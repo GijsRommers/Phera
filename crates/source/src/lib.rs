@@ -2,3 +2,5 @@
 
 mod source_file;
 mod span;
+
+pub use span::Span;

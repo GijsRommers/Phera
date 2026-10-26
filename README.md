@@ -74,7 +74,11 @@ of it: the tests listed in [`tests/phpt/selected.txt`](tests/phpt/selected.txt).
 
 ## 📜 License
 
-Dual-licensed under MIT or Apache 2.0, at your option.
+Dual-licensed under [MIT](LICENSE-MIT) or [Apache 2.0](LICENSE-APACHE), at your option.
+
+Unless you explicitly state otherwise, any contribution you intentionally submit
+for inclusion in Phera, as defined in the Apache 2.0 license, is dual-licensed as
+above, without any additional terms or conditions.
 
 ---
 

@@ -1,5 +1,7 @@
-//! Tokenization, independent of the AST.
-
 mod error;
 mod lexer;
 mod token;
+
+pub use error::{LexError, LexErrorKind};
+pub use lexer::Lexer;
+pub use token::{Token, TokenKind};
