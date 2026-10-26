@@ -1,0 +1,32 @@
+[workspace]
+resolver = "3"
+
+members = [
+    "crates/cli",
+    "crates/lexer",
+    "crates/parser",
+    "crates/ast",
+    "crates/source",
+    "crates/bytecode",
+    "crates/compiler",
+    "crates/vm",
+    "crates/runtime",
+    "crates/server",
+]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+authors = ["Gijs Rommers <gijs.rommers@gmail.com>"]
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+phera-lexer = { path = "crates/lexer" }
+phera-parser = { path = "crates/parser" }
+phera-ast = { path = "crates/ast" }
+phera-source = { path = "crates/source" }
+phera-bytecode = { path = "crates/bytecode" }
+phera-compiler = { path = "crates/compiler" }
+phera-vm = { path = "crates/vm" }
+phera-runtime = { path = "crates/runtime" }
+phera-server = { path = "crates/server" }

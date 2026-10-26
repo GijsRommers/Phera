@@ -1,0 +1,11 @@
+[package]
+name = "phera-compiler"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+phera-parser.workspace = true
+phera-ast.workspace = true
+phera-bytecode.workspace = true

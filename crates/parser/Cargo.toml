@@ -1,0 +1,11 @@
+[package]
+name = "phera-parser"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+phera-lexer.workspace = true
+phera-ast.workspace = true
+phera-source.workspace = true

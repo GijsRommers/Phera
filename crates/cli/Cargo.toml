@@ -1,0 +1,14 @@
+[package]
+name = "phera-cli"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "phera"
+path = "src/main.rs"
+
+[dependencies]
+phera-runtime.workspace = true
+phera-server.workspace = true
