@@ -69,8 +69,30 @@ The `phera` binary ends up in `target/debug/phera`.
 ## 🧪 Testing
 
 Rather than chasing PHP's entire `.phpt` suite, Phera runs a hand-picked subset
-of it: the tests listed in [`tests/phpt/selected.txt`](tests/phpt/selected.txt).
-`tests/fixtures/` holds Phera's own test programs.
+of it: the tests listed in [`tests/phpt/selected.txt`](tests/phpt/selected.txt),
+copied from php-src into `tests/upstream/`. `tests/fixtures/` holds Phera's own
+`.phpt` test programs.
+
+| Command | What it does |
+| --- | --- |
+| `make test` | All Rust tests, including the lexer comparison below |
+| `make phpt` | Runs every selected test and fixture through the `phera` binary and checks the output |
+| `make phpt-lexer` | Lexes each test's code with Phera and with PHP's `token_get_all`, and compares them |
+
+`make phpt` isn't part of `make test` yet, since Phera can't run PHP. Narrow
+either runner with `FILTER=<part of a path>`.
+
+The lexer comparison needs a `php` binary and skips itself without one. It only
+compares tests made entirely of tokens Phera supports, and lists the most common
+unsupported tokens for the rest. Point it at a php-src checkout with
+`make phpt-lexer PHP_SRC=/path/to/php-src` to find newly relevant tests after
+extending the lexer.
+
+To check the tests themselves against real PHP, run them with PHP instead:
+
+```sh
+PHERA_PHPT_BIN="php -n -d fatal_error_backtraces=0 -d display_errors=1" make phpt
+```
 
 ## 📜 License
 
