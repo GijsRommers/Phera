@@ -12,3 +12,13 @@ path = "src/main.rs"
 [dependencies]
 phera-runtime.workspace = true
 phera-server.workspace = true
+
+[dev-dependencies]
+phera-phpt.workspace = true
+
+# Run explicitly with `make phpt`: Phera cannot execute PHP yet, so this
+# would fail every `cargo test`.
+[[test]]
+name = "phpt"
+harness = false
+test = false

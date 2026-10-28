@@ -17,6 +17,7 @@ version = "0.1.0"
 name = "phera-cli"
 version = "0.1.0"
 dependencies = [
+ "phera-phpt",
  "phera-runtime",
  "phera-server",
 ]
@@ -62,6 +63,13 @@ dependencies = [
  "phera-ast",
  "phera-lexer",
  "phera-source",
+]
+
+[[package]]
+name = "phera-phpt"
+version = "0.1.0"
+dependencies = [
+ "phera-lexer",
 ]
 
 [[package]]

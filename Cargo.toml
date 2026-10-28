@@ -12,6 +12,7 @@ members = [
     "crates/vm",
     "crates/runtime",
     "crates/server",
+    "crates/phpt",
     "crates/extension-api",
     "crates/extensions/*",
 ]
@@ -32,4 +33,5 @@ phera-compiler = { path = "crates/compiler" }
 phera-vm = { path = "crates/vm" }
 phera-runtime = { path = "crates/runtime" }
 phera-server = { path = "crates/server" }
+phera-phpt = { path = "crates/phpt" }
 phera-extension-api = { path = "crates/extension-api" }
