@@ -31,6 +31,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "phera-ext-json"
+version = "0.1.0"
+dependencies = [
+ "phera-extension-api",
+]
+
+[[package]]
+name = "phera-ext-pdo"
+version = "0.1.0"
+dependencies = [
+ "phera-extension-api",
+]
+
+[[package]]
+name = "phera-extension-api"
+version = "0.1.0"
+
+[[package]]
 name = "phera-lexer"
 version = "0.1.0"
 dependencies = [

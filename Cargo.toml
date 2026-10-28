@@ -12,6 +12,8 @@ members = [
     "crates/vm",
     "crates/runtime",
     "crates/server",
+    "crates/extension-api",
+    "crates/extensions/*",
 ]
 
 [workspace.package]
@@ -30,3 +32,4 @@ phera-compiler = { path = "crates/compiler" }
 phera-vm = { path = "crates/vm" }
 phera-runtime = { path = "crates/runtime" }
 phera-server = { path = "crates/server" }
+phera-extension-api = { path = "crates/extension-api" }
