@@ -92,6 +92,10 @@ name = "phera-source"
 version = "0.1.0"
 
 [[package]]
+name = "phera-value"
+version = "0.1.0"
+
+[[package]]
 name = "phera-vm"
 version = "0.1.0"
 dependencies = [
