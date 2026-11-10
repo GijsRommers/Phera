@@ -1,45 +1,63 @@
+use std::any::Any;
 use std::fmt;
 
-/// Why a native function call failed; the runtime turns this into a PHP error.
-#[derive(Debug, Clone, PartialEq)]
-pub enum CallError {
-    ArgumentCount {
-        min: usize,
-        max: usize,
-        given: usize,
+use phera_value::{OpError, Value};
+
+pub type NativeResult = Result<Value, NativeError>;
+
+/// Why a native function did not return a value.
+#[derive(Debug)]
+pub enum NativeError {
+    /// Throw a new instance of a built-in PHP class, such as `ValueError`.
+    /// The runtime creates the object; native code only names the class.
+    Throw {
+        class: &'static str,
+        message: String,
     },
-    ArgumentType {
-        position: usize,
-        expected: &'static str,
-        given: &'static str,
-    },
-    /// Raised as a PHP `Error` with this message.
-    Error(String),
+    /// The runtime is already unwinding: a callback threw, or called `exit()`.
+    /// Native code passes this on untouched.
+    Unwind(Unwind),
 }
 
-impl fmt::Display for CallError {
+/// Opaque unwinding state owned by the runtime.
+pub struct Unwind(pub Box<dyn Any>);
+
+impl fmt::Debug for Unwind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            CallError::ArgumentCount { min, max, given } => {
-                let (bound, count) = match (given < min, min == max) {
-                    (_, true) => ("exactly", min),
-                    (true, false) => ("at least", min),
-                    (false, false) => ("at most", max),
-                };
-                let noun = if *count == 1 { "argument" } else { "arguments" };
-                write!(f, "expects {bound} {count} {noun}, {given} given")
-            }
-            CallError::ArgumentType {
-                position,
-                expected,
-                given,
-            } => write!(
-                f,
-                "Argument #{position} must be of type {expected}, {given} given"
-            ),
-            CallError::Error(message) => f.write_str(message),
-        }
+        f.write_str("Unwind(..)")
     }
 }
 
-impl std::error::Error for CallError {}
+impl NativeError {
+    pub fn throw(class: &'static str, message: impl Into<String>) -> Self {
+        NativeError::Throw {
+            class,
+            message: message.into(),
+        }
+    }
+
+    pub fn error(message: impl Into<String>) -> Self {
+        Self::throw("Error", message)
+    }
+
+    pub fn type_error(message: impl Into<String>) -> Self {
+        Self::throw("TypeError", message)
+    }
+
+    pub fn value_error(message: impl Into<String>) -> Self {
+        Self::throw("ValueError", message)
+    }
+
+    pub fn argument_count_error(message: impl Into<String>) -> Self {
+        Self::throw("ArgumentCountError", message)
+    }
+}
+
+impl From<OpError> for NativeError {
+    fn from(error: OpError) -> Self {
+        NativeError::Throw {
+            class: error.kind.class_name(),
+            message: error.message,
+        }
+    }
+}

@@ -177,6 +177,9 @@ dependencies = [
 [[package]]
 name = "phera-extension-api"
 version = "0.1.0"
+dependencies = [
+ "phera-value",
+]
 
 [[package]]
 name = "phera-lexer"

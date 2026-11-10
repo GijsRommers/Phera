@@ -1,9 +1,9 @@
-//! PHP's `ext/json`. Only scalar values exist so far, so this covers
-//! `json_encode()` for scalars and the extension's constants.
+//! PHP's `ext/json`. So far this covers `json_encode()` for scalars and the
+//! extension's constants.
 
 mod encode;
 
-use phera_extension_api::{Extension, Registry};
+use phera_extension_api::{Extension, FunctionEntry, Param, ParamType, Registry};
 
 pub struct Json;
 
@@ -13,7 +13,16 @@ impl Extension for Json {
     }
 
     fn register(&self, registry: &mut Registry) {
-        registry.function("json_encode", encode::json_encode);
+        const ENCODE: &[Param] = &[
+            Param::new("value", ParamType::Mixed),
+            Param::new("flags", ParamType::Int).optional(),
+            Param::new("depth", ParamType::Int).optional(),
+        ];
+        registry.function(FunctionEntry::sync(
+            "json_encode",
+            ENCODE,
+            encode::json_encode,
+        ));
 
         for &(name, value) in CONSTANTS {
             registry.constant(name, value);

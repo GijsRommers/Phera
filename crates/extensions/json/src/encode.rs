@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use phera_extension_api::{CallError, Value};
+use phera_extension_api::{Context, NativeError, NativeResult, Value};
 
 pub const HEX_TAG: i64 = 1;
 pub const HEX_AMP: i64 = 2;
@@ -18,6 +18,7 @@ pub const THROW_ON_ERROR: i64 = 1 << 22;
 enum EncodeError {
     Utf8,
     InfOrNan,
+    UnsupportedType,
 }
 
 impl EncodeError {
@@ -25,13 +26,14 @@ impl EncodeError {
         match self {
             EncodeError::Utf8 => "Malformed UTF-8 characters, possibly incorrectly encoded",
             EncodeError::InfOrNan => "Inf and NaN cannot be JSON encoded",
+            EncodeError::UnsupportedType => "Type is not supported",
         }
     }
 
     /// What `JSON_PARTIAL_OUTPUT_ON_ERROR` writes in place of the bad value.
     fn substitute(&self) -> &'static str {
         match self {
-            EncodeError::Utf8 => "null",
+            EncodeError::Utf8 | EncodeError::UnsupportedType => "null",
             EncodeError::InfOrNan => "0",
         }
     }
@@ -39,47 +41,45 @@ impl EncodeError {
 
 /// `json_encode(mixed $value, int $flags = 0, int $depth = 512): string|false`
 ///
-/// `$depth` is accepted but unused until arrays exist. Failures don't update
-/// `json_last_error()` yet, which needs per-request state.
-pub fn json_encode(args: &[Value]) -> Result<Value, CallError> {
-    if !(1..=3).contains(&args.len()) {
-        return Err(CallError::ArgumentCount {
-            min: 1,
-            max: 3,
-            given: args.len(),
-        });
-    }
-    let flags = int_argument(args, 2, 0)?;
-    int_argument(args, 3, 512)?;
+/// Arrays and objects are not encoded yet, and `$depth` is unused until they
+/// are. Failures don't update `json_last_error()` yet, which needs per-request
+/// state.
+pub fn json_encode(_context: &mut dyn Context, args: &[Value]) -> NativeResult {
+    let flags = int_argument(args, 2, "flags", 0)?;
+    int_argument(args, 3, "depth", 512)?;
 
-    let encoded = match &args[0] {
-        Value::Null => Ok("null".to_owned()),
-        Value::Bool(b) => Ok(b.to_string()),
-        Value::Int(i) => Ok(i.to_string()),
-        Value::Float(f) => encode_float(*f, flags),
-        Value::String(bytes) => encode_string(bytes, flags),
+    let encoded = match args.first().map(|value| value.deref()).as_deref() {
+        None | Some(Value::Null) => Ok("null".to_owned()),
+        Some(Value::Bool(b)) => Ok(b.to_string()),
+        Some(Value::Int(i)) => Ok(i.to_string()),
+        Some(Value::Float(f)) => encode_float(*f, flags),
+        Some(Value::String(bytes)) => encode_string(bytes.as_bytes(), flags),
+        Some(_) => Err(EncodeError::UnsupportedType),
     };
 
     match encoded {
-        Ok(json) => Ok(Value::String(json.into_bytes())),
+        Ok(json) => Ok(Value::from(json)),
         Err(error) if flags & PARTIAL_OUTPUT_ON_ERROR != 0 => Ok(Value::from(error.substitute())),
-        // Should throw JsonException once the runtime has classes.
         Err(error) if flags & THROW_ON_ERROR != 0 => {
-            Err(CallError::Error(error.message().to_owned()))
+            Err(NativeError::throw("JsonException", error.message()))
         }
         Err(_) => Ok(Value::Bool(false)),
     }
 }
 
-fn int_argument(args: &[Value], position: usize, default: i64) -> Result<i64, CallError> {
+fn int_argument(
+    args: &[Value],
+    position: usize,
+    name: &str,
+    default: i64,
+) -> Result<i64, NativeError> {
     match args.get(position - 1) {
         None => Ok(default),
         Some(Value::Int(i)) => Ok(*i),
-        Some(other) => Err(CallError::ArgumentType {
-            position,
-            expected: "int",
-            given: other.type_name(),
-        }),
+        Some(other) => Err(NativeError::type_error(format!(
+            "json_encode(): Argument #{position} (${name}) must be of type int, {} given",
+            other.type_name()
+        ))),
     }
 }
 

@@ -13,6 +13,19 @@ pub enum ErrorKind {
     DivisionByZeroError,
 }
 
+impl ErrorKind {
+    /// The name of the PHP class to throw.
+    pub fn class_name(self) -> &'static str {
+        match self {
+            ErrorKind::Error => "Error",
+            ErrorKind::TypeError => "TypeError",
+            ErrorKind::ValueError => "ValueError",
+            ErrorKind::ArithmeticError => "ArithmeticError",
+            ErrorKind::DivisionByZeroError => "DivisionByZeroError",
+        }
+    }
+}
+
 /// A failed value operation, matching what PHP throws for the same input.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpError {
