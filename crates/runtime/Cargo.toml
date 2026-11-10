@@ -8,3 +8,6 @@ license.workspace = true
 [dependencies]
 phera-compiler.workspace = true
 phera-vm.workspace = true
+
+[lints]
+workspace = true

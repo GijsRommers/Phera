@@ -22,3 +22,6 @@ phera-phpt.workspace = true
 name = "phpt"
 harness = false
 test = false
+
+[lints]
+workspace = true

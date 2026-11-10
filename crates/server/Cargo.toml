@@ -6,4 +6,12 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-phera-runtime.workspace = true
+bytes = { workspace = true }
+http-body-util = { workspace = true }
+hyper = { workspace = true }
+hyper-util = { workspace = true }
+socket2 = { workspace = true }
+tokio = { workspace = true }
+
+[lints]
+workspace = true

@@ -24,6 +24,11 @@ version = "0.1.0"
 authors = ["Gijs Rommers <gijs.rommers@gmail.com>"]
 license = "MIT OR Apache-2.0"
 
+# Phera is written in safe Rust only. Unsafe code in dependencies is fine;
+# unsafe code in this workspace does not compile.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
 [workspace.dependencies]
 phera-lexer = { path = "crates/lexer" }
 phera-parser = { path = "crates/parser" }
@@ -37,3 +42,9 @@ phera-runtime = { path = "crates/runtime" }
 phera-server = { path = "crates/server" }
 phera-phpt = { path = "crates/phpt" }
 phera-extension-api = { path = "crates/extension-api" }
+bytes = "1"
+http-body-util = "0.1"
+hyper = { version = "1", default-features = false, features = ["http1", "server"] }
+hyper-util = { version = "0.1", default-features = false, features = ["tokio", "http1", "server-graceful"] }
+socket2 = { version = "0.5", features = ["all"] }
+tokio = { version = "1", features = ["rt", "net", "time", "sync", "signal", "macros"] }

@@ -26,6 +26,11 @@ PHP source ─▶ lexer ─▶ parser ─▶ AST ─▶ compiler ─▶ bytecode
 | `phera-server` | HTTP on Tokio, one worker thread per core | |
 | `phera-cli` | `phera run file.php`, `phera serve` | runtime, server |
 
+**Safe Rust only.** The workspace sets `unsafe_code = "forbid"`, so no Phera
+crate can contain `unsafe`. Where a design seems to need it (the value
+representation, the array, the interpreter loop), the answer is a safe design
+that is a little slower, not an exception to the rule.
+
 Dependencies point one way. The VM never sees the AST, and the server never sees
 the VM: it talks to a `Handler` trait that the runtime implements.
 

@@ -7,3 +7,6 @@ license.workspace = true
 
 [dependencies]
 phera-bytecode.workspace = true
+
+[lints]
+workspace = true
