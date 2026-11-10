@@ -31,6 +31,19 @@ crate can contain `unsafe`. Where a design seems to need it (the value
 representation, the array, the interpreter loop), the answer is a safe design
 that is a little slower, not an exception to the rule.
 
+**No stack overflows.** A stack overflow cannot be caught. It aborts the process,
+and with it every request on every worker. So nothing may recurse in proportion
+to its input without a limit:
+
+- The parser runs on its own 256 MB stack and refuses nesting deeper than 1000
+  levels with an ordinary error.
+- Long chains (`a . b . c ...`, `$a->b()->c()...`) are built, walked and dropped
+  in loops, never by recursion. Generated code has chains thousands of terms long.
+- The compiler may recurse on nesting, which the parser has bounded, but must
+  loop over chains.
+- The VM never uses the Rust stack for PHP calls, and values drop iteratively,
+  so a million-element linked list or a deeply nested array is safe to free.
+
 Dependencies point one way. The VM never sees the AST, and the server never sees
 the VM: it talks to a `Handler` trait that the runtime implements.
 
