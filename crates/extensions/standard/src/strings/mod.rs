@@ -2,14 +2,26 @@
 
 use phera_extension_api::{NativeError, PhpString, Registry, Value};
 
+mod base64;
 mod case;
 mod decimal;
 mod encode;
+mod escaping;
 mod format;
+mod html;
+mod html_encoding;
+mod html_entities;
+mod metaphone;
 mod number_format;
+mod padding;
 mod replace;
 mod search;
+mod search_more;
+mod similarity;
 mod split;
+mod substitute;
+mod tags;
+mod text;
 mod trim;
 mod url;
 
@@ -25,6 +37,16 @@ pub(crate) fn register(registry: &mut Registry) {
     trim::register(registry);
     split::register(registry);
     search::register(registry);
+    search_more::register(registry);
+    padding::register(registry);
+    escaping::register(registry);
+    html::register(registry);
+    text::register(registry);
+    base64::register(registry);
+    tags::register(registry);
+    similarity::register(registry);
+    metaphone::register(registry);
+    substitute::register(registry);
 }
 
 pub(super) fn bytes(value: impl Into<Vec<u8>>) -> Value {
@@ -86,4 +108,11 @@ fn find_bytes(haystack: &[u8], needle: &[u8], insensitive: bool) -> Option<usize
             }
             None
         })
+}
+
+/// Match the oracle's fixed byte alphabet for word and phonetic boundaries without
+/// consulting process locale; case-insensitive comparisons remain ASCII-only.
+pub(super) fn alphabetic(byte: u8) -> bool {
+    byte.is_ascii_alphabetic()
+        || matches!(byte, 170 | 181 | 186 | 192..=214 | 216..=246 | 248..=255)
 }

@@ -22,7 +22,7 @@ pub(crate) fn register(registry: &mut Registry) {
 }
 
 /// Malformed ranges warn independently because PHP still uses the remaining mask bytes.
-fn mask(context: &mut dyn Context, string: &[u8], name: &str) -> [bool; 256] {
+pub(super) fn mask(context: &mut dyn Context, string: &[u8], name: &str) -> [bool; 256] {
     let mut mask = [false; 256];
     let mut i = 0;
     while let Some(&b) = string.get(i) {
