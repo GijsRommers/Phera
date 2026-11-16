@@ -32,16 +32,27 @@ pub fn prepare_arguments(
     arguments: &mut [Value],
     context: &mut dyn Context,
 ) -> Result<(), NativeError> {
-    check_count(entry, arguments.len())?;
+    prepare_call(entry.name, entry.params, arguments, context)
+}
+
+/// [`prepare_arguments`] for anything with a parameter list. For a native
+/// method, `name` is `Class::method`, which is how PHP names it in errors.
+pub fn prepare_call(
+    name: &str,
+    params: &[Param],
+    arguments: &mut [Value],
+    context: &mut dyn Context,
+) -> Result<(), NativeError> {
+    check_count(name, params, arguments.len())?;
     let strict = context.strict_types();
     for (index, argument) in arguments.iter_mut().enumerate() {
         // Arguments past the declared list belong to the variadic parameter.
         // `check_count` has already rejected them when there is none.
-        let Some(param) = entry.params.get(index).or(entry.params.last()) else {
+        let Some(param) = params.get(index).or(params.last()) else {
             break;
         };
         let site = Site {
-            function: entry.name,
+            function: name,
             number: index + 1,
             param,
         };
@@ -341,9 +352,12 @@ fn numeric(string: &PhpString) -> Option<NumVal> {
     if parsed.exact { parsed.value } else { None }
 }
 
-fn check_count(entry: &FunctionEntry, given: usize) -> Result<(), NativeError> {
-    let min = entry.min_args();
-    let max = entry.max_args();
+fn check_count(name: &str, params: &[Param], given: usize) -> Result<(), NativeError> {
+    let min = params.iter().filter(|param| !param.optional).count();
+    let max = match params.last() {
+        Some(last) if last.variadic => None,
+        _ => Some(params.len()),
+    };
     let (bound, expected) = match max {
         Some(max) if given > max && min == max => ("exactly", max),
         Some(max) if given > max => ("at most", max),
@@ -353,8 +367,7 @@ fn check_count(entry: &FunctionEntry, given: usize) -> Result<(), NativeError> {
     };
     let plural = if expected == 1 { "" } else { "s" };
     Err(NativeError::argument_count_error(format!(
-        "{}() expects {bound} {expected} argument{plural}, {given} given",
-        entry.name
+        "{name}() expects {bound} {expected} argument{plural}, {given} given"
     )))
 }
 

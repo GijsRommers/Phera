@@ -1,7 +1,10 @@
 //! Test support: a stand-in [`Context`] for calling native functions without
 //! a VM, and [`oracle`] for comparing them against real PHP.
 
+mod classes;
 pub mod oracle;
+
+pub use classes::{call_method, instantiate};
 
 use phera_value::{CollectDiagnostics, Diagnostics, Value};
 

@@ -1,10 +1,11 @@
 //! Functions every script expects: inspecting values (`var_dump`, `print_r`,
-//! `var_export`), type tests and conversions, `count`, and the engine's
-//! constants.
+//! `var_export`), type tests and conversions, `count`, the engine's constants,
+//! and the exception classes.
 
 mod constants;
 mod count;
 mod dump;
+mod throwable;
 mod types;
 
 use phera_extension_api::{Extension, Registry};
@@ -20,6 +21,7 @@ impl Extension for Core {
         constants::register(registry);
         count::register(registry);
         dump::register(registry);
+        throwable::register(registry);
         types::register(registry);
     }
 }

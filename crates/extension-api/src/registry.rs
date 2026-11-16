@@ -2,17 +2,19 @@ use std::collections::HashMap;
 
 use phera_value::Value;
 
-use crate::FunctionEntry;
+use crate::{ClassEntry, FunctionEntry};
 
 /// The value of a constant an extension defines. Kept apart from [`Value`] so
 /// a registry holds no `Rc` and can be shared between worker threads.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ConstantValue {
     Null,
     Bool(bool),
     Int(i64),
     Float(f64),
     String(&'static str),
+    /// `[]`, the only array a default value needs.
+    EmptyArray,
 }
 
 impl ConstantValue {
@@ -23,6 +25,7 @@ impl ConstantValue {
             ConstantValue::Int(value) => Value::Int(*value),
             ConstantValue::Float(value) => Value::Float(*value),
             ConstantValue::String(value) => Value::from(*value),
+            ConstantValue::EmptyArray => Value::from(phera_value::PhpArray::new()),
         }
     }
 }
@@ -58,6 +61,8 @@ pub struct Registry {
     /// Keyed by lowercase name: PHP function names are case-insensitive.
     functions: HashMap<String, FunctionEntry>,
     constants: HashMap<String, ConstantValue>,
+    /// In registration order, which puts every parent before its children.
+    classes: Vec<ClassEntry>,
 }
 
 impl Registry {
@@ -89,6 +94,36 @@ impl Registry {
             "constant {name} is already registered"
         );
         self.constants.insert(name.to_owned(), value.into());
+    }
+
+    /// Panics on a duplicate name or an unregistered parent or interface:
+    /// both are build bugs, like a duplicate function.
+    pub fn class(&mut self, entry: ClassEntry) {
+        assert!(
+            self.get_class(entry.name).is_none(),
+            "class {} is already registered",
+            entry.name
+        );
+        for required in entry.parent.iter().chain(entry.interfaces) {
+            assert!(
+                self.get_class(required).is_some(),
+                "class {} needs {required}, which is not registered before it",
+                entry.name
+            );
+        }
+        self.classes.push(entry);
+    }
+
+    /// Class names ignore case, like function names.
+    pub fn get_class(&self, name: &str) -> Option<&ClassEntry> {
+        self.classes
+            .iter()
+            .find(|entry| entry.name.eq_ignore_ascii_case(name))
+    }
+
+    /// Every class, parents before children.
+    pub fn classes(&self) -> impl Iterator<Item = &ClassEntry> {
+        self.classes.iter()
     }
 
     pub fn get_function(&self, name: &str) -> Option<&FunctionEntry> {
