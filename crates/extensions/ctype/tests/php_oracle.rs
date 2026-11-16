@@ -1,7 +1,10 @@
+//! Generated PHP executable oracle cases, including diagnostics and output.
+
 use phera_ext_ctype::Ctype;
 use phera_extension_api::{
+    ArrayKey, NativeError, PhpArray, PhpString, Registry, Value,
     testing::{TestContext, call},
-    *,
+    value,
 };
 use std::{fmt::Write, process::Command};
 fn hex(s: &[u8]) -> String {

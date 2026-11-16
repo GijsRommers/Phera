@@ -1,6 +1,12 @@
-use super::*;
+//! Misc operations for PHP values.
+
 use phera_extension_api::value;
-pub(crate) fn register(r: &mut Registry) {
+use phera_extension_api::{
+    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Registry, SyncFn, Value,
+    args,
+};
+
+pub(crate) fn register(registry: &mut Registry) {
     const ONE: &[Param] = &[Param::new("num", ParamType::Float)];
     for (n, f) in [
         ("is_nan", nan as SyncFn),
@@ -9,16 +15,16 @@ pub(crate) fn register(r: &mut Registry) {
         ("deg2rad", deg),
         ("rad2deg", rad),
     ] {
-        r.function(FunctionEntry::sync(n, ONE, f));
+        registry.function(FunctionEntry::sync(n, ONE, f));
     }
     const TWO: &[Param] = &[
         Param::new("num1", ParamType::Float),
         Param::new("num2", ParamType::Float),
     ];
     for (n, f) in [("fdiv", fdiv as SyncFn), ("fmod", fmod), ("hypot", hypot)] {
-        r.function(FunctionEntry::sync(n, TWO, f));
+        registry.function(FunctionEntry::sync(n, TWO, f));
     }
-    r.function(FunctionEntry::sync(
+    registry.function(FunctionEntry::sync(
         "atan2",
         const {
             &[
@@ -28,13 +34,13 @@ pub(crate) fn register(r: &mut Registry) {
         },
         atan2,
     ));
-    r.function(FunctionEntry::sync("pi", &[], pi));
-    r.function(FunctionEntry::sync(
+    registry.function(FunctionEntry::sync("pi", &[], pi));
+    registry.function(FunctionEntry::sync(
         "abs",
         const { &[Param::new("num", ParamType::Number)] },
         abs,
     ));
-    r.function(FunctionEntry::sync(
+    registry.function(FunctionEntry::sync(
         "intdiv",
         const {
             &[
@@ -44,7 +50,7 @@ pub(crate) fn register(r: &mut Registry) {
         },
         intdiv,
     ));
-    r.function(FunctionEntry::sync(
+    registry.function(FunctionEntry::sync(
         "pow",
         const {
             &[
@@ -54,7 +60,7 @@ pub(crate) fn register(r: &mut Registry) {
         },
         pow,
     ));
-    r.function(FunctionEntry::sync(
+    registry.function(FunctionEntry::sync(
         "log",
         const {
             &[
@@ -65,65 +71,81 @@ pub(crate) fn register(r: &mut Registry) {
         log,
     ));
 }
-fn nan(_: &mut dyn Context, a: &[Value]) -> NativeResult {
-    Ok(Value::Bool(args::float(a, 0).unwrap_or_default().is_nan()))
-}
-fn finite(_: &mut dyn Context, a: &[Value]) -> NativeResult {
+
+fn nan(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(Value::Bool(
-        args::float(a, 0).unwrap_or_default().is_finite(),
+        args::float(arguments, 0).unwrap_or_default().is_nan(),
     ))
 }
-fn infinite(_: &mut dyn Context, a: &[Value]) -> NativeResult {
+
+fn finite(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(Value::Bool(
-        args::float(a, 0).unwrap_or_default().is_infinite(),
+        args::float(arguments, 0).unwrap_or_default().is_finite(),
     ))
 }
-fn deg(_: &mut dyn Context, a: &[Value]) -> NativeResult {
-    Ok(Value::Float(
-        args::float(a, 0).unwrap_or_default() * (std::f64::consts::PI / 180.0),
+
+fn infinite(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    Ok(Value::Bool(
+        args::float(arguments, 0).unwrap_or_default().is_infinite(),
     ))
 }
-fn rad(_: &mut dyn Context, a: &[Value]) -> NativeResult {
+
+fn deg(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(Value::Float(
-        args::float(a, 0).unwrap_or_default() * (180.0 / std::f64::consts::PI),
+        args::float(arguments, 0).unwrap_or_default() * (std::f64::consts::PI / 180.0),
     ))
 }
-fn fdiv(_: &mut dyn Context, a: &[Value]) -> NativeResult {
+
+fn rad(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(Value::Float(
-        args::float(a, 0).unwrap_or_default() / args::float(a, 1).unwrap_or_default(),
+        args::float(arguments, 0).unwrap_or_default() * (180.0 / std::f64::consts::PI),
     ))
 }
-fn fmod(_: &mut dyn Context, a: &[Value]) -> NativeResult {
+
+fn fdiv(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(Value::Float(
-        args::float(a, 0).unwrap_or_default() % args::float(a, 1).unwrap_or_default(),
+        args::float(arguments, 0).unwrap_or_default()
+            / args::float(arguments, 1).unwrap_or_default(),
     ))
 }
-fn hypot(_: &mut dyn Context, a: &[Value]) -> NativeResult {
+
+fn fmod(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(Value::Float(
-        args::float(a, 0)
+        args::float(arguments, 0).unwrap_or_default()
+            % args::float(arguments, 1).unwrap_or_default(),
+    ))
+}
+
+fn hypot(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    Ok(Value::Float(
+        args::float(arguments, 0)
             .unwrap_or_default()
-            .hypot(args::float(a, 1).unwrap_or_default()),
+            .hypot(args::float(arguments, 1).unwrap_or_default()),
     ))
 }
-fn atan2(_: &mut dyn Context, a: &[Value]) -> NativeResult {
+
+fn atan2(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(Value::Float(
-        args::float(a, 0)
+        args::float(arguments, 0)
             .unwrap_or_default()
-            .atan2(args::float(a, 1).unwrap_or_default()),
+            .atan2(args::float(arguments, 1).unwrap_or_default()),
     ))
 }
+
 fn pi(_: &mut dyn Context, _: &[Value]) -> NativeResult {
     Ok(Value::Float(std::f64::consts::PI))
 }
-fn abs(_: &mut dyn Context, a: &[Value]) -> NativeResult {
-    Ok(match args::int(a, 0) {
+
+fn abs(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    Ok(match args::int(arguments, 0) {
         Some(n) if n != i64::MIN => Value::Int(n.abs()),
-        _ => Value::Float(args::float(a, 0).unwrap_or_default().abs()),
+        _ => Value::Float(args::float(arguments, 0).unwrap_or_default().abs()),
     })
 }
-fn intdiv(_: &mut dyn Context, a: &[Value]) -> NativeResult {
-    let n = args::int(a, 0).unwrap_or_default();
-    let d = args::int(a, 1).unwrap_or_default();
+
+fn intdiv(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let n = args::int(arguments, 0).unwrap_or_default();
+    let d = args::int(arguments, 1).unwrap_or_default();
     if d == 0 {
         return Err(NativeError::throw(
             "DivisionByZeroError",
@@ -137,22 +159,24 @@ fn intdiv(_: &mut dyn Context, a: &[Value]) -> NativeResult {
         )
     })
 }
-fn pow(c: &mut dyn Context, a: &[Value]) -> NativeResult {
+
+fn pow(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(value::pow(
-        a.first().unwrap_or(&Value::Null),
-        a.get(1).unwrap_or(&Value::Null),
-        c.diagnostics(),
+        arguments.first().unwrap_or(&Value::Null),
+        arguments.get(1).unwrap_or(&Value::Null),
+        context.diagnostics(),
     )?)
 }
-fn log(_: &mut dyn Context, a: &[Value]) -> NativeResult {
-    let n = args::float(a, 0).unwrap_or_default();
-    let b = args::float(a, 1).unwrap_or(std::f64::consts::E);
+
+fn log(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let n = args::float(arguments, 0).unwrap_or_default();
+    let b = args::float(arguments, 1).unwrap_or(std::f64::consts::E);
     if b <= 0.0 {
         return Err(NativeError::value_error(
             "log(): Argument #2 ($base) must be greater than 0",
         ));
     }
-    Ok(Value::Float(if !args::given(a, 1) {
+    Ok(Value::Float(if !args::given(arguments, 1) {
         n.ln()
     } else if b == 10.0 {
         n.log10()

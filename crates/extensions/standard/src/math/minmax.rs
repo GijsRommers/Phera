@@ -1,37 +1,46 @@
-use super::*;
-pub(crate) fn register(r: &mut Registry) {
+//! Minmax operations for PHP values.
+
+use phera_extension_api::{
+    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Registry, Value, value,
+};
+
+pub(crate) fn register(registry: &mut Registry) {
     const PARAMS: &[Param] = &[
         Param::new("value", ParamType::Mixed),
         Param::new("values", ParamType::Mixed).variadic(),
     ];
-    r.function(FunctionEntry::sync("max", PARAMS, max));
-    r.function(FunctionEntry::sync("min", PARAMS, min));
+    registry.function(FunctionEntry::sync("max", PARAMS, max));
+    registry.function(FunctionEntry::sync("min", PARAMS, min));
 }
-fn max(c: &mut dyn Context, a: &[Value]) -> NativeResult {
-    select(c, a, true)
+
+fn max(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    select(context, arguments, true)
 }
-fn min(c: &mut dyn Context, a: &[Value]) -> NativeResult {
-    select(c, a, false)
+
+fn min(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    select(context, arguments, false)
 }
-fn select(c: &mut dyn Context, a: &[Value], maximum: bool) -> NativeResult {
+
+/// PHP uses native numeric comparisons until a nonnumeric value forces generic comparison.
+fn select(context: &mut dyn Context, arguments: &[Value], maximum: bool) -> NativeResult {
     let name = if maximum { "max" } else { "min" };
-    let values: Vec<&Value> = if a.len() == 1 {
-        match a.first() {
-            Some(Value::Array(arr)) => arr.values().collect(),
-            Some(v) => {
+    let values: Vec<&Value> = if arguments.len() == 1 {
+        match arguments.first() {
+            Some(Value::Array(array)) => array.values().collect(),
+            Some(value) => {
                 return Err(NativeError::type_error(format!(
                     "{name}(): Argument #1 ($value) must be of type array, {} given",
-                    match v {
+                    match value {
                         Value::Bool(false) => "false".into(),
                         Value::Bool(true) => "true".into(),
-                        _ => v.type_name(),
+                        _ => value.type_name(),
                     }
                 )));
             }
             None => Vec::new(),
         }
     } else {
-        a.iter().collect()
+        arguments.iter().collect()
     };
     let mut iter = values.into_iter();
     let Some(mut best) = iter.next() else {
@@ -42,11 +51,11 @@ fn select(c: &mut dyn Context, a: &[Value], maximum: bool) -> NativeResult {
     // PHP's variadic numeric fast path uses native comparisons, which are
     // intentionally different from zend_compare for NaN. Once a non-numeric
     // value is seen PHP remains on the generic comparison path.
-    let mut generic = a.len() == 1;
-    for v in iter {
-        let numeric = match (best, v) {
+    let mut generic = arguments.len() == 1;
+    for value in iter {
+        let numeric = match (best, value) {
             (Value::Int(x), Value::Int(y)) if !generic => Some(if maximum { x < y } else { x > y }),
-            _ if !generic => match (exact_number(best), exact_number(v)) {
+            _ if !generic => match (exact_number(best), exact_number(value)) {
                 (Some(x), Some(y)) => Some(if maximum { x < y } else { x > y }),
                 _ => None,
             },
@@ -56,18 +65,19 @@ fn select(c: &mut dyn Context, a: &[Value], maximum: bool) -> NativeResult {
             result
         } else {
             generic = true;
-            let cmp = value::compare(v, best, c.diagnostics())?;
+            let cmp = value::compare(value, best, context.diagnostics())?;
             if maximum { cmp > 0 } else { cmp < 0 }
         };
         if replace {
-            best = v;
+            best = value;
         }
     }
     Ok(best.clone())
 }
 
-fn exact_number(v: &Value) -> Option<f64> {
-    match v {
+/// Avoid rounding an integer before comparison with another exact integer.
+fn exact_number(value: &Value) -> Option<f64> {
+    match value {
         Value::Float(f) => Some(*f),
         Value::Int(i) if (*i as f64) as i128 == i128::from(*i) => Some(*i as f64),
         _ => None,

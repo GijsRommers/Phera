@@ -1,6 +1,14 @@
-use super::*;
-pub(crate) fn register(r: &mut Registry) {
-    r.function(FunctionEntry::sync(
+//! Slice operations for PHP values.
+
+use std::rc::Rc;
+
+use phera_extension_api::{
+    ArrayKey, Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, PhpArray,
+    Registry, Value, args,
+};
+
+pub(crate) fn register(registry: &mut Registry) {
+    registry.function(FunctionEntry::sync(
         "array_slice",
         const {
             &[
@@ -12,7 +20,7 @@ pub(crate) fn register(r: &mut Registry) {
         },
         slice,
     ));
-    r.function(FunctionEntry::sync(
+    registry.function(FunctionEntry::sync(
         "array_reverse",
         const {
             &[
@@ -23,43 +31,64 @@ pub(crate) fn register(r: &mut Registry) {
         reverse,
     ));
 }
-fn insert(out: &mut PhpArray, k: &ArrayKey, v: &Value, preserve: bool) -> Result<(), NativeError> {
-    if preserve || matches!(k, ArrayKey::String(_)) {
-        out.insert(k.clone(), v.clone());
+
+/// Slice and reverse renumber integer keys unless asked to preserve them.
+fn insert(
+    result: &mut PhpArray,
+    key: &ArrayKey,
+    value: &Value,
+    preserve: bool,
+) -> Result<(), NativeError> {
+    if preserve || matches!(key, ArrayKey::String(_)) {
+        result.insert(key.clone(), value.clone());
     } else {
-        out.push(v.clone())?;
+        result.push(value.clone())?;
     }
     Ok(())
 }
-fn slice(_: &mut dyn Context, a: &[Value]) -> NativeResult {
-    let mut out = PhpArray::new();
-    if let Some(arr) = args::array(a, 0) {
-        let offset = args::int(a, 1).unwrap_or_default();
+
+/// Negative lengths count from the end; string keys always survive slicing.
+fn slice(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let mut result = PhpArray::new();
+    if let Some(array) = args::array(arguments, 0) {
+        let offset = args::int(arguments, 1).unwrap_or_default();
         let start = if offset < 0 {
-            arr.len().saturating_sub(offset.unsigned_abs() as usize)
+            array.len().saturating_sub(offset.unsigned_abs() as usize)
         } else {
-            (offset as usize).min(arr.len())
+            (offset as usize).min(array.len())
         };
-        let end = match args::int(a, 2) {
-            None => arr.len(),
-            Some(n) if n < 0 => arr
+        let end = match args::int(arguments, 2) {
+            None => array.len(),
+            Some(n) if n < 0 => array
                 .len()
                 .saturating_sub(n.unsigned_abs() as usize)
                 .max(start),
-            Some(n) => start.saturating_add(n as usize).min(arr.len()),
+            Some(n) => start.saturating_add(n as usize).min(array.len()),
         };
-        for (k, v) in arr.iter().skip(start).take(end - start) {
-            insert(&mut out, k, v, args::bool(a, 3).unwrap_or(false))?;
+        for (key, value) in array.iter().skip(start).take(end - start) {
+            insert(
+                &mut result,
+                key,
+                value,
+                args::bool(arguments, 3).unwrap_or(false),
+            )?;
         }
     }
-    Ok(Value::Array(Rc::new(out)))
+    Ok(Value::Array(Rc::new(result)))
 }
-fn reverse(_: &mut dyn Context, a: &[Value]) -> NativeResult {
-    let mut out = PhpArray::new();
-    if let Some(arr) = args::array(a, 0) {
-        for (k, v) in arr.iter().collect::<Vec<_>>().into_iter().rev() {
-            insert(&mut out, k, v, args::bool(a, 1).unwrap_or(false))?;
+
+/// Reversal changes iteration order while preserving string-key identity.
+fn reverse(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let mut result = PhpArray::new();
+    if let Some(array) = args::array(arguments, 0) {
+        for (key, value) in array.iter().collect::<Vec<_>>().into_iter().rev() {
+            insert(
+                &mut result,
+                key,
+                value,
+                args::bool(arguments, 1).unwrap_or(false),
+            )?;
         }
     }
-    Ok(Value::Array(Rc::new(out)))
+    Ok(Value::Array(Rc::new(result)))
 }

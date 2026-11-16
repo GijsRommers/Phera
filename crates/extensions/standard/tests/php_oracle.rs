@@ -1,7 +1,10 @@
+//! Generated PHP executable oracle cases, including diagnostics and output.
+
 use phera_ext_standard::Standard;
 use phera_extension_api::{
+    ArrayKey, NativeError, PhpArray, PhpString, Registry, Value,
     testing::{TestContext, call},
-    *,
+    value,
 };
 use std::{fmt::Write, process::Command};
 fn hex(s: &[u8]) -> String {
@@ -86,6 +89,239 @@ fn s(bytes: &[u8]) -> Value {
 #[test]
 fn php_oracle() {
     let mut cases: Vec<(&str, Vec<Value>)> = Vec::new();
+    let mut seed = 0x123456789abcdef0u64;
+    let mut floats = vec![
+        0.0,
+        -0.0,
+        0.5,
+        1.5,
+        2.5,
+        1e23,
+        1e-23,
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+    ];
+    for _ in 0..128 {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        floats.push(f64::from_bits(seed));
+    }
+    for number in &floats {
+        for precision in -24..=53 {
+            cases.push((
+                "number_format",
+                vec![Value::Float(*number), Value::Int(precision)],
+            ));
+            for mode in 1..=8 {
+                cases.push((
+                    "round",
+                    vec![
+                        Value::Float(*number),
+                        Value::Int(precision),
+                        Value::Int(mode),
+                    ],
+                ));
+            }
+        }
+    }
+    for integer in -1024..=1024 {
+        cases.push(("chr", vec![Value::Int(integer)]));
+    }
+    for integer in [i64::MIN, i64::MAX, 0, -1, 1, 5, 15, 9995] {
+        for precision in -25..=10 {
+            for separator in [b"".as_slice(), b"..", b"\0\xff"] {
+                cases.push((
+                    "number_format",
+                    vec![
+                        Value::Int(integer),
+                        Value::Int(precision),
+                        s(separator),
+                        s(separator),
+                    ],
+                ));
+            }
+        }
+    }
+    for exponent in -20..=20 {
+        for integer in -20..=20 {
+            let number = (f64::from(integer) + 0.5) * 10f64.powi(exponent);
+            for mode in 1..=8 {
+                cases.push((
+                    "round",
+                    vec![
+                        Value::Float(number),
+                        Value::Int(-i64::from(exponent)),
+                        Value::Int(mode),
+                    ],
+                ));
+            }
+        }
+    }
+    for number in floats {
+        for precision in 0..=53 {
+            for conversion in ["e", "E", "f", "F", "g", "G", "h", "H"] {
+                cases.push((
+                    "sprintf",
+                    vec![
+                        Value::from(format!("%.{precision}{conversion}")),
+                        Value::Float(number),
+                    ],
+                ));
+            }
+        }
+    }
+    for format in [
+        "%s",
+        "%d",
+        "%u",
+        "%b",
+        "%x",
+        "%X",
+        "%o",
+        "%c",
+        "%+08d",
+        "%-08d",
+        "%'.12s",
+        "%.2s",
+        "%2$s %1$d",
+        "%",
+        "%q",
+        "%0$s",
+        "%2147483648d",
+        "%*s",
+        "%.*f",
+    ] {
+        for value in [
+            Value::Int(-12),
+            Value::Int(i64::MIN),
+            Value::from("abc"),
+            Value::Null,
+            Value::Float(-0.5),
+        ] {
+            cases.push((
+                "sprintf",
+                vec![Value::from(format), value.clone(), Value::from("abc")],
+            ));
+            cases.push((
+                "printf",
+                vec![Value::from(format), value.clone(), Value::from("abc")],
+            ));
+            let mut array = PhpArray::new();
+            array.push(value).unwrap();
+            array.push(Value::from("abc")).unwrap();
+            for name in ["vsprintf", "vprintf"] {
+                cases.push((
+                    name,
+                    vec![
+                        Value::from(format),
+                        Value::Array(std::rc::Rc::new(array.clone())),
+                    ],
+                ));
+            }
+        }
+    }
+    for integer in [i64::MIN, -10, -1, 0, 1, 10, i64::MAX] {
+        for name in ["dechex", "decbin", "decoct"] {
+            cases.push((name, vec![Value::Int(integer)]));
+        }
+    }
+    for text in [
+        "",
+        "0xff",
+        " 0b101 ",
+        "0o777",
+        "-100",
+        "123xzz",
+        "ffffffffffffffff",
+        "18446744073709551616",
+    ] {
+        for name in ["hexdec", "bindec", "octdec"] {
+            cases.push((name, vec![Value::from(text)]));
+        }
+        for from in [1, 2, 8, 10, 16, 36, 37] {
+            for to in [1, 2, 8, 10, 16, 36, 37] {
+                cases.push((
+                    "base_convert",
+                    vec![Value::from(text), Value::Int(from), Value::Int(to)],
+                ));
+            }
+        }
+    }
+    for base in [-0.0, 0.0, -2.0, 2.0, f64::NAN, f64::INFINITY] {
+        for exponent in [-3.0, -0.5, 0.0, 0.5, 3.0, f64::NAN, f64::INFINITY] {
+            cases.push(("fpow", vec![Value::Float(base), Value::Float(exponent)]));
+        }
+    }
+    for values in [
+        vec![],
+        vec![Value::Int(2), Value::Int(3)],
+        vec![
+            Value::Null,
+            Value::Bool(true),
+            Value::from("3x"),
+            Value::from("foo"),
+        ],
+        vec![Value::Int(i64::MAX), Value::Int(i64::MAX)],
+        vec![
+            Value::Array(std::rc::Rc::new(PhpArray::new())),
+            Value::Float(-0.0),
+        ],
+    ] {
+        let mut array = PhpArray::new();
+        for value in values {
+            array.push(value).unwrap();
+        }
+        let array = Value::Array(std::rc::Rc::new(array));
+        for name in ["array_sum", "array_product", "current", "pos", "key"] {
+            cases.push((name, vec![array.clone()]));
+        }
+        for name in ["next", "prev", "reset", "end"] {
+            cases.push((
+                name,
+                vec![Value::Reference(std::rc::Rc::new(std::cell::RefCell::new(
+                    array.clone(),
+                )))],
+            ));
+        }
+    }
+    for format in [
+        "%s %s",
+        "%2$s",
+        "%3$d %2$d",
+        "%*s",
+        "%.*f",
+        "%.*H",
+        "%q",
+        "%",
+        "%\0",
+        "%0$s",
+        "%99999999999999999$s",
+        "%2147483648s",
+        "%.*3$s",
+        "%2$*1$s",
+    ] {
+        for values in [
+            vec![],
+            vec![Value::Int(-1)],
+            vec![Value::Int(4), Value::from("abc")],
+            vec![Value::Int(54), Value::Float(0.1)],
+            vec![Value::Int(-1), Value::Float(-0.0)],
+        ] {
+            let mut variadic = vec![Value::from(format)];
+            variadic.extend(values.clone());
+            cases.push(("sprintf", variadic));
+            let mut array = PhpArray::new();
+            for value in values {
+                array.push(value).unwrap();
+            }
+            cases.push((
+                "vsprintf",
+                vec![Value::from(format), Value::Array(std::rc::Rc::new(array))],
+            ));
+        }
+    }
     let mut strings = vec![
         vec![],
         b" Hello World \0\r\n\t\x0c\x0b".to_vec(),
@@ -98,6 +334,14 @@ fn php_oracle() {
     }
     for bytes in &strings {
         for name in [
+            "urlencode",
+            "rawurlencode",
+            "urldecode",
+            "rawurldecode",
+            "bin2hex",
+            "hex2bin",
+            "crc32",
+            "ord",
             "strlen",
             "strtoupper",
             "strtolower",
@@ -163,7 +407,6 @@ fn php_oracle() {
         "sqrt",
         "exp",
         "log10",
-        "log2",
         "log1p",
         "expm1",
         "sin",
@@ -412,7 +655,7 @@ fn run(cases: Vec<(&str, Vec<Value>)>) {
         r#"<?php
 function enc($v){if(is_null($v))return 'N';if(is_bool($v))return 'B:'.(int)$v;if(is_int($v))return 'I:'.$v;if(is_float($v))return is_nan($v)?'F:NAN':'F:'.bin2hex(pack('E',$v));if(is_string($v))return 'S:'.bin2hex($v);$s='A(';foreach($v as $k=>$x)$s.=enc($k).'>'.enc($x).';';return $s.')';}
 set_error_handler(function($n,$m)use(&$diag){$diag.='|'.$n.':'.bin2hex($m);return true;});
-function invoke($name,$args){global $diag;$diag='';$refs=[];if(in_array($name,['str_replace','str_ireplace'])&&count($args)>3){$refs[3]=&$args[3];}ob_start();try{$v=enc($name(...$args));}catch(Throwable $e){$v='E:'.get_class($e).':'.bin2hex($e->getMessage());}$out=ob_get_clean();foreach($refs as $x)$v.='|R:'.enc($x);echo $v,$diag,'|O:',bin2hex($out),"\n";}
+function invoke($name,$args){global $diag;$diag='';$refs=[];if(in_array($name,['next','prev','reset','end'])){$refs[0]=&$args[0];}if(in_array($name,['str_replace','str_ireplace'])&&count($args)>3){$refs[3]=&$args[3];}ob_start();try{$v=enc($name(...$args));}catch(Throwable $e){$v='E:'.get_class($e).':'.bin2hex($e->getMessage());}$out=ob_get_clean();foreach($refs as $x)$v.='|R:'.enc($x);echo $v,$diag,'|O:',bin2hex($out),"\n";}
 "#,
     );
     for (name, a) in &cases {
@@ -446,15 +689,47 @@ function invoke($name,$args){global $diag;$diag='';$refs=[];if(in_array($name,['
     assert_eq!(lines.len(), cases.len());
     let mut groups = std::collections::BTreeMap::new();
     for (name, _) in &cases {
-        let group = if name.starts_with("array_") || ["in_array", "key_exists"].contains(name) {
+        let group = if ["sprintf", "printf", "vsprintf", "vprintf"].contains(name) {
+            "formatting"
+        } else if *name == "number_format" {
+            "number_format"
+        } else if *name == "round" {
+            "rounding"
+        } else if [
+            "urlencode",
+            "rawurlencode",
+            "urldecode",
+            "rawurldecode",
+            "bin2hex",
+            "hex2bin",
+            "crc32",
+            "ord",
+            "chr",
+        ]
+        .contains(name)
+        {
+            "encoding"
+        } else if ["array_sum", "array_product"].contains(name) {
+            "aggregate"
+        } else if ["current", "pos", "key", "next", "prev", "reset", "end"].contains(name) {
+            "pointer"
+        } else if name.starts_with("array_") || ["in_array", "key_exists"].contains(name) {
             "arrays"
         } else if [
+            "round",
+            "dechex",
+            "decbin",
+            "decoct",
+            "hexdec",
+            "bindec",
+            "octdec",
+            "base_convert",
+            "fpow",
             "ceil",
             "floor",
             "sqrt",
             "exp",
             "log10",
-            "log2",
             "log1p",
             "expm1",
             "sin",

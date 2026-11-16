@@ -1,14 +1,18 @@
-//! Byte character classes in PHP's default C locale.
-use phera_extension_api::*;
+//! ASCII character classes matching PHP with LC_CTYPE=C on Linux servers.
+
+use phera_extension_api::{
+    Context, Extension, FunctionEntry, NativeResult, Param, ParamType, Registry, SyncFn, Value,
+};
+
 pub struct Ctype;
 impl Extension for Ctype {
     fn name(&self) -> &'static str {
         "ctype"
     }
-    fn register(&self, r: &mut Registry) {
+    fn register(&self, registry: &mut Registry) {
         const PARAMS: &[Param] = &[Param::new("text", ParamType::Mixed)];
         for (n, f) in FUNCTIONS {
-            r.function(FunctionEntry::sync(n, PARAMS, *f));
+            registry.function(FunctionEntry::sync(n, PARAMS, *f));
         }
     }
 }
@@ -25,19 +29,25 @@ const FUNCTIONS: &[(&str, SyncFn)] = &[
     ("ctype_upper", upper),
     ("ctype_xdigit", xdigit),
 ];
-fn check(c: &mut dyn Context, a: &[Value], name: &str, p: fn(u8) -> bool) -> NativeResult {
-    let v = a.first().unwrap_or(&Value::Null);
-    let v = v.deref();
-    if let Value::String(s) = &*v {
+/// Legacy integer inputs denote a byte, while non-string inputs emit a deprecation.
+fn check(
+    context: &mut dyn Context,
+    arguments: &[Value],
+    name: &str,
+    p: fn(u8) -> bool,
+) -> NativeResult {
+    let value = arguments.first().unwrap_or(&Value::Null);
+    let value = value.deref();
+    if let Value::String(string) = &*value {
         return Ok(Value::Bool(
-            !s.is_empty() && s.as_bytes().iter().all(|b| p(*b)),
+            !string.is_empty() && string.as_bytes().iter().all(|b| p(*b)),
         ));
     }
-    c.deprecated(format!(
+    context.deprecated(format!(
         "{name}(): Argument of type {} will be interpreted as string in the future",
-        v.type_name()
+        value.type_name()
     ));
-    let result = match &*v {
+    let result = match &*value {
         Value::Int(i) if (-128..=255).contains(i) => p(*i as u8),
         Value::Int(i) if *i >= 0 => p(b'0'),
         Value::Int(_) => p(b'0') && p(b'-'),
@@ -47,8 +57,8 @@ fn check(c: &mut dyn Context, a: &[Value], name: &str, p: fn(u8) -> bool) -> Nat
 }
 macro_rules! class {
     ($f:ident,$name:literal,$p:expr) => {
-        fn $f(c: &mut dyn Context, a: &[Value]) -> NativeResult {
-            check(c, a, $name, $p)
+        fn $f(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+            check(context, arguments, $name, $p)
         }
     };
 }
