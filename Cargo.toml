@@ -42,6 +42,11 @@ phera-runtime = { path = "crates/runtime" }
 phera-server = { path = "crates/server" }
 phera-phpt = { path = "crates/phpt" }
 phera-extension-api = { path = "crates/extension-api" }
+phera-ext-core = { path = "crates/extensions/core" }
+phera-ext-ctype = { path = "crates/extensions/ctype" }
+phera-ext-json = { path = "crates/extensions/json" }
+phera-ext-pdo = { path = "crates/extensions/pdo" }
+phera-ext-standard = { path = "crates/extensions/standard" }
 bytes = "1"
 http-body-util = "0.1"
 hyper = { version = "1", default-features = false, features = ["http1", "server"] }

@@ -161,6 +161,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "phera-ext-core"
+version = "0.1.0"
+dependencies = [
+ "phera-extension-api",
+]
+
+[[package]]
+name = "phera-ext-ctype"
+version = "0.1.0"
+dependencies = [
+ "phera-extension-api",
+]
+
+[[package]]
 name = "phera-ext-json"
 version = "0.1.0"
 dependencies = [
@@ -169,6 +183,13 @@ dependencies = [
 
 [[package]]
 name = "phera-ext-pdo"
+version = "0.1.0"
+dependencies = [
+ "phera-extension-api",
+]
+
+[[package]]
+name = "phera-ext-standard"
 version = "0.1.0"
 dependencies = [
  "phera-extension-api",

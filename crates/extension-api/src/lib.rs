@@ -4,6 +4,7 @@
 //! never the VM's frames or bytecode, so the VM can change its internals
 //! without breaking extensions. Native classes are not expressible yet.
 
+mod arguments;
 mod context;
 mod error;
 mod function;
@@ -13,6 +14,7 @@ pub mod testing;
 pub use phera_value as value;
 pub use phera_value::{ArrayKey, Diagnostics, PhpArray, PhpString, Value};
 
+pub use arguments::{args, prepare_arguments};
 pub use context::{Context, LocalFuture};
 pub use error::{NativeError, NativeResult, Unwind};
 pub use function::{AsyncFn, FunctionEntry, NativeFn, Param, ParamType, SyncFn};
