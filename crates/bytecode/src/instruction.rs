@@ -88,6 +88,12 @@ pub enum Instruction {
         mode: FetchMode,
     },
     /// `<path> = src`.
+    /// Append to a local array without looking up a one-step path table entry.
+    /// References and scalar roots retain the ordinary PHP path-write behavior.
+    AppendLocal {
+        local: Reg,
+        src: Reg,
+    },
     AssignPath {
         path: PathId,
         src: Reg,
@@ -153,6 +159,22 @@ pub enum Instruction {
     },
 
     // ----- Operators ------------------------------------------------------
+    /// Compare a register to an integer and branch when the result is false.
+    /// The literal and target fit inline; no temporary boolean register is needed.
+    BinaryIntBranch {
+        op: BinaryOp,
+        lhs: Reg,
+        rhs: i32,
+        target: Target,
+    },
+    /// A binary operation with a signed small integer. This avoids loading a
+    /// literal register on every loop iteration; coercion matches `Binary`.
+    BinaryInt {
+        op: BinaryOp,
+        dst: Reg,
+        lhs: Reg,
+        rhs: i32,
+    },
     Binary {
         op: BinaryOp,
         dst: Reg,

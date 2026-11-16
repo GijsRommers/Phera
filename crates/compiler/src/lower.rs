@@ -169,6 +169,35 @@ impl Tables {
                 target.0 = offsets.get(target.index()).copied().unwrap_or(target.0);
             }
         }
+        function.observes_arguments =
+            function
+                .instructions
+                .iter()
+                .any(|instruction| match instruction {
+                    Instruction::InitDynamicCall { .. } => true,
+                    Instruction::InitCall { function } => self
+                        .unit
+                        .symbols
+                        .get(function.index())
+                        .is_some_and(|symbol| {
+                            [Some(symbol.name.as_str()), symbol.fallback.as_deref()]
+                                .into_iter()
+                                .flatten()
+                                .any(|name| {
+                                    matches!(
+                                        name.rsplit('\\').next(),
+                                        Some(
+                                            "func_get_args"
+                                                | "func_get_arg"
+                                                | "func_num_args"
+                                                | "call_user_func"
+                                                | "call_user_func_array"
+                                        )
+                                    )
+                                })
+                        }),
+                    _ => false,
+                });
         crate::optimize::optimize(&mut function);
         function
     }

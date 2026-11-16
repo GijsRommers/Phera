@@ -1,5 +1,5 @@
 //! Foreach snapshots and live reference traversal.
-use crate::{Place, Vm, frame};
+use crate::{AccessPath, Vm, frame};
 use phera_bytecode::{IterId, Reg, Target};
 use phera_extension_api::NativeError;
 use phera_value::{ArrayKey, Value};
@@ -8,7 +8,7 @@ impl Vm {
         &mut self,
         iter: IterId,
         src: Reg,
-        place: Option<Place>,
+        place: Option<AccessPath>,
     ) -> Result<(), NativeError> {
         let v = self.get(src);
         let snapshot = if let Value::Array(a) = v {
@@ -20,7 +20,7 @@ impl Vm {
             ));
             None
         };
-        if let Some(f) = self.frames.last_mut() {
+        if let Some(f) = self.call_stack.frames.last_mut() {
             f.iterators.insert(
                 iter.0,
                 frame::IteratorState {
@@ -37,7 +37,7 @@ impl Vm {
     pub(crate) fn iter_start_reference(
         &mut self,
         iter: IterId,
-        place: Place,
+        place: AccessPath,
     ) -> Result<(), NativeError> {
         let value = self.read_place(&place, false)?;
         if !value.is_array() {
@@ -46,7 +46,7 @@ impl Vm {
                 value.type_name()
             ));
         }
-        if let Some(frame) = self.frames.last_mut() {
+        if let Some(frame) = self.call_stack.frames.last_mut() {
             frame.iterators.insert(
                 iter.0,
                 frame::IteratorState {
@@ -67,6 +67,7 @@ impl Vm {
         end: Target,
     ) -> Result<(), NativeError> {
         let mut state = self
+            .call_stack
             .frames
             .last_mut()
             .and_then(|f| f.iterators.remove(&iter.0))
@@ -103,15 +104,14 @@ impl Vm {
                 },
             );
             if let Some(p) = &state.source {
-                let mut p = p.clone();
-                p.path.push(Some(key_register));
+                let p = p.clone().with_key(key_register);
                 v = self.reference(&p)?;
             }
             self.set(value, v);
         } else {
             self.jump(end)?
         }
-        if let Some(f) = self.frames.last_mut() {
+        if let Some(f) = self.call_stack.frames.last_mut() {
             f.iterators.insert(iter.0, state);
         }
 

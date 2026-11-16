@@ -1,6 +1,6 @@
 //! Scalar declaration checks delegate conversions to the value layer.
 use phera_extension_api::{NativeError, NativeResult};
-use phera_value::{CollectDiagnostics, Value, to_bool, to_php_string};
+use phera_value::{Value, to_bool, to_php_string};
 
 use crate::Vm;
 use phera_bytecode::{Type, TypeMask};
@@ -31,7 +31,7 @@ pub(crate) fn coerce(value: Value, ty: &Type, strict: bool, vm: &mut Vm) -> Nati
     {
         return Ok(value);
     }
-    let mut diagnostics = CollectDiagnostics::default();
+    let mut diagnostics = std::mem::take(&mut vm.diagnostic_reporter.operator_diagnostics);
     if mask.intersects(TypeMask::FLOAT) && value.is_int() {
         return Ok(Value::Float(to_float(&value, &mut diagnostics)?));
     }

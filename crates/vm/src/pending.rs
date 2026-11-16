@@ -2,26 +2,32 @@
 
 use phera_bytecode::{NameId, PathId, Reg, SymbolId};
 use phera_extension_api::{NativeError, NativeResult};
-use phera_value::{CollectDiagnostics, Value, to_php_string};
+use phera_value::{Value, to_php_string};
 
-use crate::{Place, Vm};
+use crate::{AccessPath, Vm};
 
-use phera_bytecode::CompiledUnit;
 use phera_extension_api::FunctionEntry;
-use std::{rc::Rc, sync::Arc};
+use std::rc::Rc;
 
 /// A signature and target resolved once for a symbol in this request.
 pub(crate) struct Callee {
     pub(crate) name: String,
-    pub(crate) parameters: Vec<(String, bool, bool)>,
+    pub(crate) parameters: Vec<ParameterSpec>,
     pub(crate) target: CallTarget,
+}
+
+/// Named argument routing and PHP parameter binding modifiers.
+pub(crate) struct ParameterSpec {
+    pub(crate) name: String,
+    pub(crate) by_reference: bool,
+    pub(crate) variadic: bool,
 }
 
 /// User bytecode, a native entry, or an intrinsic resolved at the call site.
 pub(crate) enum CallTarget {
-    User(Arc<CompiledUnit>, usize),
+    User(crate::function_table::FunctionRef),
     Native(FunctionEntry),
-    Intrinsic,
+    Intrinsic(crate::intrinsics::Intrinsic),
 }
 
 /// An unfinished call; nested argument calls push another entry.
@@ -61,8 +67,8 @@ impl Vm {
     }
 
     pub(crate) fn init_dynamic_call(&mut self, callee: Reg) -> Result<(), NativeError> {
-        let mut diagnostics = CollectDiagnostics::default();
-        let name = to_php_string(&self.get(callee), &mut diagnostics)?.to_string_lossy();
+        let mut diagnostics = std::mem::take(&mut self.diagnostic_reporter.operator_diagnostics);
+        let name = to_php_string(&self.operand(callee), &mut diagnostics)?.to_string_lossy();
         self.diagnostics_flush(diagnostics);
         let callee = self.resolve_callee(name)?;
         self.prepare_call(callee)
@@ -70,48 +76,48 @@ impl Vm {
 
     fn resolve_callee(&self, name: String) -> Result<Rc<Callee>, NativeError> {
         let lower = name.to_ascii_lowercase();
-        let (target, parameters) = if let Some((unit, index)) = self.functions.get(&lower) {
-            let function = unit
-                .functions
-                .get(*index)
-                .ok_or_else(|| NativeError::error("Phera internal error: function table"))?;
-            let parameters = function
-                .parameters
-                .iter()
-                .map(|parameter| {
-                    (
-                        unit.names
+        let (target, parameters) =
+            if let Some(reference) = self.function_table.functions.get(&lower) {
+                let unit = &reference.unit;
+                let index = reference.index;
+                let function = unit
+                    .functions
+                    .get(index)
+                    .ok_or_else(|| NativeError::error("Phera internal error: function table"))?;
+                let parameters = function
+                    .parameters
+                    .iter()
+                    .map(|parameter| ParameterSpec {
+                        name: unit
+                            .names
                             .get(parameter.name.index())
                             .cloned()
                             .unwrap_or_default(),
-                        parameter.by_reference,
-                        parameter.variadic,
-                    )
-                })
-                .collect();
-            (CallTarget::User(unit.clone(), *index), parameters)
-        } else if let Some(entry) = self.registry.get_function(&name) {
-            (
-                CallTarget::Native(*entry),
-                entry
-                    .params
-                    .iter()
-                    .map(|parameter| {
-                        (
-                            parameter.name.to_owned(),
-                            parameter.by_ref,
-                            parameter.variadic,
-                        )
+                        by_reference: parameter.by_reference,
+                        variadic: parameter.variadic,
                     })
-                    .collect(),
-            )
-        } else if self.exists(&name) {
-            (CallTarget::Intrinsic, Vec::new())
-        } else {
-            return Err(NativeError::error(format!(
-                "Call to undefined function {name}()"
-            )));
-        };
+                    .collect();
+                (CallTarget::User(reference.clone()), parameters)
+            } else if let Some(entry) = self.registry.get_function(&name) {
+                (
+                    CallTarget::Native(*entry),
+                    entry
+                        .params
+                        .iter()
+                        .map(|parameter| ParameterSpec {
+                            name: parameter.name.to_owned(),
+                            by_reference: parameter.by_ref,
+                            variadic: parameter.variadic,
+                        })
+                        .collect(),
+                )
+            } else if let Some(intrinsic) = crate::intrinsics::Intrinsic::resolve(&name) {
+                (CallTarget::Intrinsic(intrinsic), Vec::new())
+            } else {
+                return Err(NativeError::error(format!(
+                    "Call to undefined function {name}()"
+                )));
+            };
         Ok(Rc::new(Callee {
             name,
             parameters,
@@ -120,8 +126,9 @@ impl Vm {
     }
 
     fn prepare_call(&mut self, callee: Rc<Callee>) -> Result<(), NativeError> {
-        let arguments = self.argument_buffers.pop().unwrap_or_default();
+        let arguments = self.call_stack.argument_buffers.pop().unwrap_or_default();
         let frame = self
+            .call_stack
             .frames
             .last_mut()
             .ok_or_else(|| NativeError::error("Phera internal error: call without frame"))?;
@@ -134,10 +141,10 @@ impl Vm {
     }
 
     pub(crate) fn name_argument(&mut self, name: NameId) -> Result<(), NativeError> {
-        let frame = self
-            .frames
-            .last_mut()
-            .ok_or_else(|| NativeError::error("Phera internal error: argument without frame"))?;
+        let frame =
+            self.call_stack.frames.last_mut().ok_or_else(|| {
+                NativeError::error("Phera internal error: argument without frame")
+            })?;
         let name = frame
             .unit
             .names
@@ -155,7 +162,7 @@ impl Vm {
     pub(crate) fn send(
         &mut self,
         register: Option<Reg>,
-        place: Option<Place>,
+        place: Option<AccessPath>,
     ) -> Result<(), NativeError> {
         let call = self
             .current()
@@ -169,15 +176,15 @@ impl Vm {
         let index = if let Some(named) = &named {
             params
                 .iter()
-                .position(|parameter| &parameter.0 == named)
+                .position(|parameter| &parameter.name == named)
                 .ok_or_else(|| NativeError::error(format!("Unknown named parameter ${named}")))?
         } else {
             position
         };
         let by_reference = params
             .get(index)
-            .or_else(|| params.last().filter(|parameter| parameter.2))
-            .is_some_and(|parameter| parameter.1);
+            .or_else(|| params.last().filter(|parameter| parameter.variadic))
+            .is_some_and(|parameter| parameter.by_reference);
         let value = if by_reference {
             if let Some(place) = place {
                 self.reference(&place)?
@@ -195,6 +202,7 @@ impl Vm {
                 .unwrap_or_default()
         };
         let call = self
+            .call_stack
             .frames
             .last_mut()
             .and_then(|frame| frame.calls.last_mut())
@@ -212,24 +220,32 @@ impl Vm {
         Ok(())
     }
 
-    pub(crate) fn path(&self, index: PathId) -> Result<Place, NativeError> {
-        self.current()
-            .and_then(|frame| frame.function().paths.get(index.index()))
-            .map(Place::from_path)
-            .ok_or_else(|| NativeError::error("Phera internal error: invalid path"))
+    pub(crate) fn path(&self, index: PathId) -> Result<AccessPath, NativeError> {
+        let frame = self
+            .current()
+            .ok_or_else(|| NativeError::error("Phera internal error: missing path frame"))?;
+        Ok(AccessPath::compiled(
+            frame.unit.clone(),
+            frame.function_id,
+            index,
+        ))
     }
 
     pub(crate) async fn finish_call(&mut self, destination: Reg) -> Result<(), NativeError> {
         let call = self
+            .call_stack
             .frames
             .last_mut()
             .and_then(|frame| frame.calls.pop())
             .ok_or_else(|| NativeError::error("Phera internal error: call not initialized"))?;
         let arguments = call.arguments;
         match &call.callee.target {
-            CallTarget::User(unit, index) => {
-                self.push_prepared(unit.clone(), *index, Some(destination), arguments)?
-            }
+            CallTarget::User(function) => self.push_prepared(
+                function.unit.clone(),
+                function.index,
+                Some(destination),
+                arguments,
+            )?,
             CallTarget::Native(entry) => {
                 let result = self
                     .native_entry(
@@ -242,10 +258,10 @@ impl Vm {
                     .await?;
                 self.set(destination, result);
             }
-            CallTarget::Intrinsic => {
+            CallTarget::Intrinsic(intrinsic) => {
                 let result = self
-                    .native(
-                        &call.callee.name,
+                    .intrinsic(
+                        *intrinsic,
                         arguments
                             .into_iter()
                             .map(Option::unwrap_or_default)
@@ -281,13 +297,14 @@ impl Vm {
                 })?;
         }
         let frame = self
+            .call_stack
             .frames
             .pop()
             .ok_or_else(|| NativeError::error("Phera internal error: return without frame"))?;
         self.registers.truncate(frame.base);
         let destination = frame.destination;
-        self.recycled_frames.push(frame);
-        if self.frames.len() == stop {
+        self.call_stack.recycled_frames.push(frame);
+        if self.call_stack.frames.len() == stop {
             return Ok(Some(value));
         }
         if let Some(destination) = destination {
@@ -304,6 +321,7 @@ impl Vm {
         };
         for (_, value) in array.iter() {
             let call = self
+                .call_stack
                 .frames
                 .last_mut()
                 .and_then(|frame| frame.calls.last_mut())
@@ -315,7 +333,7 @@ impl Vm {
 
     pub(crate) fn exit_value(&mut self, register: Reg) -> NativeResult {
         let value = self.get(register);
-        let mut diagnostics = CollectDiagnostics::default();
+        let mut diagnostics = std::mem::take(&mut self.diagnostic_reporter.operator_diagnostics);
         if matches!(
             value,
             Value::Int(_) | Value::Bool(_) | Value::Null | Value::Float(_)
@@ -326,7 +344,7 @@ impl Vm {
             self.out(text.as_bytes());
         }
         self.diagnostics_flush(diagnostics);
-        self.frames.clear();
+        self.call_stack.frames.clear();
         Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
             (),
         ))))

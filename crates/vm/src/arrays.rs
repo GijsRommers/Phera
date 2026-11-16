@@ -2,7 +2,7 @@
 use crate::Vm;
 use phera_bytecode::Reg;
 use phera_extension_api::NativeError;
-use phera_value::{ArrayKey, CollectDiagnostics, Value};
+use phera_value::{ArrayKey, Value};
 use std::rc::Rc;
 impl Vm {
     pub(crate) fn array_write(
@@ -18,12 +18,13 @@ impl Vm {
             .and_then(Option::as_ref)
             .cloned()
             .unwrap_or_default();
-        let mut diagnostics = CollectDiagnostics::default();
+        let mut diagnostics = std::mem::take(&mut self.diagnostic_reporter.operator_diagnostics);
         let key = key
-            .map(|key| ArrayKey::from_value_diag(&self.get(key), &mut diagnostics))
+            .map(|key| ArrayKey::from_value_diag(&self.operand(key), &mut diagnostics))
             .transpose()?;
         self.diagnostics_flush(diagnostics);
         let mut target = self
+            .call_stack
             .frames
             .last_mut()
             .and_then(|frame| {

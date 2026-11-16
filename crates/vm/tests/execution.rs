@@ -91,3 +91,24 @@ async fn million_nested_array_writes() {
     let (status,output) = execute("<?php $grid=[];for($row=0;$row<1000;$row++){for($column=0;$column<1000;$column++){$grid[$row][$column]=$row+$column;}}echo $grid[999][999];",10).await;
     assert_eq!((status, output), (0, b"1998".to_vec()));
 }
+
+/// PHP's argument introspection sees assignments to the original parameter slot.
+#[tokio::test(flavor = "current_thread")]
+async fn observed_arguments_follow_parameter_assignment() {
+    let (status, output) = execute(
+        "<?php function inspect($value){$value=9;echo func_num_args(),':',func_get_arg(0),':';$args=func_get_args();echo $args[0];}inspect(1);",
+        10,
+    ).await;
+    assert_eq!((status, output), (0, b"1:9:9".to_vec()));
+}
+
+/// A cached namespace fallback must observe a later definition in that namespace.
+#[tokio::test(flavor = "current_thread")]
+async fn constant_cache_invalidates_namespace_fallbacks() {
+    let (status, output) = execute(
+        "<?php namespace A;define('K',1);echo K;define('A\\K',2);echo K;",
+        10,
+    )
+    .await;
+    assert_eq!((status, output), (0, b"12".to_vec()));
+}

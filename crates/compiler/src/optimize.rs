@@ -7,6 +7,8 @@ use std::collections::HashSet;
 
 use phera_bytecode::{BinaryOp, Function, Instruction, Target};
 
+use crate::integer_operands::fuse_integer_operands;
+
 pub(super) fn optimize(function: &mut Function) {
     let boundaries: HashSet<_> = function
         .instructions
@@ -24,6 +26,7 @@ pub(super) fn optimize(function: &mut Function) {
             scalar.fill(false);
         }
         let remove = match instruction {
+            Instruction::Nop => true,
             Instruction::Clear { reg } => scalar.get(reg.index()).copied().unwrap_or(false),
             Instruction::Move { dst, .. } => function
                 .instructions
@@ -64,16 +67,22 @@ pub(super) fn optimize(function: &mut Function) {
     }
     function.instructions = instructions;
     function.lines = lines;
+    fuse_integer_operands(function);
+    crate::direct_operands::optimize(function);
+    crate::integer_operands::fuse_integer_branches(function);
+    crate::direct_operands::specialize_appends(function);
+    compact_nops(function);
 }
 
-fn target(instruction: &Instruction) -> Option<Target> {
+pub(super) fn target(instruction: &Instruction) -> Option<Target> {
     let mut instruction = *instruction;
     target_mut(&mut instruction).copied()
 }
 
-fn target_mut(instruction: &mut Instruction) -> Option<&mut Target> {
+pub(super) fn target_mut(instruction: &mut Instruction) -> Option<&mut Target> {
     match instruction {
-        Instruction::Jump { target }
+        Instruction::BinaryIntBranch { target, .. }
+        | Instruction::Jump { target }
         | Instruction::JumpIf { target, .. }
         | Instruction::JumpIfNot { target, .. }
         | Instruction::JumpIfNull { target, .. }
@@ -83,4 +92,31 @@ fn target_mut(instruction: &mut Instruction) -> Option<&mut Target> {
         Instruction::IterNext { end, .. } | Instruction::IterNextKeyed { end, .. } => Some(end),
         _ => None,
     }
+}
+
+/// Preserve source locations and targets after integer fusion removes loads.
+fn compact_nops(function: &mut Function) {
+    let mut offsets = Vec::with_capacity(function.instructions.len() + 1);
+    let mut count = 0;
+    for instruction in &function.instructions {
+        offsets.push(count);
+        if !matches!(instruction, Instruction::Nop) {
+            count += 1
+        }
+    }
+    offsets.push(count);
+    let mut lines = Vec::new();
+    let mut instructions = Vec::new();
+    for (index, mut instruction) in function.instructions.iter().copied().enumerate() {
+        if matches!(instruction, Instruction::Nop) {
+            continue;
+        }
+        if let Some(target) = target_mut(&mut instruction) {
+            target.0 = offsets.get(target.index()).copied().unwrap_or(target.0);
+        }
+        instructions.push(instruction);
+        lines.push(function.lines[index]);
+    }
+    function.instructions = instructions;
+    function.lines = lines;
 }

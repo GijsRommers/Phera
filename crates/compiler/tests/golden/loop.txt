@@ -4,12 +4,9 @@ function {main} (6 registers, dynamic scope)
   r0 = $index
   0000  line 1    LoadInt { dst: r1, value: 0 }
   0001  line 1    Assign { local: r0, src: r1 }
-  0002  line 1    Move { dst: r2, src: r0 }
-  0003  line 1    LoadInt { dst: r3, value: 3 }
-  0004  line 1    Binary { op: Less, dst: r2, lhs: r2, rhs: r3 }
-  0005  line 1    JumpIfNot { condition: r2, target: @9 }
-  0006  line 1    IncDecLocal { mode: PostIncrement, dst: r3, local: r0 }
-  0007  line 1    Clear { reg: r3 }
-  0008  line 1    Jump { target: @2 }
-  0009  line 1    LoadInt { dst: r4, value: 1 }
-  0010  line 1    Return { src: r4 }
+  0002  line 1    BinaryIntBranch { op: Less, lhs: r0, rhs: 3, target: @6 }
+  0003  line 1    IncDecLocal { mode: PostIncrement, dst: r3, local: r0 }
+  0004  line 1    Clear { reg: r3 }
+  0005  line 1    Jump { target: @2 }
+  0006  line 1    LoadInt { dst: r4, value: 1 }
+  0007  line 1    Return { src: r4 }

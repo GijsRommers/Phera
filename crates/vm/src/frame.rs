@@ -1,11 +1,11 @@
 //! Heap call frames and conversion of immutable bytecode constants.
-use crate::Place;
+use crate::AccessPath;
 use phera_bytecode::{CompiledUnit, Constant, Function, Reg};
 use phera_value::{PhpArray, Value};
-use std::{collections::HashMap, rc::Rc, sync::Arc};
+use std::{rc::Rc, sync::Arc};
 pub struct IteratorState {
     pub snapshot: Option<Rc<PhpArray>>,
-    pub source: Option<Place>,
+    pub source: Option<AccessPath>,
     pub position: Option<usize>,
     pub started: bool,
 }
@@ -19,8 +19,8 @@ pub struct Frame {
     pub base: usize,
     pub count: usize,
     pub arguments: Vec<Value>,
-    pub dynamic: HashMap<String, Reg>,
-    pub iterators: HashMap<u16, IteratorState>,
+    pub dynamic: crate::dynamic_variables::DynamicVariables,
+    pub iterators: crate::iterators::Iterators,
 }
 impl Frame {
     pub fn new(
@@ -30,10 +30,12 @@ impl Frame {
         function_id: Option<usize>,
         destination: Option<Reg>,
     ) -> Self {
-        let count = function_id
+        let function = function_id
             .and_then(|i| unit.functions.get(i))
-            .unwrap_or(&unit.main)
-            .registers;
+            .unwrap_or(&unit.main);
+        let count = function.registers;
+        let dynamic = crate::dynamic_variables::DynamicVariables::new(function.dynamic_scope);
+        let iterators = crate::iterators::Iterators::new(function.iterators);
         let base = registers.len();
         registers.resize_with(base + count as usize, || None);
         Self {
@@ -46,15 +48,17 @@ impl Frame {
             base,
             count: count as usize,
             arguments: vec![],
-            dynamic: HashMap::new(),
-            iterators: HashMap::new(),
+            dynamic,
+            iterators,
         }
     }
+    #[inline]
     pub fn slots<'a>(&self, registers: &'a [Option<Value>]) -> &'a [Option<Value>] {
         registers
             .get(self.base..self.base + self.count)
             .unwrap_or(&[])
     }
+    #[inline]
     pub fn slots_mut<'a>(&self, registers: &'a mut [Option<Value>]) -> &'a mut [Option<Value>] {
         registers
             .get_mut(self.base..self.base + self.count)
@@ -72,6 +76,7 @@ impl Frame {
             .copied()
             .unwrap_or(1) as usize
     }
+    #[inline]
     pub fn get(&self, registers: &[Option<Value>], r: Reg) -> Value {
         self.slots(registers)
             .get(r.0 as usize)
@@ -79,6 +84,7 @@ impl Frame {
             .map(|v| v.deref().clone())
             .unwrap_or_default()
     }
+    #[inline]
     pub fn set(&mut self, registers: &mut [Option<Value>], r: Reg, v: Value) {
         if let Some(s) = self.slots_mut(registers).get_mut(r.0 as usize) {
             *s = Some(v)

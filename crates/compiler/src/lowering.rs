@@ -1,12 +1,15 @@
 //! Instruction translation and interning of access paths.
 use phera_bytecode::{
-    BinaryOp, CastKind, FetchMode, Function, FunctionId, IncDec, IncludeKind, Instruction, IterId,
-    Path, PathBase, PathId, Reg, RuntimeError, StaticId, Step, Target, UnaryOp,
+    CastKind, FetchMode, Function, FunctionId, IncDec, IncludeKind, Instruction, IterId, Reg,
+    RuntimeError, Target, UnaryOp,
 };
 
 use crate::ir;
 
-use crate::lower::Tables;
+use crate::{
+    lower::Tables,
+    lowering_tables::{binary, path, static_id},
+};
 impl Tables {
     pub(super) fn instruction(
         &mut self,
@@ -363,7 +366,10 @@ impl Tables {
                 fallback,
                 arguments,
             } => {
-                self.init_call(function, name, fallback, constants);
+                function
+                    .instructions
+                    .push(Instruction::InitDynamicCall { callee: name });
+                let _ = fallback;
                 for argument in arguments {
                     if let Some(name) = argument.name {
                         function.instructions.push(Instruction::NameArgument {
@@ -390,74 +396,4 @@ impl Tables {
         };
         function.instructions.push(instruction);
     }
-
-    fn init_call(
-        &mut self,
-        function: &mut Function,
-        name: Reg,
-        fallback: Option<String>,
-        _constants: &[ir::Constant],
-    ) {
-        function
-            .instructions
-            .push(Instruction::InitDynamicCall { callee: name });
-        let _ = fallback;
-    }
-}
-
-fn path(function: &mut Function, place: ir::Place) -> PathId {
-    let index = function.paths.len();
-    function.paths.push(Path {
-        base: if place.dynamic {
-            PathBase::Named(place.base)
-        } else {
-            PathBase::Register(place.base)
-        },
-        steps: place
-            .path
-            .into_iter()
-            .map(|step| step.map_or(Step::Append, Step::Index))
-            .collect(),
-    });
-    PathId(index as u32)
-}
-
-fn binary(operator: ir::Binary) -> BinaryOp {
-    match operator {
-        ir::Binary::Add => BinaryOp::Add,
-        ir::Binary::Subtract => BinaryOp::Subtract,
-        ir::Binary::Multiply => BinaryOp::Multiply,
-        ir::Binary::Divide => BinaryOp::Divide,
-        ir::Binary::Modulo => BinaryOp::Modulo,
-        ir::Binary::Power => BinaryOp::Power,
-        ir::Binary::Concat => BinaryOp::Concat,
-        ir::Binary::BitwiseAnd => BinaryOp::BitwiseAnd,
-        ir::Binary::BitwiseOr => BinaryOp::BitwiseOr,
-        ir::Binary::BitwiseXor => BinaryOp::BitwiseXor,
-        ir::Binary::ShiftLeft => BinaryOp::ShiftLeft,
-        ir::Binary::ShiftRight => BinaryOp::ShiftRight,
-        ir::Binary::Xor => BinaryOp::LogicalXor,
-        ir::Binary::Equal => BinaryOp::Equal,
-        ir::Binary::NotEqual => BinaryOp::NotEqual,
-        ir::Binary::Identical => BinaryOp::Identical,
-        ir::Binary::NotIdentical => BinaryOp::NotIdentical,
-        ir::Binary::Less => BinaryOp::Less,
-        ir::Binary::LessEqual => BinaryOp::LessEqual,
-        ir::Binary::Greater => BinaryOp::Greater,
-        ir::Binary::GreaterEqual => BinaryOp::GreaterEqual,
-        ir::Binary::Spaceship => BinaryOp::Spaceship,
-    }
-}
-
-fn static_id(tables: &mut Tables, function: &mut Function, name: &str) -> StaticId {
-    let name = tables.name(name);
-    let index = function
-        .statics
-        .iter()
-        .position(|candidate| candidate == &name)
-        .unwrap_or_else(|| {
-            function.statics.push(name);
-            function.statics.len() - 1
-        });
-    StaticId(index as u16)
 }

@@ -2,7 +2,7 @@
 use phera_ast as ast;
 use phera_bytecode::Reg;
 
-use crate::ir::{Binary, Constant, Instruction, Target};
+use crate::ir::{Constant, Instruction, Target};
 use crate::{CompileError, Compiler, Loop, constant, writable};
 impl Compiler<'_> {
     pub(super) fn statement(
@@ -358,57 +358,7 @@ impl Compiler<'_> {
                 self.patch(jump, self.pos());
                 self.loop_end(start);
             }
-            S::Switch { subject, cases } => {
-                let value = self.expr(subject)?;
-                let mut jumps = vec![];
-                let mut default = None;
-                for (i, c) in cases.iter().enumerate() {
-                    if let Some(expression) = &c.condition {
-                        let rhs = self.expr(expression)?;
-                        let dst = self.reg()?;
-                        self.emit(
-                            Instruction::Binary {
-                                dst,
-                                operator: Binary::Equal,
-                                lhs: value,
-                                rhs,
-                            },
-                            line,
-                        );
-                        jumps.push((
-                            i,
-                            self.emit(
-                                Instruction::Branch {
-                                    value: dst,
-                                    target: Target(0),
-                                    when: true,
-                                },
-                                line,
-                            ),
-                        ));
-                    } else {
-                        default = Some(i)
-                    }
-                }
-                let miss = self.emit(Instruction::Jump(Target(0)), line);
-                self.loops.push(Loop {
-                    breaks: vec![],
-                    continues: vec![],
-                });
-                for (i, c) in cases.iter().enumerate() {
-                    for (_, jump) in jumps.iter().filter(|(name, _)| *name == i) {
-                        self.patch(*jump, self.pos())
-                    }
-                    if default == Some(i) {
-                        self.patch(miss, self.pos())
-                    }
-                    self.block(&c.body, false)?
-                }
-                if default.is_none() {
-                    self.patch(miss, self.pos())
-                }
-                self.loop_end(self.pos());
-            }
+            S::Switch { subject, cases } => self.compile_switch(subject, cases, line)?,
             _ => return Err(self.error("Statement not supported yet", line)),
         }
         Ok(())

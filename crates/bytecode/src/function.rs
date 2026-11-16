@@ -31,6 +31,9 @@ pub struct Function {
     /// `compact`, `get_defined_vars`, `include` or `eval`. Such a frame keeps
     /// a name table next to its registers; all others skip that cost.
     pub dynamic_scope: bool,
+    /// Preserve the mutable argument view for `func_get_args`, `func_get_arg`
+    /// and `func_num_args`, including dynamically selected intrinsics.
+    pub observes_arguments: bool,
     /// Whether the file declared `strict_types=1`, which governs the calls
     /// this function makes.
     pub strict_types: bool,

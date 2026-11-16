@@ -3,12 +3,13 @@ use std::{rc::Rc, sync::Arc};
 
 use phera_bytecode::{CompiledUnit, Reg};
 use phera_extension_api::{Context, NativeError, NativeFn, NativeResult, prepare_arguments};
-use phera_value::{ArrayKey, CollectDiagnostics, PhpArray, Value, to_php_string};
+use phera_value::{ArrayKey, PhpArray, Value, to_php_string};
 
-use crate::{Vm, types};
+use crate::{Vm, intrinsics::Intrinsic, types};
 impl Vm {
     pub(crate) fn named_slot(&mut self, name: &str) -> Result<Reg, NativeError> {
         let frame = self
+            .call_stack
             .frames
             .last_mut()
             .ok_or_else(|| NativeError::error("Phera internal error: no variable frame"))?;
@@ -32,28 +33,13 @@ impl Vm {
         Ok(register)
     }
     pub(crate) fn exists(&self, name: &str) -> bool {
-        self.functions.contains_key(&name.to_ascii_lowercase())
+        self.function_table
+            .functions
+            .contains_key(&name.to_ascii_lowercase())
             || self.registry.get_function(name).is_some()
-            || matches!(
-                name.to_ascii_lowercase().as_str(),
-                "define"
-                    | "extract"
-                    | "compact"
-                    | "get_defined_vars"
-                    | "call_user_func"
-                    | "call_user_func_array"
-                    | "is_callable"
-                    | "defined"
-                    | "constant"
-                    | "function_exists"
-                    | "error_reporting"
-                    | "ini_set"
-                    | "ini_get"
-                    | "func_num_args"
-                    | "func_get_args"
-                    | "func_get_arg"
-            )
+            || Intrinsic::resolve(name).is_some()
     }
+
     pub(crate) fn push_call(
         &mut self,
         unit: Arc<CompiledUnit>,
@@ -70,14 +56,14 @@ impl Vm {
         dst: Option<Reg>,
         mut arguments: Vec<Option<Value>>,
     ) -> Result<(), NativeError> {
-        if self.frames.len() >= self.frame_limit {
+        if self.call_stack.frames.len() >= self.frame_limit {
             return Err(NativeError::error(format!(
                 "Maximum call stack depth of {} exceeded",
                 self.frame_limit
             )));
         }
         let mut frame = self.make_frame(unit, Some(id), dst);
-        if frame.function().dynamic_scope {
+        if frame.function().observes_arguments {
             frame.arguments = arguments
                 .iter()
                 .cloned()
@@ -109,26 +95,30 @@ impl Vm {
                 }
                 Value::Array(Rc::new(values))
             } else {
-                let value = arguments.get(i).cloned().flatten().ok_or_else(|| {
+                let value = arguments.get_mut(i).and_then(Option::take).ok_or_else(|| {
                     let required = params.iter().filter(|parameter| !parameter.has_default && !parameter.variadic).count();
                     NativeError::argument_count_error(format!(
                         "Too few arguments to function {}(), {} passed and at least {required} expected",
                         function.name,arguments.len(),
                     ))
                 })?;
-                self.check_argument(
-                    value,
-                    parameter.ty.map(|ty| &code.types[ty.index()]),
-                    &function.name,
-                    i,
-                    &code.names[parameter.name.index()],
-                )?
+                if parameter.ty.is_none() {
+                    value
+                } else {
+                    self.check_argument(
+                        value,
+                        parameter.ty.map(|ty| &code.types[ty.index()]),
+                        &function.name,
+                        i,
+                        &code.names[parameter.name.index()],
+                    )?
+                }
             };
             frame.set(&mut self.registers, Reg(i as u16), value);
         }
         arguments.clear();
-        self.argument_buffers.push(arguments);
-        self.frames.push(frame);
+        self.call_stack.argument_buffers.push(arguments);
+        self.call_stack.frames.push(frame);
         Ok(())
     }
     /// Coercion of a reference updates its cell so the caller observes it.
@@ -165,18 +155,34 @@ impl Vm {
     }
 
     pub(crate) async fn native(&mut self, name: &str, arguments: Vec<Value>) -> NativeResult {
+        if let Some(intrinsic) = Intrinsic::resolve(name) {
+            return self.intrinsic(intrinsic, arguments).await;
+        }
+        let entry =
+            self.registry.get_function(name).copied().ok_or_else(|| {
+                NativeError::error(format!("Call to undefined function {name}()"))
+            })?;
+        self.native_entry(entry, arguments).await
+    }
+
+    /// Execute a resolved intrinsic without matching its function name again.
+    pub(crate) async fn intrinsic(
+        &mut self,
+        intrinsic: Intrinsic,
+        arguments: Vec<Value>,
+    ) -> NativeResult {
         let arg = arguments.first().cloned().unwrap_or_default();
-        let mut diagnostics = CollectDiagnostics::default();
-        match name.to_ascii_lowercase().as_str() {
-            "is_callable" => {
+        let mut diagnostics = std::mem::take(&mut self.diagnostic_reporter.operator_diagnostics);
+        match intrinsic {
+            Intrinsic::IsCallable => {
                 let name = to_php_string(&arg, &mut diagnostics)?.to_string_lossy();
-                return Ok(Value::Bool(self.exists(&name)));
+                Ok(Value::Bool(self.exists(&name)))
             }
-            "call_user_func" => {
+            Intrinsic::CallUserFunc => {
                 let rest = arguments.iter().skip(1).cloned().collect();
                 return self.call(&arg, rest).await;
             }
-            "call_user_func_array" => {
+            Intrinsic::CallUserFuncArray => {
                 let array = arguments.get(1).cloned().unwrap_or_default();
                 let Value::Array(array) = array else {
                     return Err(NativeError::type_error(
@@ -185,7 +191,7 @@ impl Vm {
                 };
                 return self.call(&arg, array.values().cloned().collect()).await;
             }
-            "get_defined_vars" => {
+            Intrinsic::GetDefinedVars => {
                 let mut array = PhpArray::new();
                 if let Some(frame) = self.current() {
                     for (i, name) in frame.function().locals.iter().enumerate() {
@@ -204,7 +210,7 @@ impl Vm {
                             );
                         }
                     }
-                    for (name, register) in &frame.dynamic {
+                    for (name, register) in frame.dynamic.iter() {
                         if let Some(Some(value)) =
                             frame.slots(&self.registers).get(register.0 as usize)
                         {
@@ -215,9 +221,9 @@ impl Vm {
                         }
                     }
                 }
-                return Ok(Value::Array(Rc::new(array)));
+                Ok(Value::Array(Rc::new(array)))
             }
-            "compact" => {
+            Intrinsic::Compact => {
                 let mut names: Vec<_> = arguments.into_iter().rev().collect();
                 let mut array = PhpArray::new();
                 while let Some(value) = names.pop() {
@@ -256,9 +262,9 @@ impl Vm {
                         _ => {}
                     }
                 }
-                return Ok(Value::Array(Rc::new(array)));
+                Ok(Value::Array(Rc::new(array)))
             }
-            "extract" => {
+            Intrinsic::Extract => {
                 let Value::Array(array) = arg else {
                     return Err(NativeError::type_error(
                         "extract(): Argument #1 ($array) must be of type array",
@@ -282,9 +288,9 @@ impl Vm {
                         count += 1;
                     }
                 }
-                return Ok(Value::Int(count));
+                Ok(Value::Int(count))
             }
-            "define" => {
+            Intrinsic::Define => {
                 let name = to_php_string(&arg, &mut diagnostics)?.to_string_lossy();
                 if self.constants.contains_key(&name) {
                     self.warn(format!("Constant {name} already defined"));
@@ -292,32 +298,26 @@ impl Vm {
                 }
                 self.constants
                     .insert(name, arguments.get(1).cloned().unwrap_or_default());
-                return Ok(Value::Bool(true));
+                Ok(Value::Bool(true))
             }
-            "defined" => {
-                return Ok(Value::Bool(self.constants.contains_key(
-                    &to_php_string(&arg, &mut diagnostics)?.to_string_lossy(),
-                )));
-            }
-            "constant" => {
+            Intrinsic::Defined => Ok(Value::Bool(
+                self.constants
+                    .contains_key(&to_php_string(&arg, &mut diagnostics)?.to_string_lossy()),
+            )),
+            Intrinsic::Constant => {
                 let name = to_php_string(&arg, &mut diagnostics)?.to_string_lossy();
-                return self
-                    .constants
+                self.constants
                     .get(&name)
                     .cloned()
-                    .ok_or_else(|| NativeError::error(format!("Undefined constant \"{name}\"")));
+                    .ok_or_else(|| NativeError::error(format!("Undefined constant \"{name}\"")))
             }
-            "function_exists" => {
-                return Ok(Value::Bool(self.exists(
-                    &to_php_string(&arg, &mut diagnostics)?.to_string_lossy(),
-                )));
-            }
-            "func_num_args" => {
-                return Ok(Value::Int(
-                    self.current().map_or(0, |frame| frame.arguments.len()) as i64,
-                ));
-            }
-            "func_get_args" => {
+            Intrinsic::FunctionExists => Ok(Value::Bool(
+                self.exists(&to_php_string(&arg, &mut diagnostics)?.to_string_lossy()),
+            )),
+            Intrinsic::FuncNumArgs => Ok(Value::Int(
+                self.current().map_or(0, |frame| frame.arguments.len()) as i64,
+            )),
+            Intrinsic::FuncGetArgs => {
                 let array = self
                     .current()
                     .map(|frame| frame.arguments.clone())
@@ -326,21 +326,15 @@ impl Vm {
                 for value in array {
                     result.push(value)?;
                 }
-                return Ok(Value::Array(Rc::new(result)));
+                Ok(Value::Array(Rc::new(result)))
             }
-            "func_get_arg" => {
+            Intrinsic::FuncGetArg => {
                 let i = phera_value::to_int(&arg, &mut diagnostics)?;
-                return self.current().and_then(|frame|frame.arguments.get(i as usize)).cloned().ok_or_else(||NativeError::value_error("func_get_arg(): Argument #1 ($position) must be less than the number of the arguments passed to the currently executed function"));
+                self.current().and_then(|frame|frame.arguments.get(i as usize)).cloned().ok_or_else(||NativeError::value_error("func_get_arg(): Argument #1 ($position) must be less than the number of the arguments passed to the currently executed function"))
             }
-            "error_reporting" => return Ok(Value::Int(30719)),
-            "ini_set" | "ini_get" => return Ok(Value::from("1")),
-            _ => {}
+            Intrinsic::ErrorReporting => Ok(Value::Int(30719)),
+            Intrinsic::IniSet | Intrinsic::IniGet => Ok(Value::from("1")),
         }
-        let entry =
-            self.registry.get_function(name).copied().ok_or_else(|| {
-                NativeError::error(format!("Call to undefined function {name}()"))
-            })?;
-        self.native_entry(entry, arguments).await
     }
 
     pub(crate) async fn native_entry(
