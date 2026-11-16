@@ -2,7 +2,6 @@
 
 use std::collections::HashMap;
 use std::fmt;
-use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use crate::error::{Diagnostics, OpError};
@@ -106,25 +105,28 @@ fn string_to_key(bytes: &[u8]) -> ArrayKey {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
-enum Idx {
-    Int(i64),
-    Str(u64),
+/// How a key is turned into a position in the entry vector.
+///
+/// Most PHP arrays are lists or small maps, and for those a hash table is
+/// pure overhead: more memory, more allocation, and a hash computed for
+/// every access. So the array picks the cheapest way that works and moves
+/// to the next one only when it has to.
+#[derive(Clone, Default)]
+enum Lookup {
+    /// A list: entry `i` has the key `i` and nothing was removed, so the
+    /// key is the position. PHP calls this a packed array.
+    #[default]
+    Packed,
+    /// A few entries with any keys: comparing them one by one is faster
+    /// than hashing.
+    Scan,
+    /// Everything else: each live key with its position.
+    Hashed(HashMap<ArrayKey, u32>),
 }
 
-fn key_idx(key: &ArrayKey) -> Idx {
-    match key {
-        ArrayKey::Int(i) => Idx::Int(*i),
-        ArrayKey::String(s) => {
-            // DefaultHasher (SipHash with fixed keys) is stable within a
-            // process, which is all the index needs; collisions are resolved
-            // by comparing the full stored keys.
-            let mut h = std::collections::hash_map::DefaultHasher::new();
-            s.as_bytes().hash(&mut h);
-            Idx::Str(h.finish())
-        }
-    }
-}
+/// The most entries an array looks through one by one before it builds a
+/// hash table.
+const SCAN_LIMIT: usize = 8;
 
 #[derive(Clone)]
 struct Entry {
@@ -141,13 +143,12 @@ const INVALID: usize = usize::MAX;
 ///
 /// Entries live in a vector (insertion order preserved); removals leave
 /// tombstones and the map is compacted once tombstones outnumber live
-/// entries. A hash index gives O(1) average get/insert/remove. Tracks PHP's
+/// entries. Keys are found through [`Lookup`]. Tracks PHP's
 /// next-free-integer-key rules and the internal array pointer.
 #[derive(Clone, Default)]
 pub struct PhpArray {
     entries: Vec<Entry>,
-    /// Key discriminator -> positions of entries with it (usually one).
-    index: HashMap<Idx, Vec<u32>>,
+    lookup: Lookup,
     dead: usize,
     /// PHP's `nNextFreeElement`: what the next `push` would use. `None`
     /// means no integer key was ever inserted (PHP starts at `LONG_MIN`,
@@ -166,7 +167,7 @@ impl PhpArray {
     pub fn with_capacity(cap: usize) -> Self {
         PhpArray {
             entries: Vec::with_capacity(cap),
-            index: HashMap::with_capacity(cap),
+            lookup: Lookup::Packed,
             dead: 0,
             next_free: None,
             pos: INVALID,
@@ -223,25 +224,71 @@ impl PhpArray {
     }
 
     fn find_pos(&self, key: &ArrayKey) -> Option<usize> {
-        let candidates = self.index.get(&key_idx(key))?;
-        candidates
+        match &self.lookup {
+            Lookup::Packed => match key {
+                ArrayKey::Int(index) => usize::try_from(*index)
+                    .ok()
+                    .filter(|&position| position < self.entries.len()),
+                ArrayKey::String(_) => None,
+            },
+            Lookup::Scan => self
+                .entries
+                .iter()
+                .position(|entry| entry.value.is_some() && &entry.key == key),
+            Lookup::Hashed(positions) => positions.get(key).map(|&position| position as usize),
+        }
+    }
+
+    /// The lookup that fits the entries as they are now.
+    fn fresh_lookup(&self) -> Lookup {
+        let is_list = self.dead == 0
+            && self
+                .entries
+                .iter()
+                .enumerate()
+                .all(|(position, entry)| entry.key == ArrayKey::Int(position as i64));
+        if is_list {
+            Lookup::Packed
+        } else {
+            self.lookup_by_size()
+        }
+    }
+
+    /// The lookup for entries that are known not to form a list.
+    fn lookup_by_size(&self) -> Lookup {
+        if self.entries.len() <= SCAN_LIMIT {
+            return Lookup::Scan;
+        }
+        let positions = self
+            .entries
             .iter()
-            .copied()
-            .find(|&p| {
-                let e = &self.entries[p as usize];
-                e.value.is_some() && &e.key == key
-            })
-            .map(|p| p as usize)
+            .enumerate()
+            .filter(|(_, entry)| entry.value.is_some())
+            .map(|(position, entry)| (entry.key.clone(), position as u32))
+            .collect();
+        Lookup::Hashed(positions)
+    }
+
+    /// Keeps the lookup right after the entry at `position` lost its value.
+    fn after_removal(&mut self, key: &ArrayKey) {
+        match &mut self.lookup {
+            Lookup::Hashed(positions) => {
+                positions.remove(key);
+            }
+            Lookup::Scan => {}
+            // A hole ends the guarantee that the position is the key.
+            Lookup::Packed => self.lookup = self.lookup_by_size(),
+        }
     }
 
     pub fn get(&self, key: &ArrayKey) -> Option<&Value> {
-        self.find_pos(key)
-            .map(|p| self.entries[p].value.as_ref().unwrap())
+        let position = self.find_pos(key)?;
+        self.entries.get(position)?.value.as_ref()
     }
 
     pub fn get_mut(&mut self, key: &ArrayKey) -> Option<&mut Value> {
-        self.find_pos(key)
-            .map(|p| self.entries[p].value.as_mut().unwrap())
+        let position = self.find_pos(key)?;
+        self.entries.get_mut(position)?.value.as_mut()
     }
 
     pub fn contains_key(&self, key: &ArrayKey) -> bool {
@@ -273,15 +320,25 @@ impl PhpArray {
     }
 
     fn push_entry(&mut self, key: ArrayKey, value: Value) {
+        let position = self.entries.len();
+        let extends_list =
+            matches!(self.lookup, Lookup::Packed) && key == ArrayKey::Int(position as i64);
+        if !extends_list {
+            match &mut self.lookup {
+                Lookup::Hashed(positions) => {
+                    positions.insert(key.clone(), position as u32);
+                }
+                // Decided after the push, when the entry is in place.
+                Lookup::Packed | Lookup::Scan => {}
+            }
+        }
         self.entries.push(Entry {
             key,
             value: Some(value),
         });
-        let pos = (self.entries.len() - 1) as u32;
-        self.index
-            .entry(key_idx(&self.entries[pos as usize].key))
-            .or_default()
-            .push(pos);
+        if !extends_list && !matches!(self.lookup, Lookup::Hashed(_)) {
+            self.lookup = self.lookup_by_size();
+        }
         self.maybe_compact();
     }
 
@@ -302,31 +359,24 @@ impl PhpArray {
 
     /// Removes `key`, returning its value. Tombstones are compacted lazily.
     pub fn remove(&mut self, key: &ArrayKey) -> Option<Value> {
-        let p = self.find_pos(key)?;
-        self.dead += 1;
-        let idx = key_idx(key);
-        let cands = self.index.get_mut(&idx).unwrap();
-        cands.retain(|&c| c != p as u32);
-        if cands.is_empty() {
-            self.index.remove(&idx);
+        let position = self.find_pos(key)?;
+        // Removing the end of a list leaves a shorter list, with no hole.
+        if matches!(self.lookup, Lookup::Packed) && position + 1 == self.entries.len() {
+            return self.entries.pop()?.value;
         }
-        self.entries[p].value.take()
+        let value = self.entries.get_mut(position)?.value.take();
+        self.dead += 1;
+        self.after_removal(key);
+        value
     }
 
     /// Rebuilds entries/index when tombstones outnumber live entries.
     /// Positions held by outside iterators may shift across a compaction.
     fn maybe_compact(&mut self) {
         if self.dead > self.len() {
-            let entries = std::mem::take(&mut self.entries);
-            self.entries = entries.into_iter().filter(|e| e.value.is_some()).collect();
+            self.entries.retain(|entry| entry.value.is_some());
             self.dead = 0;
-            self.index.clear();
-            for (i, e) in self.entries.iter().enumerate() {
-                self.index
-                    .entry(key_idx(&e.key))
-                    .or_default()
-                    .push(i as u32);
-            }
+            self.lookup = self.fresh_lookup();
         }
     }
 
@@ -368,16 +418,22 @@ impl PhpArray {
     /// key was one below the next-free index, PHP rolls that index back one
     /// step.
     pub fn pop(&mut self) -> Option<Value> {
-        let p = self.entries.iter().rposition(|e| e.value.is_some())?;
-        let key = self.entries[p].key.clone();
-        let value = self.entries[p].value.take().unwrap();
-        self.dead += 1;
-        let idx = key_idx(&key);
-        let cands = self.index.get_mut(&idx).unwrap();
-        cands.retain(|&c| c != p as u32);
-        if cands.is_empty() {
-            self.index.remove(&idx);
-        }
+        let position = self
+            .entries
+            .iter()
+            .rposition(|entry| entry.value.is_some())?;
+        let (key, value) = if matches!(self.lookup, Lookup::Packed) {
+            // The last entry of a list: taking it off leaves a list.
+            let entry = self.entries.pop()?;
+            (entry.key, entry.value?)
+        } else {
+            let entry = self.entries.get_mut(position)?;
+            let key = entry.key.clone();
+            let value = entry.value.take()?;
+            self.dead += 1;
+            self.after_removal(&key);
+            (key, value)
+        };
         if let (ArrayKey::Int(k), Some(n)) = (&key, self.next_free)
             && n == k.checked_add(1).unwrap_or(i64::MAX)
         {
@@ -391,49 +447,30 @@ impl PhpArray {
     /// keys of the remainder are renumbered 0..n in order and the next-free
     /// index becomes that count.
     pub fn shift(&mut self) -> Option<Value> {
-        while matches!(self.entries.first().map(|e| &e.value), Some(None)) {
-            self.entries.remove(0);
-            self.dead -= 1;
-        }
-        let first = self.entries.first_mut()?;
-        let key = first.key.clone();
-        let value = first.value.take().unwrap();
-        self.dead += 1;
-        let idx = key_idx(&key);
-        let cands = self.index.get_mut(&idx).unwrap();
-        cands.retain(|&c| c != 0);
-        if cands.is_empty() {
-            self.index.remove(&idx);
-        }
+        let first = self.first_position()?;
+        // Take the entry out for real, with any holes before it, so that a
+        // list stays a list.
+        let value = self.entries.drain(..=first).next_back()?.value;
+        self.dead = self.dead.saturating_sub(first);
         // Renumber the remaining integer keys 0..n in order.
         let mut next = 0i64;
-        for e in self.entries.iter_mut() {
-            if e.value.is_some() && matches!(e.key, ArrayKey::Int(_)) {
-                e.key = ArrayKey::Int(next);
+        for entry in self.entries.iter_mut() {
+            if entry.value.is_some() && matches!(entry.key, ArrayKey::Int(_)) {
+                entry.key = ArrayKey::Int(next);
                 next += 1;
             }
         }
-        self.rebuild_index();
+        self.lookup = self.fresh_lookup();
         self.next_free = Some(next);
         self.pos = self.first_position().unwrap_or(INVALID);
-        Some(value)
+        value
     }
 
-    fn rebuild_index(&mut self) {
-        self.index.clear();
-        for (i, e) in self.entries.iter().enumerate() {
-            if e.value.is_some() {
-                self.index
-                    .entry(key_idx(&e.key))
-                    .or_default()
-                    .push(i as u32);
-            }
-        }
-    }
-
-    /// True when the keys are exactly the integers 0..len-1 in order
-    /// (PHP's `array_is_list`).
+    /// Whether the keys are exactly 0, 1, 2, ... in order.
     pub fn is_list(&self) -> bool {
+        if matches!(self.lookup, Lookup::Packed) {
+            return true;
+        }
         let mut expect = 0i64;
         for (k, _) in self.iter() {
             match k {
@@ -899,5 +936,131 @@ mod tests {
         assert_eq!(a.len(), 2);
         assert!(!a.is_empty());
         let _ = PhpString::default();
+    }
+
+    /// Which lookup an array uses is invisible from outside, so these tests
+    /// look inside.
+    fn lookup_name(array: &PhpArray) -> &'static str {
+        match array.lookup {
+            Lookup::Packed => "packed",
+            Lookup::Scan => "scan",
+            Lookup::Hashed(_) => "hashed",
+        }
+    }
+
+    #[test]
+    fn a_list_needs_no_index_however_long() {
+        let mut list = PhpArray::new();
+        for value in 0..10_000 {
+            list.push(vi(value)).unwrap();
+        }
+        assert_eq!(lookup_name(&list), "packed");
+        assert_eq!(list.get(&k(9_999)), Some(&vi(9_999)));
+        assert_eq!(list.get(&k(10_000)), None);
+        assert_eq!(list.get(&k(-1)), None);
+        assert_eq!(list.get(&ks("five")), None);
+
+        // Taking from the end, or the front, leaves a list.
+        assert_eq!(list.pop(), Some(vi(9_999)));
+        assert_eq!(list.remove(&k(9_998)), Some(vi(9_998)));
+        assert_eq!(list.shift(), Some(vi(0)));
+        assert_eq!(lookup_name(&list), "packed");
+        assert_eq!(list.get(&k(0)), Some(&vi(1)));
+
+        // A hole in the middle does not.
+        list.remove(&k(5));
+        assert_eq!(lookup_name(&list), "hashed");
+        assert_eq!(list.get(&k(5)), None);
+        assert_eq!(list.get(&k(6)), Some(&vi(7)));
+    }
+
+    #[test]
+    fn small_maps_are_scanned_and_large_ones_hashed() {
+        let mut map = PhpArray::new();
+        for name in ["a", "b", "c", "d", "e", "f", "g", "h"] {
+            map.insert(ks(name), Value::from(name));
+        }
+        assert_eq!(lookup_name(&map), "scan");
+        assert_eq!(map.get(&ks("h")), Some(&Value::from("h")));
+
+        map.insert(ks("i"), Value::from("i"));
+        assert_eq!(lookup_name(&map), "hashed");
+        for name in ["a", "e", "i"] {
+            assert_eq!(map.get(&ks(name)), Some(&Value::from(name)));
+        }
+        assert_eq!(map.get(&ks("z")), None);
+    }
+
+    /// Random inserts, pushes and removals, checked after every step
+    /// against a plain list of pairs that does the same thing the slow,
+    /// obvious way. The key space is small so that arrays keep crossing
+    /// between the three lookups and keep being compacted.
+    #[test]
+    fn every_lookup_agrees_with_a_plain_list_of_pairs() {
+        let mut state: u64 = 0x9e37_79b9_7f4a_7c15;
+        let mut random = move |bound: u64| {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (state >> 33) % bound
+        };
+        let mut array = PhpArray::new();
+        let mut pairs: Vec<(ArrayKey, Value)> = Vec::new();
+
+        for step in 0..60_000_i64 {
+            let key = if random(3) == 0 {
+                ks(["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l"]
+                    [random(12) as usize])
+            } else {
+                k(random(24) as i64 - 4)
+            };
+            match random(10) {
+                0..=3 => {
+                    let value = vi(step);
+                    array.insert(key.clone(), value.clone());
+                    match pairs.iter_mut().find(|(existing, _)| existing == &key) {
+                        Some(pair) => pair.1 = value,
+                        None => pairs.push((key, value)),
+                    }
+                }
+                4..=5 => {
+                    if let Ok(pushed) = array.push(vi(step)) {
+                        assert!(pairs.iter().all(|(existing, _)| existing != &pushed));
+                        pairs.push((pushed, vi(step)));
+                    }
+                }
+                6..=7 => {
+                    let expected = pairs
+                        .iter()
+                        .position(|(existing, _)| existing == &key)
+                        .map(|position| pairs.remove(position).1);
+                    assert_eq!(array.remove(&key), expected);
+                }
+                8 => assert_eq!(array.pop(), pairs.pop().map(|pair| pair.1)),
+                _ => {
+                    let expected = (!pairs.is_empty()).then(|| pairs.remove(0).1);
+                    assert_eq!(array.shift(), expected);
+                    let mut next = 0;
+                    for (existing, _) in pairs.iter_mut() {
+                        if matches!(existing, ArrayKey::Int(_)) {
+                            *existing = k(next);
+                            next += 1;
+                        }
+                    }
+                }
+            }
+
+            assert_eq!(array.len(), pairs.len(), "step {step}");
+            let seen: Vec<(ArrayKey, Value)> = array
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect();
+            assert_eq!(seen, pairs, "step {step}");
+            for (key, value) in &pairs {
+                assert_eq!(array.get(key), Some(value), "step {step}, key {key:?}");
+            }
+            assert_eq!(array.get(&k(1_000)), None);
+            assert_eq!(array.get(&ks("absent")), None);
+        }
     }
 }
