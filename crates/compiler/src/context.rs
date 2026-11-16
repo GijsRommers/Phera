@@ -9,16 +9,19 @@ use phera_bytecode::Reg;
 use phera_source::LineTable;
 
 use crate::ir::{Constant, Function, Instruction, Place, Target};
+use crate::policies::{DeclarationTiming, NameKind};
 use crate::{CompileError, writable};
 
+/// Unresolved exits for one nested loop or switch context.
 pub(super) struct Loop {
     pub(super) breaks: Vec<usize>,
     pub(super) continues: Vec<usize>,
 }
+/// Mutable AST-to-IR state for one PHP function, sharing source locations.
 pub(super) struct Compiler<'ast> {
     pub(super) file: &'ast str,
     pub(super) lines: &'ast LineTable,
-    pub(super) fun: Function,
+    pub(super) function: Function,
     pub(super) functions: Vec<Function>,
     pub(super) hoisted: Vec<usize>,
     pub(super) next: usize,
@@ -26,14 +29,20 @@ pub(super) struct Compiler<'ast> {
     pub(super) locals: HashMap<String, Reg>,
     pub(super) loops: Vec<Loop>,
     pub(super) namespace: String,
-    pub(super) imports: HashMap<(u8, String), String>,
+    pub(super) imports: HashMap<(NameKind, String), String>,
 }
 impl<'ast> Compiler<'ast> {
-    pub(super) fn new(file: &'ast str, lines: &'ast LineTable, name: &str, ns: &str) -> Self {
+    /// Start an independent function builder in the current namespace.
+    pub(super) fn new(
+        file: &'ast str,
+        lines: &'ast LineTable,
+        name: &str,
+        namespace: &str,
+    ) -> Self {
         Self {
             file,
             lines,
-            fun: Function {
+            function: Function {
                 name: name.into(),
                 ..Function::default()
             },
@@ -43,10 +52,12 @@ impl<'ast> Compiler<'ast> {
             peak: 0,
             locals: HashMap::new(),
             loops: vec![],
-            namespace: ns.into(),
+            namespace: namespace.into(),
             imports: HashMap::new(),
         }
     }
+
+    /// Attach the current file to a compiler diagnostic without changing PHP wording.
     pub(super) fn error(&self, message: impl Into<String>, line: usize) -> CompileError {
         CompileError {
             message: message.into(),
@@ -55,7 +66,9 @@ impl<'ast> Compiler<'ast> {
             parse: false,
         }
     }
-    pub(super) fn reg(&mut self) -> Result<Reg, CompileError> {
+
+    /// Reserve a temporary slot and reject programs exceeding the bytecode register limit.
+    pub(super) fn allocate_register(&mut self) -> Result<Reg, CompileError> {
         if self.next >= u16::MAX as usize - 1 {
             return Err(self.error("Phera register limit exceeded", 1));
         }
@@ -65,19 +78,23 @@ impl<'ast> Compiler<'ast> {
         self.peak = self.peak.max(self.next);
         Ok(Reg(index))
     }
+
+    /// Allocate each named local once; finalization moves these slots ahead of temporaries.
     pub(super) fn local(&mut self, name: &str) -> Result<Reg, CompileError> {
         if let Some(register) = self.locals.get(name) {
             return Ok(*register);
         }
-        let register = self.reg()?;
+        let register = self.allocate_register()?;
         self.locals.insert(name.into(), register);
-        self.fun.locals.push(name.into());
+        self.function.locals.push(name.into());
         Ok(register)
     }
+
+    /// Renumber locals before temporaries without changing instruction order.
     pub(super) fn finish(&mut self) -> Function {
         let mut mapping = vec![Reg(0); self.peak];
         let mut named = vec![false; self.peak];
-        for (i, name) in self.fun.locals.iter().enumerate() {
+        for (i, name) in self.function.locals.iter().enumerate() {
             if let Some(old) = self.locals.get(name) {
                 if let Some(slot) = mapping.get_mut(old.0 as usize) {
                     *slot = Reg(i as u16)
@@ -87,7 +104,7 @@ impl<'ast> Compiler<'ast> {
                 }
             }
         }
-        let mut next = self.fun.locals.len();
+        let mut next = self.function.locals.len();
         for (i, is_named) in named.into_iter().enumerate() {
             if !is_named {
                 if let Some(slot) = mapping.get_mut(i) {
@@ -96,7 +113,7 @@ impl<'ast> Compiler<'ast> {
                 next += 1;
             }
         }
-        for instruction in &mut self.fun.instructions {
+        for instruction in &mut self.function.instructions {
             instruction.map_registers(|register| {
                 mapping
                     .get(register.0 as usize)
@@ -104,18 +121,24 @@ impl<'ast> Compiler<'ast> {
                     .unwrap_or(register)
             });
         }
-        self.fun.registers = self.peak;
-        std::mem::take(&mut self.fun)
+        self.function.registers = self.peak;
+        std::mem::take(&mut self.function)
     }
+
+    /// Append an IR instruction and its source line together; return its patch position.
     pub(super) fn emit(&mut self, i: Instruction, line: usize) -> usize {
-        let index = self.fun.instructions.len();
-        self.fun.instructions.push(i);
-        self.fun.lines.push(line);
+        let index = self.function.instructions.len();
+        self.function.instructions.push(i);
+        self.function.lines.push(line);
         index
     }
-    pub(super) fn pos(&self) -> usize {
-        self.fun.instructions.len()
+
+    /// Return the next IR instruction position for a control-flow target.
+    pub(super) fn position(&self) -> usize {
+        self.function.instructions.len()
     }
+
+    /// Resolve a previously emitted control-flow edge to its destination.
     pub(super) fn patch(&mut self, i: usize, to: usize) {
         if let Some(
             Instruction::DefaultCheck { passed: t, .. }
@@ -124,33 +147,41 @@ impl<'ast> Compiler<'ast> {
             | Instruction::Branch { target: t, .. }
             | Instruction::BranchNull { target: t, .. }
             | Instruction::IterNext { end: t, .. },
-        ) = self.fun.instructions.get_mut(i)
+        ) = self.function.instructions.get_mut(i)
         {
             *t = Target(to)
         }
     }
-    pub(super) fn literal(&mut self, v: Constant, line: usize) -> Result<Reg, CompileError> {
-        let dst = self.reg()?;
-        let constant = self.fun.constants.len();
-        self.fun.constants.push(v);
+
+    /// Record a literal and load it into a fresh register.
+    pub(super) fn literal(&mut self, value: Constant, line: usize) -> Result<Reg, CompileError> {
+        let dst = self.allocate_register()?;
+        let constant = self.function.constants.len();
+        self.function.constants.push(value);
         self.emit(Instruction::Load { dst, constant }, line);
         Ok(dst)
     }
-    pub(super) fn resolve(&self, index: &ast::Name, kind: u8) -> (String, Option<String>) {
+
+    /// Resolve imports before namespace fallback, preserving PHP qualification rules.
+    pub(super) fn resolve(&self, index: &ast::Name, kind: NameKind) -> (String, Option<String>) {
         if index.kind == ast::NameKind::FullyQualified {
             return (index.text.clone(), None);
         }
         if index.kind != ast::NameKind::Relative {
             let (first, rest) = index.text.split_once('\\').unwrap_or((&index.text, ""));
-            if let Some(v) = self.imports.get(&(
-                if rest.is_empty() { kind } else { 0 },
+            if let Some(value) = self.imports.get(&(
+                if rest.is_empty() {
+                    kind
+                } else {
+                    NameKind::Class
+                },
                 first.to_ascii_lowercase(),
             )) {
                 return (
                     if rest.is_empty() {
-                        v.clone()
+                        value.clone()
                     } else {
-                        format!("{v}\\{rest}")
+                        format!("{value}\\{rest}")
                     },
                     None,
                 );
@@ -165,6 +196,8 @@ impl<'ast> Compiler<'ast> {
             .then(|| index.text.clone());
         (full, fallback)
     }
+
+    /// Walk indexed targets iteratively, then evaluate index expressions from root to leaf.
     pub(super) fn place(&mut self, error: &ast::Expression) -> Result<Place, CompileError> {
         let line = self.lines.line(error.span.start);
         let mut node = error;
@@ -178,14 +211,18 @@ impl<'ast> Compiler<'ast> {
                 (self.local(index)?, false)
             }
             ast::ExpressionKind::Variable(ast::Variable::Dynamic(error)) => {
-                self.fun.dynamic_scope = true;
-                (self.expr(error)?, true)
+                self.function.dynamic_scope = true;
+                (self.compile_expression(error)?, true)
             }
             _ => return Err(self.error("Expression is not a writable place", line)),
         };
         let mut steps = vec![];
         for index in path.into_iter().rev() {
-            steps.push(index.map(|error| self.expr(error)).transpose()?)
+            steps.push(
+                index
+                    .map(|error| self.compile_expression(error))
+                    .transpose()?,
+            )
         }
         Ok(Place {
             base,
@@ -193,6 +230,8 @@ impl<'ast> Compiler<'ast> {
             path: steps,
         })
     }
+
+    /// Allow a computed root for reads while preserving iterative postfix traversal.
     pub(super) fn readable_place(
         &mut self,
         error: &ast::Expression,
@@ -206,10 +245,14 @@ impl<'ast> Compiler<'ast> {
             indices.push(index.as_deref());
             node = target;
         }
-        let base = self.expr(node)?;
+        let base = self.compile_expression(node)?;
         let mut path = vec![];
         for index in indices.into_iter().rev() {
-            path.push(index.map(|error| self.expr(error)).transpose()?)
+            path.push(
+                index
+                    .map(|error| self.compile_expression(error))
+                    .transpose()?,
+            )
         }
         Ok(Place {
             base,
@@ -217,23 +260,27 @@ impl<'ast> Compiler<'ast> {
             path,
         })
     }
+
+    /// Compile statements in source order with the enclosing declaration policy.
     pub(super) fn block(
         &mut self,
         statements: &[ast::Statement],
-        hoist: bool,
+        timing: DeclarationTiming,
     ) -> Result<(), CompileError> {
         for statement in statements {
-            self.statement(statement, hoist)?
+            self.statement(statement, timing)?
         }
         Ok(())
     }
+
+    /// Patch break exits and continue edges for the innermost loop or switch.
     pub(super) fn loop_end(&mut self, continue_at: usize) {
-        if let Some(l) = self.loops.pop() {
-            let end = self.pos();
-            for i in l.breaks {
+        if let Some(loop_state) = self.loops.pop() {
+            let end = self.position();
+            for i in loop_state.breaks {
                 self.patch(i, end)
             }
-            for i in l.continues {
+            for i in loop_state.continues {
                 self.patch(i, continue_at)
             }
         }

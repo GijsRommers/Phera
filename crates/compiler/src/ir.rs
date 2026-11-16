@@ -1,7 +1,10 @@
 //! Compiler-only lowering representation. Paths are interned before code leaves this crate.
+
 use phera_bytecode::Reg;
+/// An IR instruction offset, translated to a bytecode offset during emission.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Target(pub usize);
+/// Literal data before interning into the compiled unit constant table.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Constant {
     EmptyArray,
@@ -11,6 +14,7 @@ pub enum Constant {
     Float(f64),
     Bytes(Vec<u8>),
 }
+/// Supported binary operations whose operands have already been evaluated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Binary {
     Add,
@@ -36,6 +40,7 @@ pub enum Binary {
     GreaterEqual,
     Spaceship,
 }
+/// Unary operations and casts before conversion to bytecode opcode families.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Unary {
     Plus,
@@ -48,12 +53,14 @@ pub enum Unary {
     String,
     Array,
 }
+/// An evaluated variable root and ordered index steps for a read or write.
 #[derive(Debug, Clone)]
 pub struct Place {
     pub base: Reg,
     pub dynamic: bool,
     pub path: Vec<Option<Reg>>,
 }
+/// An evaluated call argument with optional reference-capable place and name.
 #[derive(Debug, Clone)]
 pub struct Argument {
     pub value: Reg,
@@ -61,6 +68,7 @@ pub struct Argument {
     pub name: Option<String>,
     pub spread: bool,
 }
+/// Compiler IR with owned names and paths before table interning.
 #[derive(Debug, Clone)]
 pub enum Instruction {
     Check {
@@ -106,8 +114,7 @@ pub enum Instruction {
     IncPlace {
         dst: Reg,
         place: Place,
-        increment: bool,
-        prefix: bool,
+        mode: phera_bytecode::IncDec,
     },
     Compound {
         dst: Reg,
@@ -141,7 +148,7 @@ pub enum Instruction {
     Read {
         dst: Reg,
         place: Place,
-        quiet: bool,
+        mode: phera_bytecode::FetchMode,
     },
     Write {
         place: Place,
@@ -220,6 +227,7 @@ pub enum Instruction {
         subject: Reg,
     },
 }
+/// A function parameter and the metadata needed by the runtime call protocol.
 #[derive(Debug, Clone)]
 pub struct Parameter {
     pub name: String,
@@ -228,6 +236,7 @@ pub struct Parameter {
     pub by_reference: bool,
     pub variadic: bool,
 }
+/// One function of IR plus its constants, locals, source lines and scope requirements.
 #[derive(Debug, Clone, Default)]
 pub struct Function {
     pub name: String,
@@ -242,133 +251,11 @@ pub struct Function {
     pub return_type: Option<String>,
     pub returns_reference: bool,
 }
+/// The top-level function and declarations awaiting final bytecode emission.
 #[derive(Debug, Clone)]
 pub struct CompiledUnit {
     pub main: Function,
     pub functions: Vec<Function>,
     pub hoisted: Vec<usize>,
     pub file: String,
-}
-impl Instruction {
-    /// Visits all register operands, including writable argument paths.
-    pub fn map_registers(&mut self, mut map: impl FnMut(Reg) -> Reg) {
-        fn place(p: &mut Place, m: &mut impl FnMut(Reg) -> Reg) {
-            p.base = m(p.base);
-            for r in p.path.iter_mut().flatten() {
-                *r = m(*r)
-            }
-        }
-        match self {
-            Instruction::DefaultCheck { param, .. } => *param = map(*param),
-            Instruction::StaticCheck { local, .. } => *local = map(*local),
-            Instruction::StaticInit { local, src, .. } => {
-                *local = map(*local);
-                *src = map(*src);
-            }
-            Instruction::Check { local, .. } => *local = map(*local),
-            Instruction::DynamicGlobal { name } => *name = map(*name),
-            Instruction::Clear { register } => *register = map(*register),
-            Instruction::StartCall { .. } => {}
-            Instruction::StartDynamicCall { callee } => *callee = map(*callee),
-            Instruction::FinishCall { dst } | Instruction::FinishCallable { dst } => {
-                *dst = map(*dst)
-            }
-            Instruction::Send { argument } => {
-                argument.value = map(argument.value);
-                if let Some(target) = &mut argument.place {
-                    place(target, &mut map);
-                }
-            }
-            Instruction::IncPlace {
-                dst, place: target, ..
-            } => {
-                *dst = map(*dst);
-                place(target, &mut map);
-            }
-            Instruction::Compound {
-                dst,
-                place: target,
-                source,
-                ..
-            } => {
-                *dst = map(*dst);
-                *source = map(*source);
-                place(target, &mut map);
-            }
-
-            Instruction::Load { dst, .. }
-            | Instruction::Constant { dst, .. }
-            | Instruction::Array(dst)
-            | Instruction::Echo(dst)
-            | Instruction::ReturnReference(dst)
-            | Instruction::Return(dst)
-            | Instruction::Exit(dst) => *dst = map(*dst),
-            Instruction::Include { dst, path: src, .. }
-            | Instruction::Move { dst, src }
-            | Instruction::Unary { dst, src, .. } => {
-                *dst = map(*dst);
-                *src = map(*src)
-            }
-            Instruction::Reference { dst, place: p } | Instruction::Read { dst, place: p, .. } => {
-                *dst = map(*dst);
-                place(p, &mut map)
-            }
-            Instruction::Rebind { place: p, src } | Instruction::Write { place: p, src } => {
-                place(p, &mut map);
-                *src = map(*src)
-            }
-            Instruction::Bind { place: p, source } => {
-                place(p, &mut map);
-                place(source, &mut map)
-            }
-            Instruction::Unset(p) => place(p, &mut map),
-            Instruction::Binary { dst, lhs, rhs, .. } => {
-                *dst = map(*dst);
-                *lhs = map(*lhs);
-                *rhs = map(*rhs)
-            }
-            Instruction::Branch { value, .. }
-            | Instruction::BranchNull { value, .. }
-            | Instruction::Define { src: value, .. }
-            | Instruction::Global { local: value, .. } => *value = map(*value),
-            Instruction::Call {
-                dst,
-                name,
-                arguments,
-                ..
-            } => {
-                *dst = map(*dst);
-                *name = map(*name);
-                for a in arguments {
-                    a.value = map(a.value);
-                    if let Some(p) = &mut a.place {
-                        place(p, &mut map)
-                    }
-                }
-            }
-            Instruction::ArrayPush {
-                array, key, value, ..
-            } => {
-                *array = map(*array);
-                *value = map(*value);
-                if let Some(k) = key {
-                    *k = map(*k)
-                }
-            }
-            Instruction::IterInit { id, src, place: p } => {
-                *id = map(*id);
-                *src = map(*src);
-                if let Some(p) = p {
-                    place(p, &mut map)
-                }
-            }
-            Instruction::IterNext { id, key, value, .. } => {
-                *id = map(*id);
-                *key = map(*key);
-                *value = map(*value)
-            }
-            Instruction::MatchError { subject } => *subject = map(*subject),
-            Instruction::Jump(_) | Instruction::Suppress(_) | Instruction::Declare(_) => {}
-        }
-    }
 }

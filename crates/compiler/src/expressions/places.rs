@@ -1,11 +1,14 @@
 //! Destructuring, writable paths, and quiet reads.
+
 use phera_ast as ast;
 use phera_bytecode::Reg;
 
 use crate::ir::{Constant, Instruction, Place};
 use crate::{CompileError, Compiler};
+
 impl Compiler<'_> {
-    pub(super) fn assign(
+    /// Destructure in item order, binding references only for reference list elements.
+    pub(crate) fn assign(
         &mut self,
         target: &ast::Expression,
         src: Reg,
@@ -15,11 +18,11 @@ impl Compiler<'_> {
             for (i, item) in items.iter().enumerate() {
                 if let Some(item) = item {
                     let key = if let Some(key) = &item.key {
-                        self.expr(key)?
+                        self.compile_expression(key)?
                     } else {
                         self.literal(Constant::Int(i as i64), line)?
                     };
-                    let dst = self.reg()?;
+                    let dst = self.allocate_register()?;
                     let place = Place {
                         base: src,
                         dynamic: false,
@@ -40,7 +43,7 @@ impl Compiler<'_> {
                             Instruction::Read {
                                 dst,
                                 place,
-                                quiet: false,
+                                mode: phera_bytecode::FetchMode::Read,
                             },
                             line,
                         );
@@ -54,24 +57,26 @@ impl Compiler<'_> {
         }
         Ok(())
     }
-    pub(super) fn quiet(&mut self, expression: &ast::Expression) -> Result<Reg, CompileError> {
+
+    /// Read variables and indexes without undefined-value warnings; evaluate other expressions normally.
+    pub(crate) fn quiet(&mut self, expression: &ast::Expression) -> Result<Reg, CompileError> {
         if matches!(
             expression.kind,
             ast::ExpressionKind::Variable(_) | ast::ExpressionKind::Index { .. }
         ) {
             let place = self.readable_place(expression)?;
-            let dst = self.reg()?;
+            let dst = self.allocate_register()?;
             self.emit(
                 Instruction::Read {
                     dst,
                     place,
-                    quiet: true,
+                    mode: phera_bytecode::FetchMode::Quiet,
                 },
                 self.lines.line(expression.span.start),
             );
             Ok(dst)
         } else {
-            self.expr(expression)
+            self.compile_expression(expression)
         }
     }
 }

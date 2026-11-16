@@ -1,7 +1,9 @@
 //! Compiler entry-point and name-resolution regression checks.
 
-use super::compile;
 use phera_bytecode::Reg;
+
+use super::compile;
+
 #[test]
 fn tiny_caller_stack() {
     std::thread::Builder::new()
@@ -14,6 +16,7 @@ fn tiny_caller_stack() {
         .join()
         .expect("join");
 }
+
 #[test]
 fn namespace_fallback_and_import() {
     let compiler = compile(
@@ -34,6 +37,7 @@ fn namespace_fallback_and_import() {
             .any(|symbol| symbol.name == "app\\f" && symbol.fallback.as_deref() == Some("f"))
     );
 }
+
 #[test]
 fn locals_precede_temporaries() {
     let compiler = compile("<?php $a=1;$b=2;echo $a+$b;", "test.php").expect("valid PHP");

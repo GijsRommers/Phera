@@ -1,4 +1,9 @@
 //! Converts compiler paths and source names into compact bytecode tables.
+//!
+//! Input IR has final register numbers and IR-position jump targets. Output
+//! bytecode owns interned tables and has targets remapped after expansion.
+//! For example, Read(local) becomes Move, while Read(indexed) becomes Fetch
+//! with a newly appended path-table entry.
 
 use phera_bytecode::{
     CompiledUnit, ConstId, Constant, Function, FunctionId, Instruction, NameId, Parameter, Reg,
@@ -9,12 +14,13 @@ use crate::ir;
 
 /// Final table builder. No compiler-only paths escape in instructions.
 #[derive(Default)]
-pub(super) struct Tables {
+pub(crate) struct Tables {
     unit: CompiledUnit,
 }
 
 impl Tables {
-    pub(super) fn name(&mut self, name: &str) -> NameId {
+    /// Intern names in first-use order to keep table indices deterministic.
+    pub(crate) fn name(&mut self, name: &str) -> NameId {
         let index = self
             .unit
             .names
@@ -27,7 +33,8 @@ impl Tables {
         NameId(index as u32)
     }
 
-    pub(super) fn constant(&mut self, constant: &ir::Constant) -> ConstId {
+    /// Recognize literal values without evaluating arbitrary PHP expressions.
+    pub(crate) fn constant(&mut self, constant: &ir::Constant) -> ConstId {
         let value = match constant {
             ir::Constant::EmptyArray => Constant::Array(vec![]),
             ir::Constant::Null => Constant::Null,
@@ -48,20 +55,21 @@ impl Tables {
         ConstId(index as u32)
     }
 
-    pub(super) fn symbol(
+    /// Intern a resolved symbol, folding function names but preserving constant spelling.
+    pub(crate) fn symbol(
         &mut self,
         name: &str,
         fallback: Option<String>,
-        function: bool,
+        kind: crate::policies::NameKind,
     ) -> SymbolId {
         let symbol = Symbol {
-            name: if function {
+            name: if kind == crate::policies::NameKind::Function {
                 name.to_ascii_lowercase()
             } else {
                 name.to_owned()
             },
             fallback: fallback.map(|name| {
-                if function {
+                if kind == crate::policies::NameKind::Function {
                     name.to_ascii_lowercase()
                 } else {
                     name
@@ -81,7 +89,8 @@ impl Tables {
         SymbolId(index as u32)
     }
 
-    pub(super) fn ty(&mut self, display: &str) -> TypeId {
+    /// Translate a written type to its mask and class-name table entries.
+    pub(crate) fn ty(&mut self, display: &str) -> TypeId {
         let mut mask = TypeMask::default();
         let mut classes = Vec::new();
         if display.starts_with('?') {
@@ -120,6 +129,7 @@ impl Tables {
         TypeId(index as u32)
     }
 
+    /// Emit a function, translate its jump offsets, then apply operand optimizations.
     fn function(&mut self, source: ir::Function) -> Function {
         let mut function = Function {
             name: source.name,
@@ -198,13 +208,13 @@ impl Tables {
                         }),
                     _ => false,
                 });
-        crate::optimize::optimize(&mut function);
+        crate::passes::optimize::optimize(&mut function);
         function
     }
 }
 
 /// Intern all file tables once compilation has completed.
-pub(super) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
+pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
     let mut tables = Tables::default();
     tables.unit.file = source.file;
     tables.unit.main = tables.function(source.main);

@@ -2,15 +2,19 @@
 //!
 //! Input and output are lowered bytecode; removed snapshots become Nops for the
 //! subsequent target remapping pass. No read crosses another PHP expression.
+//!
+//! Input bytecode retains stable offsets during this pass. Replacements leave
+//! Nops for later compaction. For example, Move(r1, r0); Return(r1) becomes
+//! Nop; Return(r0) when r0 is a local and r1 a temporary.
 
 use std::collections::HashSet;
 
 use phera_bytecode::{Function, Instruction};
 
-use crate::{integer_operands::dead_after, optimize::target};
+use crate::passes::{integer_operands::dead_after, optimize::target};
 
 /// Remove adjacent local snapshots whose temporary has no later reader.
-pub(super) fn optimize(function: &mut Function) {
+pub(crate) fn optimize(function: &mut Function) {
     let boundaries: HashSet<_> = function
         .instructions
         .iter()
@@ -53,7 +57,7 @@ pub(super) fn optimize(function: &mut Function) {
 }
 
 /// A single append step needs no runtime bytecode-path lookup.
-pub(super) fn specialize_appends(function: &mut Function) {
+pub(crate) fn specialize_appends(function: &mut Function) {
     for instruction in &mut function.instructions {
         let Instruction::AssignPath { path, src } = *instruction else {
             continue;

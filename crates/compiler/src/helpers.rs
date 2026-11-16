@@ -1,68 +1,79 @@
 //! Literal recognition and AST operator/type conversion helpers.
-use crate::ir::{Binary, Constant};
+
 use phera_ast as ast;
-pub(crate) fn constant(error: &ast::Expression) -> Option<Constant> {
-    match &error.kind {
+
+use crate::ir::{Binary, Constant};
+/// Recognize literal values without evaluating arbitrary PHP expressions.
+pub(crate) fn constant(expression: &ast::Expression) -> Option<Constant> {
+    match &expression.kind {
         ast::ExpressionKind::Array(items) if items.is_empty() => Some(Constant::EmptyArray),
         ast::ExpressionKind::Unary {
             operator: ast::UnaryOperator::Minus,
             operand,
         } => match constant(operand)? {
-            Constant::Int(v) => v
+            Constant::Int(value) => value
                 .checked_neg()
                 .map(Constant::Int)
-                .or(Some(Constant::Float(-(v as f64)))),
-            Constant::Float(v) => Some(Constant::Float(-v)),
+                .or(Some(Constant::Float(-(value as f64)))),
+            Constant::Float(value) => Some(Constant::Float(-value)),
             _ => None,
         },
-        ast::ExpressionKind::Literal(l) => Some(match l {
+        ast::ExpressionKind::Literal(literal) => Some(match literal {
             ast::Literal::Null => Constant::Null,
-            ast::Literal::Bool(v) => Constant::Bool(*v),
-            ast::Literal::Int(v) => Constant::Int(*v),
-            ast::Literal::Float(v) => Constant::Float(*v),
-            ast::Literal::String(v) => Constant::Bytes(v.clone()),
+            ast::Literal::Bool(value) => Constant::Bool(*value),
+            ast::Literal::Int(value) => Constant::Int(*value),
+            ast::Literal::Float(value) => Constant::Float(*value),
+            ast::Literal::String(value) => Constant::Bytes(value.clone()),
         }),
         _ => None,
     }
 }
-pub(crate) fn type_name(t: &ast::Type) -> String {
-    match &t.kind {
+
+/// Preserve the written type shape for final bytecode type-table emission.
+pub(crate) fn type_name(declared_type: &ast::Type) -> String {
+    match &declared_type.kind {
         ast::TypeKind::Named(index) => index.text.clone(),
-        ast::TypeKind::Nullable(t) => format!("?{}", type_name(t)),
-        ast::TypeKind::Union(ts) => ts.iter().map(type_name).collect::<Vec<_>>().join("|"),
-        ast::TypeKind::Intersection(ts) => ts.iter().map(type_name).collect::<Vec<_>>().join("&"),
+        ast::TypeKind::Nullable(declared_type) => format!("?{}", type_name(declared_type)),
+        ast::TypeKind::Union(types) => types.iter().map(type_name).collect::<Vec<_>>().join("|"),
+        ast::TypeKind::Intersection(types) => {
+            types.iter().map(type_name).collect::<Vec<_>>().join("&")
+        }
     }
 }
+
+/// Translate supported binary operators without folding or reordering operands.
 pub(crate) fn binary(instruction: ast::BinaryOperator) -> Option<Binary> {
-    use ast::BinaryOperator as A;
+    use ast::BinaryOperator;
     Some(match instruction {
-        A::Add => Binary::Add,
-        A::Subtract => Binary::Subtract,
-        A::Multiply => Binary::Multiply,
-        A::Divide => Binary::Divide,
-        A::Modulo => Binary::Modulo,
-        A::Power => Binary::Power,
-        A::Concat => Binary::Concat,
-        A::BitwiseAnd => Binary::BitwiseAnd,
-        A::BitwiseOr => Binary::BitwiseOr,
-        A::BitwiseXor => Binary::BitwiseXor,
-        A::ShiftLeft => Binary::ShiftLeft,
-        A::ShiftRight => Binary::ShiftRight,
-        A::Xor => Binary::Xor,
-        A::Equal => Binary::Equal,
-        A::NotEqual => Binary::NotEqual,
-        A::Identical => Binary::Identical,
-        A::NotIdentical => Binary::NotIdentical,
-        A::Less => Binary::Less,
-        A::LessEqual => Binary::LessEqual,
-        A::Greater => Binary::Greater,
-        A::GreaterEqual => Binary::GreaterEqual,
-        A::Spaceship => Binary::Spaceship,
+        BinaryOperator::Add => Binary::Add,
+        BinaryOperator::Subtract => Binary::Subtract,
+        BinaryOperator::Multiply => Binary::Multiply,
+        BinaryOperator::Divide => Binary::Divide,
+        BinaryOperator::Modulo => Binary::Modulo,
+        BinaryOperator::Power => Binary::Power,
+        BinaryOperator::Concat => Binary::Concat,
+        BinaryOperator::BitwiseAnd => Binary::BitwiseAnd,
+        BinaryOperator::BitwiseOr => Binary::BitwiseOr,
+        BinaryOperator::BitwiseXor => Binary::BitwiseXor,
+        BinaryOperator::ShiftLeft => Binary::ShiftLeft,
+        BinaryOperator::ShiftRight => Binary::ShiftRight,
+        BinaryOperator::Xor => Binary::Xor,
+        BinaryOperator::Equal => Binary::Equal,
+        BinaryOperator::NotEqual => Binary::NotEqual,
+        BinaryOperator::Identical => Binary::Identical,
+        BinaryOperator::NotIdentical => Binary::NotIdentical,
+        BinaryOperator::Less => Binary::Less,
+        BinaryOperator::LessEqual => Binary::LessEqual,
+        BinaryOperator::Greater => Binary::Greater,
+        BinaryOperator::GreaterEqual => Binary::GreaterEqual,
+        BinaryOperator::Spaceship => Binary::Spaceship,
         _ => return None,
     })
 }
-pub(crate) fn writable(error: &ast::Expression) -> bool {
-    let mut node = error;
+
+/// Recognize variable-rooted paths iteratively, including arbitrarily long index chains.
+pub(crate) fn writable(expression: &ast::Expression) -> bool {
+    let mut node = expression;
     while let ast::ExpressionKind::Index { target, .. } = &node.kind {
         node = target;
     }

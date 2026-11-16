@@ -4,15 +4,18 @@
 //! the normal compaction pass removes Nops and remaps branch targets. Only a
 //! neighbouring local read and literal load may disappear: `$a + ($a = 5)` and
 //! `$i + $i++` therefore retain their snapshots and evaluation order.
+//!
+//! For example, LoadInt(r2, 1); Binary(Add, r1, r0, r2) can become
+//! Nop; BinaryInt(Add, r1, r0, 1) when r2 is dead after the operation.
 
 use std::collections::HashSet;
 
 use phera_bytecode::{Function, Instruction};
 
-use crate::optimize::target;
+use crate::passes::optimize::target;
 
 /// Replace literal loads used only by the next binary instruction.
-pub(super) fn fuse_integer_operands(function: &mut Function) {
+pub(crate) fn fuse_integer_operands(function: &mut Function) {
     let boundaries: HashSet<_> = function
         .instructions
         .iter()
@@ -64,7 +67,7 @@ pub(super) fn fuse_integer_operands(function: &mut Function) {
 }
 
 /// A deliberately conservative proof: only straight-line overwrites are accepted.
-pub(super) fn dead_after(function: &Function, index: usize, register: phera_bytecode::Reg) -> bool {
+pub(crate) fn dead_after(function: &Function, index: usize, register: phera_bytecode::Reg) -> bool {
     let mut pending = vec![index + 1];
     let mut visited = HashSet::new();
     while let Some(mut cursor) = pending.pop() {
@@ -178,7 +181,7 @@ pub(super) fn dead_after(function: &Function, index: usize, register: phera_byte
 }
 
 /// Consume a comparison result immediately instead of storing a temporary bool.
-pub(super) fn fuse_integer_branches(function: &mut Function) {
+pub(crate) fn fuse_integer_branches(function: &mut Function) {
     let boundaries: HashSet<_> = function
         .instructions
         .iter()

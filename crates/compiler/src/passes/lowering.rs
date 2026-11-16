@@ -1,17 +1,19 @@
 //! Instruction translation and interning of access paths.
+
 use phera_bytecode::{
-    CastKind, FetchMode, Function, FunctionId, IncDec, IncludeKind, Instruction, IterId, Reg,
-    RuntimeError, Target, UnaryOp,
+    CastKind, Function, FunctionId, IncludeKind, Instruction, IterId, Reg, RuntimeError, Target,
+    UnaryOp,
 };
 
 use crate::ir;
-
 use crate::{
-    lower::Tables,
-    lowering_tables::{binary, path, static_id},
+    passes::lower::Tables,
+    passes::lowering_tables::{binary, path, static_id},
 };
+
 impl Tables {
-    pub(super) fn instruction(
+    /// Translate one IR instruction, appending any required preparation instructions first.
+    pub(crate) fn instruction(
         &mut self,
         function: &mut Function,
         source: ir::Instruction,
@@ -51,87 +53,19 @@ impl Tables {
                 }
             }
             Old::StartCall { name, fallback } => Instruction::InitCall {
-                function: self.symbol(&name, fallback, true),
+                function: self.symbol(&name, fallback, crate::policies::NameKind::Function),
             },
             Old::StartDynamicCall { callee } => Instruction::InitDynamicCall { callee },
             Old::FinishCall { dst } => Instruction::Call { dst },
             Old::FinishCallable { dst } => Instruction::MakeCallable { dst },
-            Old::Send { argument } => {
-                if let Some(name) = argument.name {
-                    function.instructions.push(Instruction::NameArgument {
-                        name: self.name(&name),
-                    });
-                }
-                if argument.spread {
-                    Instruction::SendSpread {
-                        src: argument.value,
-                    }
-                } else if let Some(place) = argument.place {
-                    if !place.dynamic && place.path.is_empty() {
-                        Instruction::SendLocal { local: place.base }
-                    } else {
-                        Instruction::SendPath {
-                            path: path(function, place),
-                        }
-                    }
-                } else {
-                    Instruction::SendValue {
-                        src: argument.value,
-                    }
-                }
-            }
-            Old::IncPlace {
-                dst,
-                place,
-                increment,
-                prefix,
-            } => {
-                let mode = match (increment, prefix) {
-                    (true, true) => IncDec::PreIncrement,
-                    (true, false) => IncDec::PostIncrement,
-                    (false, true) => IncDec::PreDecrement,
-                    (false, false) => IncDec::PostDecrement,
-                };
-                if !place.dynamic && place.path.is_empty() {
-                    Instruction::IncDecLocal {
-                        dst,
-                        local: place.base,
-                        mode,
-                    }
-                } else {
-                    Instruction::IncDecPath {
-                        dst,
-                        path: path(function, place),
-                        mode,
-                    }
-                }
-            }
+            Old::Send { argument } => self.send_argument(function, argument),
+            Old::IncPlace { dst, place, mode } => self.increment_place(function, dst, place, mode),
             Old::Compound {
                 dst,
                 place,
                 operator,
                 source,
-            } => {
-                let op = binary(operator);
-                if !place.dynamic && place.path.is_empty() {
-                    function.instructions.push(Instruction::AssignOp {
-                        op,
-                        local: place.base,
-                        src: source,
-                    });
-                    Instruction::Move {
-                        dst,
-                        src: place.base,
-                    }
-                } else {
-                    Instruction::AssignOpPath {
-                        op,
-                        dst,
-                        path: path(function, place),
-                        src: source,
-                    }
-                }
-            }
+            } => self.compound_assignment(function, dst, place, operator, source),
             Old::Load { dst, constant } => match constants.get(constant) {
                 Some(ir::Constant::Int(value)) if i32::try_from(*value).is_ok() => {
                     Instruction::LoadInt {
@@ -146,38 +80,8 @@ impl Tables {
                 None => Instruction::LoadNull { dst },
             },
             Old::Move { dst, src } => Instruction::Move { dst, src },
-            Old::Read { dst, place, quiet } => {
-                let mode = if quiet {
-                    FetchMode::Quiet
-                } else {
-                    FetchMode::Read
-                };
-                if !place.dynamic && place.path.is_empty() && mode == FetchMode::Read {
-                    Instruction::Move {
-                        dst,
-                        src: place.base,
-                    }
-                } else {
-                    Instruction::Fetch {
-                        dst,
-                        path: path(function, place),
-                        mode,
-                    }
-                }
-            }
-            Old::Write { place, src } => {
-                if !place.dynamic && place.path.is_empty() {
-                    Instruction::Assign {
-                        local: place.base,
-                        src,
-                    }
-                } else {
-                    Instruction::AssignPath {
-                        path: path(function, place),
-                        src,
-                    }
-                }
-            }
+            Old::Read { dst, place, mode } => self.read_place(function, dst, place, mode),
+            Old::Write { place, src } => self.write_place(function, place, src),
             Old::Reference { dst, place } => Instruction::MakeReference {
                 dst,
                 path: path(function, place),
@@ -186,19 +90,7 @@ impl Tables {
                 path: path(function, place),
                 src,
             },
-            Old::Bind { place, source } => {
-                let source = path(function, source);
-                function.instructions.push(Instruction::MakeReference {
-                    dst: scratch,
-                    path: source,
-                });
-                let target = path(function, place);
-                function.instructions.push(Instruction::BindReference {
-                    path: target,
-                    src: scratch,
-                });
-                Instruction::Clear { reg: scratch }
-            }
+            Old::Bind { place, source } => self.bind_reference(function, place, source, scratch),
             Old::Unset(place) => Instruction::UnsetPath {
                 path: path(function, place),
             },
@@ -301,7 +193,7 @@ impl Tables {
                 fallback,
             } => Instruction::FetchConstant {
                 dst,
-                constant: self.symbol(&name, fallback, false),
+                constant: self.symbol(&name, fallback, crate::policies::NameKind::Constant),
             },
             Old::Define { name, src } => Instruction::DeclareConstant {
                 name: self.name(&name),
@@ -365,34 +257,7 @@ impl Tables {
                 name,
                 fallback,
                 arguments,
-            } => {
-                function
-                    .instructions
-                    .push(Instruction::InitDynamicCall { callee: name });
-                let _ = fallback;
-                for argument in arguments {
-                    if let Some(name) = argument.name {
-                        function.instructions.push(Instruction::NameArgument {
-                            name: self.name(&name),
-                        });
-                    }
-                    let send = if argument.spread {
-                        Instruction::SendSpread {
-                            src: argument.value,
-                        }
-                    } else if let Some(place) = argument.place {
-                        Instruction::SendPath {
-                            path: path(function, place),
-                        }
-                    } else {
-                        Instruction::SendValue {
-                            src: argument.value,
-                        }
-                    };
-                    function.instructions.push(send);
-                }
-                Instruction::Call { dst }
-            }
+            } => self.dynamic_call(function, dst, name, fallback, arguments),
         };
         function.instructions.push(instruction);
     }

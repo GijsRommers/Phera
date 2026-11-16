@@ -2,26 +2,33 @@
 
 use phera_ast as ast;
 
+use crate::policies::DeclarationTiming;
 use crate::{
     CompileError, Compiler, Loop,
     ir::{Binary, Instruction, Target},
 };
 
+/// A comparison branch waiting for its case body's instruction position.
+struct CaseJump {
+    case_index: usize,
+    instruction: usize,
+}
+
 impl Compiler<'_> {
     /// Comparisons run in source order, then bodies retain PHP fallthrough.
-    pub(super) fn compile_switch(
+    pub(crate) fn compile_switch(
         &mut self,
         subject: &ast::Expression,
         cases: &[ast::SwitchCase],
         line: usize,
     ) -> Result<(), CompileError> {
-        let value = self.expr(subject)?;
+        let value = self.compile_expression(subject)?;
         let mut jumps = vec![];
         let mut default = None;
-        for (i, c) in cases.iter().enumerate() {
-            if let Some(expression) = &c.condition {
-                let rhs = self.expr(expression)?;
-                let dst = self.reg()?;
+        for (i, case) in cases.iter().enumerate() {
+            if let Some(expression) = &case.condition {
+                let rhs = self.compile_expression(expression)?;
+                let dst = self.allocate_register()?;
                 self.emit(
                     Instruction::Binary {
                         dst,
@@ -31,9 +38,9 @@ impl Compiler<'_> {
                     },
                     line,
                 );
-                jumps.push((
-                    i,
-                    self.emit(
+                jumps.push(CaseJump {
+                    case_index: i,
+                    instruction: self.emit(
                         Instruction::Branch {
                             value: dst,
                             target: Target(0),
@@ -41,7 +48,7 @@ impl Compiler<'_> {
                         },
                         line,
                     ),
-                ));
+                });
             } else {
                 default = Some(i)
             }
@@ -51,19 +58,19 @@ impl Compiler<'_> {
             breaks: vec![],
             continues: vec![],
         });
-        for (i, c) in cases.iter().enumerate() {
-            for (_, jump) in jumps.iter().filter(|(name, _)| *name == i) {
-                self.patch(*jump, self.pos())
+        for (i, case) in cases.iter().enumerate() {
+            for jump in jumps.iter().filter(|jump| jump.case_index == i) {
+                self.patch(jump.instruction, self.position())
             }
             if default == Some(i) {
-                self.patch(miss, self.pos())
+                self.patch(miss, self.position())
             }
-            self.block(&c.body, false)?
+            self.block(&case.body, DeclarationTiming::AtExecution)?
         }
         if default.is_none() {
-            self.patch(miss, self.pos())
+            self.patch(miss, self.position())
         }
-        self.loop_end(self.pos());
+        self.loop_end(self.position());
         Ok(())
     }
 }

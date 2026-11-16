@@ -2,14 +2,20 @@
 //!
 //! Heap values must still be cleared promptly for copy-on-write. Facts are reset
 //! at every control-flow boundary, so no branch-dependent type is assumed.
+//!
+//! Input is emitted bytecode with valid register and target indices. Output
+//! retains evaluation order and remaps all targets after removed instructions.
+//! For example, LoadInt followed by Binary can become BinaryInt when the
+//! literal temporary is proven dead; scalar-only Clear instructions disappear.
 
 use std::collections::HashSet;
 
 use phera_bytecode::{BinaryOp, Function, Instruction, Target};
 
-use crate::integer_operands::fuse_integer_operands;
+use crate::passes::integer_operands::fuse_integer_operands;
 
-pub(super) fn optimize(function: &mut Function) {
+/// Optimize operands in place while retaining source locations and valid branch targets.
+pub(crate) fn optimize(function: &mut Function) {
     let boundaries: HashSet<_> = function
         .instructions
         .iter()
@@ -36,27 +42,10 @@ pub(super) fn optimize(function: &mut Function) {
                 .any(|instruction| matches!(instruction,Instruction::Clear { reg } if *reg == dst)),
             _ => false,
         };
-        match instruction {
-            Instruction::LoadInt { dst, .. }
-            | Instruction::LoadBool { dst, .. }
-            | Instruction::LoadNull { dst } => scalar[dst.index()] = true,
-            Instruction::Move { dst, src } | Instruction::Assign { local: dst, src } => {
-                scalar[dst.index()] = scalar[src.index()]
-            }
-            Instruction::Binary { op, dst, lhs, rhs } => {
-                scalar[dst.index()] = op != BinaryOp::Concat
-                    && (op != BinaryOp::Add || scalar[lhs.index()] || scalar[rhs.index()])
-            }
-            Instruction::AssignOp { op, local, src } => {
-                scalar[local.index()] = op != BinaryOp::Concat
-                    && (op != BinaryOp::Add || scalar[local.index()] || scalar[src.index()])
-            }
-            Instruction::Clear { reg } => scalar[reg.index()] = false,
-            _ => scalar.fill(false),
-        }
+        update_scalar_facts(&mut scalar, instruction);
         if !remove {
             instructions.push(instruction);
-            lines.push(function.lines[index]);
+            lines.push(function.lines.get(index).copied().unwrap_or(1));
         }
     }
     offsets.push(instructions.len() as u32);
@@ -68,18 +57,20 @@ pub(super) fn optimize(function: &mut Function) {
     function.instructions = instructions;
     function.lines = lines;
     fuse_integer_operands(function);
-    crate::direct_operands::optimize(function);
-    crate::integer_operands::fuse_integer_branches(function);
-    crate::direct_operands::specialize_appends(function);
+    crate::passes::direct_operands::optimize(function);
+    crate::passes::integer_operands::fuse_integer_branches(function);
+    crate::passes::direct_operands::specialize_appends(function);
     compact_nops(function);
 }
 
-pub(super) fn target(instruction: &Instruction) -> Option<Target> {
+/// Read the target of a control-flow instruction when it has one.
+pub(crate) fn target(instruction: &Instruction) -> Option<Target> {
     let mut instruction = *instruction;
     target_mut(&mut instruction).copied()
 }
 
-pub(super) fn target_mut(instruction: &mut Instruction) -> Option<&mut Target> {
+/// Expose the target operand for offset remapping after instruction removal.
+pub(crate) fn target_mut(instruction: &mut Instruction) -> Option<&mut Target> {
     match instruction {
         Instruction::BinaryIntBranch { target, .. }
         | Instruction::Jump { target }
@@ -115,8 +106,46 @@ fn compact_nops(function: &mut Function) {
             target.0 = offsets.get(target.index()).copied().unwrap_or(target.0);
         }
         instructions.push(instruction);
-        lines.push(function.lines[index]);
+        lines.push(function.lines.get(index).copied().unwrap_or(1));
     }
     function.instructions = instructions;
     function.lines = lines;
+}
+
+/// Propagate only facts already recognized by the original scalar-clear pass.
+fn update_scalar_facts(scalar: &mut [bool], instruction: Instruction) {
+    match instruction {
+        Instruction::LoadInt { dst, .. }
+        | Instruction::LoadBool { dst, .. }
+        | Instruction::LoadNull { dst } => set_scalar(scalar, dst, true),
+        Instruction::Move { dst, src } | Instruction::Assign { local: dst, src } => {
+            set_scalar(scalar, dst, is_scalar(scalar, src))
+        }
+        Instruction::Binary { op, dst, lhs, rhs } => set_scalar(
+            scalar,
+            dst,
+            op != BinaryOp::Concat
+                && (op != BinaryOp::Add || is_scalar(scalar, lhs) || is_scalar(scalar, rhs)),
+        ),
+        Instruction::AssignOp { op, local, src } => set_scalar(
+            scalar,
+            local,
+            op != BinaryOp::Concat
+                && (op != BinaryOp::Add || is_scalar(scalar, local) || is_scalar(scalar, src)),
+        ),
+        Instruction::Clear { reg } => set_scalar(scalar, reg, false),
+        _ => scalar.fill(false),
+    }
+}
+
+/// Missing facts are unknown, so they can never justify removing a clear.
+fn is_scalar(scalar: &[bool], register: phera_bytecode::Reg) -> bool {
+    scalar.get(register.index()).copied().unwrap_or(false)
+}
+
+/// Record a scalar fact without unchecked indexing.
+fn set_scalar(scalar: &mut [bool], register: phera_bytecode::Reg, value: bool) {
+    if let Some(slot) = scalar.get_mut(register.index()) {
+        *slot = value;
+    }
 }
