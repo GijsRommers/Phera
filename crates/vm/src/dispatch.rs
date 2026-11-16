@@ -30,6 +30,18 @@ impl Vm {
     ) -> Result<DispatchResult, NativeError> {
         match instruction {
             Instruction::Nop => {}
+            Instruction::DeclareClass { class } => self.declare_class(class)?,
+            Instruction::New { class } => self.new_object(class)?,
+            Instruction::InitMethodCall { receiver, method } => {
+                self.init_method_call(receiver, method)?
+            }
+            Instruction::FetchClassName { dst, class } => {
+                let name = self.class_symbol(class)?;
+                self.set(dst, Value::from(name));
+            }
+            Instruction::FetchThis { dst } => self.fetch_this(dst)?,
+            Instruction::Clone { dst, src } => self.clone_object(dst, src)?,
+            Instruction::InstanceOf { dst, src, class } => self.instance_of(dst, src, class)?,
             Instruction::LoadNull { dst: destination } => self.set(destination, Value::Null),
             Instruction::LoadBool {
                 dst: destination,

@@ -20,5 +20,3 @@ print "{$x}";
 ?>
 --EXPECTF--
 Parse error: %s in %sheredoc_005.php on line 6
---XFAIL--
-Requires classes and object construction in included nowdoc.inc (outside this milestone).

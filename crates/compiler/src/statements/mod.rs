@@ -42,6 +42,7 @@ impl Compiler<'_> {
                 self.compile_loop_jump(statement, name, line)?
             }
             StatementKind::Return(expression) => self.compile_return(expression, line)?,
+            StatementKind::Class(declaration) => self.compile_class(declaration, timing, line)?,
             StatementKind::Function(declaration) => {
                 self.compile_function(declaration, timing, line)?
             }
@@ -84,6 +85,7 @@ impl Compiler<'_> {
 }
 
 pub(crate) mod bindings;
+pub(crate) mod classes;
 pub(crate) mod control;
 pub(crate) mod declarations;
 pub(crate) mod functions;

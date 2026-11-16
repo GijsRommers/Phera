@@ -22,6 +22,23 @@ impl Instruction {
             }
         }
         match self {
+            Instruction::DeclareClass(_) | Instruction::New { .. } => {}
+            Instruction::ClassName { destination, .. } | Instruction::This { destination } => {
+                *destination = map(*destination)
+            }
+            Instruction::MethodCall { receiver, .. } => *receiver = map(*receiver),
+            Instruction::Clone {
+                destination,
+                source,
+            }
+            | Instruction::InstanceOf {
+                destination,
+                source,
+                ..
+            } => {
+                *destination = map(*destination);
+                *source = map(*source);
+            }
             Instruction::DefaultCheck {
                 parameter: param, ..
             } => *param = map(*param),

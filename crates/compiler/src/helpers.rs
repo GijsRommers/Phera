@@ -77,5 +77,9 @@ pub(crate) fn writable(expression: &ast::Expression) -> bool {
     while let ast::ExpressionKind::Index { target, .. } = &node.kind {
         node = target;
     }
-    matches!(node.kind, ast::ExpressionKind::Variable(_))
+    matches!(&node.kind, ast::ExpressionKind::Variable(ast::Variable::Named(name)) if name != "this")
+        || matches!(
+            &node.kind,
+            ast::ExpressionKind::Variable(ast::Variable::Dynamic(_))
+        )
 }

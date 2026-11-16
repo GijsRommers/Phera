@@ -39,6 +39,8 @@ pub(super) fn compile_on_stack(
         main: compiler.finish(),
         functions: compiler.functions,
         hoisted: compiler.hoisted,
+        classes: compiler.classes,
+        hoisted_classes: compiler.hoisted_classes,
         file: file.into(),
     };
     validate_global_writes(&unit)?;

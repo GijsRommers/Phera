@@ -36,6 +36,15 @@ impl Compiler<'_> {
             let callee = self.compile_expression(callee)?;
             self.emit(Instruction::StartDynamicCall { callee }, line);
         }
+        self.compile_arguments(arguments, line)
+    }
+
+    /// All call forms share named arguments, spreads and reference-capable sends.
+    pub(crate) fn compile_arguments(
+        &mut self,
+        arguments: &ast::Arguments,
+        line: usize,
+    ) -> Result<Reg, CompileError> {
         let ast::Arguments::List(arguments) = arguments else {
             let dst = self.allocate_register()?;
             self.emit(Instruction::FinishCallable { destination: dst }, line);

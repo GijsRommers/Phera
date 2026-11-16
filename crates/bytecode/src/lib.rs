@@ -22,15 +22,20 @@
 //!
 //! See `docs/architecture.md`, section 4.
 
+mod class;
 mod display;
 mod function;
 mod ids;
 mod instruction;
 mod unit;
 
+pub use class::{
+    ClassConstant, ClassDeclaration, ClassKind, Initializer, MethodDeclaration,
+    PropertyDeclaration, Visibility,
+};
 pub use function::{Function, Handler, Parameter, Path, PathBase, Step};
 pub use ids::{
-    ConstId, FunctionId, IterId, NameId, PathId, Reg, StaticId, SymbolId, Target, TypeId,
+    ClassId, ConstId, FunctionId, IterId, NameId, PathId, Reg, StaticId, SymbolId, Target, TypeId,
 };
 pub use instruction::{
     BinaryOp, CastKind, FetchMode, IncDec, IncludeKind, Instruction, RuntimeError, UnaryOp,

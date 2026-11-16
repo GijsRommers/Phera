@@ -48,6 +48,9 @@ impl Compiler<'_> {
         builder.block(&declaration.body, DeclarationTiming::AtExecution)?;
         let register = builder.literal(Constant::Null, line)?;
         builder.emit(Instruction::Return(register), line);
+        if !builder.classes.is_empty() {
+            return Err(self.error("Nested class declarations not supported yet", line));
+        }
         let id = self.functions.len();
         let mut function = builder.finish();
         for instruction in function.instructions.iter_mut().chain(

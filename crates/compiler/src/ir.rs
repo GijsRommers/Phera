@@ -8,14 +8,32 @@
 
 mod data;
 pub use data::{
-    Argument, ArgumentSource, Binary, CompiledUnit, Constant, Function, Parameter, Place,
-    PlaceScope, Target, Unary,
+    Argument, ArgumentSource, Binary, ClassDeclaration, ClassMethod, CompiledUnit, Constant,
+    Function, Parameter, Place, PlaceScope, Target, Unary,
 };
 use phera_bytecode::Reg;
 
 /// Compiler IR with owned names and paths before table interning.
 #[derive(Debug, Clone)]
 pub enum Instruction {
+    /// Publish a request-local class declaration.
+    DeclareClass(usize),
+    /// Prepare a constructor using the same sends as a function call.
+    New { class: String },
+    /// Resolve a literal method name on an evaluated receiver.
+    MethodCall { receiver: Reg, method: String },
+    /// Resolve the class-name pseudo constant.
+    ClassName { destination: Reg, class: String },
+    /// Fetch the receiver from the current method frame.
+    This { destination: Reg },
+    /// Shallow-copy an object's property table.
+    Clone { destination: Reg, source: Reg },
+    /// Test membership in a resolved class or interface.
+    InstanceOf {
+        destination: Reg,
+        source: Reg,
+        class: String,
+    },
     /// Validate a local declaration; emits CheckType.
     Check {
         local: Reg,

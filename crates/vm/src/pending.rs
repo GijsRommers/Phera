@@ -108,7 +108,7 @@ impl Vm {
     }
 
     /// Nested argument calls keep independent pending calls in the current heap frame.
-    fn prepare_call(&mut self, callee: Rc<Callee>) -> Result<(), NativeError> {
+    pub(crate) fn prepare_call(&mut self, callee: Rc<Callee>) -> Result<(), NativeError> {
         let arguments = self.call_stack.take_arguments();
         let frame = self
             .call_stack
@@ -230,6 +230,12 @@ impl Vm {
             }
         }
         match &call.callee.target {
+            CallTarget::Method { method, context } => {
+                self.invoke_method(method, context.clone(), destination, arguments)
+                    .await?;
+                self.name_variadic_arguments(named_start, named_keys)?;
+            }
+            CallTarget::Constructed(object) => self.set(destination, Value::Object(object.clone())),
             CallTarget::User(function) => {
                 let result = self.push_prepared(
                     function.unit.clone(),

@@ -67,3 +67,8 @@ index!(
     /// ones; loops that follow each other reuse them.
     IterId(u16), "iter#"
 );
+
+index!(
+    /// An entry in [`crate::CompiledUnit::classes`].
+    ClassId(u32), "class#"
+);

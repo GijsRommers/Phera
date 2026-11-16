@@ -22,6 +22,37 @@ impl Tables {
     ) {
         use ir::Instruction as Old;
         let instruction = match source {
+            Old::DeclareClass(index) => Instruction::DeclareClass {
+                class: phera_bytecode::ClassId(index as u32),
+            },
+            Old::New { class } => Instruction::New {
+                class: self.symbol(&class, None, crate::policies::NameKind::Class),
+            },
+            Old::MethodCall { receiver, method } => Instruction::InitMethodCall {
+                receiver,
+                method: self.name(&method),
+            },
+            Old::ClassName { destination, class } => Instruction::FetchClassName {
+                dst: destination,
+                class: self.symbol(&class, None, crate::policies::NameKind::Class),
+            },
+            Old::This { destination } => Instruction::FetchThis { dst: destination },
+            Old::Clone {
+                destination,
+                source,
+            } => Instruction::Clone {
+                dst: destination,
+                src: source,
+            },
+            Old::InstanceOf {
+                destination,
+                source,
+                class,
+            } => Instruction::InstanceOf {
+                dst: destination,
+                src: source,
+                class: self.symbol(&class, None, crate::policies::NameKind::Class),
+            },
             Old::DynamicGlobal { name } => Instruction::BindDynamicGlobal { name },
             Old::Check {
                 local,

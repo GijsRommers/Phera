@@ -18,6 +18,39 @@ use crate::{ConstId, FunctionId, IterId, NameId, PathId, Reg, StaticId, SymbolId
 pub enum Instruction {
     /// Does nothing. Left behind when the compiler removes an instruction.
     Nop,
+    /// Link a declaration once execution reaches its source position.
+    DeclareClass {
+        class: crate::ClassId,
+    },
+    /// Allocate an object and prepare its constructor before ordinary argument sends.
+    New {
+        class: SymbolId,
+    },
+    /// Resolve an instance method before evaluating its arguments.
+    InitMethodCall {
+        receiver: Reg,
+        method: NameId,
+    },
+    /// Resolve Foo::class and self/parent/static class-name expressions without autoloading.
+    FetchClassName {
+        dst: Reg,
+        class: SymbolId,
+    },
+    /// Read the current method receiver, failing outside instance context.
+    FetchThis {
+        dst: Reg,
+    },
+    /// Copy the property table while preserving handles stored within it.
+    Clone {
+        dst: Reg,
+        src: Reg,
+    },
+    /// Test a resolved class or interface name without invoking autoloaders.
+    InstanceOf {
+        dst: Reg,
+        src: Reg,
+        class: SymbolId,
+    },
 
     // ----- Loading values -------------------------------------------------
     /// `dst = constants[constant]`.

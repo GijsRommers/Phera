@@ -114,5 +114,29 @@ pub struct CompiledUnit {
     pub main: Function,
     pub functions: Vec<Function>,
     pub hoisted: Vec<usize>,
+    pub classes: Vec<ClassDeclaration>,
+    pub hoisted_classes: Vec<usize>,
     pub file: String,
+}
+
+/// Owned class names are interned only after method functions have their final indices.
+#[derive(Debug, Clone)]
+pub struct ClassDeclaration {
+    pub name: String,
+    pub parent: Option<String>,
+    pub interfaces: Vec<String>,
+    pub kind: phera_bytecode::ClassKind,
+    pub is_abstract: bool,
+    pub is_final: bool,
+    pub methods: Vec<ClassMethod>,
+}
+/// Method metadata travels beside ordinary function IR rather than entering global scope.
+#[derive(Debug, Clone)]
+pub struct ClassMethod {
+    pub name: String,
+    pub function: usize,
+    pub visibility: phera_bytecode::Visibility,
+    pub is_static: bool,
+    pub is_abstract: bool,
+    pub is_final: bool,
 }

@@ -23,6 +23,7 @@ mod call_instructions;
 mod call_stack;
 mod call_state;
 mod calls;
+mod classes;
 mod constant_table;
 mod constants;
 mod context;
@@ -95,6 +96,8 @@ type SymbolCache = Rc<RefCell<Vec<Option<Rc<call_state::Callee>>>>>;
 
 /// One request interpreter; PHP calls use heap frames rather than Rust recursion.
 pub struct Vm {
+    classes: classes::ClassTable,
+    prelinked_classes: std::collections::HashSet<(usize, usize)>,
     function_table: function_table::FunctionTable,
     unit_caches: unit_caches::UnitCaches,
     globals: globals::Globals,
@@ -126,6 +129,8 @@ impl Vm {
             .map(|(name, value)| (name.to_owned(), value.to_value()))
             .collect();
         Self {
+            classes: classes::ClassTable::native(&registry),
+            prelinked_classes: std::collections::HashSet::new(),
             function_table: function_table::FunctionTable::new(),
             unit_caches: unit_caches::UnitCaches::new(),
             globals: globals::Globals::new(),
@@ -197,6 +202,7 @@ impl Vm {
         }
         self.include_state.record(unit.file.clone());
         let cache = self.code_cache(&unit);
+        let class_unit = unit.clone();
         let mut frame = Frame::new(cache, &mut self.registers, unit, None, None);
         for (name, value) in self.globals.iter() {
             if let Some(i) = frame
@@ -209,6 +215,10 @@ impl Vm {
             }
         }
         self.call_stack.push(frame);
+        if let Err(error) = self.hoist_classes(&class_unit) {
+            self.unwind(error);
+            return self.status;
+        }
         if let Err(error) = self.interpret(0).await {
             self.unwind(error)
         }

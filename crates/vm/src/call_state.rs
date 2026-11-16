@@ -21,6 +21,13 @@ pub(crate) struct ParameterSpec {
 
 /// User bytecode, a native entry, or an intrinsic resolved at the call site.
 pub(crate) enum CallTarget {
+    /// Bound methods retain lexical and called scopes throughout argument evaluation.
+    Method {
+        method: Rc<crate::classes::Method>,
+        context: crate::classes::MethodContext,
+    },
+    /// A class without a constructor still consumes sends and returns the allocated handle.
+    Constructed(Rc<phera_value::Object>),
     User(crate::function_table::FunctionRef),
     Native(FunctionEntry),
     Intrinsic(crate::intrinsics::Intrinsic),

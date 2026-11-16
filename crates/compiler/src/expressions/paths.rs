@@ -68,6 +68,9 @@ impl Compiler<'_> {
     fn path_root(&mut self, node: &ast::Expression, line: usize) -> Result<Place, CompileError> {
         let (base, scope) = match &node.kind {
             ast::ExpressionKind::Variable(ast::Variable::Named(index)) => {
+                if index == "this" {
+                    return Err(self.error("Cannot re-assign $this", line));
+                }
                 if index == "GLOBALS" {
                     (self.allocate_register()?, PlaceScope::Globals)
                 } else if matches!(

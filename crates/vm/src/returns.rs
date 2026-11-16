@@ -105,6 +105,15 @@ impl Vm {
                 checked
             };
         }
+        if let Some(context) = self.current().and_then(|frame| frame.method.as_ref())
+            && context.invocation == crate::classes::Invocation::Constructor
+        {
+            value = context
+                .receiver
+                .clone()
+                .map(Value::Object)
+                .unwrap_or_default();
+        }
         self.finish_include_scope()?;
         let frame = self
             .call_stack

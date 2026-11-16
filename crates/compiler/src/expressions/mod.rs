@@ -18,6 +18,16 @@ impl Compiler<'_> {
             return self.literal(condition, line);
         }
         match &expression.kind {
+            ExpressionKind::ClassConstant { .. }
+            | ExpressionKind::New { .. }
+            | ExpressionKind::MethodCall { .. }
+            | ExpressionKind::Clone { .. }
+            | ExpressionKind::InstanceOf { .. } => self.compile_object_expression(expression, line),
+            ExpressionKind::Variable(ast::Variable::Named(name)) if name == "this" => {
+                let destination = self.allocate_register()?;
+                self.emit(crate::ir::Instruction::This { destination }, line);
+                Ok(destination)
+            }
             ExpressionKind::Variable(_) | ExpressionKind::Index { .. } => {
                 self.compile_read(expression, line)
             }
@@ -123,6 +133,7 @@ pub(crate) mod assignments;
 pub(crate) mod calls;
 pub(crate) mod conditionals;
 pub(crate) mod matching;
+pub(crate) mod objects;
 pub(crate) mod operators;
 pub(crate) mod paths;
 pub(crate) mod places;

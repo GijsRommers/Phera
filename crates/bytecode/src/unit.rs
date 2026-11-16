@@ -11,6 +11,10 @@ pub struct CompiledUnit {
     pub main: Function,
     /// Every function the file declares, in source order.
     pub functions: Vec<Function>,
+    /// Source class declarations; runtime linking is request-local.
+    pub classes: Vec<crate::ClassDeclaration>,
+    /// Unconditional declarations eligible for dependency-aware prelinking.
+    pub hoisted_classes: Vec<crate::ClassId>,
     /// The functions declared unconditionally at the top level. PHP makes
     /// these callable before the file starts running.
     pub hoisted: Vec<FunctionId>,

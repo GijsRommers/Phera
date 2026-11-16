@@ -230,5 +230,44 @@ pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
         .into_iter()
         .map(|index| FunctionId(index as u32))
         .collect();
+    tables.unit.classes = source
+        .classes
+        .into_iter()
+        .map(|declaration| phera_bytecode::ClassDeclaration {
+            name: declaration.name,
+            parent: declaration
+                .parent
+                .map(|name| tables.symbol(&name, None, crate::policies::NameKind::Class)),
+            interfaces: declaration
+                .interfaces
+                .into_iter()
+                .map(|name| tables.symbol(&name, None, crate::policies::NameKind::Class))
+                .collect(),
+            kind: declaration.kind,
+            is_abstract: declaration.is_abstract,
+            is_final: declaration.is_final,
+            is_readonly: false,
+            allows_dynamic_properties: false,
+            constants: Vec::new(),
+            properties: Vec::new(),
+            methods: declaration
+                .methods
+                .into_iter()
+                .map(|method| phera_bytecode::MethodDeclaration {
+                    name: tables.name(&method.name),
+                    function: FunctionId(method.function as u32),
+                    visibility: method.visibility,
+                    is_static: method.is_static,
+                    is_abstract: method.is_abstract,
+                    is_final: method.is_final,
+                })
+                .collect(),
+        })
+        .collect();
+    tables.unit.hoisted_classes = source
+        .hoisted_classes
+        .into_iter()
+        .map(|index| phera_bytecode::ClassId(index as u32))
+        .collect();
     tables.unit
 }

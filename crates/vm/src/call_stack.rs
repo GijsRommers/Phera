@@ -63,7 +63,8 @@ impl CallStack {
     }
 
     /// Recycle allocations without retaining a second active PHP frame.
-    pub(crate) fn recycle(&mut self, frame: Frame) {
+    pub(crate) fn recycle(&mut self, mut frame: Frame) {
+        frame.method = None;
         self.recycled_frames.push(frame);
     }
 

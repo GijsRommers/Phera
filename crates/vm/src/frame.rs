@@ -21,6 +21,8 @@ pub(crate) struct IteratorState {
 
 /// A PHP activation lives on the heap; calls never recurse through the Rust stack.
 pub(crate) struct Frame {
+    /// Present only for methods; ordinary functions never inherit $this.
+    pub(crate) method: Option<Box<crate::classes::MethodContext>>,
     /// Resolved callees are shared by all frames executing this unit.
     pub(crate) cache: crate::SymbolCache,
     /// Argument expressions may nest calls, so unfinished calls form a stack.
@@ -63,6 +65,7 @@ impl Frame {
         let base = registers.len();
         registers.extend_to(base + count as usize);
         Self {
+            method: None,
             cache,
             calls: vec![],
             unit,

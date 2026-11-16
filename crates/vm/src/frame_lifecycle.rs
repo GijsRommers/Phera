@@ -24,6 +24,7 @@ impl Vm {
             self.code_cache(&unit)
         };
         if let Some(mut frame) = self.call_stack.take_recycled() {
+            frame.method = None;
             frame.unit = unit;
             frame.cache = cache;
             frame.function_id = function_id;
