@@ -149,6 +149,7 @@ dependencies = [
  "phera-phpt",
  "phera-runtime",
  "phera-server",
+ "tokio",
 ]
 
 [[package]]
@@ -170,6 +171,13 @@ dependencies = [
 
 [[package]]
 name = "phera-ext-ctype"
+version = "0.1.0"
+dependencies = [
+ "phera-extension-api",
+]
+
+[[package]]
+name = "phera-ext-http"
 version = "0.1.0"
 dependencies = [
  "phera-extension-api",
@@ -235,9 +243,11 @@ dependencies = [
  "phera-compiler",
  "phera-ext-core",
  "phera-ext-ctype",
+ "phera-ext-http",
  "phera-ext-json",
  "phera-ext-standard",
  "phera-extension-api",
+ "phera-value",
  "phera-vm",
  "tokio",
 ]
