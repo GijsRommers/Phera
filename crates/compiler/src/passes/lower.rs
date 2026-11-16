@@ -246,10 +246,33 @@ pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
             kind: declaration.kind,
             is_abstract: declaration.is_abstract,
             is_final: declaration.is_final,
-            is_readonly: false,
-            allows_dynamic_properties: false,
-            constants: Vec::new(),
-            properties: Vec::new(),
+            is_readonly: declaration.is_readonly,
+            allows_dynamic_properties: declaration.allows_dynamic_properties,
+            constants: declaration
+                .constants
+                .into_iter()
+                .map(|constant| phera_bytecode::ClassConstant {
+                    name: tables.name(&constant.name),
+                    visibility: constant.visibility,
+                    is_final: constant.is_final,
+                    initializer: FunctionId(constant.initializer as u32),
+                    ty: constant.ty.map(|name| tables.ty(&name)),
+                })
+                .collect(),
+            properties: declaration
+                .properties
+                .into_iter()
+                .map(|property| phera_bytecode::PropertyDeclaration {
+                    name: tables.name(&property.name),
+                    visibility: property.visibility,
+                    is_static: property.is_static,
+                    is_readonly: property.is_readonly,
+                    ty: property.ty.map(|name| tables.ty(&name)),
+                    default: property.default.map(|index| {
+                        phera_bytecode::Initializer::Function(FunctionId(index as u32))
+                    }),
+                })
+                .collect(),
             methods: declaration
                 .methods
                 .into_iter()

@@ -21,5 +21,3 @@ print "{$x}";
 --EXPECT--
 This is a heredoc test.
 This is another heredoc test.
---XFAIL--
-Requires classes and object construction in included nowdoc.inc (outside this milestone).

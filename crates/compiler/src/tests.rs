@@ -55,3 +55,14 @@ fn locals_precede_temporaries() {
         Some(phera_bytecode::Instruction::Assign { local: Reg(0), .. })
     ));
 }
+
+/// The public listing must expose property steps and static roots in one path vocabulary.
+#[test]
+fn class_paths_have_a_golden_listing() {
+    let source = "<?php class Counter {public $value=0;public static $total=0;function tick(){$this->value=1;self::$total++;}}\n";
+    let unit = compile(source, "class-paths.php").unwrap();
+    assert_eq!(
+        unit.to_string(),
+        include_str!("../../../tests/fixtures/classes/m3b-path-listing.txt")
+    );
+}

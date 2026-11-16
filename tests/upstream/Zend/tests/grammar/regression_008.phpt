@@ -17,5 +17,3 @@ echo "\nDone\n";
 fun (fun) fun
 
 Done
---XFAIL--
-Requires classes, object construction (outside this milestone).

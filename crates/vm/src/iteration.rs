@@ -15,7 +15,15 @@ impl Vm {
         place: Option<AccessPath>,
     ) -> Result<(), NativeError> {
         let element = self.get(source);
-        let snapshot = if let Value::Array(array) = element {
+        let object_snapshot = if let Value::Object(object) = &element {
+            Some(std::rc::Rc::new(self.visible_properties(object)))
+        } else {
+            None
+        };
+        let object_iteration = object_snapshot.is_some();
+        let snapshot = if object_snapshot.is_some() {
+            object_snapshot
+        } else if let Value::Array(array) = element {
             Some(array)
         } else {
             self.warn(format!(
@@ -32,8 +40,12 @@ impl Vm {
             frame.iterators.insert(
                 iterator.0,
                 frame::IteratorState {
-                    snapshot: if place.is_none() { snapshot } else { None },
-                    source: place,
+                    snapshot: if object_iteration || place.is_none() {
+                        snapshot
+                    } else {
+                        None
+                    },
+                    source: if object_iteration { None } else { place },
                     position: None,
                     started: false,
                 },

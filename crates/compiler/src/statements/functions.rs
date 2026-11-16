@@ -44,6 +44,31 @@ impl Compiler<'_> {
             });
         }
         builder.compile_parameter_defaults(&declaration.parameters, line)?;
+        for parameter in &declaration.parameters {
+            if parameter.modifiers.visibility.is_some() {
+                let receiver = builder.allocate_register()?;
+                builder.emit(
+                    Instruction::This {
+                        destination: receiver,
+                    },
+                    line,
+                );
+                let name =
+                    builder.literal(Constant::Bytes(parameter.name.as_bytes().to_vec()), line)?;
+                let source = builder.local(&parameter.name)?;
+                builder.emit(
+                    Instruction::Write {
+                        place: Place {
+                            base: receiver,
+                            scope: crate::ir::PlaceScope::Local,
+                            path: vec![crate::ir::PathStep::DynamicProperty(name)],
+                        },
+                        source,
+                    },
+                    line,
+                );
+            }
+        }
         builder.function.return_type = declaration.return_type.as_ref().map(type_name);
         builder.block(&declaration.body, DeclarationTiming::AtExecution)?;
         let register = builder.literal(Constant::Null, line)?;

@@ -61,7 +61,14 @@ impl Vm {
         }
         let object = self.classes.allocate(class.clone());
         for property in &class.defaults {
-            object.set(property.key.clone(), property.value.clone());
+            if property.initialized {
+                let value = if let Some(initializer) = &property.initializer {
+                    self.evaluate_initializer(initializer, &property.declaring)?
+                } else {
+                    property.value.clone()
+                };
+                object.set(property.key.clone(), value);
+            }
         }
         self.prepare_method(
             class,

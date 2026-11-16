@@ -31,7 +31,7 @@ impl Tables {
                 Instruction::SendLocal { local: place.base }
             }
             ir::ArgumentSource::Place(place) => Instruction::SendPath {
-                path: path(function, place),
+                path: path(self, function, place),
             },
         }
     }
@@ -53,7 +53,7 @@ impl Tables {
         } else {
             Instruction::IncDecPath {
                 dst,
-                path: path(function, place),
+                path: path(self, function, place),
                 mode,
             }
         }
@@ -83,7 +83,7 @@ impl Tables {
             Instruction::AssignOpPath {
                 op,
                 dst,
-                path: path(function, place),
+                path: path(self, function, place),
                 src: source,
             }
         }
@@ -106,7 +106,7 @@ impl Tables {
         } else {
             Instruction::Fetch {
                 dst,
-                path: path(function, place),
+                path: path(self, function, place),
                 mode,
             }
         }
@@ -126,7 +126,7 @@ impl Tables {
             }
         } else {
             Instruction::AssignPath {
-                path: path(function, place),
+                path: path(self, function, place),
                 src,
             }
         }
@@ -140,12 +140,12 @@ impl Tables {
         source: ir::Place,
         scratch: Reg,
     ) -> Instruction {
-        let source = path(function, source);
+        let source = path(self, function, source);
         function.instructions.push(Instruction::MakeReference {
             dst: scratch,
             path: source,
         });
-        let target = path(function, place);
+        let target = path(self, function, place);
         function.instructions.push(Instruction::BindReference {
             path: target,
             src: scratch,

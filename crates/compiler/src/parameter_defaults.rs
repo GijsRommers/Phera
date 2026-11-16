@@ -59,11 +59,12 @@ impl Compiler<'_> {
 }
 
 /// Defaults permit constant arithmetic and arrays, but never variables or function calls.
-fn constant_expression(expression: &Expression) -> bool {
+pub(crate) fn constant_expression(expression: &Expression) -> bool {
     match &expression.kind {
         ExpressionKind::Literal(_) | ExpressionKind::Name(_) | ExpressionKind::MagicConstant(_) => {
             true
         }
+        ExpressionKind::ClassConstant { .. } => true,
         ExpressionKind::Array(items) => items.iter().all(|item| {
             !item.by_reference
                 && item.key.as_ref().is_none_or(constant_expression)

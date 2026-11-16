@@ -26,7 +26,7 @@ impl Compiler<'_> {
                     let place = Place {
                         base: src,
                         scope: crate::ir::PlaceScope::Local,
-                        path: vec![Some(key)],
+                        path: vec![crate::ir::PathStep::Index(key)],
                     };
                     if item.by_reference || contains_reference(&item.value) {
                         self.emit(
@@ -73,7 +73,10 @@ impl Compiler<'_> {
     pub(crate) fn quiet(&mut self, expression: &ast::Expression) -> Result<Reg, CompileError> {
         if matches!(
             expression.kind,
-            ast::ExpressionKind::Variable(_) | ast::ExpressionKind::Index { .. }
+            ast::ExpressionKind::Variable(_)
+                | ast::ExpressionKind::Index { .. }
+                | ast::ExpressionKind::Property { .. }
+                | ast::ExpressionKind::StaticProperty { .. }
         ) {
             let place = self.readable_place(expression)?;
             let dst = self.allocate_register()?;

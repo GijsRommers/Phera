@@ -15,5 +15,3 @@ print "{$x}";
 
 ?>
 --EXPECT--
---XFAIL--
-Requires classes and object construction in included nowdoc.inc (outside this milestone).

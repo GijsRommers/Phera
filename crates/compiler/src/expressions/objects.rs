@@ -18,10 +18,28 @@ impl Compiler<'_> {
             ast::ExpressionKind::ClassConstant {
                 class,
                 name: ast::MemberName::Identifier(name),
-            } if name.name.eq_ignore_ascii_case("class") => {
+            } if name.name.eq_ignore_ascii_case("class")
+                && matches!(class.kind, ast::ExpressionKind::Name(_)) =>
+            {
                 let class = self.object_class_name(class, line)?;
                 let destination = self.allocate_register()?;
                 self.emit(Instruction::ClassName { destination, class }, line);
+                Ok(destination)
+            }
+            ast::ExpressionKind::ClassConstant {
+                class,
+                name: ast::MemberName::Identifier(name),
+            } => {
+                let class = self.compile_class_target(class, line)?;
+                let destination = self.allocate_register()?;
+                self.emit(
+                    Instruction::ClassConstant {
+                        destination,
+                        class,
+                        name: name.name.clone(),
+                    },
+                    line,
+                );
                 Ok(destination)
             }
             ast::ExpressionKind::New {
@@ -78,8 +96,24 @@ impl Compiler<'_> {
         }
     }
 
+    /// Class targets may be literal identifiers, objects, or evaluated class-name strings.
+    pub(crate) fn compile_class_target(
+        &mut self,
+        expression: &ast::Expression,
+        line: usize,
+    ) -> Result<Reg, CompileError> {
+        if matches!(expression.kind, ast::ExpressionKind::Name(_)) {
+            let class = self.object_class_name(expression, line)?;
+            let destination = self.allocate_register()?;
+            self.emit(Instruction::ClassName { destination, class }, line);
+            Ok(destination)
+        } else {
+            self.compile_expression(expression)
+        }
+    }
+
     /// Class names never use the function/constant global namespace fallback.
-    fn object_class_name(
+    pub(crate) fn object_class_name(
         &self,
         expression: &ast::Expression,
         line: usize,

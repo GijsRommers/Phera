@@ -97,7 +97,15 @@ impl Vm {
                 "#{number} {}({}): {}({})\n",
                 parent.unit.file,
                 parent.line(),
-                child.function().name,
+                if child
+                    .method
+                    .as_ref()
+                    .is_some_and(|context| context.receiver.is_some())
+                {
+                    child.function().name.replacen("::", "->", 1)
+                } else {
+                    child.function().name.clone()
+                },
                 frame_arguments(self, child)
             ));
             number += 1;

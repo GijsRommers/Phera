@@ -17,6 +17,53 @@ impl Vm {
         let argument = arguments.first().cloned().unwrap_or_default();
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         match intrinsic {
+            Intrinsic::GetObjectVars => {
+                let Value::Object(object) = argument else {
+                    return Err(NativeError::type_error(
+                        "get_object_vars(): Argument #1 ($object) must be of type object",
+                    ));
+                };
+                Ok(Value::Array(Rc::new(
+                    diagnostics.vm.visible_properties(&object),
+                )))
+            }
+            Intrinsic::GetClassVars => {
+                let name = to_php_string(&argument, &mut diagnostics.buffer)?.to_string_lossy();
+                diagnostics.vm.class_variables(&name)
+            }
+            Intrinsic::PropertyExists => {
+                let name = to_php_string(
+                    arguments.get(1).unwrap_or(&Value::Null),
+                    &mut diagnostics.buffer,
+                )?
+                .to_string_lossy();
+                let (class_name, dynamic) = match &argument {
+                    Value::Object(object) => (
+                        object.class.name().to_owned(),
+                        object.has(&phera_value::ArrayKey::str(name.as_bytes())),
+                    ),
+                    Value::String(class) => (class.to_string_lossy(), false),
+                    _ => {
+                        return Err(NativeError::type_error(
+                            "property_exists(): Argument #1 ($object_or_class) must be of type object|string",
+                        ));
+                    }
+                };
+                Ok(Value::Bool(
+                    dynamic
+                        || diagnostics
+                            .vm
+                            .classes
+                            .get(&class_name)
+                            .is_some_and(|class| {
+                                class
+                                    .defaults
+                                    .iter()
+                                    .chain(&class.static_properties)
+                                    .any(|property| property.name == name)
+                            }),
+                ))
+            }
             Intrinsic::IsCallable => {
                 let name = to_php_string(&argument, &mut diagnostics.buffer)?.to_string_lossy();
                 Ok(Value::Bool(diagnostics.vm.exists(&name)))
@@ -39,17 +86,25 @@ impl Vm {
                     .vm
                     .define_argument(argument, arguments, &mut diagnostics.buffer)
             }
-            Intrinsic::Defined => Ok(Value::Bool(diagnostics.vm.constants.contains_key(
-                &to_php_string(&argument, &mut diagnostics.buffer)?.to_string_lossy(),
-            ))),
-            Intrinsic::Constant => {
+            Intrinsic::Defined | Intrinsic::Constant => {
                 let name = to_php_string(&argument, &mut diagnostics.buffer)?.to_string_lossy();
-                diagnostics
-                    .vm
-                    .constants
-                    .get(&name)
-                    .cloned()
-                    .ok_or_else(|| NativeError::error(format!("Undefined constant \"{name}\"")))
+                if let Some((class, constant)) = name.split_once("::") {
+                    let result = diagnostics.vm.class_constant(class, constant);
+                    if matches!(intrinsic, Intrinsic::Defined) {
+                        Ok(Value::Bool(result.is_ok()))
+                    } else {
+                        result
+                    }
+                } else if matches!(intrinsic, Intrinsic::Defined) {
+                    Ok(Value::Bool(diagnostics.vm.constants.contains_key(&name)))
+                } else {
+                    diagnostics
+                        .vm
+                        .constants
+                        .get(&name)
+                        .cloned()
+                        .ok_or_else(|| NativeError::error(format!("Undefined constant \"{name}\"")))
+                }
             }
             Intrinsic::FunctionExists => {
                 Ok(Value::Bool(diagnostics.vm.exists(

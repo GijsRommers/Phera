@@ -1,105 +1,14 @@
 //! Native and source declarations inherit the same runtime tables before objects are allocated.
 
-use std::{collections::HashMap, rc::Rc, sync::Arc};
+use std::{rc::Rc, sync::Arc};
 
 use phera_bytecode::{ClassId, ClassKind, CompiledUnit, Visibility};
-use phera_extension_api::{ClassKind as NativeKind, NativeError, NativeMethod};
+use phera_extension_api::NativeError;
 use phera_value::{ArrayKey, Object};
 
 use super::class::PropertyDefault;
-use super::{Class, ClassTable, Method, MethodBody};
+use super::{Class, Method, MethodBody};
 use crate::Vm;
-
-impl ClassTable {
-    /// Registries guarantee parents-first order, allowing native classes to use ordinary inheritance.
-    pub(crate) fn native(registry: &phera_extension_api::Registry) -> Self {
-        let mut table = Self::default();
-        table.entries.insert(
-            "stdclass".into(),
-            Rc::new(Class {
-                name: "stdClass".into(),
-                parent: None,
-                interfaces: Vec::new(),
-                kind: ClassKind::Class,
-                is_abstract: false,
-                is_final: false,
-                methods: HashMap::new(),
-                defaults: Vec::new(),
-            }),
-        );
-        for entry in registry.classes() {
-            let parent = entry.parent.and_then(|name| table.get(name));
-            let mut methods = parent
-                .as_ref()
-                .map(|class| class.methods.clone())
-                .unwrap_or_default();
-            for method in entry.methods {
-                methods.insert(
-                    method.name.to_ascii_lowercase(),
-                    Rc::new(Method {
-                        name: method.name.into(),
-                        declaring: entry.name.into(),
-                        visibility: native_visibility(method.visibility),
-                        is_static: method.is_static,
-                        is_final: method.is_final,
-                        is_abstract: matches!(method.handler, NativeMethod::Abstract),
-                        body: MethodBody::Native(*method),
-                    }),
-                );
-            }
-            let mut defaults = parent
-                .as_ref()
-                .map(|class| class.defaults.clone())
-                .unwrap_or_default();
-            for property in entry
-                .properties
-                .iter()
-                .filter(|property| !property.is_static)
-            {
-                let key = match native_visibility(property.visibility) {
-                    Visibility::Private => Object::private_key(entry.name, property.name),
-                    Visibility::Protected => Object::protected_key(property.name),
-                    Visibility::Public => ArrayKey::str(property.name),
-                };
-                defaults.push(PropertyDefault {
-                    key,
-                    value: property.default.to_value(),
-                });
-            }
-            table.entries.insert(
-                entry.name.to_ascii_lowercase(),
-                Rc::new(Class {
-                    name: entry.name.into(),
-                    parent,
-                    interfaces: entry
-                        .interfaces
-                        .iter()
-                        .filter_map(|name| table.get(name))
-                        .collect(),
-                    kind: if entry.kind == NativeKind::Interface {
-                        ClassKind::Interface
-                    } else {
-                        ClassKind::Class
-                    },
-                    is_abstract: entry.kind == NativeKind::AbstractClass,
-                    is_final: entry.kind == NativeKind::FinalClass,
-                    methods,
-                    defaults,
-                }),
-            );
-        }
-        table
-    }
-}
-
-/// Preserve native visibility without coupling bytecode to extension metadata.
-fn native_visibility(visibility: phera_extension_api::Visibility) -> Visibility {
-    match visibility {
-        phera_extension_api::Visibility::Public => Visibility::Public,
-        phera_extension_api::Visibility::Protected => Visibility::Protected,
-        phera_extension_api::Visibility::Private => Visibility::Private,
-    }
-}
 
 impl Vm {
     /// Hoist only declarations whose dependencies are available; deferred ones execute normally.
@@ -233,10 +142,103 @@ impl Vm {
             &methods,
             &interfaces,
         )?;
-        let defaults = parent
+        let mut defaults = parent
             .as_ref()
             .map(|class| class.defaults.clone())
             .unwrap_or_default();
+        let mut constants = parent
+            .as_ref()
+            .map(|class| class.constants.clone())
+            .unwrap_or_default();
+        for interface in &interfaces {
+            constants.extend(interface.constants.clone());
+        }
+        for constant in &declaration.constants {
+            let constant_name = unit.names[constant.name.index()].clone();
+            if constants
+                .get(&constant_name)
+                .is_some_and(|constant| constant.is_final)
+            {
+                let declaring = constants[&constant_name].declaring.clone();
+                return Err(NativeError::error(format!(
+                    "{name}::{constant_name} cannot override final constant {declaring}::{constant_name}"
+                )));
+            }
+            constants.insert(
+                constant_name,
+                Rc::new(super::LinkedConstant {
+                    declaring: name.clone(),
+                    visibility: constant.visibility,
+                    is_final: constant.is_final,
+                    initializer: crate::function_table::FunctionRef {
+                        unit: unit.clone(),
+                        index: constant.initializer.index(),
+                    },
+                    state: std::cell::RefCell::new(super::ConstantState::Uninitialized),
+                    ty: constant.ty.map(|index| unit.types[index.index()].clone()),
+                }),
+            );
+        }
+        let mut static_properties = parent
+            .as_ref()
+            .map(|class| class.static_properties.clone())
+            .unwrap_or_default();
+        for property in &declaration.properties {
+            let property_name = &unit.names[property.name.index()];
+            let key = match property.visibility {
+                Visibility::Public => ArrayKey::str(property_name.as_bytes()),
+                Visibility::Protected => Object::protected_key(property_name),
+                Visibility::Private => Object::private_key(name, property_name),
+            };
+            let value = match property.default {
+                Some(phera_bytecode::Initializer::Literal(index)) => {
+                    crate::frame::value(&unit.constants[index.index()])
+                }
+                _ => phera_value::Value::Null,
+            };
+            let value = if property.is_static {
+                phera_value::Value::Reference(Rc::new(std::cell::RefCell::new(value)))
+            } else {
+                value
+            };
+            let linked = PropertyDefault {
+                key: key.clone(),
+                value,
+                name: property_name.clone(),
+                declaring: name.clone(),
+                visibility: property.visibility,
+                initialized: property.default.is_some() || property.ty.is_none(),
+                initializer: match property.default {
+                    Some(phera_bytecode::Initializer::Function(index)) => {
+                        Some(crate::function_table::FunctionRef {
+                            unit: unit.clone(),
+                            index: index.index(),
+                        })
+                    }
+                    _ => None,
+                },
+                ty: property.ty.map(|index| unit.types[index.index()].clone()),
+                is_readonly: property.is_readonly,
+                static_initialized: Rc::new(std::cell::Cell::new(false)),
+                value_initialized: Rc::new(std::cell::Cell::new(
+                    property.default.is_some() || property.ty.is_none(),
+                )),
+            };
+            let target = if property.is_static {
+                &mut static_properties
+            } else {
+                &mut defaults
+            };
+            if let Some(inherited) = target.iter_mut().find(|entry| entry.key == key) {
+                *inherited = linked;
+            } else {
+                target.push(linked);
+            }
+        }
+        let allows_dynamic_properties = declaration.allows_dynamic_properties
+            || parent
+                .as_ref()
+                .is_some_and(|parent| parent.allows_dynamic_properties);
         self.classes.entries.insert(
             name.to_ascii_lowercase(),
             Rc::new(Class {
@@ -246,8 +248,12 @@ impl Vm {
                 kind: declaration.kind,
                 is_abstract: declaration.is_abstract,
                 is_final: declaration.is_final,
+                is_readonly: declaration.is_readonly,
+                allows_dynamic_properties,
                 methods,
                 defaults,
+                static_properties,
+                constants,
             }),
         );
         Ok(())

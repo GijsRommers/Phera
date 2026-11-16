@@ -8,7 +8,10 @@ use phera_value::{ArrayKey, Value, to_php_string};
 
 use crate::access_mode::{Binding, Creation, Missing, Mutation};
 use crate::{AccessPath, Vm};
-use crate::{inline_stack::InlineStack, path_update::update};
+use crate::{
+    inline_stack::InlineStack,
+    path_update::{PathKey, update},
+};
 
 impl Vm {
     /// Resolve a dynamic name, optionally creating its register for a write.
@@ -19,6 +22,25 @@ impl Vm {
         missing: Missing,
     ) -> Result<Option<Reg>, NativeError> {
         let base = match place.base()? {
+            PathBase::This { scratch } => {
+                self.fetch_this(scratch)?;
+                return Ok(Some(scratch));
+            }
+            PathBase::StaticProperty {
+                class,
+                name,
+                scratch,
+            } => {
+                let reference = match self.static_property(class, name) {
+                    Ok(reference) => reference,
+                    Err(_) if creation == Creation::Existing && missing == Missing::Silent => {
+                        return Ok(None);
+                    }
+                    Err(error) => return Err(error),
+                };
+                self.set(scratch, reference);
+                return Ok(Some(scratch));
+            }
             PathBase::Register(register) => return Ok(Some(register)),
             PathBase::Named(register) => register,
             PathBase::GlobalNamed {
@@ -69,17 +91,24 @@ impl Vm {
     }
 
     /// Convert path keys in source order while reusing the operator diagnostic buffer.
-    fn keys(&mut self, place: &AccessPath) -> Result<InlineStack<Option<ArrayKey>>, NativeError> {
+    fn keys(&mut self, place: &AccessPath) -> Result<InlineStack<PathKey>, NativeError> {
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let mut keys = InlineStack::new();
         let result = (|| {
             for step in place.steps()? {
                 let key = match step {
-                    Step::Index(register) => Some(ArrayKey::from_value_diag(
+                    Step::Index(register) => PathKey::Index(Some(ArrayKey::from_value_diag(
                         &diagnostics.vm.operand(register),
                         &mut diagnostics.buffer,
-                    )?),
-                    Step::Append => None,
+                    )?)),
+                    Step::Append => PathKey::Index(None),
+                    Step::Property(name) => {
+                        PathKey::Property(ArrayKey::str(diagnostics.vm.name(name)?))
+                    }
+                    Step::DynamicProperty(register) => PathKey::Property(ArrayKey::str(
+                        to_php_string(&diagnostics.vm.operand(register), &mut diagnostics.buffer)?
+                            .as_bytes(),
+                    )),
                 };
                 keys.push(key);
             }
@@ -97,8 +126,30 @@ impl Vm {
         let Some(register) = self.base_register(place, Creation::Existing, missing)? else {
             return Ok(Value::Null);
         };
+        if let PathBase::StaticProperty { class, name, .. } = place.base()? {
+            let (class_name, name) = self.static_property_names(class, name)?;
+            if missing == Missing::Warn
+                && self.classes.get(&class_name).is_some_and(|class| {
+                    class
+                        .static_properties
+                        .iter()
+                        .any(|property| property.name == name && !property.value_initialized.get())
+                })
+            {
+                return Err(NativeError::error(format!(
+                    "Typed static property {class_name}::${name} must not be accessed before initialization"
+                )));
+            }
+        }
         let mut value = self.read_root(register, missing);
         for key in self.keys(place)?.iter().cloned() {
+            if let PathKey::Property(key) = key {
+                value = self.read_property(value, key, missing)?;
+                continue;
+            }
+            let PathKey::Index(key) = key else {
+                return Err(internal_error!("path key"));
+            };
             let key = key.ok_or_else(|| NativeError::error("Cannot use [] for reading"))?;
             value = match value {
                 Value::Array(array) => {
@@ -130,7 +181,7 @@ impl Vm {
     pub(crate) fn write_place(
         &mut self,
         place: &AccessPath,
-        value: Value,
+        mut value: Value,
         binding: Binding,
     ) -> Result<(), NativeError> {
         let register = self
@@ -154,7 +205,19 @@ impl Vm {
             Rc::make_mut(array).push(value)?;
             return Ok(());
         }
-        let keys = self.keys(place)?;
+        if let PathBase::StaticProperty { class, name, .. } = place.base()?
+            && place.steps()?.next().is_none()
+        {
+            self.validate_static_mutation(class, name, &mut value)?;
+        }
+        let root_value = self.read_root(register, Missing::Silent);
+        let keys = self.property_keys(place, root_value.clone())?;
+        self.validate_property_mutation(
+            root_value,
+            &keys,
+            &mut value,
+            crate::access_mode::Mutation::Assign,
+        )?;
         let root = self
             .call_stack
             .current_mut()
@@ -191,10 +254,16 @@ impl Vm {
             .cloned()
             .flatten()
             .unwrap_or_default();
-        for key in self.keys(place)?.iter().cloned() {
+        let keys = self.property_keys(place, raw.deref().clone())?;
+        for key in keys.iter().cloned() {
             let plain = raw.deref().clone();
             raw = match (plain, key) {
-                (Value::Array(array), Some(key)) => array.get(&key).cloned().unwrap_or_default(),
+                (Value::Array(array), PathKey::Index(Some(key))) => {
+                    array.get(&key).cloned().unwrap_or_default()
+                }
+                (Value::Object(object), PathKey::Property(key)) => {
+                    crate::property_storage::read(&object, &key).unwrap_or_default()
+                }
                 _ => Value::Null,
             };
         }
@@ -212,6 +281,14 @@ impl Vm {
 
     /// Remove the slot itself without assigning null through an existing alias.
     pub(crate) fn unset_place(&mut self, place: &AccessPath) -> Result<(), NativeError> {
+        if let PathBase::StaticProperty { class, name, .. } = place.base()?
+            && place.steps()?.next().is_none()
+        {
+            let (class, name) = self.static_property_names(class, name)?;
+            return Err(NativeError::error(format!(
+                "Attempt to unset static property {class}::${name}"
+            )));
+        }
         let Some(register) = self.base_register(place, Creation::Existing, Missing::Silent)? else {
             return Ok(());
         };
@@ -231,7 +308,9 @@ impl Vm {
             }
             return Ok(());
         }
-        let keys = self.keys(place)?;
+        let root_value = self.read_root(register, Missing::Silent);
+        let keys = self.property_keys(place, root_value.clone())?;
+        self.validate_property_mutation(root_value, &keys, &mut Value::Null, Mutation::Unset)?;
         let root = self
             .call_stack
             .current_mut()

@@ -53,10 +53,18 @@ pub enum Unary {
     Float,
     String,
     Array,
+    Object,
 }
 /// Selects PHP's local, variable-variable, or request-global namespace.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlaceScope {
+    /// The base register is a scratch slot for the current receiver.
+    This,
+    /// The base register holds a class name or object.
+    StaticProperty {
+        name: Reg,
+        scratch: Reg,
+    },
     Local,
     Dynamic,
     Global(Reg),
@@ -67,7 +75,7 @@ pub enum PlaceScope {
 pub struct Place {
     pub base: Reg,
     pub scope: PlaceScope,
-    pub path: Vec<Option<Reg>>,
+    pub path: Vec<PathStep>,
 }
 /// Values and writable argument paths are distinct; a path needs no dummy register.
 #[derive(Debug, Clone)]
@@ -128,6 +136,10 @@ pub struct ClassDeclaration {
     pub kind: phera_bytecode::ClassKind,
     pub is_abstract: bool,
     pub is_final: bool,
+    pub is_readonly: bool,
+    pub allows_dynamic_properties: bool,
+    pub constants: Vec<ClassConstant>,
+    pub properties: Vec<ClassProperty>,
     pub methods: Vec<ClassMethod>,
 }
 /// Method metadata travels beside ordinary function IR rather than entering global scope.
@@ -139,4 +151,34 @@ pub struct ClassMethod {
     pub is_static: bool,
     pub is_abstract: bool,
     pub is_final: bool,
+}
+
+/// Property metadata keeps source names until bytecode interning.
+#[derive(Debug, Clone)]
+pub struct ClassProperty {
+    pub name: String,
+    pub visibility: phera_bytecode::Visibility,
+    pub is_static: bool,
+    pub is_readonly: bool,
+    pub ty: Option<String>,
+    pub default: Option<usize>,
+}
+
+/// Constant initializers execute only when the linked class first needs their value.
+#[derive(Debug, Clone)]
+pub struct ClassConstant {
+    pub name: String,
+    pub visibility: phera_bytecode::Visibility,
+    pub is_final: bool,
+    pub initializer: usize,
+    pub ty: Option<String>,
+}
+
+/// Literal property names are interned once; computed names retain evaluated registers.
+#[derive(Debug, Clone)]
+pub enum PathStep {
+    Index(Reg),
+    Append,
+    Property(String),
+    DynamicProperty(Reg),
 }

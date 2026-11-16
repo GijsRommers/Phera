@@ -3,6 +3,12 @@
 /// VM services that need access to the caller scope or request state.
 #[derive(Clone, Copy)]
 pub(crate) enum Intrinsic {
+    /// Visibility-aware instance properties.
+    GetObjectVars,
+    /// Visibility-aware default instance and static properties.
+    GetClassVars,
+    /// Declaration and dynamic-property existence, independent of visibility.
+    PropertyExists,
     /// PHP `is_callable()` runtime service.
     IsCallable,
     /// PHP `call_user_func()` runtime service.
@@ -41,6 +47,9 @@ impl Intrinsic {
     /// Resolve the case-insensitive PHP function name at the call boundary.
     pub(crate) fn resolve(name: &str) -> Option<Self> {
         Some(match name.to_ascii_lowercase().as_str() {
+            "get_object_vars" => Self::GetObjectVars,
+            "get_class_vars" => Self::GetClassVars,
+            "property_exists" => Self::PropertyExists,
             "is_callable" => Self::IsCallable,
             "call_user_func" => Self::CallUserFunc,
             "call_user_func_array" => Self::CallUserFuncArray,

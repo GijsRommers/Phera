@@ -173,7 +173,34 @@ impl Vm {
             ))),
             CastKind::Void => Value::Null,
             CastKind::Object => {
-                return Err(NativeError::error("Object casts not supported yet"));
+                if value.is_object() {
+                    value
+                } else {
+                    let class = diagnostics
+                        .vm
+                        .classes
+                        .get("stdClass")
+                        .ok_or_else(|| internal_error!("stdClass"))?;
+                    let object = diagnostics.vm.classes.allocate(class);
+                    match value {
+                        Value::Null => {}
+                        Value::Array(array) => {
+                            for (key, value) in array.iter() {
+                                let key = match key {
+                                    phera_value::ArrayKey::Int(index) => {
+                                        phera_value::ArrayKey::str(index.to_string())
+                                    }
+                                    key => key.clone(),
+                                };
+                                object.set(key, value.clone());
+                            }
+                        }
+                        value => {
+                            object.set(phera_value::ArrayKey::str("scalar"), value);
+                        }
+                    }
+                    Value::Object(object)
+                }
             }
         };
         drop(diagnostics);

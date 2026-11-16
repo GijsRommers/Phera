@@ -20,6 +20,7 @@ impl Compiler<'_> {
             ast::CastKind::String => Unary::String,
             ast::CastKind::Bool => Unary::Bool,
             ast::CastKind::Array => Unary::Array,
+            ast::CastKind::Object => Unary::Object,
             _ => return Err(self.error("Cast not supported yet", line)),
         };
         let src = self.compile_expression(operand)?;

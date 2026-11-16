@@ -8,14 +8,20 @@
 
 mod data;
 pub use data::{
-    Argument, ArgumentSource, Binary, ClassDeclaration, ClassMethod, CompiledUnit, Constant,
-    Function, Parameter, Place, PlaceScope, Target, Unary,
+    Argument, ArgumentSource, Binary, ClassConstant, ClassDeclaration, ClassMethod, ClassProperty,
+    CompiledUnit, Constant, Function, Parameter, PathStep, Place, PlaceScope, Target, Unary,
 };
 use phera_bytecode::Reg;
 
 /// Compiler IR with owned names and paths before table interning.
 #[derive(Debug, Clone)]
 pub enum Instruction {
+    /// Fetch a constant using an evaluated class target.
+    ClassConstant {
+        destination: Reg,
+        class: Reg,
+        name: String,
+    },
     /// Publish a request-local class declaration.
     DeclareClass(usize),
     /// Prepare a constructor using the same sends as a function call.

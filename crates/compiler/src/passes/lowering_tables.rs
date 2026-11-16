@@ -5,10 +5,18 @@ use phera_bytecode::{BinaryOp, Function, Path, PathBase, PathId, StaticId, Step}
 use crate::{ir, passes::lower::Tables};
 
 /// Append an access path with evaluated keys; absent keys denote array append.
-pub(crate) fn path(function: &mut Function, place: ir::Place) -> PathId {
+pub(crate) fn path(tables: &mut Tables, function: &mut Function, place: ir::Place) -> PathId {
     let index = function.paths.len();
     function.paths.push(Path {
         base: match place.scope {
+            ir::PlaceScope::This => PathBase::This {
+                scratch: place.base,
+            },
+            ir::PlaceScope::StaticProperty { name, scratch } => PathBase::StaticProperty {
+                class: place.base,
+                name,
+                scratch,
+            },
             ir::PlaceScope::Local => PathBase::Register(place.base),
             ir::PlaceScope::Dynamic => PathBase::Named(place.base),
             ir::PlaceScope::Global(scratch) => PathBase::GlobalNamed {
@@ -20,7 +28,12 @@ pub(crate) fn path(function: &mut Function, place: ir::Place) -> PathId {
         steps: place
             .path
             .into_iter()
-            .map(|step| step.map_or(Step::Append, Step::Index))
+            .map(|step| match step {
+                ir::PathStep::Index(register) => Step::Index(register),
+                ir::PathStep::Append => Step::Append,
+                ir::PathStep::Property(name) => Step::Property(tables.name(&name)),
+                ir::PathStep::DynamicProperty(register) => Step::DynamicProperty(register),
+            })
             .collect(),
     });
     PathId(index as u32)

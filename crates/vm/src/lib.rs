@@ -23,6 +23,7 @@ mod call_instructions;
 mod call_stack;
 mod call_state;
 mod calls;
+mod class_constants;
 mod classes;
 mod constant_table;
 mod constants;
@@ -46,6 +47,7 @@ mod globals;
 mod include_scope;
 mod include_state;
 mod includes;
+mod initializers;
 mod inline_stack;
 mod interpreter;
 mod intrinsic_calls;
@@ -62,6 +64,9 @@ mod path_instructions;
 mod path_update;
 mod pending;
 mod places;
+mod properties;
+mod property_mutation;
+mod property_storage;
 mod references;
 mod registers;
 mod returns;
@@ -97,6 +102,8 @@ type SymbolCache = Rc<RefCell<Vec<Option<Rc<call_state::Callee>>>>>;
 /// One request interpreter; PHP calls use heap frames rather than Rust recursion.
 pub struct Vm {
     classes: classes::ClassTable,
+    /// Pure defaults retain lexical class scope while running outside a method frame.
+    initializer_scope: Option<String>,
     prelinked_classes: std::collections::HashSet<(usize, usize)>,
     function_table: function_table::FunctionTable,
     unit_caches: unit_caches::UnitCaches,
@@ -130,6 +137,7 @@ impl Vm {
             .collect();
         Self {
             classes: classes::ClassTable::native(&registry),
+            initializer_scope: None,
             prelinked_classes: std::collections::HashSet::new(),
             function_table: function_table::FunctionTable::new(),
             unit_caches: unit_caches::UnitCaches::new(),

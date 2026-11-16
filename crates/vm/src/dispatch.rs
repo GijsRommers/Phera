@@ -35,6 +35,12 @@ impl Vm {
             Instruction::InitMethodCall { receiver, method } => {
                 self.init_method_call(receiver, method)?
             }
+            Instruction::FetchClassConstant { dst, class, name } => {
+                let class = self.class_target(class)?;
+                let name = self.name(name)?;
+                let value = self.class_constant(&class, &name)?;
+                self.set(dst, value);
+            }
             Instruction::FetchClassName { dst, class } => {
                 let name = self.class_symbol(class)?;
                 self.set(dst, Value::from(name));

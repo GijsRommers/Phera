@@ -14,6 +14,9 @@ impl Compiler<'_> {
     ) -> Result<Reg, CompileError> {
         use ast::ExpressionKind;
         let line = self.lines.line(expression.span.start);
+        if nullsafe::contains_nullsafe(expression) {
+            return self.compile_nullsafe_chain(expression, line);
+        }
         if let Some(condition) = constant(expression) {
             return self.literal(condition, line);
         }
@@ -28,9 +31,10 @@ impl Compiler<'_> {
                 self.emit(crate::ir::Instruction::This { destination }, line);
                 Ok(destination)
             }
-            ExpressionKind::Variable(_) | ExpressionKind::Index { .. } => {
-                self.compile_read(expression, line)
-            }
+            ExpressionKind::Variable(_)
+            | ExpressionKind::Index { .. }
+            | ExpressionKind::Property { .. }
+            | ast::ExpressionKind::StaticProperty { .. } => self.compile_read(expression, line),
             ExpressionKind::Assign { target, value } => {
                 self.compile_assignment(target, value, line)
             }
@@ -133,6 +137,7 @@ pub(crate) mod assignments;
 pub(crate) mod calls;
 pub(crate) mod conditionals;
 pub(crate) mod matching;
+pub(crate) mod nullsafe;
 pub(crate) mod objects;
 pub(crate) mod operators;
 pub(crate) mod paths;

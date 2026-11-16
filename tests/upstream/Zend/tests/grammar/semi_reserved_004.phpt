@@ -244,5 +244,3 @@ __NAMESPACE__
 __halt_compiler
 
 Done
---XFAIL--
-Requires classes (outside this milestone).

@@ -73,9 +73,27 @@ pub(crate) fn binary(instruction: ast::BinaryOperator) -> Option<Binary> {
 
 /// Recognize variable-rooted paths iteratively, including arbitrarily long index chains.
 pub(crate) fn writable(expression: &ast::Expression) -> bool {
+    if crate::expressions::nullsafe::contains_nullsafe(expression) {
+        return false;
+    }
     let mut node = expression;
-    while let ast::ExpressionKind::Index { target, .. } = &node.kind {
-        node = target;
+    let mut property = false;
+    loop {
+        match &node.kind {
+            ast::ExpressionKind::Index { target, .. } => node = target,
+            ast::ExpressionKind::Property {
+                target,
+                nullsafe: false,
+                ..
+            } => {
+                property = true;
+                node = target;
+            }
+            _ => break,
+        }
+    }
+    if property || matches!(node.kind, ast::ExpressionKind::StaticProperty { .. }) {
+        return true;
     }
     matches!(&node.kind, ast::ExpressionKind::Variable(ast::Variable::Named(name)) if name != "this")
         || matches!(

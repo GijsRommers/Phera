@@ -14,9 +14,13 @@ pub(crate) struct Class {
     pub(crate) kind: ClassKind,
     pub(crate) is_abstract: bool,
     pub(crate) is_final: bool,
+    pub(crate) is_readonly: bool,
+    pub(crate) allows_dynamic_properties: bool,
     pub(crate) methods: HashMap<String, Rc<Method>>,
     /// Root-first property keys reproduce the layout used by native testing helpers.
     pub(crate) defaults: Vec<PropertyDefault>,
+    pub(crate) static_properties: Vec<PropertyDefault>,
+    pub(crate) constants: HashMap<String, Rc<LinkedConstant>>,
 }
 
 /// Defaults retain their mangled keys so private ancestors do not collide.
@@ -24,6 +28,15 @@ pub(crate) struct Class {
 pub(crate) struct PropertyDefault {
     pub(crate) key: ArrayKey,
     pub(crate) value: Value,
+    pub(crate) name: String,
+    pub(crate) declaring: String,
+    pub(crate) visibility: Visibility,
+    pub(crate) initialized: bool,
+    pub(crate) initializer: Option<crate::function_table::FunctionRef>,
+    pub(crate) ty: Option<phera_bytecode::Type>,
+    pub(crate) is_readonly: bool,
+    pub(crate) static_initialized: Rc<std::cell::Cell<bool>>,
+    pub(crate) value_initialized: Rc<std::cell::Cell<bool>>,
 }
 
 /// A method remembers its declaring scope independently of the receiver's class.
@@ -82,4 +95,21 @@ impl Class {
 pub(crate) enum Invocation {
     Constructor,
     Method,
+}
+
+/// Lazy constants retain declaring scope and detect recursive initializers before borrowing values.
+pub(crate) struct LinkedConstant {
+    pub(crate) declaring: String,
+    pub(crate) visibility: Visibility,
+    pub(crate) is_final: bool,
+    pub(crate) initializer: crate::function_table::FunctionRef,
+    pub(crate) state: std::cell::RefCell<ConstantState>,
+    pub(crate) ty: Option<phera_bytecode::Type>,
+}
+
+/// A failed evaluation restores Uninitialized so later accesses can retry.
+pub(crate) enum ConstantState {
+    Uninitialized,
+    Evaluating,
+    Ready(Value),
 }

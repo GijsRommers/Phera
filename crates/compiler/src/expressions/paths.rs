@@ -1,80 +1,77 @@
-//! Evaluate variable paths while preserving the separate PHP global namespace.
+//! Mixed array and property paths preserve evaluation order and shared object identity.
 
+use crate::ir::PathStep as Step;
 use crate::ir::{Constant, Place, PlaceScope};
-use crate::{CompileError, Compiler, writable};
+use crate::{CompileError, Compiler};
 use phera_ast as ast;
 
 impl Compiler<'_> {
-    /// Walk indexed targets iteratively, then evaluate index expressions from root to leaf.
-    pub(crate) fn place(&mut self, error: &ast::Expression) -> Result<Place, CompileError> {
-        let line = self.lines.line(error.span.start);
-        let mut node = error;
-        let mut path = vec![];
-        while let ast::ExpressionKind::Index { target, index } = &node.kind {
-            path.push(index.as_deref());
-            node = target;
+    /// Lower every postfix access into one path, including object roots produced by calls.
+    pub(crate) fn place(&mut self, expression: &ast::Expression) -> Result<Place, CompileError> {
+        if crate::expressions::nullsafe::contains_nullsafe(expression) {
+            return Err(self.error(
+                "Can't use nullsafe operator in write context",
+                self.lines.line(expression.span.start),
+            ));
         }
-        let mut place = self.path_root(node, line)?;
-        let mut steps = vec![];
-        for index in path.into_iter().rev() {
-            steps.push(
-                index
-                    .map(|error| self.compile_expression(error))
-                    .transpose()?,
-            )
-        }
-        if place.scope == PlaceScope::Globals && !steps.is_empty() {
-            let scratch = place.base;
-            place.base = steps
-                .remove(0)
-                .ok_or_else(|| self.error("Cannot use [] for reading", line))?;
-            place.scope = PlaceScope::Global(scratch);
-        }
-        place.path = steps;
-        Ok(place)
+        self.readable_place(expression)
     }
 
-    /// Allow a computed root for reads while preserving iterative postfix traversal.
+    /// Evaluate the root first and each dynamic key once in source order.
     pub(crate) fn readable_place(
         &mut self,
-        error: &ast::Expression,
+        expression: &ast::Expression,
     ) -> Result<Place, CompileError> {
-        if writable(error) {
-            return self.place(error);
-        }
-        let mut node = error;
-        let mut indices = vec![];
-        while let ast::ExpressionKind::Index { target, index } = &node.kind {
-            indices.push(index.as_deref());
+        let line = self.lines.line(expression.span.start);
+        let mut node = expression;
+        let mut postfix = Vec::new();
+        while let ast::ExpressionKind::Index { target, .. }
+        | ast::ExpressionKind::Property { target, .. } = &node.kind
+        {
+            postfix.push(node);
             node = target;
         }
-        let base = self.compile_expression(node)?;
-        let mut path = vec![];
-        for index in indices.into_iter().rev() {
-            path.push(
-                index
-                    .map(|error| self.compile_expression(error))
-                    .transpose()?,
-            )
-        }
-        Ok(Place {
-            base,
-            scope: PlaceScope::Local,
-            path,
-        })
-    }
-
-    /// Superglobal roots bypass the local namespace without a function-entry binding.
-    fn path_root(&mut self, node: &ast::Expression, line: usize) -> Result<Place, CompileError> {
         let (base, scope) = match &node.kind {
-            ast::ExpressionKind::Variable(ast::Variable::Named(index)) => {
-                if index == "this" {
+            ast::ExpressionKind::Variable(ast::Variable::Named(name)) if name == "this" => {
+                if postfix.is_empty() {
                     return Err(self.error("Cannot re-assign $this", line));
                 }
-                if index == "GLOBALS" {
-                    (self.allocate_register()?, PlaceScope::Globals)
-                } else if matches!(
-                    index.as_str(),
+                (self.allocate_register()?, PlaceScope::This)
+            }
+
+            ast::ExpressionKind::StaticProperty { class, name } => {
+                let class = if matches!(class.kind, ast::ExpressionKind::Name(_)) {
+                    let class = self.object_class_name(class, line)?;
+                    let destination = self.allocate_register()?;
+                    self.emit(
+                        crate::ir::Instruction::ClassName { destination, class },
+                        line,
+                    );
+                    destination
+                } else {
+                    self.compile_expression(class)?
+                };
+                let name = match name {
+                    ast::Variable::Named(name) => {
+                        self.literal(Constant::Bytes(name.as_bytes().to_vec()), line)?
+                    }
+                    ast::Variable::Dynamic(name) => self.compile_expression(name)?,
+                };
+                (
+                    class,
+                    PlaceScope::StaticProperty {
+                        name,
+                        scratch: self.allocate_register()?,
+                    },
+                )
+            }
+
+            ast::ExpressionKind::Variable(ast::Variable::Named(name)) if name == "GLOBALS" => {
+                (self.allocate_register()?, PlaceScope::Globals)
+            }
+            ast::ExpressionKind::Variable(ast::Variable::Named(name))
+                if matches!(
+                    name.as_str(),
                     "_GET"
                         | "_POST"
                         | "_COOKIE"
@@ -83,25 +80,51 @@ impl Compiler<'_> {
                         | "_FILES"
                         | "_ENV"
                         | "_SESSION"
-                ) {
-                    (
-                        self.literal(Constant::Bytes(index.as_bytes().to_vec()), line)?,
-                        PlaceScope::Global(self.allocate_register()?),
-                    )
-                } else {
-                    (self.local(index)?, PlaceScope::Local)
-                }
+                ) =>
+            {
+                (
+                    self.literal(Constant::Bytes(name.as_bytes().to_vec()), line)?,
+                    PlaceScope::Global(self.allocate_register()?),
+                )
             }
-            ast::ExpressionKind::Variable(ast::Variable::Dynamic(error)) => {
+            ast::ExpressionKind::Variable(ast::Variable::Named(name)) if name != "this" => {
+                (self.local(name)?, PlaceScope::Local)
+            }
+            ast::ExpressionKind::Variable(ast::Variable::Dynamic(name)) => {
                 self.function.dynamic_scope = true;
-                (self.compile_expression(error)?, PlaceScope::Dynamic)
+                (self.compile_expression(name)?, PlaceScope::Dynamic)
             }
-            _ => return Err(self.error("Expression is not a writable place", line)),
+            _ => (self.compile_expression(node)?, PlaceScope::Local),
         };
-        Ok(Place {
+        let mut place = Place {
             base,
             scope,
-            path: vec![],
-        })
+            path: Vec::new(),
+        };
+        for access in postfix.into_iter().rev() {
+            let step = match &access.kind {
+                ast::ExpressionKind::Index { index, .. } => match index {
+                    Some(index) => Step::Index(self.compile_expression(index)?),
+                    None => Step::Append,
+                },
+                ast::ExpressionKind::Property { name, .. } => match name {
+                    ast::MemberName::Identifier(name) => Step::Property(name.name.clone()),
+                    ast::MemberName::Expression(name) => {
+                        Step::DynamicProperty(self.compile_expression(name)?)
+                    }
+                },
+                _ => return Err(self.error("Invalid access path", line)),
+            };
+            if place.scope == PlaceScope::Globals && place.path.is_empty() {
+                let Step::Index(name) = step else {
+                    return Err(self.error("Cannot use [] for reading", line));
+                };
+                place.scope = PlaceScope::Global(place.base);
+                place.base = name;
+            } else {
+                place.path.push(step);
+            }
+        }
+        Ok(place)
     }
 }

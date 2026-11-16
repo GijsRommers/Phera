@@ -20,5 +20,3 @@ string(3) "Foo"
 string(3) "Foo"
 string(3) "Foo"
 string(3) "Foo"
---XFAIL--
-Requires classes (outside this milestone).

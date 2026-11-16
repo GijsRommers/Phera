@@ -17,11 +17,25 @@ impl Instruction {
             if let crate::ir::PlaceScope::Global(scratch) = &mut target.scope {
                 *scratch = mapping(*scratch);
             }
-            for register in target.path.iter_mut().flatten() {
-                *register = mapping(*register)
+            if let crate::ir::PlaceScope::StaticProperty { name, scratch } = &mut target.scope {
+                *name = mapping(*name);
+                *scratch = mapping(*scratch);
+            }
+            for step in &mut target.path {
+                if let crate::ir::PathStep::Index(register)
+                | crate::ir::PathStep::DynamicProperty(register) = step
+                {
+                    *register = mapping(*register);
+                }
             }
         }
         match self {
+            Instruction::ClassConstant {
+                destination, class, ..
+            } => {
+                *destination = map(*destination);
+                *class = map(*class);
+            }
             Instruction::DeclareClass(_) | Instruction::New { .. } => {}
             Instruction::ClassName { destination, .. } | Instruction::This { destination } => {
                 *destination = map(*destination)

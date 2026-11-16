@@ -18,5 +18,3 @@ print e::E . "\n";
 ?>
 --EXPECT--
 If you DON'T see this, something's wrong.
---XFAIL--
-Requires classes (outside this milestone).

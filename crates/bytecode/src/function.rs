@@ -66,6 +66,10 @@ pub struct Path {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PathBase {
+    /// The active instance receiver is materialized only for path execution.
+    This { scratch: Reg },
+    /// Static storage is shared by inherited declarations and aliased through a scratch slot.
+    StaticProperty { class: Reg, name: Reg, scratch: Reg },
     /// A register: a local variable, or a temporary holding a value.
     Register(Reg),
     /// `$$name`: the variable whose name is the string in this register.
@@ -79,6 +83,10 @@ pub enum PathBase {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Step {
+    /// A declared property name, interned in the unit name table.
+    Property(NameId),
+    /// An evaluated property name; numeric names remain strings.
+    DynamicProperty(Reg),
     /// `[key]`, with the key already evaluated into a register.
     Index(Reg),
     /// `[]`: the next free integer key. Only valid when writing.

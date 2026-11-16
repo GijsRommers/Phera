@@ -16,6 +16,12 @@ use crate::{ConstId, FunctionId, IterId, NameId, PathId, Reg, StaticId, SymbolId
 ///   it never leaves `dst` half written.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Instruction {
+    /// Resolve a lazily initialized class constant with lexical visibility checks.
+    FetchClassConstant {
+        dst: Reg,
+        class: Reg,
+        name: NameId,
+    },
     /// Does nothing. Left behind when the compiler removes an instruction.
     Nop,
     /// Link a declaration once execution reaches its source position.

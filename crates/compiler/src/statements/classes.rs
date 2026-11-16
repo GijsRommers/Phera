@@ -3,7 +3,7 @@
 use phera_ast as ast;
 use phera_bytecode::{ClassKind, Visibility};
 
-use crate::ir::{ClassDeclaration, ClassMethod, Instruction};
+use crate::ir::{ClassDeclaration, ClassMethod, ClassProperty, Instruction};
 use crate::policies::{DeclarationTiming, NameKind};
 use crate::{CompileError, Compiler};
 
@@ -24,16 +24,64 @@ impl Compiler<'_> {
         let Some(identifier) = &declaration.name else {
             return Err(self.error("Anonymous classes not supported yet", line));
         };
-        if declaration.modifiers.is_readonly {
-            return Err(self.error("Readonly classes not supported yet", line));
-        }
         let name = if self.namespace.is_empty() {
             identifier.name.clone()
         } else {
             format!("{}\\{}", self.namespace, identifier.name)
         };
         let mut methods = Vec::new();
+        let mut properties = Vec::new();
+        let mut constants = Vec::new();
         for member in &declaration.members {
+            if let ast::ClassMemberKind::Constant {
+                modifiers,
+                ty,
+                items,
+                ..
+            } = &member.kind
+            {
+                for constant in items {
+                    if constant.name.name.eq_ignore_ascii_case("class") {
+                        return Err(self.error("A class constant must not be called 'class'; it is reserved for class name fetching", self.lines.line(member.span.start)));
+                    }
+                    constants.push(crate::ir::ClassConstant {
+                        name: constant.name.name.clone(),
+                        visibility: member_visibility(modifiers),
+                        is_final: modifiers.is_final,
+                        initializer: self.compile_initializer(&constant.value, line)?,
+                        ty: ty.as_ref().map(crate::type_name),
+                    });
+                }
+                continue;
+            }
+            if let ast::ClassMemberKind::Property {
+                modifiers,
+                ty,
+                items,
+                ..
+            } = &member.kind
+            {
+                for property in items {
+                    let default = property
+                        .default
+                        .as_ref()
+                        .map(|value| self.compile_initializer(value, line))
+                        .transpose()?;
+                    properties.push(ClassProperty {
+                        name: property.name.clone(),
+                        visibility: match modifiers.visibility {
+                            Some(ast::Visibility::Private) => Visibility::Private,
+                            Some(ast::Visibility::Protected) => Visibility::Protected,
+                            _ => Visibility::Public,
+                        },
+                        is_static: modifiers.is_static,
+                        is_readonly: modifiers.is_readonly || declaration.modifiers.is_readonly,
+                        ty: ty.as_ref().map(crate::type_name),
+                        default,
+                    });
+                }
+                continue;
+            }
             let ast::ClassMemberKind::Method(method) = &member.kind else {
                 return Err(self.error("Class properties and constants not supported yet", line));
             };
@@ -45,6 +93,19 @@ impl Compiler<'_> {
                     format!("Cannot redeclare {name}::{}()", method.name.name),
                     line,
                 ));
+            }
+            for parameter in &method.parameters {
+                if parameter.modifiers.visibility.is_some() {
+                    properties.push(ClassProperty {
+                        name: parameter.name.clone(),
+                        visibility: member_visibility(&parameter.modifiers),
+                        is_static: false,
+                        is_readonly: parameter.modifiers.is_readonly
+                            || declaration.modifiers.is_readonly,
+                        ty: parameter.ty.as_ref().map(crate::type_name),
+                        default: None,
+                    });
+                }
             }
             methods.push(self.compile_method(&name, method, line)?);
         }
@@ -75,6 +136,13 @@ impl Compiler<'_> {
             },
             is_abstract: declaration.modifiers.is_abstract,
             is_final: declaration.modifiers.is_final,
+            is_readonly: declaration.modifiers.is_readonly,
+            allows_dynamic_properties: declaration
+                .attributes
+                .iter()
+                .any(|attribute| attribute.name.text == "AllowDynamicProperties"),
+            constants,
+            properties,
             methods,
         });
         if timing == DeclarationTiming::Hoisted {
@@ -84,6 +152,24 @@ impl Compiler<'_> {
         Ok(())
     }
 
+    /// A separate pure function retains expression evaluation order without storing AST nodes.
+    fn compile_initializer(
+        &mut self,
+        expression: &ast::Expression,
+        line: usize,
+    ) -> Result<usize, CompileError> {
+        if !crate::parameter_defaults::constant_expression(expression) {
+            return Err(self.error("Constant expression contains invalid operations", line));
+        }
+        let mut builder = Compiler::new(self.file, self.lines, "{initializer}", &self.namespace);
+        builder.imports = self.imports.clone();
+        let result = builder.compile_expression(expression)?;
+        builder.emit(Instruction::Return(result), line);
+        let index = self.functions.len();
+        self.functions.push(builder.finish());
+        Ok(index)
+    }
+
     /// Reuse parameter/default lowering while keeping method names out of the function table.
     fn compile_method(
         &mut self,
@@ -91,13 +177,6 @@ impl Compiler<'_> {
         method: &ast::Method,
         line: usize,
     ) -> Result<ClassMethod, CompileError> {
-        if method
-            .parameters
-            .iter()
-            .any(|parameter| parameter.modifiers != ast::Modifiers::default())
-        {
-            return Err(self.error("Constructor promotion not supported yet", line));
-        }
         let declaration = ast::FunctionDeclaration {
             attributes: method.attributes.clone(),
             name: ast::Identifier {
@@ -128,5 +207,14 @@ impl Compiler<'_> {
             is_abstract: method.body.is_none(),
             is_final: method.modifiers.is_final,
         })
+    }
+}
+
+/// All member categories use the same default public visibility.
+fn member_visibility(modifiers: &ast::Modifiers) -> Visibility {
+    match modifiers.visibility {
+        Some(ast::Visibility::Private) => Visibility::Private,
+        Some(ast::Visibility::Protected) => Visibility::Protected,
+        _ => Visibility::Public,
     }
 }

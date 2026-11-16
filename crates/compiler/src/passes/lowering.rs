@@ -22,6 +22,15 @@ impl Tables {
     ) {
         use ir::Instruction as Old;
         let instruction = match source {
+            Old::ClassConstant {
+                destination,
+                class,
+                name,
+            } => Instruction::FetchClassConstant {
+                dst: destination,
+                class,
+                name: self.name(&name),
+            },
             Old::DeclareClass(index) => Instruction::DeclareClass {
                 class: phera_bytecode::ClassId(index as u32),
             },
@@ -142,15 +151,15 @@ impl Tables {
                 place,
             } => Instruction::MakeReference {
                 dst,
-                path: path(function, place),
+                path: path(self, function, place),
             },
             Old::Rebind { place, source: src } => Instruction::BindReference {
-                path: path(function, place),
+                path: path(self, function, place),
                 src,
             },
             Old::Bind { place, source } => self.bind_reference(function, place, source, scratch),
             Old::Unset(place) => Instruction::UnsetPath {
-                path: path(function, place),
+                path: path(self, function, place),
             },
             Old::Binary {
                 destination: dst,
@@ -196,6 +205,7 @@ impl Tables {
                         ir::Unary::Int => CastKind::Int,
                         ir::Unary::Float => CastKind::Float,
                         ir::Unary::String => CastKind::String,
+                        ir::Unary::Object => CastKind::Object,
                         _ => CastKind::Array,
                     },
                 },
@@ -289,7 +299,7 @@ impl Tables {
                     Instruction::IterStartReference {
                         subject: src,
                         iter: IterId(id.0),
-                        path: path(function, place),
+                        path: path(self, function, place),
                         end: Target(0),
                     }
                 } else {

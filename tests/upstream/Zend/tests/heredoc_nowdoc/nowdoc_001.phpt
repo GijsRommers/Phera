@@ -22,5 +22,3 @@ print "{$x}";
 This is a nowdoc test.
 This is another nowdoc test.
 With another line in it.
---XFAIL--
-Requires classes and object construction in included nowdoc.inc (outside this milestone).

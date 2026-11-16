@@ -49,6 +49,8 @@ pub struct ClassConstant {
     pub visibility: Visibility,
     pub is_final: bool,
     pub initializer: FunctionId,
+    /// PHP 8.3 validates the lazily evaluated value against this declaration.
+    pub ty: Option<TypeId>,
 }
 
 /// An absent default on a typed property means uninitialized, rather than null.

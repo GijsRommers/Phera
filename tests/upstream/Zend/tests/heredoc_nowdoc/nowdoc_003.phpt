@@ -21,5 +21,3 @@ print "{$x}";
 --EXPECT--
 This is nowdoc test #$a.
 This is nowdoc test #$b.
---XFAIL--
-Requires classes and object construction in included nowdoc.inc (outside this milestone).

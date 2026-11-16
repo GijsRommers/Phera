@@ -9,15 +9,25 @@ use crate::inline_stack::InlineStack;
 
 /// Parents retain each detached container while an iterative write visits its child.
 enum Parent {
-    String { bytes: Vec<u8>, index: usize },
-    Array { array: Rc<PhpArray>, key: ArrayKey },
+    String {
+        bytes: Vec<u8>,
+        index: usize,
+    },
+    Array {
+        array: Rc<PhpArray>,
+        key: ArrayKey,
+    },
     Reference(Rc<RefCell<Value>>),
+    Object {
+        object: Rc<phera_value::Object>,
+        key: ArrayKey,
+    },
 }
 
 /// Walk and rebuild nested containers iteratively, keeping PHP references shared.
 pub(super) fn update(
     mut current: Value,
-    keys: &InlineStack<Option<ArrayKey>>,
+    keys: &InlineStack<PathKey>,
     value: Value,
     mutation: crate::access_mode::Mutation,
     diagnostics: &mut dyn Diagnostics,
@@ -33,6 +43,24 @@ pub(super) fn update(
             parents.push(Parent::Reference(register));
             current = value;
         }
+        if let PathKey::Property(key) = key {
+            let Value::Object(object) = current else {
+                return Err(NativeError::error(format!(
+                    "Attempt to assign property \"{}\" on {}",
+                    property_name(key),
+                    current.type_name()
+                )));
+            };
+            current = crate::property_storage::take(&object, key);
+            parents.push(Parent::Object {
+                object,
+                key: key.clone(),
+            });
+            continue;
+        }
+        let PathKey::Index(key) = key else {
+            return Err(internal_error!("path key"));
+        };
         if current.is_null() || matches!(current, Value::Bool(false)) {
             current = Value::Array(Rc::new(PhpArray::new()))
         }
@@ -166,6 +194,15 @@ fn rebuild(
                     .map_err(|_| internal_error!("borrowed reference"))? = current;
                 Value::Reference(register)
             }
+            Parent::Object { object, key } => {
+                if remove {
+                    object.remove(&key);
+                    remove = false;
+                } else {
+                    crate::property_storage::write(&object, key, current);
+                }
+                Value::Object(object)
+            }
             Parent::Array { mut array, key } => {
                 if remove {
                     Rc::make_mut(&mut array).remove(&key);
@@ -178,4 +215,21 @@ fn rebuild(
         };
     }
     Ok(current)
+}
+
+/// Property steps must never be confused with array offsets on scalar values.
+#[derive(Clone)]
+pub(crate) enum PathKey {
+    Index(Option<ArrayKey>),
+    Property(ArrayKey),
+}
+
+/// Diagnostics display the source property name rather than its storage prefix.
+pub(crate) fn property_name(key: &ArrayKey) -> String {
+    match key {
+        ArrayKey::String(name) => {
+            String::from_utf8_lossy(phera_value::split_property_key(name.as_bytes()).0).into_owned()
+        }
+        ArrayKey::Int(index) => index.to_string(),
+    }
 }

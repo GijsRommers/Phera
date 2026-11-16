@@ -28,5 +28,3 @@ use
 use
 
 Done
---XFAIL--
-Requires classes (outside this milestone).
