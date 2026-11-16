@@ -52,6 +52,7 @@ impl AccessPath {
         }
     }
 
+    /// Borrow a compiled path while the access handle keeps its owning unit alive.
     fn definition(&self) -> Result<Option<&Path>, NativeError> {
         let PathSource::Compiled {
             unit,
@@ -68,7 +69,7 @@ impl AccessPath {
         function
             .and_then(|function| function.paths.get(index.index()))
             .map(Some)
-            .ok_or_else(|| NativeError::error("Phera internal error: invalid path"))
+            .ok_or_else(|| internal_error!("invalid path"))
     }
 
     /// Resolve the root without evaluating or cloning any PHP values.
@@ -78,7 +79,7 @@ impl AccessPath {
         }
         self.definition()?
             .map(|path| path.base)
-            .ok_or_else(|| NativeError::error("Phera internal error: missing path"))
+            .ok_or_else(|| internal_error!("missing path"))
     }
 
     /// Walk the original bytecode steps, followed by the live iterator key.
@@ -94,6 +95,7 @@ impl AccessPath {
         self.key = Some(Step::Index(key));
         self
     }
+
     /// Specialized append instructions retain the ordinary path fallback.
     pub(crate) fn with_append(mut self) -> Self {
         self.key = Some(Step::Append);

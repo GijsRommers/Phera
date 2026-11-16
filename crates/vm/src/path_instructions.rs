@@ -9,49 +9,62 @@ impl Vm {
     /// Append through aliases using the ordinary PHP write semantics.
     pub(crate) fn append_local(&mut self, local: Reg, source: Reg) -> Result<(), NativeError> {
         let value = self.read_local(source);
-        self.write_place(&crate::AccessPath::local(local).with_append(), value, false)
+        self.write_place(
+            &crate::AccessPath::local(local).with_append(),
+            value,
+            crate::access_mode::Binding::ByValue,
+        )
     }
 
     /// Implements PHP Fetch semantics outside the dispatch loop.
     pub(crate) fn fetch_path(
         &mut self,
-        dst: Reg,
+        destination: Reg,
         path: PathId,
         mode: FetchMode,
     ) -> Result<(), NativeError> {
         let place = self.path(path)?;
-        let value = self.read_place(&place, mode != phera_bytecode::FetchMode::Read)?;
-        self.set(dst, value);
+        let value = self.read_place(
+            &place,
+            if mode == FetchMode::Read {
+                crate::access_mode::Missing::Warn
+            } else {
+                crate::access_mode::Missing::Silent
+            },
+        )?;
+        self.set(destination, value);
         Ok(())
     }
+
     /// Implements PHP AssignOpPath semantics outside the dispatch loop.
     pub(crate) fn assign_op_path(
         &mut self,
-        op: BinaryOp,
-        dst: Reg,
+        operator: BinaryOp,
+        destination: Reg,
         path: PathId,
-        src: Reg,
+        source: Reg,
     ) -> Result<(), NativeError> {
         let place = self.path(path)?;
-        let left = self.read_place(&place, false)?;
-        let mut diagnostics = std::mem::take(&mut self.diagnostic_reporter.operator_diagnostics);
-        let value = ops::binary(op, &left, &self.operand(src), &mut diagnostics);
+        let left = self.read_place(&place, crate::access_mode::Missing::Warn)?;
+        let mut diagnostics = self.diagnostic_reporter.take_operator();
+        let value = ops::binary(operator, &left, &self.operand(source), &mut diagnostics);
         self.diagnostics_flush(diagnostics);
         let value = value?;
-        self.write_place(&place, value.clone(), false)?;
-        self.set(dst, value);
+        self.write_place(&place, value.clone(), crate::access_mode::Binding::ByValue)?;
+        self.set(destination, value);
         Ok(())
     }
+
     /// Implements PHP IncDecPath semantics outside the dispatch loop.
     pub(crate) fn inc_dec_path(
         &mut self,
         mode: IncDec,
-        dst: Reg,
+        destination: Reg,
         path: PathId,
     ) -> Result<(), NativeError> {
         let place = self.path(path)?;
-        let old = self.read_place(&place, false)?;
-        let mut diagnostics = std::mem::take(&mut self.diagnostic_reporter.operator_diagnostics);
+        let old = self.read_place(&place, crate::access_mode::Missing::Warn)?;
+        let mut diagnostics = self.diagnostic_reporter.take_operator();
         let value = if matches!(mode, IncDec::PreIncrement | IncDec::PostIncrement) {
             phera_value::increment(&old, &mut diagnostics)
         } else {
@@ -59,9 +72,9 @@ impl Vm {
         };
         self.diagnostics_flush(diagnostics);
         let value = value?;
-        self.write_place(&place, value.clone(), false)?;
+        self.write_place(&place, value.clone(), crate::access_mode::Binding::ByValue)?;
         self.set(
-            dst,
+            destination,
             if matches!(mode, IncDec::PostIncrement | IncDec::PostDecrement) {
                 old
             } else {
@@ -70,27 +83,42 @@ impl Vm {
         );
         Ok(())
     }
+
     /// Implements PHP AssignPath semantics outside the dispatch loop.
-    pub(crate) fn assign_path(&mut self, path: PathId, src: Reg) -> Result<(), NativeError> {
-        let value = self.read_local(src);
-        self.write_place(&self.path(path)?, value, false)?;
+    pub(crate) fn assign_path(&mut self, path: PathId, source: Reg) -> Result<(), NativeError> {
+        let value = self.read_local(source);
+        self.write_place(
+            &self.path(path)?,
+            value,
+            crate::access_mode::Binding::ByValue,
+        )?;
         Ok(())
     }
+
     /// Implements PHP MakeReference semantics outside the dispatch loop.
-    pub(crate) fn make_reference(&mut self, dst: Reg, path: PathId) -> Result<(), NativeError> {
+    pub(crate) fn make_reference(
+        &mut self,
+        destination: Reg,
+        path: PathId,
+    ) -> Result<(), NativeError> {
         let value = self.reference(&self.path(path)?)?;
-        self.set(dst, value);
+        self.set(destination, value);
         Ok(())
     }
+
     /// Implements PHP BindReference semantics outside the dispatch loop.
-    pub(crate) fn bind_reference(&mut self, path: PathId, src: Reg) -> Result<(), NativeError> {
+    pub(crate) fn bind_reference(&mut self, path: PathId, source: Reg) -> Result<(), NativeError> {
         let value = self
             .current()
-            .and_then(|frame| frame.slots(&self.registers).get(src.index()))
+            .and_then(|frame| frame.slots(&self.registers).get(source.index()))
             .and_then(Option::as_ref)
             .cloned()
             .unwrap_or_default();
-        self.write_place(&self.path(path)?, value, true)?;
+        self.write_place(
+            &self.path(path)?,
+            value,
+            crate::access_mode::Binding::ByReference,
+        )?;
         Ok(())
     }
 }

@@ -63,7 +63,7 @@ impl ConstantTable {
         let definition = unit
             .symbols
             .get(symbol.index())
-            .ok_or_else(|| NativeError::error("Phera internal error: constant symbol"))?;
+            .ok_or_else(|| internal_error!("constant symbol"))?;
         let value = self
             .values
             .get(&definition.name)

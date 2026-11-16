@@ -19,6 +19,7 @@ impl Vm {
         self.jump(target)?;
         Ok(())
     }
+
     /// Implements PHP JumpIf semantics outside the dispatch loop.
     pub(crate) fn jump_if(
         &mut self,
@@ -34,6 +35,7 @@ impl Vm {
         }
         Ok(())
     }
+
     /// Implements PHP JumpIfNot semantics outside the dispatch loop.
     pub(crate) fn jump_if_not(
         &mut self,
@@ -49,6 +51,7 @@ impl Vm {
         }
         Ok(())
     }
+
     /// Implements PHP JumpIfNull semantics outside the dispatch loop.
     pub(crate) fn jump_if_null(&mut self, value: Reg, target: Target) -> Result<(), NativeError> {
         if self.get(value).is_null() {
@@ -56,6 +59,7 @@ impl Vm {
         }
         Ok(())
     }
+
     /// Implements PHP JumpIfNotNull semantics outside the dispatch loop.
     pub(crate) fn jump_if_not_null(
         &mut self,
@@ -79,11 +83,11 @@ impl Vm {
         target: Target,
     ) -> Result<(), NativeError> {
         let left = self.read_local(left);
-        let mut diagnostics = std::mem::take(&mut self.diagnostic_reporter.operator_diagnostics);
+        let mut diagnostics = self.diagnostic_reporter.take_operator();
         let value =
             crate::ops::binary(operator, &left, &Value::Int(right as i64), &mut diagnostics);
         self.diagnostics_flush_reuse(&mut diagnostics);
-        self.diagnostic_reporter.operator_diagnostics = diagnostics;
+        self.diagnostic_reporter.restore_operator(diagnostics);
         if !to_bool(&value?) {
             self.jump(target)?
         }

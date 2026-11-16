@@ -14,8 +14,7 @@ impl Vm {
             Value::String(_) => "of type string".to_owned(),
             Value::Array(_) => "of type array".to_owned(),
             _ => {
-                let mut diagnostics =
-                    std::mem::take(&mut self.diagnostic_reporter.operator_diagnostics);
+                let mut diagnostics = self.diagnostic_reporter.take_operator();
                 to_php_string(&value, &mut diagnostics)?.to_string_lossy()
             }
         };

@@ -1,27 +1,33 @@
 //! Paths are walked and rebuilt iteratively, applying COW at every array level.
+
 use std::{cell::RefCell, rc::Rc};
 
 use phera_bytecode::{PathBase, Reg, Step};
-
-use crate::{inline_stack::InlineStack, path_update::update};
 use phera_extension_api::{NativeError, NativeResult};
 use phera_value::{ArrayKey, Value, to_php_string};
 
+use crate::access_mode::{Binding, Creation, Missing, Mutation};
 use crate::{AccessPath, Vm};
+use crate::{inline_stack::InlineStack, path_update::update};
+
 impl Vm {
-    fn base_reg(&mut self, place: &AccessPath, create: bool) -> Result<Option<Reg>, NativeError> {
+    /// Resolve a dynamic name, optionally creating its register for a write.
+    fn base_register(
+        &mut self,
+        place: &AccessPath,
+        creation: Creation,
+    ) -> Result<Option<Reg>, NativeError> {
         let base = match place.base()? {
             PathBase::Register(register) => return Ok(Some(register)),
             PathBase::Named(register) => register,
         };
-        let mut diagnostics = std::mem::take(&mut self.diagnostic_reporter.operator_diagnostics);
+        let mut diagnostics = self.diagnostic_reporter.take_operator();
         let name = to_php_string(&self.operand(base), &mut diagnostics)?.to_string_lossy();
         self.diagnostics_flush(diagnostics);
         let frame = self
             .call_stack
-            .frames
-            .last_mut()
-            .ok_or_else(|| NativeError::error("Phera internal error: place without frame"))?;
+            .current_mut()
+            .ok_or_else(|| internal_error!("place without frame"))?;
         if let Some(index) = frame.function().locals.iter().position(|candidate| {
             frame
                 .unit
@@ -34,22 +40,24 @@ impl Vm {
         if let Some(register) = frame.dynamic.get(&name) {
             return Ok(Some(*register));
         }
-        if create {
+        if creation == Creation::Create {
             let register = Reg(u16::try_from(frame.count)
                 .map_err(|_| NativeError::error("Phera register limit exceeded"))?);
-            self.registers.push(None);
+            self.registers.push_undefined();
             frame.count += 1;
             frame.dynamic.insert(name, register);
             Ok(Some(register))
         } else {
-            if self.diagnostic_reporter.suppression == 0 {
+            if self.diagnostic_reporter.is_visible() {
                 self.warn(format!("Undefined variable ${name}"))
             }
             Ok(None)
         }
     }
+
+    /// Convert path keys in source order while reusing the operator diagnostic buffer.
     fn keys(&mut self, place: &AccessPath) -> Result<InlineStack<Option<ArrayKey>>, NativeError> {
-        let mut diagnostics = std::mem::take(&mut self.diagnostic_reporter.operator_diagnostics);
+        let mut diagnostics = self.diagnostic_reporter.take_operator();
         let mut keys = InlineStack::new();
         let result = (|| {
             for step in place.steps()? {
@@ -65,38 +73,16 @@ impl Vm {
             Ok(())
         })();
         self.diagnostics_flush_reuse(&mut diagnostics);
-        self.diagnostic_reporter.operator_diagnostics = diagnostics;
+        self.diagnostic_reporter.restore_operator(diagnostics);
         result.map(|()| keys)
     }
-    pub(crate) fn read_place(&mut self, place: &AccessPath, quiet: bool) -> NativeResult {
-        let Some(register) = self.base_reg(place, false)? else {
+
+    /// Read through PHP references, suppressing missing-slot warnings when requested.
+    pub(crate) fn read_place(&mut self, place: &AccessPath, missing: Missing) -> NativeResult {
+        let Some(register) = self.base_register(place, Creation::Existing)? else {
             return Ok(Value::Null);
         };
-        let slot = self
-            .current()
-            .and_then(|frame| frame.slots(&self.registers).get(register.0 as usize))
-            .cloned()
-            .flatten();
-        let mut value = match slot {
-            Some(value) => value.deref().clone(),
-            None => {
-                if !quiet {
-                    let name = self
-                        .current()
-                        .and_then(|frame| {
-                            frame
-                                .function()
-                                .locals
-                                .get(register.0 as usize)
-                                .and_then(|name| frame.unit.names.get(name.index()))
-                        })
-                        .cloned()
-                        .unwrap_or_default();
-                    self.warn(format!("Undefined variable ${name}"));
-                }
-                Value::Null
-            }
-        };
+        let mut value = self.read_root(register, missing);
         for key in self.keys(place)?.iter().cloned() {
             let key = key.ok_or_else(|| NativeError::error("Cannot use [] for reading"))?;
             value = match value {
@@ -104,43 +90,15 @@ impl Vm {
                     if let Some(value) = array.get(&key) {
                         value.deref().clone()
                     } else {
-                        if !quiet {
+                        if missing == Missing::Warn {
                             self.warn(format!("Undefined array key {}", display_key(&key)))
                         }
                         Value::Null
                     }
                 }
-                Value::String(string) => {
-                    let index = match key {
-                        ArrayKey::Int(index) => index,
-                        ArrayKey::String(key) => {
-                            let name = key.to_string_lossy();
-                            name.parse::<i64>().map_err(|_| {
-                                NativeError::type_error(
-                                    "Cannot access offset of type string on string",
-                                )
-                            })?
-                        }
-                    };
-                    let index = if index < 0 {
-                        string.len() as i64 + index
-                    } else {
-                        index
-                    };
-                    if let Some(b) = usize::try_from(index)
-                        .ok()
-                        .and_then(|index| string.as_bytes().get(index))
-                    {
-                        Value::from(vec![*b])
-                    } else {
-                        if !quiet {
-                            self.warn(format!("Uninitialized string offset {index}"))
-                        }
-                        Value::from("")
-                    }
-                }
+                Value::String(string) => self.read_string_offset(&string, key, missing)?,
                 other => {
-                    if !quiet {
+                    if missing == Missing::Warn {
                         self.warn(format!(
                             "Trying to access array offset on {}",
                             other.type_name()
@@ -152,15 +110,17 @@ impl Vm {
         }
         Ok(value)
     }
+
+    /// Separate shared arrays on writes while preserving reference-cell identity.
     pub(crate) fn write_place(
         &mut self,
         place: &AccessPath,
         value: Value,
-        rebind: bool,
+        binding: Binding,
     ) -> Result<(), NativeError> {
         let register = self
-            .base_reg(place, true)?
-            .ok_or_else(|| NativeError::error("Phera internal error: missing place"))?;
+            .base_register(place, Creation::Create)?
+            .ok_or_else(|| internal_error!("missing place"))?;
         // Appending to an existing array needs neither key conversion nor a
         // parent reconstruction stack. References retain the general handler.
         let mut steps = place.steps()?;
@@ -168,8 +128,7 @@ impl Vm {
             && steps.next().is_none()
             && let Some(Value::Array(array)) = self
                 .call_stack
-                .frames
-                .last_mut()
+                .current_mut()
                 .and_then(|frame| {
                     frame
                         .slots_mut(&mut self.registers)
@@ -183,8 +142,7 @@ impl Vm {
         let keys = self.keys(place)?;
         let root = self
             .call_stack
-            .frames
-            .last_mut()
+            .current_mut()
             .and_then(|frame| {
                 frame
                     .slots_mut(&mut self.registers)
@@ -192,18 +150,20 @@ impl Vm {
             })
             .and_then(Option::take)
             .unwrap_or_default();
-        let mut diagnostics = std::mem::take(&mut self.diagnostic_reporter.operator_diagnostics);
-        let updated = update(root, &keys, value, rebind, false, &mut diagnostics);
+        let mut diagnostics = self.diagnostic_reporter.take_operator();
+        let updated = update(root, &keys, value, binding.into(), &mut diagnostics);
         self.diagnostics_flush(diagnostics);
         let updated = updated?;
         self.set(register, updated);
         Ok(())
     }
+
+    /// Promote a slot to a shared reference cell only when an alias is requested.
     pub(crate) fn reference(&mut self, place: &AccessPath) -> NativeResult {
-        let value = self.read_place(place, true)?;
+        let value = self.read_place(place, crate::access_mode::Missing::Silent)?;
         let register = self
-            .base_reg(place, true)?
-            .ok_or_else(|| NativeError::error("Phera internal error: reference missing"))?;
+            .base_register(place, Creation::Create)?
+            .ok_or_else(|| internal_error!("reference missing"))?;
         let mut raw = self
             .current()
             .and_then(|frame| frame.slots(&self.registers).get(register.0 as usize))
@@ -221,15 +181,21 @@ impl Vm {
             return Ok(raw);
         }
         let reference = Value::Reference(Rc::new(RefCell::new(value)));
-        self.write_place(place, reference.clone(), true)?;
+        self.write_place(
+            place,
+            reference.clone(),
+            crate::access_mode::Binding::ByReference,
+        )?;
         Ok(reference)
     }
+
+    /// Remove the slot itself without assigning null through an existing alias.
     pub(crate) fn unset_place(&mut self, place: &AccessPath) -> Result<(), NativeError> {
-        let Some(register) = self.base_reg(place, false)? else {
+        let Some(register) = self.base_register(place, Creation::Existing)? else {
             return Ok(());
         };
         if place.steps()?.next().is_none() {
-            if let Some(string) = self.call_stack.frames.last_mut().and_then(|frame| {
+            if let Some(string) = self.call_stack.current_mut().and_then(|frame| {
                 frame
                     .slots_mut(&mut self.registers)
                     .get_mut(register.0 as usize)
@@ -241,8 +207,7 @@ impl Vm {
         let keys = self.keys(place)?;
         let root = self
             .call_stack
-            .frames
-            .last_mut()
+            .current_mut()
             .and_then(|frame| {
                 frame
                     .slots_mut(&mut self.registers)
@@ -250,17 +215,49 @@ impl Vm {
             })
             .and_then(Option::take)
             .unwrap_or_default();
-        let mut diagnostics = std::mem::take(&mut self.diagnostic_reporter.operator_diagnostics);
-        let updated = update(root, &keys, Value::Null, true, true, &mut diagnostics);
+        let mut diagnostics = self.diagnostic_reporter.take_operator();
+        let updated = update(root, &keys, Value::Null, Mutation::Unset, &mut diagnostics);
         self.diagnostics_flush(diagnostics);
         let updated = updated?;
         self.set(register, updated);
         Ok(())
     }
 }
+
 fn display_key(key: &ArrayKey) -> String {
     match key {
         ArrayKey::Int(index) => index.to_string(),
         ArrayKey::String(string) => format!("\"{}\"", string.to_string_lossy()),
+    }
+}
+
+impl Vm {
+    /// Read a root slot without evaluating array keys, retaining undefined-variable warnings.
+    fn read_root(&mut self, register: Reg, missing: Missing) -> Value {
+        let slot = self
+            .current()
+            .and_then(|frame| frame.slots(&self.registers).get(register.0 as usize))
+            .cloned()
+            .flatten();
+        match slot {
+            Some(value) => value.deref().clone(),
+            None => {
+                if missing == Missing::Warn {
+                    let name = self
+                        .current()
+                        .and_then(|frame| {
+                            frame
+                                .function()
+                                .locals
+                                .get(register.0 as usize)
+                                .and_then(|name| frame.unit.names.get(name.index()))
+                        })
+                        .cloned()
+                        .unwrap_or_default();
+                    self.warn(format!("Undefined variable ${name}"));
+                }
+                Value::Null
+            }
+        }
     }
 }

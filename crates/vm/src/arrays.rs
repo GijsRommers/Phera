@@ -1,16 +1,28 @@
 //! In-place array construction without keeping an extra COW owner.
-use crate::Vm;
+
+use std::rc::Rc;
+
 use phera_bytecode::Reg;
 use phera_extension_api::NativeError;
 use phera_value::{ArrayKey, Value};
-use std::rc::Rc;
+
+use crate::Vm;
+
+/// Literal construction either inserts one element or unpacks an entire array.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ArrayWrite {
+    Element,
+    Spread,
+}
+
 impl Vm {
+    /// Detach the array register before mutation so a temporary owner does not force COW.
     pub(crate) fn array_write(
         &mut self,
         register: Reg,
         key: Option<Reg>,
         source: Reg,
-        spread: bool,
+        mode: ArrayWrite,
     ) -> Result<(), NativeError> {
         let value = self
             .current()
@@ -18,15 +30,14 @@ impl Vm {
             .and_then(Option::as_ref)
             .cloned()
             .unwrap_or_default();
-        let mut diagnostics = std::mem::take(&mut self.diagnostic_reporter.operator_diagnostics);
+        let mut diagnostics = self.diagnostic_reporter.take_operator();
         let key = key
             .map(|key| ArrayKey::from_value_diag(&self.operand(key), &mut diagnostics))
             .transpose()?;
         self.diagnostics_flush(diagnostics);
         let mut target = self
             .call_stack
-            .frames
-            .last_mut()
+            .current_mut()
             .and_then(|frame| {
                 frame
                     .slots_mut(&mut self.registers)
@@ -35,10 +46,10 @@ impl Vm {
             .and_then(Option::take)
             .unwrap_or_default();
         let Value::Array(array) = &mut target else {
-            return Err(NativeError::error("Phera internal error: array"));
+            return Err(internal_error!("array"));
         };
         let array = Rc::make_mut(array);
-        if spread {
+        if mode == ArrayWrite::Spread {
             let Value::Array(source) = value else {
                 return Err(NativeError::error(
                     "Only arrays and Traversables can be unpacked",

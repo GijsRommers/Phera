@@ -5,11 +5,11 @@ use phera_value::CollectDiagnostics;
 /// Owns the request state for diagnostic reporter.
 pub(crate) struct DiagnosticReporter {
     /// Request-owned operator diagnostics.
-    pub(crate) operator_diagnostics: CollectDiagnostics,
+    operator_diagnostics: CollectDiagnostics,
     /// Request-owned suppression.
-    pub(crate) suppression: usize,
+    suppression: usize,
     /// Request-owned diagnostic capture.
-    pub(crate) diagnostic_capture: Option<Vec<Vec<u8>>>,
+    diagnostic_capture: Option<Vec<Vec<u8>>>,
 }
 
 impl DiagnosticReporter {
@@ -18,6 +18,63 @@ impl DiagnosticReporter {
             operator_diagnostics: CollectDiagnostics::default(),
             suppression: 0,
             diagnostic_capture: None,
+        }
+    }
+}
+
+impl DiagnosticReporter {
+    /// Operators borrow a reusable collector without retaining a mutable VM borrow.
+    pub(crate) fn take_operator(&mut self) -> CollectDiagnostics {
+        std::mem::take(&mut self.operator_diagnostics)
+    }
+
+    pub(crate) fn restore_operator(&mut self, diagnostics: CollectDiagnostics) {
+        self.operator_diagnostics = diagnostics;
+    }
+
+    pub(crate) fn operator(&mut self) -> &mut CollectDiagnostics {
+        &mut self.operator_diagnostics
+    }
+
+    pub(crate) fn has_pending(&self) -> bool {
+        !self.operator_diagnostics.entries.is_empty()
+    }
+
+    /// PHP @ suppresses ordinary diagnostics within its nested expression.
+    pub(crate) fn begin_silence(&mut self) {
+        self.suppression += 1;
+    }
+
+    pub(crate) fn end_silence(&mut self) {
+        self.suppression = self.suppression.saturating_sub(1);
+    }
+
+    /// Fatal errors remain visible even when raised inside @.
+    pub(crate) fn end_all_silence(&mut self) {
+        self.suppression = 0;
+    }
+
+    pub(crate) fn is_visible(&self) -> bool {
+        self.suppression == 0
+    }
+
+    /// Return output for the embedding VM, or retain it while capturing diagnostics.
+    pub(crate) fn report(
+        &mut self,
+        kind: &str,
+        message: String,
+        file: &str,
+        line: usize,
+    ) -> Option<Vec<u8>> {
+        if !self.is_visible() {
+            return None;
+        }
+        let bytes = format!("\n{kind}: {message} in {file} on line {line}\n").into_bytes();
+        if let Some(capture) = &mut self.diagnostic_capture {
+            capture.push(bytes);
+            None
+        } else {
+            Some(bytes)
         }
     }
 }

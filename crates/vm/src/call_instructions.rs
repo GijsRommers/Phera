@@ -8,16 +8,16 @@ use crate::Vm;
 
 impl Vm {
     /// Implements PHP MakeCallable semantics outside the dispatch loop.
-    pub(crate) fn make_callable(&mut self, dst: Reg) -> Result<(), NativeError> {
+    pub(crate) fn make_callable(&mut self, destination: Reg) -> Result<(), NativeError> {
         let call = self
             .call_stack
-            .frames
-            .last_mut()
+            .current_mut()
             .and_then(|frame| frame.calls.pop())
-            .ok_or_else(|| NativeError::error("Phera internal error: callable"))?;
-        self.set(dst, Value::from(call.callee.name.clone()));
+            .ok_or_else(|| internal_error!("callable"))?;
+        self.set(destination, Value::from(call.callee.name.clone()));
         Ok(())
     }
+
     /// Implements PHP ReceiveDefault semantics outside the dispatch loop.
     pub(crate) fn receive_default(
         &mut self,
@@ -33,25 +33,26 @@ impl Vm {
         }
         Ok(())
     }
+
     /// Implements PHP DeclareFunction semantics outside the dispatch loop.
     pub(crate) fn declare_function(&mut self, function: FunctionId) -> Result<(), NativeError> {
         let unit = self
             .current()
-            .ok_or_else(|| NativeError::error("Phera internal error: declaration"))?
+            .ok_or_else(|| internal_error!("declaration"))?
             .unit
             .clone();
         let name = unit
             .functions
             .get(function.index())
-            .ok_or_else(|| NativeError::error("Phera internal error: function"))?
+            .ok_or_else(|| internal_error!("function"))?
             .name
             .to_ascii_lowercase();
-        if self.function_table.functions.contains_key(&name) {
+        if self.function_table.contains(&name) {
             return Err(NativeError::error(format!(
                 "Cannot redeclare function {name}()"
             )));
         }
-        self.function_table.functions.insert(
+        self.function_table.insert(
             name,
             crate::function_table::FunctionRef {
                 unit,

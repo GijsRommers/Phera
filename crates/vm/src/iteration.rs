@@ -1,28 +1,32 @@
 //! Foreach snapshots and live reference traversal.
-use crate::{AccessPath, Vm, frame};
+
 use phera_bytecode::{IterId, Reg, Target};
 use phera_extension_api::NativeError;
 use phera_value::{ArrayKey, Value};
+
+use crate::{AccessPath, Vm, frame};
+
 impl Vm {
+    /// By-value foreach retains an array snapshot, so later writes separate by COW.
     pub(crate) fn iter_start(
         &mut self,
-        iter: IterId,
-        src: Reg,
+        iterator: IterId,
+        source: Reg,
         place: Option<AccessPath>,
     ) -> Result<(), NativeError> {
-        let v = self.get(src);
-        let snapshot = if let Value::Array(a) = v {
-            Some(a)
+        let element = self.get(source);
+        let snapshot = if let Value::Array(array) = element {
+            Some(array)
         } else {
             self.warn(format!(
                 "foreach() argument must be of type array|object, {} given",
-                v.type_name()
+                element.type_name()
             ));
             None
         };
-        if let Some(f) = self.call_stack.frames.last_mut() {
-            f.iterators.insert(
-                iter.0,
+        if let Some(frame) = self.call_stack.current_mut() {
+            frame.iterators.insert(
+                iterator.0,
                 frame::IteratorState {
                     snapshot: if place.is_none() { snapshot } else { None },
                     source: place,
@@ -34,21 +38,23 @@ impl Vm {
 
         Ok(())
     }
+
+    /// By-reference foreach follows a live place instead of an array snapshot.
     pub(crate) fn iter_start_reference(
         &mut self,
-        iter: IterId,
+        iterator: IterId,
         place: AccessPath,
     ) -> Result<(), NativeError> {
-        let value = self.read_place(&place, false)?;
+        let value = self.read_place(&place, crate::access_mode::Missing::Warn)?;
         if !value.is_array() {
             self.warn(format!(
                 "foreach() argument must be of type array|object, {} given",
                 value.type_name()
             ));
         }
-        if let Some(frame) = self.call_stack.frames.last_mut() {
+        if let Some(frame) = self.call_stack.current_mut() {
             frame.iterators.insert(
-                iter.0,
+                iterator.0,
                 frame::IteratorState {
                     snapshot: None,
                     source: Some(place),
@@ -59,62 +65,80 @@ impl Vm {
         }
         Ok(())
     }
+
+    /// Advance in insertion order and bind a live element cell for reference iteration.
     pub(crate) fn iter_next(
         &mut self,
-        iter: IterId,
+        iterator: IterId,
         key: Option<Reg>,
         value: Reg,
         end: Target,
     ) -> Result<(), NativeError> {
         let mut state = self
             .call_stack
-            .frames
-            .last_mut()
-            .and_then(|f| f.iterators.remove(&iter.0))
-            .ok_or_else(|| NativeError::error("Phera internal error: missing iterator"))?;
-        let array = if let Some(p) = &state.source {
-            match self.read_place(p, true)? {
-                Value::Array(a) => Some(a),
+            .current_mut()
+            .and_then(|frame| frame.iterators.remove(&iterator.0))
+            .ok_or_else(|| internal_error!("missing iterator"))?;
+        let array = if let Some(position) = &state.source {
+            match self.read_place(position, crate::access_mode::Missing::Silent)? {
+                Value::Array(array) => Some(array),
                 _ => None,
             }
         } else {
             state.snapshot.clone()
         };
-        let position = array.as_ref().and_then(|a| {
+        let position = array.as_ref().and_then(|array| {
             if state.started {
-                state.position.and_then(|p| a.next_position(p))
+                state
+                    .position
+                    .and_then(|position| array.next_position(position))
             } else {
-                a.first_position()
+                array.first_position()
             }
         });
         state.started = true;
         state.position = position;
         let entry = array
             .as_ref()
-            .and_then(|a| position.and_then(|p| a.entry_at(p)))
-            .map(|(k, v)| (k.clone(), v.deref().clone()));
+            .and_then(|array| position.and_then(|position| array.entry_at(position)))
+            .map(|(element_key, element)| (element_key.clone(), element.deref().clone()));
         drop(array);
-        if let Some((k, mut v)) = entry {
-            let key_register = key.unwrap_or(value);
-            self.set(
-                key_register,
-                match k {
-                    ArrayKey::Int(i) => Value::Int(i),
-                    ArrayKey::String(s) => Value::String(s),
-                },
-            );
-            if let Some(p) = &state.source {
-                let p = p.clone().with_key(key_register);
-                v = self.reference(&p)?;
-            }
-            self.set(value, v);
+        if let Some((element_key, element)) = entry {
+            self.bind_iteration_entry(element_key, element, state.source.as_ref(), key, value)?;
         } else {
-            self.jump(end)?
+            self.jump(end)?;
         }
-        if let Some(f) = self.call_stack.frames.last_mut() {
-            f.iterators.insert(iter.0, state);
+        if let Some(frame) = self.call_stack.current_mut() {
+            frame.iterators.insert(iterator.0, state);
         }
 
+        Ok(())
+    }
+}
+
+impl Vm {
+    /// Publish the key before resolving a by-reference element path that uses its register.
+    fn bind_iteration_entry(
+        &mut self,
+        element_key: ArrayKey,
+        mut element: Value,
+        source: Option<&AccessPath>,
+        key: Option<Reg>,
+        destination: Reg,
+    ) -> Result<(), NativeError> {
+        let key_register = key.unwrap_or(destination);
+        self.set(
+            key_register,
+            match element_key {
+                ArrayKey::Int(i) => Value::Int(i),
+                ArrayKey::String(string) => Value::String(string),
+            },
+        );
+        if let Some(position) = source {
+            let position = position.clone().with_key(key_register);
+            element = self.reference(&position)?;
+        }
+        self.set(destination, element);
         Ok(())
     }
 }

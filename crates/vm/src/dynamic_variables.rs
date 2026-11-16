@@ -4,15 +4,28 @@ use std::collections::HashMap;
 
 use phera_bytecode::Reg;
 
+/// Only functions with observable dynamic scope allocate their name table eagerly.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum VariableScope {
+    Static,
+    Dynamic,
+}
+
+impl From<bool> for VariableScope {
+    fn from(dynamic: bool) -> Self {
+        if dynamic { Self::Dynamic } else { Self::Static }
+    }
+}
+
 /// Functions with static scope have no dynamic name table.
 pub(crate) struct DynamicVariables {
     names: Option<HashMap<String, Reg>>,
 }
 
 impl DynamicVariables {
-    pub(crate) fn new(enabled: bool) -> Self {
+    pub(crate) fn new(scope: VariableScope) -> Self {
         Self {
-            names: enabled.then(HashMap::new),
+            names: (scope == VariableScope::Dynamic).then(HashMap::new),
         }
     }
 

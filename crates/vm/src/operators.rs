@@ -1,9 +1,12 @@
 //! Borrowed arithmetic operands and amortised in-place string assignment.
-use crate::{Vm, ops};
+
+use std::rc::Rc;
+
 use phera_bytecode::{BinaryOp, CastKind, IncDec, Reg, UnaryOp};
 use phera_extension_api::NativeError;
 use phera_value::{Value, to_php_string};
-use std::rc::Rc;
+
+use crate::{Vm, ops};
 
 impl Vm {
     /// Read a local before applying the literal, retaining undefined-variable warnings.
@@ -15,14 +18,15 @@ impl Vm {
         right: i32,
     ) -> Result<(), NativeError> {
         let left = self.read_local(left);
-        let mut diagnostics = std::mem::take(&mut self.diagnostic_reporter.operator_diagnostics);
+        let mut diagnostics = self.diagnostic_reporter.take_operator();
         let result = ops::binary(operator, &left, &Value::Int(right as i64), &mut diagnostics);
         self.diagnostics_flush_reuse(&mut diagnostics);
-        self.diagnostic_reporter.operator_diagnostics = diagnostics;
+        self.diagnostic_reporter.restore_operator(diagnostics);
         self.set(destination, result?);
         Ok(())
     }
 
+    /// Borrow operands so arithmetic does not add array or string owners.
     pub(crate) fn execute_binary(
         &mut self,
         operator: BinaryOp,
@@ -32,9 +36,8 @@ impl Vm {
     ) -> Result<(), NativeError> {
         let frame = self
             .call_stack
-            .frames
-            .last()
-            .ok_or_else(|| NativeError::error("Phera internal error: operator frame"))?;
+            .current()
+            .ok_or_else(|| internal_error!("operator frame"))?;
         let left = frame
             .slots(&self.registers)
             .get(left.index())
@@ -49,23 +52,12 @@ impl Vm {
         let result = fast_binary(operator, &left, &right)
             .map(Ok)
             .unwrap_or_else(|| {
-                ops::binary(
-                    operator,
-                    &left,
-                    &right,
-                    &mut self.diagnostic_reporter.operator_diagnostics,
-                )
+                ops::binary(operator, &left, &right, self.diagnostic_reporter.operator())
             });
         drop(left);
         drop(right);
-        if !self
-            .diagnostic_reporter
-            .operator_diagnostics
-            .entries
-            .is_empty()
-        {
-            let mut diagnostics =
-                std::mem::take(&mut self.diagnostic_reporter.operator_diagnostics);
+        if self.diagnostic_reporter.has_pending() {
+            let mut diagnostics = self.diagnostic_reporter.take_operator();
             for (kind, message) in diagnostics.entries.drain(..) {
                 let kind = match kind {
                     phera_value::DiagnosticKind::Warning => "Warning",
@@ -74,19 +66,19 @@ impl Vm {
                 };
                 self.diagnostic(kind, message);
             }
-            self.diagnostic_reporter.operator_diagnostics = diagnostics;
+            self.diagnostic_reporter.restore_operator(diagnostics);
         }
         self.set(destination, result?);
         Ok(())
     }
 
+    /// Append directly to strings, including referenced strings, to retain amortized growth.
     pub(crate) fn assign_concat(&mut self, local: Reg, source: Reg) -> Result<bool, NativeError> {
-        let mut diagnostics = std::mem::take(&mut self.diagnostic_reporter.operator_diagnostics);
+        let mut diagnostics = self.diagnostic_reporter.take_operator();
         let source = to_php_string(&self.operand(source), &mut diagnostics)?;
         let target = self
             .call_stack
-            .frames
-            .last_mut()
+            .current_mut()
             .and_then(|frame| frame.slots_mut(&mut self.registers).get_mut(local.index()))
             .and_then(Option::as_mut);
         let changed = match target {
@@ -97,7 +89,7 @@ impl Vm {
             Some(Value::Reference(reference)) => {
                 let mut target = reference
                     .try_borrow_mut()
-                    .map_err(|_| NativeError::error("Phera internal error: borrowed string"))?;
+                    .map_err(|_| internal_error!("borrowed string"))?;
                 if let Value::String(target) = &mut *target {
                     target.push_bytes(source.as_bytes());
                     true
@@ -108,7 +100,7 @@ impl Vm {
             _ => false,
         };
         self.diagnostics_flush_reuse(&mut diagnostics);
-        self.diagnostic_reporter.operator_diagnostics = diagnostics;
+        self.diagnostic_reporter.restore_operator(diagnostics);
         Ok(changed)
     }
 }
@@ -158,14 +150,15 @@ pub(crate) fn fast_binary(operator: BinaryOp, left: &Value, right: &Value) -> Op
 }
 
 impl Vm {
+    /// Apply PHP conversions and emit their diagnostics before publishing the result.
     pub(crate) fn execute_cast(
         &mut self,
         to: phera_bytecode::CastKind,
-        dst: Reg,
-        src: Reg,
+        destination: Reg,
+        source: Reg,
     ) -> Result<(), NativeError> {
-        let value = self.get(src);
-        let mut diagnostics = std::mem::take(&mut self.diagnostic_reporter.operator_diagnostics);
+        let value = self.get(source);
+        let mut diagnostics = self.diagnostic_reporter.take_operator();
         let result = match to {
             CastKind::Bool => Value::Bool(phera_value::cast_to_bool(&value, &mut diagnostics)),
             CastKind::Int => Value::Int(phera_value::to_int(&value, &mut diagnostics)?),
@@ -180,22 +173,23 @@ impl Vm {
             }
         };
         self.diagnostics_flush(diagnostics);
-        self.set(dst, result);
+        self.set(destination, result);
 
         Ok(())
     }
 }
 
 impl Vm {
+    /// Preserve pre/post expression values while assigning through local references.
     pub(crate) fn execute_inc_dec(
         &mut self,
         mode: phera_bytecode::IncDec,
-        dst: Reg,
+        destination: Reg,
         local: Reg,
     ) -> Result<(), NativeError> {
         let old = self.read_local(local);
         let increment = matches!(mode, IncDec::PreIncrement | IncDec::PostIncrement);
-        let mut diagnostics = std::mem::take(&mut self.diagnostic_reporter.operator_diagnostics);
+        let mut diagnostics = self.diagnostic_reporter.take_operator();
         let value = if let Value::Int(integer) = old {
             let step = if increment { 1 } else { -1 };
             Ok(integer
@@ -211,7 +205,7 @@ impl Vm {
         let value = value?;
         self.assign_local(local, value.clone())?;
         self.set(
-            dst,
+            destination,
             if matches!(mode, IncDec::PostIncrement | IncDec::PostDecrement) {
                 old
             } else {
@@ -227,52 +221,53 @@ impl Vm {
     /// Implements PHP AssignOp semantics outside the dispatch loop.
     pub(crate) fn execute_assign_op(
         &mut self,
-        op: BinaryOp,
+        operator: BinaryOp,
         local: Reg,
-        src: Reg,
+        source: Reg,
     ) -> Result<(), NativeError> {
         // A compiler-elided local snapshot must retain its undefined-variable notice.
         if self
             .current()
-            .and_then(|frame| frame.slots(&self.registers).get(src.index()))
+            .and_then(|frame| frame.slots(&self.registers).get(source.index()))
             .is_some_and(Option::is_none)
         {
-            self.read_local(src);
+            self.read_local(source);
         }
         let reference = self
             .current()
             .and_then(|frame| frame.slots(&self.registers).get(local.index()))
             .and_then(Option::as_ref)
             .is_some_and(Value::is_reference);
-        if op != phera_bytecode::BinaryOp::Concat && !reference {
-            self.execute_binary(op, local, local, src)?;
+        if operator != phera_bytecode::BinaryOp::Concat && !reference {
+            self.execute_binary(operator, local, local, source)?;
             return Ok(());
         }
-        if op == phera_bytecode::BinaryOp::Concat && self.assign_concat(local, src)? {
+        if operator == phera_bytecode::BinaryOp::Concat && self.assign_concat(local, source)? {
             return Ok(());
         }
-        let mut diagnostics = std::mem::take(&mut self.diagnostic_reporter.operator_diagnostics);
+        let mut diagnostics = self.diagnostic_reporter.take_operator();
         let value = ops::binary(
-            op,
+            operator,
             &self.operand(local),
-            &self.operand(src),
+            &self.operand(source),
             &mut diagnostics,
         );
         self.diagnostics_flush(diagnostics);
         self.assign_local(local, value?)?;
         Ok(())
     }
+
     /// Implements PHP Unary semantics outside the dispatch loop.
     pub(crate) fn execute_unary(
         &mut self,
-        dst: Reg,
-        op: UnaryOp,
-        src: Reg,
+        destination: Reg,
+        operator: UnaryOp,
+        source: Reg,
     ) -> Result<(), NativeError> {
-        let mut diagnostics = std::mem::take(&mut self.diagnostic_reporter.operator_diagnostics);
-        let value = ops::unary(op, &self.operand(src), &mut diagnostics);
+        let mut diagnostics = self.diagnostic_reporter.take_operator();
+        let value = ops::unary(operator, &self.operand(source), &mut diagnostics);
         self.diagnostics_flush(diagnostics);
-        self.set(dst, value?);
+        self.set(destination, value?);
         Ok(())
     }
 }

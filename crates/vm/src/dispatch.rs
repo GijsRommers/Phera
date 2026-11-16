@@ -30,43 +30,96 @@ impl Vm {
     ) -> Result<DispatchResult, NativeError> {
         match instruction {
             Instruction::Nop => {}
-            Instruction::LoadNull { dst } => self.set(dst, Value::Null),
-            Instruction::LoadBool { dst, value } => self.set(dst, Value::Bool(value)),
-            Instruction::LoadInt { dst, value } => self.set(dst, Value::Int(value as i64)),
-            Instruction::LoadConst { dst, constant } => self.load_constant(dst, constant)?,
-            Instruction::Move { dst, src } => self.move_local(dst, src)?,
-            Instruction::Clear { reg } | Instruction::UnsetLocal { local: reg } => {
-                self.clear_local(reg)?
+            Instruction::LoadNull { dst: destination } => self.set(destination, Value::Null),
+            Instruction::LoadBool {
+                dst: destination,
+                value,
+            } => self.set(destination, Value::Bool(value)),
+            Instruction::LoadInt {
+                dst: destination,
+                value,
+            } => self.set(destination, Value::Int(value as i64)),
+            Instruction::LoadConst {
+                dst: destination,
+                constant,
+            } => self.load_constant(destination, constant)?,
+            Instruction::Move {
+                dst: destination,
+                src: source,
+            } => self.move_local(destination, source)?,
+            Instruction::Clear { reg: register } | Instruction::UnsetLocal { local: register } => {
+                self.clear_local(register)?
             }
-            Instruction::Assign { local, src } => self.execute_assign(local, src)?,
-            Instruction::CheckType { local, ty } => self.check_local_type(local, ty)?,
-            Instruction::AssignOp { op, local, src } => self.execute_assign_op(op, local, src)?,
-            Instruction::Fetch { dst, path, mode } => self.fetch_path(dst, path, mode)?,
-            Instruction::AssignOpPath { op, dst, path, src } => {
-                self.assign_op_path(op, dst, path, src)?
+            Instruction::Assign { local, src: source } => self.execute_assign(local, source)?,
+            Instruction::CheckType {
+                local,
+                ty: declaration_type,
+            } => self.check_local_type(local, declaration_type)?,
+            Instruction::AssignOp {
+                op: operator,
+                local,
+                src: source,
+            } => self.execute_assign_op(operator, local, source)?,
+            Instruction::Fetch {
+                dst: destination,
+                path,
+                mode,
+            } => self.fetch_path(destination, path, mode)?,
+            Instruction::AssignOpPath {
+                op: operator,
+                dst: destination,
+                path,
+                src: source,
+            } => self.assign_op_path(operator, destination, path, source)?,
+            Instruction::IncDecPath {
+                mode,
+                dst: destination,
+                path,
+            } => self.inc_dec_path(mode, destination, path)?,
+            Instruction::AppendLocal { local, src: source } => self.append_local(local, source)?,
+            Instruction::AssignPath { path, src: source } => self.assign_path(path, source)?,
+            Instruction::MakeReference {
+                dst: destination,
+                path,
+            } => self.make_reference(destination, path)?,
+            Instruction::BindReference { path, src: source } => {
+                self.bind_reference(path, source)?
             }
-            Instruction::IncDecPath { mode, dst, path } => self.inc_dec_path(mode, dst, path)?,
-            Instruction::AppendLocal { local, src } => self.append_local(local, src)?,
-            Instruction::AssignPath { path, src } => self.assign_path(path, src)?,
-            Instruction::MakeReference { dst, path } => self.make_reference(dst, path)?,
-            Instruction::BindReference { path, src } => self.bind_reference(path, src)?,
             Instruction::UnsetPath { path } => self.unset_place(&self.path(path)?)?,
             Instruction::BinaryIntBranch {
-                op,
-                lhs,
-                rhs,
+                op: operator,
+                lhs: left,
+                rhs: right,
                 target,
-            } => self.binary_int_branch(op, lhs, rhs, target)?,
-            Instruction::BinaryInt { op, dst, lhs, rhs } => {
-                self.execute_binary_int(op, dst, lhs, rhs)?
-            }
-            Instruction::Binary { dst, op, lhs, rhs } => self.execute_binary(op, dst, lhs, rhs)?,
-            Instruction::Unary { dst, op, src } => self.execute_unary(dst, op, src)?,
-            Instruction::Cast { to, dst, src } => self.execute_cast(to, dst, src)?,
-            Instruction::IncDecLocal { mode, dst, local } => {
-                self.execute_inc_dec(mode, dst, local)?
-            }
-            Instruction::Echo { src } => self.echo_value(src)?,
+            } => self.binary_int_branch(operator, left, right, target)?,
+            Instruction::BinaryInt {
+                op: operator,
+                dst: destination,
+                lhs: left,
+                rhs: right,
+            } => self.execute_binary_int(operator, destination, left, right)?,
+            Instruction::Binary {
+                dst: destination,
+                op: operator,
+                lhs: left,
+                rhs: right,
+            } => self.execute_binary(operator, destination, left, right)?,
+            Instruction::Unary {
+                dst: destination,
+                op: operator,
+                src: source,
+            } => self.execute_unary(destination, operator, source)?,
+            Instruction::Cast {
+                to,
+                dst: destination,
+                src: source,
+            } => self.execute_cast(to, destination, source)?,
+            Instruction::IncDecLocal {
+                mode,
+                dst: destination,
+                local,
+            } => self.execute_inc_dec(mode, destination, local)?,
+            Instruction::Echo { src: source } => self.echo_value(source)?,
             Instruction::Jump { target } => self.execute_jump(target, work)?,
             Instruction::JumpIf { condition, target } => self.jump_if(condition, target, work)?,
             Instruction::JumpIfNot { condition, target } => {
@@ -74,42 +127,60 @@ impl Vm {
             }
             Instruction::JumpIfNull { value, target } => self.jump_if_null(value, target)?,
             Instruction::JumpIfNotNull { value, target } => self.jump_if_not_null(value, target)?,
-            Instruction::BeginSilence => self.diagnostic_reporter.suppression += 1,
-            Instruction::EndSilence => {
-                self.diagnostic_reporter.suppression =
-                    self.diagnostic_reporter.suppression.saturating_sub(1)
-            }
+            Instruction::BeginSilence => self.diagnostic_reporter.begin_silence(),
+            Instruction::EndSilence => self.diagnostic_reporter.end_silence(),
             Instruction::InitCall { function } => self.init_call(function)?,
             Instruction::InitDynamicCall { callee } => self.init_dynamic_call(callee)?,
             Instruction::NameArgument { name } => self.name_argument(name)?,
-            Instruction::SendValue { src } => self.send(Some(src), None)?,
+            Instruction::SendValue { src: source } => self.send(Some(source), None)?,
             Instruction::SendLocal { local } => {
                 self.send(None, Some(crate::AccessPath::local(local)))?
             }
             Instruction::SendPath { path } => self.send(None, Some(self.path(path)?))?,
-            Instruction::SendSpread { src } => self.spread(src)?,
-            Instruction::Call { dst } => self.execute_call(dst, work).await?,
-            Instruction::MakeCallable { dst } => self.make_callable(dst)?,
-            Instruction::ReturnReference { src } => return self.return_reference(src, stop),
-            Instruction::Return { src } => return self.return_register(src, stop),
+            Instruction::SendSpread { src: source } => self.spread(source)?,
+            Instruction::Call { dst: destination } => self.execute_call(destination, work).await?,
+            Instruction::MakeCallable { dst: destination } => self.make_callable(destination)?,
+            Instruction::ReturnReference { src: source } => {
+                return self.return_reference(source, stop);
+            }
+            Instruction::Return { src: source } => return self.return_register(source, stop),
             Instruction::ReturnNull => return self.return_null(stop),
             Instruction::ReceiveDefault { param, passed } => self.receive_default(param, passed)?,
-            Instruction::Exit { src } => return self.exit_value(src).map(DispatchResult::Returned),
-            Instruction::NewArray { dst, .. } => {
-                self.set(dst, Value::Array(Rc::new(PhpArray::new())))
+            Instruction::Exit { src: source } => {
+                return self.exit_value(source).map(DispatchResult::Returned);
             }
-            Instruction::ArrayPush { array, src }
-            | Instruction::ArrayPushReference { array, src } => {
-                self.array_write(array, None, src, false)?
+            Instruction::NewArray {
+                dst: destination, ..
+            } => self.set(destination, Value::Array(Rc::new(PhpArray::new()))),
+            Instruction::ArrayPush { array, src: source }
+            | Instruction::ArrayPushReference { array, src: source } => {
+                self.array_write(array, None, source, crate::arrays::ArrayWrite::Element)?
             }
-            Instruction::ArraySet { array, key, src }
-            | Instruction::ArraySetReference { array, key, src } => {
-                self.array_write(array, Some(key), src, false)?
+            Instruction::ArraySet {
+                array,
+                key,
+                src: source,
             }
-            Instruction::ArraySpread { array, src } => self.array_write(array, None, src, true)?,
-            Instruction::Include { dst, path, kind } => self.include(dst, path, kind).await?,
-            Instruction::FetchConstant { dst, constant } => self.fetch_constant(dst, constant)?,
-            Instruction::DeclareConstant { name, src } => self.declare_constant(name, src)?,
+            | Instruction::ArraySetReference {
+                array,
+                key,
+                src: source,
+            } => self.array_write(array, Some(key), source, crate::arrays::ArrayWrite::Element)?,
+            Instruction::ArraySpread { array, src: source } => {
+                self.array_write(array, None, source, crate::arrays::ArrayWrite::Spread)?
+            }
+            Instruction::Include {
+                dst: destination,
+                path,
+                kind,
+            } => self.include(destination, path, kind).await?,
+            Instruction::FetchConstant {
+                dst: destination,
+                constant,
+            } => self.fetch_constant(destination, constant)?,
+            Instruction::DeclareConstant { name, src: source } => {
+                self.declare_constant(name, source)?
+            }
             Instruction::DeclareFunction { function } => self.declare_function(function)?,
             Instruction::BindDynamicGlobal { name } => self.bind_dynamic_global(name)?,
             Instruction::BindGlobal { local, name } => self.bind_named_global(local, name)?,
@@ -121,25 +192,33 @@ impl Vm {
             Instruction::InitStatic {
                 local,
                 variable,
-                src,
-            } => self.init_static(local, variable, src)?,
-            Instruction::IterStart { iter, src, .. } => self.iter_start(iter, src, None)?,
-            Instruction::IterStartReference { iter, path, .. } => {
-                self.start_reference_iterator(iter, path)?
-            }
+                src: source,
+            } => self.init_static(local, variable, source)?,
+            Instruction::IterStart {
+                iter: iterator,
+                src: source,
+                ..
+            } => self.iter_start(iterator, source, None)?,
+            Instruction::IterStartReference {
+                iter: iterator,
+                path,
+                ..
+            } => self.start_reference_iterator(iterator, path)?,
             Instruction::IterNextKeyed {
-                iter,
+                iter: iterator,
                 key,
                 value,
                 end,
-            } => self.iter_next(iter, Some(key), value, end)?,
-            Instruction::IterNext { iter, value, end } => self.iter_next(iter, None, value, end)?,
-            Instruction::IterEnd { iter } => self.end_iterator(iter)?,
+            } => self.iter_next(iterator, Some(key), value, end)?,
+            Instruction::IterNext {
+                iter: iterator,
+                value,
+                end,
+            } => self.iter_next(iterator, None, value, end)?,
+            Instruction::IterEnd { iter: iterator } => self.end_iterator(iterator)?,
             Instruction::Raise { detail, .. } => self.raise_match_error(detail)?,
             _ => {
-                return Err(NativeError::error(
-                    "Phera internal error: unimplemented instruction",
-                ));
+                return Err(internal_error!("unimplemented instruction"));
             }
         }
         Ok(DispatchResult::Continue)

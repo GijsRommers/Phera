@@ -6,6 +6,13 @@ use phera_value::Value;
 
 use crate::{Vm, dispatch::DispatchResult};
 
+/// Retain return-type metadata while coercion mutably borrows the VM.
+struct ReturnDeclaration {
+    declaration_type: phera_bytecode::Type,
+    name: String,
+    checking: crate::types::TypeChecking,
+}
+
 impl Vm {
     /// Reference returns carry the reference cell rather than its current value.
     pub(crate) fn return_reference(
@@ -53,5 +60,52 @@ impl Vm {
     ) -> Result<(), NativeError> {
         *work += 1;
         self.finish_call(destination).await
+    }
+}
+
+impl Vm {
+    /// Check the declared result before releasing registers and recycling the callee.
+    pub(crate) fn return_value(
+        &mut self,
+        mut value: Value,
+        stop: usize,
+    ) -> Result<Option<Value>, NativeError> {
+        if let Some(ReturnDeclaration {
+            declaration_type,
+            name,
+            checking,
+        }) = self.current().and_then(|frame| {
+            frame
+                .function()
+                .return_type
+                .map(|declaration_type| ReturnDeclaration {
+                    declaration_type: frame.unit.types[declaration_type.index()].clone(),
+                    name: frame.function().name.clone(),
+                    checking: frame.function().strict_types.into(),
+                })
+        }) {
+            value = crate::types::coerce(value, &declaration_type, checking, self).map_err(
+                |error| match error {
+                    NativeError::Throw { class, message } => {
+                        NativeError::throw(class, format!("{name}(): Return value {message}"))
+                    }
+                    other => other,
+                },
+            )?;
+        }
+        let frame = self
+            .call_stack
+            .pop()
+            .ok_or_else(|| internal_error!("return without frame"))?;
+        self.registers.truncate(frame.base);
+        let destination = frame.destination;
+        self.call_stack.recycle(frame);
+        if self.call_stack.depth() == stop {
+            return Ok(Some(value));
+        }
+        if let Some(destination) = destination {
+            self.set(destination, value);
+        }
+        Ok(None)
     }
 }

@@ -1,10 +1,13 @@
 //! PHP operators dispatched without heap-owned instructions.
+
 use phera_bytecode::{BinaryOp as Binary, UnaryOp as Unary};
 use phera_value::{
     Diagnostics, OpError, Value, add, bitwise_and, bitwise_not, bitwise_or, bitwise_xor,
     compare_op, concat, div, less, less_equal, loose_equals, modulo, mul, negate, pow, shift_left,
     shift_right, strict_equals, sub, to_bool, unary_plus,
 };
+
+/// Delegate coercion and warnings to the value layer for each PHP binary operator.
 pub fn binary(
     operator: Binary,
     left: &Value,
@@ -49,6 +52,8 @@ pub fn binary(
         Binary::LogicalXor => Ok(Value::Bool(to_bool(left) ^ to_bool(right))),
     }
 }
+
+/// Apply PHP unary conversion rules through the value layer.
 pub fn unary(
     operator: Unary,
     left: &Value,

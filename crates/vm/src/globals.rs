@@ -1,24 +1,35 @@
-//! Request-local globals state kept separate from register execution.
+//! Request globals and the shared cells created by PHP global declarations.
 
-use std::collections::HashMap;
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use phera_value::Value;
 
-use crate::references::StaticKey;
-
-/// Owns the request state for globals.
+/// Global values are promoted to reference cells when a function binds them.
 pub(crate) struct Globals {
-    /// Request-owned globals.
-    pub(crate) globals: HashMap<String, Value>,
-    /// Request-owned statics.
-    pub(crate) statics: HashMap<StaticKey, Value>,
+    values: HashMap<String, Value>,
 }
 
 impl Globals {
     pub(crate) fn new() -> Self {
         Self {
-            globals: HashMap::new(),
-            statics: HashMap::new(),
+            values: HashMap::new(),
         }
+    }
+
+    pub(crate) fn insert(&mut self, name: String, value: Value) {
+        self.values.insert(name, value);
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&String, &Value)> {
+        self.values.iter()
+    }
+
+    /// Repeated global declarations share the same cell, including a missing global.
+    pub(crate) fn reference(&mut self, name: String) -> Value {
+        let value = self.values.entry(name).or_default();
+        if !value.is_reference() {
+            *value = Value::Reference(Rc::new(RefCell::new(std::mem::take(value))));
+        }
+        value.clone()
     }
 }
