@@ -3,7 +3,7 @@ use std::pin::Pin;
 
 use phera_value::{Diagnostics, Value};
 
-use crate::NativeResult;
+use crate::{NativeResult, RequestState};
 
 /// A future that stays on the worker thread it was created on. PHP values are
 /// reference counted with `Rc`, so nothing that holds one can be `Send`.
@@ -19,6 +19,9 @@ pub trait Context {
 
     /// Where warnings, notices and deprecations go.
     fn diagnostics(&mut self) -> &mut dyn Diagnostics;
+
+    /// Per-request storage for extensions; see [`RequestState`].
+    fn state(&mut self) -> &mut RequestState;
 
     /// Whether the PHP file making this call declared `strict_types=1`, which
     /// turns off scalar coercion of arguments.

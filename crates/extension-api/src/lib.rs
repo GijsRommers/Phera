@@ -9,6 +9,7 @@ mod context;
 mod error;
 mod function;
 mod registry;
+mod state;
 pub mod testing;
 
 pub use phera_value as value;
@@ -19,6 +20,7 @@ pub use context::{Context, LocalFuture};
 pub use error::{NativeError, NativeResult, Unwind};
 pub use function::{AsyncFn, FunctionEntry, NativeFn, Param, ParamType, SyncFn};
 pub use registry::{ConstantValue, Registry};
+pub use state::RequestState;
 
 /// A compile-time linked bundle of PHP functions and constants.
 pub trait Extension {

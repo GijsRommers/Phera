@@ -14,7 +14,9 @@ mod registers;
 mod types;
 use frame::Frame;
 use phera_bytecode::{CompiledUnit, Reg};
-use phera_extension_api::{Context, LocalFuture, NativeError, NativeResult, Registry};
+use phera_extension_api::{
+    Context, LocalFuture, NativeError, NativeResult, Registry, RequestState,
+};
 use phera_value::{CollectDiagnostics, Diagnostics, PhpArray, Value, to_php_string};
 use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 #[derive(Clone)]
@@ -80,6 +82,8 @@ pub struct Vm {
     callback_depth: usize,
     status: i32,
     diagnostic_capture: Option<Vec<Vec<u8>>>,
+    /// What extensions remember during this request (response headers, ...).
+    state: RequestState,
 }
 impl Vm {
     pub fn new(registry: Arc<Registry>) -> Self {
@@ -109,6 +113,7 @@ impl Vm {
             callback_depth: 0,
             status: 0,
             diagnostic_capture: None,
+            state: RequestState::default(),
         }
     }
     pub fn set_loader(&mut self, loader: Arc<dyn CodeLoader>) {
@@ -117,6 +122,18 @@ impl Vm {
     pub fn set_sink(&mut self, sink: Box<dyn OutputSink>) {
         self.sink = Some(sink)
     }
+    /// Defines a global variable before the script starts, such as a
+    /// superglobal the runtime fills from the request.
+    pub fn set_global(&mut self, name: &str, value: Value) {
+        self.globals.insert(name.to_string(), value);
+    }
+
+    /// The extensions' per-request state, for the runtime to read once the
+    /// script has finished.
+    pub fn state_mut(&mut self) -> &mut RequestState {
+        &mut self.state
+    }
+
     pub fn set_args(&mut self, args: &[String]) {
         let mut a = PhpArray::new();
         for arg in args {
@@ -288,6 +305,10 @@ impl Context for Vm {
     fn diagnostics(&mut self) -> &mut dyn Diagnostics {
         self
     }
+    fn state(&mut self) -> &mut RequestState {
+        &mut self.state
+    }
+
     fn strict_types(&self) -> bool {
         self.current().is_some_and(|f| f.function().strict_types)
     }

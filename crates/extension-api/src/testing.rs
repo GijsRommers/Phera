@@ -5,7 +5,10 @@ pub mod oracle;
 
 use phera_value::{CollectDiagnostics, Diagnostics, Value};
 
-use crate::{Context, FunctionEntry, LocalFuture, NativeError, NativeFn, NativeResult, Registry};
+use crate::{
+    Context, FunctionEntry, LocalFuture, NativeError, NativeFn, NativeResult, Registry,
+    RequestState,
+};
 
 /// Records output and diagnostics. Calling back into PHP is not possible
 /// without a VM, so [`Context::call`] fails.
@@ -14,6 +17,7 @@ pub struct TestContext {
     pub output: Vec<u8>,
     pub diagnostics: CollectDiagnostics,
     pub strict_types: bool,
+    pub state: RequestState,
 }
 
 impl Context for TestContext {
@@ -23,6 +27,10 @@ impl Context for TestContext {
 
     fn diagnostics(&mut self) -> &mut dyn Diagnostics {
         &mut self.diagnostics
+    }
+
+    fn state(&mut self) -> &mut RequestState {
+        &mut self.state
     }
 
     fn strict_types(&self) -> bool {
