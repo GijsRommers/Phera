@@ -426,6 +426,11 @@ pub mod args {
         }
     }
 
+    /// The argument as it is; null when it was left out.
+    pub fn value(arguments: &[Value], index: usize) -> &Value {
+        arguments.get(index).unwrap_or(&Value::Null)
+    }
+
     /// Whether the caller passed this argument at all (null counts as passed).
     pub fn given(arguments: &[Value], index: usize) -> bool {
         index < arguments.len()

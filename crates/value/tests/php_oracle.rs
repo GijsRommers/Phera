@@ -681,7 +681,7 @@ fn run_case(run: impl FnOnce(&mut CollectDiagnostics) -> Result<Value, OpError>)
     format!("{out}{}", enc_diag(&d.entries))
 }
 
-fn emit_cases(vals: &[VSpec], skip_obj_intfloat: bool) -> Vec<Case> {
+fn emit_cases(vals: &[VSpec]) -> Vec<Case> {
     // Case enumeration shared by generator and evaluator below.
     let n = vals.len();
     let mut cases = Vec::new();
@@ -698,10 +698,7 @@ fn emit_cases(vals: &[VSpec], skip_obj_intfloat: bool) -> Vec<Case> {
         }
     }
     for op in Conv::ALL {
-        for (i, v) in vals.iter().enumerate() {
-            if skip_obj_intfloat && matches!(op, Conv::Int | Conv::Float) && v.value.is_object() {
-                continue;
-            }
+        for i in 0..n {
             cases.push(Case::Conv(op, i));
         }
     }
@@ -724,7 +721,7 @@ enum Case {
 #[test]
 fn oracle_operators_and_conversions() {
     let vals = values();
-    let cases = emit_cases(&vals, true);
+    let cases = emit_cases(&vals);
     let n = vals.len();
 
     let mut php = php_preamble();
@@ -763,13 +760,7 @@ fn oracle_operators_and_conversions() {
         }
     }
     for op in Conv::ALL {
-        for (i, v) in vals.iter().enumerate() {
-            // Objects cast to int/float are handled by the VM in real PHP
-            // (warning + 1); this crate returns an error per its contract,
-            // so those pairs are not comparable.
-            if matches!(op, Conv::Int | Conv::Float) && v.value.is_object() {
-                continue;
-            }
+        for i in 0..n {
             php.push_str(&format!(
                 "$i = {i}; runop('{}|{i}', fn() => {});\n",
                 op.tag(),

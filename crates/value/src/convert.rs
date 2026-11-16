@@ -350,20 +350,21 @@ pub fn to_int(v: &Value, diag: &mut dyn Diagnostics) -> Result<i64, OpError> {
             None => 0,
         }),
         Value::Array(a) => Ok(i64::from(!a.is_empty())),
-        Value::Object(o) => Err(OpError::new(
-            ErrorKind::Error,
-            format!(
+        // Casting an object warns and gives 1; only arithmetic on one throws.
+        Value::Object(o) => {
+            diag.warning(format!(
                 "Object of class {} could not be converted to int",
                 o.class.name()
-            ),
-        )),
+            ));
+            Ok(1)
+        }
         Value::Resource(r) => Ok(r.id),
         Value::Reference(_) => unreachable!("deref returns non-reference values"),
     }
 }
 
 /// `(float)` cast.
-pub fn to_float(v: &Value, _diag: &mut dyn Diagnostics) -> Result<f64, OpError> {
+pub fn to_float(v: &Value, diag: &mut dyn Diagnostics) -> Result<f64, OpError> {
     match &*v.deref() {
         Value::Null => Ok(0.0),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
@@ -371,13 +372,13 @@ pub fn to_float(v: &Value, _diag: &mut dyn Diagnostics) -> Result<f64, OpError> 
         Value::Float(f) => Ok(*f),
         Value::String(s) => Ok(strtod_prefix(s.as_bytes())),
         Value::Array(a) => Ok(if a.is_empty() { 0.0 } else { 1.0 }),
-        Value::Object(o) => Err(OpError::new(
-            ErrorKind::Error,
-            format!(
+        Value::Object(o) => {
+            diag.warning(format!(
                 "Object of class {} could not be converted to float",
                 o.class.name()
-            ),
-        )),
+            ));
+            Ok(1.0)
+        }
         Value::Resource(r) => Ok(r.id as f64),
         Value::Reference(_) => unreachable!("deref returns non-reference values"),
     }
