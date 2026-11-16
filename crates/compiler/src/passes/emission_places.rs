@@ -20,22 +20,19 @@ impl Tables {
                 name: self.name(&name),
             });
         }
-        if argument.spread {
-            Instruction::SendSpread {
-                src: argument.value,
+        match argument.source {
+            ir::ArgumentSource::Value(source) if argument.spread => {
+                Instruction::SendSpread { src: source }
             }
-        } else if let Some(place) = argument.place {
-            if !place.dynamic && place.path.is_empty() {
+            ir::ArgumentSource::Value(source) => Instruction::SendValue { src: source },
+            ir::ArgumentSource::Place(place)
+                if place.scope == ir::PlaceScope::Local && place.path.is_empty() =>
+            {
                 Instruction::SendLocal { local: place.base }
-            } else {
-                Instruction::SendPath {
-                    path: path(function, place),
-                }
             }
-        } else {
-            Instruction::SendValue {
-                src: argument.value,
-            }
+            ir::ArgumentSource::Place(place) => Instruction::SendPath {
+                path: path(function, place),
+            },
         }
     }
 
@@ -47,7 +44,7 @@ impl Tables {
         place: ir::Place,
         mode: phera_bytecode::IncDec,
     ) -> Instruction {
-        if !place.dynamic && place.path.is_empty() {
+        if place.scope == ir::PlaceScope::Local && place.path.is_empty() {
             Instruction::IncDecLocal {
                 dst,
                 local: place.base,
@@ -72,7 +69,7 @@ impl Tables {
         source: Reg,
     ) -> Instruction {
         let op = binary(operator);
-        if !place.dynamic && place.path.is_empty() {
+        if place.scope == ir::PlaceScope::Local && place.path.is_empty() {
             function.instructions.push(Instruction::AssignOp {
                 op,
                 local: place.base,
@@ -100,7 +97,8 @@ impl Tables {
         place: ir::Place,
         mode: phera_bytecode::FetchMode,
     ) -> Instruction {
-        if !place.dynamic && place.path.is_empty() && mode == FetchMode::Read {
+        if place.scope == ir::PlaceScope::Local && place.path.is_empty() && mode == FetchMode::Read
+        {
             Instruction::Move {
                 dst,
                 src: place.base,
@@ -121,7 +119,7 @@ impl Tables {
         place: ir::Place,
         src: Reg,
     ) -> Instruction {
-        if !place.dynamic && place.path.is_empty() {
+        if place.scope == ir::PlaceScope::Local && place.path.is_empty() {
             Instruction::Assign {
                 local: place.base,
                 src,
@@ -169,25 +167,8 @@ impl Tables {
             .push(Instruction::InitDynamicCall { callee: name });
         let _ = fallback;
         for argument in arguments {
-            if let Some(name) = argument.name {
-                function.instructions.push(Instruction::NameArgument {
-                    name: self.name(&name),
-                });
-            }
-            let send = if argument.spread {
-                Instruction::SendSpread {
-                    src: argument.value,
-                }
-            } else if let Some(place) = argument.place {
-                Instruction::SendPath {
-                    path: path(function, place),
-                }
-            } else {
-                Instruction::SendValue {
-                    src: argument.value,
-                }
-            };
-            function.instructions.push(send);
+            let instruction = self.send_argument(function, argument);
+            function.instructions.push(instruction);
         }
         Instruction::Call { dst }
     }

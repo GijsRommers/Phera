@@ -31,12 +31,16 @@ mod diagnostic_reporter;
 mod diagnostics;
 mod dispatch;
 mod dynamic_variables;
+mod error_traces;
+mod error_values;
 mod errors;
+mod extract;
 mod fast;
 mod frame;
 mod frame_lifecycle;
 mod function_table;
 mod global_instructions;
+mod global_paths;
 mod globals;
 mod include_state;
 mod includes;
@@ -64,6 +68,8 @@ mod static_variables;
 mod string_offsets;
 mod types;
 mod unit_caches;
+mod unpacking;
+mod variadic_names;
 
 /// Resolves PHP includes through the embedding runtime code cache.
 pub trait CodeLoader: Send + Sync {
@@ -106,6 +112,7 @@ pub struct Vm {
     /// PHP call depth limit, independent of the native Rust stack.
     pub frame_limit: usize,
     status: i32,
+    failed_native: Option<error_traces::NativeTrace>,
     /// What extensions remember during this request (response headers, ...).
     state: RequestState,
 }
@@ -133,6 +140,7 @@ impl Vm {
             constants: constant_table::ConstantTable::new(constants),
             frame_limit: DEFAULT_FRAME_LIMIT,
             status: 0,
+            failed_native: None,
             state: RequestState::default(),
         }
     }

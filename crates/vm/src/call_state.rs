@@ -26,21 +26,108 @@ pub(crate) enum CallTarget {
     Intrinsic(crate::intrinsics::Intrinsic),
 }
 
+/// An unknown named argument belongs to a variadic collector and retains its string key.
+pub(crate) struct NamedArgument {
+    pub(crate) name: String,
+    pub(crate) value: Value,
+}
+
+/// Extra argument storage is allocated only for calls using a named variadic collector.
+pub(crate) struct NamedArguments {
+    pub(crate) values: Vec<NamedArgument>,
+}
+
+/// Once a named argument is seen, further unpacked integer keys are illegal.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ArgumentOrder {
+    Positional,
+    Named,
+}
+
 /// An unfinished call; nested argument calls push another entry.
 pub(crate) struct PendingCall {
     pub(crate) callee: Rc<Callee>,
     pub(crate) arguments: Vec<Option<Value>>,
     pub(crate) named: Option<String>,
+    pub(crate) extra_named: Option<Box<NamedArguments>>,
 }
 
 impl PendingCall {
+    /// Route extra names into the variadic array while rejecting overwritten names.
+    #[inline]
+    pub(crate) fn store_argument(
+        &mut self,
+        index: usize,
+        named: Option<String>,
+        value: Value,
+    ) -> Result<(), phera_extension_api::NativeError> {
+        if named.is_none() {
+            self.arguments.push(Some(value));
+            return Ok(());
+        }
+        self.extra_named
+            .get_or_insert_with(|| Box::new(NamedArguments { values: Vec::new() }));
+        if let Some(name) = &named
+            && !self
+                .callee
+                .parameters
+                .iter()
+                .any(|parameter| !parameter.variadic && &parameter.name == name)
+        {
+            if self
+                .extra_named
+                .iter()
+                .flat_map(|arguments| arguments.values.iter())
+                .any(|argument| &argument.name == name)
+            {
+                return Err(phera_extension_api::NativeError::error(format!(
+                    "Named parameter ${name} overwrites previous argument"
+                )));
+            }
+            self.extra_named
+                .get_or_insert_with(|| Box::new(NamedArguments { values: Vec::new() }))
+                .values
+                .push(NamedArgument {
+                    name: name.clone(),
+                    value,
+                });
+        } else {
+            if self.arguments.get(index).is_some_and(Option::is_some) {
+                return Err(phera_extension_api::NativeError::error(format!(
+                    "Named parameter ${} overwrites previous argument",
+                    named.unwrap_or_default()
+                )));
+            }
+            self.arguments
+                .resize_with(self.arguments.len().max(index + 1), || None);
+            self.arguments[index] = Some(value);
+        }
+        self.named = None;
+        Ok(())
+    }
+
+    /// Named ordering is encoded by lazily allocated metadata, keeping positional calls small.
+    pub(crate) fn order(&self) -> ArgumentOrder {
+        if self.extra_named.is_some() {
+            ArgumentOrder::Named
+        } else {
+            ArgumentOrder::Positional
+        }
+    }
+
     /// Named sends select a signature slot; positional sends follow prepared arguments.
     pub(crate) fn argument_index(&self) -> Result<usize, phera_extension_api::NativeError> {
         if let Some(named) = &self.named {
             self.callee
                 .parameters
                 .iter()
-                .position(|parameter| &parameter.name == named)
+                .position(|parameter| &parameter.name == named && !parameter.variadic)
+                .or_else(|| {
+                    self.callee
+                        .parameters
+                        .iter()
+                        .position(|parameter| parameter.variadic)
+                })
                 .ok_or_else(|| {
                     phera_extension_api::NativeError::error(format!(
                         "Unknown named parameter ${named}"

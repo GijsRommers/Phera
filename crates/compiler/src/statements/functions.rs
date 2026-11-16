@@ -29,6 +29,7 @@ impl Compiler<'_> {
             return Err(self.error(format!("Cannot redeclare function {name}()"), line));
         }
         let mut builder = Compiler::new(self.file, self.lines, &name, &self.namespace);
+        builder.function.definition_line = line;
         builder.function.returns_reference = declaration.by_reference;
         builder.imports = self.imports.clone();
         builder.function.strict_types = self.function.strict_types;
@@ -90,7 +91,7 @@ impl Compiler<'_> {
                     Instruction::Write {
                         place: Place {
                             base: param,
-                            dynamic: false,
+                            scope: crate::ir::PlaceScope::Local,
                             path: vec![],
                         },
                         src,

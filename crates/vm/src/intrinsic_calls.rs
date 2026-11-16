@@ -28,7 +28,7 @@ impl Vm {
             Intrinsic::CallUserFuncArray => self.call_user_func_array(argument, arguments).await,
             Intrinsic::GetDefinedVars => self.defined_variables(),
             Intrinsic::Compact => self.compact_variables(arguments),
-            Intrinsic::Extract => self.extract_variables(argument),
+            Intrinsic::Extract => self.extract_variables(arguments),
             Intrinsic::Define => self.define_argument(argument, arguments, &mut diagnostics),
             Intrinsic::Defined => Ok(Value::Bool(
                 self.constants

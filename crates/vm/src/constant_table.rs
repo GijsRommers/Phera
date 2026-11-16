@@ -26,7 +26,19 @@ pub(crate) struct ConstantTable {
 }
 
 impl ConstantTable {
-    pub(crate) fn new(values: HashMap<String, Value>) -> Self {
+    pub(crate) fn new(mut values: HashMap<String, Value>) -> Self {
+        for (name, number) in [
+            ("EXTR_OVERWRITE", 0),
+            ("EXTR_SKIP", 1),
+            ("EXTR_PREFIX_SAME", 2),
+            ("EXTR_PREFIX_ALL", 3),
+            ("EXTR_PREFIX_INVALID", 4),
+            ("EXTR_PREFIX_IF_EXISTS", 5),
+            ("EXTR_IF_EXISTS", 6),
+            ("EXTR_REFS", 256),
+        ] {
+            values.insert(name.into(), Value::Int(number));
+        }
         Self {
             values,
             resolved: HashMap::new(),

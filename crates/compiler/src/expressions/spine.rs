@@ -147,8 +147,7 @@ impl Compiler<'_> {
                 name,
                 fallback: None,
                 arguments: vec![Argument {
-                    value: lhs,
-                    place: None,
+                    source: crate::ir::ArgumentSource::Value(lhs),
                     name: None,
                     spread: false,
                 }],

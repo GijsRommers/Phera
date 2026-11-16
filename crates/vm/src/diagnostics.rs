@@ -61,28 +61,7 @@ impl Vm {
         self.diagnostic_reporter.end_all_silence();
         if let NativeError::Throw { class, message } = error {
             let SourceLocation { file, line } = self.location();
-            let mut text = format!(
-                "\nFatal error: Uncaught {class}: {message} in {file}:{line}\nStack trace:\n"
-            );
-            let mut n = 0;
-            for (frame, child) in self
-                .call_stack
-                .iter()
-                .rev()
-                .skip(1)
-                .zip(self.call_stack.iter().rev())
-            {
-                text.push_str(&format!(
-                    "#{n} {}({}): {}()\n",
-                    frame.unit.file,
-                    frame.line(),
-                    child.function().name
-                ));
-                n += 1;
-            }
-            text.push_str(&format!(
-                "#{n} {{main}}\n  thrown in {file} on line {line}\n"
-            ));
+            let text = self.error_trace(class, &message, &file, line);
             self.out(text.as_bytes());
             self.status = 255;
         }

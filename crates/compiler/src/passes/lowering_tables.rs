@@ -8,10 +8,14 @@ use crate::{ir, passes::lower::Tables};
 pub(crate) fn path(function: &mut Function, place: ir::Place) -> PathId {
     let index = function.paths.len();
     function.paths.push(Path {
-        base: if place.dynamic {
-            PathBase::Named(place.base)
-        } else {
-            PathBase::Register(place.base)
+        base: match place.scope {
+            ir::PlaceScope::Local => PathBase::Register(place.base),
+            ir::PlaceScope::Dynamic => PathBase::Named(place.base),
+            ir::PlaceScope::Global(scratch) => PathBase::GlobalNamed {
+                name: place.base,
+                scratch,
+            },
+            ir::PlaceScope::Globals => PathBase::Globals,
         },
         steps: place
             .path

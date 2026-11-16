@@ -79,7 +79,10 @@ impl Vm {
                 .map(Option::unwrap_or_default)
                 .collect();
         }
-        self.bind_parameters(&mut frame, &mut arguments, function_id)?;
+        if let Err(error) = self.bind_parameters(&mut frame, &mut arguments, function_id) {
+            self.call_stack.push(frame);
+            return Err(error);
+        }
         arguments.clear();
         self.call_stack.recycle_arguments(arguments);
         self.call_stack.push(frame);
@@ -136,9 +139,32 @@ impl Vm {
         entry: phera_extension_api::FunctionEntry,
         mut arguments: Vec<Value>,
     ) -> NativeResult {
-        prepare_arguments(&entry, &mut arguments, self)?;
+        if let Err(error) = prepare_arguments(&entry, &mut arguments, self) {
+            if !matches!(
+                entry.name,
+                "strlen" | "count" | "sizeof" | "array_key_exists"
+            ) {
+                self.failed_native = Some(crate::error_traces::NativeTrace::new(
+                    entry.name, &arguments,
+                ));
+            }
+            return Err(error);
+        }
         match entry.handler {
-            NativeFn::Sync(frame) => frame(self, &arguments),
+            NativeFn::Sync(handler) => {
+                let result = handler(self, &arguments);
+                if result.is_err()
+                    && !matches!(
+                        entry.name,
+                        "strlen" | "count" | "sizeof" | "array_key_exists"
+                    )
+                {
+                    self.failed_native = Some(crate::error_traces::NativeTrace::new(
+                        entry.name, &arguments,
+                    ));
+                }
+                result
+            }
             NativeFn::Async(frame) => frame(self, arguments).await,
         }
     }
@@ -175,7 +201,8 @@ impl Vm {
                 if parameter.ty.is_none() {
                     value
                 } else {
-                    self.check_argument(
+                    let original = value.clone();
+                    match self.check_argument(
                         value,
                         parameter
                             .ty
@@ -183,7 +210,13 @@ impl Vm {
                         &function.name,
                         i,
                         &code.names[parameter.name.index()],
-                    )?
+                    ) {
+                        Ok(value) => value,
+                        Err(error) => {
+                            frame.set(&mut self.registers, Reg(i as u16), original);
+                            return Err(error);
+                        }
+                    }
                 }
             };
             frame.set(&mut self.registers, Reg(i as u16), value);

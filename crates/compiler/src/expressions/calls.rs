@@ -47,16 +47,26 @@ impl Compiler<'_> {
             } else {
                 None
             };
-            let value = if place.is_some() {
-                Reg(0)
+            let source = if let Some(place) = place {
+                crate::ir::ArgumentSource::Place(place)
+            } else if argument.spread && writable(&argument.value) {
+                let place = self.place(&argument.value)?;
+                let destination = self.allocate_register()?;
+                self.emit(
+                    Instruction::Reference {
+                        dst: destination,
+                        place,
+                    },
+                    line,
+                );
+                crate::ir::ArgumentSource::Value(destination)
             } else {
-                self.compile_expression(&argument.value)?
+                crate::ir::ArgumentSource::Value(self.compile_expression(&argument.value)?)
             };
             self.emit(
                 Instruction::Send {
                     argument: Argument {
-                        value,
-                        place,
+                        source,
                         name: argument.name.as_ref().map(|name| name.name.clone()),
                         spread: argument.spread,
                     },

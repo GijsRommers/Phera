@@ -73,6 +73,7 @@ impl Frame {
             count: count as usize,
             arguments: vec![],
             dynamic,
+
             iterators,
         }
     }
@@ -98,6 +99,9 @@ impl Frame {
 
     /// IP has already advanced, so diagnostics use the previous instruction line.
     pub(crate) fn line(&self) -> usize {
+        if self.ip == 0 && self.function_id.is_some() {
+            return self.function().definition_line as usize;
+        }
         self.function()
             .lines
             .get(self.ip.saturating_sub(1))

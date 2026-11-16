@@ -14,6 +14,9 @@ impl Instruction {
         /// Walk indexed targets iteratively, then evaluate index expressions from root to leaf.
         fn place(target: &mut Place, mapping: &mut impl FnMut(Reg) -> Reg) {
             target.base = mapping(target.base);
+            if let crate::ir::PlaceScope::Global(scratch) = &mut target.scope {
+                *scratch = mapping(*scratch);
+            }
             for register in target.path.iter_mut().flatten() {
                 *register = mapping(*register)
             }
@@ -33,12 +36,10 @@ impl Instruction {
             Instruction::FinishCall { dst } | Instruction::FinishCallable { dst } => {
                 *dst = map(*dst)
             }
-            Instruction::Send { argument } => {
-                argument.value = map(argument.value);
-                if let Some(target) = &mut argument.place {
-                    place(target, &mut map);
-                }
-            }
+            Instruction::Send { argument } => match &mut argument.source {
+                crate::ir::ArgumentSource::Value(register) => *register = map(*register),
+                crate::ir::ArgumentSource::Place(target) => place(target, &mut map),
+            },
             Instruction::IncPlace {
                 dst, place: target, ..
             } => {
@@ -107,9 +108,9 @@ impl Instruction {
                 *dst = map(*dst);
                 *name = map(*name);
                 for argument in arguments {
-                    argument.value = map(argument.value);
-                    if let Some(target) = &mut argument.place {
-                        place(target, &mut map)
+                    match &mut argument.source {
+                        crate::ir::ArgumentSource::Value(register) => *register = map(*register),
+                        crate::ir::ArgumentSource::Place(target) => place(target, &mut map),
                     }
                 }
             }

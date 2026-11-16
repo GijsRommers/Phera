@@ -117,6 +117,7 @@ impl Vm {
             callee,
             arguments,
             named: None,
+            extra_named: None,
         });
         Ok(())
     }
@@ -160,7 +161,18 @@ impl Vm {
             .get(index)
             .or_else(|| parameters.last().filter(|parameter| parameter.variadic))
             .is_some_and(|parameter| parameter.by_reference);
-        let value = if by_reference {
+        let value = if matches!(
+            callee.target,
+            CallTarget::Intrinsic(crate::intrinsics::Intrinsic::Extract)
+        ) && index == 0
+            && place.is_some()
+        {
+            self.reference(
+                place
+                    .as_ref()
+                    .ok_or_else(|| internal_error!("extract place"))?,
+            )?
+        } else if by_reference {
             if let Some(place) = place {
                 self.reference(&place)?
             } else {
@@ -181,16 +193,7 @@ impl Vm {
             .current_mut()
             .and_then(|frame| frame.calls.last_mut())
             .ok_or_else(|| internal_error!("lost call"))?;
-        if call.arguments.get(index).is_some_and(Option::is_some) {
-            return Err(NativeError::error(format!(
-                "Named parameter ${} overwrites previous argument",
-                named.unwrap_or_default()
-            )));
-        }
-        call.arguments
-            .resize_with(call.arguments.len().max(index + 1), || None);
-        call.arguments[index] = Some(value);
-        call.named = None;
+        call.store_argument(index, named, value)?;
         Ok(())
     }
 
@@ -212,14 +215,29 @@ impl Vm {
             .current_mut()
             .and_then(|frame| frame.calls.pop())
             .ok_or_else(|| internal_error!("call not initialized"))?;
-        let arguments = call.arguments;
+        let mut arguments = call.arguments;
+        let mut named_keys = Vec::new();
+        let mut named_start = 0;
+        if let Some(extra_named) = call.extra_named {
+            named_start = arguments
+                .len()
+                .max(call.callee.parameters.len().saturating_sub(1));
+            arguments.resize_with(named_start, || None);
+            for argument in extra_named.values {
+                named_keys.push(argument.name);
+                arguments.push(Some(argument.value));
+            }
+        }
         match &call.callee.target {
-            CallTarget::User(function) => self.push_prepared(
-                function.unit.clone(),
-                function.index,
-                Some(destination),
-                arguments,
-            )?,
+            CallTarget::User(function) => {
+                self.push_prepared(
+                    function.unit.clone(),
+                    function.index,
+                    Some(destination),
+                    arguments,
+                )?;
+                self.name_variadic_arguments(named_start, named_keys)?;
+            }
             CallTarget::Native(entry) => {
                 let result = self
                     .native_entry(
@@ -244,24 +262,6 @@ impl Vm {
                     .await?;
                 self.set(destination, result);
             }
-        }
-        Ok(())
-    }
-
-    /// Unpacked arguments copy their values into the pending call in array order.
-    pub(crate) fn spread(&mut self, register: Reg) -> Result<(), NativeError> {
-        let Value::Array(array) = self.get(register) else {
-            return Err(NativeError::type_error(
-                "Only arrays and Traversables can be unpacked",
-            ));
-        };
-        for (_, value) in array.iter() {
-            let call = self
-                .call_stack
-                .current_mut()
-                .and_then(|frame| frame.calls.last_mut())
-                .ok_or_else(|| internal_error!("spread without call"))?;
-            call.arguments.push(Some(value.deref().clone()));
         }
         Ok(())
     }

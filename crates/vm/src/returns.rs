@@ -84,7 +84,11 @@ impl Vm {
                     checking: frame.function().strict_types.into(),
                 })
         }) {
-            value = crate::types::coerce(value, &declaration_type, checking, self).map_err(
+            let reference = match &value {
+                Value::Reference(reference) => Some(reference.clone()),
+                _ => None,
+            };
+            let checked = crate::types::coerce(value, &declaration_type, checking, self).map_err(
                 |error| match error {
                     NativeError::Throw { class, message } => {
                         NativeError::throw(class, format!("{name}(): Return value {message}"))
@@ -92,6 +96,14 @@ impl Vm {
                     other => other,
                 },
             )?;
+            value = if let Some(reference) = reference {
+                *reference
+                    .try_borrow_mut()
+                    .map_err(|_| internal_error!("return reference"))? = checked;
+                Value::Reference(reference)
+            } else {
+                checked
+            };
         }
         let frame = self
             .call_stack

@@ -25,7 +25,7 @@ impl Compiler<'_> {
                     let dst = self.allocate_register()?;
                     let place = Place {
                         base: src,
-                        dynamic: false,
+                        scope: crate::ir::PlaceScope::Local,
                         path: vec![Some(key)],
                     };
                     if item.by_reference {

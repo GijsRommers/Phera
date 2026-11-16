@@ -53,18 +53,32 @@ pub enum Unary {
     String,
     Array,
 }
+/// Selects PHP's local, variable-variable, or request-global namespace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlaceScope {
+    Local,
+    Dynamic,
+    Global(Reg),
+    Globals,
+}
 /// An evaluated variable root and ordered index steps for a read or write.
 #[derive(Debug, Clone)]
 pub struct Place {
     pub base: Reg,
-    pub dynamic: bool,
+    pub scope: PlaceScope,
     pub path: Vec<Option<Reg>>,
 }
+/// Values and writable argument paths are distinct; a path needs no dummy register.
+#[derive(Debug, Clone)]
+pub enum ArgumentSource {
+    Value(Reg),
+    Place(Place),
+}
+
 /// An evaluated call argument with optional reference-capable place and name.
 #[derive(Debug, Clone)]
 pub struct Argument {
-    pub value: Reg,
-    pub place: Option<Place>,
+    pub source: ArgumentSource,
     pub name: Option<String>,
     pub spread: bool,
 }
@@ -240,6 +254,7 @@ pub struct Parameter {
 #[derive(Debug, Clone, Default)]
 pub struct Function {
     pub name: String,
+    pub definition_line: usize,
     pub instructions: Vec<Instruction>,
     pub constants: Vec<Constant>,
     pub registers: usize,

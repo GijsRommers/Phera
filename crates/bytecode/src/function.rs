@@ -8,6 +8,8 @@ pub struct Function {
     /// The name as written, with its namespace: `App\helper`. `{main}` for a
     /// file's top-level code.
     pub name: String,
+    /// Declaration location for parameter errors raised before the body executes.
+    pub definition_line: u32,
     pub instructions: Vec<Instruction>,
     /// The source line of each instruction, for error messages. Same length
     /// as `instructions`.
@@ -69,6 +71,10 @@ pub enum PathBase {
     /// `$$name`: the variable whose name is the string in this register.
     /// Only in functions with `dynamic_scope`.
     Named(Reg),
+    /// Request-global variable whose name has already been evaluated.
+    GlobalNamed { name: Reg, scratch: Reg },
+    /// A copy of PHP's global symbol table; only valid for reads.
+    Globals,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

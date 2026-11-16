@@ -122,6 +122,35 @@ impl Compiler<'_> {
         expression: &Option<ast::Expression>,
         line: usize,
     ) -> Result<(), CompileError> {
+        if let Some(return_type) = &self.function.return_type {
+            let message = match (return_type.as_str(), expression.is_some()) {
+                ("never", _) => Some("A never-returning function must not return"),
+                ("void", true)
+                    if expression.as_ref().is_some_and(|expression| {
+                        matches!(
+                            expression.kind,
+                            ast::ExpressionKind::Literal(ast::Literal::Null)
+                        )
+                    }) =>
+                {
+                    Some(
+                        "A void function must not return a value (did you mean \"return;\" instead of \"return null;\"?)",
+                    )
+                }
+                ("void", true) => Some("A void function must not return a value"),
+                ("void", false) | (_, true) => None,
+                ("mixed", false) => Some(
+                    "A function with return type must return a value (did you mean \"return null;\" instead of \"return;\"?)",
+                ),
+                (name, false) if name.contains("null") || name.starts_with('?') => Some(
+                    "A function with return type must return a value (did you mean \"return null;\" instead of \"return;\"?)",
+                ),
+                (_, false) => Some("A function with return type must return a value"),
+            };
+            if let Some(message) = message {
+                return Err(self.error(message, line));
+            }
+        }
         let source = if let Some(expression) = expression {
             if self.function.returns_reference && writable(expression) {
                 let place = self.place(expression)?;

@@ -133,6 +133,7 @@ impl Tables {
     fn function(&mut self, source: ir::Function) -> Function {
         let mut function = Function {
             name: source.name,
+            definition_line: source.definition_line as u32,
             registers: source.registers as u16 + 1,
             locals: source.locals.iter().map(|name| self.name(name)).collect(),
             parameters: source

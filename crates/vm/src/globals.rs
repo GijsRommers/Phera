@@ -20,6 +20,11 @@ impl Globals {
         self.values.insert(name, value);
     }
 
+    /// Unset detaches the global name while existing references remain alive.
+    pub(crate) fn remove(&mut self, name: &str) {
+        self.values.remove(name);
+    }
+
     pub(crate) fn iter(&self) -> impl Iterator<Item = (&String, &Value)> {
         self.values.iter()
     }

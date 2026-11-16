@@ -8,9 +8,9 @@ use phera_ast as ast;
 use phera_bytecode::Reg;
 use phera_source::LineTable;
 
-use crate::ir::{Constant, Function, Instruction, Place, Target};
+use crate::CompileError;
+use crate::ir::{Constant, Function, Instruction, Target};
 use crate::policies::{DeclarationTiming, NameKind};
-use crate::{CompileError, writable};
 
 /// Unresolved exits for one nested loop or switch context.
 pub(super) struct Loop {
@@ -84,6 +84,8 @@ impl<'ast> Compiler<'ast> {
         if let Some(register) = self.locals.get(name) {
             return Ok(*register);
         }
+        // A new local must never reuse a slot mentioned by earlier temporary code.
+        self.next = self.next.max(self.peak);
         let register = self.allocate_register()?;
         self.locals.insert(name.into(), register);
         self.function.locals.push(name.into());
@@ -195,70 +197,6 @@ impl<'ast> Compiler<'ast> {
         let fallback = (index.kind == ast::NameKind::Unqualified && !self.namespace.is_empty())
             .then(|| index.text.clone());
         (full, fallback)
-    }
-
-    /// Walk indexed targets iteratively, then evaluate index expressions from root to leaf.
-    pub(super) fn place(&mut self, error: &ast::Expression) -> Result<Place, CompileError> {
-        let line = self.lines.line(error.span.start);
-        let mut node = error;
-        let mut path = vec![];
-        while let ast::ExpressionKind::Index { target, index } = &node.kind {
-            path.push(index.as_deref());
-            node = target;
-        }
-        let (base, dynamic) = match &node.kind {
-            ast::ExpressionKind::Variable(ast::Variable::Named(index)) => {
-                (self.local(index)?, false)
-            }
-            ast::ExpressionKind::Variable(ast::Variable::Dynamic(error)) => {
-                self.function.dynamic_scope = true;
-                (self.compile_expression(error)?, true)
-            }
-            _ => return Err(self.error("Expression is not a writable place", line)),
-        };
-        let mut steps = vec![];
-        for index in path.into_iter().rev() {
-            steps.push(
-                index
-                    .map(|error| self.compile_expression(error))
-                    .transpose()?,
-            )
-        }
-        Ok(Place {
-            base,
-            dynamic,
-            path: steps,
-        })
-    }
-
-    /// Allow a computed root for reads while preserving iterative postfix traversal.
-    pub(super) fn readable_place(
-        &mut self,
-        error: &ast::Expression,
-    ) -> Result<Place, CompileError> {
-        if writable(error) {
-            return self.place(error);
-        }
-        let mut node = error;
-        let mut indices = vec![];
-        while let ast::ExpressionKind::Index { target, index } = &node.kind {
-            indices.push(index.as_deref());
-            node = target;
-        }
-        let base = self.compile_expression(node)?;
-        let mut path = vec![];
-        for index in indices.into_iter().rev() {
-            path.push(
-                index
-                    .map(|error| self.compile_expression(error))
-                    .transpose()?,
-            )
-        }
-        Ok(Place {
-            base,
-            dynamic: false,
-            path,
-        })
     }
 
     /// Compile statements in source order with the enclosing declaration policy.

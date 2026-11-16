@@ -3,7 +3,7 @@
 use std::rc::Rc;
 
 use phera_bytecode::Reg;
-use phera_extension_api::{NativeError, NativeResult};
+use phera_extension_api::NativeResult;
 use phera_value::{ArrayKey, PhpArray, Value};
 
 use crate::Vm;
@@ -79,33 +79,5 @@ impl Vm {
             }
         }
         Ok(Value::Array(Rc::new(array)))
-    }
-
-    /// Copy valid string keys into the caller scope using the existing extract behavior.
-    pub(crate) fn extract_variables(&mut self, argument: Value) -> NativeResult {
-        let Value::Array(array) = argument else {
-            return Err(NativeError::type_error(
-                "extract(): Argument #1 ($array) must be of type array",
-            ));
-        };
-        let mut count = 0;
-        for (key, value) in array.iter() {
-            if let ArrayKey::String(name) = key {
-                let name = name.to_string_lossy();
-                if !name.bytes().enumerate().all(|(i, byte)| {
-                    byte == b'_'
-                        || byte.is_ascii_alphabetic()
-                        || byte >= 128
-                        || (i > 0 && byte.is_ascii_digit())
-                }) || name.is_empty()
-                {
-                    continue;
-                }
-                let register = self.named_slot(&name)?;
-                self.set(register, value.deref().clone());
-                count += 1;
-            }
-        }
-        Ok(Value::Int(count))
     }
 }

@@ -16,10 +16,21 @@ impl Vm {
         &mut self,
         place: &AccessPath,
         creation: Creation,
+        missing: Missing,
     ) -> Result<Option<Reg>, NativeError> {
         let base = match place.base()? {
             PathBase::Register(register) => return Ok(Some(register)),
             PathBase::Named(register) => register,
+            PathBase::GlobalNamed {
+                name: register,
+                scratch,
+            } => {
+                let mut diagnostics = self.diagnostic_reporter.take_operator();
+                let result = to_php_string(&self.operand(register), &mut diagnostics);
+                self.diagnostics_flush(diagnostics);
+                return self.global_register(result?.to_string_lossy(), scratch, creation, missing);
+            }
+            PathBase::Globals => return Err(internal_error!("global table has no register")),
         };
         let mut diagnostics = self.diagnostic_reporter.take_operator();
         let name = to_php_string(&self.operand(base), &mut diagnostics)?.to_string_lossy();
@@ -48,7 +59,7 @@ impl Vm {
             frame.dynamic.insert(name, register);
             Ok(Some(register))
         } else {
-            if self.diagnostic_reporter.is_visible() {
+            if missing == Missing::Warn && self.diagnostic_reporter.is_visible() {
                 self.warn(format!("Undefined variable ${name}"))
             }
             Ok(None)
@@ -79,7 +90,10 @@ impl Vm {
 
     /// Read through PHP references, suppressing missing-slot warnings when requested.
     pub(crate) fn read_place(&mut self, place: &AccessPath, missing: Missing) -> NativeResult {
-        let Some(register) = self.base_register(place, Creation::Existing)? else {
+        if place.base()? == PathBase::Globals {
+            return self.global_snapshot();
+        }
+        let Some(register) = self.base_register(place, Creation::Existing, missing)? else {
             return Ok(Value::Null);
         };
         let mut value = self.read_root(register, missing);
@@ -119,7 +133,7 @@ impl Vm {
         binding: Binding,
     ) -> Result<(), NativeError> {
         let register = self
-            .base_register(place, Creation::Create)?
+            .base_register(place, Creation::Create, Missing::Silent)?
             .ok_or_else(|| internal_error!("missing place"))?;
         // Appending to an existing array needs neither key conversion nor a
         // parent reconstruction stack. References retain the general handler.
@@ -154,6 +168,12 @@ impl Vm {
         let updated = update(root, &keys, value, binding.into(), &mut diagnostics);
         self.diagnostics_flush(diagnostics);
         let updated = updated?;
+        if let PathBase::GlobalNamed { name, .. } = place.base()? {
+            let name = self.get(name);
+            if let Value::String(name) = name {
+                self.publish_global(name.to_string_lossy(), updated.clone());
+            }
+        }
         self.set(register, updated);
         Ok(())
     }
@@ -162,7 +182,7 @@ impl Vm {
     pub(crate) fn reference(&mut self, place: &AccessPath) -> NativeResult {
         let value = self.read_place(place, crate::access_mode::Missing::Silent)?;
         let register = self
-            .base_register(place, Creation::Create)?
+            .base_register(place, Creation::Create, Missing::Silent)?
             .ok_or_else(|| internal_error!("reference missing"))?;
         let mut raw = self
             .current()
@@ -191,10 +211,16 @@ impl Vm {
 
     /// Remove the slot itself without assigning null through an existing alias.
     pub(crate) fn unset_place(&mut self, place: &AccessPath) -> Result<(), NativeError> {
-        let Some(register) = self.base_register(place, Creation::Existing)? else {
+        let Some(register) = self.base_register(place, Creation::Existing, Missing::Silent)? else {
             return Ok(());
         };
         if place.steps()?.next().is_none() {
+            if let PathBase::GlobalNamed { name, .. } = place.base()? {
+                let name = self.get(name).deref().clone();
+                if let Value::String(name) = name {
+                    self.remove_global(&name.to_string_lossy());
+                }
+            }
             if let Some(string) = self.call_stack.current_mut().and_then(|frame| {
                 frame
                     .slots_mut(&mut self.registers)

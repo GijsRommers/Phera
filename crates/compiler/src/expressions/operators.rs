@@ -36,8 +36,7 @@ impl Compiler<'_> {
                 name,
                 fallback: None,
                 arguments: vec![Argument {
-                    value,
-                    place: None,
+                    source: crate::ir::ArgumentSource::Value(value),
                     name: None,
                     spread: false,
                 }],

@@ -35,10 +35,42 @@ pub(super) fn compile_on_stack(
     compiler.block(&ast.statements, DeclarationTiming::Hoisted)?;
     let register = compiler.literal(Constant::Int(1), 1)?;
     compiler.emit(Instruction::Return(register), 1);
-    Ok(lower::lower(CompiledUnit {
+    let unit = CompiledUnit {
         main: compiler.finish(),
         functions: compiler.functions,
         hoisted: compiler.hoisted,
         file: file.into(),
-    }))
+    };
+    validate_global_writes(&unit)?;
+    Ok(lower::lower(unit))
+}
+
+/// PHP 8.1 makes the global table read-only except through an indexed symbol name.
+fn validate_global_writes(unit: &CompiledUnit) -> Result<(), CompileError> {
+    use crate::ir::PlaceScope;
+    for function in std::iter::once(&unit.main).chain(&unit.functions) {
+        for (index, instruction) in function.instructions.iter().enumerate() {
+            let place = match instruction {
+                Instruction::Write { place, .. }
+                | Instruction::Rebind { place, .. }
+                | Instruction::Compound { place, .. }
+                | Instruction::IncPlace { place, .. }
+                | Instruction::Bind { place, .. }
+                | Instruction::Unset(place)
+                | Instruction::Reference { place, .. } => place,
+                _ => continue,
+            };
+            if place.scope == PlaceScope::Globals {
+                return Err(CompileError {
+                    message:
+                        "$GLOBALS can only be modified using the $GLOBALS[$name] = $value syntax"
+                            .into(),
+                    file: unit.file.clone(),
+                    line: function.lines[index],
+                    parse: false,
+                });
+            }
+        }
+    }
+    Ok(())
 }

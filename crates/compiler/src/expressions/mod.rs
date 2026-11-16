@@ -124,6 +124,7 @@ pub(crate) mod calls;
 pub(crate) mod conditionals;
 pub(crate) mod matching;
 pub(crate) mod operators;
+pub(crate) mod paths;
 pub(crate) mod places;
 pub(crate) mod spine;
 pub(crate) mod values;
