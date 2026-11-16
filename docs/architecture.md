@@ -119,6 +119,10 @@ pub enum Value {
   `finally` targets). Throwing unwinds the heap frames; no Rust panics.
 - **Generators** fall out of heap frames: a generator is a frame detached from
   the stack and resumed later.
+- **A call is several instructions,** as in PHP itself: find the callee, pass
+  each argument in source order, then call. Only the callee knows which
+  parameters are by reference, so this gives PHP's evaluation order and the
+  right order of warnings.
 - **Calls into PHP from native code** (`array_map`, `usort`, autoloaders) are
   async native functions that ask the VM to run a callable and await it.
 
@@ -183,15 +187,120 @@ Real PHP is the oracle at every layer.
 
 ## 8. Milestones
 
-1. **Frontend and foundations.** Parser, value model, HTTP server skeleton.
-2. **Core execution.** Bytecode, compiler and VM for expressions, control flow,
-   functions, arrays and strings. `phera run file.php` prints output.
-3. **Objects.** Classes, interfaces, traits, enums, exceptions, closures,
-   generators, magic methods.
-4. **Standard library.** String, array, math, output and variable functions, then
-   json, pcre, ctype, mbstring, date, spl.
-5. **Web.** Superglobals, headers, output buffering, includes, autoloading,
-   `phera serve` running a PHP front controller.
-6. **Frameworks.** Reflection, sessions, PDO. Boot a bare Symfony kernel, then a
-   Laravel hello world.
-7. **Snapshot and fork.** Phase 2 of request isolation.
+| | Milestone | State |
+| --- | --- | --- |
+| 1 | **Frontend and foundations.** Lexer, parser, value model, HTTP server. | Done |
+| 2 | **Core execution.** Bytecode, compiler and VM for procedural PHP. `phera file.php` prints output. | Done; a list of parity gaps is being closed |
+| 3 | **Objects.** Classes, exceptions, closures, generators. Design in section 9. | Next |
+| 4 | **Standard library.** Strings, arrays, math, ctype done (187 functions). Then pcre, mbstring, date, spl, output buffering, files. | First wave done |
+| 5 | **Web.** `phera serve` runs scripts with superglobals and `header()`. Then uploads, cookies, sessions, autoloading. | Started |
+| 6 | **Frameworks.** Reflection, sessions, PDO. Boot a bare Symfony kernel, then a Laravel hello world. | |
+| 7 | **Snapshot and fork.** Phase 2 of request isolation. | |
+
+## 9. Objects, exceptions, closures, generators
+
+The design for milestone 3. It is built in the order of the subsections,
+each with its own fixtures checked against real PHP.
+
+### 9.1 Classes and objects
+
+- **Compile time.** A class declaration becomes plain data in the
+  `CompiledUnit`: its name, parent and interfaces as symbols, flags
+  (abstract, final, readonly, interface, trait, enum), constants, properties
+  with their flags and default-value code, methods as ordinary `Function`s,
+  enum cases. Nothing is resolved against other classes yet.
+- **Run time.** The VM links a declaration into a `Class` when execution
+  reaches it (or before the file runs, for a top-level class whose parent is
+  already known, as PHP does). Linking copies the parent's tables, flattens
+  traits in, and checks what PHP checks: abstract methods implemented,
+  signatures compatible, no final overridden. A linked class is an
+  `Rc<Class>` and never changes, except for its static properties.
+- **Objects** stay `Rc<Object>` with a class handle and a property table, but
+  the table moves behind methods (`get`, `set`, `unset`, `iter`) so its
+  representation can change. It starts as the ordered map it is now, which
+  gives `var_dump`, `foreach` and `(array)` their order for free. Slots
+  indexed by declaration order, with a map only for dynamic properties, come
+  later as an optimisation inside that one type.
+- **Visibility.** A private property is stored under PHP's own mangled key
+  (`\0Class\0name`), so a parent's and a child's private property of the
+  same name coexist. Public and protected ones use the plain name. Access
+  checks compare the frame's class scope with the declaring class.
+- **Calls.** A frame gains `this`, the class scope (for `self` and
+  visibility) and the called class (for `static`). New instructions follow
+  the existing call sequence: `InitMethodCall`, `InitStaticCall`, `New`,
+  then the same `Send` and `Call`. Property access extends paths with
+  `Step::Property`, so `$this->items[] = $x` is one copy-on-write walk like
+  an array write.
+- **Native classes.** The extension API gains `ClassEntry`: name, parent,
+  interfaces, constants, properties, and methods as native functions that
+  receive the object. `Throwable` and its family, `Closure`, `Generator`,
+  `ArrayObject` and `stdClass` are defined this way.
+- **Magic.** `__get`, `__set`, `__isset`, `__unset`, `__call`,
+  `__callStatic`, `__toString`, `__invoke`, `__clone`, and the interfaces the
+  engine itself understands (`ArrayAccess`, `Countable`, `Iterator`,
+  `IteratorAggregate`, `Stringable`) are flags on the linked class, checked
+  only on the slow path of an operation that failed the ordinary way.
+- **Destructors.** Rust drops an object when its last reference goes, but a
+  `Drop` cannot run PHP code: it has no VM and cannot await. So dropping an
+  object whose class has `__destruct` moves its contents into a queue owned
+  by the request. The VM empties the queue at the next instruction boundary
+  and runs the destructors there. The timing is PHP's to within one
+  instruction.
+- **`__toString` and native functions.** A native function declared with a
+  string parameter must accept a stringable object. The VM converts such
+  arguments before `prepare_arguments`, because calling a PHP method needs
+  the VM.
+
+### 9.2 Exceptions
+
+- `throw` raises an object. Errors raised by the engine and by native
+  functions (`TypeError`, `ValueError`, ...) become instances of the same
+  native classes, so PHP code can catch them.
+- Unwinding is the one routine that exists today, extended to consult
+  `Function::handlers`: innermost `try` first, frame by frame.
+- A `catch` is compiled code: take the pending exception, test it with
+  `instanceof` against each type, jump, or rethrow.
+- A `finally` block is compiled once and entered as a subroutine. A register
+  remembers how it was entered: by falling out of the `try`, by `return` (the
+  value waits in a temporary), by `break` or `continue`, or by an exception
+  (which continues unwinding afterwards). That is PHP's own scheme.
+- Uncaught exceptions keep today's output. `set_exception_handler` and
+  `set_error_handler` are VM intrinsics.
+
+### 9.3 Closures and callables
+
+- A closure's body is an ordinary `Function` with a list of captured
+  variables, which occupy the registers after its parameters. Creating one
+  is `MakeClosure` preceded by one capture instruction per variable, by value
+  or by reference. An arrow function is the same with the captures worked
+  out by the compiler.
+- A closure value is an object of the native class `Closure` whose native
+  state holds the function, the captured values, the bound `$this` and the
+  class scope.
+- One resolver turns any callable into a call target: a function name,
+  `'Class::method'`, `[$object, 'method']`, a closure, an object with
+  `__invoke`. `InitDynamicCall` and `Context::call` both use it, so
+  `array_map` and `$f()` cannot disagree.
+- `strlen(...)` creates a real `Closure`.
+
+### 9.4 Generators
+
+- Calling a generator function creates a `Generator` object instead of
+  running the body. The object owns a frame that is not on the call stack.
+- `yield` suspends: the frame's registers are moved out of the VM's register
+  stack into the generator, and control returns to whoever resumed it.
+  `current`, `next`, `send` and `throw` move them back and continue. This is
+  why frames were kept detachable from the start.
+- `yield from` keeps a stack of inner generators inside the outer one.
+- A generator dropped while suspended inside a `try` runs its `finally`
+  blocks through the destructor queue.
+
+### 9.5 Order of work
+
+1. Native classes in the extension API; the object model; classes with
+   properties, methods, constants, statics, inheritance, interfaces and
+   abstract classes; `new`, `clone`, `instanceof`.
+2. Exceptions.
+3. Closures, arrow functions, callables.
+4. Traits, enums, readonly, magic methods, the engine's interfaces.
+5. Generators.
