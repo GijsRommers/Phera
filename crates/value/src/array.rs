@@ -181,25 +181,45 @@ impl PhpArray {
         self.len() == 0
     }
 
+    /// Drops values without recursing into what they contain.
+    ///
+    /// Dropping a value that is the last holder of an array, an object or a
+    /// reference would normally drop its contents from inside its own drop,
+    /// one stack frame per level. A million-node linked list would overflow
+    /// the stack that way. Instead, the contents are moved onto this work
+    /// list and dropped from the loop.
     fn drop_values(work: Vec<Value>) {
         let mut work = work;
-        while let Some(v) = work.pop() {
-            // Flatten a nested array when this Rc holds the last reference
-            // to it; otherwise dropping is someone else's job.
-            match v {
-                Value::Array(rc) if Rc::strong_count(&rc) == 1 => {
+        while let Some(value) = work.pop() {
+            // Only the last holder frees the contents; for anyone else,
+            // dropping just lowers the count.
+            match value {
+                Value::Array(rc) => {
                     if let Ok(mut inner) = Rc::try_unwrap(rc) {
-                        work.extend(
-                            std::mem::take(&mut inner.entries)
-                                .into_iter()
-                                .filter_map(|e| e.value),
-                        );
+                        work.extend(inner.take_values());
                     }
-                    // `inner` is empty here, so its own drop is trivial.
                 }
-                v => drop(v),
+                Value::Object(rc) => {
+                    if let Ok(object) = Rc::try_unwrap(rc) {
+                        work.extend(object.properties.into_inner().take_values());
+                    }
+                }
+                Value::Reference(rc) => {
+                    if let Ok(cell) = Rc::try_unwrap(rc) {
+                        work.push(cell.into_inner());
+                    }
+                }
+                scalar => drop(scalar),
             }
         }
+    }
+
+    /// Empties the array and hands back its values, leaving nothing for its
+    /// own drop to do.
+    fn take_values(&mut self) -> impl Iterator<Item = Value> + use<> {
+        std::mem::take(&mut self.entries)
+            .into_iter()
+            .filter_map(|entry| entry.value)
     }
 
     fn find_pos(&self, key: &ArrayKey) -> Option<usize> {
@@ -531,15 +551,10 @@ impl PhpArray {
 }
 
 impl Drop for PhpArray {
-    /// Flattens the drop of nested arrays into a loop: a deeply nested
-    /// structure must not recurse through Rc's drop glue.
+    /// Flattens the drop of everything nested inside into a loop: a deeply
+    /// nested structure must not recurse through Rc's drop glue.
     fn drop(&mut self) {
-        Self::drop_values(
-            std::mem::take(&mut self.entries)
-                .into_iter()
-                .filter_map(|e| e.value)
-                .collect(),
-        );
+        Self::drop_values(self.take_values().collect());
     }
 }
 

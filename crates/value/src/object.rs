@@ -66,3 +66,43 @@ impl std::fmt::Debug for Resource {
         write!(f, "Resource({}, {})", self.id, self.kind)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{ArrayKey, Value};
+
+    struct Node;
+
+    impl ClassHandle for Node {
+        fn name(&self) -> &str {
+            "Node"
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+
+    /// A linked list of a million objects, each holding the next in a
+    /// property, alternately directly and through a PHP reference. Freeing
+    /// it one stack frame per node would overflow the stack.
+    #[test]
+    fn dropping_a_long_chain_of_objects_does_not_recurse() {
+        let class: Rc<dyn ClassHandle> = Rc::new(Node);
+        let mut head = Value::Null;
+        for id in 0..1_000_000 {
+            let node = Object::new(id, class.clone());
+            let next = if id % 2 == 0 {
+                head
+            } else {
+                Value::Reference(Rc::new(RefCell::new(head)))
+            };
+            node.properties
+                .borrow_mut()
+                .insert(ArrayKey::str("next"), next);
+            head = Value::Object(Rc::new(node));
+        }
+        drop(head);
+    }
+}
