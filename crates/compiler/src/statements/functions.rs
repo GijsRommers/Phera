@@ -38,7 +38,7 @@ impl Compiler<'_> {
             builder.function.parameters.push(Parameter {
                 name: parameter.name.clone(),
                 has_default: parameter.default.is_some(),
-                ty: parameter.ty.as_ref().map(type_name),
+                declaration_type: parameter.ty.as_ref().map(type_name),
                 by_reference: parameter.by_reference,
                 variadic: parameter.variadic,
             });
@@ -78,10 +78,11 @@ impl Compiler<'_> {
     ) -> Result<(), CompileError> {
         for parameter in parameters {
             if let Some(default) = &parameter.default {
+                self.validate_parameter_default(parameter, default, line)?;
                 let param = self.local(&parameter.name)?;
                 let check = self.emit(
                     Instruction::DefaultCheck {
-                        param,
+                        parameter: param,
                         passed: Target(0),
                     },
                     line,
@@ -94,7 +95,7 @@ impl Compiler<'_> {
                             scope: crate::ir::PlaceScope::Local,
                             path: vec![],
                         },
-                        src,
+                        source: src,
                     },
                     line,
                 );
@@ -102,7 +103,7 @@ impl Compiler<'_> {
                     self.emit(
                         Instruction::Check {
                             local: param,
-                            ty: type_name(ty),
+                            declaration_type: type_name(ty),
                         },
                         line,
                     );

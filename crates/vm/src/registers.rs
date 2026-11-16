@@ -32,6 +32,17 @@ impl Vm {
         Value::Null
     }
 
+    /// Only replacing a whole subject restarts foreach; array copy-on-write keeps its cursor.
+    pub(crate) fn restart_subject_iterators(&mut self, register: Reg) {
+        let Some(frame) = self.call_stack.current_mut() else {
+            return;
+        };
+        let slots = self.registers.window(frame.base, frame.count);
+        if let Some(Some(subject)) = slots.get(register.index()) {
+            frame.iterators.restart_for(subject, slots);
+        }
+    }
+
     /// Assignment updates the shared cell when a local already holds a PHP reference.
     pub(crate) fn assign_local(&mut self, register: Reg, value: Value) -> Result<(), NativeError> {
         if let Some(Value::Reference(reference)) = self

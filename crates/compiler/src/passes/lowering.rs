@@ -23,12 +23,18 @@ impl Tables {
         use ir::Instruction as Old;
         let instruction = match source {
             Old::DynamicGlobal { name } => Instruction::BindDynamicGlobal { name },
-            Old::Check { local, ty } => Instruction::CheckType {
+            Old::Check {
+                local,
+                declaration_type: ty,
+            } => Instruction::CheckType {
                 local,
                 ty: self.ty(&ty),
             },
             Old::Clear { register } => Instruction::Clear { reg: register },
-            Old::DefaultCheck { param, passed } => Instruction::ReceiveDefault {
+            Old::DefaultCheck {
+                parameter: param,
+                passed,
+            } => Instruction::ReceiveDefault {
                 param,
                 passed: Target(passed.0 as u32),
             },
@@ -44,7 +50,11 @@ impl Tables {
                     initialized: Target(initialized.0 as u32),
                 }
             }
-            Old::StaticInit { local, name, src } => {
+            Old::StaticInit {
+                local,
+                name,
+                source: src,
+            } => {
                 let variable = static_id(self, function, &name);
                 Instruction::InitStatic {
                     local,
@@ -56,17 +66,24 @@ impl Tables {
                 function: self.symbol(&name, fallback, crate::policies::NameKind::Function),
             },
             Old::StartDynamicCall { callee } => Instruction::InitDynamicCall { callee },
-            Old::FinishCall { dst } => Instruction::Call { dst },
-            Old::FinishCallable { dst } => Instruction::MakeCallable { dst },
+            Old::FinishCall { destination: dst } => Instruction::Call { dst },
+            Old::FinishCallable { destination: dst } => Instruction::MakeCallable { dst },
             Old::Send { argument } => self.send_argument(function, argument),
-            Old::IncPlace { dst, place, mode } => self.increment_place(function, dst, place, mode),
+            Old::IncPlace {
+                destination: dst,
+                place,
+                mode,
+            } => self.increment_place(function, dst, place, mode),
             Old::Compound {
-                dst,
+                destination: dst,
                 place,
                 operator,
                 source,
             } => self.compound_assignment(function, dst, place, operator, source),
-            Old::Load { dst, constant } => match constants.get(constant) {
+            Old::Load {
+                destination: dst,
+                constant,
+            } => match constants.get(constant) {
                 Some(ir::Constant::Int(value)) if i32::try_from(*value).is_ok() => {
                     Instruction::LoadInt {
                         dst,
@@ -79,14 +96,24 @@ impl Tables {
                 },
                 None => Instruction::LoadNull { dst },
             },
-            Old::Move { dst, src } => Instruction::Move { dst, src },
-            Old::Read { dst, place, mode } => self.read_place(function, dst, place, mode),
-            Old::Write { place, src } => self.write_place(function, place, src),
-            Old::Reference { dst, place } => Instruction::MakeReference {
+            Old::Move {
+                destination: dst,
+                source: src,
+            } => Instruction::Move { dst, src },
+            Old::Read {
+                destination: dst,
+                place,
+                mode,
+            } => self.read_place(function, dst, place, mode),
+            Old::Write { place, source: src } => self.write_place(function, place, src),
+            Old::Reference {
+                destination: dst,
+                place,
+            } => Instruction::MakeReference {
                 dst,
                 path: path(function, place),
             },
-            Old::Rebind { place, src } => Instruction::BindReference {
+            Old::Rebind { place, source: src } => Instruction::BindReference {
                 path: path(function, place),
                 src,
             },
@@ -95,10 +122,10 @@ impl Tables {
                 path: path(function, place),
             },
             Old::Binary {
-                dst,
+                destination: dst,
                 operator: op,
-                lhs,
-                rhs,
+                left: lhs,
+                right: rhs,
             } => Instruction::Binary {
                 dst,
                 op: binary(op),
@@ -106,9 +133,9 @@ impl Tables {
                 rhs,
             },
             Old::Unary {
-                dst,
+                destination: dst,
                 operator: op,
-                src,
+                source: src,
             } => match op {
                 ir::Unary::Plus => Instruction::Unary {
                     dst,
@@ -188,14 +215,14 @@ impl Tables {
                 }
             }
             Old::Constant {
-                dst,
+                destination: dst,
                 name,
                 fallback,
             } => Instruction::FetchConstant {
                 dst,
                 constant: self.symbol(&name, fallback, crate::policies::NameKind::Constant),
             },
-            Old::Define { name, src } => Instruction::DeclareConstant {
+            Old::Define { name, source: src } => Instruction::DeclareConstant {
                 name: self.name(&name),
                 src,
             },
@@ -207,7 +234,7 @@ impl Tables {
                 name: self.name(&name),
             },
             Old::Include {
-                dst,
+                destination: dst,
                 path,
                 once,
                 required,
@@ -221,10 +248,15 @@ impl Tables {
                     (true, true) => IncludeKind::RequireOnce,
                 },
             },
-            Old::IterInit { id, src, place } => {
+            Old::IterInit {
+                iterator: id,
+                source: src,
+                place,
+            } => {
                 function.iterators = function.iterators.max(id.0 + 1);
                 if let Some(place) = place {
                     Instruction::IterStartReference {
+                        subject: src,
                         iter: IterId(id.0),
                         path: path(function, place),
                         end: Target(0),
@@ -238,22 +270,29 @@ impl Tables {
                 }
             }
             Old::IterNext {
-                id,
+                iterator: id,
                 key,
                 value,
                 end,
-            } => Instruction::IterNextKeyed {
-                iter: IterId(id.0),
-                key,
-                value,
-                end: Target(end.0 as u32),
+            } => match key {
+                Some(key) => Instruction::IterNextKeyed {
+                    iter: IterId(id.0),
+                    key,
+                    value,
+                    end: Target(end.0 as u32),
+                },
+                None => Instruction::IterNext {
+                    iter: IterId(id.0),
+                    value,
+                    end: Target(end.0 as u32),
+                },
             },
             Old::MatchError { subject } => Instruction::Raise {
                 error: RuntimeError::UnhandledMatch,
                 detail: subject,
             },
             Old::Call {
-                dst,
+                destination: dst,
                 name,
                 fallback,
                 arguments,

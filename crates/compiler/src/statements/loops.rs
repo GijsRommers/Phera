@@ -155,7 +155,13 @@ impl Compiler<'_> {
             if self.function.returns_reference && writable(expression) {
                 let place = self.place(expression)?;
                 let dst = self.allocate_register()?;
-                self.emit(Instruction::Reference { dst, place }, line);
+                self.emit(
+                    Instruction::Reference {
+                        destination: dst,
+                        place,
+                    },
+                    line,
+                );
                 dst
             } else {
                 self.compile_expression(expression)?

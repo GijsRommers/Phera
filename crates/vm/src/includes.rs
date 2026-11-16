@@ -1,19 +1,12 @@
 //! Include resolution and sharing caller variable references.
 
 use std::path::{Path, PathBuf};
-use std::{cell::RefCell, rc::Rc};
 
 use phera_bytecode::{IncludeKind, Reg};
 use phera_extension_api::NativeError;
 use phera_value::{Value, to_php_string};
 
-use crate::{Vm, frame::Frame};
-
-/// A callee register and the caller reference cell it must share.
-struct ScopeBinding {
-    register: Reg,
-    value: Value,
-}
+use crate::{Vm, frame::Frame, include_scope::ScopeBinding};
 
 impl Vm {
     /// Execute included top-level code with references to the caller scope.
@@ -24,45 +17,49 @@ impl Vm {
         kind: IncludeKind,
     ) -> Result<(), NativeError> {
         let once = matches!(kind, IncludeKind::IncludeOnce | IncludeKind::RequireOnce);
-        let required = matches!(kind, IncludeKind::Require | IncludeKind::RequireOnce);
-        let mut diagnostics = self.diagnostic_reporter.take_operator();
-        let name = to_php_string(&self.operand(path), &mut diagnostics)?.to_string_lossy();
-        self.diagnostics_flush(diagnostics);
+        let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
+        let name = to_php_string(&diagnostics.vm.operand(path), &mut diagnostics.buffer)?
+            .to_string_lossy();
+        drop(diagnostics);
         let unit = match self.load_include(&name).await? {
-            Some(unit) => unit,
-            None => {
-                let kind = if required {
-                    if once { "require_once" } else { "require" }
-                } else if once {
-                    "include_once"
-                } else {
-                    "include"
-                };
-                self.warn(format!(
-                    "{kind}({name}): Failed to open stream: No such file or directory"
-                ));
-                if required {
-                    return Err(NativeError::error(format!(
-                        "Failed opening required '{name}' (include_path='.:')"
-                    )));
-                }
-                self.warn(format!(
-                    "{kind}(): Failed opening '{name}' for inclusion (include_path='.:')"
-                ));
-                self.set(destination, Value::Bool(false));
-                return Ok(());
-            }
+            Ok(unit) => unit,
+            Err(reason) => return self.failed_include(destination, &name, kind, &reason),
         };
         if once && self.include_state.contains(&unit.file) {
-            self.set(destination, Value::Int(1));
+            self.set(destination, Value::Bool(true));
             return Ok(());
+        }
+        if self.call_stack.depth() >= self.frame_limit {
+            return Err(NativeError::error(format!(
+                "Maximum call stack depth of {} exceeded",
+                self.frame_limit
+            )));
         }
         self.include_state.record(unit.file.clone());
         self.declare_included_functions(&unit)?;
+        self.push_include_frame(unit, destination)
+    }
+
+    /// Sharing the caller scope happens before the included frame takes its register window.
+    fn push_include_frame(
+        &mut self,
+        unit: std::sync::Arc<phera_bytecode::CompiledUnit>,
+        destination: Reg,
+    ) -> Result<(), NativeError> {
         let bindings = self.include_bindings(&unit)?;
         let cache = self.code_cache(&unit);
         let mut frame = Frame::new(cache, &mut self.registers, unit, None, Some(destination));
-        for ScopeBinding { register, value } in bindings {
+        for ScopeBinding {
+            register,
+            name,
+            value,
+        } in bindings
+        {
+            if let Some(name) = name {
+                self.registers.push_undefined();
+                frame.count += 1;
+                frame.dynamic.insert(name, register);
+            }
             frame.set(&mut self.registers, register, value);
         }
         self.call_stack.push(frame);
@@ -71,12 +68,47 @@ impl Vm {
 }
 
 impl Vm {
+    /// PHP emits one stream warning, then either the inclusion warning or an uncaught Error.
+    fn failed_include(
+        &mut self,
+        destination: Reg,
+        name: &str,
+        kind: IncludeKind,
+        reason: &str,
+    ) -> Result<(), NativeError> {
+        let construct = match kind {
+            IncludeKind::Include => "include",
+            IncludeKind::IncludeOnce => "include_once",
+            IncludeKind::Require => "require",
+            IncludeKind::RequireOnce => "require_once",
+        };
+        let display_name = Path::new(name)
+            .canonicalize()
+            .ok()
+            .filter(|path| path.is_dir() || reason == "Permission denied")
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_else(|| name.to_owned());
+        self.warn(format!(
+            "{construct}({display_name}): Failed to open stream: {reason}"
+        ));
+        if matches!(kind, IncludeKind::Require | IncludeKind::RequireOnce) {
+            return Err(NativeError::error(format!(
+                "Failed opening required '{name}' (include_path='.')"
+            )));
+        }
+        self.warn(format!(
+            "{construct}(): Failed opening '{name}' for inclusion (include_path='.')"
+        ));
+        self.set(destination, Value::Bool(false));
+        Ok(())
+    }
+
     /// Resolve relative includes against the caller only after the first load fails.
     /// Parse errors terminate the request before any fallback lookup.
     async fn load_include(
         &mut self,
         name: &str,
-    ) -> Result<Option<std::sync::Arc<phera_bytecode::CompiledUnit>>, NativeError> {
+    ) -> Result<Result<std::sync::Arc<phera_bytecode::CompiledUnit>, String>, NativeError> {
         let loader = self
             .include_state
             .loader()
@@ -91,7 +123,11 @@ impl Vm {
                 (),
             ))));
         }
-        if result.is_err() && !Path::new(name).is_absolute() {
+        if result.is_err()
+            && !Path::new(name).is_absolute()
+            && !name.starts_with("./")
+            && !name.starts_with("../")
+        {
             let file = self.location().file;
             if let Some(parent) = Path::new(&file).parent() {
                 result = loader.load(parent.join(name)).await;
@@ -106,7 +142,13 @@ impl Vm {
                 (),
             ))));
         }
-        Ok(result.ok())
+        Ok(result.map_err(|error| {
+            if error.contains("Permission denied") {
+                "Permission denied".into()
+            } else {
+                "No such file or directory".into()
+            }
+        }))
     }
 
     /// Included declarations reject names that already exist in this request.
@@ -117,11 +159,21 @@ impl Vm {
         for id in &unit.hoisted {
             if let Some(function) = unit.functions.get(id.index()) {
                 let key = function.name.to_ascii_lowercase();
-                if self.function_table.contains(&key) {
-                    return Err(NativeError::error(format!(
-                        "Cannot redeclare function {}()",
-                        function.name
-                    )));
+                if let Some(previous) = self.function_table.get(&key) {
+                    let previous_line = previous
+                        .unit
+                        .functions
+                        .get(previous.index)
+                        .map_or(1, |function| function.definition_line);
+                    let text = format!(
+                        "\nFatal error: Cannot redeclare function {}() (previously declared in {}:{previous_line}) in {} on line {}\n",
+                        function.name, previous.unit.file, unit.file, function.definition_line,
+                    );
+                    self.out(text.as_bytes());
+                    self.status = 255;
+                    return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
+                        (),
+                    ))));
                 }
                 self.function_table.insert(
                     key,
@@ -133,60 +185,5 @@ impl Vm {
             }
         }
         Ok(())
-    }
-
-    /// Included top-level locals share the caller's reference cells, including new names.
-    fn include_bindings(
-        &mut self,
-        unit: &phera_bytecode::CompiledUnit,
-    ) -> Result<Vec<ScopeBinding>, NativeError> {
-        let names: Vec<String> = unit
-            .main
-            .locals
-            .iter()
-            .filter_map(|name| unit.names.get(name.index()).cloned())
-            .collect();
-        let mut bindings = Vec::new();
-        for (i, name) in names.iter().enumerate() {
-            let parent = self
-                .call_stack
-                .current_mut()
-                .ok_or_else(|| internal_error!("include without parent"))?;
-            let register = if let Some(i) = parent.function().locals.iter().position(|n| {
-                parent
-                    .unit
-                    .names
-                    .get(n.index())
-                    .is_some_and(|value| value == name)
-            }) {
-                Reg(i as u16)
-            } else if let Some(register) = parent.dynamic.get(name) {
-                *register
-            } else {
-                let register = Reg(u16::try_from(parent.count)
-                    .map_err(|_| NativeError::error("Phera register limit exceeded"))?);
-                self.registers.push_undefined();
-                parent.count += 1;
-                parent.dynamic.insert(name.clone(), register);
-                register
-            };
-            if let Some(slot) = parent
-                .slots_mut(&mut self.registers)
-                .get_mut(register.0 as usize)
-            {
-                let value = slot.take().unwrap_or_default();
-                let reference = if matches!(value, Value::Reference(_)) {
-                    value
-                } else {
-                    Value::Reference(Rc::new(RefCell::new(value)))
-                };
-                *slot = Some(reference.clone());
-                bindings.push(ScopeBinding {
-                    register: Reg(i as u16),
-                    value: reference,
-                });
-            }
-        }
-        Ok(bindings)
     }
 }

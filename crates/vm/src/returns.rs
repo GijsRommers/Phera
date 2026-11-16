@@ -105,6 +105,7 @@ impl Vm {
                 checked
             };
         }
+        self.finish_include_scope()?;
         let frame = self
             .call_stack
             .pop()

@@ -30,11 +30,13 @@ impl Vm {
             .and_then(Option::as_ref)
             .cloned()
             .unwrap_or_default();
-        let mut diagnostics = self.diagnostic_reporter.take_operator();
+        let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let key = key
-            .map(|key| ArrayKey::from_value_diag(&self.operand(key), &mut diagnostics))
+            .map(|key| {
+                ArrayKey::from_value_diag(&diagnostics.vm.operand(key), &mut diagnostics.buffer)
+            })
             .transpose()?;
-        self.diagnostics_flush(diagnostics);
+        drop(diagnostics);
         let mut target = self
             .call_stack
             .current_mut()

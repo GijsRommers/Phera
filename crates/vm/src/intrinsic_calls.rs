@@ -15,42 +15,57 @@ impl Vm {
         arguments: Vec<Value>,
     ) -> NativeResult {
         let argument = arguments.first().cloned().unwrap_or_default();
-        let mut diagnostics = self.diagnostic_reporter.take_operator();
+        let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         match intrinsic {
             Intrinsic::IsCallable => {
-                let name = to_php_string(&argument, &mut diagnostics)?.to_string_lossy();
-                Ok(Value::Bool(self.exists(&name)))
+                let name = to_php_string(&argument, &mut diagnostics.buffer)?.to_string_lossy();
+                Ok(Value::Bool(diagnostics.vm.exists(&name)))
             }
             Intrinsic::CallUserFunc => {
                 let rest = arguments.iter().skip(1).cloned().collect();
-                return self.call(&argument, rest).await;
+                return diagnostics.vm.call(&argument, rest).await;
             }
-            Intrinsic::CallUserFuncArray => self.call_user_func_array(argument, arguments).await,
-            Intrinsic::GetDefinedVars => self.defined_variables(),
-            Intrinsic::Compact => self.compact_variables(arguments),
-            Intrinsic::Extract => self.extract_variables(arguments),
-            Intrinsic::Define => self.define_argument(argument, arguments, &mut diagnostics),
-            Intrinsic::Defined => Ok(Value::Bool(
-                self.constants
-                    .contains_key(&to_php_string(&argument, &mut diagnostics)?.to_string_lossy()),
-            )),
+            Intrinsic::CallUserFuncArray => {
+                diagnostics
+                    .vm
+                    .call_user_func_array(argument, arguments)
+                    .await
+            }
+            Intrinsic::GetDefinedVars => diagnostics.vm.defined_variables(),
+            Intrinsic::Compact => diagnostics.vm.compact_variables(arguments),
+            Intrinsic::Extract => diagnostics.vm.extract_variables(arguments),
+            Intrinsic::Define => {
+                diagnostics
+                    .vm
+                    .define_argument(argument, arguments, &mut diagnostics.buffer)
+            }
+            Intrinsic::Defined => Ok(Value::Bool(diagnostics.vm.constants.contains_key(
+                &to_php_string(&argument, &mut diagnostics.buffer)?.to_string_lossy(),
+            ))),
             Intrinsic::Constant => {
-                let name = to_php_string(&argument, &mut diagnostics)?.to_string_lossy();
-                self.constants
+                let name = to_php_string(&argument, &mut diagnostics.buffer)?.to_string_lossy();
+                diagnostics
+                    .vm
+                    .constants
                     .get(&name)
                     .cloned()
                     .ok_or_else(|| NativeError::error(format!("Undefined constant \"{name}\"")))
             }
-            Intrinsic::FunctionExists => Ok(Value::Bool(
-                self.exists(&to_php_string(&argument, &mut diagnostics)?.to_string_lossy()),
-            )),
+            Intrinsic::FunctionExists => {
+                Ok(Value::Bool(diagnostics.vm.exists(
+                    &to_php_string(&argument, &mut diagnostics.buffer)?.to_string_lossy(),
+                )))
+            }
             Intrinsic::FuncNumArgs => Ok(Value::Int(
-                self.current().map_or(0, |frame| frame.arguments.len()) as i64,
+                diagnostics
+                    .vm
+                    .current()
+                    .map_or(0, |frame| frame.arguments.len()) as i64,
             )),
-            Intrinsic::FuncGetArgs => self.observed_arguments(),
+            Intrinsic::FuncGetArgs => diagnostics.vm.observed_arguments(),
             Intrinsic::FuncGetArg => {
-                let position = phera_value::to_int(&argument, &mut diagnostics)?;
-                self.current().and_then(|frame|frame.arguments.get(position as usize)).cloned().ok_or_else(||NativeError::value_error("func_get_arg(): Argument #1 ($position) must be less than the number of the arguments passed to the currently executed function"))
+                let position = phera_value::to_int(&argument, &mut diagnostics.buffer)?;
+                diagnostics.vm.current().and_then(|frame|frame.arguments.get(position as usize)).cloned().ok_or_else(||NativeError::value_error("func_get_arg(): Argument #1 ($position) must be less than the number of the arguments passed to the currently executed function"))
             }
             Intrinsic::ErrorReporting => Ok(Value::Int(30719)),
             Intrinsic::IniSet | Intrinsic::IniGet => Ok(Value::from("1")),

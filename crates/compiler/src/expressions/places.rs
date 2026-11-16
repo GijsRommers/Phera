@@ -28,22 +28,33 @@ impl Compiler<'_> {
                         scope: crate::ir::PlaceScope::Local,
                         path: vec![Some(key)],
                     };
-                    if item.by_reference {
-                        self.emit(Instruction::Reference { dst, place }, line);
+                    if item.by_reference || contains_reference(&item.value) {
+                        self.emit(
+                            Instruction::Reference {
+                                destination: dst,
+                                place,
+                            },
+                            line,
+                        );
+                        if !item.by_reference {
+                            self.assign(&item.value, dst, line)?;
+                            self.emit(Instruction::Clear { register: dst }, line);
+                            continue;
+                        }
                         let target = self.place(&item.value)?;
                         self.emit(
                             Instruction::Rebind {
                                 place: target,
-                                src: dst,
+                                source: dst,
                             },
                             line,
                         );
                     } else {
                         self.emit(
                             Instruction::Read {
-                                dst,
+                                destination: dst,
                                 place,
-                                mode: phera_bytecode::FetchMode::Read,
+                                mode: phera_bytecode::FetchMode::Destructure,
                             },
                             line,
                         );
@@ -53,7 +64,7 @@ impl Compiler<'_> {
             }
         } else {
             let place = self.place(target)?;
-            self.emit(Instruction::Write { place, src }, line);
+            self.emit(Instruction::Write { place, source: src }, line);
         }
         Ok(())
     }
@@ -68,7 +79,7 @@ impl Compiler<'_> {
             let dst = self.allocate_register()?;
             self.emit(
                 Instruction::Read {
-                    dst,
+                    destination: dst,
                     place,
                     mode: phera_bytecode::FetchMode::Quiet,
                 },
@@ -79,4 +90,15 @@ impl Compiler<'_> {
             self.compile_expression(expression)
         }
     }
+}
+
+/// A nested reference requires every ancestor array to retain its original writable cell.
+pub(crate) fn contains_reference(expression: &ast::Expression) -> bool {
+    let ast::ExpressionKind::List(items) = &expression.kind else {
+        return false;
+    };
+    items
+        .iter()
+        .flatten()
+        .any(|item| item.by_reference || contains_reference(&item.value))
 }

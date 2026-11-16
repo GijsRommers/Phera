@@ -43,7 +43,7 @@ impl Compiler<'_> {
             self.emit(
                 Instruction::Define {
                     name,
-                    src: register,
+                    source: register,
                 },
                 line,
             );
@@ -131,7 +131,7 @@ impl Compiler<'_> {
                 Instruction::StaticInit {
                     local,
                     name: variable.name.clone(),
-                    src,
+                    source: src,
                 },
                 line,
             );

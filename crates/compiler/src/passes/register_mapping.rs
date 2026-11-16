@@ -22,9 +22,13 @@ impl Instruction {
             }
         }
         match self {
-            Instruction::DefaultCheck { param, .. } => *param = map(*param),
+            Instruction::DefaultCheck {
+                parameter: param, ..
+            } => *param = map(*param),
             Instruction::StaticCheck { local, .. } => *local = map(*local),
-            Instruction::StaticInit { local, src, .. } => {
+            Instruction::StaticInit {
+                local, source: src, ..
+            } => {
                 *local = map(*local);
                 *src = map(*src);
             }
@@ -33,21 +37,22 @@ impl Instruction {
             Instruction::Clear { register } => *register = map(*register),
             Instruction::StartCall { .. } => {}
             Instruction::StartDynamicCall { callee } => *callee = map(*callee),
-            Instruction::FinishCall { dst } | Instruction::FinishCallable { dst } => {
-                *dst = map(*dst)
-            }
+            Instruction::FinishCall { destination: dst }
+            | Instruction::FinishCallable { destination: dst } => *dst = map(*dst),
             Instruction::Send { argument } => match &mut argument.source {
                 crate::ir::ArgumentSource::Value(register) => *register = map(*register),
                 crate::ir::ArgumentSource::Place(target) => place(target, &mut map),
             },
             Instruction::IncPlace {
-                dst, place: target, ..
+                destination: dst,
+                place: target,
+                ..
             } => {
                 *dst = map(*dst);
                 place(target, &mut map);
             }
             Instruction::Compound {
-                dst,
+                destination: dst,
                 place: target,
                 source,
                 ..
@@ -57,28 +62,54 @@ impl Instruction {
                 place(target, &mut map);
             }
 
-            Instruction::Load { dst, .. }
-            | Instruction::Constant { dst, .. }
+            Instruction::Load {
+                destination: dst, ..
+            }
+            | Instruction::Constant {
+                destination: dst, ..
+            }
             | Instruction::Array(dst)
             | Instruction::Echo(dst)
             | Instruction::ReturnReference(dst)
             | Instruction::Return(dst)
             | Instruction::Exit(dst) => *dst = map(*dst),
-            Instruction::Include { dst, path: src, .. }
-            | Instruction::Move { dst, src }
-            | Instruction::Unary { dst, src, .. } => {
+            Instruction::Include {
+                destination: dst,
+                path: src,
+                ..
+            }
+            | Instruction::Move {
+                destination: dst,
+                source: src,
+            }
+            | Instruction::Unary {
+                destination: dst,
+                source: src,
+                ..
+            } => {
                 *dst = map(*dst);
                 *src = map(*src)
             }
-            Instruction::Reference { dst, place: target }
+            Instruction::Reference {
+                destination: dst,
+                place: target,
+            }
             | Instruction::Read {
-                dst, place: target, ..
+                destination: dst,
+                place: target,
+                ..
             } => {
                 *dst = map(*dst);
                 place(target, &mut map)
             }
-            Instruction::Rebind { place: target, src }
-            | Instruction::Write { place: target, src } => {
+            Instruction::Rebind {
+                place: target,
+                source: src,
+            }
+            | Instruction::Write {
+                place: target,
+                source: src,
+            } => {
                 place(target, &mut map);
                 *src = map(*src)
             }
@@ -90,17 +121,22 @@ impl Instruction {
                 place(source, &mut map)
             }
             Instruction::Unset(target) => place(target, &mut map),
-            Instruction::Binary { dst, lhs, rhs, .. } => {
+            Instruction::Binary {
+                destination: dst,
+                left: lhs,
+                right: rhs,
+                ..
+            } => {
                 *dst = map(*dst);
                 *lhs = map(*lhs);
                 *rhs = map(*rhs)
             }
             Instruction::Branch { value, .. }
             | Instruction::BranchNull { value, .. }
-            | Instruction::Define { src: value, .. }
+            | Instruction::Define { source: value, .. }
             | Instruction::Global { local: value, .. } => *value = map(*value),
             Instruction::Call {
-                dst,
+                destination: dst,
                 name,
                 arguments,
                 ..
@@ -124,8 +160,8 @@ impl Instruction {
                 }
             }
             Instruction::IterInit {
-                id,
-                src,
+                iterator: id,
+                source: src,
                 place: target,
             } => {
                 *id = map(*id);
@@ -134,9 +170,16 @@ impl Instruction {
                     place(target, &mut map)
                 }
             }
-            Instruction::IterNext { id, key, value, .. } => {
+            Instruction::IterNext {
+                iterator: id,
+                key,
+                value,
+                ..
+            } => {
                 *id = map(*id);
-                *key = map(*key);
+                if let Some(key) = key {
+                    *key = map(*key);
+                }
                 *value = map(*value)
             }
             Instruction::MatchError { subject } => *subject = map(*subject),

@@ -22,6 +22,32 @@ impl Iterators {
         self.slots.resize_with(count as usize, || None);
     }
 
+    /// A whole-subject assignment restarts live iterators sharing that reference cell.
+    pub(crate) fn restart_for(
+        &mut self,
+        subject: &phera_value::Value,
+        slots: &[Option<phera_value::Value>],
+    ) {
+        let phera_value::Value::Reference(subject) = subject else {
+            return;
+        };
+        for state in self.slots.iter_mut().flatten() {
+            let Some(source) = &state.source else {
+                continue;
+            };
+            let Ok(phera_bytecode::PathBase::Register(register)) = source.base() else {
+                continue;
+            };
+            if let Some(Some(phera_value::Value::Reference(reference))) =
+                slots.get(register.index())
+                && std::rc::Rc::ptr_eq(subject, reference)
+            {
+                state.started = false;
+                state.position = None;
+            }
+        }
+    }
+
     pub(crate) fn insert(&mut self, index: u16, state: IteratorState) {
         if let Some(slot) = self.slots.get_mut(index as usize) {
             *slot = Some(state)

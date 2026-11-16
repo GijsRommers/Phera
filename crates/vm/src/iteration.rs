@@ -20,7 +20,11 @@ impl Vm {
         } else {
             self.warn(format!(
                 "foreach() argument must be of type array|object, {} given",
-                element.type_name()
+                match element {
+                    Value::Bool(true) => "true".into(),
+                    Value::Bool(false) => "false".into(),
+                    _ => element.type_name(),
+                }
             ));
             None
         };
@@ -49,7 +53,11 @@ impl Vm {
         if !value.is_array() {
             self.warn(format!(
                 "foreach() argument must be of type array|object, {} given",
-                value.type_name()
+                match value {
+                    Value::Bool(true) => "true".into(),
+                    Value::Bool(false) => "false".into(),
+                    _ => value.type_name(),
+                }
             ));
         }
         if let Some(frame) = self.call_stack.current_mut() {
@@ -79,6 +87,13 @@ impl Vm {
             .current_mut()
             .and_then(|frame| frame.iterators.remove(&iterator.0))
             .ok_or_else(|| internal_error!("missing iterator"))?;
+        if state.source.is_none() {
+            self.next_snapshot(&mut state, key, value, end)?;
+            if let Some(frame) = self.call_stack.current_mut() {
+                frame.iterators.insert(iterator.0, state);
+            }
+            return Ok(());
+        }
         let array = if let Some(position) = &state.source {
             match self.read_place(position, crate::access_mode::Missing::Silent)? {
                 Value::Array(array) => Some(array),
@@ -117,6 +132,46 @@ impl Vm {
 }
 
 impl Vm {
+    /// Snapshot iteration borrows its owner directly, avoiding a new array owner on every element.
+    #[inline]
+    fn next_snapshot(
+        &mut self,
+        state: &mut frame::IteratorState,
+        key: Option<Reg>,
+        destination: Reg,
+        end: Target,
+    ) -> Result<(), NativeError> {
+        let position = state.snapshot.as_ref().and_then(|array| {
+            if state.started {
+                state
+                    .position
+                    .and_then(|position| array.next_position(position))
+            } else {
+                array.first_position()
+            }
+        });
+        state.started = true;
+        state.position = position;
+        let Some((element_key, element)) = state
+            .snapshot
+            .as_ref()
+            .and_then(|array| position.and_then(|position| array.entry_at(position)))
+        else {
+            return self.jump(end);
+        };
+        if let Some(key) = key {
+            self.set(
+                key,
+                match element_key {
+                    ArrayKey::Int(integer) => Value::Int(*integer),
+                    ArrayKey::String(string) => Value::String(string.clone()),
+                },
+            );
+        }
+        self.set(destination, element.deref().clone());
+        Ok(())
+    }
+
     /// Publish the key before resolving a by-reference element path that uses its register.
     fn bind_iteration_entry(
         &mut self,
@@ -126,6 +181,10 @@ impl Vm {
         key: Option<Reg>,
         destination: Reg,
     ) -> Result<(), NativeError> {
+        if source.is_none() && key.is_none() {
+            self.set(destination, element);
+            return Ok(());
+        }
         let key_register = key.unwrap_or(destination);
         self.set(
             key_register,

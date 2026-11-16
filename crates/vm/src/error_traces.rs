@@ -34,20 +34,28 @@ fn argument(value: &Value) -> String {
 
 /// Read user parameter slots after coercion, as PHP's stack traces do.
 fn frame_arguments(vm: &Vm, frame: &Frame) -> String {
-    frame
-        .function()
-        .parameters
-        .iter()
-        .enumerate()
-        .filter_map(|(index, _)| {
-            frame
-                .slots(&vm.registers)
-                .get(index)
-                .and_then(Option::as_ref)
-        })
-        .map(argument)
-        .collect::<Vec<_>>()
-        .join(", ")
+    let mut arguments = Vec::new();
+    for (index, parameter) in frame.function().parameters.iter().enumerate() {
+        let Some(Some(value)) = frame.slots(&vm.registers).get(index) else {
+            continue;
+        };
+        if parameter.variadic {
+            if let Value::Array(values) = &*value.deref() {
+                for (key, value) in values.iter() {
+                    let text = argument(value);
+                    arguments.push(match key {
+                        phera_value::ArrayKey::String(name) => {
+                            format!("{}: {text}", name.to_string_lossy())
+                        }
+                        _ => text,
+                    });
+                }
+            }
+        } else {
+            arguments.push(argument(value));
+        }
+    }
+    arguments.join(", ")
 }
 
 impl Vm {

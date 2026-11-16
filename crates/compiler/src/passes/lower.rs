@@ -141,7 +141,7 @@ impl Tables {
                 .iter()
                 .map(|parameter| Parameter {
                     name: self.name(&parameter.name),
-                    ty: parameter.ty.as_deref().map(|ty| self.ty(ty)),
+                    ty: parameter.declaration_type.as_deref().map(|ty| self.ty(ty)),
                     by_reference: parameter.by_reference,
                     variadic: parameter.variadic,
                     has_default: parameter.has_default,
@@ -173,6 +173,7 @@ impl Tables {
                 | Instruction::JumpIf { target, .. }
                 | Instruction::JumpIfNot { target, .. }
                 | Instruction::JumpIfNull { target, .. }
+                | Instruction::IterNext { end: target, .. }
                 | Instruction::IterNextKeyed { end: target, .. } => Some(target),
                 _ => None,
             };

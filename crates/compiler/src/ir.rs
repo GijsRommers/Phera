@@ -1,276 +1,172 @@
-//! Compiler-only lowering representation. Paths are interned before code leaves this crate.
+//! The compiler keeps an intermediate form to preserve PHP evaluation order before
+//! committing to bytecode tables, compact instructions, and final jump offsets.
+//! AST lowering emits owned names and writable paths. Register mapping moves named
+//! locals ahead of temporaries. Bytecode lowering interns constants, names, types,
+//! and paths, expands call and binding operations, and relocates branch targets.
+//! The final bytecode optimization pass removes dead scalar temporaries and fuses
+//! integer operands without moving observable PHP side effects across branches.
 
+mod data;
+pub use data::{
+    Argument, ArgumentSource, Binary, CompiledUnit, Constant, Function, Parameter, Place,
+    PlaceScope, Target, Unary,
+};
 use phera_bytecode::Reg;
-/// An IR instruction offset, translated to a bytecode offset during emission.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Target(pub usize);
-/// Literal data before interning into the compiled unit constant table.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Constant {
-    EmptyArray,
-    Null,
-    Bool(bool),
-    Int(i64),
-    Float(f64),
-    Bytes(Vec<u8>),
-}
-/// Supported binary operations whose operands have already been evaluated.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Binary {
-    Add,
-    Subtract,
-    Multiply,
-    Divide,
-    Modulo,
-    Power,
-    Concat,
-    BitwiseAnd,
-    BitwiseOr,
-    BitwiseXor,
-    ShiftLeft,
-    ShiftRight,
-    Xor,
-    Equal,
-    NotEqual,
-    Identical,
-    NotIdentical,
-    Less,
-    LessEqual,
-    Greater,
-    GreaterEqual,
-    Spaceship,
-}
-/// Unary operations and casts before conversion to bytecode opcode families.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Unary {
-    Plus,
-    Minus,
-    Not,
-    BitwiseNot,
-    Bool,
-    Int,
-    Float,
-    String,
-    Array,
-}
-/// Selects PHP's local, variable-variable, or request-global namespace.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PlaceScope {
-    Local,
-    Dynamic,
-    Global(Reg),
-    Globals,
-}
-/// An evaluated variable root and ordered index steps for a read or write.
-#[derive(Debug, Clone)]
-pub struct Place {
-    pub base: Reg,
-    pub scope: PlaceScope,
-    pub path: Vec<Option<Reg>>,
-}
-/// Values and writable argument paths are distinct; a path needs no dummy register.
-#[derive(Debug, Clone)]
-pub enum ArgumentSource {
-    Value(Reg),
-    Place(Place),
-}
 
-/// An evaluated call argument with optional reference-capable place and name.
-#[derive(Debug, Clone)]
-pub struct Argument {
-    pub source: ArgumentSource,
-    pub name: Option<String>,
-    pub spread: bool,
-}
 /// Compiler IR with owned names and paths before table interning.
 #[derive(Debug, Clone)]
 pub enum Instruction {
+    /// Validate a local declaration; emits CheckType.
     Check {
         local: Reg,
-        ty: String,
+        declaration_type: String,
     },
-    DynamicGlobal {
-        name: Reg,
-    },
-    Clear {
-        register: Reg,
-    },
-    DefaultCheck {
-        param: Reg,
-        passed: Target,
-    },
+    /// Bind an evaluated global name into this scope; emits BindDynamicGlobal.
+    DynamicGlobal { name: Reg },
+    /// Release a temporary owner to preserve copy-on-write behavior; emits Clear.
+    Clear { register: Reg },
+    /// Skip a default expression when an argument was passed; emits ReceiveDefault.
+    DefaultCheck { parameter: Reg, passed: Target },
+    /// Bind persistent function storage and skip initialization when present; emits BindStatic.
     StaticCheck {
         local: Reg,
         name: String,
         initialized: Target,
     },
+    /// Initialize persistent function storage; emits InitStatic.
     StaticInit {
         local: Reg,
         name: String,
-        src: Reg,
+        source: Reg,
     },
+    /// Resolve a named callee before evaluating arguments; emits InitCall.
     StartCall {
         name: String,
         fallback: Option<String>,
     },
-    StartDynamicCall {
-        callee: Reg,
-    },
-    Send {
-        argument: Argument,
-    },
-    FinishCall {
-        dst: Reg,
-    },
-    FinishCallable {
-        dst: Reg,
-    },
+    /// Resolve an evaluated callable; emits InitDynamicCall.
+    StartDynamicCall { callee: Reg },
+    /// Send a value or writable argument in evaluation order; emits NameArgument and SendValue, SendLocal, SendPath, or SendSpread.
+    Send { argument: Argument },
+    /// Invoke the prepared callee and save its result; emits Call.
+    FinishCall { destination: Reg },
+    /// Capture the prepared first-class callable; emits MakeCallable.
+    FinishCallable { destination: Reg },
+    /// Increment or decrement a writable place; emits IncDecLocal or IncDecPath.
     IncPlace {
-        dst: Reg,
+        destination: Reg,
         place: Place,
         mode: phera_bytecode::IncDec,
     },
+    /// Apply a binary operation through a place; emits AssignOp and Move, or AssignOpPath.
     Compound {
-        dst: Reg,
+        destination: Reg,
         place: Place,
         operator: Binary,
         source: Reg,
     },
 
-    Reference {
-        dst: Reg,
-        place: Place,
-    },
-    Rebind {
-        place: Place,
-        src: Reg,
-    },
+    /// Retain a writable reference cell; emits MakeReference.
+    Reference { destination: Reg, place: Place },
+    /// Replace a binding with an existing cell; emits BindReference.
+    Rebind { place: Place, source: Reg },
+    /// Execute another file in this scope; emits Include.
     Include {
-        dst: Reg,
+        destination: Reg,
         path: Reg,
         once: bool,
         required: bool,
     },
-    Load {
-        dst: Reg,
-        constant: usize,
-    },
-    Move {
-        dst: Reg,
-        src: Reg,
-    },
+    /// Materialize a literal; emits LoadInt, LoadConst, or LoadNull.
+    Load { destination: Reg, constant: usize },
+    /// Copy a dereferenced register value; emits Move.
+    Move { destination: Reg, source: Reg },
+    /// Read a place with the selected warning policy; emits Move or Fetch.
     Read {
-        dst: Reg,
+        destination: Reg,
         place: Place,
         mode: phera_bytecode::FetchMode,
     },
-    Write {
-        place: Place,
-        src: Reg,
-    },
-    Bind {
-        place: Place,
-        source: Place,
-    },
+    /// Assign through an existing reference when present; emits Assign or AssignPath.
+    Write { place: Place, source: Reg },
+    /// Alias two writable places; emits MakeReference, BindReference, and Clear.
+    Bind { place: Place, source: Place },
+    /// Remove a binding or array element; emits UnsetPath.
     Unset(Place),
+    /// Apply an already evaluated binary operation; emits Binary.
     Binary {
-        dst: Reg,
+        destination: Reg,
         operator: Binary,
-        lhs: Reg,
-        rhs: Reg,
+        left: Reg,
+        right: Reg,
     },
+    /// Apply a unary operation or explicit cast; emits Unary or Cast.
     Unary {
-        dst: Reg,
+        destination: Reg,
         operator: Unary,
-        src: Reg,
+        source: Reg,
     },
+    /// Write a PHP string conversion to output; emits Echo.
     Echo(Reg),
+    /// Transfer control to an IR target; emits Jump with a relocated target.
     Jump(Target),
+    /// Branch on PHP truthiness; emits JumpIf or JumpIfNot.
     Branch {
         value: Reg,
         target: Target,
         when: bool,
     },
-    BranchNull {
-        value: Reg,
-        target: Target,
-    },
+    /// Branch when the value is null; emits JumpIfNull.
+    BranchNull { value: Reg, target: Target },
+    /// Prepare and invoke an evaluated callee; emits InitDynamicCall, argument sends, and Call.
     Call {
-        dst: Reg,
+        destination: Reg,
         name: Reg,
         fallback: Option<String>,
         arguments: Vec<Argument>,
     },
+    /// Return a dereferenced value from this frame; emits Return.
     Return(Reg),
+    /// Return an alias cell from this frame; emits ReturnReference.
     ReturnReference(Reg),
+    /// Stop the request with a value or status; emits Exit.
     Exit(Reg),
+    /// Enter or leave PHP error suppression; emits BeginSilence or EndSilence.
     Suppress(bool),
+    /// Construct an empty array; emits NewArray.
     Array(Reg),
+    /// Insert, append, reference-bind, or unpack an array entry; emits ArraySetReference, ArrayPushReference, or ArraySpread.
     ArrayPush {
         array: Reg,
         key: Option<Reg>,
         value: Reg,
         spread: bool,
     },
+    /// Fetch a named PHP constant; emits FetchConstant.
     Constant {
-        dst: Reg,
+        destination: Reg,
         name: String,
         fallback: Option<String>,
     },
-    Define {
-        name: String,
-        src: Reg,
-    },
+    /// Define a request constant; emits DeclareConstant.
+    Define { name: String, source: Reg },
+    /// Publish a conditional function declaration; emits DeclareFunction.
     Declare(usize),
-    Global {
-        local: Reg,
-        name: String,
-    },
+    /// Bind a named global cell into a local; emits BindGlobal.
+    Global { local: Reg, name: String },
+    /// Start snapshot or live reference traversal; emits IterStart or IterStartReference.
     IterInit {
-        id: Reg,
-        src: Reg,
+        iterator: Reg,
+        source: Reg,
         place: Option<Place>,
     },
+    /// Advance traversal and branch on exhaustion; emits IterNext or IterNextKeyed.
     IterNext {
-        id: Reg,
-        key: Reg,
+        iterator: Reg,
+        key: Option<Reg>,
         value: Reg,
         end: Target,
     },
-    MatchError {
-        subject: Reg,
-    },
-}
-/// A function parameter and the metadata needed by the runtime call protocol.
-#[derive(Debug, Clone)]
-pub struct Parameter {
-    pub name: String,
-    pub has_default: bool,
-    pub ty: Option<String>,
-    pub by_reference: bool,
-    pub variadic: bool,
-}
-/// One function of IR plus its constants, locals, source lines and scope requirements.
-#[derive(Debug, Clone, Default)]
-pub struct Function {
-    pub name: String,
-    pub definition_line: usize,
-    pub instructions: Vec<Instruction>,
-    pub constants: Vec<Constant>,
-    pub registers: usize,
-    pub parameters: Vec<Parameter>,
-    pub locals: Vec<String>,
-    pub lines: Vec<usize>,
-    pub dynamic_scope: bool,
-    pub strict_types: bool,
-    pub return_type: Option<String>,
-    pub returns_reference: bool,
-}
-/// The top-level function and declarations awaiting final bytecode emission.
-#[derive(Debug, Clone)]
-pub struct CompiledUnit {
-    pub main: Function,
-    pub functions: Vec<Function>,
-    pub hoisted: Vec<usize>,
-    pub file: String,
+    /// Raise the unmatched-subject exception; emits Raise(UnhandledMatch).
+    MatchError { subject: Reg },
 }

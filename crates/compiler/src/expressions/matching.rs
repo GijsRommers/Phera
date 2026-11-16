@@ -25,10 +25,10 @@ impl Compiler<'_> {
                     let test = self.allocate_register()?;
                     self.emit(
                         Instruction::Binary {
-                            dst: test,
+                            destination: test,
                             operator: Binary::Identical,
-                            lhs: subject,
-                            rhs,
+                            left: subject,
+                            right: rhs,
                         },
                         line,
                     );
@@ -46,7 +46,13 @@ impl Compiler<'_> {
                     self.patch(jump, self.position())
                 }
                 let src = self.compile_expression(&arm.body)?;
-                self.emit(Instruction::Move { dst, src }, line);
+                self.emit(
+                    Instruction::Move {
+                        destination: dst,
+                        source: src,
+                    },
+                    line,
+                );
                 done.push(self.emit(Instruction::Jump(Target(0)), line));
                 self.patch(skip, self.position());
             } else {
@@ -55,7 +61,13 @@ impl Compiler<'_> {
         }
         if let Some(expression) = default {
             let src = self.compile_expression(expression)?;
-            self.emit(Instruction::Move { dst, src }, line);
+            self.emit(
+                Instruction::Move {
+                    destination: dst,
+                    source: src,
+                },
+                line,
+            );
         } else {
             self.emit(Instruction::MatchError { subject }, line);
         }

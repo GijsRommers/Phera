@@ -62,12 +62,12 @@ impl Compiler<'_> {
                         let rhs = self.compile_expression(right)?;
                         self.emit(
                             Instruction::Binary {
-                                dst: lhs,
+                                destination: lhs,
                                 operator: binary(operator).ok_or_else(|| {
                                     self.error("Operator not supported yet", line)
                                 })?,
-                                lhs,
-                                rhs,
+                                left: lhs,
+                                right: rhs,
                             },
                             line,
                         );
@@ -116,14 +116,20 @@ impl Compiler<'_> {
             )
         };
         let src = self.compile_expression(right)?;
-        self.emit(Instruction::Move { dst, src }, line);
+        self.emit(
+            Instruction::Move {
+                destination: dst,
+                source: src,
+            },
+            line,
+        );
         self.patch(jump, self.position());
         if operator != ast::BinaryOperator::NullCoalesce {
             self.emit(
                 Instruction::Unary {
-                    dst,
+                    destination: dst,
                     operator: Unary::Bool,
-                    src: dst,
+                    source: dst,
                 },
                 line,
             );
@@ -143,7 +149,7 @@ impl Compiler<'_> {
         let dst = lhs;
         self.emit(
             Instruction::Call {
-                dst,
+                destination: dst,
                 name,
                 fallback: None,
                 arguments: vec![Argument {

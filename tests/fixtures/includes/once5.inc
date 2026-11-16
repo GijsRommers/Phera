@@ -1,0 +1,1 @@
+<?php echo "loaded\n"; return 7;

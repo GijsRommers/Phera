@@ -52,18 +52,17 @@ pub(crate) fn coerce(
     {
         return Ok(value);
     }
-    let mut diagnostics = vm.diagnostic_reporter.take_operator();
+    let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(vm);
     if mask.intersects(TypeMask::FLOAT) && value.is_int() {
-        return Ok(Value::Float(to_float(&value, &mut diagnostics)?));
+        return Ok(Value::Float(to_float(&value, &mut diagnostics.buffer)?));
     }
     if checking == TypeChecking::Coerce
         && !value.is_null()
         && !value.is_array()
         && !value.is_object()
         && !matches!(value, Value::Resource(_))
-        && let Some(converted) = coerce_scalar(&value, mask, &mut diagnostics)?
+        && let Some(converted) = coerce_scalar(&value, mask, &mut diagnostics.buffer)?
     {
-        vm.diagnostics_flush(diagnostics);
         return Ok(converted);
     }
     Err(NativeError::type_error(format!(

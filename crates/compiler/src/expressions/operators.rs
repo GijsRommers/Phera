@@ -16,7 +16,14 @@ impl Compiler<'_> {
     ) -> Result<Reg, CompileError> {
         let place = self.place(target)?;
         let dst = self.allocate_register()?;
-        self.emit(Instruction::IncPlace { dst, place, mode }, line);
+        self.emit(
+            Instruction::IncPlace {
+                destination: dst,
+                place,
+                mode,
+            },
+            line,
+        );
         Ok(dst)
     }
 
@@ -32,7 +39,7 @@ impl Compiler<'_> {
         let dst = self.allocate_register()?;
         self.emit(
             Instruction::Call {
-                dst,
+                destination: dst,
                 name,
                 fallback: None,
                 arguments: vec![Argument {
@@ -60,7 +67,13 @@ impl Compiler<'_> {
             self.compile_expression(left)?
         };
         let dst = self.allocate_register()?;
-        self.emit(Instruction::Move { dst, src: lhs }, line);
+        self.emit(
+            Instruction::Move {
+                destination: dst,
+                source: lhs,
+            },
+            line,
+        );
         let jump = if *operator == ast::BinaryOperator::NullCoalesce {
             let jump = self.emit(
                 Instruction::BranchNull {
@@ -83,14 +96,20 @@ impl Compiler<'_> {
             )
         };
         let rhs = self.compile_expression(right)?;
-        self.emit(Instruction::Move { dst, src: rhs }, line);
+        self.emit(
+            Instruction::Move {
+                destination: dst,
+                source: rhs,
+            },
+            line,
+        );
         self.patch(jump, self.position());
         if *operator != ast::BinaryOperator::NullCoalesce {
             self.emit(
                 Instruction::Unary {
-                    dst,
+                    destination: dst,
                     operator: Unary::Bool,
-                    src: dst,
+                    source: dst,
                 },
                 line,
             );
@@ -119,7 +138,14 @@ impl Compiler<'_> {
             ast::UnaryOperator::Not => Unary::Not,
             _ => Unary::BitwiseNot,
         };
-        self.emit(Instruction::Unary { dst, operator, src }, line);
+        self.emit(
+            Instruction::Unary {
+                destination: dst,
+                operator,
+                source: src,
+            },
+            line,
+        );
         Ok(dst)
     }
 }

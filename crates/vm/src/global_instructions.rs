@@ -11,9 +11,10 @@ use crate::Vm;
 impl Vm {
     /// Implements PHP BindDynamicGlobal semantics outside the dispatch loop.
     pub(crate) fn bind_dynamic_global(&mut self, name: Reg) -> Result<(), NativeError> {
-        let mut diagnostics = self.diagnostic_reporter.take_operator();
-        let name = to_php_string(&self.operand(name), &mut diagnostics)?.to_string_lossy();
-        self.diagnostics_flush(diagnostics);
+        let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
+        let name = to_php_string(&diagnostics.vm.operand(name), &mut diagnostics.buffer)?
+            .to_string_lossy();
+        drop(diagnostics);
         let local = self.named_slot(&name)?;
         self.bind_global(local, name)?;
         Ok(())

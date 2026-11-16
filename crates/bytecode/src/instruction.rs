@@ -259,6 +259,8 @@ pub enum Instruction {
     /// `foreach ($array as &$value)`: iterates over the place itself so the
     /// loop can modify it.
     IterStartReference {
+        /// Compiler-reserved register retaining the subject cell after unset.
+        subject: Reg,
         iter: IterId,
         path: PathId,
         end: Target,
@@ -464,8 +466,8 @@ pub enum FetchMode {
     Read,
     /// For `??`, `isset` and `empty`: missing things are null, silently.
     Quiet,
-    /// For `[$a, $b] = $value`: a missing key warns, but destructuring
-    /// something that is not an array yields nulls silently.
+    /// For `[$a, $b] = $value`: missing keys warn; null yields null silently,
+    /// while other non-array values warn and yield null in PHP 8.5.
     Destructure,
 }
 

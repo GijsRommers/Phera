@@ -83,11 +83,14 @@ impl Vm {
         target: Target,
     ) -> Result<(), NativeError> {
         let left = self.read_local(left);
-        let mut diagnostics = self.diagnostic_reporter.take_operator();
-        let value =
-            crate::ops::binary(operator, &left, &Value::Int(right as i64), &mut diagnostics);
-        self.diagnostics_flush_reuse(&mut diagnostics);
-        self.diagnostic_reporter.restore_operator(diagnostics);
+        let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
+        let value = crate::ops::binary(
+            operator,
+            &left,
+            &Value::Int(right as i64),
+            &mut diagnostics.buffer,
+        );
+        drop(diagnostics);
         if !to_bool(&value?) {
             self.jump(target)?
         }

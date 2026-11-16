@@ -31,36 +31,53 @@ impl Compiler<'_> {
         body: &[ast::Statement],
         line: usize,
     ) -> Result<(), CompileError> {
-        let src = if binding == crate::policies::IterationBinding::Reference {
+        let reference_subject = binding == crate::policies::IterationBinding::Reference
+            || crate::expressions::places::contains_reference(value);
+        let src = if reference_subject && crate::writable(subject) {
             self.literal(Constant::Null, line)?
         } else {
             self.compile_expression(subject)?
         };
         let id = self.allocate_register()?;
-        let key_register = self.allocate_register()?;
+        let key_register = key.as_ref().map(|_| self.allocate_register()).transpose()?;
         let value_register = self.allocate_register()?;
-        let place = if binding == crate::policies::IterationBinding::Reference {
-            Some(self.place(subject)?)
+        let place = if reference_subject {
+            Some(if crate::writable(subject) {
+                self.place(subject)?
+            } else {
+                crate::ir::Place {
+                    base: src,
+                    scope: crate::ir::PlaceScope::Local,
+                    path: vec![],
+                }
+            })
         } else {
             None
         };
-        self.emit(Instruction::IterInit { id, src, place }, line);
+        self.emit(
+            Instruction::IterInit {
+                iterator: id,
+                source: src,
+                place,
+            },
+            line,
+        );
         let start = self.position();
         let jump = self.emit(
             Instruction::IterNext {
-                id,
+                iterator: id,
                 key: key_register,
                 value: value_register,
                 end: Target(0),
             },
             line,
         );
-        if let Some(key) = key {
+        if let (Some(key), Some(key_register)) = (key, key_register) {
             let place = self.place(key)?;
             self.emit(
                 Instruction::Write {
                     place,
-                    src: key_register,
+                    source: key_register,
                 },
                 line,
             );
@@ -70,12 +87,20 @@ impl Compiler<'_> {
             self.emit(
                 Instruction::Rebind {
                     place,
-                    src: value_register,
+                    source: value_register,
                 },
                 line,
             );
         } else {
             self.assign(value, value_register, line)?;
+            if reference_subject {
+                self.emit(
+                    Instruction::Clear {
+                        register: value_register,
+                    },
+                    line,
+                );
+            }
         }
         self.loops.push(Loop {
             breaks: vec![],

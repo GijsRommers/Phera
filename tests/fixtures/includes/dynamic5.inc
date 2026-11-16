@@ -1,0 +1,1 @@
+<?php $name='hidden'; $$name++; extract(['only_dynamic5'=>13]); $name='only_dynamic5'; $$name++; return compact('hidden');

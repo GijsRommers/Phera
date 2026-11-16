@@ -33,6 +33,7 @@ impl Vm {
         {
             *argument = value.clone();
         }
+        self.restart_subject_iterators(local);
         self.assign_local(local, value)?;
         Ok(())
     }
@@ -54,6 +55,7 @@ impl Vm {
             crate::types::TypeChecking::Strict,
             self,
         )?;
+        self.restart_subject_iterators(local);
         self.assign_local(local, value)?;
         Ok(())
     }

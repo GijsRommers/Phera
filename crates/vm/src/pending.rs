@@ -41,9 +41,10 @@ impl Vm {
 
     /// Resolve a computed callable after publishing its conversion diagnostics.
     pub(crate) fn init_dynamic_call(&mut self, callee: Reg) -> Result<(), NativeError> {
-        let mut diagnostics = self.diagnostic_reporter.take_operator();
-        let name = to_php_string(&self.operand(callee), &mut diagnostics)?.to_string_lossy();
-        self.diagnostics_flush(diagnostics);
+        let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
+        let name = to_php_string(&diagnostics.vm.operand(callee), &mut diagnostics.buffer)?
+            .to_string_lossy();
+        drop(diagnostics);
         let callee = self.resolve_callee(name)?;
         self.prepare_call(callee)
     }
@@ -230,13 +231,14 @@ impl Vm {
         }
         match &call.callee.target {
             CallTarget::User(function) => {
-                self.push_prepared(
+                let result = self.push_prepared(
                     function.unit.clone(),
                     function.index,
                     Some(destination),
                     arguments,
-                )?;
+                );
                 self.name_variadic_arguments(named_start, named_keys)?;
+                result?;
             }
             CallTarget::Native(entry) => {
                 let result = self
@@ -269,17 +271,17 @@ impl Vm {
     /// Numeric exit values set status; strings are output before unwinding the request.
     pub(crate) fn exit_value(&mut self, register: Reg) -> NativeResult {
         let value = self.get(register);
-        let mut diagnostics = self.diagnostic_reporter.take_operator();
+        let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         if matches!(
             value,
             Value::Int(_) | Value::Bool(_) | Value::Null | Value::Float(_)
         ) {
-            self.status = phera_value::to_int(&value, &mut diagnostics)? as i32;
+            diagnostics.vm.status = phera_value::to_int(&value, &mut diagnostics.buffer)? as i32;
         } else {
-            let text = to_php_string(&value, &mut diagnostics)?;
-            self.out(text.as_bytes());
+            let text = to_php_string(&value, &mut diagnostics.buffer)?;
+            diagnostics.vm.out(text.as_bytes());
         }
-        self.diagnostics_flush(diagnostics);
+        drop(diagnostics);
         self.call_stack.clear();
         Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
             (),

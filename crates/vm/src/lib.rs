@@ -42,6 +42,7 @@ mod function_table;
 mod global_instructions;
 mod global_paths;
 mod globals;
+mod include_scope;
 mod include_state;
 mod includes;
 mod inline_stack;

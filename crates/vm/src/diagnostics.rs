@@ -25,10 +25,9 @@ impl Vm {
             })
     }
 
-    /// Publish diagnostics while retaining their allocation for the next operator.
-    pub(crate) fn diagnostics_flush(&mut self, mut diagnostics: CollectDiagnostics) {
-        self.diagnostics_flush_reuse(&mut diagnostics);
-        self.diagnostic_reporter.restore_operator(diagnostics);
+    /// Flush borrowed operator diagnostics through the same owner as conversions.
+    pub(crate) fn flush_operator_diagnostics(&mut self) {
+        drop(OperatorDiagnostics::new(self));
     }
 
     /// Drain entries without discarding the reusable allocation.
@@ -66,5 +65,65 @@ impl Vm {
             self.status = 255;
         }
         self.call_stack.clear();
+    }
+}
+
+/// A conversion owns the buffer until drop, including PHP exceptions and early returns.
+pub(crate) struct OperatorDiagnostics<'vm> {
+    pub(crate) vm: &'vm mut Vm,
+    pub(crate) buffer: CollectDiagnostics,
+}
+
+impl<'vm> OperatorDiagnostics<'vm> {
+    /// Detach the reusable buffer while retaining the VM needed to publish it on every exit.
+    pub(crate) fn new(vm: &'vm mut Vm) -> Self {
+        let buffer = vm.diagnostic_reporter.take_operator();
+        Self { vm, buffer }
+    }
+}
+
+impl Drop for OperatorDiagnostics<'_> {
+    fn drop(&mut self) {
+        self.vm.diagnostics_flush_reuse(&mut self.buffer);
+        self.vm
+            .diagnostic_reporter
+            .restore_operator(std::mem::take(&mut self.buffer));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::OperatorDiagnostics;
+    use crate::{Vm, intrinsics::Intrinsic};
+    use phera_extension_api::Registry;
+    use phera_value::{PhpArray, Value, to_php_string};
+    use std::{rc::Rc, sync::Arc};
+
+    /// An intrinsic must flush an already pending operator warning instead of discarding it.
+    #[tokio::test(flavor = "current_thread")]
+    async fn intrinsic_keeps_pending_conversion_diagnostics() {
+        let mut vm = Vm::new(Arc::new(Registry::new()));
+        let value = Value::Array(Rc::new(PhpArray::new()));
+        to_php_string(&value, vm.diagnostic_reporter.operator()).unwrap();
+        vm.intrinsic(Intrinsic::FuncNumArgs, vec![]).await.unwrap();
+        assert!(String::from_utf8_lossy(&vm.output).contains("Array to string conversion"));
+        assert!(!vm.diagnostic_reporter.has_pending());
+    }
+
+    /// Returning an error while owning a buffer still publishes and drains its warnings.
+    #[test]
+    fn conversion_error_drops_and_flushes_owner() {
+        let mut vm = Vm::new(Arc::new(Registry::new()));
+        let convert = |vm: &mut Vm| -> Result<(), phera_extension_api::NativeError> {
+            let mut diagnostics = OperatorDiagnostics::new(vm);
+            to_php_string(
+                &Value::Array(Rc::new(PhpArray::new())),
+                &mut diagnostics.buffer,
+            )?;
+            Err(phera_extension_api::NativeError::error("conversion failed"))
+        };
+        assert!(convert(&mut vm).is_err());
+        assert!(String::from_utf8_lossy(&vm.output).contains("Array to string conversion"));
+        assert!(!vm.diagnostic_reporter.has_pending());
     }
 }

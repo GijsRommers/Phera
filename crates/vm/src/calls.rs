@@ -106,7 +106,8 @@ impl Vm {
             .map_err(|error| match error {
                 NativeError::Throw { class,message } => {
                     let number = index+1;
-                    let message = format!("{function}(): Argument #{number} (${parameter}) {message}, called in {file} on line {line}");
+                    let label = if parameter.is_empty() { String::new() } else { format!(" (${parameter})") };
+                    let message = format!("{function}(): Argument #{number}{label} {message}, called in {file} on line {line}");
                     NativeError::throw(class,message)
                 },
                 other => other,
@@ -189,7 +190,21 @@ impl Vm {
                 continue;
             }
             let value = if parameter.variadic {
-                self.variadic_arguments(&code, function, parameter, arguments, i)?
+                match self.variadic_arguments(&code, function, parameter, arguments, i) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        let mut original = PhpArray::new();
+                        for argument in arguments.iter().skip(i) {
+                            original.push(argument.clone().unwrap_or_default())?;
+                        }
+                        frame.set(
+                            &mut self.registers,
+                            Reg(i as u16),
+                            Value::Array(Rc::new(original)),
+                        );
+                        return Err(error);
+                    }
+                }
             } else {
                 let value = arguments.get_mut(i).and_then(Option::take).ok_or_else(|| {
                     let required = parameters.iter().filter(|parameter| !parameter.has_default && !parameter.variadic).count();
@@ -245,7 +260,7 @@ impl Vm {
                     .map(|declaration_type| &code.types[declaration_type.index()]),
                 &function.name,
                 offset,
-                &code.names[parameter.name.index()],
+                "",
             )?;
             values.push(value)?;
         }

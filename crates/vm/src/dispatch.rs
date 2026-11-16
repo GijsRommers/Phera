@@ -200,10 +200,11 @@ impl Vm {
                 ..
             } => self.iter_start(iterator, source, None)?,
             Instruction::IterStartReference {
+                subject,
                 iter: iterator,
                 path,
                 ..
-            } => self.start_reference_iterator(iterator, path)?,
+            } => self.start_reference_iterator(iterator, path, subject)?,
             Instruction::IterNextKeyed {
                 iter: iterator,
                 key,

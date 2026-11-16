@@ -31,10 +31,10 @@ impl Compiler<'_> {
                 let dst = self.allocate_register()?;
                 self.emit(
                     Instruction::Binary {
-                        dst,
+                        destination: dst,
                         operator: Binary::Equal,
-                        lhs: value,
-                        rhs,
+                        left: value,
+                        right: rhs,
                     },
                     line,
                 );

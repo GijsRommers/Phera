@@ -1,6 +1,6 @@
 //! PHP iterator instructions instruction handlers, separate from dispatch.
 
-use phera_bytecode::{IterId, PathId};
+use phera_bytecode::{IterId, PathId, Reg};
 use phera_extension_api::NativeError;
 
 use crate::Vm;
@@ -11,11 +11,14 @@ impl Vm {
         &mut self,
         iterator: IterId,
         path: PathId,
+        subject: Reg,
     ) -> Result<(), NativeError> {
         let place = self.path(path)?;
         let value = self.read_place(&place, crate::access_mode::Missing::Warn)?;
         drop(value);
-        self.iter_start_reference(iterator, place)?;
+        let reference = self.reference(&place)?;
+        self.set(subject, reference);
+        self.iter_start_reference(iterator, crate::AccessPath::local(subject))?;
         Ok(())
     }
 

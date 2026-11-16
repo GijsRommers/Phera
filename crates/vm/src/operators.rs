@@ -18,10 +18,14 @@ impl Vm {
         right: i32,
     ) -> Result<(), NativeError> {
         let left = self.read_local(left);
-        let mut diagnostics = self.diagnostic_reporter.take_operator();
-        let result = ops::binary(operator, &left, &Value::Int(right as i64), &mut diagnostics);
-        self.diagnostics_flush_reuse(&mut diagnostics);
-        self.diagnostic_reporter.restore_operator(diagnostics);
+        let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
+        let result = ops::binary(
+            operator,
+            &left,
+            &Value::Int(right as i64),
+            &mut diagnostics.buffer,
+        );
+        drop(diagnostics);
         self.set(destination, result?);
         Ok(())
     }
@@ -57,16 +61,7 @@ impl Vm {
         drop(left);
         drop(right);
         if self.diagnostic_reporter.has_pending() {
-            let mut diagnostics = self.diagnostic_reporter.take_operator();
-            for (kind, message) in diagnostics.entries.drain(..) {
-                let kind = match kind {
-                    phera_value::DiagnosticKind::Warning => "Warning",
-                    phera_value::DiagnosticKind::Notice => "Notice",
-                    phera_value::DiagnosticKind::Deprecated => "Deprecated",
-                };
-                self.diagnostic(kind, message);
-            }
-            self.diagnostic_reporter.restore_operator(diagnostics);
+            self.flush_operator_diagnostics();
         }
         self.set(destination, result?);
         Ok(())
@@ -74,12 +69,17 @@ impl Vm {
 
     /// Append directly to strings, including referenced strings, to retain amortized growth.
     pub(crate) fn assign_concat(&mut self, local: Reg, source: Reg) -> Result<bool, NativeError> {
-        let mut diagnostics = self.diagnostic_reporter.take_operator();
-        let source = to_php_string(&self.operand(source), &mut diagnostics)?;
-        let target = self
+        let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
+        let source = to_php_string(&diagnostics.vm.operand(source), &mut diagnostics.buffer)?;
+        let target = diagnostics
+            .vm
             .call_stack
             .current_mut()
-            .and_then(|frame| frame.slots_mut(&mut self.registers).get_mut(local.index()))
+            .and_then(|frame| {
+                frame
+                    .slots_mut(&mut diagnostics.vm.registers)
+                    .get_mut(local.index())
+            })
             .and_then(Option::as_mut);
         let changed = match target {
             Some(Value::String(target)) => {
@@ -99,8 +99,7 @@ impl Vm {
             }
             _ => false,
         };
-        self.diagnostics_flush_reuse(&mut diagnostics);
-        self.diagnostic_reporter.restore_operator(diagnostics);
+        drop(diagnostics);
         Ok(changed)
     }
 }
@@ -158,21 +157,26 @@ impl Vm {
         source: Reg,
     ) -> Result<(), NativeError> {
         let value = self.get(source);
-        let mut diagnostics = self.diagnostic_reporter.take_operator();
+        let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let result = match to {
-            CastKind::Bool => Value::Bool(phera_value::cast_to_bool(&value, &mut diagnostics)),
-            CastKind::Int => Value::Int(phera_value::to_int(&value, &mut diagnostics)?),
-            CastKind::Float => Value::Float(phera_value::to_float(&value, &mut diagnostics)?),
-            CastKind::String => Value::String(to_php_string(&value, &mut diagnostics)?),
-            CastKind::Array => {
-                Value::Array(Rc::new(phera_value::to_array(&value, &mut diagnostics)))
+            CastKind::Bool => {
+                Value::Bool(phera_value::cast_to_bool(&value, &mut diagnostics.buffer))
             }
+            CastKind::Int => Value::Int(phera_value::to_int(&value, &mut diagnostics.buffer)?),
+            CastKind::Float => {
+                Value::Float(phera_value::to_float(&value, &mut diagnostics.buffer)?)
+            }
+            CastKind::String => Value::String(to_php_string(&value, &mut diagnostics.buffer)?),
+            CastKind::Array => Value::Array(Rc::new(phera_value::to_array(
+                &value,
+                &mut diagnostics.buffer,
+            ))),
             CastKind::Void => Value::Null,
             CastKind::Object => {
                 return Err(NativeError::error("Object casts not supported yet"));
             }
         };
-        self.diagnostics_flush(diagnostics);
+        drop(diagnostics);
         self.set(destination, result);
 
         Ok(())
@@ -189,7 +193,7 @@ impl Vm {
     ) -> Result<(), NativeError> {
         let old = self.read_local(local);
         let increment = matches!(mode, IncDec::PreIncrement | IncDec::PostIncrement);
-        let mut diagnostics = self.diagnostic_reporter.take_operator();
+        let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let value = if let Value::Int(integer) = old {
             let step = if increment { 1 } else { -1 };
             Ok(integer
@@ -197,11 +201,11 @@ impl Vm {
                 .map(Value::Int)
                 .unwrap_or(Value::Float(integer as f64 + step as f64)))
         } else if increment {
-            phera_value::increment(&old, &mut diagnostics)
+            phera_value::increment(&old, &mut diagnostics.buffer)
         } else {
-            phera_value::decrement(&old, &mut diagnostics)
+            phera_value::decrement(&old, &mut diagnostics.buffer)
         };
-        self.diagnostics_flush(diagnostics);
+        drop(diagnostics);
         let value = value?;
         self.assign_local(local, value.clone())?;
         self.set(
@@ -245,14 +249,14 @@ impl Vm {
         if operator == phera_bytecode::BinaryOp::Concat && self.assign_concat(local, source)? {
             return Ok(());
         }
-        let mut diagnostics = self.diagnostic_reporter.take_operator();
+        let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let value = ops::binary(
             operator,
-            &self.operand(local),
-            &self.operand(source),
-            &mut diagnostics,
+            &diagnostics.vm.operand(local),
+            &diagnostics.vm.operand(source),
+            &mut diagnostics.buffer,
         );
-        self.diagnostics_flush(diagnostics);
+        drop(diagnostics);
         self.assign_local(local, value?)?;
         Ok(())
     }
@@ -264,9 +268,13 @@ impl Vm {
         operator: UnaryOp,
         source: Reg,
     ) -> Result<(), NativeError> {
-        let mut diagnostics = self.diagnostic_reporter.take_operator();
-        let value = ops::unary(operator, &self.operand(source), &mut diagnostics);
-        self.diagnostics_flush(diagnostics);
+        let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
+        let value = ops::unary(
+            operator,
+            &diagnostics.vm.operand(source),
+            &mut diagnostics.buffer,
+        );
+        drop(diagnostics);
         self.set(destination, value?);
         Ok(())
     }

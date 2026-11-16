@@ -24,7 +24,14 @@ impl Compiler<'_> {
         };
         let src = self.compile_expression(operand)?;
         let dst = self.allocate_register()?;
-        self.emit(Instruction::Unary { dst, operator, src }, line);
+        self.emit(
+            Instruction::Unary {
+                destination: dst,
+                operator,
+                source: src,
+            },
+            line,
+        );
         Ok(dst)
     }
 
@@ -40,8 +47,8 @@ impl Compiler<'_> {
         let dst = self.allocate_register()?;
         self.emit(
             Instruction::Move {
-                dst,
-                src: condition,
+                destination: dst,
+                source: condition,
             },
             line,
         );
@@ -55,12 +62,24 @@ impl Compiler<'_> {
         );
         if let Some(then_expression) = then {
             let src = self.compile_expression(then_expression)?;
-            self.emit(Instruction::Move { dst, src }, line);
+            self.emit(
+                Instruction::Move {
+                    destination: dst,
+                    source: src,
+                },
+                line,
+            );
         }
         let end = self.emit(Instruction::Jump(Target(0)), line);
         self.patch(jump, self.position());
         let src = self.compile_expression(otherwise)?;
-        self.emit(Instruction::Move { dst, src }, line);
+        self.emit(
+            Instruction::Move {
+                destination: dst,
+                source: src,
+            },
+            line,
+        );
         self.patch(end, self.position());
         Ok(dst)
     }
@@ -77,7 +96,7 @@ impl Compiler<'_> {
         let dst = self.allocate_register()?;
         self.emit(
             Instruction::Include {
-                dst,
+                destination: dst,
                 path,
                 once: matches!(
                     kind,

@@ -24,7 +24,13 @@ impl Compiler<'_> {
             let value = if item.by_reference {
                 let place = self.place(&item.value)?;
                 let dst = self.allocate_register()?;
-                self.emit(Instruction::Reference { dst, place }, line);
+                self.emit(
+                    Instruction::Reference {
+                        destination: dst,
+                        place,
+                    },
+                    line,
+                );
                 dst
             } else {
                 self.compile_expression(&item.value)?
@@ -61,10 +67,10 @@ impl Compiler<'_> {
             let next = self.allocate_register()?;
             self.emit(
                 Instruction::Binary {
-                    dst: next,
+                    destination: next,
                     operator: Binary::Concat,
-                    lhs: dst,
-                    rhs,
+                    left: dst,
+                    right: rhs,
                 },
                 line,
             );

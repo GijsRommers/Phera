@@ -160,7 +160,13 @@ impl<'ast> Compiler<'ast> {
         let dst = self.allocate_register()?;
         let constant = self.function.constants.len();
         self.function.constants.push(value);
-        self.emit(Instruction::Load { dst, constant }, line);
+        self.emit(
+            Instruction::Load {
+                destination: dst,
+                constant,
+            },
+            line,
+        );
         Ok(dst)
     }
 

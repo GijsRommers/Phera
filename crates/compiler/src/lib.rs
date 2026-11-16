@@ -6,6 +6,7 @@ mod errors;
 mod expressions;
 mod helpers;
 mod ir;
+mod parameter_defaults;
 mod passes;
 mod pipeline;
 mod policies;

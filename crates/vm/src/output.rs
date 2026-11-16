@@ -9,9 +9,9 @@ use crate::{OutputSink, Vm};
 impl Vm {
     /// Implements PHP Echo semantics outside the dispatch loop.
     pub(crate) fn echo_value(&mut self, source: Reg) -> Result<(), NativeError> {
-        let mut diagnostics = self.diagnostic_reporter.take_operator();
-        let text = to_php_string(&self.operand(source), &mut diagnostics)?;
-        self.diagnostics_flush(diagnostics);
+        let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
+        let text = to_php_string(&diagnostics.vm.operand(source), &mut diagnostics.buffer)?;
+        drop(diagnostics);
         self.out(text.as_bytes());
         Ok(())
     }

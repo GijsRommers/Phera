@@ -38,7 +38,7 @@ impl Compiler<'_> {
         }
         let ast::Arguments::List(arguments) = arguments else {
             let dst = self.allocate_register()?;
-            self.emit(Instruction::FinishCallable { dst }, line);
+            self.emit(Instruction::FinishCallable { destination: dst }, line);
             return Ok(dst);
         };
         for argument in arguments {
@@ -52,13 +52,7 @@ impl Compiler<'_> {
             } else if argument.spread && writable(&argument.value) {
                 let place = self.place(&argument.value)?;
                 let destination = self.allocate_register()?;
-                self.emit(
-                    Instruction::Reference {
-                        dst: destination,
-                        place,
-                    },
-                    line,
-                );
+                self.emit(Instruction::Reference { destination, place }, line);
                 crate::ir::ArgumentSource::Value(destination)
             } else {
                 crate::ir::ArgumentSource::Value(self.compile_expression(&argument.value)?)
@@ -75,7 +69,7 @@ impl Compiler<'_> {
             );
         }
         let dst = self.allocate_register()?;
-        self.emit(Instruction::FinishCall { dst }, line);
+        self.emit(Instruction::FinishCall { destination: dst }, line);
         Ok(dst)
     }
 }

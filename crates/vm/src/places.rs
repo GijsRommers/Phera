@@ -25,16 +25,18 @@ impl Vm {
                 name: register,
                 scratch,
             } => {
-                let mut diagnostics = self.diagnostic_reporter.take_operator();
-                let result = to_php_string(&self.operand(register), &mut diagnostics);
-                self.diagnostics_flush(diagnostics);
+                let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
+                let result =
+                    to_php_string(&diagnostics.vm.operand(register), &mut diagnostics.buffer);
+                drop(diagnostics);
                 return self.global_register(result?.to_string_lossy(), scratch, creation, missing);
             }
             PathBase::Globals => return Err(internal_error!("global table has no register")),
         };
-        let mut diagnostics = self.diagnostic_reporter.take_operator();
-        let name = to_php_string(&self.operand(base), &mut diagnostics)?.to_string_lossy();
-        self.diagnostics_flush(diagnostics);
+        let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
+        let name = to_php_string(&diagnostics.vm.operand(base), &mut diagnostics.buffer)?
+            .to_string_lossy();
+        drop(diagnostics);
         let frame = self
             .call_stack
             .current_mut()
@@ -68,14 +70,14 @@ impl Vm {
 
     /// Convert path keys in source order while reusing the operator diagnostic buffer.
     fn keys(&mut self, place: &AccessPath) -> Result<InlineStack<Option<ArrayKey>>, NativeError> {
-        let mut diagnostics = self.diagnostic_reporter.take_operator();
+        let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let mut keys = InlineStack::new();
         let result = (|| {
             for step in place.steps()? {
                 let key = match step {
                     Step::Index(register) => Some(ArrayKey::from_value_diag(
-                        &self.operand(register),
-                        &mut diagnostics,
+                        &diagnostics.vm.operand(register),
+                        &mut diagnostics.buffer,
                     )?),
                     Step::Append => None,
                 };
@@ -83,8 +85,7 @@ impl Vm {
             }
             Ok(())
         })();
-        self.diagnostics_flush_reuse(&mut diagnostics);
-        self.diagnostic_reporter.restore_operator(diagnostics);
+        drop(diagnostics);
         result.map(|()| keys)
     }
 
@@ -164,9 +165,9 @@ impl Vm {
             })
             .and_then(Option::take)
             .unwrap_or_default();
-        let mut diagnostics = self.diagnostic_reporter.take_operator();
-        let updated = update(root, &keys, value, binding.into(), &mut diagnostics);
-        self.diagnostics_flush(diagnostics);
+        let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
+        let updated = update(root, &keys, value, binding.into(), &mut diagnostics.buffer);
+        drop(diagnostics);
         let updated = updated?;
         if let PathBase::GlobalNamed { name, .. } = place.base()? {
             let name = self.get(name);
@@ -241,9 +242,15 @@ impl Vm {
             })
             .and_then(Option::take)
             .unwrap_or_default();
-        let mut diagnostics = self.diagnostic_reporter.take_operator();
-        let updated = update(root, &keys, Value::Null, Mutation::Unset, &mut diagnostics);
-        self.diagnostics_flush(diagnostics);
+        let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
+        let updated = update(
+            root,
+            &keys,
+            Value::Null,
+            Mutation::Unset,
+            &mut diagnostics.buffer,
+        );
+        drop(diagnostics);
         let updated = updated?;
         self.set(register, updated);
         Ok(())

@@ -1,7 +1,6 @@
 //! Lower AST expression constructs to IR while preserving PHP evaluation order.
 
 use phera_ast as ast;
-use phera_ast::ExpressionKind;
 use phera_bytecode::Reg;
 
 use crate::ir::{Instruction, Target};
@@ -18,7 +17,7 @@ impl Compiler<'_> {
         let dst = self.allocate_register()?;
         self.emit(
             Instruction::Read {
-                dst,
+                destination: dst,
                 place,
                 mode: phera_bytecode::FetchMode::Read,
             },
@@ -34,11 +33,17 @@ impl Compiler<'_> {
         value: &ast::Expression,
         line: usize,
     ) -> Result<Reg, CompileError> {
-        let references = matches!(&target.kind, ExpressionKind::List(items) if items.iter().flatten().any(|item| item.by_reference));
+        let references = super::places::contains_reference(target);
         let src = if references && writable(value) {
             let place = self.place(value)?;
             let dst = self.allocate_register()?;
-            self.emit(Instruction::Reference { dst, place }, line);
+            self.emit(
+                Instruction::Reference {
+                    destination: dst,
+                    place,
+                },
+                line,
+            );
             dst
         } else {
             self.compile_expression(value)?
@@ -57,7 +62,7 @@ impl Compiler<'_> {
         let place = self.place(target)?;
         if matches!(value.kind, ast::ExpressionKind::Call { .. }) {
             let src = self.compile_expression(value)?;
-            self.emit(Instruction::Rebind { place, src }, line);
+            self.emit(Instruction::Rebind { place, source: src }, line);
             return Ok(src);
         }
         let source = self.place(value)?;
@@ -71,7 +76,7 @@ impl Compiler<'_> {
         let dst = self.allocate_register()?;
         self.emit(
             Instruction::Read {
-                dst,
+                destination: dst,
                 place,
                 mode: phera_bytecode::FetchMode::Read,
             },
@@ -96,7 +101,7 @@ impl Compiler<'_> {
                 binary(*operator).ok_or_else(|| self.error("Operator not supported yet", line))?;
             self.emit(
                 Instruction::Compound {
-                    dst,
+                    destination: dst,
                     place,
                     operator,
                     source,
@@ -119,7 +124,7 @@ impl Compiler<'_> {
         let lhs = self.allocate_register()?;
         self.emit(
             Instruction::Read {
-                dst: lhs,
+                destination: lhs,
                 place: place.clone(),
                 mode: phera_bytecode::FetchMode::Quiet,
             },
@@ -135,8 +140,14 @@ impl Compiler<'_> {
         let end = self.emit(Instruction::Jump(Target(0)), line);
         self.patch(jump, self.position());
         let rhs = self.compile_expression(value)?;
-        self.emit(Instruction::Write { place, src: rhs }, line);
-        self.emit(Instruction::Move { dst: lhs, src: rhs }, line);
+        self.emit(Instruction::Write { place, source: rhs }, line);
+        self.emit(
+            Instruction::Move {
+                destination: lhs,
+                source: rhs,
+            },
+            line,
+        );
         self.patch(end, self.position());
         Ok(lhs)
     }

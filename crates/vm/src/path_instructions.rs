@@ -24,9 +24,25 @@ impl Vm {
         mode: FetchMode,
     ) -> Result<(), NativeError> {
         let place = self.path(path)?;
+        if mode == FetchMode::Destructure {
+            let root = self.read_place(
+                &crate::AccessPath::local(match place.base()? {
+                    phera_bytecode::PathBase::Register(register) => register,
+                    _ => return Err(internal_error!("destructure root")),
+                }),
+                crate::access_mode::Missing::Silent,
+            )?;
+            if !root.is_array() {
+                if !root.is_null() {
+                    self.warn(format!("Cannot use {} as array", root.type_name()));
+                }
+                self.set(destination, phera_value::Value::Null);
+                return Ok(());
+            }
+        }
         let value = self.read_place(
             &place,
-            if mode == FetchMode::Read {
+            if mode != FetchMode::Quiet {
                 crate::access_mode::Missing::Warn
             } else {
                 crate::access_mode::Missing::Silent
@@ -46,9 +62,14 @@ impl Vm {
     ) -> Result<(), NativeError> {
         let place = self.path(path)?;
         let left = self.read_place(&place, crate::access_mode::Missing::Warn)?;
-        let mut diagnostics = self.diagnostic_reporter.take_operator();
-        let value = ops::binary(operator, &left, &self.operand(source), &mut diagnostics);
-        self.diagnostics_flush(diagnostics);
+        let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
+        let value = ops::binary(
+            operator,
+            &left,
+            &diagnostics.vm.operand(source),
+            &mut diagnostics.buffer,
+        );
+        drop(diagnostics);
         let value = value?;
         self.write_place(&place, value.clone(), crate::access_mode::Binding::ByValue)?;
         self.set(destination, value);
@@ -64,13 +85,13 @@ impl Vm {
     ) -> Result<(), NativeError> {
         let place = self.path(path)?;
         let old = self.read_place(&place, crate::access_mode::Missing::Warn)?;
-        let mut diagnostics = self.diagnostic_reporter.take_operator();
+        let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let value = if matches!(mode, IncDec::PreIncrement | IncDec::PostIncrement) {
-            phera_value::increment(&old, &mut diagnostics)
+            phera_value::increment(&old, &mut diagnostics.buffer)
         } else {
-            phera_value::decrement(&old, &mut diagnostics)
+            phera_value::decrement(&old, &mut diagnostics.buffer)
         };
-        self.diagnostics_flush(diagnostics);
+        drop(diagnostics);
         let value = value?;
         self.write_place(&place, value.clone(), crate::access_mode::Binding::ByValue)?;
         self.set(
@@ -87,11 +108,13 @@ impl Vm {
     /// Implements PHP AssignPath semantics outside the dispatch loop.
     pub(crate) fn assign_path(&mut self, path: PathId, source: Reg) -> Result<(), NativeError> {
         let value = self.read_local(source);
-        self.write_place(
-            &self.path(path)?,
-            value,
-            crate::access_mode::Binding::ByValue,
-        )?;
+        let place = self.path(path)?;
+        if place.steps()?.next().is_none()
+            && let phera_bytecode::PathBase::Register(register) = place.base()?
+        {
+            self.restart_subject_iterators(register);
+        }
+        self.write_place(&place, value, crate::access_mode::Binding::ByValue)?;
         Ok(())
     }
 

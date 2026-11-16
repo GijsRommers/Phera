@@ -33,7 +33,7 @@ impl Compiler<'_> {
         let dst = self.allocate_register()?;
         self.emit(
             Instruction::Constant {
-                dst,
+                destination: dst,
                 name,
                 fallback,
             },
@@ -52,9 +52,9 @@ impl Compiler<'_> {
         let dst = self.allocate_register()?;
         self.emit(
             Instruction::Unary {
-                dst,
+                destination: dst,
                 operator: Unary::Not,
-                src,
+                source: src,
             },
             line,
         );
@@ -80,7 +80,13 @@ impl Compiler<'_> {
             ));
         }
         let src = self.literal(Constant::Bool(true), line)?;
-        self.emit(Instruction::Move { dst, src }, line);
+        self.emit(
+            Instruction::Move {
+                destination: dst,
+                source: src,
+            },
+            line,
+        );
         for jump in ends {
             self.patch(jump, self.position())
         }
