@@ -113,8 +113,10 @@ fn string_to_key(bytes: &[u8]) -> ArrayKey {
 /// to the next one only when it has to.
 #[derive(Clone, Default)]
 enum Lookup {
-    /// A list: entry `i` has the key `i` and nothing was removed, so the
-    /// key is the position. PHP calls this a packed array.
+    /// A list: the entry at position `i` has the key `i`, so the key is the
+    /// position. PHP calls this a packed array. A removed entry keeps its
+    /// place as a hole, because a running `foreach` remembers positions and
+    /// must not see a later element slide into one it has passed.
     #[default]
     Packed,
     /// A few entries with any keys: comparing them one by one is faster
@@ -226,9 +228,11 @@ impl PhpArray {
     fn find_pos(&self, key: &ArrayKey) -> Option<usize> {
         match &self.lookup {
             Lookup::Packed => match key {
-                ArrayKey::Int(index) => usize::try_from(*index)
-                    .ok()
-                    .filter(|&position| position < self.entries.len()),
+                ArrayKey::Int(index) => usize::try_from(*index).ok().filter(|&position| {
+                    self.entries
+                        .get(position)
+                        .is_some_and(|entry| entry.value.is_some())
+                }),
                 ArrayKey::String(_) => None,
             },
             Lookup::Scan => self
@@ -269,15 +273,11 @@ impl PhpArray {
         Lookup::Hashed(positions)
     }
 
-    /// Keeps the lookup right after the entry at `position` lost its value.
+    /// Keeps the lookup right after the entry with this key lost its value.
     fn after_removal(&mut self, key: &ArrayKey) {
-        match &mut self.lookup {
-            Lookup::Hashed(positions) => {
-                positions.remove(key);
-            }
-            Lookup::Scan => {}
-            // A hole ends the guarantee that the position is the key.
-            Lookup::Packed => self.lookup = self.lookup_by_size(),
+        // Packed and scanned arrays find a hole by looking at the entry.
+        if let Lookup::Hashed(positions) = &mut self.lookup {
+            positions.remove(key);
         }
     }
 
@@ -360,10 +360,6 @@ impl PhpArray {
     /// Removes `key`, returning its value. Tombstones are compacted lazily.
     pub fn remove(&mut self, key: &ArrayKey) -> Option<Value> {
         let position = self.find_pos(key)?;
-        // Removing the end of a list leaves a shorter list, with no hole.
-        if matches!(self.lookup, Lookup::Packed) && position + 1 == self.entries.len() {
-            return self.entries.pop()?.value;
-        }
         let value = self.entries.get_mut(position)?.value.take();
         self.dead += 1;
         self.after_removal(key);
@@ -422,18 +418,11 @@ impl PhpArray {
             .entries
             .iter()
             .rposition(|entry| entry.value.is_some())?;
-        let (key, value) = if matches!(self.lookup, Lookup::Packed) {
-            // The last entry of a list: taking it off leaves a list.
-            let entry = self.entries.pop()?;
-            (entry.key, entry.value?)
-        } else {
-            let entry = self.entries.get_mut(position)?;
-            let key = entry.key.clone();
-            let value = entry.value.take()?;
-            self.dead += 1;
-            self.after_removal(&key);
-            (key, value)
-        };
+        let entry = self.entries.get_mut(position)?;
+        let key = entry.key.clone();
+        let value = entry.value.take()?;
+        self.dead += 1;
+        self.after_removal(&key);
         if let (ArrayKey::Int(k), Some(n)) = (&key, self.next_free)
             && n == k.checked_add(1).unwrap_or(i64::MAX)
         {
@@ -448,10 +437,11 @@ impl PhpArray {
     /// index becomes that count.
     pub fn shift(&mut self) -> Option<Value> {
         let first = self.first_position()?;
-        // Take the entry out for real, with any holes before it, so that a
-        // list stays a list.
-        let value = self.entries.drain(..=first).next_back()?.value;
-        self.dead = self.dead.saturating_sub(first);
+        let value = self.entries.get_mut(first)?.value.take();
+        // Every integer key changes anyway, so close all holes: a list
+        // stays a list.
+        self.entries.retain(|entry| entry.value.is_some());
+        self.dead = 0;
         // Renumber the remaining integer keys 0..n in order.
         let mut next = 0i64;
         for entry in self.entries.iter_mut() {
@@ -468,7 +458,7 @@ impl PhpArray {
 
     /// Whether the keys are exactly 0, 1, 2, ... in order.
     pub fn is_list(&self) -> bool {
-        if matches!(self.lookup, Lookup::Packed) {
+        if matches!(self.lookup, Lookup::Packed) && self.dead == 0 {
             return true;
         }
         let mut expect = 0i64;
@@ -960,18 +950,26 @@ mod tests {
         assert_eq!(list.get(&k(-1)), None);
         assert_eq!(list.get(&ks("five")), None);
 
-        // Taking from the end, or the front, leaves a list.
+        // Removing entries leaves holes, not an index.
         assert_eq!(list.pop(), Some(vi(9_999)));
-        assert_eq!(list.remove(&k(9_998)), Some(vi(9_998)));
+        assert_eq!(list.remove(&k(5)), Some(vi(5)));
+        assert_eq!(lookup_name(&list), "packed");
+        assert_eq!(list.get(&k(5)), None);
+        assert_eq!(list.get(&k(6)), Some(&vi(6)));
+        assert!(!list.is_list());
+
+        // Shifting renumbers everything, which makes it a list again.
         assert_eq!(list.shift(), Some(vi(0)));
         assert_eq!(lookup_name(&list), "packed");
+        assert!(list.is_list());
         assert_eq!(list.get(&k(0)), Some(&vi(1)));
+        assert_eq!(list.get(&k(4)), Some(&vi(6)));
 
-        // A hole in the middle does not.
-        list.remove(&k(5));
+        // A key out of order ends it: PHP appends it, it does not slot in.
+        list.remove(&k(2));
+        list.insert(k(2), vi(-1));
         assert_eq!(lookup_name(&list), "hashed");
-        assert_eq!(list.get(&k(5)), None);
-        assert_eq!(list.get(&k(6)), Some(&vi(7)));
+        assert_eq!(list.last(), Some((&k(2), &vi(-1))));
     }
 
     #[test]
