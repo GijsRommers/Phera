@@ -148,9 +148,9 @@ pub(crate) fn register(registry: &mut Registry) {
     }
 }
 
-/// Reads a protected property, stored under its plain name.
+/// Reads a protected property.
 fn protected(this: Option<&Rc<Object>>, name: &str) -> Value {
-    this.and_then(|object| object.get(&ArrayKey::str(name)))
+    this.and_then(|object| object.get(&Object::protected_key(name)))
         .unwrap_or(Value::Null)
 }
 
@@ -186,10 +186,13 @@ fn construct(
         return Ok(Value::Null);
     };
     if let Some(message) = args::string(arguments, 0) {
-        object.set(ArrayKey::str("message"), Value::String(message.clone()));
+        object.set(
+            Object::protected_key("message"),
+            Value::String(message.clone()),
+        );
     }
     if let Some(code) = args::int(arguments, 1) {
-        object.set(ArrayKey::str("code"), Value::Int(code));
+        object.set(Object::protected_key("code"), Value::Int(code));
     }
     if let Some(previous) = args::object(arguments, 2) {
         set_private(object, "previous", Value::Object(previous.clone()));
@@ -215,7 +218,7 @@ fn construct_error_exception(
     for (index, name) in fields {
         let value = args::value(arguments, index);
         if args::given(arguments, index) && !value.is_null() {
-            object.set(ArrayKey::str(name), value.clone());
+            object.set(Object::protected_key(name), value.clone());
         }
     }
     if let Some(previous) = args::object(arguments, 5) {
@@ -315,6 +318,10 @@ fn to_string(
             text.extend_from_slice(b"\n\nNext ");
         }
         text.extend_from_slice(&describe(object));
+    }
+    // PHP keeps the text in the object, where `var_dump` shows it.
+    if let Some(object) = this {
+        set_private(object, "string", Value::from(text.clone()));
     }
     Ok(Value::from(text))
 }

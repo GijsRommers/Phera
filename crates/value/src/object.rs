@@ -22,9 +22,11 @@ pub struct Object {
     /// change (to slots indexed by declaration order, for example) without
     /// touching the code that uses objects.
     ///
-    /// A private property is stored under the key PHP itself uses,
-    /// `\0Class\0name`, so a parent's and a child's private property of
-    /// the same name do not collide.
+    /// Keys are the ones PHP itself uses: the plain name for a public
+    /// property, `\0*\0name` for a protected one and `\0Class\0name` for
+    /// a private one. So a parent's and a child's private property of the
+    /// same name do not collide, and `(array)`, `var_dump` and `serialize`
+    /// can tell the visibility from the key alone.
     pub(crate) properties: RefCell<PhpArray>,
     /// Native state for built-in classes (closures, PDO handles, ...).
     pub native: RefCell<Option<Box<dyn Any>>>,
@@ -92,6 +94,37 @@ impl Object {
     /// by `class`.
     pub fn private_key(class: &str, name: &str) -> ArrayKey {
         ArrayKey::str(format!("\0{class}\0{name}").into_bytes())
+    }
+
+    /// The key under which PHP stores the protected property `name`.
+    pub fn protected_key(name: &str) -> ArrayKey {
+        ArrayKey::str(format!("\0*\0{name}").into_bytes())
+    }
+}
+
+/// Who may see a property, as recorded in its key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PropertyScope<'a> {
+    Public,
+    Protected,
+    /// Private to the class with this name.
+    Private(&'a [u8]),
+}
+
+/// Splits a property key into the property's name and its visibility. The
+/// reverse of [`Object::private_key`] and [`Object::protected_key`].
+pub fn split_property_key(key: &[u8]) -> (&[u8], PropertyScope<'_>) {
+    let [0, rest @ ..] = key else {
+        return (key, PropertyScope::Public);
+    };
+    let Some(end) = rest.iter().position(|&byte| byte == 0) else {
+        return (key, PropertyScope::Public);
+    };
+    let (scope, name) = (&rest[..end], &rest[end + 1..]);
+    if scope == b"*" {
+        (name, PropertyScope::Protected)
+    } else {
+        (name, PropertyScope::Private(scope))
     }
 }
 

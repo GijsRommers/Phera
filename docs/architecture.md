@@ -221,10 +221,14 @@ each with its own fixtures checked against real PHP.
   gives `var_dump`, `foreach` and `(array)` their order for free. Slots
   indexed by declaration order, with a map only for dynamic properties, come
   later as an optimisation inside that one type.
-- **Visibility.** A private property is stored under PHP's own mangled key
-  (`\0Class\0name`), so a parent's and a child's private property of the
-  same name coexist. Public and protected ones use the plain name. Access
-  checks compare the frame's class scope with the declaring class.
+- **Visibility.** Properties are stored under the keys PHP itself uses: the
+  plain name for a public one, `\0*\0name` for a protected one and
+  `\0Class\0name` for a private one. So a parent's and a child's private
+  property of the same name coexist, and `(array)`, `var_dump` and
+  `serialize` read the visibility from the key without asking the class.
+  The compiler and VM know a declared property's visibility, so an access
+  goes straight to the right key. Access checks compare the frame's class
+  scope with the declaring class.
 - **Calls.** A frame gains `this`, the class scope (for `self` and
   visibility) and the called class (for `static`). New instructions follow
   the existing call sequence: `InitMethodCall`, `InitStaticCall`, `New`,

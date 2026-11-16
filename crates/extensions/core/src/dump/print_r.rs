@@ -1,4 +1,4 @@
-use phera_extension_api::value::{NoDiagnostics, to_php_string};
+use phera_extension_api::value::{NoDiagnostics, PropertyScope, split_property_key, to_php_string};
 use phera_extension_api::{
     ArrayKey, Context, FunctionEntry, NativeResult, Param, ParamType, Registry, Value, args,
 };
@@ -50,12 +50,29 @@ impl Style for PrintR {
         out.extend_from_slice(b"(\n");
     }
 
-    fn key(&mut self, out: &mut Vec<u8>, key: &ArrayKey, _container: &Container, depth: usize) {
+    fn key(&mut self, out: &mut Vec<u8>, key: &ArrayKey, container: &Container, depth: usize) {
         spaces(out, 8 * depth - 4);
         out.push(b'[');
-        match key {
-            ArrayKey::Int(int) => out.extend_from_slice(int.to_string().as_bytes()),
-            ArrayKey::String(string) => out.extend_from_slice(string.as_bytes()),
+        match (key, container) {
+            (ArrayKey::Int(int), _) => out.extend_from_slice(int.to_string().as_bytes()),
+            (ArrayKey::String(string), Container::Array(_)) => {
+                out.extend_from_slice(string.as_bytes());
+            }
+            // A property shows who may see it: [name:protected] or
+            // [name:Class:private].
+            (ArrayKey::String(string), Container::Object(_)) => {
+                let (name, scope) = split_property_key(string.as_bytes());
+                out.extend_from_slice(name);
+                match scope {
+                    PropertyScope::Public => {}
+                    PropertyScope::Protected => out.extend_from_slice(b":protected"),
+                    PropertyScope::Private(class) => {
+                        out.push(b':');
+                        out.extend_from_slice(class);
+                        out.extend_from_slice(b":private");
+                    }
+                }
+            }
         }
         out.extend_from_slice(b"] => ");
     }

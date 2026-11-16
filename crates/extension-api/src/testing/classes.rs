@@ -53,7 +53,8 @@ pub fn instantiate(registry: &Registry, class: &str) -> Option<Rc<Object>> {
         {
             let key = match property.visibility {
                 Visibility::Private => Object::private_key(ancestor.name, property.name),
-                Visibility::Public | Visibility::Protected => ArrayKey::str(property.name),
+                Visibility::Protected => Object::protected_key(property.name),
+                Visibility::Public => ArrayKey::str(property.name),
             };
             object.set(key, property.default.to_value());
         }

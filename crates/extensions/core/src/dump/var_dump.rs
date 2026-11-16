@@ -1,4 +1,4 @@
-use phera_extension_api::value::float_repr;
+use phera_extension_api::value::{PropertyScope, float_repr, split_property_key};
 use phera_extension_api::{
     ArrayKey, Context, FunctionEntry, NativeResult, Param, ParamType, Registry, Value,
 };
@@ -77,14 +77,32 @@ impl Style for VarDump {
         out.extend_from_slice(head.as_bytes());
     }
 
-    fn key(&mut self, out: &mut Vec<u8>, key: &ArrayKey, _container: &Container, depth: usize) {
+    fn key(&mut self, out: &mut Vec<u8>, key: &ArrayKey, container: &Container, depth: usize) {
         spaces(out, 2 * depth);
-        match key {
-            ArrayKey::Int(int) => out.extend_from_slice(format!("[{int}]").as_bytes()),
-            ArrayKey::String(string) => {
+        match (key, container) {
+            (ArrayKey::Int(int), _) => out.extend_from_slice(format!("[{int}]").as_bytes()),
+            (ArrayKey::String(string), Container::Array(_)) => {
                 out.extend_from_slice(b"[\"");
                 out.extend_from_slice(string.as_bytes());
                 out.extend_from_slice(b"\"]");
+            }
+            // A property shows who may see it: ["name":protected] or
+            // ["name":"Class":private].
+            (ArrayKey::String(string), Container::Object(_)) => {
+                let (name, scope) = split_property_key(string.as_bytes());
+                out.extend_from_slice(b"[\"");
+                out.extend_from_slice(name);
+                out.push(b'"');
+                match scope {
+                    PropertyScope::Public => {}
+                    PropertyScope::Protected => out.extend_from_slice(b":protected"),
+                    PropertyScope::Private(class) => {
+                        out.extend_from_slice(b":\"");
+                        out.extend_from_slice(class);
+                        out.extend_from_slice(b"\":private");
+                    }
+                }
+                out.push(b']');
             }
         }
         out.extend_from_slice(b"=>\n");

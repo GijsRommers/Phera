@@ -7,7 +7,7 @@
 use std::rc::Rc;
 
 use phera_ext_core::Core;
-use phera_extension_api::testing::{TestContext, call_method, instantiate, oracle};
+use phera_extension_api::testing::{TestContext, call, call_method, instantiate, oracle};
 use phera_extension_api::{ArrayKey, Extension, Object, PhpArray, Registry, Value};
 
 fn registry() -> Registry {
@@ -184,7 +184,9 @@ fn exceptions_print_like_php() {
     script.push_str(oracle::PHP_PREAMBLE);
     script.push_str(
         "function put($e, $class, $name, $value) { \
-         $p = new ReflectionProperty($class, $name); $p->setValue($e, $value); }\n$E = [];\n",
+         $p = new ReflectionProperty($class, $name); $p->setValue($e, $value); }\n\
+         function same_ids($f) { ob_start(); $r = $f(); \
+         echo preg_replace('/\\)#\\d+ \\(/', ')#1 (', ob_get_clean()); return $r; }\n$E = [];\n",
     );
 
     let mut objects: Vec<Rc<Object>> = Vec::new();
@@ -196,13 +198,20 @@ fn exceptions_print_like_php() {
             .previous
             .map_or("null".to_string(), |earlier| format!("$E[{earlier}]"));
         script.push_str(&format!(
-            "$E[{index}] = new {}({}, {}, {previous});\n\
+            "$E[{index}] = new {}({}, {}{});\n\
              put($E[{index}], '{root}', 'file', {});\n\
              put($E[{index}], '{root}', 'line', {});\n\
              put($E[{index}], '{root}', 'trace', {});\n",
             case.class,
             oracle::php_literal(&Value::from(case.message)),
             case.code,
+            // ErrorException's third parameter is the severity, not the
+            // previous exception.
+            if case.class == "ErrorException" {
+                String::new()
+            } else {
+                format!(", {previous}")
+            },
             oracle::php_literal(&Value::from(case.file)),
             case.line,
             oracle::php_literal(&case.trace),
@@ -215,8 +224,8 @@ fn exceptions_print_like_php() {
             arguments.push(Value::Object(objects[earlier].clone()));
         }
         call_method(&registry, &mut context, &object, "__construct", arguments).expect("construct");
-        object.set(ArrayKey::str("file"), Value::from(case.file));
-        object.set(ArrayKey::str("line"), Value::Int(case.line));
+        object.set(Object::protected_key("file"), Value::from(case.file));
+        object.set(Object::protected_key("line"), Value::Int(case.line));
         object.set(Object::private_key(root, "trace"), case.trace.clone());
 
         for method in [
@@ -236,6 +245,26 @@ fn exceptions_print_like_php() {
             let result = call_method(&registry, &mut context, &object, method, vec![]);
             rust.push(oracle::encode_case(
                 method,
+                &result,
+                &context.output,
+                &context.diagnostics,
+            ));
+        }
+        // After __toString, so the cached text in the object is compared too.
+        for function in ["var_dump", "print_r", "var_export"] {
+            script.push_str(&format!(
+                "run('{function}', fn() => same_ids(fn() => {function}($E[{index}])));\n"
+            ));
+            labels.push(format!("{function}({}#{index})", case.class));
+            let mut context = TestContext::default();
+            let result = call(
+                &registry,
+                &mut context,
+                function,
+                vec![Value::Object(object.clone())],
+            );
+            rust.push(oracle::encode_case(
+                function,
                 &result,
                 &context.output,
                 &context.diagnostics,

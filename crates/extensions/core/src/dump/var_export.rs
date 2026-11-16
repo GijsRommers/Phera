@@ -1,4 +1,4 @@
-use phera_extension_api::value::float_repr;
+use phera_extension_api::value::{float_repr, split_property_key};
 use phera_extension_api::{
     ArrayKey, Context, FunctionEntry, NativeResult, Param, ParamType, Registry, Value, args,
 };
@@ -97,6 +97,11 @@ impl Style for VarExport {
         spaces(out, 2 * depth + extra);
         match key {
             ArrayKey::Int(int) => out.extend_from_slice(int.to_string().as_bytes()),
+            // Exported code names a property plainly, whatever its
+            // visibility.
+            ArrayKey::String(string) if extra == 1 => {
+                quote(out, split_property_key(string.as_bytes()).0);
+            }
             ArrayKey::String(string) => quote(out, string.as_bytes()),
         }
         out.extend_from_slice(b" => ");
