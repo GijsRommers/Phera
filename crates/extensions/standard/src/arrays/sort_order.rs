@@ -1,4 +1,8 @@
-//! PHP-compatible comparison traversal with stable ordinal tie breaking.
+//! Port of php-src Zend/zend_sort.c: zend_sort and zend_insert_sort.
+//!
+//! PHP comparisons across mixed types are not transitive. Using slice::sort_by
+//! would change the comparison sequence and therefore observable results. The
+//! explicit partition stack and bounded scans also permit inconsistent callbacks.
 /*
  * Copyright (c) 2009-2012 by the contributors listed at
  * http://llvm.org/svn/llvm-project/libcxx/trunk/CREDITS.TXT
@@ -22,12 +26,20 @@
  * IN THE SOFTWARE.
  */
 // Safe Rust adaptation of PHP zend_sort, including its small-run traversal.
-use phera_extension_api::NativeError;
+
 use std::cmp::Ordering;
+
+use phera_extension_api::NativeError;
+
+const INSERTION_SORT_LIMIT: usize = 16;
+
+const FIVE_SAMPLE_THRESHOLD: usize = 1024;
+
+const SMALL_SORT_LIMIT: usize = 5;
 
 /// Compare original ordinals, so even inconsistent PHP comparisons never violate
 /// a Rust sorting API's ordering preconditions.
-pub(super) fn order(
+pub fn order(
     length: usize,
     mut compare: impl FnMut(usize, usize) -> Result<Ordering, NativeError>,
 ) -> Result<Vec<usize>, NativeError> {
@@ -35,61 +47,24 @@ pub(super) fn order(
     let mut pending = vec![(0, length)];
     while let Some((start, end)) = pending.pop() {
         let length = end.saturating_sub(start);
-        if length <= 16 {
+        if length <= INSERTION_SORT_LIMIT {
             insertion(&mut indices, start, end, &mut compare)?;
             continue;
         }
-        let middle = start + length / 2;
-        if length >= 1024 {
-            let delta = (length / 2) / 2;
-            small(
-                &mut indices,
-                &[start, start + delta, middle, middle + delta, end - 1],
-                &mut compare,
-            )?;
+        let left = partition(&mut indices, start, end, &mut compare)?;
+        let lower = (start, left - 1);
+        let upper = (left, end);
+        if lower.1 - lower.0 < upper.1 - upper.0 {
+            pending.push(upper);
+            pending.push(lower);
         } else {
-            small(&mut indices, &[start, middle, end - 1], &mut compare)?;
-        }
-        indices.swap(start + 1, middle);
-        let pivot = start + 1;
-        let mut left = start + 2;
-        let mut right = end - 1;
-        'partition: loop {
-            while greater(&indices, pivot, left, &mut compare)? {
-                left += 1;
-                if left == right {
-                    break 'partition;
-                }
-            }
-            right -= 1;
-            if right == left {
-                break;
-            }
-            while greater(&indices, right, pivot, &mut compare)? {
-                right -= 1;
-                if right == left {
-                    break 'partition;
-                }
-            }
-            indices.swap(left, right);
-            left += 1;
-            if left == right {
-                break;
-            }
-        }
-        indices.swap(pivot, left - 1);
-        let a = (start, left - 1);
-        let b = (left, end);
-        if a.1 - a.0 < b.1 - b.0 {
-            pending.push(b);
-            pending.push(a);
-        } else {
-            pending.push(a);
-            pending.push(b);
+            pending.push(lower);
+            pending.push(upper);
         }
     }
     Ok(indices)
 }
+
 /// Bounds-checked reads keep comparator calls safe even on non-transitive values.
 fn greater(
     indices: &[usize],
@@ -102,33 +77,34 @@ fn greater(
     };
     Ok(compare(*left, *right)? == Ordering::Greater)
 }
+
 /// PHP uses a three-element decision tree before extending small sorted runs.
 fn small(
     indices: &mut [usize],
     positions: &[usize],
     compare: &mut impl FnMut(usize, usize) -> Result<Ordering, NativeError>,
 ) -> Result<(), NativeError> {
-    let [a, b, c, ..] = positions else {
-        if let [a, b] = positions
-            && greater(indices, *a, *b, compare)?
+    let [first, second, third, ..] = positions else {
+        if let [first, second] = positions
+            && greater(indices, *first, *second, compare)?
         {
-            indices.swap(*a, *b);
+            swap_positions(indices, *first, *second);
         }
         return Ok(());
     };
-    if !greater(indices, *a, *b, compare)? {
-        if greater(indices, *b, *c, compare)? {
-            indices.swap(*b, *c);
-            if greater(indices, *a, *b, compare)? {
-                indices.swap(*a, *b);
+    if !greater(indices, *first, *second, compare)? {
+        if greater(indices, *second, *third, compare)? {
+            swap_positions(indices, *second, *third);
+            if greater(indices, *first, *second, compare)? {
+                swap_positions(indices, *first, *second);
             }
         }
-    } else if !greater(indices, *c, *b, compare)? {
-        indices.swap(*a, *c);
+    } else if !greater(indices, *third, *second, compare)? {
+        swap_positions(indices, *first, *third);
     } else {
-        indices.swap(*a, *b);
-        if greater(indices, *b, *c, compare)? {
-            indices.swap(*b, *c);
+        swap_positions(indices, *first, *second);
+        if greater(indices, *second, *third, compare)? {
+            swap_positions(indices, *second, *third);
         }
     }
     for position in 3..positions.len() {
@@ -141,12 +117,13 @@ fn small(
             if !greater(indices, *previous, *next, compare)? {
                 break;
             }
-            indices.swap(*previous, *next);
+            swap_positions(indices, *previous, *next);
             current -= 1;
         }
     }
     Ok(())
 }
+
 /// PHP scans later insertion positions two entries at a time; this is observable
 /// for NaN and mixed boolean comparisons that do not form a total order.
 fn insertion(
@@ -155,7 +132,7 @@ fn insertion(
     end: usize,
     compare: &mut impl FnMut(usize, usize) -> Result<Ordering, NativeError>,
 ) -> Result<(), NativeError> {
-    if end - start <= 5 {
+    if end.saturating_sub(start) <= SMALL_SORT_LIMIT {
         return small(indices, &(start..end).collect::<Vec<_>>(), compare);
     }
     for index in start + 1..end {
@@ -163,7 +140,7 @@ fn insertion(
         if !greater(indices, position, index, compare)? {
             continue;
         }
-        if index < start + 6 {
+        if index < start + SMALL_SORT_LIMIT + 1 {
             while position > start {
                 position -= 1;
                 if !greater(indices, position, index, compare)? {
@@ -194,8 +171,87 @@ fn insertion(
             }
         }
         for current in (position + 1..=index).rev() {
-            indices.swap(current, current - 1);
+            swap_positions(indices, current, current - 1);
         }
     }
     Ok(())
+}
+
+/// Sampling and inward scans follow zend_sort exactly; each scan shrinks its bounds.
+fn partition(
+    indices: &mut [usize],
+    start: usize,
+    end: usize,
+    compare: &mut impl FnMut(usize, usize) -> Result<Ordering, NativeError>,
+) -> Result<usize, NativeError> {
+    select_pivot(indices, start, end, compare)?;
+    let pivot = start + 1;
+    let mut left = start + 2;
+    let mut right = end - 1;
+    'partition: loop {
+        while greater(indices, pivot, left, compare)? {
+            left += 1;
+            if left == right {
+                break 'partition;
+            }
+        }
+        right -= 1;
+        if right == left {
+            break;
+        }
+        while greater(indices, right, pivot, compare)? {
+            right -= 1;
+            if right == left {
+                break 'partition;
+            }
+        }
+        swap_positions(indices, left, right);
+        left += 1;
+        if left == right {
+            break;
+        }
+    }
+    swap_positions(indices, pivot, left - 1);
+    Ok(left)
+}
+
+/// Large partitions use five samples; smaller partitions use three, as Zend does.
+fn select_pivot(
+    indices: &mut [usize],
+    start: usize,
+    end: usize,
+    compare: &mut impl FnMut(usize, usize) -> Result<Ordering, NativeError>,
+) -> Result<(), NativeError> {
+    let length = end.saturating_sub(start);
+    let middle = start + length / 2;
+    if length >= FIVE_SAMPLE_THRESHOLD {
+        let delta = (length / 2) / 2;
+        small(
+            indices,
+            &[start, start + delta, middle, middle + delta, end - 1],
+            compare,
+        )?;
+    } else {
+        small(indices, &[start, middle, end - 1], compare)?;
+    }
+    swap_positions(indices, start + 1, middle);
+    Ok(())
+}
+
+/// Distinct checked borrows keep swaps safe without requiring comparator consistency.
+fn swap_positions(indices: &mut [usize], left: usize, right: usize) {
+    if left == right {
+        return;
+    }
+    let (lower, upper) = if left < right {
+        (left, right)
+    } else {
+        (right, left)
+    };
+    let Some((before, after)) = indices.split_at_mut_checked(upper) else {
+        return;
+    };
+    if let (Some(left), Some(right)) = (before.get_mut(lower), after.first_mut()) {
+        std::mem::swap(left, right);
+    }
 }

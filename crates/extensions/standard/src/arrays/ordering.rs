@@ -1,16 +1,41 @@
 //! Shared PHP sorting comparisons.
+
+use std::cmp::Ordering;
+
 use phera_extension_api::value::{compare, to_float, to_php_string};
 use phera_extension_api::{Context, NativeError, Value};
-use std::cmp::Ordering;
+
+/// PHP masks SORT_FLAG_CASE independently of the base comparison mode.
+#[derive(Clone, Copy)]
+pub(super) enum SortOrder {
+    Regular,
+    Numeric,
+    String { ignore_case: bool },
+    Natural { ignore_case: bool },
+}
+
+impl SortOrder {
+    /// Unknown flags use regular comparison; locale strings use byte ordering.
+    pub(super) fn from_flags(flags: i64) -> Self {
+        let ignore_case = flags & 8 != 0;
+        match flags & !8 {
+            1 => Self::Numeric,
+            2 | 5 => Self::String { ignore_case },
+            6 => Self::Natural { ignore_case },
+            _ => Self::Regular,
+        }
+    }
+}
+
 /// Unknown flags fall back to regular comparison; locale strings use byte order.
 pub(super) fn compare_values(
     context: &mut dyn Context,
     left: &Value,
     right: &Value,
-    flags: i64,
+    order: SortOrder,
 ) -> Result<Ordering, NativeError> {
-    match flags & !8 {
-        1 => {
+    match order {
+        SortOrder::Numeric => {
             let left = to_float(left, context.diagnostics())?;
             let right = to_float(right, context.diagnostics())?;
             Ok(if left == right {
@@ -21,17 +46,17 @@ pub(super) fn compare_values(
                 Ordering::Greater
             })
         }
-        2 | 5 | 6 => {
+        SortOrder::String { ignore_case } | SortOrder::Natural { ignore_case } => {
             let left = to_php_string(left, context.diagnostics())?;
             let right = to_php_string(right, context.diagnostics())?;
-            if flags & !8 == 6 {
+            if matches!(order, SortOrder::Natural { .. }) {
                 return Ok(crate::natural::natural_compare(
                     left.as_bytes(),
                     right.as_bytes(),
-                    flags & 8 != 0,
+                    ignore_case,
                 ));
             }
-            if flags & 8 != 0 {
+            if ignore_case {
                 Ok(left
                     .as_bytes()
                     .iter()

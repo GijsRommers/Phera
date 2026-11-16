@@ -4,15 +4,16 @@ use phera_extension_api::{
     Context, FunctionEntry, NativeResult, Param, ParamType, Registry, Value, args,
 };
 
+const UNARY_FLOAT_PARAMS: &[Param] = &[Param::new("num", ParamType::Float)];
+
 pub(crate) fn register(registry: &mut Registry) {
-    const ONE: &[Param] = &[Param::new("num", ParamType::Float)];
-    registry.function(FunctionEntry::sync("ceil", ONE, ceil));
-    registry.function(FunctionEntry::sync("floor", ONE, floor));
-    registry.function(FunctionEntry::sync("sqrt", ONE, sqrt));
-    registry.function(FunctionEntry::sync("exp", ONE, exp));
-    registry.function(FunctionEntry::sync("log10", ONE, log10));
-    registry.function(FunctionEntry::sync("log1p", ONE, log1p));
-    registry.function(FunctionEntry::sync("expm1", ONE, expm1));
+    registry.function(FunctionEntry::sync("ceil", UNARY_FLOAT_PARAMS, ceil));
+    registry.function(FunctionEntry::sync("floor", UNARY_FLOAT_PARAMS, floor));
+    registry.function(FunctionEntry::sync("sqrt", UNARY_FLOAT_PARAMS, sqrt));
+    registry.function(FunctionEntry::sync("exp", UNARY_FLOAT_PARAMS, exp));
+    registry.function(FunctionEntry::sync("log10", UNARY_FLOAT_PARAMS, log10));
+    registry.function(FunctionEntry::sync("log1p", UNARY_FLOAT_PARAMS, log1p));
+    registry.function(FunctionEntry::sync("expm1", UNARY_FLOAT_PARAMS, expm1));
 }
 
 fn ceil(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {

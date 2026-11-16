@@ -1,43 +1,51 @@
 //! Array construction and padding, including PHP's key stringification rules.
+
 use phera_extension_api::value::to_php_string;
 use phera_extension_api::{
     ArrayKey, Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, PhpArray,
     Registry, Value, args,
 };
-const COMBINE: &[Param] = &[
+
+const ARRAY_COMBINE_PARAMS: &[Param] = &[
     Param::new("keys", ParamType::Array),
     Param::new("values", ParamType::Array),
 ];
-const FLIP: &[Param] = &[Param::new("array", ParamType::Array)];
-const FILL: &[Param] = &[
+
+const ARRAY_FLIP_PARAMS: &[Param] = &[Param::new("array", ParamType::Array)];
+
+const ARRAY_FILL_PARAMS: &[Param] = &[
     Param::new("start_index", ParamType::Int),
     Param::new("count", ParamType::Int),
     Param::new("value", ParamType::Mixed),
 ];
-const FILL_KEYS: &[Param] = &[
+
+const ARRAY_FILL_KEYS_PARAMS: &[Param] = &[
     Param::new("keys", ParamType::Array),
     Param::new("value", ParamType::Mixed),
 ];
-const PAD: &[Param] = &[
+
+const ARRAY_PAD_PARAMS: &[Param] = &[
     Param::new("array", ParamType::Array),
     Param::new("length", ParamType::Int),
     Param::new("value", ParamType::Mixed),
 ];
+
 pub(crate) fn register(registry: &mut Registry) {
     for (name, params, body) in [
         (
             "array_combine",
-            COMBINE,
-            combine as phera_extension_api::SyncFn,
+            ARRAY_COMBINE_PARAMS,
+            array_combine as phera_extension_api::SyncFn,
         ),
-        ("array_flip", FLIP, flip),
-        ("array_fill", FILL, fill),
-        ("array_fill_keys", FILL_KEYS, fill_keys),
-        ("array_pad", PAD, pad),
+        ("array_flip", ARRAY_FLIP_PARAMS, array_flip),
+        ("array_fill", ARRAY_FILL_PARAMS, array_fill),
+        ("array_fill_keys", ARRAY_FILL_KEYS_PARAMS, array_fill_keys),
+        ("array_pad", ARRAY_PAD_PARAMS, array_pad),
     ] {
         registry.function(FunctionEntry::sync(name, params, body));
     }
 }
+
 /// Construction stringifies noninteger keys, unlike ordinary offset conversion.
 pub(super) fn string_key(
     context: &mut dyn Context,
@@ -51,8 +59,9 @@ pub(super) fn string_key(
         context.diagnostics(),
     )?))?)
 }
+
 /// Duplicate constructed keys overwrite values without moving their original positions.
-fn combine(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn array_combine(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let mut result = PhpArray::new();
     if let (Some(keys), Some(values)) = (args::array(arguments, 0), args::array(arguments, 1)) {
         if keys.len() != values.len() {
@@ -66,8 +75,9 @@ fn combine(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     }
     Ok(Value::from(result))
 }
+
 /// Only integer and string values can become flipped keys; others emit warnings.
-fn flip(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn array_flip(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let mut result = PhpArray::new();
     if let Some(array) = args::array(arguments, 0) {
         for (key, value) in array.iter() {
@@ -82,8 +92,9 @@ fn flip(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     }
     Ok(Value::from(result))
 }
+
 /// Negative starting keys keep increasing from that key, as in PHP 8.
-fn fill(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn array_fill(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let count = args::int(arguments, 1).unwrap_or_default();
     if count < 0 {
         return Err(NativeError::value_error(
@@ -109,8 +120,9 @@ fn fill(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     }
     Ok(Value::from(result))
 }
+
 /// Values become keys through string conversion, including bool and null values.
-fn fill_keys(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn array_fill_keys(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let mut result = PhpArray::new();
     if let Some(keys) = args::array(arguments, 0) {
         for key in keys.values() {
@@ -119,8 +131,9 @@ fn fill_keys(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     }
     Ok(Value::from(result))
 }
+
 /// Padding renumbers integer keys but returns an unchanged copy when already long enough.
-fn pad(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn array_pad(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let length = args::int(arguments, 1).unwrap_or_default();
     let count = length.unsigned_abs();
     if count > 1_073_741_824 {
@@ -142,7 +155,7 @@ fn pad(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         }
     }
     for (key, value) in array.iter() {
-        super::slice::insert(&mut result, key, value, false)?;
+        super::slice::insert(&mut result, key, value, super::Keys::Renumber)?;
     }
     if length > 0 {
         for _ in 0..padding {

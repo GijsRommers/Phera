@@ -23,3 +23,16 @@ impl Extension for Standard {
         constants::register(registry);
     }
 }
+
+/// Exposes PHP comparison traversal for adversarial comparator regression tests.
+#[doc(hidden)]
+pub use arrays::sort_order::order as php_sort_order;
+
+/// PHP argument errors name boolean literals rather than the general bool type.
+pub(crate) fn argument_type_name(value: &phera_extension_api::Value) -> String {
+    match value {
+        phera_extension_api::Value::Bool(false) => "false".into(),
+        phera_extension_api::Value::Bool(true) => "true".into(),
+        _ => value.type_name(),
+    }
+}

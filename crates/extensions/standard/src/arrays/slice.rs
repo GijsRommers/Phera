@@ -7,28 +7,28 @@ use phera_extension_api::{
     Registry, Value, args,
 };
 
+const ARRAY_SLICE_PARAMS: &[Param] = &[
+    Param::new("array", ParamType::Array),
+    Param::new("offset", ParamType::Int),
+    Param::new("length", ParamType::Int).nullable().optional(),
+    Param::new("preserve_keys", ParamType::Bool).optional(),
+];
+
+const ARRAY_REVERSE_PARAMS: &[Param] = &[
+    Param::new("array", ParamType::Array),
+    Param::new("preserve_keys", ParamType::Bool).optional(),
+];
+
 pub(crate) fn register(registry: &mut Registry) {
     registry.function(FunctionEntry::sync(
         "array_slice",
-        const {
-            &[
-                Param::new("array", ParamType::Array),
-                Param::new("offset", ParamType::Int),
-                Param::new("length", ParamType::Int).nullable().optional(),
-                Param::new("preserve_keys", ParamType::Bool).optional(),
-            ]
-        },
-        slice,
+        ARRAY_SLICE_PARAMS,
+        array_slice,
     ));
     registry.function(FunctionEntry::sync(
         "array_reverse",
-        const {
-            &[
-                Param::new("array", ParamType::Array),
-                Param::new("preserve_keys", ParamType::Bool).optional(),
-            ]
-        },
-        reverse,
+        ARRAY_REVERSE_PARAMS,
+        array_reverse,
     ));
 }
 
@@ -37,9 +37,9 @@ pub(super) fn insert(
     result: &mut PhpArray,
     key: &ArrayKey,
     value: &Value,
-    preserve: bool,
+    keys: super::Keys,
 ) -> Result<(), NativeError> {
-    if preserve || matches!(key, ArrayKey::String(_)) {
+    if matches!(keys, super::Keys::Preserve) || matches!(key, ArrayKey::String(_)) {
         result.insert(key.clone(), value.clone());
     } else {
         result.push(value.clone())?;
@@ -48,7 +48,7 @@ pub(super) fn insert(
 }
 
 /// Negative lengths count from the end; string keys always survive slicing.
-fn slice(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn array_slice(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let mut result = PhpArray::new();
     if let Some(array) = args::array(arguments, 0) {
         let offset = args::int(arguments, 1).unwrap_or_default();
@@ -59,18 +59,18 @@ fn slice(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         };
         let end = match args::int(arguments, 2) {
             None => array.len(),
-            Some(n) if n < 0 => array
+            Some(number) if number < 0 => array
                 .len()
-                .saturating_sub(n.unsigned_abs() as usize)
+                .saturating_sub(number.unsigned_abs() as usize)
                 .max(start),
-            Some(n) => start.saturating_add(n as usize).min(array.len()),
+            Some(number) => start.saturating_add(number as usize).min(array.len()),
         };
         for (key, value) in array.iter().skip(start).take(end - start) {
             insert(
                 &mut result,
                 key,
                 value,
-                args::bool(arguments, 3).unwrap_or(false),
+                super::Keys::from_preserve(args::bool(arguments, 3).unwrap_or(false)),
             )?;
         }
     }
@@ -78,7 +78,7 @@ fn slice(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
 }
 
 /// Reversal changes iteration order while preserving string-key identity.
-fn reverse(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn array_reverse(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let mut result = PhpArray::new();
     if let Some(array) = args::array(arguments, 0) {
         for (key, value) in array.iter().collect::<Vec<_>>().into_iter().rev() {
@@ -86,7 +86,7 @@ fn reverse(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
                 &mut result,
                 key,
                 value,
-                args::bool(arguments, 1).unwrap_or(false),
+                super::Keys::from_preserve(args::bool(arguments, 1).unwrap_or(false)),
             )?;
         }
     }

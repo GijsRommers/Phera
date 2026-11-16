@@ -1,28 +1,46 @@
 //! Counting, row projection, and chunking of ordered PHP arrays.
+
 use phera_extension_api::{
     ArrayKey, Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, PhpArray,
     Registry, Value, args,
 };
-const COUNT: &[Param] = &[Param::new("array", ParamType::Array)];
-const COLUMN: &[Param] = &[
+
+const ARRAY_COUNT_VALUES_PARAMS: &[Param] = &[Param::new("array", ParamType::Array)];
+
+const ARRAY_COLUMN_PARAMS: &[Param] = &[
     Param::new("array", ParamType::Array),
     Param::new("column_key", ParamType::IntOrString).nullable(),
     Param::new("index_key", ParamType::IntOrString)
         .nullable()
         .optional(),
 ];
-const CHUNK: &[Param] = &[
+
+const ARRAY_CHUNK_PARAMS: &[Param] = &[
     Param::new("array", ParamType::Array),
     Param::new("length", ParamType::Int),
     Param::new("preserve_keys", ParamType::Bool).optional(),
 ];
+
 pub(crate) fn register(registry: &mut Registry) {
-    registry.function(FunctionEntry::sync("array_count_values", COUNT, count));
-    registry.function(FunctionEntry::sync("array_column", COLUMN, column));
-    registry.function(FunctionEntry::sync("array_chunk", CHUNK, chunk));
+    registry.function(FunctionEntry::sync(
+        "array_count_values",
+        ARRAY_COUNT_VALUES_PARAMS,
+        array_count_values,
+    ));
+    registry.function(FunctionEntry::sync(
+        "array_column",
+        ARRAY_COLUMN_PARAMS,
+        array_column,
+    ));
+    registry.function(FunctionEntry::sync(
+        "array_chunk",
+        ARRAY_CHUNK_PARAMS,
+        array_chunk,
+    ));
 }
+
 /// Counting accepts only integer and string values, skipping all other types.
-fn count(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn array_count_values(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let mut result = PhpArray::new();
     if let Some(array) = args::array(arguments, 0) {
         for value in array.values() {
@@ -43,8 +61,9 @@ fn count(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     }
     Ok(Value::from(result))
 }
+
 /// Missing columns skip rows; missing index keys append with the next integer key.
-fn column(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn array_column(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let column = if args::value(arguments, 1).is_null() {
         None
     } else {
@@ -93,8 +112,9 @@ fn column(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     }
     Ok(Value::from(result))
 }
+
 /// Chunk boundaries count entries, independent of numeric or string key values.
-fn chunk(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn array_chunk(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let length = args::int(arguments, 1).unwrap_or_default();
     if length <= 0 {
         return Err(NativeError::value_error(

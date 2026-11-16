@@ -4,20 +4,21 @@ use phera_extension_api::{
     Context, FunctionEntry, NativeResult, Param, ParamType, Registry, Value, args,
 };
 
+const UNARY_FLOAT_PARAMS: &[Param] = &[Param::new("num", ParamType::Float)];
+
 pub(crate) fn register(registry: &mut Registry) {
-    const ONE: &[Param] = &[Param::new("num", ParamType::Float)];
-    registry.function(FunctionEntry::sync("sin", ONE, sin));
-    registry.function(FunctionEntry::sync("cos", ONE, cos));
-    registry.function(FunctionEntry::sync("tan", ONE, tan));
-    registry.function(FunctionEntry::sync("asin", ONE, asin));
-    registry.function(FunctionEntry::sync("acos", ONE, acos));
-    registry.function(FunctionEntry::sync("atan", ONE, atan));
-    registry.function(FunctionEntry::sync("sinh", ONE, sinh));
-    registry.function(FunctionEntry::sync("cosh", ONE, cosh));
-    registry.function(FunctionEntry::sync("tanh", ONE, tanh));
-    registry.function(FunctionEntry::sync("asinh", ONE, asinh));
-    registry.function(FunctionEntry::sync("acosh", ONE, acosh));
-    registry.function(FunctionEntry::sync("atanh", ONE, atanh));
+    registry.function(FunctionEntry::sync("sin", UNARY_FLOAT_PARAMS, sin));
+    registry.function(FunctionEntry::sync("cos", UNARY_FLOAT_PARAMS, cos));
+    registry.function(FunctionEntry::sync("tan", UNARY_FLOAT_PARAMS, tan));
+    registry.function(FunctionEntry::sync("asin", UNARY_FLOAT_PARAMS, asin));
+    registry.function(FunctionEntry::sync("acos", UNARY_FLOAT_PARAMS, acos));
+    registry.function(FunctionEntry::sync("atan", UNARY_FLOAT_PARAMS, atan));
+    registry.function(FunctionEntry::sync("sinh", UNARY_FLOAT_PARAMS, sinh));
+    registry.function(FunctionEntry::sync("cosh", UNARY_FLOAT_PARAMS, cosh));
+    registry.function(FunctionEntry::sync("tanh", UNARY_FLOAT_PARAMS, tanh));
+    registry.function(FunctionEntry::sync("asinh", UNARY_FLOAT_PARAMS, asinh));
+    registry.function(FunctionEntry::sync("acosh", UNARY_FLOAT_PARAMS, acosh));
+    registry.function(FunctionEntry::sync("atanh", UNARY_FLOAT_PARAMS, atanh));
 }
 
 fn sin(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {

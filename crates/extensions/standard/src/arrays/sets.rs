@@ -1,31 +1,56 @@
 //! Set operations compare string representations, while key variants retain key identity.
+
+use std::cmp::Ordering;
+
 use phera_extension_api::{
     Context, FunctionEntry, NativeResult, Param, ParamType, PhpArray, Registry, Value, args,
 };
-use std::cmp::Ordering;
-const SET: &[Param] = &[
+
+use super::ordering::SortOrder;
+
+#[derive(Clone, Copy)]
+enum SetOperation {
+    Difference,
+    Intersection,
+}
+
+#[derive(Clone, Copy)]
+enum MatchBy {
+    Key,
+    Value,
+    KeyAndValue,
+}
+
+const ARRAY_SET_PARAMS: &[Param] = &[
     Param::new("array", ParamType::Array),
     Param::new("arrays", ParamType::Array).variadic(),
 ];
-const UNIQUE: &[Param] = &[
+
+const ARRAY_UNIQUE_PARAMS: &[Param] = &[
     Param::new("array", ParamType::Array),
     Param::new("flags", ParamType::Int).optional(),
 ];
+
 pub(crate) fn register(registry: &mut Registry) {
     for (name, body) in [
-        ("array_diff", diff as phera_extension_api::SyncFn),
-        ("array_diff_key", diff_key),
-        ("array_diff_assoc", diff_assoc),
-        ("array_intersect", intersect),
-        ("array_intersect_key", intersect_key),
-        ("array_intersect_assoc", intersect_assoc),
+        ("array_diff", array_diff as phera_extension_api::SyncFn),
+        ("array_diff_key", array_diff_key),
+        ("array_diff_assoc", array_diff_assoc),
+        ("array_intersect", array_intersect),
+        ("array_intersect_key", array_intersect_key),
+        ("array_intersect_assoc", array_intersect_assoc),
     ] {
-        registry.function(FunctionEntry::sync(name, SET, body));
+        registry.function(FunctionEntry::sync(name, ARRAY_SET_PARAMS, body));
     }
-    registry.function(FunctionEntry::sync("array_unique", UNIQUE, unique));
+    registry.function(FunctionEntry::sync(
+        "array_unique",
+        ARRAY_UNIQUE_PARAMS,
+        array_unique,
+    ));
 }
+
 /// PHP builds a string lookup table, converting each value exactly once.
-fn diff(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn array_diff(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     if args::array(arguments, 0).is_some_and(|array| array.is_empty()) {
         return Ok(args::value(arguments, 0).clone());
     }
@@ -79,28 +104,48 @@ fn diff(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     }
     Ok(Value::from(result))
 }
-fn diff_key(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    set(context, arguments, false, true, false)
+
+fn array_diff_key(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    set(context, arguments, SetOperation::Difference, MatchBy::Key)
 }
-fn diff_assoc(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    set(context, arguments, false, true, true)
+
+fn array_diff_assoc(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    set(
+        context,
+        arguments,
+        SetOperation::Difference,
+        MatchBy::KeyAndValue,
+    )
 }
-fn intersect(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    set(context, arguments, true, false, true)
+
+fn array_intersect(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    set(
+        context,
+        arguments,
+        SetOperation::Intersection,
+        MatchBy::Value,
+    )
 }
-fn intersect_key(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    set(context, arguments, true, true, false)
+
+fn array_intersect_key(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    set(context, arguments, SetOperation::Intersection, MatchBy::Key)
 }
-fn intersect_assoc(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    set(context, arguments, true, true, true)
+
+fn array_intersect_assoc(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    set(
+        context,
+        arguments,
+        SetOperation::Intersection,
+        MatchBy::KeyAndValue,
+    )
 }
+
 /// Difference rejects a match in any input; intersection needs one in every input.
 fn set(
     context: &mut dyn Context,
     arguments: &[Value],
-    intersection: bool,
-    keys: bool,
-    values: bool,
+    operation: SetOperation,
+    match_by: MatchBy,
 ) -> NativeResult {
     let mut result = PhpArray::new();
     if let Some(array) = args::array(arguments, 0) {
@@ -112,18 +157,22 @@ fn set(
                 };
                 let mut found = false;
                 for (other_key, other_value) in other.iter() {
-                    if keys && key != other_key {
+                    if !matches!(match_by, MatchBy::Value) && key != other_key {
                         continue;
                     }
-                    if !values
-                        || super::ordering::compare_values(context, value, other_value, 2)?
-                            == Ordering::Equal
+                    if matches!(match_by, MatchBy::Key)
+                        || super::ordering::compare_values(
+                            context,
+                            value,
+                            other_value,
+                            SortOrder::String { ignore_case: false },
+                        )? == Ordering::Equal
                     {
                         found = true;
                         break;
                     }
                 }
-                if found != intersection {
+                if found != matches!(operation, SetOperation::Intersection) {
                     keep = false;
                     break;
                 }
@@ -135,8 +184,9 @@ fn set(
     }
     Ok(Value::from(result))
 }
+
 /// Keep the first occurrence and its key; string comparison is the default.
-fn unique(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn array_unique(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let flags = args::int(arguments, 1).unwrap_or(2);
     let Some(array) = args::array(arguments, 0) else {
         return Ok(Value::from(PhpArray::new()));
@@ -157,12 +207,13 @@ fn unique(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         }
         return Ok(Value::from(result));
     }
+    let order = SortOrder::from_flags(flags);
     let entries: Vec<_> = array.iter().collect();
     let indices = super::sort_order::order(entries.len(), |left, right| {
         let (Some((_, left)), Some((_, right))) = (entries.get(left), entries.get(right)) else {
             return Ok(Ordering::Equal);
         };
-        super::ordering::compare_values(context, left, right, flags)
+        super::ordering::compare_values(context, left, right, order)
     })?;
     let mut result = (**array).clone();
     let mut previous: Option<usize> = None;
@@ -170,7 +221,7 @@ fn unique(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         if let Some(last) = previous
             && let (Some((last_key, last_value)), Some((key, value))) =
                 (entries.get(last), entries.get(index))
-            && super::ordering::compare_values(context, last_value, value, flags)?
+            && super::ordering::compare_values(context, last_value, value, order)?
                 == Ordering::Equal
         {
             if last > index {

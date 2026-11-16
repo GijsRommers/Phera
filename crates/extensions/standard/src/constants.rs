@@ -1,4 +1,4 @@
-//! Constants operations for PHP values.
+//! PHP mathematical, rounding, sorting, and array-filter constants.
 
 use phera_extension_api::Registry;
 

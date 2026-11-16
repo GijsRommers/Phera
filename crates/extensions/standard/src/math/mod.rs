@@ -1,4 +1,4 @@
-//! Registration and shared helpers for PHP operations.
+//! Registration of PHP arithmetic, rounding, radix, and array aggregation functions.
 
 use phera_extension_api::Registry;
 

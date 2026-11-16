@@ -6,97 +6,82 @@ use phera_extension_api::{
     args,
 };
 
+const UNARY_FLOAT_PARAMS: &[Param] = &[Param::new("num", ParamType::Float)];
+
+const BINARY_FLOAT_PARAMS: &[Param] = &[
+    Param::new("num1", ParamType::Float),
+    Param::new("num2", ParamType::Float),
+];
+
+const ATAN2_PARAMS: &[Param] = &[
+    Param::new("y", ParamType::Float),
+    Param::new("x", ParamType::Float),
+];
+
+const ABS_PARAMS: &[Param] = &[Param::new("num", ParamType::Number)];
+
+const INTDIV_PARAMS: &[Param] = &[
+    Param::new("num1", ParamType::Int),
+    Param::new("num2", ParamType::Int),
+];
+
+const POW_PARAMS: &[Param] = &[
+    Param::new("num", ParamType::Mixed),
+    Param::new("exponent", ParamType::Mixed),
+];
+
+const LOG_PARAMS: &[Param] = &[
+    Param::new("num", ParamType::Float),
+    Param::new("base", ParamType::Float).optional(),
+];
+
 pub(crate) fn register(registry: &mut Registry) {
-    const ONE: &[Param] = &[Param::new("num", ParamType::Float)];
-    for (n, f) in [
-        ("is_nan", nan as SyncFn),
-        ("is_finite", finite),
-        ("is_infinite", infinite),
-        ("deg2rad", deg),
-        ("rad2deg", rad),
+    for (name, function) in [
+        ("is_nan", is_nan as SyncFn),
+        ("is_finite", is_finite),
+        ("is_infinite", is_infinite),
+        ("deg2rad", deg2rad),
+        ("rad2deg", rad2deg),
     ] {
-        registry.function(FunctionEntry::sync(n, ONE, f));
+        registry.function(FunctionEntry::sync(name, UNARY_FLOAT_PARAMS, function));
     }
-    const TWO: &[Param] = &[
-        Param::new("num1", ParamType::Float),
-        Param::new("num2", ParamType::Float),
-    ];
-    for (n, f) in [("fdiv", fdiv as SyncFn), ("fmod", fmod), ("hypot", hypot)] {
-        registry.function(FunctionEntry::sync(n, TWO, f));
+
+    for (name, function) in [("fdiv", fdiv as SyncFn), ("fmod", fmod), ("hypot", hypot)] {
+        registry.function(FunctionEntry::sync(name, BINARY_FLOAT_PARAMS, function));
     }
-    registry.function(FunctionEntry::sync(
-        "atan2",
-        const {
-            &[
-                Param::new("y", ParamType::Float),
-                Param::new("x", ParamType::Float),
-            ]
-        },
-        atan2,
-    ));
+    registry.function(FunctionEntry::sync("atan2", ATAN2_PARAMS, atan2));
     registry.function(FunctionEntry::sync("pi", &[], pi));
-    registry.function(FunctionEntry::sync(
-        "abs",
-        const { &[Param::new("num", ParamType::Number)] },
-        abs,
-    ));
-    registry.function(FunctionEntry::sync(
-        "intdiv",
-        const {
-            &[
-                Param::new("num1", ParamType::Int),
-                Param::new("num2", ParamType::Int),
-            ]
-        },
-        intdiv,
-    ));
-    registry.function(FunctionEntry::sync(
-        "pow",
-        const {
-            &[
-                Param::new("num", ParamType::Mixed),
-                Param::new("exponent", ParamType::Mixed),
-            ]
-        },
-        pow,
-    ));
-    registry.function(FunctionEntry::sync(
-        "log",
-        const {
-            &[
-                Param::new("num", ParamType::Float),
-                Param::new("base", ParamType::Float).optional(),
-            ]
-        },
-        log,
-    ));
+    registry.function(FunctionEntry::sync("abs", ABS_PARAMS, abs));
+    registry.function(FunctionEntry::sync("intdiv", INTDIV_PARAMS, intdiv));
+    registry.function(FunctionEntry::sync("pow", POW_PARAMS, pow));
+    registry.function(FunctionEntry::sync("log", LOG_PARAMS, log));
 }
 
-fn nan(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn is_nan(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(Value::Bool(
         args::float(arguments, 0).unwrap_or_default().is_nan(),
     ))
 }
 
-fn finite(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn is_finite(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(Value::Bool(
         args::float(arguments, 0).unwrap_or_default().is_finite(),
     ))
 }
 
-fn infinite(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn is_infinite(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(Value::Bool(
         args::float(arguments, 0).unwrap_or_default().is_infinite(),
     ))
 }
 
-fn deg(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn deg2rad(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(Value::Float(
         args::float(arguments, 0).unwrap_or_default() * (std::f64::consts::PI / 180.0),
     ))
 }
 
-fn rad(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn rad2deg(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(Value::Float(
         args::float(arguments, 0).unwrap_or_default() * (180.0 / std::f64::consts::PI),
     ))
@@ -136,23 +121,25 @@ fn pi(_: &mut dyn Context, _: &[Value]) -> NativeResult {
     Ok(Value::Float(std::f64::consts::PI))
 }
 
+/// The signed minimum has no positive integer counterpart, so PHP returns a float.
 fn abs(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(match args::int(arguments, 0) {
-        Some(n) if n != i64::MIN => Value::Int(n.abs()),
+        Some(number) if number != i64::MIN => Value::Int(number.abs()),
         _ => Value::Float(args::float(arguments, 0).unwrap_or_default().abs()),
     })
 }
 
+/// PHP distinguishes zero divisors from the signed minimum divided by minus one.
 fn intdiv(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let n = args::int(arguments, 0).unwrap_or_default();
-    let d = args::int(arguments, 1).unwrap_or_default();
-    if d == 0 {
+    let number = args::int(arguments, 0).unwrap_or_default();
+    let divisor = args::int(arguments, 1).unwrap_or_default();
+    if divisor == 0 {
         return Err(NativeError::throw(
             "DivisionByZeroError",
             "Division by zero",
         ));
     }
-    n.checked_div(d).map(Value::Int).ok_or_else(|| {
+    number.checked_div(divisor).map(Value::Int).ok_or_else(|| {
         NativeError::throw(
             "ArithmeticError",
             "Division of PHP_INT_MIN by -1 is not an integer",
@@ -168,21 +155,22 @@ fn pow(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     )?)
 }
 
+/// Omitted bases use ln directly; explicit bases retain PHP's specialized paths.
 fn log(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let n = args::float(arguments, 0).unwrap_or_default();
-    let b = args::float(arguments, 1).unwrap_or(std::f64::consts::E);
-    if b <= 0.0 {
+    let number = args::float(arguments, 0).unwrap_or_default();
+    let base = args::float(arguments, 1).unwrap_or(std::f64::consts::E);
+    if base <= 0.0 {
         return Err(NativeError::value_error(
             "log(): Argument #2 ($base) must be greater than 0",
         ));
     }
     Ok(Value::Float(if !args::given(arguments, 1) {
-        n.ln()
-    } else if b == 10.0 {
-        n.log10()
-    } else if b == 2.0 {
-        n.log2()
+        number.ln()
+    } else if base == 10.0 {
+        number.log10()
+    } else if base == 2.0 {
+        number.log2()
     } else {
-        n.ln() / b.ln()
+        number.ln() / base.ln()
     }))
 }
