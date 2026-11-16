@@ -4,10 +4,11 @@ use phera_extension_api::{
     Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Registry, Value, args,
 };
 
-use super::{buffer, bytes, decimal};
 use crate::math::rounding::decimal_round;
 
-const PARAMETERS: &[Param] = &[
+use super::{buffer, bytes, decimal};
+
+const NUMBER_FORMAT_PARAMS: &[Param] = &[
     Param::new("num", ParamType::Number),
     Param::new("decimals", ParamType::Int).optional(),
     Param::new("decimal_separator", ParamType::String)
@@ -21,7 +22,7 @@ const PARAMETERS: &[Param] = &[
 pub(crate) fn register(registry: &mut Registry) {
     registry.function(FunctionEntry::sync(
         "number_format",
-        PARAMETERS,
+        NUMBER_FORMAT_PARAMS,
         number_format,
     ));
 }
@@ -51,19 +52,7 @@ fn number_format(_context: &mut dyn Context, arguments: &[Value]) -> NativeResul
             .saturating_add(thousands.len().saturating_mul(110)),
     )?;
     let (text, negative) = if let Some(integer) = integer {
-        let mut magnitude = integer.unsigned_abs();
-        if places < -19 {
-            magnitude = 0;
-        } else if places < 0 {
-            let power = 10u64.pow((-places) as u32);
-            magnitude = (magnitude / power + u64::from(magnitude % power >= power / 2)) * power;
-        }
-        let mut text = magnitude.to_string().into_bytes();
-        if precision > 0 {
-            text.push(b'.');
-            text.resize(text.len() + precision, b'0');
-        }
-        (text, integer < 0 && magnitude != 0)
+        format_integer(integer, places, precision)
     } else {
         if !value.is_finite() {
             return Ok(bytes(if value.is_nan() {
@@ -81,6 +70,18 @@ fn number_format(_context: &mut dyn Context, arguments: &[Value]) -> NativeResul
     if negative {
         result.push(b'-');
     }
+    group_decimal(&mut result, &text, precision, separator, thousands);
+    Ok(bytes(result))
+}
+
+/// Thousands grouping applies only before the decimal point, including large integers.
+fn group_decimal(
+    result: &mut Vec<u8>,
+    text: &[u8],
+    precision: usize,
+    separator: &[u8],
+    thousands: &[u8],
+) {
     let point = text
         .iter()
         .position(|byte| *byte == b'.')
@@ -95,5 +96,21 @@ fn number_format(_context: &mut dyn Context, arguments: &[Value]) -> NativeResul
         result.extend_from_slice(separator);
         result.extend_from_slice(text.get(point + 1..).unwrap_or_default());
     }
-    Ok(bytes(result))
+}
+
+/// PHP rounds integer inputs without a lossy intermediate f64 conversion.
+fn format_integer(integer: i64, places: i64, precision: usize) -> (Vec<u8>, bool) {
+    let mut magnitude = integer.unsigned_abs();
+    if places < -19 {
+        magnitude = 0;
+    } else if places < 0 {
+        let power = 10u64.pow((-places) as u32);
+        magnitude = (magnitude / power + u64::from(magnitude % power >= power / 2)) * power;
+    }
+    let mut text = magnitude.to_string().into_bytes();
+    if precision > 0 {
+        text.push(b'.');
+        text.resize(text.len() + precision, b'0');
+    }
+    (text, integer < 0 && magnitude != 0)
 }

@@ -1,26 +1,37 @@
-//! Similarity algorithms retain PHP's tie ordering and integer overflow behavior.
-use super::{buffer, bytes};
+//! PHP similarity ports: ext/standard/string.c (php_similar_char),
+//! ext/standard/levenshtein.c (levenshtein), and ext/standard/soundex.c (soundex).
+
 use phera_extension_api::{
     Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Registry, Value, args,
 };
-const SIMILAR: &[Param] = &[
+
+use super::{buffer, bytes};
+
+const SIMILAR_PARAMS: &[Param] = &[
     Param::new("string1", ParamType::String),
     Param::new("string2", ParamType::String),
     Param::new("percent", ParamType::Mixed).by_ref().optional(),
 ];
-const DISTANCE: &[Param] = &[
+
+const DISTANCE_PARAMS: &[Param] = &[
     Param::new("string1", ParamType::String),
     Param::new("string2", ParamType::String),
     Param::new("insertion_cost", ParamType::Int).optional(),
     Param::new("replacement_cost", ParamType::Int).optional(),
     Param::new("deletion_cost", ParamType::Int).optional(),
 ];
-const STRING: &[Param] = &[Param::new("string", ParamType::String)];
+
+const STRING_PARAMS: &[Param] = &[Param::new("string", ParamType::String)];
 pub(crate) fn register(registry: &mut Registry) {
-    registry.function(FunctionEntry::sync("similar_text", SIMILAR, similar));
-    registry.function(FunctionEntry::sync("levenshtein", DISTANCE, distance));
-    registry.function(FunctionEntry::sync("soundex", STRING, soundex));
+    registry.function(FunctionEntry::sync("similar_text", SIMILAR_PARAMS, similar));
+    registry.function(FunctionEntry::sync(
+        "levenshtein",
+        DISTANCE_PARAMS,
+        distance,
+    ));
+    registry.function(FunctionEntry::sync("soundex", STRING_PARAMS, soundex));
 }
+
 /// An explicit work stack reproduces PHP's recursive longest-match partitioning.
 fn similar(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let first = args::bytes(arguments, 0);
@@ -28,39 +39,26 @@ fn similar(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let mut pending = vec![(first, second)];
     let mut sum = 0usize;
     while let Some((left, right)) = pending.pop() {
-        let mut best = 0;
-        let mut updates = 0;
-        let mut position = (0, 0);
-        for index in 0..left.len() {
-            for other in 0..right.len() {
-                let length = left
-                    .iter()
-                    .skip(index)
-                    .zip(right.iter().skip(other))
-                    .take_while(|(a, b)| a == b)
-                    .count();
-                if length > best {
-                    best = length;
-                    position = (index, other);
-                    updates += 1;
-                }
-            }
-        }
+        let CommonMatch {
+            length: best,
+            updates,
+            position,
+        } = longest_match(left, right);
         if best == 0 {
             continue;
         }
         sum += best;
-        let (left_pos, right_pos) = position;
-        if left_pos > 0 && right_pos > 0 && updates > 1 {
+        let (left_offset, right_offset) = position;
+        if left_offset > 0 && right_offset > 0 && updates > 1 {
             pending.push((
-                left.get(..left_pos).unwrap_or_default(),
-                right.get(..right_pos).unwrap_or_default(),
+                left.get(..left_offset).unwrap_or_default(),
+                right.get(..right_offset).unwrap_or_default(),
             ));
         }
-        if left_pos + best < left.len() && right_pos + best < right.len() {
+        if left_offset + best < left.len() && right_offset + best < right.len() {
             pending.push((
-                left.get(left_pos + best..).unwrap_or_default(),
-                right.get(right_pos + best..).unwrap_or_default(),
+                left.get(left_offset + best..).unwrap_or_default(),
+                right.get(right_offset + best..).unwrap_or_default(),
             ));
         }
     }
@@ -78,6 +76,7 @@ fn similar(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     }
     Ok(Value::Int(sum as i64))
 }
+
 /// Custom costs may be negative; PHP's signed machine arithmetic wraps on overflow.
 fn distance(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let mut left = args::bytes(arguments, 0);
@@ -95,17 +94,7 @@ fn distance(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         std::mem::swap(&mut left, &mut right);
     }
     let length = right.len().saturating_add(1);
-    let allocation = buffer(length.saturating_mul(16))?;
-    drop(allocation);
-    let mut previous = Vec::new();
-    let mut next = Vec::new();
-    previous
-        .try_reserve(length)
-        .map_err(|_| NativeError::error("Could not allocate string"))?;
-    next.try_reserve(length)
-        .map_err(|_| NativeError::error("Could not allocate string"))?;
-    previous.extend((0..length).map(|index| (index as i64).wrapping_mul(insert)));
-    next.resize(length, 0);
+    let (mut previous, mut next) = distance_rows(length, insert)?;
     for &byte in left {
         if let Some(first) = next.first_mut() {
             *first = previous
@@ -138,6 +127,7 @@ fn distance(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     }
     Ok(Value::Int(previous.last().copied().unwrap_or_default()))
 }
+
 /// Vowels reset duplicate suppression; nonletters do not reset it.
 fn soundex(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     const CODES: &[u8] = b"01230120022455012623010202";
@@ -161,4 +151,53 @@ fn soundex(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     }
     result.resize(4, b'0');
     Ok(bytes(result))
+}
+
+struct CommonMatch {
+    length: usize,
+    updates: usize,
+    position: (usize, usize),
+}
+
+/// PHP keeps the first longest match and remembers how many records it improved.
+fn longest_match(left: &[u8], right: &[u8]) -> CommonMatch {
+    let mut best = 0;
+    let mut updates = 0;
+    let mut position = (0, 0);
+    for index in 0..left.len() {
+        for other in 0..right.len() {
+            let length = left
+                .iter()
+                .skip(index)
+                .zip(right.iter().skip(other))
+                .take_while(|(a, byte)| a == byte)
+                .count();
+            if length > best {
+                best = length;
+                position = (index, other);
+                updates += 1;
+            }
+        }
+    }
+    CommonMatch {
+        length: best,
+        updates,
+        position,
+    }
+}
+
+/// Both dynamic-programming rows obey the shared allocation limit before iteration.
+fn distance_rows(length: usize, insert: i64) -> Result<(Vec<i64>, Vec<i64>), NativeError> {
+    let allocation = buffer(length.saturating_mul(16))?;
+    drop(allocation);
+    let mut previous = Vec::new();
+    let mut next = Vec::new();
+    previous
+        .try_reserve(length)
+        .map_err(|_| NativeError::error("Could not allocate string"))?;
+    next.try_reserve(length)
+        .map_err(|_| NativeError::error("Could not allocate string"))?;
+    previous.extend((0..length).map(|index| (index as i64).wrapping_mul(insert)));
+    next.resize(length, 0);
+    Ok((previous, next))
 }

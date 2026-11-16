@@ -1,13 +1,17 @@
 //! PHP backslash escaping treats strings and character masks as bytes.
-use super::{buffer, bytes};
+
 use phera_extension_api::{
     Context, FunctionEntry, NativeResult, Param, ParamType, Registry, SyncFn, Value, args,
 };
-const STRING: &[Param] = &[Param::new("string", ParamType::String)];
-const MASK: &[Param] = &[
+
+use super::{buffer, bytes};
+
+const STRING_PARAMS: &[Param] = &[Param::new("string", ParamType::String)];
+const MASK_PARAMS: &[Param] = &[
     Param::new("string", ParamType::String),
     Param::new("characters", ParamType::String),
 ];
+
 pub(crate) fn register(registry: &mut Registry) {
     for (name, body) in [
         ("addslashes", addslashes as SyncFn),
@@ -15,10 +19,11 @@ pub(crate) fn register(registry: &mut Registry) {
         ("stripcslashes", stripcslashes),
         ("quotemeta", quotemeta),
     ] {
-        registry.function(FunctionEntry::sync(name, STRING, body));
+        registry.function(FunctionEntry::sync(name, STRING_PARAMS, body));
     }
-    registry.function(FunctionEntry::sync("addcslashes", MASK, addcslashes));
+    registry.function(FunctionEntry::sync("addcslashes", MASK_PARAMS, addcslashes));
 }
+
 /// NUL is escaped as backslash-zero; other quote bytes retain their spelling.
 fn addslashes(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let string = args::bytes(arguments, 0);
@@ -31,6 +36,7 @@ fn addslashes(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     }
     Ok(bytes(result))
 }
+
 /// A terminal backslash disappears, while backslash-zero becomes a NUL byte.
 fn stripslashes(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let string = args::bytes(arguments, 0);
@@ -47,6 +53,7 @@ fn stripslashes(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     }
     Ok(bytes(result))
 }
+
 /// quotemeta escapes only PHP's fixed punctuation set, including embedded NUL.
 fn quotemeta(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let string = args::bytes(arguments, 0);
@@ -59,6 +66,7 @@ fn quotemeta(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     }
     Ok(bytes(result))
 }
+
 /// Non-printable masked bytes use named C escapes or exactly three octal digits.
 fn addcslashes(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let string = args::bytes(arguments, 0);
@@ -97,6 +105,7 @@ fn addcslashes(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     }
     Ok(bytes(result))
 }
+
 /// Octal escapes consume at most three digits and wrap to a single byte.
 fn stripcslashes(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let string = args::bytes(arguments, 0);
@@ -127,38 +136,43 @@ fn stripcslashes(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
             result.push(value);
             continue;
         }
-        if next == b'x'
-            && string
-                .get(cursor)
-                .copied()
-                .and_then(super::url::unhex)
-                .is_some()
-        {
-            let mut number = 0u8;
-            for _ in 0..2 {
-                let Some(digit) = string.get(cursor).copied().and_then(super::url::unhex) else {
-                    break;
-                };
-                number = number.wrapping_mul(16).wrapping_add(digit);
-                cursor += 1;
-            }
-            result.push(number);
-        } else if (b'0'..=b'7').contains(&next) {
-            let mut number = next - b'0';
-            for _ in 0..2 {
-                let Some(&digit) = string
-                    .get(cursor)
-                    .filter(|byte| (b'0'..=b'7').contains(byte))
-                else {
-                    break;
-                };
-                number = number.wrapping_mul(8).wrapping_add(digit - b'0');
-                cursor += 1;
-            }
-            result.push(number);
-        } else {
-            result.push(next);
-        }
+        result.push(decode_numeric_escape(next, string, &mut cursor));
     }
     Ok(bytes(result))
+}
+
+/// Hex escapes consume two digits; octal consumes three and wraps to a byte.
+fn decode_numeric_escape(next: u8, string: &[u8], cursor: &mut usize) -> u8 {
+    if next == b'x'
+        && string
+            .get(*cursor)
+            .copied()
+            .and_then(super::url::unhex)
+            .is_some()
+    {
+        let mut number = 0u8;
+        for _ in 0..2 {
+            let Some(digit) = string.get(*cursor).copied().and_then(super::url::unhex) else {
+                break;
+            };
+            number = number.wrapping_mul(16).wrapping_add(digit);
+            *cursor += 1;
+        }
+        number
+    } else if (b'0'..=b'7').contains(&next) {
+        let mut number = next - b'0';
+        for _ in 0..2 {
+            let Some(&digit) = string
+                .get(*cursor)
+                .filter(|byte| (b'0'..=b'7').contains(byte))
+            else {
+                break;
+            };
+            number = number.wrapping_mul(8).wrapping_add(digit - b'0');
+            *cursor += 1;
+        }
+        number
+    } else {
+        next
+    }
 }

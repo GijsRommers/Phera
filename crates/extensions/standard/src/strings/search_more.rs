@@ -1,74 +1,100 @@
 //! Reverse searches, byte comparisons, and bounded substring counting.
-use super::{bytes, find, find_ignore_case};
+
 use phera_extension_api::{
     Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Registry, SyncFn, Value,
     args,
 };
-const SEARCH: &[Param] = &[
+
+use super::{CaseSensitivity, bytes, find, find_ignore_case};
+
+enum PartSearch {
+    First(CaseSensitivity),
+    LastByte,
+}
+
+enum Membership {
+    Included,
+    Excluded,
+}
+
+mod comparison;
+
+use comparison::{strcasecmp, strcmp, strncasecmp, strncmp, substr_compare};
+
+const SEARCH_PARAMS: &[Param] = &[
     Param::new("haystack", ParamType::String),
     Param::new("needle", ParamType::String),
     Param::new("offset", ParamType::Int).optional(),
 ];
-const PART: &[Param] = &[
+
+const PART_PARAMS: &[Param] = &[
     Param::new("haystack", ParamType::String),
     Param::new("needle", ParamType::String),
     Param::new("before_needle", ParamType::Bool).optional(),
 ];
-const COMPARE: &[Param] = &[
+
+const COMPARE_PARAMS: &[Param] = &[
     Param::new("string1", ParamType::String),
     Param::new("string2", ParamType::String),
 ];
-const LIMITED: &[Param] = &[
+
+const LIMITED_PARAMS: &[Param] = &[
     Param::new("string1", ParamType::String),
     Param::new("string2", ParamType::String),
     Param::new("length", ParamType::Int),
 ];
-const COUNT: &[Param] = &[
+
+const COUNT_PARAMS: &[Param] = &[
     Param::new("haystack", ParamType::String),
     Param::new("needle", ParamType::String),
     Param::new("offset", ParamType::Int).optional(),
     Param::new("length", ParamType::Int).nullable().optional(),
 ];
-const SPAN: &[Param] = &[
+
+const SPAN_PARAMS: &[Param] = &[
     Param::new("string", ParamType::String),
     Param::new("characters", ParamType::String),
     Param::new("offset", ParamType::Int).optional(),
     Param::new("length", ParamType::Int).nullable().optional(),
 ];
-const SUBCOMPARE: &[Param] = &[
+
+const SUBCOMPARE_PARAMS: &[Param] = &[
     Param::new("haystack", ParamType::String),
     Param::new("needle", ParamType::String),
     Param::new("offset", ParamType::Int),
     Param::new("length", ParamType::Int).nullable().optional(),
     Param::new("case_insensitive", ParamType::Bool).optional(),
 ];
-const PBRK: &[Param] = &[
+
+const PBRK_PARAMS: &[Param] = &[
     Param::new("string", ParamType::String),
     Param::new("characters", ParamType::String),
 ];
+
 pub(crate) fn register(registry: &mut Registry) {
     for (name, params, body) in [
-        ("strrpos", SEARCH, strrpos as SyncFn),
-        ("strripos", SEARCH, strripos),
-        ("strstr", PART, strstr),
-        ("strchr", PART, strstr),
-        ("stristr", PART, stristr),
-        ("strrchr", PART, strrchr),
-        ("strpbrk", PBRK, strpbrk),
-        ("strcmp", COMPARE, strcmp),
-        ("strcasecmp", COMPARE, strcasecmp),
-        ("strncmp", LIMITED, strncmp),
-        ("strncasecmp", LIMITED, strncasecmp),
-        ("substr_count", COUNT, substr_count),
-        ("substr_compare", SUBCOMPARE, substr_compare),
-        ("strspn", SPAN, strspn),
-        ("strcspn", SPAN, strcspn),
+        ("strrpos", SEARCH_PARAMS, strrpos as SyncFn),
+        ("strripos", SEARCH_PARAMS, strripos),
+        ("strstr", PART_PARAMS, strstr),
+        ("strchr", PART_PARAMS, strstr),
+        ("stristr", PART_PARAMS, stristr),
+        ("strrchr", PART_PARAMS, strrchr),
+        ("strpbrk", PBRK_PARAMS, strpbrk),
+        ("strcmp", COMPARE_PARAMS, strcmp),
+        ("strcasecmp", COMPARE_PARAMS, strcasecmp),
+        ("strncmp", LIMITED_PARAMS, strncmp),
+        ("strncasecmp", LIMITED_PARAMS, strncasecmp),
+        ("substr_count", COUNT_PARAMS, substr_count),
+        ("substr_compare", SUBCOMPARE_PARAMS, substr_compare),
+        ("strspn", SPAN_PARAMS, strspn),
+        ("strcspn", SPAN_PARAMS, strcspn),
     ] {
         registry.function(FunctionEntry::sync(name, params, body));
     }
 }
+
 /// Negative offsets cap the starting position of the last match, not its end.
-fn reverse(arguments: &[Value], name: &str, fold: bool) -> NativeResult {
+fn find_last(arguments: &[Value], name: &str, sensitivity: CaseSensitivity) -> NativeResult {
     let haystack = args::bytes(arguments, 0);
     let needle = args::bytes(arguments, 1);
     let offset = args::int(arguments, 2).unwrap_or_default();
@@ -86,7 +112,7 @@ fn reverse(arguments: &[Value], name: &str, fold: bool) -> NativeResult {
         haystack
             .get(index..index + needle.len())
             .is_some_and(|part| {
-                if fold {
+                if sensitivity == CaseSensitivity::Insensitive {
                     part.eq_ignore_ascii_case(needle)
                 } else {
                     part == needle
@@ -95,25 +121,29 @@ fn reverse(arguments: &[Value], name: &str, fold: bool) -> NativeResult {
     });
     Ok(found.map_or(Value::Bool(false), |index| Value::Int(index as i64)))
 }
+
 fn offset_error(name: &str) -> NativeError {
     NativeError::value_error(format!(
         "{name}(): Argument #3 ($offset) must be contained in argument #1 ($haystack)"
     ))
 }
+
 fn strrpos(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    reverse(arguments, "strrpos", false)
+    find_last(arguments, "strrpos", CaseSensitivity::Sensitive)
 }
+
 fn strripos(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    reverse(arguments, "strripos", true)
+    find_last(arguments, "strripos", CaseSensitivity::Insensitive)
 }
+
 /// strrchr uses only the first needle byte, with an empty needle meaning NUL.
-fn part(arguments: &[Value], fold: bool, last: bool) -> NativeResult {
+fn part(arguments: &[Value], mode: PartSearch) -> NativeResult {
     let haystack = args::bytes(arguments, 0);
     let needle = args::bytes(arguments, 1);
-    let position = if last {
+    let position = if matches!(mode, PartSearch::LastByte) {
         let byte = needle.first().copied().unwrap_or(0);
         haystack.iter().rposition(|&item| item == byte)
-    } else if fold {
+    } else if matches!(mode, PartSearch::First(CaseSensitivity::Insensitive)) {
         find_ignore_case(haystack, needle)
     } else {
         find(haystack, needle)
@@ -130,15 +160,20 @@ fn part(arguments: &[Value], fold: bool, last: bool) -> NativeResult {
         )
     }))
 }
+
 fn strstr(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    part(arguments, false, false)
+    part(arguments, PartSearch::First(CaseSensitivity::Sensitive))
 }
+
 fn stristr(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    part(arguments, true, false)
+    part(arguments, PartSearch::First(CaseSensitivity::Insensitive))
 }
+
 fn strrchr(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    part(arguments, false, true)
+    part(arguments, PartSearch::LastByte)
 }
+
+/// An empty character mask is an error rather than an unsuccessful match.
 fn strpbrk(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let haystack = args::bytes(arguments, 0);
     let mask = args::bytes(arguments, 1);
@@ -154,62 +189,7 @@ fn strpbrk(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
             bytes(haystack.get(index..).unwrap_or_default().to_vec())
         }))
 }
-/// PHP returns the byte difference for unequal bytes, and arguments length sign otherwise.
-fn compare(left: &[u8], right: &[u8], fold: bool) -> Value {
-    for (&left, &right) in left.iter().zip(right) {
-        let (left, right) = if fold {
-            (left.to_ascii_lowercase(), right.to_ascii_lowercase())
-        } else {
-            (left, right)
-        };
-        if left != right {
-            return Value::Int(i64::from(left) - i64::from(right));
-        }
-    }
-    Value::Int(match left.len().cmp(&right.len()) {
-        std::cmp::Ordering::Less => -1,
-        std::cmp::Ordering::Equal => 0,
-        std::cmp::Ordering::Greater => 1,
-    })
-}
-fn strcmp(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(compare(
-        args::bytes(arguments, 0),
-        args::bytes(arguments, 1),
-        false,
-    ))
-}
-fn strcasecmp(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(compare(
-        args::bytes(arguments, 0),
-        args::bytes(arguments, 1),
-        true,
-    ))
-}
-fn limited(arguments: &[Value], name: &str, fold: bool) -> NativeResult {
-    let length = args::int(arguments, 2).unwrap_or_default();
-    if length < 0 {
-        return Err(NativeError::value_error(format!(
-            "{name}(): Argument #3 ($length) must be greater than or equal to 0"
-        )));
-    }
-    let left = args::bytes(arguments, 0);
-    let right = args::bytes(arguments, 1);
-    Ok(compare(
-        left.get(..left.len().min(length as usize))
-            .unwrap_or_default(),
-        right
-            .get(..right.len().min(length as usize))
-            .unwrap_or_default(),
-        fold,
-    ))
-}
-fn strncmp(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    limited(arguments, "strncmp", false)
-}
-fn strncasecmp(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    limited(arguments, "strncasecmp", true)
-}
+
 /// PHP clamps negative starts for spans but rejects them for substring counts.
 fn start(length: usize, offset: i64) -> usize {
     if offset < 0 {
@@ -218,31 +198,36 @@ fn start(length: usize, offset: i64) -> usize {
         length.min(offset as usize)
     }
 }
-fn span(arguments: &[Value], included: bool) -> NativeResult {
+
+/// Span lengths clamp to the remaining bytes, including negative lengths.
+fn span(arguments: &[Value], membership: Membership) -> NativeResult {
     let string = args::bytes(arguments, 0);
     let mask = args::bytes(arguments, 1);
     let start = start(string.len(), args::int(arguments, 2).unwrap_or_default());
     let remaining = string.len() - start;
     let length = match args::int(arguments, 3) {
         None => remaining,
-        Some(n) if n < 0 => remaining.saturating_sub(n.unsigned_abs() as usize),
-        Some(n) => remaining.min(n as usize),
+        Some(count) if count < 0 => remaining.saturating_sub(count.unsigned_abs() as usize),
+        Some(count) => remaining.min(count as usize),
     };
     Ok(Value::Int(
         string
             .iter()
             .skip(start)
             .take(length)
-            .take_while(|byte| mask.contains(byte) == included)
+            .take_while(|byte| mask.contains(byte) == matches!(membership, Membership::Included))
             .count() as i64,
     ))
 }
+
 fn strspn(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    span(arguments, true)
+    span(arguments, Membership::Included)
 }
+
 fn strcspn(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    span(arguments, false)
+    span(arguments, Membership::Excluded)
 }
+
 /// Count only non-overlapping matches and validate the needle before bounds.
 fn substr_count(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let haystack = args::bytes(arguments, 0);
@@ -276,29 +261,4 @@ fn substr_count(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         tail = tail.get(index + needle.len()..).unwrap_or_default();
     }
     Ok(Value::Int(count))
-}
-/// A zero comparison length bypasses even an invalid offset.
-fn substr_compare(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let left = args::bytes(arguments, 0);
-    let right = args::bytes(arguments, 1);
-    let offset = args::int(arguments, 2).unwrap_or_default();
-    let length = args::int(arguments, 3);
-    if length == Some(0) {
-        return Ok(Value::Int(0));
-    }
-    if length.is_some_and(|n| n < 0) {
-        return Err(NativeError::value_error(
-            "substr_compare(): Argument #4 ($length) must be greater than or equal to 0",
-        ));
-    }
-    if offset > left.len() as i64 {
-        return Err(offset_error("substr_compare"));
-    }
-    let left = left.get(start(left.len(), offset)..).unwrap_or_default();
-    let length = length.map_or(usize::MAX, |n| n as usize);
-    Ok(compare(
-        left.get(..left.len().min(length)).unwrap_or_default(),
-        right.get(..right.len().min(length)).unwrap_or_default(),
-        args::bool(arguments, 4).unwrap_or(false),
-    ))
 }

@@ -1,4 +1,11 @@
-//! Exact binary-to-decimal conversion for PHP's fixed and significant formats.
+//! Decimal conversion following php-src Zend/zend_strtod.c (zend_dtoa)
+//! and main/snprintf.c (php_conv_fp and php_gcvt), using decimal integer arithmetic.
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Notation {
+    General,
+    Scientific,
+}
 
 /// Decimal digits and the number of digits preceding the decimal point.
 /// Integer arithmetic avoids introducing another binary rounding before dtoa's
@@ -102,8 +109,12 @@ pub(super) fn fixed(number: f64, precision: usize) -> Vec<u8> {
 
 /// General formatting switches notation at the same decimal exponent as gcvt.
 pub(super) fn significant(number: f64, precision: usize, conversion: u8) -> Vec<u8> {
-    let general = matches!(conversion, b'g' | b'G' | b'h' | b'H');
-    let count = if general {
+    let notation = if matches!(conversion, b'g' | b'G' | b'h' | b'H') {
+        Notation::General
+    } else {
+        Notation::Scientific
+    };
+    let count = if notation == Notation::General {
         precision.max(1)
     } else {
         precision + 1
@@ -111,30 +122,15 @@ pub(super) fn significant(number: f64, precision: usize, conversion: u8) -> Vec<
     let (digits, point) = digits(number);
     let (mut digits, point) = rounded(digits, count as i32, point);
     digits.resize(count, 0);
-    if general {
+    if notation == Notation::General {
         while digits.len() > 1 && digits.last() == Some(&0) {
             digits.pop();
         }
     }
-    let scientific = !general || point > count as i32 || point < -3;
+    let scientific = notation == Notation::Scientific || point > count as i32 || point < -3;
     let mut result = Vec::new();
     if scientific {
-        result.push(b'0' + digits.first().copied().unwrap_or(0));
-        if digits.len() > 1 || general {
-            result.push(b'.');
-            if digits.len() == 1 {
-                result.push(b'0');
-            }
-            result.extend(digits.iter().skip(1).map(|digit| b'0' + digit));
-        }
-        result.push(if conversion.is_ascii_uppercase() {
-            b'E'
-        } else {
-            b'e'
-        });
-        let exponent = point - 1;
-        result.push(if exponent < 0 { b'-' } else { b'+' });
-        result.extend(exponent.unsigned_abs().to_string().bytes());
+        append_scientific(&mut result, &digits, point, conversion, notation);
     } else {
         for index in 0..point.max(1) {
             result.push(
@@ -159,4 +155,30 @@ pub(super) fn significant(number: f64, precision: usize, conversion: u8) -> Vec<
         }
     }
     result
+}
+
+/// General scientific notation retains a fractional zero when only one digit remains.
+fn append_scientific(
+    result: &mut Vec<u8>,
+    digits: &[u8],
+    point: i32,
+    conversion: u8,
+    notation: Notation,
+) {
+    result.push(b'0' + digits.first().copied().unwrap_or(0));
+    if digits.len() > 1 || notation == Notation::General {
+        result.push(b'.');
+        if digits.len() == 1 {
+            result.push(b'0');
+        }
+        result.extend(digits.iter().skip(1).map(|digit| b'0' + digit));
+    }
+    result.push(if conversion.is_ascii_uppercase() {
+        b'E'
+    } else {
+        b'e'
+    });
+    let exponent = point - 1;
+    result.push(if exponent < 0 { b'-' } else { b'+' });
+    result.extend(exponent.unsigned_abs().to_string().bytes());
 }

@@ -1,6 +1,6 @@
 //! Byte string operations, with shared allocation and substring search helpers.
 
-use phera_extension_api::{NativeError, PhpString, Registry, Value};
+use phera_extension_api::{NativeError, NativeResult, PhpArray, PhpString, Registry, Value};
 
 mod base64;
 mod case;
@@ -74,40 +74,38 @@ pub(super) fn buffer(length: usize) -> Result<Vec<u8>, NativeError> {
 
 /// Skip directly to candidate first bytes; an empty needle matches at zero.
 pub(super) fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    find_bytes(haystack, needle, false)
+    find_bytes(haystack, needle, CaseSensitivity::Sensitive)
 }
 
 /// PHP case-insensitive byte searches fold ASCII only, independent of locale.
 pub(super) fn find_ignore_case(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    find_bytes(haystack, needle, true)
+    find_bytes(haystack, needle, CaseSensitivity::Insensitive)
 }
 
-fn find_bytes(haystack: &[u8], needle: &[u8], insensitive: bool) -> Option<usize> {
-    let Some(first) = needle.first() else {
+/// PHP byte searches fold ASCII without consulting the process locale.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum CaseSensitivity {
+    Sensitive,
+    Insensitive,
+}
+
+impl CaseSensitivity {
+    pub(super) fn matches(self, left: &[u8], right: &[u8]) -> bool {
+        match self {
+            Self::Sensitive => left == right,
+            Self::Insensitive => left.eq_ignore_ascii_case(right),
+        }
+    }
+}
+
+/// Empty needles match at zero; windows preserve byte offsets even in invalid UTF-8.
+fn find_bytes(haystack: &[u8], needle: &[u8], sensitivity: CaseSensitivity) -> Option<usize> {
+    if needle.is_empty() {
         return Some(0);
-    };
-    let last = haystack.len().checked_sub(needle.len())?;
+    }
     haystack
-        .iter()
-        .take(last + 1)
-        .enumerate()
-        .find_map(|(index, byte)| {
-            if if insensitive {
-                byte.eq_ignore_ascii_case(first)
-            } else {
-                byte == first
-            } {
-                let candidate = haystack.get(index..index + needle.len())?;
-                if if insensitive {
-                    candidate.eq_ignore_ascii_case(needle)
-                } else {
-                    candidate == needle
-                } {
-                    return Some(index);
-                }
-            }
-            None
-        })
+        .windows(needle.len())
+        .position(|candidate| sensitivity.matches(candidate, needle))
 }
 
 /// Match the oracle's fixed byte alphabet for word and phonetic boundaries without
@@ -115,4 +113,13 @@ fn find_bytes(haystack: &[u8], needle: &[u8], insensitive: bool) -> Option<usize
 pub(super) fn alphabetic(byte: u8) -> bool {
     byte.is_ascii_alphabetic()
         || matches!(byte, 170 | 181 | 186 | 192..=214 | 216..=246 | 248..=255)
+}
+
+/// List-producing string functions assign consecutive integer keys in insertion order.
+pub(super) fn list_array(values: impl IntoIterator<Item = Value>) -> NativeResult {
+    let mut array = PhpArray::new();
+    for value in values {
+        array.push(value)?;
+    }
+    Ok(Value::from(array))
 }

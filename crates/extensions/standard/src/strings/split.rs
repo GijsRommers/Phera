@@ -1,59 +1,41 @@
 //! Split operations for PHP values.
 
-use std::rc::Rc;
-
 use phera_extension_api::value::to_php_string;
 use phera_extension_api::{
-    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, PhpArray, Registry,
-    SyncFn, Value, args,
+    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Registry, SyncFn, Value,
+    args,
 };
 
 use super::{buffer, bytes};
 
+const IMPLODE_PARAMS: &[Param] = &[
+    Param::new("separator", ParamType::ArrayOrString),
+    Param::new("array", ParamType::Array).nullable().optional(),
+];
+
+const EXPLODE_PARAMS: &[Param] = &[
+    Param::new("separator", ParamType::String),
+    Param::new("string", ParamType::String),
+    Param::new("limit", ParamType::Int).optional(),
+];
+
+const REPEAT_PARAMS: &[Param] = &[
+    Param::new("string", ParamType::String),
+    Param::new("times", ParamType::Int),
+];
+
+const SPLIT_PARAMS: &[Param] = &[
+    Param::new("string", ParamType::String),
+    Param::new("length", ParamType::Int).optional(),
+];
+
 pub(crate) fn register(registry: &mut Registry) {
-    for (n, f) in [("implode", implode as SyncFn), ("join", join)] {
-        registry.function(FunctionEntry::sync(
-            n,
-            const {
-                &[
-                    Param::new("separator", ParamType::ArrayOrString),
-                    Param::new("array", ParamType::Array).nullable().optional(),
-                ]
-            },
-            f,
-        ));
+    for (name, function) in [("implode", implode as SyncFn), ("join", join)] {
+        registry.function(FunctionEntry::sync(name, IMPLODE_PARAMS, function));
     }
-    registry.function(FunctionEntry::sync(
-        "explode",
-        const {
-            &[
-                Param::new("separator", ParamType::String),
-                Param::new("string", ParamType::String),
-                Param::new("limit", ParamType::Int).optional(),
-            ]
-        },
-        explode,
-    ));
-    registry.function(FunctionEntry::sync(
-        "str_repeat",
-        const {
-            &[
-                Param::new("string", ParamType::String),
-                Param::new("times", ParamType::Int),
-            ]
-        },
-        repeat,
-    ));
-    registry.function(FunctionEntry::sync(
-        "str_split",
-        const {
-            &[
-                Param::new("string", ParamType::String),
-                Param::new("length", ParamType::Int).optional(),
-            ]
-        },
-        split,
-    ));
+    registry.function(FunctionEntry::sync("explode", EXPLODE_PARAMS, explode));
+    registry.function(FunctionEntry::sync("str_repeat", REPEAT_PARAMS, repeat));
+    registry.function(FunctionEntry::sync("str_split", SPLIT_PARAMS, split));
 }
 
 fn implode(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
@@ -113,40 +95,36 @@ fn explode(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
             if limit > 0 && parts.len() >= limit as usize - 1 {
                 break;
             }
-            let Some(pos) = super::find(tail, separator) else {
+            let Some(position) = super::find(tail, separator) else {
                 break;
             };
-            parts.push(tail.get(..pos).unwrap_or_default());
-            start += pos + separator.len();
+            parts.push(tail.get(..position).unwrap_or_default());
+            start += position + separator.len();
         }
     }
     parts.push(string.get(start..).unwrap_or_default());
     if limit < 0 {
         parts.truncate(parts.len().saturating_sub(limit.unsigned_abs() as usize));
     }
-    let mut array = PhpArray::new();
-    for p in parts {
-        array.push(bytes(p.to_vec()))?;
-    }
-    Ok(Value::Array(Rc::new(array)))
+    super::list_array(parts.into_iter().map(|part| bytes(part.to_vec())))
 }
 
 /// Check the product before allocating, including for extreme repeat counts.
 fn repeat(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let string = args::bytes(arguments, 0);
-    let n = args::int(arguments, 1).unwrap_or_default();
-    if n < 0 {
+    let count = args::int(arguments, 1).unwrap_or_default();
+    if count < 0 {
         return Err(NativeError::value_error(
             "str_repeat(): Argument #2 ($times) must be greater than or equal to 0",
         ));
     }
     let len = string
         .len()
-        .checked_mul(n as usize)
+        .checked_mul(count as usize)
         .ok_or_else(|| NativeError::error("String size exceeds the maximum allowed size"))?;
     let mut result = buffer(len)?;
     if !string.is_empty() {
-        for _ in 0..n {
+        for _ in 0..count {
             result.extend_from_slice(string);
         }
     }
@@ -155,15 +133,15 @@ fn repeat(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
 
 /// Byte chunks preserve invalid UTF-8 and embedded NULs unchanged.
 fn split(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let n = args::int(arguments, 1).unwrap_or(1);
-    if n < 1 {
+    let count = args::int(arguments, 1).unwrap_or(1);
+    if count < 1 {
         return Err(NativeError::value_error(
             "str_split(): Argument #2 ($length) must be greater than 0",
         ));
     }
-    let mut array = PhpArray::new();
-    for part in args::bytes(arguments, 0).chunks(n as usize) {
-        array.push(bytes(part.to_vec()))?;
-    }
-    Ok(Value::Array(Rc::new(array)))
+    super::list_array(
+        args::bytes(arguments, 0)
+            .chunks(count as usize)
+            .map(|part| bytes(part.to_vec())),
+    )
 }

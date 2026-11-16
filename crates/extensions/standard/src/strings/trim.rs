@@ -6,65 +6,76 @@ use phera_extension_api::{
 
 use super::bytes;
 
-const PARAMS: &[Param] = &[
+#[derive(Clone, Copy)]
+enum Side {
+    Left,
+    Right,
+    Both,
+}
+
+const TRIM_PARAMS: &[Param] = &[
     Param::new("string", ParamType::String),
     Param::new("characters", ParamType::String).optional(),
 ];
+
 pub(crate) fn register(registry: &mut Registry) {
-    for (n, f) in [
+    for (name, function) in [
         ("trim", trim as SyncFn),
         ("ltrim", left),
         ("rtrim", right),
         ("chop", chop),
     ] {
-        registry.function(FunctionEntry::sync(n, PARAMS, f));
+        registry.function(FunctionEntry::sync(name, TRIM_PARAMS, function));
     }
 }
 
 /// Malformed ranges warn independently because PHP still uses the remaining mask bytes.
 pub(super) fn mask(context: &mut dyn Context, string: &[u8], name: &str) -> [bool; 256] {
     let mut mask = [false; 256];
-    let mut i = 0;
-    while let Some(&b) = string.get(i) {
-        if let Some(t) = string.get(i..i.saturating_add(4))
-            && t.get(1) == Some(&b'.')
-            && t.get(2) == Some(&b'.')
-            && t.get(3).is_some_and(|e| *e >= b)
+    let mut cursor = 0;
+    while let Some(&byte) = string.get(cursor) {
+        if let Some(range) = string.get(cursor..cursor.saturating_add(4))
+            && range.get(1) == Some(&b'.')
+            && range.get(2) == Some(&b'.')
+            && range.get(3).is_some_and(|end| *end >= byte)
         {
-            if let Some(&end) = t.get(3) {
-                for value in b..=end {
-                    mask[usize::from(value)] = true;
+            if let Some(&end) = range.get(3) {
+                for value in byte..=end {
+                    if let Some(entry) = mask.get_mut(usize::from(value)) {
+                        *entry = true;
+                    }
                 }
             }
-            i += 4;
+            cursor += 4;
             continue;
         }
-        if b == b'.' && string.get(i + 1) == Some(&b'.') {
-            let reason = if i == 0 {
+        if byte == b'.' && string.get(cursor + 1) == Some(&b'.') {
+            let reason = if cursor == 0 {
                 ", no character to the left of '..'"
-            } else if i + 2 >= string.len() {
+            } else if cursor + 2 >= string.len() {
                 ", no character to the right of '..'"
-            } else if string.get(i - 1) > string.get(i + 2) {
+            } else if string.get(cursor - 1) > string.get(cursor + 2) {
                 ", '..'-range needs to be incrementing"
             } else {
                 ""
             };
             context.warning(format!("{name}(): Invalid '..'-range{reason}"));
         } else {
-            mask[usize::from(b)] = true;
+            if let Some(entry) = mask.get_mut(usize::from(byte)) {
+                *entry = true;
+            }
         }
-        i += 1;
+        cursor += 1;
     }
     mask
 }
 
 /// Default whitespace excludes form feed in the installed PHP executable.
-fn run(
+fn trim_sides(
     context: &mut dyn Context,
     arguments: &[Value],
     name: &str,
-    trim_left: bool,
-    trim_right: bool,
+    side: Side,
 ) -> NativeResult {
     let string = args::bytes(arguments, 0);
     let characters = if args::given(arguments, 1) {
@@ -74,19 +85,23 @@ fn run(
     };
     let characters_mask = mask(context, characters, name);
     let mut result = string;
-    if trim_left {
-        while result
-            .first()
-            .is_some_and(|b| characters_mask[usize::from(*b)])
-        {
+    if matches!(side, Side::Left | Side::Both) {
+        while result.first().is_some_and(|b| {
+            characters_mask
+                .get(usize::from(*b))
+                .copied()
+                .unwrap_or(false)
+        }) {
             result = result.get(1..).unwrap_or_default();
         }
     }
-    if trim_right {
-        while result
-            .last()
-            .is_some_and(|b| characters_mask[usize::from(*b)])
-        {
+    if matches!(side, Side::Right | Side::Both) {
+        while result.last().is_some_and(|b| {
+            characters_mask
+                .get(usize::from(*b))
+                .copied()
+                .unwrap_or(false)
+        }) {
             result = result.get(..result.len() - 1).unwrap_or_default();
         }
     }
@@ -94,17 +109,17 @@ fn run(
 }
 
 fn trim(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    run(context, arguments, "trim", true, true)
+    trim_sides(context, arguments, "trim", Side::Both)
 }
 
 fn left(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    run(context, arguments, "ltrim", true, false)
+    trim_sides(context, arguments, "ltrim", Side::Left)
 }
 
 fn right(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    run(context, arguments, "rtrim", false, true)
+    trim_sides(context, arguments, "rtrim", Side::Right)
 }
 
 fn chop(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    run(context, arguments, "chop", false, true)
+    trim_sides(context, arguments, "chop", Side::Right)
 }

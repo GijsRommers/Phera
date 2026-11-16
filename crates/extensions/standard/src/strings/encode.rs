@@ -6,25 +6,27 @@ use phera_extension_api::{
 
 use super::{buffer, bytes, url::unhex};
 
-const STRING: &[Param] = &[Param::new("string", ParamType::String)];
-const ORD: &[Param] = &[Param::new("character", ParamType::String)];
-const CHR: &[Param] = &[Param::new("codepoint", ParamType::Int)];
 const HEX: &[u8] = b"0123456789abcdef";
 
+const STRING_PARAMS: &[Param] = &[Param::new("string", ParamType::String)];
+const ORD_PARAMS: &[Param] = &[Param::new("character", ParamType::String)];
+const CHR_PARAMS: &[Param] = &[Param::new("codepoint", ParamType::Int)];
+
 pub(crate) fn register(registry: &mut Registry) {
-    registry.function(FunctionEntry::sync("bin2hex", STRING, bin2hex));
-    registry.function(FunctionEntry::sync("hex2bin", STRING, hex2bin));
-    registry.function(FunctionEntry::sync("crc32", STRING, crc32));
-    registry.function(FunctionEntry::sync("ord", ORD, ord));
-    registry.function(FunctionEntry::sync("chr", CHR, chr));
+    registry.function(FunctionEntry::sync("bin2hex", STRING_PARAMS, bin2hex));
+    registry.function(FunctionEntry::sync("hex2bin", STRING_PARAMS, hex2bin));
+    registry.function(FunctionEntry::sync("crc32", STRING_PARAMS, crc32));
+    registry.function(FunctionEntry::sync("ord", ORD_PARAMS, ord));
+    registry.function(FunctionEntry::sync("chr", CHR_PARAMS, chr));
 }
 
+/// PHP encodes every byte, including NUL, with lowercase hexadecimal digits.
 fn bin2hex(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let string = args::bytes(arguments, 0);
     let mut result = buffer(string.len().saturating_mul(2))?;
     for &byte in string {
-        result.push(HEX[usize::from(byte >> 4)]);
-        result.push(HEX[usize::from(byte & 15)]);
+        result.push(HEX.get(usize::from(byte >> 4)).copied().unwrap_or_default());
+        result.push(HEX.get(usize::from(byte & 15)).copied().unwrap_or_default());
     }
     Ok(bytes(result))
 }
@@ -62,6 +64,7 @@ fn crc32(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(Value::Int(i64::from(!checksum)))
 }
 
+/// PHP 8.5 deprecates inputs whose byte length differs from one.
 fn ord(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     match args::bytes(arguments, 0).len() {
         0 => context.deprecated("ord(): Providing an empty string is deprecated".into()),

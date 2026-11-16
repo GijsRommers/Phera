@@ -6,49 +6,64 @@ use phera_extension_api::{
 
 use super::{buffer, bytes};
 
-const STRING: &[Param] = &[Param::new("string", ParamType::String)];
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Encoding {
+    Form,
+    Raw,
+}
+
 const HEX: &[u8] = b"0123456789ABCDEF";
 
+const STRING_PARAMS: &[Param] = &[Param::new("string", ParamType::String)];
+
 pub(crate) fn register(registry: &mut Registry) {
-    registry.function(FunctionEntry::sync("urlencode", STRING, urlencode));
-    registry.function(FunctionEntry::sync("rawurlencode", STRING, rawurlencode));
-    registry.function(FunctionEntry::sync("urldecode", STRING, urldecode));
-    registry.function(FunctionEntry::sync("rawurldecode", STRING, rawurldecode));
+    registry.function(FunctionEntry::sync("urlencode", STRING_PARAMS, urlencode));
+    registry.function(FunctionEntry::sync(
+        "rawurlencode",
+        STRING_PARAMS,
+        rawurlencode,
+    ));
+    registry.function(FunctionEntry::sync("urldecode", STRING_PARAMS, urldecode));
+    registry.function(FunctionEntry::sync(
+        "rawurldecode",
+        STRING_PARAMS,
+        rawurldecode,
+    ));
 }
 
 fn urlencode(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    encode(arguments, false)
+    encode(arguments, Encoding::Form)
 }
 
 fn rawurlencode(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    encode(arguments, true)
+    encode(arguments, Encoding::Raw)
 }
 
 fn urldecode(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    decode(arguments, false)
+    decode(arguments, Encoding::Form)
 }
 
 fn rawurldecode(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    decode(arguments, true)
+    decode(arguments, Encoding::Raw)
 }
 
 /// Form encoding uses '+' for spaces; RFC 3986 encoding preserves '~'.
-fn encode(arguments: &[Value], raw: bool) -> NativeResult {
+fn encode(arguments: &[Value], encoding: Encoding) -> NativeResult {
     let string = args::bytes(arguments, 0);
     let mut result = buffer(string.len().saturating_mul(3))?;
     for &byte in string {
         if byte.is_ascii_alphanumeric()
             || matches!(byte, b'-' | b'_' | b'.')
-            || (raw && byte == b'~')
+            || (encoding == Encoding::Raw && byte == b'~')
         {
             result.push(byte);
-        } else if !raw && byte == b' ' {
+        } else if encoding == Encoding::Form && byte == b' ' {
             result.push(b'+');
         } else {
             result.extend_from_slice(&[
                 b'%',
-                HEX[usize::from(byte >> 4)],
-                HEX[usize::from(byte & 15)],
+                HEX.get(usize::from(byte >> 4)).copied().unwrap_or_default(),
+                HEX.get(usize::from(byte & 15)).copied().unwrap_or_default(),
             ]);
         }
     }
@@ -65,7 +80,7 @@ pub(super) fn unhex(byte: u8) -> Option<u8> {
 }
 
 /// Malformed percent escapes are copied literally, rather than rejected.
-fn decode(arguments: &[Value], raw: bool) -> NativeResult {
+fn decode(arguments: &[Value], encoding: Encoding) -> NativeResult {
     let string = args::bytes(arguments, 0);
     let mut result = buffer(string.len())?;
     let mut cursor = 0;
@@ -81,7 +96,11 @@ fn decode(arguments: &[Value], raw: bool) -> NativeResult {
             cursor += 3;
             continue;
         }
-        result.push(if !raw && byte == b'+' { b' ' } else { byte });
+        result.push(if encoding == Encoding::Form && byte == b'+' {
+            b' '
+        } else {
+            byte
+        });
         cursor += 1;
     }
     Ok(bytes(result))

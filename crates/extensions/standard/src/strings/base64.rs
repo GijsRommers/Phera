@@ -1,18 +1,30 @@
 //! Binary-safe Base64 with PHP's permissive and strict decoding modes.
-use super::{buffer, bytes};
+
 use phera_extension_api::{
     Context, FunctionEntry, NativeResult, Param, ParamType, Registry, Value, args,
 };
-const ENCODE: &[Param] = &[Param::new("string", ParamType::String)];
-const DECODE: &[Param] = &[
+
+use super::{buffer, bytes};
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Decoding {
+    Strict,
+    Permissive,
+}
+
+const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+const ENCODE_PARAMS: &[Param] = &[Param::new("string", ParamType::String)];
+const DECODE_PARAMS: &[Param] = &[
     Param::new("string", ParamType::String),
     Param::new("strict", ParamType::Bool).optional(),
 ];
-const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
 pub(crate) fn register(registry: &mut Registry) {
-    registry.function(FunctionEntry::sync("base64_encode", ENCODE, encode));
-    registry.function(FunctionEntry::sync("base64_decode", DECODE, decode));
+    registry.function(FunctionEntry::sync("base64_encode", ENCODE_PARAMS, encode));
+    registry.function(FunctionEntry::sync("base64_decode", DECODE_PARAMS, decode));
 }
+
 /// Encoding always emits padding for the final incomplete three-byte group.
 fn encode(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let string = args::bytes(arguments, 0);
@@ -22,25 +34,41 @@ fn encode(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         let second = chunk.get(1).copied().unwrap_or_default();
         let third = chunk.get(2).copied().unwrap_or_default();
         for index in [first >> 2, ((first & 3) << 4) | (second >> 4)] {
-            result.push(ALPHABET[usize::from(index)]);
+            result.push(
+                ALPHABET
+                    .get(usize::from(index))
+                    .copied()
+                    .unwrap_or_default(),
+            );
         }
         result.push(if chunk.len() > 1 {
-            ALPHABET[usize::from(((second & 15) << 2) | (third >> 6))]
+            ALPHABET
+                .get(usize::from(((second & 15) << 2) | (third >> 6)))
+                .copied()
+                .unwrap_or_default()
         } else {
             b'='
         });
         result.push(if chunk.len() > 2 {
-            ALPHABET[usize::from(third & 63)]
+            ALPHABET
+                .get(usize::from(third & 63))
+                .copied()
+                .unwrap_or_default()
         } else {
             b'='
         });
     }
     Ok(bytes(result))
 }
+
 /// Strict mode accepts absent padding but rejects data after any padding.
 fn decode(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let string = args::bytes(arguments, 0);
-    let strict = args::bool(arguments, 1).unwrap_or(false);
+    let mode = if args::bool(arguments, 1).unwrap_or(false) {
+        Decoding::Strict
+    } else {
+        Decoding::Permissive
+    };
     let mut result = buffer(string.len())?;
     let mut padding = 0;
     let mut count = 0;
@@ -58,13 +86,13 @@ fn decode(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
             b'/' => 63,
             b' ' | b'\t' | b'\r' | b'\n' => continue,
             _ => {
-                if strict {
+                if mode == Decoding::Strict {
                     return Ok(Value::Bool(false));
                 }
                 continue;
             }
         };
-        if strict && padding > 0 {
+        if mode == Decoding::Strict && padding > 0 {
             return Ok(Value::Bool(false));
         }
         match count % 4 {
@@ -81,7 +109,9 @@ fn decode(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         }
         count += 1;
     }
-    if strict && (count % 4 == 1 || padding > 0 && (padding > 2 || (count + padding) % 4 != 0)) {
+    if mode == Decoding::Strict
+        && (count % 4 == 1 || padding > 0 && (padding > 2 || (count + padding) % 4 != 0))
+    {
         return Ok(Value::Bool(false));
     }
     Ok(bytes(result))

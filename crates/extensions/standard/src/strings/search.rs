@@ -5,48 +5,36 @@ use phera_extension_api::{
     args,
 };
 
-use super::bytes;
+use super::{CaseSensitivity, bytes};
+
+const SUBSTR_PARAMS: &[Param] = &[
+    Param::new("string", ParamType::String),
+    Param::new("offset", ParamType::Int),
+    Param::new("length", ParamType::Int).nullable().optional(),
+];
+
+const POSITION_PARAMS: &[Param] = &[
+    Param::new("haystack", ParamType::String),
+    Param::new("needle", ParamType::String),
+    Param::new("offset", ParamType::Int).optional(),
+];
+
+const PREDICATE_PARAMS: &[Param] = &[
+    Param::new("haystack", ParamType::String),
+    Param::new("needle", ParamType::String),
+];
 
 pub(crate) fn register(registry: &mut Registry) {
-    registry.function(FunctionEntry::sync(
-        "substr",
-        const {
-            &[
-                Param::new("string", ParamType::String),
-                Param::new("offset", ParamType::Int),
-                Param::new("length", ParamType::Int).nullable().optional(),
-            ]
-        },
-        substr,
-    ));
-    for (n, f) in [("strpos", strpos as SyncFn), ("stripos", stripos)] {
-        registry.function(FunctionEntry::sync(
-            n,
-            const {
-                &[
-                    Param::new("haystack", ParamType::String),
-                    Param::new("needle", ParamType::String),
-                    Param::new("offset", ParamType::Int).optional(),
-                ]
-            },
-            f,
-        ));
+    registry.function(FunctionEntry::sync("substr", SUBSTR_PARAMS, substr));
+    for (name, function) in [("strpos", strpos as SyncFn), ("stripos", stripos)] {
+        registry.function(FunctionEntry::sync(name, POSITION_PARAMS, function));
     }
-    for (n, f) in [
+    for (name, function) in [
         ("str_contains", contains as SyncFn),
         ("str_starts_with", starts),
         ("str_ends_with", ends),
     ] {
-        registry.function(FunctionEntry::sync(
-            n,
-            const {
-                &[
-                    Param::new("haystack", ParamType::String),
-                    Param::new("needle", ParamType::String),
-                ]
-            },
-            f,
-        ));
+        registry.function(FunctionEntry::sync(name, PREDICATE_PARAMS, function));
     }
 }
 
@@ -61,17 +49,17 @@ fn substr(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     };
     let end = match args::int(arguments, 2) {
         None => string.len(),
-        Some(n) if n < 0 => string
+        Some(length) if length < 0 => string
             .len()
-            .saturating_sub(n.unsigned_abs() as usize)
+            .saturating_sub(length.unsigned_abs() as usize)
             .max(start),
-        Some(n) => start.saturating_add(n as usize).min(string.len()),
+        Some(length) => start.saturating_add(length as usize).min(string.len()),
     };
     Ok(bytes(string.get(start..end).unwrap_or_default().to_vec()))
 }
 
 /// Search offsets outside the haystack throw rather than silently clamp.
-fn position(arguments: &[Value], name: &str, fold: bool) -> NativeResult {
+fn position(arguments: &[Value], name: &str, sensitivity: CaseSensitivity) -> NativeResult {
     let string = args::bytes(arguments, 0);
     let needle = args::bytes(arguments, 1);
     let offset = args::int(arguments, 2).unwrap_or_default();
@@ -86,26 +74,28 @@ fn position(arguments: &[Value], name: &str, fold: bool) -> NativeResult {
         offset as usize
     };
     let tail = string.get(start..).unwrap_or_default();
-    let pos = if fold {
+    let found = if sensitivity == CaseSensitivity::Insensitive {
         super::find_ignore_case(tail, needle)
     } else {
         super::find(tail, needle)
     };
-    Ok(pos.map_or(Value::Bool(false), |p| Value::Int((p + start) as i64)))
+    Ok(found.map_or(Value::Bool(false), |position| {
+        Value::Int((position + start) as i64)
+    }))
 }
 
 fn strpos(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    position(arguments, "strpos", false)
+    position(arguments, "strpos", CaseSensitivity::Sensitive)
 }
 
 fn stripos(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    position(arguments, "stripos", true)
+    position(arguments, "stripos", CaseSensitivity::Insensitive)
 }
 
 fn contains(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let n = args::bytes(arguments, 1);
+    let length = args::bytes(arguments, 1);
     Ok(Value::Bool(
-        super::find(args::bytes(arguments, 0), n).is_some(),
+        super::find(args::bytes(arguments, 0), length).is_some(),
     ))
 }
 
