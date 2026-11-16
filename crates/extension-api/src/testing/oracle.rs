@@ -114,7 +114,7 @@ pub fn encode(value: &Value) -> String {
         }
         Value::Object(object) => {
             let mut text = format!("O:{}(", object.class.name());
-            for (key, item) in object.properties.borrow().iter() {
+            for (key, item) in object.to_array().iter() {
                 text.push_str(&format!("{}>{};", encode_key(key), encode(item)));
             }
             text + ")"

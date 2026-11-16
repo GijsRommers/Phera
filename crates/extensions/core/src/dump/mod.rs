@@ -145,7 +145,7 @@ fn enter(
         Value::Array(array) => (Container::Array(array.clone()), array.clone()),
         Value::Object(object) => (
             Container::Object(object.clone()),
-            Rc::new(object.properties.borrow().clone()),
+            Rc::new(object.to_array()),
         ),
         scalar => {
             style.scalar(out, scalar, place);

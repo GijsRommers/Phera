@@ -114,9 +114,7 @@ fn compare_resolved(a: &Value, b: &Value, d: &mut dyn Diagnostics) -> Result<i8,
                     if x.class.name() != y.class.name() {
                         return Ok(1);
                     }
-                    let xp = x.properties.borrow();
-                    let yp = y.properties.borrow();
-                    return compare_arrays(&xp, &yp, d);
+                    return compare_arrays(&x.to_array(), &y.to_array(), d);
                 }
             }
             if other.is_bool() {

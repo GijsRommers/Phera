@@ -43,10 +43,7 @@ fn object(properties: Vec<(&str, Value)>) -> Rc<Object> {
     // PHP's ids depend on what else is alive; the PHP side rewrites them to 1.
     let object = Object::new(1, Rc::new(StdClass));
     for (name, value) in properties {
-        object
-            .properties
-            .borrow_mut()
-            .insert(ArrayKey::str(name), value);
+        object.set(ArrayKey::str(name), value);
     }
     Rc::new(object)
 }
@@ -259,10 +256,7 @@ fn cases() -> Vec<Case> {
         cyclic: false,
     });
     let selfish = object(vec![("a", Value::Int(1))]);
-    selfish
-        .properties
-        .borrow_mut()
-        .insert(ArrayKey::str("self"), Value::Object(selfish.clone()));
+    selfish.set(ArrayKey::str("self"), Value::Object(selfish.clone()));
     cases.push(Case {
         php: "$v = new stdClass; $v->a = 1; $v->self = $v;".to_string(),
         value: Value::Object(selfish),

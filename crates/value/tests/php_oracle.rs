@@ -68,7 +68,7 @@ fn enc_value(v: &Value) -> String {
             s
         }
         Value::Object(o) => {
-            let props = o.properties.borrow();
+            let props = o.to_array();
             let mut s = format!("O:{}(", o.class.name());
             for (k, val) in props.iter() {
                 s.push_str(&enc_key(k));
@@ -225,11 +225,8 @@ fn dummy_object(name: &str, props: &[(&str, Value)], id: u32) -> Value {
         name: name.to_string(),
     }) as Rc<dyn ClassHandle>;
     let o = Object::new(id, class);
-    {
-        let mut p = o.properties.borrow_mut();
-        for (k, v) in props {
-            p.insert(ArrayKey::str(*k), v.clone());
-        }
+    for (k, v) in props {
+        o.set(ArrayKey::str(*k), v.clone());
     }
     Value::Object(Rc::new(o))
 }

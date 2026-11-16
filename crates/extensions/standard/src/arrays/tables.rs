@@ -82,11 +82,7 @@ fn array_column(context: &mut dyn Context, arguments: &[Value]) -> NativeResult 
                 None => Some(row.clone()),
                 Some(key) => match &*row {
                     Value::Array(array) => array.get(key).cloned(),
-                    Value::Object(object) => object
-                        .properties
-                        .try_borrow()
-                        .ok()
-                        .and_then(|properties| properties.get(key).cloned()),
+                    Value::Object(object) => object.get(key),
                     _ => None,
                 },
             };
@@ -95,11 +91,7 @@ fn array_column(context: &mut dyn Context, arguments: &[Value]) -> NativeResult 
             };
             let key = index.as_ref().and_then(|key| match &*row {
                 Value::Array(array) => array.get(key).cloned(),
-                Value::Object(object) => object
-                    .properties
-                    .try_borrow()
-                    .ok()
-                    .and_then(|properties| properties.get(key).cloned()),
+                Value::Object(object) => object.get(key),
                 _ => None,
             });
             if let Some(key) = key {
