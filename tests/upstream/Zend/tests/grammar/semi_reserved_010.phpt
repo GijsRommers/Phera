@@ -29,3 +29,5 @@ echo PHP_EOL, "Done", PHP_EOL;
 TraitB::insteadof
 
 Done
+--XFAIL--
+Requires classes, traits (outside this milestone).

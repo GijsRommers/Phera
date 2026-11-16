@@ -1,33 +1,49 @@
 //! Bytecode lowering for statements.
-use super::*;
+use phera_ast as ast;
+use phera_bytecode::Reg;
+
+use crate::ir::{Binary, Constant, Instruction, Target};
+use crate::{CompileError, Compiler, Loop, constant, writable};
 impl Compiler<'_> {
-    pub(super) fn statement(&mut self, s: &a::Statement, hoist: bool) -> Result<(), CompileError> {
-        use a::StatementKind as S;
-        let line = self.lines.line(s.span.start);
-        match &s.kind {
-            S::Expression(e) => {
-                self.expr(e)?;
-            }
-            S::Echo(es) => {
-                for e in es {
-                    let r = self.expr(e)?;
-                    self.emit(Instruction::Echo(r), line);
+    pub(super) fn statement(
+        &mut self,
+        statement: &ast::Statement,
+        hoist: bool,
+    ) -> Result<(), CompileError> {
+        use ast::StatementKind as S;
+        let line = self.lines.line(statement.span.start);
+        match &statement.kind {
+            S::Expression(expression) => {
+                let first = self.next;
+                self.expr(expression)?;
+                let temporaries: Vec<_> = (first..self.next)
+                    .map(|index| Reg(index as u16))
+                    .filter(|register| !self.locals.values().any(|local| local == register))
+                    .collect();
+                for register in temporaries {
+                    self.emit(Instruction::Clear { register }, line);
                 }
             }
-            S::InlineHtml(v) => {
-                let r = self.literal(Constant::Bytes(v.as_bytes().to_vec()), line)?;
-                self.emit(Instruction::Echo(r), line);
+            S::Echo(expressions) => {
+                for expression in expressions {
+                    let register = self.expr(expression)?;
+                    self.emit(Instruction::Echo(register), line);
+                }
             }
-            S::Block(b) => self.block(b, false)?,
+            S::InlineHtml(value) => {
+                let register = self.literal(Constant::Bytes(value.as_bytes().to_vec()), line)?;
+                self.emit(Instruction::Echo(register), line);
+            }
+            S::Block(body) => self.block(body, false)?,
             S::If {
                 condition,
                 then,
                 otherwise,
             } => {
-                let r = self.expr(condition)?;
-                let j = self.emit(
+                let register = self.expr(condition)?;
+                let jump = self.emit(
                     Instruction::Branch {
-                        value: r,
+                        value: register,
                         target: Target(0),
                         when: false,
                     },
@@ -35,18 +51,18 @@ impl Compiler<'_> {
                 );
                 self.block(then, false)?;
                 let end = self.emit(Instruction::Jump(Target(0)), line);
-                self.patch(j, self.pos());
-                if let Some(b) = otherwise {
-                    self.block(b, false)?
+                self.patch(jump, self.pos());
+                if let Some(body) = otherwise {
+                    self.block(body, false)?
                 }
                 self.patch(end, self.pos());
             }
             S::While { condition, body } => {
                 let start = self.pos();
-                let r = self.expr(condition)?;
+                let register = self.expr(condition)?;
                 let end = self.emit(
                     Instruction::Branch {
-                        value: r,
+                        value: register,
                         target: Target(0),
                         when: false,
                     },
@@ -69,10 +85,10 @@ impl Compiler<'_> {
                 });
                 self.block(body, false)?;
                 let cont = self.pos();
-                let r = self.expr(condition)?;
+                let register = self.expr(condition)?;
                 self.emit(
                     Instruction::Branch {
-                        value: r,
+                        value: register,
                         target: Target(start),
                         when: true,
                     },
@@ -86,18 +102,18 @@ impl Compiler<'_> {
                 step,
                 body,
             } => {
-                for e in init {
-                    self.expr(e)?;
+                for expression in init {
+                    self.expr(expression)?;
                 }
                 let start = self.pos();
                 let mut last = None;
-                for e in condition {
-                    last = Some(self.expr(e)?)
+                for expression in condition {
+                    last = Some(self.expr(expression)?)
                 }
-                let end = last.map(|r| {
+                let end = last.map(|register| {
                     self.emit(
                         Instruction::Branch {
-                            value: r,
+                            value: register,
                             target: Target(0),
                             when: false,
                         },
@@ -110,18 +126,18 @@ impl Compiler<'_> {
                 });
                 self.block(body, false)?;
                 let cont = self.pos();
-                for e in step {
-                    self.expr(e)?;
+                for expression in step {
+                    self.expr(expression)?;
                 }
                 self.emit(Instruction::Jump(Target(start)), line);
-                if let Some(j) = end {
-                    self.patch(j, self.pos())
+                if let Some(jump) = end {
+                    self.patch(jump, self.pos())
                 }
                 self.loop_end(cont);
             }
-            S::Break(n) | S::Continue(n) => {
-                let is_break = matches!(s.kind, S::Break(_));
-                let depth = *n as usize;
+            S::Break(name) | S::Continue(name) => {
+                let is_break = matches!(statement.kind, S::Break(_));
+                let depth = *name as usize;
                 if depth == 0 || depth > self.loops.len() {
                     return Err(self.error(
                         if self.loops.is_empty() {
@@ -130,93 +146,52 @@ impl Compiler<'_> {
                                 if is_break { "break" } else { "continue" }
                             )
                         } else {
-                            format!("Cannot 'break' {n} levels")
+                            format!("Cannot 'break' {name} levels")
                         },
                         line,
                     ));
                 }
-                let j = self.emit(Instruction::Jump(Target(0)), line);
+                let jump = self.emit(Instruction::Jump(Target(0)), line);
                 let at = self.loops.len() - depth;
-                if let Some(l) = self.loops.get_mut(at) {
+                if let Some(loop_state) = self.loops.get_mut(at) {
                     if is_break {
-                        l.breaks.push(j)
+                        loop_state.breaks.push(jump)
                     } else {
-                        l.continues.push(j)
+                        loop_state.continues.push(jump)
                     }
                 }
             }
-            S::Return(e) => {
-                let r = if let Some(e) = e {
-                    self.expr(e)?
+            S::Return(expression) => {
+                let source = if let Some(expression) = expression {
+                    if self.fun.returns_reference && writable(expression) {
+                        let place = self.place(expression)?;
+                        let dst = self.reg()?;
+                        self.emit(Instruction::Reference { dst, place }, line);
+                        dst
+                    } else {
+                        self.expr(expression)?
+                    }
                 } else {
                     self.literal(Constant::Null, line)?
                 };
-                self.emit(Instruction::Return(r), line);
+                self.emit(
+                    if self.fun.returns_reference {
+                        Instruction::ReturnReference(source)
+                    } else {
+                        Instruction::Return(source)
+                    },
+                    line,
+                );
             }
-            S::Function(f) => {
-                let name = if self.namespace.is_empty() {
-                    f.name.name.clone()
-                } else {
-                    format!("{}\\{}", self.namespace, f.name.name)
-                };
-                if hoist
-                    && self
-                        .hoisted
-                        .iter()
-                        .filter_map(|i| self.functions.get(*i))
-                        .any(|f| f.name.eq_ignore_ascii_case(&name))
-                {
-                    return Err(self.error(format!("Cannot redeclare function {name}()"), line));
-                }
-                let mut sub = Compiler::new(self.file, self.lines, &name, &self.namespace);
-                sub.imports = self.imports.clone();
-                sub.fun.strict_types = self.fun.strict_types;
-                for p in &f.parameters {
-                    sub.local(&p.name)?;
-                    sub.fun.parameters.push(Parameter {
-                        name: p.name.clone(),
-                        default: p
-                            .default
-                            .as_ref()
-                            .map(|e| {
-                                constant(e).ok_or_else(|| {
-                                    self.error("Non-literal default not supported yet", line)
-                                })
-                            })
-                            .transpose()?,
-                        ty: p.ty.as_ref().map(type_name),
-                        by_reference: p.by_reference,
-                        variadic: p.variadic,
-                    });
-                }
-                sub.fun.return_type = f.return_type.as_ref().map(type_name);
-                sub.block(&f.body, false)?;
-                let r = sub.literal(Constant::Null, line)?;
-                sub.emit(Instruction::Return(r), line);
-                let id = self.functions.len();
-                let mut function = sub.finish();
-                for op in function.instructions.iter_mut().chain(
-                    sub.functions
-                        .iter_mut()
-                        .flat_map(|f| f.instructions.iter_mut()),
-                ) {
-                    if let Instruction::Declare(i) = op {
-                        *i += id + 1;
-                    }
-                }
-                self.functions.push(function);
-                self.functions.extend(sub.functions);
-                if hoist {
-                    self.hoisted.push(id)
-                } else {
-                    self.emit(Instruction::Declare(id), line);
-                }
-            }
+            S::Function(declaration) => self.compile_function(declaration, hoist, line)?,
             S::Namespace {
                 name, statements, ..
             } => {
                 let old = self.namespace.clone();
-                self.namespace = name.as_ref().map(|n| n.text.clone()).unwrap_or_default();
+                self.namespace = name
+                    .as_ref()
+                    .map(|name| name.text.clone())
+                    .unwrap_or_default();
                 self.block(statements, hoist)?;
                 self.namespace = old;
             }
@@ -226,43 +201,51 @@ impl Compiler<'_> {
                         i.alias.as_ref().map(|x| x.name.clone()).unwrap_or_else(|| {
                             i.name.text.rsplit('\\').next().unwrap_or("").into()
                         });
-                    let k = match i.kind {
-                        a::UseKind::Class => 0,
-                        a::UseKind::Function => 1,
-                        a::UseKind::Constant => 2,
+                    let key = match i.kind {
+                        ast::UseKind::Class => 0,
+                        ast::UseKind::Function => 1,
+                        ast::UseKind::Constant => 2,
                     };
                     self.imports
-                        .insert((k, alias.to_ascii_lowercase()), i.name.text.clone());
+                        .insert((key, alias.to_ascii_lowercase()), i.name.text.clone());
                 }
             }
             S::Const { items, .. } => {
                 for i in items {
-                    let r = self.expr(&i.value)?;
+                    let register = self.expr(&i.value)?;
                     let name = if self.namespace.is_empty() {
                         i.name.name.clone()
                     } else {
                         format!("{}\\{}", self.namespace, i.name.name)
                     };
-                    self.emit(Instruction::Define { name, src: r }, line);
+                    self.emit(
+                        Instruction::Define {
+                            name,
+                            src: register,
+                        },
+                        line,
+                    );
                 }
             }
             S::Declare { directives, body } => {
-                for d in directives {
-                    if d.name.name == "strict_types" {
-                        self.fun.strict_types = matches!(constant(&d.value), Some(Constant::Int(1)))
+                for directive in directives {
+                    if directive.name.name == "strict_types" {
+                        self.fun.strict_types =
+                            matches!(constant(&directive.value), Some(Constant::Int(1)))
                     } else {
-                        return Err(
-                            self.error(format!("declare({}) not supported yet", d.name.name), line)
-                        );
+                        return Err(self.error(
+                            format!("declare({}) not supported yet", directive.name.name),
+                            line,
+                        ));
                     }
                 }
-                if let Some(b) = body {
-                    self.block(b, hoist)?
+                if let Some(body) = body {
+                    self.block(body, hoist)?
                 }
             }
             S::Global(vars) => {
-                for v in vars {
-                    if let a::Variable::Named(name) = v {
+                for value in vars {
+                    if let ast::Variable::Named(name) = value {
                         let local = self.local(name)?;
                         self.emit(
                             Instruction::Global {
@@ -272,34 +255,45 @@ impl Compiler<'_> {
                             line,
                         );
                     } else {
-                        return Err(self.error("Dynamic global not supported yet", line));
+                        if let ast::Variable::Dynamic(expression) = value {
+                            self.fun.dynamic_scope = true;
+                            let name = self.expr(expression)?;
+                            self.emit(Instruction::DynamicGlobal { name }, line);
+                        }
                     }
                 }
             }
             S::Static(vars) => {
                 for var in vars {
                     let local = self.local(&var.name)?;
-                    let default = if let Some(e) = &var.default {
-                        constant(e).ok_or_else(|| {
-                            self.error("Non-literal static initializer not supported yet", line)
-                        })?
-                    } else {
-                        Constant::Null
-                    };
-                    self.emit(
-                        Instruction::Static {
+                    let check = self.emit(
+                        Instruction::StaticCheck {
                             local,
                             name: var.name.clone(),
-                            default,
+                            initialized: Target(0),
                         },
                         line,
                     );
+                    let src = if let Some(default) = &var.default {
+                        self.expr(default)?
+                    } else {
+                        self.literal(Constant::Null, line)?
+                    };
+                    self.emit(
+                        Instruction::StaticInit {
+                            local,
+                            name: var.name.clone(),
+                            src,
+                        },
+                        line,
+                    );
+                    self.patch(check, self.pos());
                 }
             }
-            S::Unset(es) => {
-                for e in es {
-                    let p = self.place(e)?;
-                    self.emit(Instruction::Unset(p), line);
+            S::Unset(expressions) => {
+                for expression in expressions {
+                    let parameter = self.place(expression)?;
+                    self.emit(Instruction::Unset(parameter), line);
                 }
             }
             S::Foreach {
@@ -309,10 +303,14 @@ impl Compiler<'_> {
                 by_reference,
                 body,
             } => {
-                let src = self.expr(subject)?;
+                let src = if *by_reference {
+                    self.literal(Constant::Null, line)?
+                } else {
+                    self.expr(subject)?
+                };
                 let id = self.reg()?;
-                let k = self.reg()?;
-                let v = self.reg()?;
+                let key_register = self.reg()?;
+                let value_register = self.reg()?;
                 let place = if *by_reference {
                     Some(self.place(subject)?)
                 } else {
@@ -320,24 +318,36 @@ impl Compiler<'_> {
                 };
                 self.emit(Instruction::IterInit { id, src, place }, line);
                 let start = self.pos();
-                let j = self.emit(
+                let jump = self.emit(
                     Instruction::IterNext {
                         id,
-                        key: k,
-                        value: v,
+                        key: key_register,
+                        value: value_register,
                         end: Target(0),
                     },
                     line,
                 );
                 if let Some(key) = key {
                     let place = self.place(key)?;
-                    self.emit(Instruction::Write { place, src: k }, line);
+                    self.emit(
+                        Instruction::Write {
+                            place,
+                            src: key_register,
+                        },
+                        line,
+                    );
                 }
                 if *by_reference {
                     let place = self.place(value)?;
-                    self.emit(Instruction::Rebind { place, src: v }, line);
+                    self.emit(
+                        Instruction::Rebind {
+                            place,
+                            src: value_register,
+                        },
+                        line,
+                    );
                 } else {
-                    self.assign(value, v, line)?;
+                    self.assign(value, value_register, line)?;
                 }
                 self.loops.push(Loop {
                     breaks: vec![],
@@ -345,22 +355,22 @@ impl Compiler<'_> {
                 });
                 self.block(body, false)?;
                 self.emit(Instruction::Jump(Target(start)), line);
-                self.patch(j, self.pos());
+                self.patch(jump, self.pos());
                 self.loop_end(start);
             }
             S::Switch { subject, cases } => {
-                let v = self.expr(subject)?;
+                let value = self.expr(subject)?;
                 let mut jumps = vec![];
                 let mut default = None;
                 for (i, c) in cases.iter().enumerate() {
-                    if let Some(e) = &c.condition {
-                        let rhs = self.expr(e)?;
+                    if let Some(expression) = &c.condition {
+                        let rhs = self.expr(expression)?;
                         let dst = self.reg()?;
                         self.emit(
                             Instruction::Binary {
                                 dst,
-                                op: Binary::Equal,
-                                lhs: v,
+                                operator: Binary::Equal,
+                                lhs: value,
                                 rhs,
                             },
                             line,
@@ -386,8 +396,8 @@ impl Compiler<'_> {
                     continues: vec![],
                 });
                 for (i, c) in cases.iter().enumerate() {
-                    for (_, j) in jumps.iter().filter(|(n, _)| *n == i) {
-                        self.patch(*j, self.pos())
+                    for (_, jump) in jumps.iter().filter(|(name, _)| *name == i) {
+                        self.patch(*jump, self.pos())
                     }
                     if default == Some(i) {
                         self.patch(miss, self.pos())

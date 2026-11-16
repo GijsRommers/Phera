@@ -1,3 +1,5 @@
+//! Efficient source offset to line conversion for generated PHP.
+
 /// Byte offsets of line beginnings; lookup is logarithmic even in generated files.
 #[derive(Debug, Clone)]
 pub struct LineTable {
@@ -20,7 +22,7 @@ impl LineTable {
 }
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::LineTable;
     #[test]
     fn byte_offsets() {
         let t = LineTable::new("é\nx\n");

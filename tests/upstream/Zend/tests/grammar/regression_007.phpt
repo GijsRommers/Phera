@@ -42,3 +42,5 @@ Foo::new
 string(3) "yay"
 
 Done
+--XFAIL--
+Requires classes, object construction (outside this milestone).

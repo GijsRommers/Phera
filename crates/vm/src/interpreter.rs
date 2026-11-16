@@ -1,462 +1,429 @@
-//! One async loop executes all PHP frames; PHP calls never recurse here.
-use super::*;
+//! Copy-only instruction dispatch over heap frames.
+
+use std::{cell::RefCell, rc::Rc};
+
+use phera_bytecode::{IncDec, IncludeKind, Instruction, Target};
+use phera_extension_api::{NativeError, NativeResult};
+use phera_value::{CollectDiagnostics, PhpArray, Value, to_bool, to_php_string};
+
+use crate::{Vm, frame, ops};
+
 impl Vm {
     pub(crate) async fn interpret(&mut self, stop: usize) -> NativeResult {
-        let mut ticks = 0usize;
+        let mut work = 0usize;
         loop {
-            if self.frames.len() <= stop {
-                return Ok(Value::Null);
-            }
-            ticks += 1;
-            if ticks.is_multiple_of(2048) {
-                tokio::task::yield_now().await;
-            }
-            let op = {
-                let f = self
+            let instruction = {
+                let frame = self
                     .frames
                     .last_mut()
                     .ok_or_else(|| NativeError::error("Phera internal error: missing frame"))?;
-                let op = f
+                let instruction = frame
                     .function()
                     .instructions
-                    .get(f.ip)
-                    .cloned()
+                    .get(frame.ip)
+                    .copied()
                     .ok_or_else(|| {
-                        NativeError::error(
-                            "Phera internal error: instruction pointer out of bounds",
-                        )
+                        NativeError::error("Phera internal error: invalid instruction pointer")
                     })?;
-                f.ip += 1;
-                op
+                frame.ip += 1;
+                instruction
             };
-            match op {
-                Instruction::Include {
-                    dst,
-                    path,
-                    once,
-                    required,
-                } => {
-                    self.include(dst, path, once, required).await?;
-                }
-                Instruction::Static {
-                    local,
-                    name,
-                    default,
-                } => {
-                    let function = self
+            self.executed_instructions += 1;
+            match instruction {
+                Instruction::Nop => {}
+                Instruction::LoadNull { dst } => self.set(dst, Value::Null),
+                Instruction::LoadBool { dst, value } => self.set(dst, Value::Bool(value)),
+                Instruction::LoadInt { dst, value } => self.set(dst, Value::Int(value as i64)),
+                Instruction::LoadConst { dst, constant } => {
+                    let value = self
                         .current()
-                        .map(|f| f.function().name.clone())
-                        .unwrap_or_default();
-                    let v = self
-                        .statics
-                        .entry((function, name))
-                        .or_insert_with(|| {
-                            Value::Reference(Rc::new(RefCell::new(frame::value(&default))))
-                        })
-                        .clone();
-                    self.set(local, v);
-                }
-                Instruction::Increment {
-                    dst,
-                    src,
-                    increment,
-                } => {
-                    let mut d = CollectDiagnostics::default();
-                    let value = self.get(src);
-                    let result = if increment {
-                        phera_value::increment(&value, &mut d)
-                    } else {
-                        phera_value::decrement(&value, &mut d)
-                    };
-                    self.diagnostics_flush(d);
-                    self.set(dst, result?);
-                }
-                Instruction::Load { dst, constant } => {
-                    let v = self
-                        .current()
-                        .and_then(|f| f.function().constants.get(constant))
+                        .and_then(|frame| frame.unit.constants.get(constant.index()))
                         .map(frame::value)
-                        .ok_or_else(|| {
-                            NativeError::error("Phera internal error: invalid constant")
-                        })?;
-                    self.set(dst, v)
+                        .ok_or_else(|| NativeError::error("Phera internal error: constant"))?;
+                    self.set(dst, value);
                 }
-                Instruction::Move { dst, src } => self.set(dst, self.get(src)),
-                Instruction::ReadArgument { dst, place } => {
-                    self.diagnostic_capture = Some(vec![]);
-                    let result = self.read_place(&place, false);
-                    let diagnostics = self.diagnostic_capture.take().unwrap_or_default();
-                    if let Some(f) = self.frames.last_mut() {
-                        f.argument_diagnostics.insert(dst.0, diagnostics);
+                Instruction::Move { dst, src } => {
+                    let value = self.read_local(src);
+                    self.set(dst, value);
+                }
+                Instruction::Clear { reg } | Instruction::UnsetLocal { local: reg } => {
+                    if let Some(slot) = self
+                        .frames
+                        .last_mut()
+                        .and_then(|frame| frame.slots_mut(&mut self.registers).get_mut(reg.index()))
+                    {
+                        *slot = None;
                     }
-                    self.set(dst, result?);
                 }
-                Instruction::Reference { dst, place } => {
-                    let v = self.reference(&place)?;
-                    self.set(dst, v)
+                Instruction::Assign { local, src } => {
+                    let value = self.get(src);
+                    if let Some(frame) = self.frames.last_mut()
+                        && local.index() < frame.function().parameters.len()
+                        && let Some(argument) = frame.arguments.get_mut(local.index())
+                    {
+                        *argument = value.clone();
+                    }
+                    self.assign_local(local, value)?;
                 }
-                Instruction::Read { dst, place, quiet } => {
-                    let v = self.read_place(&place, quiet)?;
-                    self.set(dst, v)
-                }
-                Instruction::Rebind { place, src } => {
-                    let raw = self
+                Instruction::CheckType { local, ty } => {
+                    let ty = self
                         .current()
-                        .and_then(|f| f.slots.get(src.0 as usize))
+                        .and_then(|frame| frame.unit.types.get(ty.index()))
+                        .cloned()
+                        .ok_or_else(|| NativeError::error("Phera internal error: type"))?;
+                    let value = crate::types::coerce(self.get(local), &ty, true, self)?;
+                    self.assign_local(local, value)?;
+                }
+                Instruction::AssignOp { op, local, src } => {
+                    let reference = self
+                        .current()
+                        .and_then(|frame| frame.slots(&self.registers).get(local.index()))
+                        .and_then(Option::as_ref)
+                        .is_some_and(Value::is_reference);
+                    if op != phera_bytecode::BinaryOp::Concat && !reference {
+                        self.execute_binary(op, local, local, src)?;
+                        continue;
+                    }
+                    if op == phera_bytecode::BinaryOp::Concat && self.assign_concat(local, src)? {
+                        continue;
+                    }
+                    let mut diagnostics = CollectDiagnostics::default();
+                    let value = ops::binary(op, &self.get(local), &self.get(src), &mut diagnostics);
+                    self.diagnostics_flush(diagnostics);
+                    self.assign_local(local, value?)?;
+                }
+                Instruction::Fetch { dst, path, mode } => {
+                    let place = self.path(path)?;
+                    let value = self.read_place(&place, mode != phera_bytecode::FetchMode::Read)?;
+                    self.set(dst, value);
+                }
+                Instruction::AssignOpPath { op, dst, path, src } => {
+                    let place = self.path(path)?;
+                    let left = self.read_place(&place, false)?;
+                    let mut diagnostics = CollectDiagnostics::default();
+                    let value = ops::binary(op, &left, &self.get(src), &mut diagnostics);
+                    self.diagnostics_flush(diagnostics);
+                    let value = value?;
+                    self.write_place(&place, value.clone(), false)?;
+                    self.set(dst, value);
+                }
+                Instruction::IncDecPath { mode, dst, path } => {
+                    let place = self.path(path)?;
+                    let old = self.read_place(&place, false)?;
+                    let mut diagnostics = CollectDiagnostics::default();
+                    let value = if matches!(mode, IncDec::PreIncrement | IncDec::PostIncrement) {
+                        phera_value::increment(&old, &mut diagnostics)
+                    } else {
+                        phera_value::decrement(&old, &mut diagnostics)
+                    };
+                    self.diagnostics_flush(diagnostics);
+                    let value = value?;
+                    self.write_place(&place, value.clone(), false)?;
+                    self.set(
+                        dst,
+                        if matches!(mode, IncDec::PostIncrement | IncDec::PostDecrement) {
+                            old
+                        } else {
+                            value
+                        },
+                    );
+                }
+                Instruction::AssignPath { path, src } => {
+                    self.write_place(&self.path(path)?, self.get(src), false)?
+                }
+                Instruction::MakeReference { dst, path } => {
+                    let value = self.reference(&self.path(path)?)?;
+                    self.set(dst, value);
+                }
+                Instruction::BindReference { path, src } => {
+                    let value = self
+                        .current()
+                        .and_then(|frame| frame.slots(&self.registers).get(src.index()))
                         .and_then(Option::as_ref)
                         .cloned()
                         .unwrap_or_default();
-                    self.write_place(&place, raw, true)?;
+                    self.write_place(&self.path(path)?, value, true)?;
                 }
-                Instruction::Write { place, src } => {
-                    self.write_place(&place, self.get(src), false)?
-                }
-                Instruction::Bind { place, source } => {
-                    let r = self.reference(&source)?;
-                    self.write_place(&place, r, true)?
-                }
-                Instruction::Unset(p) => self.unset_place(&p)?,
+                Instruction::UnsetPath { path } => self.unset_place(&self.path(path)?)?,
                 Instruction::Binary { dst, op, lhs, rhs } => {
-                    let mut d = CollectDiagnostics::default();
-                    let result = ops::binary(op, &self.get(lhs), &self.get(rhs), &mut d);
-                    self.diagnostics_flush(d);
-                    self.set(dst, result?);
+                    self.execute_binary(op, dst, lhs, rhs)?
                 }
                 Instruction::Unary { dst, op, src } => {
-                    let mut d = CollectDiagnostics::default();
-                    let result = ops::unary(op, &self.get(src), &mut d);
-                    self.diagnostics_flush(d);
-                    self.set(dst, result?);
+                    let mut diagnostics = CollectDiagnostics::default();
+                    let value = ops::unary(op, &self.get(src), &mut diagnostics);
+                    self.diagnostics_flush(diagnostics);
+                    self.set(dst, value?);
                 }
-                Instruction::Echo(r) => {
-                    let mut d = CollectDiagnostics::default();
-                    let s = to_php_string(&self.get(r), &mut d);
-                    self.diagnostics_flush(d);
-                    self.out(s?.as_bytes())
+                Instruction::Cast { to, dst, src } => self.execute_cast(to, dst, src)?,
+                Instruction::IncDecLocal { mode, dst, local } => {
+                    self.execute_inc_dec(mode, dst, local)?
                 }
-                Instruction::Jump(t) => self.jump(t)?,
-                Instruction::Branch {
-                    value,
-                    target,
-                    when,
-                } => {
-                    if to_bool(&self.get(value)) == when {
-                        self.jump(target)?
+                Instruction::Echo { src } => {
+                    let mut diagnostics = CollectDiagnostics::default();
+                    let text = to_php_string(&self.get(src), &mut diagnostics)?;
+                    self.diagnostics_flush(diagnostics);
+                    self.out(text.as_bytes());
+                }
+                Instruction::Jump { target } => {
+                    if self.backward(target) {
+                        work += 1;
+                    }
+                    self.jump(target)?;
+                }
+                Instruction::JumpIf { condition, target } => {
+                    if to_bool(&self.get(condition)) {
+                        if self.backward(target) {
+                            work += 1;
+                        }
+                        self.jump(target)?;
                     }
                 }
-                Instruction::BranchNull { value, target } => {
+                Instruction::JumpIfNot { condition, target } => {
+                    if !to_bool(&self.get(condition)) {
+                        if self.backward(target) {
+                            work += 1;
+                        }
+                        self.jump(target)?;
+                    }
+                }
+                Instruction::JumpIfNull { value, target } => {
                     if self.get(value).is_null() {
-                        self.jump(target)?
+                        self.jump(target)?;
                     }
                 }
-                Instruction::Suppress(on) => {
-                    if on {
-                        self.suppression += 1
-                    } else {
-                        self.suppression = self.suppression.saturating_sub(1)
+                Instruction::JumpIfNotNull { value, target } => {
+                    if !self.get(value).is_null() {
+                        self.jump(target)?;
                     }
                 }
-                Instruction::Return(r) => {
-                    let mut v = self.get(r);
-                    if let Some((ty, name, strict)) = self.current().and_then(|f| {
-                        f.function().return_type.as_ref().map(|t| {
-                            (
-                                t.clone(),
-                                f.function().name.clone(),
-                                f.function().strict_types,
-                            )
-                        })
-                    }) {
-                        v = types::coerce(v, &ty, strict, self).map_err(|e| match e {
-                            NativeError::Throw { class, message } => NativeError::throw(
-                                class,
-                                format!("{name}(): Return value {message}"),
-                            ),
-                            e => e,
-                        })?;
-                    }
-                    let frame = self.frames.pop().ok_or_else(|| {
-                        NativeError::error("Phera internal error: return without frame")
-                    })?;
-                    if self.frames.len() == stop {
-                        return Ok(v);
-                    }
-                    if let Some(dst) = frame.destination {
-                        self.set(dst, v)
-                    }
+                Instruction::BeginSilence => self.suppression += 1,
+                Instruction::EndSilence => self.suppression = self.suppression.saturating_sub(1),
+                Instruction::InitCall { function } => self.init_call(function)?,
+                Instruction::InitDynamicCall { callee } => self.init_dynamic_call(callee)?,
+                Instruction::NameArgument { name } => self.name_argument(name)?,
+                Instruction::SendValue { src } => self.send(Some(src), None)?,
+                Instruction::SendLocal { local } => self.send(
+                    None,
+                    Some(crate::Place {
+                        base: local,
+                        dynamic: false,
+                        path: vec![],
+                    }),
+                )?,
+                Instruction::SendPath { path } => self.send(None, Some(self.path(path)?))?,
+                Instruction::SendSpread { src } => self.spread(src)?,
+                Instruction::Call { dst } => {
+                    work += 1;
+                    self.finish_call(dst).await?;
                 }
-                Instruction::Exit(r) => {
-                    let v = self.get(r);
-                    if matches!(
-                        v,
-                        Value::Int(_) | Value::Bool(_) | Value::Null | Value::Float(_)
-                    ) {
-                        let mut d = CollectDiagnostics::default();
-                        self.status = phera_value::to_int(&v, &mut d)? as i32;
-                        self.diagnostics_flush(d);
-                    } else if !v.is_string() {
-                        return Err(NativeError::type_error(format!(
-                            "exit(): Argument #1 ($status) must be of type string|int, {} given",
-                            v.type_name()
-                        )));
-                    } else {
-                        let mut d = CollectDiagnostics::default();
-                        let s = to_php_string(&v, &mut d)?;
-                        self.diagnostics_flush(d);
-                        self.out(s.as_bytes())
-                    }
-                    self.frames.clear();
-                    return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
-                        (),
-                    ))));
+                Instruction::MakeCallable { dst } => {
+                    let call = self
+                        .frames
+                        .last_mut()
+                        .and_then(|frame| frame.calls.pop())
+                        .ok_or_else(|| NativeError::error("Phera internal error: callable"))?;
+                    self.set(dst, Value::from(call.callee.name.clone()));
                 }
-                Instruction::Callable {
-                    dst,
-                    name,
-                    fallback,
-                } => {
-                    let mut d = CollectDiagnostics::default();
-                    let mut name = to_php_string(&self.get(name), &mut d)?.to_string_lossy();
-                    self.diagnostics_flush(d);
-                    if !self.exists(&name)
-                        && let Some(f) = fallback
-                    {
-                        name = f;
-                    }
-                    if !self.exists(&name) {
-                        return Err(NativeError::error(format!(
-                            "Call to undefined function {name}()"
-                        )));
-                    }
-                    self.set(dst, Value::from(name));
-                }
-                Instruction::Call {
-                    dst,
-                    name,
-                    fallback,
-                    arguments,
-                } => {
-                    let v = self.get(name);
-                    let mut d = CollectDiagnostics::default();
-                    let mut name = to_php_string(&v, &mut d)?.to_string_lossy();
-                    self.diagnostics_flush(d);
-                    if !self.exists(&name)
-                        && let Some(f) = fallback
-                    {
-                        name = f;
-                    }
-                    let args = self.arguments(&name, arguments)?;
-                    if let Some((unit, id)) =
-                        self.functions.get(&name.to_ascii_lowercase()).cloned()
-                    {
-                        self.push_call(unit, id, Some(dst), args)?;
-                    } else {
-                        let v = self.native(&name, args).await?;
-                        self.set(dst, v)
-                    }
-                }
-                Instruction::Array(r) => self.set(r, Value::Array(Rc::new(PhpArray::new()))),
-                Instruction::ArrayPush {
-                    array,
-                    key,
-                    value,
-                    spread,
-                } => {
-                    let mut v = self.get(array);
-                    let Value::Array(a) = &mut v else {
-                        return Err(NativeError::error("Phera internal error: array expected"));
-                    };
-                    let a = Rc::make_mut(a);
-                    let val = self
+                Instruction::ReturnReference { src } => {
+                    let value = self
                         .current()
-                        .and_then(|f| f.slots.get(value.0 as usize))
+                        .and_then(|frame| frame.slots(&self.registers).get(src.index()))
                         .and_then(Option::as_ref)
                         .cloned()
                         .unwrap_or_default();
-                    if spread {
-                        let Value::Array(src) = val else {
-                            return Err(NativeError::error(
-                                "Only arrays and Traversables can be unpacked",
-                            ));
-                        };
-                        for (k, v) in src.iter() {
-                            match k {
-                                ArrayKey::Int(_) => {
-                                    a.push(v.clone())?;
-                                }
-                                _ => {
-                                    a.insert(k.clone(), v.clone());
-                                }
-                            }
-                        }
-                    } else if let Some(k) = key {
-                        let mut d = CollectDiagnostics::default();
-                        let k = ArrayKey::from_value_diag(&self.get(k), &mut d)?;
-                        self.diagnostics_flush(d);
-                        a.insert(k, val);
-                    } else {
-                        a.push(val)?;
+                    if !value.is_reference() {
+                        self.diagnostic(
+                            "Notice",
+                            "Only variable references should be returned by reference".into(),
+                        );
                     }
-                    self.set(array, v)
+                    if let Some(value) = self.return_value(value, stop)? {
+                        return Ok(value);
+                    }
                 }
-                Instruction::Constant {
-                    dst,
-                    name,
-                    fallback,
-                } => {
-                    let v = self
+                Instruction::Return { src } => {
+                    if let Some(value) = self.return_value(self.get(src), stop)? {
+                        return Ok(value);
+                    }
+                }
+                Instruction::ReturnNull => {
+                    if let Some(value) = self.return_value(Value::Null, stop)? {
+                        return Ok(value);
+                    }
+                }
+                Instruction::ReceiveDefault { param, passed } => {
+                    if self
+                        .current()
+                        .and_then(|frame| frame.slots(&self.registers).get(param.index()))
+                        .is_some_and(Option::is_some)
+                    {
+                        self.jump(passed)?;
+                    }
+                }
+                Instruction::Exit { src } => return self.exit_value(src),
+                Instruction::NewArray { dst, .. } => {
+                    self.set(dst, Value::Array(Rc::new(PhpArray::new())))
+                }
+                Instruction::ArrayPush { array, src }
+                | Instruction::ArrayPushReference { array, src } => {
+                    self.array_write(array, None, src, false)?
+                }
+                Instruction::ArraySet { array, key, src }
+                | Instruction::ArraySetReference { array, key, src } => {
+                    self.array_write(array, Some(key), src, false)?
+                }
+                Instruction::ArraySpread { array, src } => {
+                    self.array_write(array, None, src, true)?
+                }
+                Instruction::Include { dst, path, kind } => {
+                    self.include(
+                        dst,
+                        path,
+                        matches!(kind, IncludeKind::IncludeOnce | IncludeKind::RequireOnce),
+                        matches!(kind, IncludeKind::Require | IncludeKind::RequireOnce),
+                    )
+                    .await?
+                }
+                Instruction::FetchConstant { dst, constant } => {
+                    let symbol = self
+                        .current()
+                        .and_then(|frame| frame.unit.symbols.get(constant.index()))
+                        .ok_or_else(|| {
+                            NativeError::error("Phera internal error: constant symbol")
+                        })?;
+                    let value = self
                         .constants
-                        .get(&name)
-                        .or_else(|| fallback.as_ref().and_then(|n| self.constants.get(n)))
+                        .get(&symbol.name)
+                        .or_else(|| {
+                            symbol
+                                .fallback
+                                .as_ref()
+                                .and_then(|name| self.constants.get(name))
+                        })
                         .cloned()
                         .ok_or_else(|| {
-                            NativeError::error(format!("Undefined constant \"{name}\""))
+                            NativeError::error(format!("Undefined constant \"{}\"", symbol.name))
                         })?;
-                    self.set(dst, v)
+                    self.set(dst, value);
                 }
-                Instruction::Define { name, src } => {
+                Instruction::DeclareConstant { name, src } => {
+                    let name = self.name(name)?;
                     if self.constants.contains_key(&name) {
-                        self.warn(format!("Constant {name} already defined"))
+                        self.warn(format!("Constant {name} already defined"));
                     } else {
                         self.constants.insert(name, self.get(src));
                     }
                 }
-                Instruction::Declare(id) => {
-                    let unit = self.current().map(|f| f.unit.clone()).ok_or_else(|| {
-                        NativeError::error("Phera internal error: declaration without frame")
-                    })?;
-                    let f = unit.functions.get(id).ok_or_else(|| {
-                        NativeError::error("Phera internal error: function missing")
-                    })?;
-                    let name = f.name.to_ascii_lowercase();
+                Instruction::DeclareFunction { function } => {
+                    let unit = self
+                        .current()
+                        .ok_or_else(|| NativeError::error("Phera internal error: declaration"))?
+                        .unit
+                        .clone();
+                    let name = unit
+                        .functions
+                        .get(function.index())
+                        .ok_or_else(|| NativeError::error("Phera internal error: function"))?
+                        .name
+                        .to_ascii_lowercase();
                     if self.functions.contains_key(&name) {
                         return Err(NativeError::error(format!(
-                            "Cannot redeclare function {}()",
-                            f.name
+                            "Cannot redeclare function {name}()"
                         )));
                     }
-                    self.functions.insert(name, (unit, id));
+                    self.functions.insert(name, (unit, function.index()));
                 }
-                Instruction::Global { local, name } => {
-                    let root = self.frames.first_mut().and_then(|f| {
-                        let i = f.function().locals.iter().position(|n| n == &name)?;
-                        let slot = f.slots.get_mut(i)?;
-                        let v = slot.take().unwrap_or_default();
-                        let r = if matches!(v, Value::Reference(_)) {
-                            v
-                        } else {
-                            Value::Reference(Rc::new(RefCell::new(v)))
-                        };
-                        *slot = Some(r.clone());
-                        Some(r)
-                    });
-                    if let Some(r) = root {
-                        self.globals.insert(name.clone(), r);
-                    }
-                    let value = self.globals.entry(name).or_default();
-                    let r = match value {
-                        Value::Reference(_) => value.clone(),
-                        _ => {
-                            let r = Value::Reference(Rc::new(RefCell::new(value.clone())));
-                            *value = r.clone();
-                            r
-                        }
-                    };
-                    self.set(local, r)
+                Instruction::BindDynamicGlobal { name } => {
+                    let mut diagnostics = CollectDiagnostics::default();
+                    let name = to_php_string(&self.get(name), &mut diagnostics)?.to_string_lossy();
+                    self.diagnostics_flush(diagnostics);
+                    let local = self.named_slot(&name)?;
+                    self.bind_global(local, name)?;
                 }
-                Instruction::IterInit { id, src, place } => {
-                    let v = self.get(src);
-                    let snapshot = if let Value::Array(a) = v {
-                        Some(a)
-                    } else {
-                        self.warn(format!(
-                            "foreach() argument must be of type array|object, {} given",
-                            v.type_name()
-                        ));
-                        None
-                    };
-                    if let Some(f) = self.frames.last_mut() {
-                        f.iterators.insert(
-                            id.0,
-                            frame::IteratorState {
-                                snapshot: if place.is_none() { snapshot } else { None },
-                                source: place,
-                                position: None,
-                                started: false,
-                            },
-                        );
+                Instruction::BindGlobal { local, name } => {
+                    let name = self.name(name)?;
+                    self.bind_global(local, name)?;
+                }
+                Instruction::BindStatic {
+                    local,
+                    variable,
+                    initialized,
+                } => {
+                    let key = self.static_key(variable)?;
+                    if let Some(value) = self.statics.get(&key).cloned() {
+                        self.set(local, value);
+                        self.jump(initialized)?;
                     }
                 }
-                Instruction::IterNext {
-                    id,
+                Instruction::InitStatic {
+                    local,
+                    variable,
+                    src,
+                } => {
+                    let key = self.static_key(variable)?;
+                    let value = Value::Reference(Rc::new(RefCell::new(self.get(src))));
+                    self.statics.insert(key, value.clone());
+                    self.set(local, value);
+                }
+                Instruction::IterStart { iter, src, .. } => self.iter_start(iter, src, None)?,
+                Instruction::IterStartReference { iter, path, .. } => {
+                    let place = self.path(path)?;
+                    let value = self.read_place(&place, false)?;
+                    drop(value);
+                    self.iter_start_reference(iter, place)?;
+                }
+                Instruction::IterNextKeyed {
+                    iter,
                     key,
                     value,
                     end,
-                } => {
-                    let mut state = self
-                        .frames
-                        .last_mut()
-                        .and_then(|f| f.iterators.remove(&id.0))
-                        .ok_or_else(|| {
-                            NativeError::error("Phera internal error: missing iterator")
-                        })?;
-                    let array = if let Some(p) = &state.source {
-                        match self.read_place(p, true)? {
-                            Value::Array(a) => Some(a),
-                            _ => None,
-                        }
-                    } else {
-                        state.snapshot.clone()
-                    };
-                    let position = array.as_ref().and_then(|a| {
-                        if state.started {
-                            state.position.and_then(|p| a.next_position(p))
-                        } else {
-                            a.first_position()
-                        }
-                    });
-                    state.started = true;
-                    state.position = position;
-                    let entry = array
-                        .as_ref()
-                        .and_then(|a| position.and_then(|p| a.entry_at(p)))
-                        .map(|(k, v)| (k.clone(), v.deref().clone()));
-                    drop(array);
-                    if let Some((k, mut v)) = entry {
-                        self.set(
-                            key,
-                            match k {
-                                ArrayKey::Int(i) => Value::Int(i),
-                                ArrayKey::String(s) => Value::String(s),
-                            },
-                        );
-                        if let Some(p) = &state.source {
-                            let mut p = p.clone();
-                            p.path.push(Some(key));
-                            v = self.reference(&p)?;
-                        }
-                        self.set(value, v);
-                    } else {
-                        self.jump(end)?
-                    }
-                    if let Some(f) = self.frames.last_mut() {
-                        f.iterators.insert(id.0, state);
+                } => self.iter_next(iter, Some(key), value, end)?,
+                Instruction::IterNext { iter, value, end } => {
+                    self.iter_next(iter, None, value, end)?
+                }
+                Instruction::IterEnd { iter } => {
+                    if let Some(frame) = self.frames.last_mut() {
+                        frame.iterators.remove(&iter.0);
                     }
                 }
-                Instruction::Fatal { class, message } => {
+                Instruction::Raise { detail, .. } => {
+                    let value = self.get(detail);
+                    let description = match &value {
+                        Value::String(_) => "of type string".to_owned(),
+                        Value::Array(_) => "of type array".to_owned(),
+                        _ => {
+                            let mut diagnostics = CollectDiagnostics::default();
+                            to_php_string(&value, &mut diagnostics)?.to_string_lossy()
+                        }
+                    };
                     return Err(NativeError::throw(
-                        Box::leak(class.into_boxed_str()),
-                        message,
+                        "UnhandledMatchError",
+                        format!("Unhandled match case {description}"),
+                    ));
+                }
+                _ => {
+                    return Err(NativeError::error(
+                        "Phera internal error: unimplemented instruction",
                     ));
                 }
             }
+            if work >= 4096 {
+                work = 0;
+                tokio::task::yield_now().await;
+            }
         }
     }
-    fn jump(&mut self, t: Target) -> Result<(), NativeError> {
-        if let Some(f) = self.frames.last_mut()
-            && t.0 < f.function().instructions.len()
+
+    fn backward(&self, target: Target) -> bool {
+        self.current()
+            .is_some_and(|frame| target.index() < frame.ip)
+    }
+
+    pub(crate) fn jump(&mut self, target: Target) -> Result<(), NativeError> {
+        if let Some(frame) = self.frames.last_mut()
+            && target.index() < frame.function().instructions.len()
         {
-            f.ip = t.0;
+            frame.ip = target.index();
             return Ok(());
         }
         Err(NativeError::error("Phera internal error: invalid jump"))

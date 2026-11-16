@@ -28,3 +28,5 @@ Deprecated: Using ${expr} (variable variables) in strings is deprecated, use {${
 string(8) "  a
  b
 c"
+--XFAIL--
+Deprecated variable-variable string interpolation is excluded by architecture section 6.

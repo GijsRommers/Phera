@@ -27,3 +27,5 @@ string(10) "a\r\n\r\nb"
 string(6) "a\n\nb"
 string(6) "a\r\rb"
 string(10) "a\r\n\r\nb"
+--XFAIL--
+Requires eval (outside this milestone).

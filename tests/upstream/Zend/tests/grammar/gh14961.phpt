@@ -24,3 +24,5 @@ int(42)
 int(42)
 int(42)
 int(42)
+--XFAIL--
+Requires classes, object construction (outside this milestone).

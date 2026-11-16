@@ -23,3 +23,5 @@ Another line
 NOTENDEITHER;
 ENDOFNOWDOCWILLBESOON
 Now let's finish it
+--XFAIL--
+Requires classes and object construction in included nowdoc.inc (outside this milestone).

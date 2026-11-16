@@ -1,3 +1,5 @@
+//! Command-line execution, listings, and streamed output.
+
 use std::{
     io::{self, Write},
     process::ExitCode,
@@ -44,7 +46,12 @@ fn main() -> ExitCode {
         }
     } else {
         match runtime.run_file_blocking(file, &args, Some(Box::new(Stdout))) {
-            Ok(result) => ExitCode::from(result.status as u8),
+            Ok(result) => {
+                if std::env::var_os("PHERA_INSTRUCTION_COUNT").is_some() {
+                    eprintln!("Executed instructions: {}", result.executed_instructions);
+                }
+                ExitCode::from(result.status as u8)
+            }
             Err(e) => {
                 print!("{e}");
                 ExitCode::from(255)

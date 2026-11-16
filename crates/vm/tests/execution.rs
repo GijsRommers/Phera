@@ -1,3 +1,4 @@
+//! End-to-end register execution, bounded stacks, and amortised writes.
 use phera_extension_api::Registry;
 use phera_vm::Vm;
 use std::sync::Arc;
@@ -65,4 +66,28 @@ async fn async_native_callback_runs_on_same_vm() {
     let mut vm = Vm::new(Arc::new(registry));
     assert_eq!(vm.run(unit).await, 0);
     assert_eq!(vm.output, b"42");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn million_string_appends() {
+    let (status, output) = execute(
+        "<?php $text='';for($index=0;$index<1000000;$index++){$text.='x';}echo $text;",
+        10,
+    )
+    .await;
+    assert_eq!(status, 0);
+    assert_eq!(output.len(), 1_000_000);
+    assert!(output.iter().all(|byte| *byte == b'x'));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn million_array_pushes() {
+    let (status,output) = execute("<?php $values=[];for($index=0;$index<1000000;$index++){$values[]=$index;}echo $values[999999];",10).await;
+    assert_eq!((status, output), (0, b"999999".to_vec()));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn million_nested_array_writes() {
+    let (status,output) = execute("<?php $grid=[];for($row=0;$row<1000;$row++){for($column=0;$column<1000;$column++){$grid[$row][$column]=$row+$column;}}echo $grid[999][999];",10).await;
+    assert_eq!((status, output), (0, b"1998".to_vec()));
 }

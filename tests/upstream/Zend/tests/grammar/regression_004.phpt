@@ -13,3 +13,5 @@ function echo(){} // not valid
 ?>
 --EXPECTF--
 Parse error: syntax error, unexpected token "echo", expecting "(" in %s on line %d
+--XFAIL--
+Requires classes (outside this milestone).

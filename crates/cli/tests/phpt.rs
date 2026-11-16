@@ -39,7 +39,7 @@ enum Outcome {
     Fail(String),
     Skip(String),
     /// Failed, but the test is marked `--XFAIL--`.
-    ExpectedFail,
+    ExpectedFail(String),
 }
 
 fn main() -> ExitCode {
@@ -85,9 +85,9 @@ fn main() -> ExitCode {
                 skipped += 1;
                 println!("SKIP  {name} ({reason})");
             }
-            Outcome::ExpectedFail => {
+            Outcome::ExpectedFail(reason) => {
                 xfailed += 1;
-                println!("XFAIL {name}");
+                println!("XFAIL {name} ({reason})");
             }
         }
     }
@@ -161,7 +161,9 @@ fn run_test(binary: &[String], path: &Path) -> Outcome {
     };
 
     match outcome {
-        Outcome::Fail(_) if phpt.section("XFAIL").is_some() => Outcome::ExpectedFail,
+        Outcome::Fail(_) if phpt.section("XFAIL").is_some() => {
+            Outcome::ExpectedFail(phpt.section("XFAIL").unwrap_or_default().trim().to_owned())
+        }
         outcome => outcome,
     }
 }
@@ -223,8 +225,8 @@ struct Run {
     status: Option<String>,
 }
 
-/// Writes `code` next to the test (so relative includes and `__DIR__` work, as
-/// with `run-tests.php`), runs it, and removes it again.
+/// Writes code in a mirrored scratch directory, preserving relative includes
+/// without creating generated PHP files in the shared checkout.
 fn run_php(
     binary: &[String],
     test: &Path,
@@ -232,10 +234,18 @@ fn run_php(
     code: &str,
     args: &[&str],
 ) -> Result<Run, String> {
-    let script = TempScript::new(test.with_extension(extension), code)
-        .map_err(|e| format!("cannot write script: {e}"))?;
+    let source_root = phera_phpt::tests_dir()
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    let test = test.canonicalize().map_err(|error| error.to_string())?;
+    let relative = test
+        .strip_prefix(&source_root)
+        .map_err(|error| error.to_string())?;
+    let destination = scratch_tests()?.join(relative).with_extension(extension);
+    let script =
+        TempScript::new(destination, code).map_err(|e| format!("cannot write script: {e}"))?;
 
-    let dir = test.parent().unwrap_or(Path::new("."));
+    let dir = script.0.parent().unwrap_or(Path::new("."));
     let executable = resolve_executable(&binary[0]);
 
     let mut child = Command::new(&binary[0])
@@ -324,4 +334,34 @@ impl Drop for TempScript {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.0);
     }
+}
+
+/// Mirror support files once, keeping generated scripts out of the checkout.
+fn scratch_tests() -> Result<&'static PathBuf, String> {
+    static DIRECTORY: std::sync::OnceLock<Result<PathBuf, String>> = std::sync::OnceLock::new();
+    DIRECTORY
+        .get_or_init(|| {
+            let root = std::env::var_os("PHERA_PHPT_TMP_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| std::env::temp_dir().join("phera-phpt"))
+                .join(std::process::id().to_string());
+            let source = phera_phpt::tests_dir();
+            let mut pending = vec![(source, root.clone())];
+            while let Some((source, destination)) = pending.pop() {
+                fs::create_dir_all(&destination).map_err(|error| error.to_string())?;
+                for entry in fs::read_dir(source).map_err(|error| error.to_string())? {
+                    let entry = entry.map_err(|error| error.to_string())?;
+                    let path = entry.path();
+                    let destination = destination.join(entry.file_name());
+                    if path.is_dir() {
+                        pending.push((path, destination));
+                    } else if path.extension().is_none_or(|extension| extension != "phpt") {
+                        fs::copy(path, destination).map_err(|error| error.to_string())?;
+                    }
+                }
+            }
+            Ok(root)
+        })
+        .as_ref()
+        .map_err(Clone::clone)
 }

@@ -23,3 +23,5 @@ echo PHP_EOL, "Done", PHP_EOL;
 TraitA::as
 
 Done
+--XFAIL--
+Requires classes, exception handling, traits (outside this milestone).

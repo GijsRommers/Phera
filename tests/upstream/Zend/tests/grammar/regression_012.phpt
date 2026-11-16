@@ -10,3 +10,5 @@ class A {
 ?>
 --EXPECTF--
 Parse error: syntax error, unexpected token "foreach", expecting "]" in %s on line %d
+--XFAIL--
+Requires classes (outside this milestone).

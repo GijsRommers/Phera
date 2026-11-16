@@ -36,3 +36,5 @@ string(8) "Test
 FOO"
 string(16) "    Test
     FOO"
+--XFAIL--
+Deprecated variable-variable string interpolation is excluded by architecture section 6.

@@ -1,22 +1,35 @@
 //! Call preparation, signature handling and VM intrinsics.
-use super::*;
+use std::{rc::Rc, sync::Arc};
+
+use phera_bytecode::{CompiledUnit, Reg};
+use phera_extension_api::{Context, NativeError, NativeFn, NativeResult, prepare_arguments};
+use phera_value::{ArrayKey, CollectDiagnostics, PhpArray, Value, to_php_string};
+
+use crate::{Vm, types};
 impl Vm {
     pub(crate) fn named_slot(&mut self, name: &str) -> Result<Reg, NativeError> {
-        let f = self
+        let frame = self
             .frames
             .last_mut()
             .ok_or_else(|| NativeError::error("Phera internal error: no variable frame"))?;
-        if let Some(i) = f.function().locals.iter().position(|n| n == name) {
+        if let Some(i) = frame.function().locals.iter().position(|candidate| {
+            frame
+                .unit
+                .names
+                .get(candidate.index())
+                .is_some_and(|value| value == name)
+        }) {
             return Ok(Reg(i as u16));
         }
-        if let Some(r) = f.dynamic.get(name) {
-            return Ok(*r);
+        if let Some(register) = frame.dynamic.get(name) {
+            return Ok(*register);
         }
-        let r = Reg(u16::try_from(f.slots.len())
+        let register = Reg(u16::try_from(frame.count)
             .map_err(|_| NativeError::error("Phera register limit exceeded"))?);
-        f.slots.push(None);
-        f.dynamic.insert(name.into(), r);
-        Ok(r)
+        self.registers.push(None);
+        frame.count += 1;
+        frame.dynamic.insert(name.into(), register);
+        Ok(register)
     }
     pub(crate) fn exists(&self, name: &str) -> bool {
         self.functions.contains_key(&name.to_ascii_lowercase())
@@ -41,134 +54,21 @@ impl Vm {
                     | "func_get_arg"
             )
     }
-    pub(crate) fn arguments(
-        &mut self,
-        name: &str,
-        args: Vec<Argument>,
-    ) -> Result<Vec<Value>, NativeError> {
-        let params: Vec<(String, bool, bool)> =
-            if let Some((u, id)) = self.functions.get(&name.to_ascii_lowercase()) {
-                u.functions
-                    .get(*id)
-                    .map(|f| {
-                        f.parameters
-                            .iter()
-                            .map(|p| (p.name.clone(), p.by_reference, p.variadic))
-                            .collect()
-                    })
-                    .unwrap_or_default()
-            } else {
-                self.registry
-                    .get_function(name)
-                    .map(|e| {
-                        e.params
-                            .iter()
-                            .map(|p| (p.name.into(), p.by_ref, p.variadic))
-                            .collect()
-                    })
-                    .unwrap_or_default()
-            };
-        let mut out: Vec<Option<Value>> = vec![];
-        let mut named = false;
-        for arg in args {
-            if arg.spread {
-                let v = self.get(arg.value);
-                let Value::Array(a) = v else {
-                    return Err(NativeError::type_error(
-                        "Only arrays and Traversables can be unpacked",
-                    ));
-                };
-                for (_, v) in a.iter() {
-                    out.push(Some(v.deref().clone()))
-                }
-                continue;
-            }
-            let index = if let Some(n) = arg.name {
-                named = true;
-                params
-                    .iter()
-                    .position(|p| p.0 == n)
-                    .ok_or_else(|| NativeError::error(format!("Unknown named parameter ${n}")))?
-            } else {
-                if named {
-                    return Err(NativeError::error(
-                        "Cannot use positional argument after named argument",
-                    ));
-                }
-                out.len()
-            };
-            if out.get(index).is_some_and(Option::is_some) {
-                return Err(NativeError::error(format!(
-                    "Named parameter ${} overwrites previous argument",
-                    params.get(index).map(|p| p.0.as_str()).unwrap_or("?")
-                )));
-            }
-            let by_ref = params
-                .get(index)
-                .or_else(|| params.last().filter(|p| p.2))
-                .is_some_and(|p| p.1);
-            let warnings = self
-                .frames
-                .last_mut()
-                .and_then(|f| f.argument_diagnostics.remove(&arg.value.0))
-                .unwrap_or_default();
-            if !by_ref {
-                for bytes in warnings {
-                    self.out(&bytes)
-                }
-            }
-            let value = if by_ref {
-                if let Some(p) = arg.place {
-                    self.reference(&p)?
-                } else {
-                    return Err(NativeError::error(format!(
-                        "{name}(): Argument #{} cannot be passed by reference",
-                        index + 1
-                    )));
-                }
-            } else {
-                self.get(arg.value)
-            };
-            if out.len() <= index {
-                out.resize(index + 1, None)
-            }
-            if let Some(slot) = out.get_mut(index) {
-                *slot = Some(value)
-            }
-        }
-        out.into_iter()
-            .enumerate()
-            .map(|(i, v)| {
-                if let Some(v) = v {
-                    return Ok(v);
-                }
-                if let Some((u, id)) = self.functions.get(&name.to_ascii_lowercase())
-                    && let Some(default) = u
-                        .functions
-                        .get(*id)
-                        .and_then(|f| f.parameters.get(i))
-                        .and_then(|p| p.default.as_ref())
-                {
-                    return Ok(frame::value(default));
-                }
-                if self
-                    .registry
-                    .get_function(name)
-                    .and_then(|e| e.params.get(i))
-                    .is_some_and(|p| p.nullable)
-                {
-                    return Ok(Value::Null);
-                }
-                Err(NativeError::error("Phera cannot skip that parameter yet"))
-            })
-            .collect()
-    }
     pub(crate) fn push_call(
         &mut self,
         unit: Arc<CompiledUnit>,
         id: usize,
         dst: Option<Reg>,
-        args: Vec<Value>,
+        arguments: Vec<Value>,
+    ) -> Result<(), NativeError> {
+        self.push_prepared(unit, id, dst, arguments.into_iter().map(Some).collect())
+    }
+    pub(crate) fn push_prepared(
+        &mut self,
+        unit: Arc<CompiledUnit>,
+        id: usize,
+        dst: Option<Reg>,
+        mut arguments: Vec<Option<Value>>,
     ) -> Result<(), NativeError> {
         if self.frames.len() >= self.frame_limit {
             return Err(NativeError::error(format!(
@@ -176,76 +76,152 @@ impl Vm {
                 self.frame_limit
             )));
         }
-        let mut f = Frame::new(unit, Some(id), dst);
-        f.arguments = args.clone();
-        let params = f.function().parameters.clone();
-        for (i, p) in params.iter().enumerate() {
-            let value = if p.variadic {
-                let mut a = PhpArray::new();
-                for v in args.iter().skip(i) {
-                    a.push(v.clone())?;
-                }
-                Value::Array(Rc::new(a))
-            } else {
-                args.get(i).cloned().or_else(||p.default.as_ref().map(frame::value)).ok_or_else(||NativeError::argument_count_error(format!("Too few arguments to function {}(), {} passed and at least {} expected",f.function().name,args.len(),params.iter().filter(|p|p.default.is_none()&&!p.variadic).count())))?
-            };
-            let value = if let Some(ty) = &p.ty {
-                if !p.by_reference && !p.variadic {
-                    let (file, line) = self.location();
-                    types::coerce(value,ty,self.strict_types(),self).map_err(|e|match e{NativeError::Throw{class,message}=>NativeError::throw(class,format!("{}(): Argument #{} (${}) {message}, called in {file} on line {line}",f.function().name,i+1,p.name)),e=>e})?
-                } else {
-                    value
-                }
-            } else {
-                value
-            };
-            f.set(Reg(i as u16), value);
+        let mut frame = self.make_frame(unit, Some(id), dst);
+        if frame.function().dynamic_scope {
+            frame.arguments = arguments
+                .iter()
+                .cloned()
+                .map(Option::unwrap_or_default)
+                .collect();
         }
-        self.frames.push(f);
+        let code = frame.unit.clone();
+        let function = code
+            .functions
+            .get(id)
+            .ok_or_else(|| NativeError::error("Phera internal error: call function"))?;
+        let params = &function.parameters;
+        for (i, parameter) in params.iter().enumerate() {
+            if arguments.get(i).is_none_or(Option::is_none) && parameter.has_default {
+                continue;
+            }
+            let value = if parameter.variadic {
+                let mut values = PhpArray::new();
+                for (offset, argument) in arguments.iter().enumerate().skip(i) {
+                    let value = argument.clone().unwrap_or_default();
+                    let value = self.check_argument(
+                        value,
+                        parameter.ty.map(|ty| &code.types[ty.index()]),
+                        &function.name,
+                        offset,
+                        &code.names[parameter.name.index()],
+                    )?;
+                    values.push(value)?;
+                }
+                Value::Array(Rc::new(values))
+            } else {
+                let value = arguments.get(i).cloned().flatten().ok_or_else(|| {
+                    let required = params.iter().filter(|parameter| !parameter.has_default && !parameter.variadic).count();
+                    NativeError::argument_count_error(format!(
+                        "Too few arguments to function {}(), {} passed and at least {required} expected",
+                        function.name,arguments.len(),
+                    ))
+                })?;
+                self.check_argument(
+                    value,
+                    parameter.ty.map(|ty| &code.types[ty.index()]),
+                    &function.name,
+                    i,
+                    &code.names[parameter.name.index()],
+                )?
+            };
+            frame.set(&mut self.registers, Reg(i as u16), value);
+        }
+        arguments.clear();
+        self.argument_buffers.push(arguments);
+        self.frames.push(frame);
         Ok(())
     }
-    pub(crate) async fn native(&mut self, name: &str, mut args: Vec<Value>) -> NativeResult {
-        let arg = args.first().cloned().unwrap_or_default();
-        let mut d = CollectDiagnostics::default();
+    /// Coercion of a reference updates its cell so the caller observes it.
+    fn check_argument(
+        &mut self,
+        value: Value,
+        ty: Option<&phera_bytecode::Type>,
+        function: &str,
+        index: usize,
+        parameter: &str,
+    ) -> NativeResult {
+        let Some(ty) = ty else {
+            return Ok(value);
+        };
+        let (file, line) = self.location();
+        let result = types::coerce(value.deref().clone(),ty,self.strict_types(),self)
+            .map_err(|error| match error {
+                NativeError::Throw { class,message } => {
+                    let number = index+1;
+                    let message = format!("{function}(): Argument #{number} (${parameter}) {message}, called in {file} on line {line}");
+                    NativeError::throw(class,message)
+                },
+                other => other,
+            })?;
+        if let Value::Reference(reference) = value {
+            *reference
+                .try_borrow_mut()
+                .map_err(|_| NativeError::error("Phera internal error: argument reference"))? =
+                result;
+            Ok(Value::Reference(reference))
+        } else {
+            Ok(result)
+        }
+    }
+
+    pub(crate) async fn native(&mut self, name: &str, arguments: Vec<Value>) -> NativeResult {
+        let arg = arguments.first().cloned().unwrap_or_default();
+        let mut diagnostics = CollectDiagnostics::default();
         match name.to_ascii_lowercase().as_str() {
             "is_callable" => {
-                let name = to_php_string(&arg, &mut d)?.to_string_lossy();
+                let name = to_php_string(&arg, &mut diagnostics)?.to_string_lossy();
                 return Ok(Value::Bool(self.exists(&name)));
             }
             "call_user_func" => {
-                let rest = args.iter().skip(1).cloned().collect();
+                let rest = arguments.iter().skip(1).cloned().collect();
                 return self.call(&arg, rest).await;
             }
             "call_user_func_array" => {
-                let a = args.get(1).cloned().unwrap_or_default();
-                let Value::Array(a) = a else {
+                let array = arguments.get(1).cloned().unwrap_or_default();
+                let Value::Array(array) = array else {
                     return Err(NativeError::type_error(
                         "call_user_func_array(): Argument #2 ($args) must be of type array",
                     ));
                 };
-                return self.call(&arg, a.values().cloned().collect()).await;
+                return self.call(&arg, array.values().cloned().collect()).await;
             }
             "get_defined_vars" => {
-                let mut a = PhpArray::new();
-                if let Some(f) = self.current() {
-                    for (i, name) in f.function().locals.iter().enumerate() {
-                        if let Some(Some(v)) = f.slots.get(i) {
-                            a.insert(ArrayKey::String(name.clone().into()), v.deref().clone());
+                let mut array = PhpArray::new();
+                if let Some(frame) = self.current() {
+                    for (i, name) in frame.function().locals.iter().enumerate() {
+                        if let Some(Some(value)) = frame.slots(&self.registers).get(i) {
+                            array.insert(
+                                ArrayKey::String(
+                                    frame
+                                        .unit
+                                        .names
+                                        .get(name.index())
+                                        .cloned()
+                                        .unwrap_or_default()
+                                        .into(),
+                                ),
+                                value.deref().clone(),
+                            );
                         }
                     }
-                    for (name, r) in &f.dynamic {
-                        if let Some(Some(v)) = f.slots.get(r.0 as usize) {
-                            a.insert(ArrayKey::String(name.clone().into()), v.deref().clone());
+                    for (name, register) in &frame.dynamic {
+                        if let Some(Some(value)) =
+                            frame.slots(&self.registers).get(register.0 as usize)
+                        {
+                            array.insert(
+                                ArrayKey::String(name.clone().into()),
+                                value.deref().clone(),
+                            );
                         }
                     }
                 }
-                return Ok(Value::Array(Rc::new(a)));
+                return Ok(Value::Array(Rc::new(array)));
             }
             "compact" => {
-                let mut names: Vec<_> = args.into_iter().rev().collect();
-                let mut a = PhpArray::new();
-                while let Some(v) = names.pop() {
-                    match v {
+                let mut names: Vec<_> = arguments.into_iter().rev().collect();
+                let mut array = PhpArray::new();
+                while let Some(value) = names.pop() {
+                    match value {
                         Value::Array(values) => names.extend(
                             values
                                 .values()
@@ -254,37 +230,44 @@ impl Vm {
                                 .into_iter()
                                 .rev(),
                         ),
-                        Value::String(name) => {
-                            let n = name.to_string_lossy();
-                            let r = self.current().and_then(|f| {
-                                f.function()
+                        Value::String(string) => {
+                            let name = string.to_string_lossy();
+                            let register = self.current().and_then(|frame| {
+                                frame
+                                    .function()
                                     .locals
                                     .iter()
-                                    .position(|x| x == &n)
+                                    .position(|x| {
+                                        frame
+                                            .unit
+                                            .names
+                                            .get(x.index())
+                                            .is_some_and(|candidate| candidate == &name)
+                                    })
                                     .map(|i| Reg(i as u16))
-                                    .or_else(|| f.dynamic.get(&n).copied())
+                                    .or_else(|| frame.dynamic.get(&name).copied())
                             });
-                            if let Some(r) = r {
-                                a.insert(ArrayKey::String(name), self.get(r));
+                            if let Some(register) = register {
+                                array.insert(ArrayKey::String(string), self.get(register));
                             } else {
-                                self.warn(format!("compact(): Undefined variable ${n}"));
+                                self.warn(format!("compact(): Undefined variable ${name}"));
                             }
                         }
                         _ => {}
                     }
                 }
-                return Ok(Value::Array(Rc::new(a)));
+                return Ok(Value::Array(Rc::new(array)));
             }
             "extract" => {
-                let Value::Array(a) = arg else {
+                let Value::Array(array) = arg else {
                     return Err(NativeError::type_error(
                         "extract(): Argument #1 ($array) must be of type array",
                     ));
                 };
                 let mut count = 0;
-                for (k, v) in a.iter() {
-                    if let ArrayKey::String(n) = k {
-                        let name = n.to_string_lossy();
+                for (k, value) in array.iter() {
+                    if let ArrayKey::String(name) = k {
+                        let name = name.to_string_lossy();
                         if !name.bytes().enumerate().all(|(i, b)| {
                             b == b'_'
                                 || b.is_ascii_alphabetic()
@@ -294,61 +277,60 @@ impl Vm {
                         {
                             continue;
                         }
-                        let r = self.named_slot(&name)?;
-                        self.set(r, v.deref().clone());
+                        let register = self.named_slot(&name)?;
+                        self.set(register, value.deref().clone());
                         count += 1;
                     }
                 }
                 return Ok(Value::Int(count));
             }
             "define" => {
-                let n = to_php_string(&arg, &mut d)?.to_string_lossy();
-                if self.constants.contains_key(&n) {
-                    self.warn(format!("Constant {n} already defined"));
+                let name = to_php_string(&arg, &mut diagnostics)?.to_string_lossy();
+                if self.constants.contains_key(&name) {
+                    self.warn(format!("Constant {name} already defined"));
                     return Ok(Value::Bool(false));
                 }
                 self.constants
-                    .insert(n, args.get(1).cloned().unwrap_or_default());
+                    .insert(name, arguments.get(1).cloned().unwrap_or_default());
                 return Ok(Value::Bool(true));
             }
             "defined" => {
-                return Ok(Value::Bool(
-                    self.constants
-                        .contains_key(&to_php_string(&arg, &mut d)?.to_string_lossy()),
-                ));
+                return Ok(Value::Bool(self.constants.contains_key(
+                    &to_php_string(&arg, &mut diagnostics)?.to_string_lossy(),
+                )));
             }
             "constant" => {
-                let n = to_php_string(&arg, &mut d)?.to_string_lossy();
+                let name = to_php_string(&arg, &mut diagnostics)?.to_string_lossy();
                 return self
                     .constants
-                    .get(&n)
+                    .get(&name)
                     .cloned()
-                    .ok_or_else(|| NativeError::error(format!("Undefined constant \"{n}\"")));
+                    .ok_or_else(|| NativeError::error(format!("Undefined constant \"{name}\"")));
             }
             "function_exists" => {
-                return Ok(Value::Bool(
-                    self.exists(&to_php_string(&arg, &mut d)?.to_string_lossy()),
-                ));
+                return Ok(Value::Bool(self.exists(
+                    &to_php_string(&arg, &mut diagnostics)?.to_string_lossy(),
+                )));
             }
             "func_num_args" => {
                 return Ok(Value::Int(
-                    self.current().map_or(0, |f| f.arguments.len()) as i64
+                    self.current().map_or(0, |frame| frame.arguments.len()) as i64,
                 ));
             }
             "func_get_args" => {
-                let a = self
+                let array = self
                     .current()
-                    .map(|f| f.arguments.clone())
+                    .map(|frame| frame.arguments.clone())
                     .unwrap_or_default();
                 let mut result = PhpArray::new();
-                for v in a {
-                    result.push(v)?;
+                for value in array {
+                    result.push(value)?;
                 }
                 return Ok(Value::Array(Rc::new(result)));
             }
             "func_get_arg" => {
-                let i = phera_value::to_int(&arg, &mut d)?;
-                return self.current().and_then(|f|f.arguments.get(i as usize)).cloned().ok_or_else(||NativeError::value_error("func_get_arg(): Argument #1 ($position) must be less than the number of the arguments passed to the currently executed function"));
+                let i = phera_value::to_int(&arg, &mut diagnostics)?;
+                return self.current().and_then(|frame|frame.arguments.get(i as usize)).cloned().ok_or_else(||NativeError::value_error("func_get_arg(): Argument #1 ($position) must be less than the number of the arguments passed to the currently executed function"));
             }
             "error_reporting" => return Ok(Value::Int(30719)),
             "ini_set" | "ini_get" => return Ok(Value::from("1")),
@@ -358,10 +340,18 @@ impl Vm {
             self.registry.get_function(name).copied().ok_or_else(|| {
                 NativeError::error(format!("Call to undefined function {name}()"))
             })?;
-        prepare_arguments(&entry, &mut args, self)?;
+        self.native_entry(entry, arguments).await
+    }
+
+    pub(crate) async fn native_entry(
+        &mut self,
+        entry: phera_extension_api::FunctionEntry,
+        mut arguments: Vec<Value>,
+    ) -> NativeResult {
+        prepare_arguments(&entry, &mut arguments, self)?;
         match entry.handler {
-            NativeFn::Sync(f) => f(self, &args),
-            NativeFn::Async(f) => f(self, args).await,
+            NativeFn::Sync(frame) => frame(self, &arguments),
+            NativeFn::Async(frame) => frame(self, arguments).await,
         }
     }
 }

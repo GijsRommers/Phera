@@ -15,3 +15,5 @@ echo PHP_EOL, "Done", PHP_EOL;
 ?>
 --EXPECT--
 Done
+--XFAIL--
+Requires classes (outside this milestone).

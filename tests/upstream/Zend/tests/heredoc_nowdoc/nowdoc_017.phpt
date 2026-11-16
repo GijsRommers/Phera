@@ -14,3 +14,5 @@ print "ok!\n";
 ?>
 --EXPECT--
 ok!
+--XFAIL--
+Requires classes (outside this milestone).

@@ -1,8 +1,21 @@
 //! AST lowering on the parser's dedicated stack. Long expression spines use a work list.
+mod functions;
+mod helpers;
+use helpers::{binary, constant, type_name, writable};
+mod arrays;
+mod calls;
+mod errors;
 mod expressions;
+mod ir;
+mod lower;
+mod lowering;
+mod matching;
+mod optimize;
+mod places;
 mod statements;
-use phera_ast as a;
-use phera_bytecode::*;
+use ir::{CompiledUnit, Constant, Function, Instruction, Place, Target};
+use phera_ast as ast;
+use phera_bytecode::Reg;
 use phera_source::LineTable;
 use std::collections::HashMap;
 #[derive(Debug, Clone)]
@@ -13,9 +26,9 @@ pub struct CompileError {
     pub parse: bool,
 }
 impl std::fmt::Display for CompileError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, function: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
-            f,
+            function,
             "\n{}: {} in {} on line {}\n",
             if self.parse {
                 "Parse error"
@@ -29,7 +42,7 @@ impl std::fmt::Display for CompileError {
     }
 }
 impl std::error::Error for CompileError {}
-pub fn compile(source: &str, file: &str) -> Result<CompiledUnit, CompileError> {
+pub fn compile(source: &str, file: &str) -> Result<phera_bytecode::CompiledUnit, CompileError> {
     std::thread::scope(|scope| {
         std::thread::Builder::new()
             .name("phera-compiler".into())
@@ -37,27 +50,36 @@ pub fn compile(source: &str, file: &str) -> Result<CompiledUnit, CompileError> {
             .spawn_scoped(scope, || {
                 let lines = LineTable::new(source);
                 let ast =
-                    phera_parser::parse_on_current_stack(source).map_err(|e| CompileError {
-                        message: e.message,
+                    phera_parser::parse_on_current_stack(source).map_err(|error| CompileError {
+                        message: errors::parse_message(
+                            &error.message,
+                            source,
+                            source
+                                .get(error.span.start..error.span.end)
+                                .unwrap_or_default(),
+                        ),
                         file: file.into(),
-                        line: lines.line(e.span.start),
+                        line: errors::parse_line(
+                            &error.message,
+                            source,
+                            lines.line(error.span.start),
+                        ),
                         parse: true,
                     })?;
-                let mut c = Compiler::new(file, &lines, "{main}", "");
-                c.fun.dynamic_scope = true;
-                c.block(&ast.statements, true)?;
-                let r = c.literal(Constant::Int(1), 1)?;
-                c.emit(Instruction::Return(r), 1);
-                Ok(CompiledUnit {
-                    main: c.finish(),
-                    functions: c.functions,
-                    hoisted: c.hoisted,
-                    constants: vec![],
+                let mut compiler = Compiler::new(file, &lines, "{main}", "");
+                compiler.fun.dynamic_scope = true;
+                compiler.block(&ast.statements, true)?;
+                let register = compiler.literal(Constant::Int(1), 1)?;
+                compiler.emit(Instruction::Return(register), 1);
+                Ok(lower::lower(CompiledUnit {
+                    main: compiler.finish(),
+                    functions: compiler.functions,
+                    hoisted: compiler.hoisted,
                     file: file.into(),
-                })
+                }))
             })
-            .map_err(|e| CompileError {
-                message: e.to_string(),
+            .map_err(|error| CompileError {
+                message: error.to_string(),
                 file: file.into(),
                 line: 1,
                 parse: false,
@@ -77,9 +99,9 @@ struct Loop {
     breaks: Vec<usize>,
     continues: Vec<usize>,
 }
-struct Compiler<'a> {
-    file: &'a str,
-    lines: &'a LineTable,
+struct Compiler<'ast> {
+    file: &'ast str,
+    lines: &'ast LineTable,
     fun: Function,
     functions: Vec<Function>,
     hoisted: Vec<usize>,
@@ -90,8 +112,8 @@ struct Compiler<'a> {
     namespace: String,
     imports: HashMap<(u8, String), String>,
 }
-impl<'a> Compiler<'a> {
-    fn new(file: &'a str, lines: &'a LineTable, name: &str, ns: &str) -> Self {
+impl<'ast> Compiler<'ast> {
+    fn new(file: &'ast str, lines: &'ast LineTable, name: &str, ns: &str) -> Self {
         Self {
             file,
             lines,
@@ -118,20 +140,23 @@ impl<'a> Compiler<'a> {
         }
     }
     fn reg(&mut self) -> Result<Reg, CompileError> {
-        let n =
+        if self.next >= u16::MAX as usize - 1 {
+            return Err(self.error("Phera register limit exceeded", 1));
+        }
+        let index =
             u16::try_from(self.next).map_err(|_| self.error("Phera register limit exceeded", 1))?;
         self.next += 1;
         self.peak = self.peak.max(self.next);
-        Ok(Reg(n))
+        Ok(Reg(index))
     }
     fn local(&mut self, name: &str) -> Result<Reg, CompileError> {
-        if let Some(r) = self.locals.get(name) {
-            return Ok(*r);
+        if let Some(register) = self.locals.get(name) {
+            return Ok(*register);
         }
-        let r = self.reg()?;
-        self.locals.insert(name.into(), r);
+        let register = self.reg()?;
+        self.locals.insert(name.into(), register);
         self.fun.locals.push(name.into());
-        Ok(r)
+        Ok(register)
     }
     fn finish(&mut self) -> Function {
         let mut mapping = vec![Reg(0); self.peak];
@@ -155,24 +180,31 @@ impl<'a> Compiler<'a> {
                 next += 1;
             }
         }
-        for op in &mut self.fun.instructions {
-            op.map_registers(|r| mapping.get(r.0 as usize).copied().unwrap_or(r));
+        for instruction in &mut self.fun.instructions {
+            instruction.map_registers(|register| {
+                mapping
+                    .get(register.0 as usize)
+                    .copied()
+                    .unwrap_or(register)
+            });
         }
         self.fun.registers = self.peak;
         std::mem::take(&mut self.fun)
     }
     fn emit(&mut self, i: Instruction, line: usize) -> usize {
-        let n = self.fun.instructions.len();
+        let index = self.fun.instructions.len();
         self.fun.instructions.push(i);
         self.fun.lines.push(line);
-        n
+        index
     }
     fn pos(&self) -> usize {
         self.fun.instructions.len()
     }
     fn patch(&mut self, i: usize, to: usize) {
         if let Some(
-            Instruction::Jump(t)
+            Instruction::DefaultCheck { passed: t, .. }
+            | Instruction::StaticCheck { initialized: t, .. }
+            | Instruction::Jump(t)
             | Instruction::Branch { target: t, .. }
             | Instruction::BranchNull { target: t, .. }
             | Instruction::IterNext { end: t, .. },
@@ -188,12 +220,12 @@ impl<'a> Compiler<'a> {
         self.emit(Instruction::Load { dst, constant }, line);
         Ok(dst)
     }
-    fn resolve(&self, n: &a::Name, kind: u8) -> (String, Option<String>) {
-        if n.kind == a::NameKind::FullyQualified {
-            return (n.text.clone(), None);
+    fn resolve(&self, index: &ast::Name, kind: u8) -> (String, Option<String>) {
+        if index.kind == ast::NameKind::FullyQualified {
+            return (index.text.clone(), None);
         }
-        if n.kind != a::NameKind::Relative {
-            let (first, rest) = n.text.split_once('\\').unwrap_or((&n.text, ""));
+        if index.kind != ast::NameKind::Relative {
+            let (first, rest) = index.text.split_once('\\').unwrap_or((&index.text, ""));
             if let Some(v) = self.imports.get(&(
                 if rest.is_empty() { kind } else { 0 },
                 first.to_ascii_lowercase(),
@@ -209,33 +241,35 @@ impl<'a> Compiler<'a> {
             }
         }
         let full = if self.namespace.is_empty() {
-            n.text.clone()
+            index.text.clone()
         } else {
-            format!("{}\\{}", self.namespace, n.text)
+            format!("{}\\{}", self.namespace, index.text)
         };
-        let fallback = (n.kind == a::NameKind::Unqualified && !self.namespace.is_empty())
-            .then(|| n.text.clone());
+        let fallback = (index.kind == ast::NameKind::Unqualified && !self.namespace.is_empty())
+            .then(|| index.text.clone());
         (full, fallback)
     }
-    fn place(&mut self, e: &a::Expression) -> Result<Place, CompileError> {
-        let line = self.lines.line(e.span.start);
-        let mut node = e;
+    fn place(&mut self, error: &ast::Expression) -> Result<Place, CompileError> {
+        let line = self.lines.line(error.span.start);
+        let mut node = error;
         let mut path = vec![];
-        while let a::ExpressionKind::Index { target, index } = &node.kind {
+        while let ast::ExpressionKind::Index { target, index } = &node.kind {
             path.push(index.as_deref());
             node = target;
         }
         let (base, dynamic) = match &node.kind {
-            a::ExpressionKind::Variable(a::Variable::Named(n)) => (self.local(n)?, false),
-            a::ExpressionKind::Variable(a::Variable::Dynamic(e)) => {
+            ast::ExpressionKind::Variable(ast::Variable::Named(index)) => {
+                (self.local(index)?, false)
+            }
+            ast::ExpressionKind::Variable(ast::Variable::Dynamic(error)) => {
                 self.fun.dynamic_scope = true;
-                (self.expr(e)?, true)
+                (self.expr(error)?, true)
             }
             _ => return Err(self.error("Expression is not a writable place", line)),
         };
         let mut steps = vec![];
         for index in path.into_iter().rev() {
-            steps.push(index.map(|e| self.expr(e)).transpose()?)
+            steps.push(index.map(|error| self.expr(error)).transpose()?)
         }
         Ok(Place {
             base,
@@ -243,20 +277,20 @@ impl<'a> Compiler<'a> {
             path: steps,
         })
     }
-    fn readable_place(&mut self, e: &a::Expression) -> Result<Place, CompileError> {
-        if writable(e) {
-            return self.place(e);
+    fn readable_place(&mut self, error: &ast::Expression) -> Result<Place, CompileError> {
+        if writable(error) {
+            return self.place(error);
         }
-        let mut node = e;
+        let mut node = error;
         let mut indices = vec![];
-        while let a::ExpressionKind::Index { target, index } = &node.kind {
+        while let ast::ExpressionKind::Index { target, index } = &node.kind {
             indices.push(index.as_deref());
             node = target;
         }
         let base = self.expr(node)?;
         let mut path = vec![];
         for index in indices.into_iter().rev() {
-            path.push(index.map(|e| self.expr(e)).transpose()?)
+            path.push(index.map(|error| self.expr(error)).transpose()?)
         }
         Ok(Place {
             base,
@@ -264,9 +298,9 @@ impl<'a> Compiler<'a> {
             path,
         })
     }
-    fn block(&mut self, ss: &[a::Statement], hoist: bool) -> Result<(), CompileError> {
-        for s in ss {
-            self.statement(s, hoist)?
+    fn block(&mut self, statements: &[ast::Statement], hoist: bool) -> Result<(), CompileError> {
+        for statement in statements {
+            self.statement(statement, hoist)?
         }
         Ok(())
     }
@@ -283,84 +317,17 @@ impl<'a> Compiler<'a> {
     }
 }
 
-fn constant(e: &a::Expression) -> Option<Constant> {
-    match &e.kind {
-        a::ExpressionKind::Array(items) if items.is_empty() => Some(Constant::EmptyArray),
-        a::ExpressionKind::Unary {
-            operator: a::UnaryOperator::Minus,
-            operand,
-        } => match constant(operand)? {
-            Constant::Int(v) => v
-                .checked_neg()
-                .map(Constant::Int)
-                .or(Some(Constant::Float(-(v as f64)))),
-            Constant::Float(v) => Some(Constant::Float(-v)),
-            _ => None,
-        },
-        a::ExpressionKind::Literal(l) => Some(match l {
-            a::Literal::Null => Constant::Null,
-            a::Literal::Bool(v) => Constant::Bool(*v),
-            a::Literal::Int(v) => Constant::Int(*v),
-            a::Literal::Float(v) => Constant::Float(*v),
-            a::Literal::String(v) => Constant::Bytes(v.clone()),
-        }),
-        _ => None,
-    }
-}
-fn type_name(t: &a::Type) -> String {
-    match &t.kind {
-        a::TypeKind::Named(n) => n.text.clone(),
-        a::TypeKind::Nullable(t) => format!("?{}", type_name(t)),
-        a::TypeKind::Union(ts) => ts.iter().map(type_name).collect::<Vec<_>>().join("|"),
-        a::TypeKind::Intersection(ts) => ts.iter().map(type_name).collect::<Vec<_>>().join("&"),
-    }
-}
-fn binary(op: a::BinaryOperator) -> Option<Binary> {
-    use a::BinaryOperator as A;
-    Some(match op {
-        A::Add => Binary::Add,
-        A::Subtract => Binary::Subtract,
-        A::Multiply => Binary::Multiply,
-        A::Divide => Binary::Divide,
-        A::Modulo => Binary::Modulo,
-        A::Power => Binary::Power,
-        A::Concat => Binary::Concat,
-        A::BitwiseAnd => Binary::BitwiseAnd,
-        A::BitwiseOr => Binary::BitwiseOr,
-        A::BitwiseXor => Binary::BitwiseXor,
-        A::ShiftLeft => Binary::ShiftLeft,
-        A::ShiftRight => Binary::ShiftRight,
-        A::Xor => Binary::Xor,
-        A::Equal => Binary::Equal,
-        A::NotEqual => Binary::NotEqual,
-        A::Identical => Binary::Identical,
-        A::NotIdentical => Binary::NotIdentical,
-        A::Less => Binary::Less,
-        A::LessEqual => Binary::LessEqual,
-        A::Greater => Binary::Greater,
-        A::GreaterEqual => Binary::GreaterEqual,
-        A::Spaceship => Binary::Spaceship,
-        _ => return None,
-    })
-}
-fn writable(e: &a::Expression) -> bool {
-    let mut node = e;
-    while let a::ExpressionKind::Index { target, .. } = &node.kind {
-        node = target;
-    }
-    matches!(node.kind, a::ExpressionKind::Variable(_))
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::compile;
+    use phera_bytecode::Reg;
     #[test]
     fn tiny_caller_stack() {
         std::thread::Builder::new()
             .stack_size(64 * 1024)
             .spawn(|| {
-                let c = compile("<?php echo 42;", "test.php").expect("valid PHP");
-                assert!(c.main.dynamic_scope);
+                let compiler = compile("<?php echo 42;", "test.php").expect("valid PHP");
+                assert!(compiler.main.dynamic_scope);
             })
             .expect("thread")
             .join()
@@ -368,38 +335,39 @@ mod tests {
     }
     #[test]
     fn namespace_fallback_and_import() {
-        let c = compile(
+        let compiler = compile(
             "<?php namespace App; use function Util\\f as g; g();f();",
             "test.php",
         )
         .expect("valid PHP");
         assert!(
-            c.main
-                .constants
-                .contains(&Constant::Bytes(b"Util\\f".to_vec()))
-        );
-        assert!(
-            c.main
-                .constants
-                .contains(&Constant::Bytes(b"App\\f".to_vec()))
-        );
-        assert!(
-            c.main
-                .instructions
+            compiler
+                .symbols
                 .iter()
-                .any(|i| matches!(i,Instruction::Call{fallback:Some(n),..}if n=="f"))
+                .any(|symbol| symbol.name == "util\\f")
+        );
+        assert!(
+            compiler
+                .symbols
+                .iter()
+                .any(|symbol| symbol.name == "app\\f" && symbol.fallback.as_deref() == Some("f"))
         );
     }
     #[test]
     fn locals_precede_temporaries() {
-        let c = compile("<?php $a=1;$b=2;echo $a+$b;", "test.php").expect("valid PHP");
-        assert_eq!(c.main.locals, ["a", "b"]);
+        let compiler = compile("<?php $a=1;$b=2;echo $a+$b;", "test.php").expect("valid PHP");
+        assert_eq!(
+            compiler
+                .main
+                .locals
+                .iter()
+                .map(|name| compiler.names[name.index()].as_str())
+                .collect::<Vec<_>>(),
+            ["a", "b"]
+        );
         assert!(matches!(
-            c.main.instructions.get(1),
-            Some(Instruction::Write {
-                place: Place { base: Reg(0), .. },
-                ..
-            })
+            compiler.main.instructions.get(1),
+            Some(phera_bytecode::Instruction::Assign { local: Reg(0), .. })
         ));
     }
 }

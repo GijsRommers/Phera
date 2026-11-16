@@ -1,0 +1,193 @@
+//! Converts compiler paths and source names into compact bytecode tables.
+
+use phera_bytecode::{
+    CompiledUnit, ConstId, Constant, Function, FunctionId, Instruction, NameId, Parameter, Reg,
+    Symbol, SymbolId, Type, TypeId, TypeMask,
+};
+
+use crate::ir;
+
+/// Final table builder. No compiler-only paths escape in instructions.
+#[derive(Default)]
+pub(super) struct Tables {
+    unit: CompiledUnit,
+}
+
+impl Tables {
+    pub(super) fn name(&mut self, name: &str) -> NameId {
+        let index = self
+            .unit
+            .names
+            .iter()
+            .position(|entry| entry == name)
+            .unwrap_or_else(|| {
+                self.unit.names.push(name.to_owned());
+                self.unit.names.len() - 1
+            });
+        NameId(index as u32)
+    }
+
+    pub(super) fn constant(&mut self, constant: &ir::Constant) -> ConstId {
+        let value = match constant {
+            ir::Constant::EmptyArray => Constant::Array(vec![]),
+            ir::Constant::Null => Constant::Null,
+            ir::Constant::Bool(value) => Constant::Bool(*value),
+            ir::Constant::Int(value) => Constant::Int(*value),
+            ir::Constant::Float(value) => Constant::Float(*value),
+            ir::Constant::Bytes(value) => Constant::String(value.clone()),
+        };
+        let index = self
+            .unit
+            .constants
+            .iter()
+            .position(|entry| entry == &value)
+            .unwrap_or_else(|| {
+                self.unit.constants.push(value);
+                self.unit.constants.len() - 1
+            });
+        ConstId(index as u32)
+    }
+
+    pub(super) fn symbol(
+        &mut self,
+        name: &str,
+        fallback: Option<String>,
+        function: bool,
+    ) -> SymbolId {
+        let symbol = Symbol {
+            name: if function {
+                name.to_ascii_lowercase()
+            } else {
+                name.to_owned()
+            },
+            fallback: fallback.map(|name| {
+                if function {
+                    name.to_ascii_lowercase()
+                } else {
+                    name
+                }
+            }),
+            written: name.to_owned(),
+        };
+        let index = self
+            .unit
+            .symbols
+            .iter()
+            .position(|entry| entry == &symbol)
+            .unwrap_or_else(|| {
+                self.unit.symbols.push(symbol);
+                self.unit.symbols.len() - 1
+            });
+        SymbolId(index as u32)
+    }
+
+    pub(super) fn ty(&mut self, display: &str) -> TypeId {
+        let mut mask = TypeMask::default();
+        let mut classes = Vec::new();
+        if display.starts_with('?') {
+            mask = TypeMask::NULL;
+        }
+        for name in display.trim_start_matches('?').split(['|', '&']) {
+            let builtin = match name {
+                "null" => TypeMask::NULL,
+                "false" => TypeMask::FALSE,
+                "true" => TypeMask::TRUE,
+                "bool" => TypeMask::BOOL,
+                "int" => TypeMask::INT,
+                "float" => TypeMask::FLOAT,
+                "string" => TypeMask::STRING,
+                "array" => TypeMask::ARRAY,
+                "object" => TypeMask::OBJECT,
+                "callable" => TypeMask::CALLABLE,
+                "iterable" => TypeMask::ITERABLE,
+                "void" => TypeMask::VOID,
+                "never" => TypeMask::NEVER,
+                "mixed" => TypeMask::MIXED,
+                _ => {
+                    classes.push(self.name(&name.to_ascii_lowercase()));
+                    TypeMask::default()
+                }
+            };
+            mask = mask.union(builtin);
+        }
+        let index = self.unit.types.len();
+        self.unit.types.push(Type {
+            mask,
+            classes,
+            intersection: display.contains('&'),
+            display: display.into(),
+        });
+        TypeId(index as u32)
+    }
+
+    fn function(&mut self, source: ir::Function) -> Function {
+        let mut function = Function {
+            name: source.name,
+            registers: source.registers as u16 + 1,
+            locals: source.locals.iter().map(|name| self.name(name)).collect(),
+            parameters: source
+                .parameters
+                .iter()
+                .map(|parameter| Parameter {
+                    name: self.name(&parameter.name),
+                    ty: parameter.ty.as_deref().map(|ty| self.ty(ty)),
+                    by_reference: parameter.by_reference,
+                    variadic: parameter.variadic,
+                    has_default: parameter.has_default,
+                })
+                .collect(),
+            return_type: source.return_type.as_deref().map(|ty| self.ty(ty)),
+            dynamic_scope: source.dynamic_scope,
+            strict_types: source.strict_types,
+            ..Function::default()
+        };
+        let scratch = Reg(source.registers as u16);
+        let mut offsets = Vec::new();
+        for (index, instruction) in source.instructions.into_iter().enumerate() {
+            offsets.push(function.instructions.len() as u32);
+            self.instruction(&mut function, instruction, &source.constants, scratch);
+            let line = source.lines.get(index).copied().unwrap_or(1) as u32;
+            function.lines.resize(function.instructions.len(), line);
+        }
+        offsets.push(function.instructions.len() as u32);
+        // Prologue targets are already final. Source jumps still name IR positions.
+        for instruction in &mut function.instructions {
+            let target = match instruction {
+                Instruction::ReceiveDefault { passed: target, .. }
+                | Instruction::BindStatic {
+                    initialized: target,
+                    ..
+                }
+                | Instruction::Jump { target }
+                | Instruction::JumpIf { target, .. }
+                | Instruction::JumpIfNot { target, .. }
+                | Instruction::JumpIfNull { target, .. }
+                | Instruction::IterNextKeyed { end: target, .. } => Some(target),
+                _ => None,
+            };
+            if let Some(target) = target {
+                target.0 = offsets.get(target.index()).copied().unwrap_or(target.0);
+            }
+        }
+        crate::optimize::optimize(&mut function);
+        function
+    }
+}
+
+/// Intern all file tables once compilation has completed.
+pub(super) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
+    let mut tables = Tables::default();
+    tables.unit.file = source.file;
+    tables.unit.main = tables.function(source.main);
+    tables.unit.functions = source
+        .functions
+        .into_iter()
+        .map(|function| tables.function(function))
+        .collect();
+    tables.unit.hoisted = source
+        .hoisted
+        .into_iter()
+        .map(|index| FunctionId(index as u32))
+        .collect();
+    tables.unit
+}

@@ -66,3 +66,5 @@ echo PHP_EOL, "Done", PHP_EOL;
 TraitB::try
 
 Done
+--XFAIL--
+Requires classes, exception handling, throw, traits (outside this milestone).

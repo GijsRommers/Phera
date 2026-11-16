@@ -126,3 +126,5 @@ e
 string(3) "Bar"
 string(4) "
 Bar"
+--XFAIL--
+Requires eval (outside this milestone).

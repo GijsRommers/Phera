@@ -1,20 +1,47 @@
 //! Request-local async interpreter. PHP calls push detachable heap frames.
+mod arrays;
 mod calls;
 mod frame;
 mod includes;
 mod interpreter;
+mod iteration;
+mod operators;
 mod ops;
+mod pending;
 mod places;
+mod references;
+mod registers;
 mod types;
 use frame::Frame;
-use phera_bytecode::*;
-use phera_extension_api::{
-    Context, LocalFuture, NativeError, NativeFn, NativeResult, Registry, prepare_arguments,
-};
-use phera_value::{
-    ArrayKey, CollectDiagnostics, Diagnostics, PhpArray, Value, to_bool, to_php_string,
-};
+use phera_bytecode::{CompiledUnit, Reg};
+use phera_extension_api::{Context, LocalFuture, NativeError, NativeResult, Registry};
+use phera_value::{CollectDiagnostics, Diagnostics, PhpArray, Value, to_php_string};
 use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
+#[derive(Clone)]
+struct Place {
+    base: Reg,
+    dynamic: bool,
+    path: Vec<Option<Reg>>,
+}
+impl Place {
+    fn from_path(path: &phera_bytecode::Path) -> Self {
+        Self {
+            base: match path.base {
+                phera_bytecode::PathBase::Register(register)
+                | phera_bytecode::PathBase::Named(register) => register,
+            },
+            dynamic: matches!(path.base, phera_bytecode::PathBase::Named(_)),
+            path: path
+                .steps
+                .iter()
+                .map(|step| match step {
+                    phera_bytecode::Step::Index(register) => Some(*register),
+                    phera_bytecode::Step::Append => None,
+                })
+                .collect(),
+        }
+    }
+}
 pub trait CodeLoader: Send + Sync {
     fn load(&self, path: std::path::PathBuf) -> LocalFuture<'_, Result<Arc<CompiledUnit>, String>>;
 }
@@ -28,17 +55,26 @@ impl OutputSink for Vec<u8> {
 }
 /// Default limit permits 200,000-deep PHP recursion without consuming Rust stack.
 pub const DEFAULT_FRAME_LIMIT: usize = 250_000;
+type SymbolCache = Rc<RefCell<Vec<Option<Rc<pending::Callee>>>>>;
+
 pub struct Vm {
+    /// Number of dispatched instructions, for reproducible benchmark reports.
+    pub executed_instructions: u64,
+    code_caches: HashMap<usize, SymbolCache>,
+    operator_diagnostics: CollectDiagnostics,
     registry: Arc<Registry>,
     loader: Option<Arc<dyn CodeLoader>>,
     included: std::collections::HashSet<String>,
     pub output: Vec<u8>,
     sink: Option<Box<dyn OutputSink>>,
+    registers: Vec<Option<Value>>,
     frames: Vec<Frame>,
+    recycled_frames: Vec<Frame>,
+    argument_buffers: Vec<Vec<Option<Value>>>,
     functions: HashMap<String, (Arc<CompiledUnit>, usize)>,
     constants: HashMap<String, Value>,
     globals: HashMap<String, Value>,
-    statics: HashMap<(String, String), Value>,
+    statics: HashMap<(usize, Option<usize>, u16), Value>,
     pub frame_limit: usize,
     suppression: usize,
     callback_depth: usize,
@@ -52,12 +88,18 @@ impl Vm {
             .map(|(n, v)| (n.to_owned(), v.to_value()))
             .collect();
         Self {
+            executed_instructions: 0,
+            code_caches: HashMap::new(),
+            operator_diagnostics: CollectDiagnostics::default(),
             registry,
             loader: None,
             included: std::collections::HashSet::new(),
             output: vec![],
             sink: None,
+            registers: vec![],
             frames: vec![],
+            recycled_frames: vec![],
+            argument_buffers: vec![],
             functions: HashMap::new(),
             constants,
             globals: HashMap::new(),
@@ -92,16 +134,22 @@ impl Vm {
     }
     pub async fn run(&mut self, unit: Arc<CompiledUnit>) -> i32 {
         for id in &unit.hoisted {
-            if let Some(f) = unit.functions.get(*id) {
+            if let Some(f) = unit.functions.get(id.index()) {
                 self.functions
-                    .insert(f.name.to_ascii_lowercase(), (unit.clone(), *id));
+                    .insert(f.name.to_ascii_lowercase(), (unit.clone(), id.index()));
             }
         }
         self.included.insert(unit.file.clone());
-        let mut frame = Frame::new(unit, None, None);
+        let cache = self.code_cache(&unit);
+        let mut frame = Frame::new(cache, &mut self.registers, unit, None, None);
         for (name, v) in &self.globals {
-            if let Some(i) = frame.function().locals.iter().position(|n| n == name) {
-                frame.set(Reg(i as u16), v.clone());
+            if let Some(i) = frame
+                .function()
+                .locals
+                .iter()
+                .position(|n| frame.unit.names.get(n.index()) == Some(name))
+            {
+                frame.set(&mut self.registers, Reg(i as u16), v.clone());
             }
         }
         self.frames.push(frame);
@@ -110,15 +158,52 @@ impl Vm {
         }
         self.status
     }
+    /// Reuse frame-owned call buffers after return. Recursion grows by depth,
+    /// rather than allocating fresh preparation buffers for every invocation.
+    fn make_frame(
+        &mut self,
+        unit: Arc<CompiledUnit>,
+        function_id: Option<usize>,
+        destination: Option<Reg>,
+    ) -> Frame {
+        let cache = self.code_cache(&unit);
+        if let Some(mut frame) = self.recycled_frames.pop() {
+            frame.unit = unit;
+            frame.cache = cache;
+            frame.function_id = function_id;
+            frame.destination = destination;
+            frame.ip = 0;
+            frame.base = self.registers.len();
+            frame.count = frame.function().registers as usize;
+            frame.arguments.clear();
+            frame.calls.clear();
+            frame.dynamic.clear();
+            frame.iterators.clear();
+            self.registers
+                .resize_with(frame.base + frame.count, || None);
+            frame
+        } else {
+            Frame::new(cache, &mut self.registers, unit, function_id, destination)
+        }
+    }
+
+    fn code_cache(&mut self, unit: &Arc<CompiledUnit>) -> SymbolCache {
+        self.code_caches
+            .entry(Arc::as_ptr(unit) as usize)
+            .or_insert_with(|| Rc::new(RefCell::new(vec![None; unit.symbols.len()])))
+            .clone()
+    }
     fn current(&self) -> Option<&Frame> {
         self.frames.last()
     }
     fn get(&self, r: Reg) -> Value {
-        self.current().map(|f| f.get(r)).unwrap_or_default()
+        self.current()
+            .map(|f| f.get(&self.registers, r))
+            .unwrap_or_default()
     }
     fn set(&mut self, r: Reg, v: Value) {
         if let Some(f) = self.frames.last_mut() {
-            f.set(r, v)
+            f.set(&mut self.registers, r, v)
         }
     }
     fn location(&self) -> (String, usize) {
@@ -128,12 +213,12 @@ impl Vm {
     }
     fn diagnostics_flush(&mut self, d: CollectDiagnostics) {
         for (k, m) in d.entries {
-            use phera_value::DiagnosticKind::*;
+            use phera_value::DiagnosticKind;
             self.diagnostic(
                 match k {
-                    Warning => "Warning",
-                    Notice => "Notice",
-                    Deprecated => "Deprecated",
+                    DiagnosticKind::Warning => "Warning",
+                    DiagnosticKind::Notice => "Notice",
+                    DiagnosticKind::Deprecated => "Deprecated",
                 },
                 m,
             )
@@ -154,6 +239,7 @@ impl Vm {
         }
     }
     fn unwind(&mut self, e: NativeError) {
+        self.suppression = 0;
         if let NativeError::Throw { class, message } = e {
             let (file, line) = self.location();
             let mut text = format!(

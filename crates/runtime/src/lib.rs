@@ -13,6 +13,8 @@ pub struct Runtime {
     cache: Arc<Mutex<HashMap<PathBuf, Arc<CompiledUnit>>>>,
 }
 pub struct RunResult {
+    /// Instructions executed by this request, including included files.
+    pub executed_instructions: u64,
     pub output: Vec<u8>,
     pub status: i32,
 }
@@ -70,6 +72,7 @@ impl Runtime {
         }
         let status = vm.run(code).await;
         Ok(RunResult {
+            executed_instructions: vm.executed_instructions,
             output: vm.output,
             status,
         })
@@ -105,7 +108,8 @@ impl phera_vm::CodeLoader for Runtime {
 }
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{OutputSink, Runtime};
+    use std::{path::Path, sync::Arc};
     #[tokio::test(flavor = "current_thread")]
     async fn cache_shares_code_and_sink_receives_output() {
         use std::{cell::RefCell, rc::Rc};

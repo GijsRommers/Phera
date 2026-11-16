@@ -35,3 +35,5 @@ self
 parent
 
 Done
+--XFAIL--
+Requires classes, object construction (outside this milestone).

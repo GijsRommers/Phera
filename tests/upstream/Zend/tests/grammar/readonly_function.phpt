@@ -39,3 +39,5 @@ Const hi!
 Static hi!
 Instance hi!
 Prop hi!
+--XFAIL--
+Requires classes, object construction (outside this milestone).

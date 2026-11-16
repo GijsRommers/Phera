@@ -239,3 +239,5 @@ __DIR__
 __NAMESPACE__
 
 Done
+--XFAIL--
+Requires arrow functions, classes, exception handling, generators, goto, interfaces, object construction, throw, traits (outside this milestone).

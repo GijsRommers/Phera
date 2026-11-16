@@ -1,4 +1,6 @@
-use phera_bytecode::{CompiledUnit, Constant, Function, Place, Reg};
+//! Heap call frames and conversion of immutable bytecode constants.
+use crate::Place;
+use phera_bytecode::{CompiledUnit, Constant, Function, Reg};
 use phera_value::{PhpArray, Value};
 use std::{collections::HashMap, rc::Rc, sync::Arc};
 pub struct IteratorState {
@@ -8,18 +10,22 @@ pub struct IteratorState {
     pub started: bool,
 }
 pub struct Frame {
-    pub argument_diagnostics: HashMap<u16, Vec<Vec<u8>>>,
+    pub cache: crate::SymbolCache,
+    pub calls: Vec<crate::pending::PendingCall>,
     pub unit: Arc<CompiledUnit>,
     pub function_id: Option<usize>,
     pub ip: usize,
     pub destination: Option<Reg>,
-    pub slots: Vec<Option<Value>>,
+    pub base: usize,
+    pub count: usize,
     pub arguments: Vec<Value>,
     pub dynamic: HashMap<String, Reg>,
     pub iterators: HashMap<u16, IteratorState>,
 }
 impl Frame {
     pub fn new(
+        cache: crate::SymbolCache,
+        registers: &mut Vec<Option<Value>>,
         unit: Arc<CompiledUnit>,
         function_id: Option<usize>,
         destination: Option<Reg>,
@@ -28,17 +34,31 @@ impl Frame {
             .and_then(|i| unit.functions.get(i))
             .unwrap_or(&unit.main)
             .registers;
+        let base = registers.len();
+        registers.resize_with(base + count as usize, || None);
         Self {
+            cache,
+            calls: vec![],
             unit,
             function_id,
             ip: 0,
             destination,
-            slots: vec![None; count],
+            base,
+            count: count as usize,
             arguments: vec![],
-            argument_diagnostics: HashMap::new(),
             dynamic: HashMap::new(),
             iterators: HashMap::new(),
         }
+    }
+    pub fn slots<'a>(&self, registers: &'a [Option<Value>]) -> &'a [Option<Value>] {
+        registers
+            .get(self.base..self.base + self.count)
+            .unwrap_or(&[])
+    }
+    pub fn slots_mut<'a>(&self, registers: &'a mut [Option<Value>]) -> &'a mut [Option<Value>] {
+        registers
+            .get_mut(self.base..self.base + self.count)
+            .unwrap_or(&mut [])
     }
     pub fn function(&self) -> &Function {
         self.function_id
@@ -50,17 +70,17 @@ impl Frame {
             .lines
             .get(self.ip.saturating_sub(1))
             .copied()
-            .unwrap_or(1)
+            .unwrap_or(1) as usize
     }
-    pub fn get(&self, r: Reg) -> Value {
-        self.slots
+    pub fn get(&self, registers: &[Option<Value>], r: Reg) -> Value {
+        self.slots(registers)
             .get(r.0 as usize)
             .and_then(Option::as_ref)
             .map(|v| v.deref().clone())
             .unwrap_or_default()
     }
-    pub fn set(&mut self, r: Reg, v: Value) {
-        if let Some(s) = self.slots.get_mut(r.0 as usize) {
+    pub fn set(&mut self, registers: &mut [Option<Value>], r: Reg, v: Value) {
+        if let Some(s) = self.slots_mut(registers).get_mut(r.0 as usize) {
             *s = Some(v)
         }
     }
@@ -68,10 +88,27 @@ impl Frame {
 pub fn value(c: &Constant) -> Value {
     match c {
         Constant::Null => Value::Null,
-        Constant::EmptyArray => Value::Array(Rc::new(PhpArray::new())),
+        Constant::Array(entries) => {
+            let mut array = PhpArray::new();
+            for (key, constant) in entries {
+                let value = value(constant);
+                match key {
+                    phera_bytecode::ConstantKey::Next => {
+                        let _ = array.push(value);
+                    }
+                    phera_bytecode::ConstantKey::Int(key) => {
+                        array.insert(phera_value::ArrayKey::Int(*key), value);
+                    }
+                    phera_bytecode::ConstantKey::String(key) => {
+                        array.insert(phera_value::ArrayKey::String(key.clone().into()), value);
+                    }
+                }
+            }
+            Value::Array(Rc::new(array))
+        }
         Constant::Bool(v) => Value::Bool(*v),
         Constant::Int(v) => Value::Int(*v),
         Constant::Float(v) => Value::Float(*v),
-        Constant::Bytes(v) => Value::from(v.clone()),
+        Constant::String(v) => Value::from(v.clone()),
     }
 }

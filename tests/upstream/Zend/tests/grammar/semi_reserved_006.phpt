@@ -78,3 +78,5 @@ TraitC::exit
 TraitC::exit
 
 Done
+--XFAIL--
+Requires classes, exception handling, object construction, throw, traits (outside this milestone).
