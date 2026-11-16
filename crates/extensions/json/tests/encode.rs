@@ -2,15 +2,17 @@
 
 use phera_ext_json::Json;
 use phera_extension_api::testing::TestContext;
-use phera_extension_api::{ConstantValue, NativeError, NativeFn, NativeResult, Registry, Value};
+use phera_extension_api::{ConstantValue, NativeError, NativeResult, Registry, Value};
 
 fn encode(args: &[Value]) -> NativeResult {
     let mut registry = Registry::new();
     registry.load(&Json);
-    let NativeFn::Sync(json_encode) = registry.get_function("json_encode").unwrap().handler else {
-        panic!("json_encode should be a sync function");
-    };
-    json_encode(&mut TestContext::default(), args)
+    phera_extension_api::testing::call(
+        &registry,
+        &mut TestContext::default(),
+        "json_encode",
+        args.to_vec(),
+    )
 }
 
 /// The class and message of the error a call throws.

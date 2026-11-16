@@ -1,10 +1,16 @@
-//! PHP's `ext/json`. So far this covers `json_encode()` for scalars and the
-//! extension's constants.
+//! PHP JSON encoding, parsing and request-local errors.
+//! JsonSerializable dispatch awaits VM method-call integration.
+//! Non-associative decoding awaits a VM-owned stdClass factory.
 
+mod decode;
 mod encode;
+mod error;
+mod flags;
+mod string;
 
 use phera_extension_api::{Extension, FunctionEntry, Param, ParamType, Registry};
 
+/// Registers PHP JSON functions and their stable option/error constants.
 pub struct Json;
 
 impl Extension for Json {
@@ -24,6 +30,35 @@ impl Extension for Json {
             encode::json_encode,
         ));
 
+        const DECODE: &[Param] = &[
+            Param::new("json", ParamType::String),
+            Param::new("associative", ParamType::Bool)
+                .nullable()
+                .optional(),
+            Param::new("depth", ParamType::Int).optional(),
+            Param::new("flags", ParamType::Int).optional(),
+        ];
+        const VALIDATE: &[Param] = &[
+            Param::new("json", ParamType::String),
+            Param::new("depth", ParamType::Int).optional(),
+            Param::new("flags", ParamType::Int).optional(),
+        ];
+        registry.function(FunctionEntry::sync(
+            "json_decode",
+            DECODE,
+            decode::json_decode,
+        ));
+        registry.function(FunctionEntry::sync(
+            "json_validate",
+            VALIDATE,
+            decode::json_validate,
+        ));
+        registry.function(FunctionEntry::sync("json_last_error", &[], error::last));
+        registry.function(FunctionEntry::sync(
+            "json_last_error_msg",
+            &[],
+            error::message,
+        ));
         for &(name, value) in CONSTANTS {
             registry.constant(name, value);
         }
@@ -31,35 +66,32 @@ impl Extension for Json {
 }
 
 const CONSTANTS: &[(&str, i64)] = &[
-    ("JSON_HEX_TAG", encode::HEX_TAG),
-    ("JSON_HEX_AMP", encode::HEX_AMP),
-    ("JSON_HEX_APOS", encode::HEX_APOS),
-    ("JSON_HEX_QUOT", encode::HEX_QUOT),
+    ("JSON_HEX_TAG", flags::HEX_TAG),
+    ("JSON_HEX_AMP", flags::HEX_AMP),
+    ("JSON_HEX_APOS", flags::HEX_APOS),
+    ("JSON_HEX_QUOT", flags::HEX_QUOT),
     ("JSON_FORCE_OBJECT", 16),
     ("JSON_NUMERIC_CHECK", 32),
-    ("JSON_UNESCAPED_SLASHES", encode::UNESCAPED_SLASHES),
+    ("JSON_UNESCAPED_SLASHES", flags::UNESCAPED_SLASHES),
     ("JSON_PRETTY_PRINT", 128),
-    ("JSON_UNESCAPED_UNICODE", encode::UNESCAPED_UNICODE),
+    ("JSON_UNESCAPED_UNICODE", flags::UNESCAPED_UNICODE),
     (
         "JSON_PARTIAL_OUTPUT_ON_ERROR",
-        encode::PARTIAL_OUTPUT_ON_ERROR,
+        flags::PARTIAL_OUTPUT_ON_ERROR,
     ),
-    (
-        "JSON_PRESERVE_ZERO_FRACTION",
-        encode::PRESERVE_ZERO_FRACTION,
-    ),
+    ("JSON_PRESERVE_ZERO_FRACTION", flags::PRESERVE_ZERO_FRACTION),
     (
         "JSON_UNESCAPED_LINE_TERMINATORS",
-        encode::UNESCAPED_LINE_TERMINATORS,
+        flags::UNESCAPED_LINE_TERMINATORS,
     ),
     ("JSON_OBJECT_AS_ARRAY", 1),
     ("JSON_BIGINT_AS_STRING", 2),
-    ("JSON_INVALID_UTF8_IGNORE", encode::INVALID_UTF8_IGNORE),
+    ("JSON_INVALID_UTF8_IGNORE", flags::INVALID_UTF8_IGNORE),
     (
         "JSON_INVALID_UTF8_SUBSTITUTE",
-        encode::INVALID_UTF8_SUBSTITUTE,
+        flags::INVALID_UTF8_SUBSTITUTE,
     ),
-    ("JSON_THROW_ON_ERROR", encode::THROW_ON_ERROR),
+    ("JSON_THROW_ON_ERROR", flags::THROW_ON_ERROR),
     ("JSON_ERROR_NONE", 0),
     ("JSON_ERROR_DEPTH", 1),
     ("JSON_ERROR_STATE_MISMATCH", 2),
