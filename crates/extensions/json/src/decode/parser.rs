@@ -2,8 +2,9 @@
 use super::scanner::{Scanner, Token};
 use crate::{error::Error, flags::Flags};
 use phera_extension_api::{ArrayKey, PhpArray, Value};
-/// Object construction is injected privately until Context can create stdClass.
-pub(super) type ObjectFactory = fn(PhpArray) -> Value;
+/// Turns the members of a JSON object into a PHP object. The parser does
+/// not know how objects are made: the caller passes this in.
+pub(super) type ObjectFactory<'a> = &'a mut dyn FnMut(PhpArray) -> Value;
 /// A precise grammar state prevents trailing commas and mismatched delimiters.
 enum State {
     First,
@@ -25,7 +26,7 @@ pub(super) fn parse(
     bytes: &[u8],
     depth: usize,
     flags: Flags,
-    factory: ObjectFactory,
+    factory: ObjectFactory<'_>,
 ) -> Result<Value, Error> {
     let mut scanner = Scanner {
         bytes,

@@ -16,7 +16,7 @@ use crate::{
 };
 
 /// Just enough of a class for an object to name its own.
-struct NamedClass(String);
+pub(super) struct NamedClass(pub(super) String);
 
 impl ClassHandle for NamedClass {
     fn name(&self) -> &str {

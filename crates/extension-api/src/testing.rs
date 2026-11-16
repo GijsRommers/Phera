@@ -6,7 +6,9 @@ pub mod oracle;
 
 pub use classes::{call_method, instantiate};
 
-use phera_value::{CollectDiagnostics, Diagnostics, Value};
+use std::rc::Rc;
+
+use phera_value::{CollectDiagnostics, Diagnostics, Object, PhpArray, Value};
 
 use crate::{
     Context, FunctionEntry, LocalFuture, NativeError, NativeFn, NativeResult, Registry,
@@ -38,6 +40,12 @@ impl Context for TestContext {
 
     fn strict_types(&self) -> bool {
         self.strict_types
+    }
+
+    fn create_object(&mut self, class: &str, properties: PhpArray) -> NativeResult {
+        let object = Object::new(1, Rc::new(classes::NamedClass(class.to_string())));
+        object.update(|table| *table = properties);
+        Ok(Value::Object(Rc::new(object)))
     }
 
     fn call<'a>(

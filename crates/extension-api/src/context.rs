@@ -1,9 +1,9 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use phera_value::{Diagnostics, Value};
+use phera_value::{Diagnostics, PhpArray, Value};
 
-use crate::{NativeResult, RequestState};
+use crate::{NativeError, NativeResult, RequestState};
 
 /// A future that stays on the worker thread it was created on. PHP values are
 /// reference counted with `Rc`, so nothing that holds one can be `Send`.
@@ -38,6 +38,20 @@ pub trait Context {
         callable: &'a Value,
         arguments: Vec<Value>,
     ) -> LocalFuture<'a, NativeResult>;
+
+    /// Creates an object of the named class with these properties, without
+    /// calling its constructor. This is how `json_decode` and `(object)`
+    /// make a `stdClass`: classes belong to the VM, so native code asks for
+    /// an object instead of building one.
+    ///
+    /// `properties` are keyed the way [`phera_value::Object`] stores them.
+    /// The default refuses, for contexts that have no classes.
+    fn create_object(&mut self, class: &str, properties: PhpArray) -> NativeResult {
+        let _ = properties;
+        Err(NativeError::error(format!(
+            "An object of class {class} cannot be created here"
+        )))
+    }
 
     fn warning(&mut self, message: String) {
         self.diagnostics().warning(message);
