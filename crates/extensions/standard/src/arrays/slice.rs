@@ -33,7 +33,7 @@ pub(crate) fn register(registry: &mut Registry) {
 }
 
 /// Slice and reverse renumber integer keys unless asked to preserve them.
-fn insert(
+pub(super) fn insert(
     result: &mut PhpArray,
     key: &ArrayKey,
     value: &Value,
