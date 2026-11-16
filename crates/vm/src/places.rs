@@ -1,21 +1,16 @@
 //! Paths are walked and rebuilt iteratively, applying COW at every array level.
 
-use std::{cell::RefCell, rc::Rc};
-
 use phera_bytecode::{PathBase, Reg, Step};
 use phera_extension_api::{NativeError, NativeResult};
 use phera_value::{ArrayKey, Value, to_php_string};
 
-use crate::access_mode::{Binding, Creation, Missing, Mutation};
+use crate::access_mode::{Creation, Missing};
 use crate::{AccessPath, Vm};
-use crate::{
-    inline_stack::InlineStack,
-    path_update::{PathKey, update},
-};
+use crate::{inline_stack::InlineStack, path_update::PathKey};
 
 impl Vm {
     /// Resolve a dynamic name, optionally creating its register for a write.
-    fn base_register(
+    pub(crate) fn base_register(
         &mut self,
         place: &AccessPath,
         creation: Creation,
@@ -176,164 +171,6 @@ impl Vm {
         }
         Ok(value)
     }
-
-    /// Separate shared arrays on writes while preserving reference-cell identity.
-    pub(crate) fn write_place(
-        &mut self,
-        place: &AccessPath,
-        mut value: Value,
-        binding: Binding,
-    ) -> Result<(), NativeError> {
-        let register = self
-            .base_register(place, Creation::Create, Missing::Silent)?
-            .ok_or_else(|| internal_error!("missing place"))?;
-        // Appending to an existing array needs neither key conversion nor a
-        // parent reconstruction stack. References retain the general handler.
-        let mut steps = place.steps()?;
-        if matches!(steps.next(), Some(Step::Append))
-            && steps.next().is_none()
-            && let Some(Value::Array(array)) = self
-                .call_stack
-                .current_mut()
-                .and_then(|frame| {
-                    frame
-                        .slots_mut(&mut self.registers)
-                        .get_mut(register.index())
-                })
-                .and_then(Option::as_mut)
-        {
-            Rc::make_mut(array).push(value)?;
-            return Ok(());
-        }
-        if let PathBase::StaticProperty { class, name, .. } = place.base()?
-            && place.steps()?.next().is_none()
-        {
-            self.validate_static_mutation(class, name, &mut value)?;
-        }
-        let root_value = self.read_root(register, Missing::Silent);
-        let keys = self.property_keys(place, root_value.clone())?;
-        self.validate_property_mutation(
-            root_value,
-            &keys,
-            &mut value,
-            crate::access_mode::Mutation::Assign,
-        )?;
-        let root = self
-            .call_stack
-            .current_mut()
-            .and_then(|frame| {
-                frame
-                    .slots_mut(&mut self.registers)
-                    .get_mut(register.0 as usize)
-            })
-            .and_then(Option::take)
-            .unwrap_or_default();
-        let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
-        let updated = update(root, &keys, value, binding.into(), &mut diagnostics.buffer);
-        drop(diagnostics);
-        let updated = updated?;
-        if let PathBase::GlobalNamed { name, .. } = place.base()? {
-            let name = self.get(name);
-            if let Value::String(name) = name {
-                self.publish_global(name.to_string_lossy(), updated.clone());
-            }
-        }
-        self.set(register, updated);
-        Ok(())
-    }
-
-    /// Promote a slot to a shared reference cell only when an alias is requested.
-    pub(crate) fn reference(&mut self, place: &AccessPath) -> NativeResult {
-        let value = self.read_place(place, crate::access_mode::Missing::Silent)?;
-        let register = self
-            .base_register(place, Creation::Create, Missing::Silent)?
-            .ok_or_else(|| internal_error!("reference missing"))?;
-        let mut raw = self
-            .current()
-            .and_then(|frame| frame.slots(&self.registers).get(register.0 as usize))
-            .cloned()
-            .flatten()
-            .unwrap_or_default();
-        let keys = self.property_keys(place, raw.deref().clone())?;
-        for key in keys.iter().cloned() {
-            let plain = raw.deref().clone();
-            raw = match (plain, key) {
-                (Value::Array(array), PathKey::Index(Some(key))) => {
-                    array.get(&key).cloned().unwrap_or_default()
-                }
-                (Value::Object(object), PathKey::Property(key)) => {
-                    crate::property_storage::read(&object, &key).unwrap_or_default()
-                }
-                _ => Value::Null,
-            };
-        }
-        if matches!(raw, Value::Reference(_)) {
-            return Ok(raw);
-        }
-        let reference = Value::Reference(Rc::new(RefCell::new(value)));
-        self.write_place(
-            place,
-            reference.clone(),
-            crate::access_mode::Binding::ByReference,
-        )?;
-        Ok(reference)
-    }
-
-    /// Remove the slot itself without assigning null through an existing alias.
-    pub(crate) fn unset_place(&mut self, place: &AccessPath) -> Result<(), NativeError> {
-        if let PathBase::StaticProperty { class, name, .. } = place.base()?
-            && place.steps()?.next().is_none()
-        {
-            let (class, name) = self.static_property_names(class, name)?;
-            return Err(NativeError::error(format!(
-                "Attempt to unset static property {class}::${name}"
-            )));
-        }
-        let Some(register) = self.base_register(place, Creation::Existing, Missing::Silent)? else {
-            return Ok(());
-        };
-        if place.steps()?.next().is_none() {
-            if let PathBase::GlobalNamed { name, .. } = place.base()? {
-                let name = self.get(name).deref().clone();
-                if let Value::String(name) = name {
-                    self.remove_global(&name.to_string_lossy());
-                }
-            }
-            if let Some(string) = self.call_stack.current_mut().and_then(|frame| {
-                frame
-                    .slots_mut(&mut self.registers)
-                    .get_mut(register.0 as usize)
-            }) {
-                *string = None
-            }
-            return Ok(());
-        }
-        let root_value = self.read_root(register, Missing::Silent);
-        let keys = self.property_keys(place, root_value.clone())?;
-        self.validate_property_mutation(root_value, &keys, &mut Value::Null, Mutation::Unset)?;
-        let root = self
-            .call_stack
-            .current_mut()
-            .and_then(|frame| {
-                frame
-                    .slots_mut(&mut self.registers)
-                    .get_mut(register.0 as usize)
-            })
-            .and_then(Option::take)
-            .unwrap_or_default();
-        let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
-        let updated = update(
-            root,
-            &keys,
-            Value::Null,
-            Mutation::Unset,
-            &mut diagnostics.buffer,
-        );
-        drop(diagnostics);
-        let updated = updated?;
-        self.set(register, updated);
-        Ok(())
-    }
 }
 
 fn display_key(key: &ArrayKey) -> String {
@@ -345,7 +182,7 @@ fn display_key(key: &ArrayKey) -> String {
 
 impl Vm {
     /// Read a root slot without evaluating array keys, retaining undefined-variable warnings.
-    fn read_root(&mut self, register: Reg, missing: Missing) -> Value {
+    pub(crate) fn read_root(&mut self, register: Reg, missing: Missing) -> Value {
         let slot = self
             .current()
             .and_then(|frame| frame.slots(&self.registers).get(register.0 as usize))

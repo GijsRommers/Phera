@@ -94,6 +94,8 @@ pub struct Argument {
 /// A function parameter and the metadata needed by the runtime call protocol.
 #[derive(Debug, Clone)]
 pub struct Parameter {
+    /// Written default spelling retained for method compatibility diagnostics.
+    pub default_display: Option<String>,
     pub name: String,
     pub has_default: bool,
     pub declaration_type: Option<String>,

@@ -91,6 +91,12 @@ impl Compiler<'_> {
                 },
                 line,
             );
+            self.emit(
+                Instruction::Clear {
+                    register: value_register,
+                },
+                line,
+            );
         } else {
             self.assign(value, value_register, line)?;
             if reference_subject {

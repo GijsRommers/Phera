@@ -20,7 +20,10 @@ impl Vm {
                 .slots_mut(&mut self.registers)
                 .get_mut(register.index())
         }) {
-            *slot = None;
+            let previous = slot.take();
+            if let Some(phera_value::Value::Reference(reference)) = previous {
+                self.release_property_reference(reference);
+            }
         }
         Ok(())
     }

@@ -31,6 +31,21 @@ impl Vm {
         match instruction {
             Instruction::Nop => {}
             Instruction::DeclareClass { class } => self.declare_class(class)?,
+            Instruction::NewDynamic { class } => {
+                let name = self.class_target(class)?;
+                self.new_named_object(&name)?;
+            }
+            Instruction::DynamicMethodCall { receiver, method } => {
+                self.dynamic_method_call(receiver, method)?
+            }
+            Instruction::StaticCall {
+                class,
+                method,
+                binding,
+            } => self.static_style_call(class, method, binding)?,
+            Instruction::DynamicInstanceOf { dst, source, class } => {
+                self.dynamic_instance_of(dst, source, class)?
+            }
             Instruction::New { class } => self.new_object(class)?,
             Instruction::InitMethodCall { receiver, method } => {
                 self.init_method_call(receiver, method)?

@@ -12,6 +12,8 @@ use super::Class;
 /// Only weak object owners are retained, so freed ids become available immediately.
 #[derive(Default)]
 pub(crate) struct ClassTable {
+    /// Preserve registration/declaration order for get_declared_classes.
+    pub(crate) order: Vec<String>,
     pub(crate) entries: HashMap<String, Rc<Class>>,
     pub(crate) objects: Vec<Weak<Object>>,
 }

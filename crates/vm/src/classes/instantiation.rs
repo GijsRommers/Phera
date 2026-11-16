@@ -43,9 +43,14 @@ impl Vm {
     /// Populate defaults root-first before resolving the inherited constructor.
     pub(crate) fn new_object(&mut self, symbol: SymbolId) -> Result<(), NativeError> {
         let name = self.class_symbol(symbol)?;
+        self.new_named_object(&name)
+    }
+
+    /// Computed and literal allocation share defaults, visibility and abstract checks.
+    pub(crate) fn new_named_object(&mut self, name: &str) -> Result<(), NativeError> {
         let class = self
             .classes
-            .get(&name)
+            .get(name)
             .ok_or_else(|| NativeError::error(format!("Class \"{name}\" not found")))?;
         if class.kind == ClassKind::Interface {
             return Err(NativeError::error(format!(

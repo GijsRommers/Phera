@@ -62,7 +62,7 @@ impl Vm {
         place: AccessPath,
     ) -> Result<(), NativeError> {
         let value = self.read_place(&place, crate::access_mode::Missing::Warn)?;
-        if !value.is_array() {
+        if !value.is_array() && !value.is_object() {
             self.warn(format!(
                 "foreach() argument must be of type array|object, {} given",
                 match value {
@@ -109,6 +109,13 @@ impl Vm {
         let array = if let Some(position) = &state.source {
             match self.read_place(position, crate::access_mode::Missing::Silent)? {
                 Value::Array(array) => Some(array),
+                Value::Object(object) => {
+                    self.next_object_reference(&mut state, &object, key, value, end)?;
+                    if let Some(frame) = self.call_stack.current_mut() {
+                        frame.iterators.insert(iterator.0, state);
+                    }
+                    return Ok(());
+                }
                 _ => None,
             }
         } else {

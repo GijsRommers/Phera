@@ -125,11 +125,15 @@ impl Vm {
             });
             if let Some(inherited) = methods.get(&method_name.to_ascii_lowercase()) {
                 super::inheritance_checks::check_override(name, inherited, &linked)?;
+                self.check_method_contract(inherited, &linked, &unit)?;
             }
             methods.insert(method_name.to_ascii_lowercase(), linked);
         }
         for interface in &interfaces {
             for (name, method) in &interface.methods {
+                if let Some(implementation) = methods.get(name) {
+                    self.check_method_contract(method, implementation, &unit)?;
+                }
                 methods
                     .entry(name.clone())
                     .or_insert_with(|| method.clone());
@@ -239,6 +243,7 @@ impl Vm {
             || parent
                 .as_ref()
                 .is_some_and(|parent| parent.allows_dynamic_properties);
+        self.classes.order.push(name.clone());
         self.classes.entries.insert(
             name.to_ascii_lowercase(),
             Rc::new(Class {

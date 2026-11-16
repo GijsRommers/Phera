@@ -1,7 +1,7 @@
 //! Native extensions use Context; callbacks are bounded independently of PHP frames.
 
 use phera_extension_api::{Context, LocalFuture, NativeResult, RequestState};
-use phera_value::{CollectDiagnostics, Diagnostics, Value, to_php_string};
+use phera_value::{Diagnostics, Value};
 
 use crate::Vm;
 
@@ -45,15 +45,52 @@ impl Context for Vm {
         Box::pin(async move {
             self.call_stack.enter_callback()?;
             let result = async {
-                let mut diagnostics = CollectDiagnostics::default();
-                let name = to_php_string(callable, &mut diagnostics)?.to_string_lossy();
+                let callee = self.resolve_callable(callable)?;
                 let stop = self.call_stack.depth();
-                if let Some(function) = self.function_table.get(&name.to_ascii_lowercase()).cloned()
-                {
-                    self.push_call(function.unit, function.index, None, arguments)?;
-                    self.interpret(stop).await
-                } else {
-                    Box::pin(self.native(&name, arguments)).await
+                match &callee.target {
+                    crate::call_state::CallTarget::User(function) => {
+                        self.push_call(function.unit.clone(), function.index, None, arguments)?;
+                        self.interpret(stop).await
+                    }
+                    crate::call_state::CallTarget::Method { method, context } => {
+                        match &method.body {
+                            crate::classes::MethodBody::User(function) => {
+                                self.push_call(
+                                    function.unit.clone(),
+                                    function.index,
+                                    None,
+                                    arguments,
+                                )?;
+                                if let Some(frame) = self.call_stack.current_mut() {
+                                    frame.method = Some(Box::new(context.clone()));
+                                }
+                                self.interpret(stop).await
+                            }
+                            crate::classes::MethodBody::Native(entry) => {
+                                let mut arguments = arguments;
+                                phera_extension_api::prepare_call(
+                                    &callee.name,
+                                    entry.params,
+                                    &mut arguments,
+                                    self,
+                                )?;
+                                match entry.handler {
+                                    phera_extension_api::NativeMethod::Sync(handler) => {
+                                        handler(self, context.receiver.as_ref(), &arguments)
+                                    }
+                                    phera_extension_api::NativeMethod::Async(handler) => {
+                                        handler(self, context.receiver.clone(), arguments).await
+                                    }
+                                    phera_extension_api::NativeMethod::Abstract => {
+                                        Err(phera_extension_api::NativeError::error(
+                                            "Cannot call abstract method",
+                                        ))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    _ => Box::pin(self.native(&callee.name, arguments)).await,
                 }
             }
             .await;

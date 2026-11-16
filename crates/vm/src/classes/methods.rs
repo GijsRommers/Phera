@@ -75,6 +75,12 @@ impl Vm {
                 method.declaring, method.name
             )));
         }
+        if !method.is_static && receiver.is_none() {
+            return Err(NativeError::error(format!(
+                "Non-static method {}::{}() cannot be called statically",
+                method.declaring, method.name
+            )));
+        }
         let scope = self
             .classes
             .get(&method.declaring)
@@ -113,7 +119,7 @@ impl Vm {
     }
 
     /// Visibility is checked against the lexical scope, never the receiver's class alone.
-    fn check_method_visibility(&self, method: &Method) -> Result<(), NativeError> {
+    pub(crate) fn check_method_visibility(&self, method: &Method) -> Result<(), NativeError> {
         let scope = self
             .current()
             .and_then(|frame| frame.method.as_ref())

@@ -116,3 +116,10 @@ impl Vm {
         text
     }
 }
+
+/// Declaration incompatibilities are fatal diagnostics rather than catchable runtime Errors.
+pub(crate) struct DeclarationFailure {
+    pub(crate) message: String,
+    pub(crate) file: String,
+    pub(crate) line: usize,
+}

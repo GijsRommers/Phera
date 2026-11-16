@@ -7,6 +7,8 @@ mod instantiation;
 mod linking;
 mod methods;
 mod native;
+mod signatures;
+mod static_calls;
 
 pub(crate) use class::{
     Class, ConstantState, Invocation, LinkedConstant, Method, MethodBody, MethodContext,

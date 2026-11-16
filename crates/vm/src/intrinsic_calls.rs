@@ -17,6 +17,7 @@ impl Vm {
         let argument = arguments.first().cloned().unwrap_or_default();
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         match intrinsic {
+            Intrinsic::Class(function) => diagnostics.vm.class_intrinsic(function, &arguments),
             Intrinsic::GetObjectVars => {
                 let Value::Object(object) = argument else {
                     return Err(NativeError::type_error(
@@ -64,10 +65,9 @@ impl Vm {
                             }),
                 ))
             }
-            Intrinsic::IsCallable => {
-                let name = to_php_string(&argument, &mut diagnostics.buffer)?.to_string_lossy();
-                Ok(Value::Bool(diagnostics.vm.exists(&name)))
-            }
+            Intrinsic::IsCallable => Ok(Value::Bool(
+                diagnostics.vm.resolve_callable(&argument).is_ok(),
+            )),
             Intrinsic::CallUserFunc => {
                 let rest = arguments.iter().skip(1).cloned().collect();
                 return diagnostics.vm.call(&argument, rest).await;

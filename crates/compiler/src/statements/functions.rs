@@ -4,7 +4,7 @@ use phera_ast as ast;
 
 use crate::ir::{Constant, Instruction, Parameter, Place, Target};
 use crate::policies::DeclarationTiming;
-use crate::{CompileError, Compiler, type_name};
+use crate::{CompileError, Compiler};
 
 impl Compiler<'_> {
     /// Build a separate frame, then relocate declarations nested within its body.
@@ -14,7 +14,21 @@ impl Compiler<'_> {
         timing: DeclarationTiming,
         line: usize,
     ) -> Result<(), CompileError> {
-        let name = if self.namespace.is_empty() {
+        if !declaration.attributes.is_empty() {
+            return Err(self.error("Attributes not supported yet", line));
+        }
+        for parameter in &declaration.parameters {
+            if !parameter.attributes.is_empty() {
+                return Err(self.error("Attributes not supported yet", line));
+            }
+            if !parameter.hooks.is_empty() {
+                return Err(self.error("Property hooks not supported yet", line));
+            }
+            if parameter.modifiers.set_visibility.is_some() {
+                return Err(self.error("Asymmetric visibility not supported yet", line));
+            }
+        }
+        let name = if self.namespace.is_empty() || declaration.name.name.contains("::") {
             declaration.name.name.clone()
         } else {
             format!("{}\\{}", self.namespace, declaration.name.name)
@@ -36,9 +50,16 @@ impl Compiler<'_> {
         for parameter in &declaration.parameters {
             builder.local(&parameter.name)?;
             builder.function.parameters.push(Parameter {
+                default_display: parameter
+                    .default
+                    .as_ref()
+                    .map(crate::helpers::default_display),
                 name: parameter.name.clone(),
                 has_default: parameter.default.is_some(),
-                declaration_type: parameter.ty.as_ref().map(type_name),
+                declaration_type: parameter
+                    .ty
+                    .as_ref()
+                    .map(|declared_type| self.declaration_type(declared_type)),
                 by_reference: parameter.by_reference,
                 variadic: parameter.variadic,
             });
@@ -69,7 +90,10 @@ impl Compiler<'_> {
                 );
             }
         }
-        builder.function.return_type = declaration.return_type.as_ref().map(type_name);
+        builder.function.return_type = declaration
+            .return_type
+            .as_ref()
+            .map(|declared_type| self.declaration_type(declared_type));
         builder.block(&declaration.body, DeclarationTiming::AtExecution)?;
         let register = builder.literal(Constant::Null, line)?;
         builder.emit(Instruction::Return(register), line);
@@ -131,7 +155,7 @@ impl Compiler<'_> {
                     self.emit(
                         Instruction::Check {
                             local: param,
-                            declaration_type: type_name(ty),
+                            declaration_type: self.declaration_type(ty),
                         },
                         line,
                     );

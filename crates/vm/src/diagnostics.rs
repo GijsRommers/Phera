@@ -58,11 +58,28 @@ impl Vm {
     /// Fatal traces describe heap frames; unwinding never relies on a Rust panic.
     pub(crate) fn unwind(&mut self, error: NativeError) {
         self.diagnostic_reporter.end_all_silence();
-        if let NativeError::Throw { class, message } = error {
-            let SourceLocation { file, line } = self.location();
-            let text = self.error_trace(class, &message, &file, line);
-            self.out(text.as_bytes());
-            self.status = 255;
+        match error {
+            NativeError::Throw { class, message } => {
+                let SourceLocation { file, line } = self.location();
+                let text = self.error_trace(class, &message, &file, line);
+                self.out(text.as_bytes());
+                self.status = 255;
+            }
+            NativeError::Unwind(state) => {
+                if let Ok(failure) = state
+                    .0
+                    .downcast::<crate::error_traces::DeclarationFailure>()
+                {
+                    self.out(
+                        format!(
+                            "\nFatal error: {} in {} on line {}\n",
+                            failure.message, failure.file, failure.line
+                        )
+                        .as_bytes(),
+                    );
+                    self.status = 255;
+                }
+            }
         }
         self.call_stack.clear();
     }

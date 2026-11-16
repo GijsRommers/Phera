@@ -44,12 +44,18 @@ impl Vm {
     }
 
     /// Assignment updates the shared cell when a local already holds a PHP reference.
+    #[inline]
     pub(crate) fn assign_local(&mut self, register: Reg, value: Value) -> Result<(), NativeError> {
-        if let Some(Value::Reference(reference)) = self
+        if let Some(reference) = self
             .current()
             .and_then(|frame| frame.slots(&self.registers).get(register.index()))
             .and_then(Option::as_ref)
+            .and_then(|value| match value {
+                Value::Reference(reference) => Some(reference.clone()),
+                _ => None,
+            })
         {
+            let value = self.check_reference_assignment(&reference, value)?;
             *reference
                 .try_borrow_mut()
                 .map_err(|_| internal_error!("borrowed reference"))? = value;

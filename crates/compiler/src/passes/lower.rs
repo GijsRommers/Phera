@@ -140,6 +140,7 @@ impl Tables {
                 .parameters
                 .iter()
                 .map(|parameter| Parameter {
+                    default_display: parameter.default_display.clone(),
                     name: self.name(&parameter.name),
                     ty: parameter.declaration_type.as_deref().map(|ty| self.ty(ty)),
                     by_reference: parameter.by_reference,
@@ -147,6 +148,7 @@ impl Tables {
                     has_default: parameter.has_default,
                 })
                 .collect(),
+            returns_reference: source.returns_reference,
             return_type: source.return_type.as_deref().map(|ty| self.ty(ty)),
             dynamic_scope: source.dynamic_scope,
             strict_types: source.strict_types,

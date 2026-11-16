@@ -31,6 +31,28 @@ impl Tables {
                 class,
                 name: self.name(&name),
             },
+            Old::NewDynamic { class } => Instruction::NewDynamic { class },
+            Old::DynamicMethodCall { receiver, method } => {
+                Instruction::DynamicMethodCall { receiver, method }
+            }
+            Old::StaticCall {
+                class,
+                method,
+                binding,
+            } => Instruction::StaticCall {
+                class,
+                method,
+                binding,
+            },
+            Old::DynamicInstanceOf {
+                destination,
+                source,
+                class,
+            } => Instruction::DynamicInstanceOf {
+                dst: destination,
+                source,
+                class,
+            },
             Old::DeclareClass(index) => Instruction::DeclareClass {
                 class: phera_bytecode::ClassId(index as u32),
             },

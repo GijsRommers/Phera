@@ -101,3 +101,50 @@ pub(crate) fn writable(expression: &ast::Expression) -> bool {
             ast::ExpressionKind::Variable(ast::Variable::Dynamic(_))
         )
 }
+
+impl crate::Compiler<'_> {
+    /// Class type identifiers obey use aliases and namespaces, unlike builtin types.
+    pub(crate) fn declaration_type(&self, declared_type: &ast::Type) -> String {
+        match &declared_type.kind {
+            ast::TypeKind::Named(name) => {
+                let lower = name.text.to_ascii_lowercase();
+                match lower.as_str() {
+                    "int" | "float" | "string" | "bool" | "array" | "object" | "iterable"
+                    | "callable" | "mixed" | "void" | "never" | "null" | "true" | "false"
+                    | "self" | "parent" | "static" => lower,
+                    _ => self.resolve(name, crate::policies::NameKind::Class).0,
+                }
+            }
+            ast::TypeKind::Nullable(inner) => format!("?{}", self.declaration_type(inner)),
+            ast::TypeKind::Union(types) => types
+                .iter()
+                .map(|member| self.declaration_type(member))
+                .collect::<Vec<_>>()
+                .join("|"),
+            ast::TypeKind::Intersection(types) => types
+                .iter()
+                .map(|member| self.declaration_type(member))
+                .collect::<Vec<_>>()
+                .join("&"),
+        }
+    }
+}
+
+/// PHP displays scalar defaults literally and compound constant expressions symbolically.
+pub(crate) fn default_display(expression: &ast::Expression) -> String {
+    match &expression.kind {
+        ast::ExpressionKind::Literal(ast::Literal::Null) => "null".into(),
+        ast::ExpressionKind::Literal(ast::Literal::Bool(value)) => value.to_string(),
+        ast::ExpressionKind::Literal(ast::Literal::Int(value)) => value.to_string(),
+        ast::ExpressionKind::Literal(ast::Literal::Float(value)) => value.to_string(),
+        ast::ExpressionKind::Literal(ast::Literal::String(value)) => format!(
+            "'{}'",
+            String::from_utf8_lossy(value)
+                .replace('\\', "\\\\")
+                .replace('\'', "\\'")
+        ),
+        ast::ExpressionKind::Array(items) if items.is_empty() => "[]".into(),
+        ast::ExpressionKind::Name(name) => name.text.clone(),
+        _ => "<expression>".into(),
+    }
+}

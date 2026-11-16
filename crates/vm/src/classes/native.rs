@@ -11,6 +11,7 @@ impl ClassTable {
     /// Registries guarantee parents-first order, allowing native classes to use ordinary inheritance.
     pub(crate) fn native(registry: &phera_extension_api::Registry) -> Self {
         let mut table = Self::default();
+        table.order.push("stdClass".into());
         table.entries.insert(
             "stdclass".into(),
             Rc::new(Class {
@@ -75,6 +76,9 @@ impl ClassTable {
                     static_initialized: Rc::new(std::cell::Cell::new(true)),
                     value_initialized: Rc::new(std::cell::Cell::new(true)),
                 });
+            }
+            if table.get(entry.name).is_none() {
+                table.order.push(entry.name.into());
             }
             table.entries.insert(
                 entry.name.to_ascii_lowercase(),

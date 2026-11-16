@@ -16,6 +16,23 @@ use phera_bytecode::Reg;
 /// Compiler IR with owned names and paths before table interning.
 #[derive(Debug, Clone)]
 pub enum Instruction {
+    /// Allocate an evaluated class target before sending constructor arguments.
+    NewDynamic { class: Reg },
+    /// Resolve a method name evaluated at runtime on an object.
+    DynamicMethodCall { receiver: Reg, method: Reg },
+    /// Resolve a static-style call; forwarding retains the caller's late-bound class.
+    StaticCall {
+        class: Reg,
+        method: Reg,
+        binding: phera_bytecode::ClassBinding,
+    },
+    /// Test an evaluated class target without autoloading.
+    DynamicInstanceOf {
+        destination: Reg,
+        source: Reg,
+        class: Reg,
+    },
+
     /// Fetch a constant using an evaluated class target.
     ClassConstant {
         destination: Reg,

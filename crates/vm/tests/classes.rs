@@ -27,6 +27,11 @@ fn later_milestones_remain_compile_errors() {
         "<?php function generator() { yield 1; }",
         "<?php goto target; target:",
         "<?php eval('echo 1;');",
+        "<?php class Example {static function method(){}} Example::method(...);",
+        "<?php class Example {function method(){}} (new Example)->method(...);",
+        "<?php class Example {public int $value {get => 1;}}",
+        "<?php class Example {public private(set) int $value;}",
+        "<?php #[Other] class Example {}",
     ] {
         let error = phera_compiler::compile(source, "unsupported.php").unwrap_err();
         assert!(
@@ -86,4 +91,14 @@ fn literal_property_names_are_resolved_in_the_unit_table() {
             phera_bytecode::Step::Property(name),
             phera_bytecode::Step::Append
         ]));
+}
+
+/// Forwarded calls retain both the receiver and the called class across three levels.
+#[tokio::test]
+async fn static_style_calls_forward_receiver_and_called_class() {
+    let source = "<?php class Root { public $value; function __construct($value){$this->value=$value;} static function make(){return new static;} function label(){return 'root';}} class Middle extends Root {function __construct(){parent::__construct(9);} function label(){return parent::label();} static function build(){return parent::make();}} class Leaf extends Middle {} $name='Leaf'; $object=new $name; $method='label';echo $object->value,$object->$method(),Leaf::build()::class; echo $object instanceof $name ? 'y':'n';";
+    let unit = phera_compiler::compile(source, "forwarding.php").unwrap();
+    let mut interpreter = Vm::new(Arc::new(Registry::new()));
+    assert_eq!(interpreter.run(Arc::new(unit)).await, 0);
+    assert_eq!(interpreter.output, b"9rootLeafy");
 }

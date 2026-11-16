@@ -3,6 +3,8 @@
 /// VM services that need access to the caller scope or request state.
 #[derive(Clone, Copy)]
 pub(crate) enum Intrinsic {
+    /// Linked class introspection needs VM metadata.
+    Class(crate::class_intrinsics::ClassFunction),
     /// Visibility-aware instance properties.
     GetObjectVars,
     /// Visibility-aware default instance and static properties.
@@ -66,7 +68,9 @@ impl Intrinsic {
             "error_reporting" => Self::ErrorReporting,
             "ini_set" => Self::IniSet,
             "ini_get" => Self::IniGet,
-            _ => return None,
+            _ => Self::Class(crate::class_intrinsics::ClassFunction::resolve(
+                &name.to_ascii_lowercase(),
+            )?),
         })
     }
 }

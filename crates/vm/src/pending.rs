@@ -41,16 +41,13 @@ impl Vm {
 
     /// Resolve a computed callable after publishing its conversion diagnostics.
     pub(crate) fn init_dynamic_call(&mut self, callee: Reg) -> Result<(), NativeError> {
-        let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
-        let name = to_php_string(&diagnostics.vm.operand(callee), &mut diagnostics.buffer)?
-            .to_string_lossy();
-        drop(diagnostics);
-        let callee = self.resolve_callee(name)?;
+        let value = self.read_local(callee);
+        let callee = self.resolve_callable(&value)?;
         self.prepare_call(callee)
     }
 
     /// Snapshot the signature and target so argument evaluation cannot change resolution.
-    fn resolve_callee(&self, name: String) -> Result<Rc<Callee>, NativeError> {
+    pub(crate) fn resolve_callee(&self, name: String) -> Result<Rc<Callee>, NativeError> {
         let lower = name.to_ascii_lowercase();
         let ResolvedSignature { target, parameters } =
             if let Some(reference) = self.function_table.get(&lower) {

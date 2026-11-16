@@ -435,6 +435,27 @@ pub enum Instruction {
         error: RuntimeError,
         detail: Reg,
     },
+    /// Allocate an evaluated class target before sending constructor arguments.
+    NewDynamic {
+        class: Reg,
+    },
+    /// Resolve a method name evaluated at runtime on an object.
+    DynamicMethodCall {
+        receiver: Reg,
+        method: Reg,
+    },
+    /// Resolve a static-style call; forwarding retains the caller's late-bound class.
+    StaticCall {
+        class: Reg,
+        method: Reg,
+        binding: ClassBinding,
+    },
+    /// Test an evaluated class target without autoloading.
+    DynamicInstanceOf {
+        dst: Reg,
+        source: Reg,
+        class: Reg,
+    },
 }
 
 // The interpreter copies one instruction per step. Keep them register-sized;
@@ -523,4 +544,13 @@ pub enum IncludeKind {
 pub enum RuntimeError {
     /// `match` found no arm; `detail` holds the unmatched value.
     UnhandledMatch,
+}
+
+/// PHP keyword targets forward the called class; explicit names establish a new one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClassBinding {
+    /// self, parent and static preserve late static binding.
+    Forward,
+    /// Explicit or evaluated class names select the called class.
+    Explicit,
 }

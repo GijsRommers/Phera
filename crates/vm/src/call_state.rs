@@ -6,6 +6,7 @@ use phera_extension_api::FunctionEntry;
 use phera_value::Value;
 
 /// A signature and target resolved once for a symbol in this request.
+#[derive(Clone)]
 pub(crate) struct Callee {
     pub(crate) name: String,
     pub(crate) parameters: Vec<ParameterSpec>,
@@ -13,6 +14,7 @@ pub(crate) struct Callee {
 }
 
 /// Named argument routing and PHP parameter binding modifiers.
+#[derive(Clone)]
 pub(crate) struct ParameterSpec {
     pub(crate) name: String,
     pub(crate) by_reference: bool,
@@ -20,6 +22,7 @@ pub(crate) struct ParameterSpec {
 }
 
 /// User bytecode, a native entry, or an intrinsic resolved at the call site.
+#[derive(Clone)]
 pub(crate) enum CallTarget {
     /// Bound methods retain lexical and called scopes throughout argument evaluation.
     Method {

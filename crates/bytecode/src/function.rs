@@ -22,6 +22,8 @@ pub struct Function {
     /// One entry per parameter; parameter `i` lives in register `i`.
     pub parameters: Vec<Parameter>,
     pub return_type: Option<TypeId>,
+    /// Return aliases are part of an inherited method contract.
+    pub returns_reference: bool,
     /// The access paths used by the path instructions.
     pub paths: Vec<Path>,
     /// The names of the function's `static` variables.
@@ -46,6 +48,8 @@ pub struct Function {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Parameter {
+    /// Written default spelling retained for method compatibility diagnostics.
+    pub default_display: Option<String>,
     pub name: NameId,
     pub ty: Option<TypeId>,
     pub by_reference: bool,

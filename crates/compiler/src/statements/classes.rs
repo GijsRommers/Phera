@@ -29,6 +29,11 @@ impl Compiler<'_> {
         } else {
             format!("{}\\{}", self.namespace, identifier.name)
         };
+        if declaration.attributes.iter().any(|attribute| {
+            attribute.name.text.trim_start_matches('\\') != "AllowDynamicProperties"
+        }) {
+            return Err(self.error("Attributes not supported yet", line));
+        }
         let mut methods = Vec::new();
         let mut properties = Vec::new();
         let mut constants = Vec::new();
@@ -49,19 +54,49 @@ impl Compiler<'_> {
                         visibility: member_visibility(modifiers),
                         is_final: modifiers.is_final,
                         initializer: self.compile_initializer(&constant.value, line)?,
-                        ty: ty.as_ref().map(crate::type_name),
+                        ty: ty
+                            .as_ref()
+                            .map(|declared_type| self.declaration_type(declared_type)),
                     });
                 }
                 continue;
             }
             if let ast::ClassMemberKind::Property {
+                attributes,
                 modifiers,
                 ty,
                 items,
-                ..
             } = &member.kind
             {
+                if !attributes.is_empty() {
+                    return Err(self.error("Attributes not supported yet", line));
+                }
+                if modifiers.set_visibility.is_some() {
+                    return Err(self.error("Asymmetric visibility not supported yet", line));
+                }
                 for property in items {
+                    if !property.hooks.is_empty() {
+                        return Err(self.error("Property hooks not supported yet", line));
+                    }
+                    let readonly = modifiers.is_readonly || declaration.modifiers.is_readonly;
+                    if readonly && modifiers.is_static {
+                        return Err(self.error(
+                            format!(
+                                "Static property {name}::${} cannot be readonly",
+                                property.name
+                            ),
+                            self.lines.line(property.span.start),
+                        ));
+                    }
+                    if readonly && ty.is_none() {
+                        return Err(self.error(
+                            format!(
+                                "Readonly property {name}::${} must have type",
+                                property.name
+                            ),
+                            self.lines.line(property.span.start),
+                        ));
+                    }
                     let default = property
                         .default
                         .as_ref()
@@ -76,7 +111,9 @@ impl Compiler<'_> {
                         },
                         is_static: modifiers.is_static,
                         is_readonly: modifiers.is_readonly || declaration.modifiers.is_readonly,
-                        ty: ty.as_ref().map(crate::type_name),
+                        ty: ty
+                            .as_ref()
+                            .map(|declared_type| self.declaration_type(declared_type)),
                         default,
                     });
                 }
@@ -102,12 +139,19 @@ impl Compiler<'_> {
                         is_static: false,
                         is_readonly: parameter.modifiers.is_readonly
                             || declaration.modifiers.is_readonly,
-                        ty: parameter.ty.as_ref().map(crate::type_name),
+                        ty: parameter
+                            .ty
+                            .as_ref()
+                            .map(|declared_type| self.declaration_type(declared_type)),
                         default: None,
                     });
                 }
             }
-            methods.push(self.compile_method(&name, method, line)?);
+            methods.push(self.compile_method(
+                &name,
+                method,
+                self.lines.line(method.name.span.start),
+            )?);
         }
         let index = self.classes.len();
         self.classes.push(ClassDeclaration {
@@ -190,9 +234,7 @@ impl Compiler<'_> {
         };
         let index = self.functions.len();
         // The synthetic name is already fully qualified.
-        let namespace = std::mem::take(&mut self.namespace);
         let result = self.compile_function(&declaration, DeclarationTiming::Hoisted, line);
-        self.namespace = namespace;
         result?;
         self.hoisted.retain(|candidate| *candidate != index);
         Ok(ClassMethod {

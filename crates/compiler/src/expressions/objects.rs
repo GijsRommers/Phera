@@ -46,24 +46,36 @@ impl Compiler<'_> {
                 class: ast::NewTarget::Class(class),
                 arguments,
             } => {
-                let class = self.object_class_name(class, line)?;
-                self.emit(Instruction::New { class }, line);
+                if matches!(class.kind, ast::ExpressionKind::Name(_)) {
+                    let class = self.object_class_name(class, line)?;
+                    self.emit(Instruction::New { class }, line);
+                } else {
+                    let class = self.compile_class_target(class, line)?;
+                    self.emit(Instruction::NewDynamic { class }, line);
+                }
                 self.compile_arguments(arguments, line)
             }
             ast::ExpressionKind::MethodCall {
                 target,
-                name: ast::MemberName::Identifier(name),
+                name,
                 arguments,
                 nullsafe: false,
             } => {
                 let receiver = self.compile_expression(target)?;
-                self.emit(
-                    Instruction::MethodCall {
-                        receiver,
-                        method: name.name.clone(),
-                    },
-                    line,
-                );
+                self.reject_method_callable(arguments, line)?;
+                match name {
+                    ast::MemberName::Identifier(name) => self.emit(
+                        Instruction::MethodCall {
+                            receiver,
+                            method: name.name.clone(),
+                        },
+                        line,
+                    ),
+                    ast::MemberName::Expression(expression) => {
+                        let method = self.compile_expression(expression)?;
+                        self.emit(Instruction::DynamicMethodCall { receiver, method }, line)
+                    }
+                };
                 self.compile_arguments(arguments, line)
             }
             ast::ExpressionKind::Clone { object, with: None } => {
@@ -78,22 +90,79 @@ impl Compiler<'_> {
                 );
                 Ok(destination)
             }
-            ast::ExpressionKind::InstanceOf { value, class } => {
-                let class = self.object_class_name(class, line)?;
-                let source = self.compile_expression(value)?;
-                let destination = self.allocate_register()?;
+            ast::ExpressionKind::StaticCall {
+                class,
+                name,
+                arguments,
+            } => {
+                self.reject_method_callable(arguments, line)?;
+                let binding = if matches!(&class.kind, ast::ExpressionKind::Name(name)
+                    if matches!(name.text.to_ascii_lowercase().as_str(), "self" | "static" | "parent"))
+                {
+                    phera_bytecode::ClassBinding::Forward
+                } else {
+                    phera_bytecode::ClassBinding::Explicit
+                };
+                let class = self.compile_class_target(class, line)?;
+                let method = match name {
+                    ast::MemberName::Identifier(name) => self.literal(
+                        crate::ir::Constant::Bytes(name.name.as_bytes().to_vec()),
+                        line,
+                    )?,
+                    ast::MemberName::Expression(expression) => {
+                        self.compile_expression(expression)?
+                    }
+                };
                 self.emit(
-                    Instruction::InstanceOf {
-                        destination,
-                        source,
+                    Instruction::StaticCall {
                         class,
+                        method,
+                        binding,
                     },
                     line,
                 );
+                self.compile_arguments(arguments, line)
+            }
+            ast::ExpressionKind::InstanceOf { value, class } => {
+                let source = self.compile_expression(value)?;
+                let destination = self.allocate_register()?;
+                if matches!(class.kind, ast::ExpressionKind::Name(_)) {
+                    let class = self.object_class_name(class, line)?;
+                    self.emit(
+                        Instruction::InstanceOf {
+                            destination,
+                            source,
+                            class,
+                        },
+                        line,
+                    );
+                } else {
+                    let class = self.compile_expression(class)?;
+                    self.emit(
+                        Instruction::DynamicInstanceOf {
+                            destination,
+                            source,
+                            class,
+                        },
+                        line,
+                    );
+                }
                 Ok(destination)
             }
             _ => Err(self.error("Object expression not supported yet", line)),
         }
+    }
+
+    /// Method closures need a bound callable value, which is not represented yet.
+    fn reject_method_callable(
+        &self,
+        arguments: &ast::Arguments,
+        line: usize,
+    ) -> Result<(), CompileError> {
+        if matches!(arguments, ast::Arguments::FirstClassCallable) {
+            return Err(self.error("First-class method callables not supported yet", line));
+        }
+        Ok(())
     }
 
     /// Class targets may be literal identifiers, objects, or evaluated class-name strings.

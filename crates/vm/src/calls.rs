@@ -90,6 +90,7 @@ impl Vm {
     }
 
     /// Coercion of a reference updates its cell so the caller observes it.
+    #[inline]
     fn check_argument(
         &mut self,
         value: Value,
@@ -101,8 +102,49 @@ impl Vm {
         let Some(declaration_type) = declaration_type else {
             return Ok(value);
         };
+        self.check_typed_argument(value, declaration_type, function, index, parameter)
+    }
+
+    /// Keep class-type coercion off the ordinary untyped call's parameter-binding path.
+    fn check_typed_argument(
+        &mut self,
+        value: Value,
+        declaration_type: &phera_bytecode::Type,
+        function: &str,
+        index: usize,
+        parameter: &str,
+    ) -> NativeResult {
         let crate::diagnostics::SourceLocation { file, line } = self.location();
-        let result = types::coerce(value.deref().clone(),declaration_type,self.strict_types().into(),self)
+        let mut resolved_type = declaration_type.clone();
+        if let Some((scope, _)) = function.split_once("::") {
+            let parent = self
+                .classes
+                .get(scope)
+                .and_then(|class| class.parent.clone());
+            resolved_type.display = declaration_type
+                .display
+                .split_inclusive(['|', '&', '?'])
+                .map(|part| {
+                    let separator = part
+                        .chars()
+                        .last()
+                        .filter(|character| matches!(character, '|' | '&' | '?'));
+                    let name = part.trim_end_matches(['|', '&', '?']);
+                    let name = match name {
+                        "self" => scope,
+                        "parent" => parent.as_ref().map_or(name, |parent| parent.name.as_str()),
+                        _ => name,
+                    };
+                    format!(
+                        "{name}{}",
+                        separator
+                            .map(|separator| separator.to_string())
+                            .unwrap_or_default()
+                    )
+                })
+                .collect();
+        }
+        let result = types::coerce(value.deref().clone(),&resolved_type,self.strict_types().into(),self)
             .map_err(|error| match error {
                 NativeError::Throw { class,message } => {
                     let number = index+1;

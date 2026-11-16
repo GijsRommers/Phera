@@ -6,7 +6,7 @@ use phera_value::Value;
 
 impl Vm {
     /// Class types use inheritance membership; scalar types reuse PHP's existing coercion policy.
-    fn coerce_property(
+    pub(crate) fn coerce_property(
         &mut self,
         value: Value,
         property: &crate::classes::class::PropertyDefault,
@@ -88,24 +88,47 @@ impl Vm {
                         .ok_or_else(|| internal_error!("property class"))?;
                     let property = class.defaults.iter().find(|property| property.key == *key);
                     let name = crate::path_update::property_name(key);
+                    self.notice_static_instance_access(&class, &name);
                     if let Some(property) = property {
-                        if property.is_readonly {
+                        if property.is_readonly
+                            && !(steps.peek().is_some()
+                                && crate::property_storage::read(object, key)
+                                    .is_some_and(|value| value.deref().is_object()))
+                        {
+                            if mutation == Mutation::Bind {
+                                return Err(NativeError::error(format!(
+                                    "Cannot indirectly modify readonly property {}::${name}",
+                                    property.declaring
+                                )));
+                            }
                             let scope = self
                                 .current()
                                 .and_then(|frame| frame.method.as_ref())
                                 .map(|context| &context.scope);
                             if crate::property_storage::read(object, key).is_some()
                                 || steps.peek().is_some()
-                                || mutation == Mutation::Unset
                             {
+                                let action = if mutation == Mutation::Unset {
+                                    "unset"
+                                } else {
+                                    "modify"
+                                };
                                 return Err(NativeError::error(format!(
-                                    "Cannot modify readonly property {}::${name}",
+                                    "Cannot {action} readonly property {}::${name}",
                                     property.declaring
                                 )));
                             }
                             if scope.is_none_or(|scope| !scope.is_a(&property.declaring)) {
+                                let action = if mutation == Mutation::Unset {
+                                    "unset"
+                                } else {
+                                    "modify"
+                                };
+                                let from = scope
+                                    .map(|scope| format!("scope {}", scope.name))
+                                    .unwrap_or_else(|| "global scope".into());
                                 return Err(NativeError::error(format!(
-                                    "Cannot modify protected(set) readonly property {}::${name} from global scope",
+                                    "Cannot {action} protected(set) readonly property {}::${name} from {from}",
                                     property.declaring
                                 )));
                             }
@@ -152,5 +175,42 @@ impl Vm {
             }
         }
         Ok(())
+    }
+}
+
+impl Vm {
+    /// Static storage is never read or modified through an instance property access.
+    pub(crate) fn notice_static_instance_access(
+        &mut self,
+        class: &crate::classes::Class,
+        name: &str,
+    ) {
+        if class.static_properties.is_empty() {
+            return;
+        }
+        let scope = self
+            .current()
+            .and_then(|frame| frame.method.as_ref())
+            .map(|context| context.scope.name.as_str());
+        if class.defaults.iter().any(|property| {
+            property.name == name
+                && (property.visibility != phera_bytecode::Visibility::Private
+                    || scope == Some(property.declaring.as_str()))
+        }) {
+            return;
+        }
+        if class
+            .static_properties
+            .iter()
+            .any(|property| property.name == name)
+        {
+            self.diagnostic(
+                "Notice",
+                format!(
+                    "Accessing static property {}::${name} as non static",
+                    class.name
+                ),
+            );
+        }
     }
 }

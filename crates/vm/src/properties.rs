@@ -140,6 +140,14 @@ impl Vm {
             Err(_) if missing == Missing::Silent => return Ok(Value::Null),
             Err(error) => return Err(error),
         };
+        if missing == Missing::Warn
+            && let Some(class) = object
+                .class
+                .as_any()
+                .downcast_ref::<crate::classes::Class>()
+        {
+            self.notice_static_instance_access(class, &name);
+        }
         if let Some(value) = crate::property_storage::read(&object, &key) {
             return Ok(value.deref().clone());
         }
@@ -248,6 +256,13 @@ impl Vm {
                     .iter()
                     .rev()
                     .find(|property| property.name == name)
+            })
+            .or_else(|| {
+                class
+                    .static_properties
+                    .iter()
+                    .rev()
+                    .find(|property| property.name == name)
             });
         let property = property.filter(|property| {
             !(property.visibility == Visibility::Private
@@ -280,6 +295,14 @@ impl Vm {
                 property.declaring
             )));
         }
-        Ok(property.key.clone())
+        if class
+            .defaults
+            .iter()
+            .any(|candidate| std::ptr::eq(candidate, property))
+        {
+            Ok(property.key.clone())
+        } else {
+            Ok(ArrayKey::str(name))
+        }
     }
 }

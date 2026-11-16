@@ -24,6 +24,7 @@ impl Compiler<'_> {
             ExpressionKind::ClassConstant { .. }
             | ExpressionKind::New { .. }
             | ExpressionKind::MethodCall { .. }
+            | ExpressionKind::StaticCall { .. }
             | ExpressionKind::Clone { .. }
             | ExpressionKind::InstanceOf { .. } => self.compile_object_expression(expression, line),
             ExpressionKind::Variable(ast::Variable::Named(name)) if name == "this" => {

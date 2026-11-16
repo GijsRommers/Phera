@@ -29,6 +29,9 @@ pub(crate) fn coerce(
 ) -> NativeResult {
     let value = value.deref().clone();
     let mask = declaration_type.mask;
+    if mask == TypeMask::MIXED {
+        return Ok(value);
+    }
     let actual = match &value {
         Value::Null => TypeMask::NULL,
         Value::Bool(true) => TypeMask::TRUE,
@@ -40,16 +43,16 @@ pub(crate) fn coerce(
         Value::Object(_) => TypeMask::OBJECT,
         _ => TypeMask::default(),
     };
+    if vm.matches_class_type(&value, declaration_type) {
+        return Ok(value);
+    }
     if mask.intersects(actual)
         || mask.intersects(TypeMask::VOID) && value.is_null()
         || mask.intersects(TypeMask::ITERABLE) && value.is_array()
     {
         return Ok(value);
     }
-    if mask.intersects(TypeMask::CALLABLE)
-        && let Value::String(name) = &value
-        && vm.exists(&name.to_string_lossy())
-    {
+    if mask.intersects(TypeMask::CALLABLE) && vm.resolve_callable(&value).is_ok() {
         return Ok(value);
     }
     let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(vm);
@@ -68,7 +71,10 @@ pub(crate) fn coerce(
     Err(NativeError::type_error(format!(
         "must be of type {}, {} given",
         declaration_type.display,
-        value.type_name()
+        match &value {
+            Value::Object(object) => object.class.name().to_owned(),
+            _ => value.type_name(),
+        }
     )))
 }
 
