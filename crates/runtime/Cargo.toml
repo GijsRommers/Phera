@@ -6,6 +6,14 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+phera-bytecode.workspace = true
+phera-extension-api.workspace = true
+phera-ext-core.workspace = true
+phera-ext-standard.workspace = true
+phera-ext-ctype.workspace = true
+phera-ext-json.workspace = true
+tokio.workspace = true
+
 phera-compiler.workspace = true
 phera-vm.workspace = true
 
