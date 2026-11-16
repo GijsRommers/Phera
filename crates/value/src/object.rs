@@ -30,15 +30,41 @@ pub struct Object {
     pub(crate) properties: RefCell<PhpArray>,
     /// Native state for built-in classes (closures, PDO handles, ...).
     pub native: RefCell<Option<Box<dyn Any>>>,
+    /// Gives the id back to its pool when the object is freed. A separate
+    /// field rather than a `Drop` on `Object` itself, because a type with
+    /// its own `Drop` cannot have its fields moved out, and freeing long
+    /// chains of objects without recursion relies on moving the properties
+    /// out. The underscore says the field is never read: it exists only
+    /// to be dropped.
+    _lease: Option<IdLease>,
 }
 
 impl Object {
+    /// An object with an id chosen by the caller, which is never reused.
     pub fn new(id: u32, class: Rc<dyn ClassHandle>) -> Self {
         Object {
             id,
             class,
             properties: RefCell::new(PhpArray::new()),
             native: RefCell::new(None),
+            _lease: None,
+        }
+    }
+
+    /// An object with the next id from `ids`. The id returns to the pool
+    /// when the object is freed, so the pool never has to look for dead
+    /// objects.
+    pub fn allocate(ids: &Rc<ObjectIds>, class: Rc<dyn ClassHandle>) -> Self {
+        let lease = IdLease {
+            id: ids.take(),
+            pool: ids.clone(),
+        };
+        Object {
+            id: lease.id,
+            class,
+            properties: RefCell::new(PhpArray::new()),
+            native: RefCell::new(None),
+            _lease: Some(lease),
         }
     }
 
@@ -99,6 +125,66 @@ impl Object {
     /// The key under which PHP stores the protected property `name`.
     pub fn protected_key(name: &str) -> ArrayKey {
         ArrayKey::str(format!("\0*\0{name}").into_bytes())
+    }
+}
+
+/// The ids of a request's objects (the `#3` in `var_dump`).
+///
+/// PHP numbers objects from 1 and reuses the id of a freed object, most
+/// recently freed first. Scripts see this through `spl_object_id` and
+/// `var_dump`, so the order matters.
+#[derive(Debug, Default)]
+pub struct ObjectIds {
+    state: RefCell<IdState>,
+}
+
+#[derive(Debug, Default)]
+struct IdState {
+    /// The highest id handed out so far.
+    highest: u32,
+    /// Ids of freed objects; the last one pushed is reused first.
+    free: Vec<u32>,
+}
+
+impl ObjectIds {
+    pub fn new() -> Rc<Self> {
+        Rc::new(ObjectIds::default())
+    }
+
+    fn take(&self) -> u32 {
+        let mut state = self.state.borrow_mut();
+        if let Some(id) = state.free.pop() {
+            return id;
+        }
+        state.highest = state.highest.saturating_add(1);
+        state.highest
+    }
+
+    fn give_back(&self, id: u32) {
+        // Nothing borrows the state across a call that could free an
+        // object, so this cannot fail; if it ever did, the id would simply
+        // not be reused.
+        if let Ok(mut state) = self.state.try_borrow_mut() {
+            state.free.push(id);
+        }
+    }
+
+    /// How many objects are alive.
+    pub fn live(&self) -> usize {
+        let state = self.state.borrow();
+        state.highest as usize - state.free.len()
+    }
+}
+
+/// Returns an object's id to the pool when dropped.
+struct IdLease {
+    id: u32,
+    pool: Rc<ObjectIds>,
+}
+
+impl Drop for IdLease {
+    fn drop(&mut self) {
+        self.pool.give_back(self.id);
     }
 }
 
@@ -199,5 +285,46 @@ mod tests {
             head = Value::Object(Rc::new(node));
         }
         drop(head);
+    }
+
+    /// PHP gives a new object the id of the most recently freed one.
+    #[test]
+    fn freed_ids_are_reused_last_freed_first() {
+        let class: Rc<dyn ClassHandle> = Rc::new(Node);
+        let ids = ObjectIds::new();
+        let first = Object::allocate(&ids, class.clone());
+        let second = Object::allocate(&ids, class.clone());
+        let third = Object::allocate(&ids, class.clone());
+        assert_eq!((first.id, second.id, third.id), (1, 2, 3));
+
+        drop(first);
+        drop(second);
+        let reused: Vec<u32> = (0..3)
+            .map(|_| {
+                let object = Object::allocate(&ids, class.clone());
+                let id = object.id;
+                // Keep it alive so the next one cannot take the same id.
+                std::mem::forget(object);
+                id
+            })
+            .collect();
+        assert_eq!(reused, vec![2, 1, 4]);
+        assert_eq!(ids.live(), 4);
+    }
+
+    /// Ids come back through the non-recursive drop of a long chain too.
+    #[test]
+    fn a_dropped_chain_returns_every_id() {
+        let class: Rc<dyn ClassHandle> = Rc::new(Node);
+        let ids = ObjectIds::new();
+        let mut head = Value::Null;
+        for _ in 0..100_000 {
+            let node = Object::allocate(&ids, class.clone());
+            node.set(ArrayKey::str("next"), head);
+            head = Value::Object(Rc::new(node));
+        }
+        assert_eq!(ids.live(), 100_000);
+        drop(head);
+        assert_eq!(ids.live(), 0);
     }
 }
