@@ -31,6 +31,14 @@ impl Analyzer<'_> {
     }
 
     fn statement(&mut self, statement: &Statement, scope: &mut Scope) -> Flow {
+        let previous = self.context.known.clone();
+        self.context.known.extend(scope.known.iter().cloned());
+        let flow = self.statement_kind(statement, scope);
+        self.context.known = previous;
+        flow
+    }
+
+    fn statement_kind(&mut self, statement: &Statement, scope: &mut Scope) -> Flow {
         match &statement.kind {
             StatementKind::Namespace { .. }
             | StatementKind::Function(_)

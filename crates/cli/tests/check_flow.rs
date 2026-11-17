@@ -63,6 +63,9 @@ fn namespace_sensitive_guards_and_attributed_suppressions_are_honored() {
 class C {}
 if (defined('c::OPTIONAL')) { echo C::OPTIONAL; }
 if (class_exists('Optional')) { function f(Optional $x) {} }
+if (class_exists('OptionalCatch')) {
+    try { strlen('x'); } catch (OptionalCatch $error) {}
+}
 /** @psalm-suppress UndefinedFunction */
 #[Deprecated]
 function attributed() { missing(); }
