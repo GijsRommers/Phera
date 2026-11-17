@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 use std::fs;
 
 pub(crate) fn write(project: &Project, lock: &Lock, options: &Options) -> Result<()> {
+    project.validate_output_paths()?;
     let vendor = project.vendor_dir()?;
     let directory = vendor.join("composer");
     fs::create_dir_all(&directory)?;

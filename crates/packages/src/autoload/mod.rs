@@ -26,6 +26,7 @@ pub(super) struct Maps {
 }
 
 pub(crate) fn generate(project: &Project, packages: &[Package], options: &Options) -> Result<()> {
+    project.validate_output_paths()?;
     let vendor = project.vendor_dir()?;
     std::fs::create_dir_all(vendor.join("composer"))?;
     let mut maps = Maps::default();

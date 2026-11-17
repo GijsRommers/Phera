@@ -54,6 +54,29 @@ impl Project {
         }
     }
 
+    pub(crate) fn validate_output_paths(&self) -> Result<()> {
+        let vendor = self.vendor_dir()?;
+        crate::paths::inside(&vendor, "autoload.php")?;
+        let composer = crate::paths::inside(&vendor, "composer")?;
+        for name in [
+            "ClassLoader.php",
+            "InstalledVersions.php",
+            "LICENSE",
+            "installed.json",
+            "installed.php",
+            "autoload_psr4.php",
+            "autoload_namespaces.php",
+            "autoload_classmap.php",
+            "autoload_files.php",
+            "autoload_static.php",
+            "autoload_real.php",
+            "platform_check.php",
+        ] {
+            crate::paths::inside(&composer, name)?;
+        }
+        Ok(())
+    }
+
     pub fn config_str<'a>(&'a self, key: &str, default: &'a str) -> &'a str {
         self.data["config"][key].as_str().unwrap_or(default)
     }
