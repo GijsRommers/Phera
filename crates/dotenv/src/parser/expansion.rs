@@ -1,6 +1,6 @@
 //! Expand earlier assignments once. `HOST=${HOST:-localhost}` never looks ahead.
 
-use super::{FILE_LIMIT, ParseError, Parser, VALUE_LIMIT, name_byte, valid_name};
+use super::{FILE_LIMIT, ParseError, Parser, VALUE_LIMIT, invalid_name_byte, name_byte};
 
 impl Parser<'_> {
     pub(super) fn expand(&mut self, out: &mut Vec<u8>) -> Result<(), ParseError> {
@@ -37,7 +37,8 @@ impl Parser<'_> {
             out.push(b'$');
             return Ok(());
         }
-        if braced && !valid_name(name) {
+        if braced && let Some(offset) = invalid_name_byte(name) {
+            self.pos = name_start + offset;
             return Err(self.error("a variable name inside braces"));
         }
         let default =

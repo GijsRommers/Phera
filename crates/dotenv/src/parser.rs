@@ -143,7 +143,8 @@ impl<'a> Parser<'a> {
             self.pos += 1;
         }
         let name = &self.bytes[start..self.pos];
-        if !valid_name(name) {
+        if let Some(offset) = invalid_name_byte(name) {
+            self.pos = start + offset;
             return Err(self.error("a valid variable name"));
         }
         if let Some(quote) = quote {
@@ -262,15 +263,17 @@ fn name_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_') || !byte.is_ascii()
 }
 
-fn valid_name(name: &[u8]) -> bool {
+fn invalid_name_byte(name: &[u8]) -> Option<usize> {
     if name.is_empty() {
-        return false;
+        return Some(0);
     }
     if name.is_ascii() {
-        return name.iter().copied().all(name_byte);
+        return name.iter().position(|b| !name_byte(*b));
     }
-    static NAME: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"\A[\p{Ll}\p{Lu}\p{M}\p{N}_.]+\z").expect("valid name pattern")
-    });
-    std::str::from_utf8(name).is_ok_and(|s| NAME.is_match(s))
+    static INVALID: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"[^\p{Ll}\p{Lu}\p{M}\p{N}_.]").expect("valid name pattern"));
+    match std::str::from_utf8(name) {
+        Ok(name) => INVALID.find(name).map(|invalid| invalid.start()),
+        Err(error) => Some(error.valid_up_to()),
+    }
 }

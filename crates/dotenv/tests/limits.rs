@@ -27,3 +27,59 @@ fn ten_thousand_assignments_and_pathological_values() {
     assert_eq!(cycle.get(b"A"), Some(b"".as_slice()));
     assert_eq!(cycle.get(b"B"), Some(b"".as_slice()));
 }
+
+#[test]
+fn diagnostics_pinpoint_the_byte_without_echoing_input() {
+    let empty = Environment::default();
+    let path = Path::new("example.env");
+    for (input, line, column, name, expected) in [
+        (
+            b"\xef\xbb\xbf# heading\r\nAB\xffCD=private".as_slice(),
+            2,
+            3,
+            None,
+            "a valid variable name",
+        ),
+        (
+            b"A=\"private\r\ntext",
+            2,
+            5,
+            Some("A"),
+            "a closing value quote",
+        ),
+        (
+            b"A=\nB=${A:-${B}}",
+            2,
+            8,
+            Some("B"),
+            "a literal default followed by '}'",
+        ),
+        (
+            b"B=\"$(private)\"",
+            1,
+            5,
+            Some("B"),
+            "a variable expansion (command substitution is disabled)",
+        ),
+        (
+            b"A=private\x00tail",
+            1,
+            10,
+            Some("A"),
+            "a value without a NUL byte",
+        ),
+    ] {
+        let error = parse(path, input, &empty, &empty).err().unwrap();
+        assert_eq!(error.file, path);
+        assert_eq!(
+            (
+                error.line,
+                error.column,
+                error.name.as_deref(),
+                error.expected
+            ),
+            (line, column, name, expected)
+        );
+        assert!(!format!("{error:?} {error}").contains("private"));
+    }
+}

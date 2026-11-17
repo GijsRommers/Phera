@@ -46,7 +46,7 @@ impl Vm {
                     Value::String(_) => result.clone(),
                     Value::Bool(_) | Value::Int(_) | Value::Float(_)
                         if matches!(&method.body, MethodBody::User(f)
-                            if !f.unit.functions[f.index].strict_types) =>
+                            if !self.code.function(*f).strict_types) =>
                     {
                         Value::String(phera_value::to_php_string(&result, self)?)
                     }
