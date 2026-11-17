@@ -92,7 +92,7 @@ impl Vm {
             })?;
         let scope = self
             .current()
-            .and_then(|frame| frame.method.as_ref())
+            .and_then(|frame| frame.method())
             .map(|context| &context.scope);
         let allowed = match property.visibility {
             Visibility::Public => true,
@@ -249,7 +249,7 @@ impl Vm {
             .ok_or_else(|| internal_error!("property class"))?;
         let scope = self
             .current()
-            .and_then(|frame| frame.method.as_ref())
+            .and_then(|frame| frame.method())
             .map(|context| &context.scope);
         let property = scope
             .and_then(|scope| {

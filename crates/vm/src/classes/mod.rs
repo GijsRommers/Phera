@@ -6,13 +6,13 @@ mod declaration_errors;
 mod inheritance_checks;
 pub(crate) mod instantiation;
 mod linking;
-pub(crate) mod method_cache;
+pub(crate) mod method_lookup;
+pub(crate) mod method_table;
 mod methods;
 mod native;
 mod signatures;
 mod static_calls;
 mod static_known;
-pub(crate) mod static_sites;
 
 pub(crate) use class::{
     Class, ConstantState, Invocation, LinkedConstant, Method, MethodBody, MethodContext,

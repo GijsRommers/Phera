@@ -80,10 +80,12 @@ The `phera` binary ends up in `target/debug/phera`.
 
 ## 🧪 Testing
 
-Rather than chasing PHP's entire `.phpt` suite, Phera runs a hand-picked subset
-of it: the tests listed in [`tests/phpt/selected.txt`](tests/phpt/selected.txt),
-copied from php-src into `tests/upstream/`. `tests/fixtures/` holds Phera's own
-`.phpt` test programs.
+Phera runs the tests of PHP's own `.phpt` suite that it passes: those listed in
+[`tests/phpt/selected.txt`](tests/phpt/selected.txt), copied from php-src into
+`tests/upstream/`. [`tests/phpt/sweep.sh`](tests/phpt/sweep.sh) runs whole
+directories of php-src with real PHP and with Phera and adds every test that
+passes on both; [`tests/upstream/README.md`](tests/upstream/README.md) shows how
+far that is. `tests/fixtures/` holds Phera's own `.phpt` test programs.
 
 | Command | What it does |
 | --- | --- |

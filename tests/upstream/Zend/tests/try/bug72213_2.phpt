@@ -18,9 +18,9 @@ function test() {
 
 try {
     test();
-} catch (Throwable $e) {
-    echo $e::class, ': ', $e->getMessage(), "\n";
+} catch (Exception $e) {
+    echo "caught {$e->getMessage()}\n";
 }
 ?>
 --EXPECT--
-Exception: 1
+caught 1
