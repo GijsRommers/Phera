@@ -15,6 +15,11 @@ mod interval_diff;
 mod interval_iso;
 mod interval_registration;
 mod interval_serialization;
+mod period;
+#[cfg(test)]
+mod period_dates;
+mod period_registration;
+mod period_serialization;
 mod timezone;
 mod timezone_registration;
 mod transition_list;
@@ -49,6 +54,7 @@ pub fn register(registry: &mut Registry) {
     datetime_registration::register(registry);
     datetime_functions::register(registry);
     interval_registration::register(registry);
+    period_registration::register(registry);
 }
 
 fn receiver(this: This<'_>) -> Result<&Rc<Object>, NativeError> {
