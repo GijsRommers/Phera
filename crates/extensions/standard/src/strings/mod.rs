@@ -115,9 +115,14 @@ impl CaseSensitivity {
         if needle.is_empty() {
             return Some(0);
         }
-        haystack
-            .windows(needle.len())
-            .position(|candidate| self.equal(candidate, needle))
+        // One loop per case, so the sensitive search compares plain slices.
+        let mut candidates = haystack.windows(needle.len());
+        match self {
+            Self::Sensitive => candidates.position(|candidate| candidate == needle),
+            Self::Insensitive => {
+                candidates.position(|candidate| candidate.eq_ignore_ascii_case(needle))
+            }
+        }
     }
 }
 
