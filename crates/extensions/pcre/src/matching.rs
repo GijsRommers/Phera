@@ -7,7 +7,7 @@
 //! ```
 
 use crate::errors::Error;
-use crate::flags::{CaptureFlags, Order};
+use crate::flags::{self, CaptureFlags, Order};
 use crate::scan::Scanner;
 use crate::{cache, errors, matches};
 use phera_extension_api::{Context, NativeError, NativeResult, PhpArray, Value, args};
@@ -35,11 +35,11 @@ impl Function {
     }
 
     /// The shape of `$matches` that the low byte of `$flags` asks for.
-    fn order(self, flags: i64) -> Result<Order, NativeError> {
-        match (self, flags & 0xff) {
+    fn order(self, bits: i64) -> Result<Order, NativeError> {
+        match (self, bits & 0xff) {
             (Self::Match, 0) => Ok(Order::Single),
-            (Self::MatchAll, 0 | 1) => Ok(Order::Pattern),
-            (Self::MatchAll, 2) => Ok(Order::Set),
+            (Self::MatchAll, 0 | flags::PATTERN_ORDER) => Ok(Order::Pattern),
+            (Self::MatchAll, flags::SET_ORDER) => Ok(Order::Set),
             _ => Err(NativeError::value_error(format!(
                 "{}(): Argument #4 ($flags) must be a PREG_* constant",
                 self.name()

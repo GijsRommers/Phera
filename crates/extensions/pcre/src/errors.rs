@@ -1,5 +1,9 @@
 //! Request-local errors: `preg_match('//u', "\\xff"); preg_last_error()` returns 4.
 
+use pcre2_sys::{
+    PCRE2_ERROR_BADUTFOFFSET, PCRE2_ERROR_DEPTHLIMIT, PCRE2_ERROR_JIT_STACKLIMIT,
+    PCRE2_ERROR_MATCHLIMIT, PCRE2_ERROR_UTF8_ERR1, PCRE2_ERROR_UTF8_ERR21,
+};
 use phera_extension_api::{Context, NativeResult, Value};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -29,15 +33,16 @@ impl Error {
         }
     }
 }
+/// The PHP error for a PCRE2 match error, as `pcre_handle_exec_error` in
+/// php-src maps them.
 impl From<pcre2::Error> for Error {
     fn from(error: pcre2::Error) -> Self {
-        // PCRE2's public, stable execution error numbers; no sys/FFI calls.
         match error.code() {
-            -47 => Self::Backtrack,
-            -53 => Self::Recursion,
-            -23..=-3 => Self::Utf8,
-            -36 => Self::Utf8Offset,
-            -46 => Self::JitStack,
+            PCRE2_ERROR_MATCHLIMIT => Self::Backtrack,
+            PCRE2_ERROR_DEPTHLIMIT => Self::Recursion,
+            PCRE2_ERROR_UTF8_ERR21..=PCRE2_ERROR_UTF8_ERR1 => Self::Utf8,
+            PCRE2_ERROR_BADUTFOFFSET => Self::Utf8Offset,
+            PCRE2_ERROR_JIT_STACKLIMIT => Self::JitStack,
             _ => Self::Internal,
         }
     }
