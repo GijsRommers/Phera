@@ -16,6 +16,7 @@ phera-ext-json.workspace = true
 phera-ext-pcre.workspace = true
 phera-ext-pdo.workspace = true
 phera-ext-standard.workspace = true
+phera-ext-tokenizer.workspace = true
 phera-value.workspace = true
 phera-vm.workspace = true
 tokio.workspace = true

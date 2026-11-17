@@ -49,6 +49,7 @@ phera-ext-json = { path = "crates/extensions/json" }
 phera-ext-pcre = { path = "crates/extensions/pcre" }
 phera-ext-pdo = { path = "crates/extensions/pdo" }
 phera-ext-standard = { path = "crates/extensions/standard" }
+phera-ext-tokenizer = { path = "crates/extensions/tokenizer" }
 bytes = "1"
 http-body-util = "0.1"
 hyper = { version = "1", default-features = false, features = ["http1", "server"] }

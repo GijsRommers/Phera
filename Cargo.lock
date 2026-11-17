@@ -996,6 +996,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "phera-ext-tokenizer"
+version = "0.1.0"
+dependencies = [
+ "phera-extension-api",
+]
+
+[[package]]
 name = "phera-extension-api"
 version = "0.1.0"
 dependencies = [
@@ -1041,6 +1048,7 @@ dependencies = [
  "phera-ext-pcre",
  "phera-ext-pdo",
  "phera-ext-standard",
+ "phera-ext-tokenizer",
  "phera-extension-api",
  "phera-value",
  "phera-vm",
