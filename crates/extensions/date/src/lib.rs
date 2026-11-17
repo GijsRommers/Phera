@@ -10,6 +10,7 @@ mod parse_format;
 mod posix;
 mod register;
 pub mod resolve;
+mod sun;
 pub mod zone;
 
 use phera_extension_api::{Extension, FunctionEntry, Param, ParamType, Registry};

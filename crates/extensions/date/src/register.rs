@@ -77,7 +77,13 @@ pub fn functions(registry: &mut Registry) {
         Param::new("day", ParamType::Int).nullable().optional(),
         Param::new("year", ParamType::Int).nullable().optional(),
     ];
+    const SUN: &[Param] = &[
+        Param::new("timestamp", ParamType::Int),
+        Param::new("latitude", ParamType::Float),
+        Param::new("longitude", ParamType::Float),
+    ];
     for entry in [
+        FunctionEntry::sync("date_sun_info", SUN, crate::sun::info),
         FunctionEntry::sync("date", FORMAT, functions::date),
         FunctionEntry::sync("gmdate", FORMAT, functions::gmdate),
         FunctionEntry::sync("idate", FORMAT, functions::idate),
