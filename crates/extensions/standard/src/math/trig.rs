@@ -88,7 +88,15 @@ fn acosh(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
 }
 
 fn atanh(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(Value::Float(
-        args::float(arguments, 0).unwrap_or_default().atanh(),
-    ))
+    let value = args::float(arguments, 0).unwrap_or_default();
+    let magnitude = value.abs();
+    // Preserve signed zero, infinities and NaN/domain handling from libstd.
+    // Away from zero, log of the ratio avoids log1p's different rounding from
+    // PHP's libm atanh on glibc. Near zero, log1p avoids cancellation.
+    let result = if (0.5..1.0).contains(&magnitude) {
+        0.5 * ((1.0 + magnitude) / (1.0 - magnitude)).ln()
+    } else {
+        return Ok(Value::Float(value.atanh()));
+    };
+    Ok(Value::Float(result.copysign(value)))
 }

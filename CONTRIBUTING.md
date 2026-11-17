@@ -7,7 +7,7 @@ Install Rust with rustup; `rust-toolchain.toml` selects **1.99.1**, including
 rustfmt and Clippy. This matches development and supports edition 2024 and
 let-chains. A C compiler is needed for the bundled static PCRE2 build.
 
-Install PHP 8.5 with json, pcre, ctype, pdo_pgsql, pdo_mysql and mbstring, then start
+Install PHP 8.5 with json, pcre, ctype, pdo_pgsql, pdo_mysql, mbstring and tokenizer, then start
 PostgreSQL 17 and MySQL 8.4 using the commands in the
 [PDO tests README](crates/extensions/pdo/tests/README.md). Wait for both to accept
 connections. Use only the dedicated ports 54329 and 33069; leave port 5432 alone.
