@@ -1,7 +1,7 @@
 //! One-shot hashing: `hash_hmac('sha256', 'message', 'key')` authenticates bytes.
 use crate::{
-    algorithms::{Algorithm, NAMES},
-    options,
+    algorithms::{ALGORITHMS, Algorithm},
+    options::{self, Options},
 };
 use phera_extension_api::{Context, NativeError, NativeResult, PhpArray, Value, args};
 use subtle::ConstantTimeEq;
@@ -14,14 +14,14 @@ pub fn output(bytes: Vec<u8>, binary: bool) -> Value {
     }
 }
 pub fn hash(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let mut algorithm = options::algorithm(arguments, "hash", false)?;
-    options::apply(context, &mut algorithm, arguments.get(3), "hash")?;
+    let algorithm = options::algorithm(args::bytes(arguments, 0), "hash")?;
+    let options = Options::read(context, algorithm, arguments.get(3), "hash")?;
     Ok(output(
-        algorithm.digest(args::bytes(arguments, 1)),
+        algorithm.digest_with(&options, args::bytes(arguments, 1)),
         args::bool(arguments, 2).unwrap_or(false),
     ))
 }
-pub fn hmac(algorithm: &Algorithm, data: &[u8], key: &[u8]) -> Vec<u8> {
+pub fn hmac(algorithm: Algorithm, data: &[u8], key: &[u8]) -> Vec<u8> {
     let size = algorithm
         .block_size()
         .expect("validated cryptographic hash");
@@ -41,10 +41,10 @@ pub fn hmac(algorithm: &Algorithm, data: &[u8], key: &[u8]) -> Vec<u8> {
     algorithm.digest(&outer)
 }
 pub fn hash_hmac(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let algorithm = options::algorithm(arguments, "hash_hmac", true)?;
+    let algorithm = options::cryptographic_algorithm(args::bytes(arguments, 0), "hash_hmac")?;
     Ok(output(
         hmac(
-            &algorithm,
+            algorithm,
             args::bytes(arguments, 1),
             args::bytes(arguments, 2),
         ),
@@ -52,17 +52,20 @@ pub fn hash_hmac(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     ))
 }
 pub fn algos(_: &mut dyn Context, _: &[Value]) -> NativeResult {
-    list(false)
+    list(ALGORITHMS.iter().map(|&(name, _)| name))
 }
 pub fn hmac_algos(_: &mut dyn Context, _: &[Value]) -> NativeResult {
-    list(true)
+    list(
+        ALGORITHMS
+            .iter()
+            .filter(|(_, algorithm)| algorithm.block_size().is_some())
+            .map(|&(name, _)| name),
+    )
 }
-fn list(crypto: bool) -> NativeResult {
+fn list(names: impl Iterator<Item = &'static str>) -> NativeResult {
     let mut list = PhpArray::new();
-    for name in NAMES {
-        if !crypto || Algorithm::find(name.as_bytes()).is_some_and(|a| a.block_size().is_some()) {
-            list.push(Value::from(*name))?;
-        }
+    for name in names {
+        list.push(Value::from(name))?;
     }
     Ok(Value::from(list))
 }
@@ -87,21 +90,19 @@ pub fn equals(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     )))
 }
 pub fn md5(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    use digest::Digest;
     Ok(output(
-        md5::Md5::digest(args::bytes(arguments, 0)).to_vec(),
+        Algorithm::Md5.digest(args::bytes(arguments, 0)),
         args::bool(arguments, 1).unwrap_or(false),
     ))
 }
 pub fn sha1(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    use digest::Digest;
     Ok(output(
-        sha1::Sha1::digest(args::bytes(arguments, 0)).to_vec(),
+        Algorithm::Sha1.digest(args::bytes(arguments, 0)),
         args::bool(arguments, 1).unwrap_or(false),
     ))
 }
 pub fn pbkdf2(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let mut algorithm = options::algorithm(arguments, "hash_pbkdf2", true)?;
+    let algorithm = options::cryptographic_algorithm(args::bytes(arguments, 0), "hash_pbkdf2")?;
     let iterations = args::int(arguments, 3).unwrap_or_default();
     let length = args::int(arguments, 4).unwrap_or_default();
     if iterations <= 0 {
@@ -114,7 +115,8 @@ pub fn pbkdf2(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
             "hash_pbkdf2(): Argument #5 ($length) must be greater than or equal to 0",
         ));
     }
-    options::apply(context, &mut algorithm, arguments.get(6), "hash_pbkdf2")?;
+    // A cryptographic algorithm takes no seed, but PHP still checks the options.
+    Options::read(context, algorithm, arguments.get(6), "hash_pbkdf2")?;
     let binary = args::bool(arguments, 5).unwrap_or(false);
     let size = algorithm.digest(&[]).len();
     let length = if length == 0 {
@@ -131,10 +133,10 @@ pub fn pbkdf2(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     for index in 1..=bytes.div_ceil(size) {
         let mut input = args::bytes(arguments, 2).to_vec();
         input.extend_from_slice(&(index as u32).to_be_bytes());
-        let mut block = hmac(&algorithm, &input, password);
+        let mut block = hmac(algorithm, &input, password);
         let mut sum = block.clone();
         for _ in 1..iterations {
-            block = hmac(&algorithm, &block, password);
+            block = hmac(algorithm, &block, password);
             for (a, b) in sum.iter_mut().zip(&block) {
                 *a ^= b;
             }
@@ -149,7 +151,7 @@ pub fn pbkdf2(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     }
 }
 pub fn hkdf(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let algorithm = options::algorithm(arguments, "hash_hkdf", true)?;
+    let algorithm = options::cryptographic_algorithm(args::bytes(arguments, 0), "hash_hkdf")?;
     let key = args::bytes(arguments, 1);
     if key.is_empty() {
         return Err(NativeError::value_error(
@@ -170,13 +172,13 @@ pub fn hkdf(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         )));
     }
     let length = if length == 0 { size } else { length as usize };
-    let extracted = hmac(&algorithm, key, args::bytes(arguments, 4));
+    let extracted = hmac(algorithm, key, args::bytes(arguments, 4));
     let mut result = Vec::with_capacity(length);
     let mut previous = Vec::new();
     for i in 1..=length.div_ceil(size) {
         previous.extend_from_slice(args::bytes(arguments, 3));
         previous.push(i as u8);
-        previous = hmac(&algorithm, &previous, &extracted);
+        previous = hmac(algorithm, &previous, &extracted);
         result.extend_from_slice(&previous);
     }
     result.truncate(length);

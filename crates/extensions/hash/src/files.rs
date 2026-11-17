@@ -3,7 +3,7 @@ use crate::{
     algorithms::Algorithm,
     functions,
     incremental::{self, State},
-    options,
+    options::{self, Options},
 };
 use phera_extension_api::{Context, LocalFuture, NativeError, NativeResult, Value, args};
 use tokio::io::AsyncReadExt;
@@ -69,9 +69,9 @@ pub fn hash_file(
     arguments: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
-        let mut algorithm = options::algorithm(&arguments, "hash_file", false)?;
-        options::apply(context, &mut algorithm, arguments.get(3), "hash_file")?;
-        let mut state = State::new(algorithm, None);
+        let algorithm = options::algorithm(args::bytes(&arguments, 0), "hash_file")?;
+        let options = Options::read(context, algorithm, arguments.get(3), "hash_file")?;
+        let mut state = State::new(algorithm, options, None);
         if !read(
             context,
             "hash_file",
@@ -94,8 +94,10 @@ pub fn hmac_file(
     arguments: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
-        let algorithm = options::algorithm(&arguments, "hash_hmac_file", true)?;
-        let mut state = State::new(algorithm, Some(args::bytes(&arguments, 2).to_vec()));
+        let algorithm =
+            options::cryptographic_algorithm(args::bytes(&arguments, 0), "hash_hmac_file")?;
+        let key = Some(args::bytes(&arguments, 2).to_vec());
+        let mut state = State::new(algorithm, Options::default(), key);
         if !read(
             context,
             "hash_hmac_file",
@@ -114,30 +116,23 @@ pub fn hmac_file(
     })
 }
 pub fn md5_file(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    standalone(context, arguments, "md5")
+    standalone(context, arguments, "md5_file", Algorithm::Md5)
 }
 pub fn sha1_file(
     context: &mut dyn Context,
     arguments: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
-    standalone(context, arguments, "sha1")
+    standalone(context, arguments, "sha1_file", Algorithm::Sha1)
 }
 fn standalone<'a>(
     context: &'a mut dyn Context,
     arguments: Vec<Value>,
-    name: &'static str,
+    function: &'static str,
+    algorithm: Algorithm,
 ) -> LocalFuture<'a, NativeResult> {
     Box::pin(async move {
-        let mut state = State::new(Algorithm::find(name.as_bytes()).expect("known hash"), None);
-        if !read(
-            context,
-            &format!("{name}_file"),
-            args::bytes(&arguments, 0),
-            1,
-            &mut state,
-        )
-        .await?
-        {
+        let mut state = State::new(algorithm, Options::default(), None);
+        if !read(context, function, args::bytes(&arguments, 0), 1, &mut state).await? {
             return Ok(Value::Bool(false));
         }
         Ok(functions::output(

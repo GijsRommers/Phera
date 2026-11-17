@@ -1,18 +1,23 @@
 //! `$h=hash_init('sha256'); hash_update($h,'a'); hash_final(hash_copy($h));`.
-use crate::{algorithms::Algorithm, functions, options};
+use crate::{
+    algorithms::Algorithm,
+    functions,
+    options::{self, Options},
+};
 use digest::DynDigest;
 use phera_extension_api::{Context, NativeError, NativeResult, Object, PhpArray, Value, args};
 
 #[derive(Clone)]
 pub struct State {
-    pub algorithm: Algorithm,
+    algorithm: Algorithm,
+    options: Options,
     digest: Option<Box<dyn DynDigest>>,
     buffered: Vec<u8>,
     key: Option<Vec<u8>>,
 }
 impl State {
-    pub fn new(algorithm: Algorithm, key: Option<Vec<u8>>) -> Self {
-        let mut digest = algorithm.crypto();
+    pub fn new(algorithm: Algorithm, options: Options, key: Option<Vec<u8>>) -> Self {
+        let mut digest = algorithm.streaming();
         let key = key.map(|key| {
             let size = algorithm.block_size().expect("validated HMAC");
             let key = if key.len() > size {
@@ -33,6 +38,7 @@ impl State {
         });
         Self {
             algorithm,
+            options,
             digest,
             buffered: Vec::new(),
             key,
@@ -54,7 +60,7 @@ impl State {
             inner.extend_from_slice(&self.buffered);
             self.algorithm.digest(&inner)
         } else {
-            self.algorithm.digest(&self.buffered)
+            self.algorithm.digest_with(&self.options, &self.buffered)
         };
         if let Some(mut outer) = self.key {
             outer.extend_from_slice(&inner);
@@ -72,7 +78,7 @@ pub fn create(context: &mut dyn Context, state: State) -> NativeResult {
     Ok(value)
 }
 pub fn init(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let mut algorithm = options::algorithm(arguments, "hash_init", false)?;
+    let algorithm = options::algorithm(args::bytes(arguments, 0), "hash_init")?;
     let key = if args::int(arguments, 1).unwrap_or(0) & 1 != 0 {
         if algorithm.block_size().is_none() {
             return Err(NativeError::value_error(
@@ -89,8 +95,8 @@ pub fn init(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     } else {
         None
     };
-    options::apply(context, &mut algorithm, arguments.get(3), "hash_init")?;
-    create(context, State::new(algorithm, key))
+    let options = Options::read(context, algorithm, arguments.get(3), "hash_init")?;
+    create(context, State::new(algorithm, options, key))
 }
 pub fn object<'a>(arguments: &'a [Value], function: &str) -> Result<&'a Object, NativeError> {
     if let Some(object) = args::object(arguments, 0)
