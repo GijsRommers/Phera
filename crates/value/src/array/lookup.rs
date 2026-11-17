@@ -16,13 +16,14 @@ impl PhpArray {
                     .filter(|&position| values.get(position).is_some_and(Option::is_some)),
                 ArrayKey::String(_) => None,
             },
-            Storage::Map(map) => match &map.positions {
+            Storage::Map(map) => match &map.index {
                 None => map
                     .entries
                     .iter()
                     .position(|entry| entry.value.is_some() && &entry.key == key),
-                Some(table) => table
-                    .find(map.hasher.hash_one(key), |position| {
+                Some(index) => index
+                    .positions
+                    .find(index.hasher.hash_one(key), |position| {
                         &map.entries[*position as usize].key == key
                     })
                     .map(|position| *position as usize),

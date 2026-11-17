@@ -84,7 +84,7 @@ fn storage_sizes() {
     assert_eq!(size_of::<Value>(), 16);
     assert_eq!(size_of::<Option<Value>>(), 16);
     assert_eq!(size_of::<Entry>(), 32);
-    assert_eq!(size_of::<PhpArray>(), 48);
+    assert_eq!(size_of::<PhpArray>(), 56);
     println!(
         "PhpArray={} Value={} Option<Value>={} Entry={}",
         size_of::<PhpArray>(),

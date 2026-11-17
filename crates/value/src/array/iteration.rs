@@ -1,4 +1,5 @@
 //! Owned keys let lists compute their keys without allocating backing storage.
+//! Positional accessors inline so value-only callers can discard the computed key.
 
 use super::storage::Storage;
 use super::{ArrayKey, PhpArray};

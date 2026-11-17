@@ -153,7 +153,7 @@ fn every_lookup_agrees_with_a_plain_list_of_pairs() {
         if before == 1 && after == 0 && operation != 15 {
             demotions += 1;
         }
-        if matches!(&array.storage, Storage::Map(map) if map.positions.is_some()) {
+        if matches!(&array.storage, Storage::Map(map) if map.index.is_some()) {
             hashed_visits += 1;
         }
         if after == 0 && array.dead > 0 {

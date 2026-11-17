@@ -15,11 +15,11 @@ pub(super) struct Entry {
     pub value: Option<Value>,
 }
 
-/// Keeping map-only data behind a box avoids charging lists for the hash table.
+/// Keep entry vectors inline; only large maps allocate separate index metadata.
 #[derive(Clone)]
 pub(super) enum Storage {
     List(Vec<Option<Value>>),
-    Map(Box<OrderedMap>),
+    Map(OrderedMap),
 }
 
 impl Default for Storage {
@@ -31,7 +31,13 @@ impl Default for Storage {
 #[derive(Clone)]
 pub(super) struct OrderedMap {
     pub entries: Vec<Entry>,
-    pub positions: Option<HashTable<u32>>,
+    pub index: Option<Box<Index>>,
+}
+
+/// Small maps need neither an index allocation nor a per-array hasher.
+#[derive(Clone)]
+pub(super) struct Index {
+    pub positions: HashTable<u32>,
     pub hasher: RandomState,
 }
 
@@ -71,7 +77,7 @@ impl Storage {
                     value,
                 })
                 .collect();
-            *self = Self::Map(Box::new(OrderedMap::new(entries)));
+            *self = Self::Map(OrderedMap::new(entries));
         }
     }
 
@@ -98,8 +104,7 @@ impl OrderedMap {
     pub fn new(entries: Vec<Entry>) -> Self {
         let mut map = Self {
             entries,
-            positions: None,
-            hasher: RandomState::default(),
+            index: None,
         };
         map.reindex();
         map
@@ -107,20 +112,21 @@ impl OrderedMap {
 
     /// The table stores positions only; equality and rehashing consult the sole key copy.
     pub fn reindex(&mut self) {
-        self.positions = if self.entries.len() <= SCAN_LIMIT {
+        self.index = if self.entries.len() <= SCAN_LIMIT {
             None
         } else {
-            let mut table = HashTable::with_capacity(self.entries.len());
+            let hasher = RandomState::default();
+            let mut positions = HashTable::with_capacity(self.entries.len());
             for (position, entry) in self.entries.iter().enumerate() {
                 if entry.value.is_some() {
-                    table.insert_unique(
-                        self.hasher.hash_one(&entry.key),
+                    positions.insert_unique(
+                        hasher.hash_one(&entry.key),
                         u32::try_from(position).expect("array position fits u32"),
-                        |index| self.hasher.hash_one(&self.entries[*index as usize].key),
+                        |index| hasher.hash_one(&self.entries[*index as usize].key),
                     );
                 }
             }
-            Some(table)
+            Some(Box::new(Index { positions, hasher }))
         };
     }
 
@@ -131,11 +137,11 @@ impl OrderedMap {
             key,
             value: Some(value),
         });
-        match &mut self.positions {
-            Some(table) => {
-                let hash = self.hasher.hash_one(&self.entries[position as usize].key);
-                table.insert_unique(hash, position, |index| {
-                    self.hasher.hash_one(&self.entries[*index as usize].key)
+        match &mut self.index {
+            Some(index) => {
+                let hash = index.hasher.hash_one(&self.entries[position as usize].key);
+                index.positions.insert_unique(hash, position, |position| {
+                    index.hasher.hash_one(&self.entries[*position as usize].key)
                 });
             }
             None if self.entries.len() > SCAN_LIMIT => self.reindex(),
@@ -145,11 +151,11 @@ impl OrderedMap {
 
     /// Remove the position before clearing its key, so lookups never see a dead entry.
     pub fn remove_index(&mut self, key: &ArrayKey) {
-        if let Some(table) = &mut self.positions {
-            let hash = self.hasher.hash_one(key);
-            if let Ok(entry) =
-                table.find_entry(hash, |index| self.entries[*index as usize].key == *key)
-            {
+        if let Some(index) = &mut self.index {
+            let hash = index.hasher.hash_one(key);
+            if let Ok(entry) = index.positions.find_entry(hash, |position| {
+                self.entries[*position as usize].key == *key
+            }) {
                 entry.remove();
             }
         }
