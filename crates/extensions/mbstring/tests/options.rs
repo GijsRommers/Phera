@@ -160,6 +160,20 @@ fn option_matrix() {
             vec![Value::from("Subject"), Value::from(input)],
         );
     }
+    // Encoded words are folded with `$newline` as given, bytes and all.
+    for newline in [b"\n".to_vec(), b"\xFF\r\n".to_vec(), b"\r\n\t".to_vec()] {
+        for scheme in ["B", "Q"] {
+            m.case(
+                "mb_encode_mimeheader",
+                vec![
+                    Value::from("é".repeat(40)),
+                    Value::from("UTF-8"),
+                    Value::from(scheme),
+                    Value::from(newline.clone()),
+                ],
+            );
+        }
+    }
     m.compare("mbstring-options");
 }
 #[test]

@@ -135,17 +135,14 @@ fn mb_encode_mimeheader(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     let scheme = Scheme::parse(
         args::string(a, 2).map_or(mail.header_encoding.as_bytes(), |scheme| scheme.as_bytes()),
     );
-    let newline = args::string(a, 3).map_or_else(
-        || b"\r\n".to_vec(),
-        |newline| newline.to_string_lossy().into_bytes(),
-    );
+    let newline = args::string(a, 3).map_or(&b"\r\n"[..], |newline| newline.as_bytes());
     let indent = args::int(a, 4).unwrap_or(0).max(0) as usize;
     let source = args::bytes(a, 0);
     let needs_encoding =
         |byte: &u8| !matches!(byte, 32..=126) || matches!(byte, b'=' | b'?' | b'_');
     let Some(first_special) = source.iter().position(needs_encoding) else {
         if indent + source.len() > LINE_LENGTH {
-            let mut output = newline.clone();
+            let mut output = newline.to_vec();
             output.push(b' ');
             output.extend_from_slice(source);
             return Ok(Value::from(output));
@@ -163,7 +160,7 @@ fn mb_encode_mimeheader(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     let overhead = label.len() + 7;
     let mut column = plain + indent;
     if column + overhead + 4 > LINE_LENGTH {
-        output.extend_from_slice(&newline);
+        output.extend_from_slice(newline);
         output.push(b' ');
         column = 1;
     }
@@ -175,7 +172,7 @@ fn mb_encode_mimeheader(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
         if !pending.is_empty() && column + overhead + scheme.encode(&candidate).len() > LINE_LENGTH
         {
             output.extend_from_slice(scheme.word(&pending, label).as_bytes());
-            output.extend_from_slice(&newline);
+            output.extend_from_slice(newline);
             output.push(b' ');
             column = 1;
             pending.clear();
