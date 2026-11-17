@@ -1,4 +1,6 @@
 //! Round-trip every representable scalar through every advertised character encoding.
+mod support;
+
 use phera_ext_mbstring::Mbstring;
 use phera_extension_api::testing::{TestContext, call, oracle};
 use phera_extension_api::{Extension, Registry, Value};
@@ -109,4 +111,47 @@ for ($cp = 0; $cp <= 0x10FFFF; $cp++) {{
         examples.join("\n")
     );
     println!("Encoding round trips: {comparisons} calls, zero mismatches");
+}
+
+/// PHP 8.5 lists 79 encodings and Phera 48. Every encoding Phera lists must
+/// be in PHP's list, in the same order, with the same aliases and MIME name,
+/// and each alias must name the same encoding in PHP.
+#[test]
+fn listed_encodings_exist_in_php_with_the_same_names() {
+    let mut matrix = support::Matrix::new();
+    let Ok(Value::Array(listed)) = call(
+        &matrix.registry,
+        &mut matrix.context,
+        "mb_list_encodings",
+        vec![],
+    ) else {
+        panic!("mb_list_encodings returns an array");
+    };
+    let names: Vec<Value> = listed.iter().map(|(_, name)| name.clone()).collect();
+    let phera_list = oracle::php_literal(&Value::from(listed.as_ref().clone()));
+    matrix.case_as(
+        &format!(
+            "array_values(array_filter(mb_list_encodings(), \
+             fn($e) => in_array($e, {phera_list}, true)))"
+        ),
+        "mb_list_encodings",
+        vec![],
+    );
+    for name in &names {
+        matrix.case("mb_encoding_aliases", vec![name.clone()]);
+        matrix.case("mb_preferred_mime_name", vec![name.clone()]);
+        let Ok(Value::Array(aliases)) = call(
+            &matrix.registry,
+            &mut matrix.context,
+            "mb_encoding_aliases",
+            vec![name.clone()],
+        ) else {
+            panic!("mb_encoding_aliases returns an array");
+        };
+        for (_, alias) in aliases.iter() {
+            // An alias names the same encoding: the same canonical aliases.
+            matrix.case("mb_encoding_aliases", vec![alias.clone()]);
+        }
+    }
+    matrix.compare("mbstring-encoding-names");
 }

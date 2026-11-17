@@ -30,6 +30,12 @@ impl Matrix {
                 .collect::<Vec<_>>()
                 .join(",")
         );
+        self.case_as(&expression, function, arguments);
+    }
+
+    /// A case whose PHP side runs `expression` instead of the plain call,
+    /// for a result that can only be compared after PHP has adapted it.
+    pub fn case_as(&mut self, expression: &str, function: &str, arguments: Vec<Value>) {
         self.script
             .push_str(&format!("run('case', fn() => {expression});\n"));
         self.context.diagnostics.entries.clear();
@@ -41,7 +47,7 @@ impl Matrix {
             &self.context.output,
             &self.context.diagnostics,
         ));
-        self.labels.push(expression);
+        self.labels.push(expression.to_string());
     }
     pub fn compare(self, name: &str) {
         let php = oracle::run_php(name, &self.script).expect("PHP 8.5 required");

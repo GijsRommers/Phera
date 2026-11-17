@@ -125,8 +125,12 @@ const fn names(name: &'static str, aliases: &'static [&'static str], mime: &'sta
 }
 
 impl Encoding {
-    /// In the order `mb_list_encodings()` returns them.
+    /// In the order `mb_list_encodings()` returns them, which is PHP's.
     pub const ALL: [Encoding; 48] = [
+        Self::Base64,
+        Self::Uuencode,
+        Self::HtmlEntities,
+        Self::QuotedPrintable,
         Self::SevenBit,
         Self::EightBit,
         Self::Ucs4,
@@ -171,10 +175,6 @@ impl Encoding {
         Self::Windows1251,
         Self::Koi8R,
         Self::Koi8U,
-        Self::Base64,
-        Self::Uuencode,
-        Self::HtmlEntities,
-        Self::QuotedPrintable,
     ];
 
     fn names(self) -> Names {
