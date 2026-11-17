@@ -16,17 +16,27 @@ pub fn escape(_: &mut dyn Context, _: Option<&Rc<Object>>, arguments: &[Value]) 
     Ok(Value::from(escaped))
 }
 
-pub fn version(_: &mut dyn Context, _: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
-    let mut values = PhpArray::new();
-    values.insert(
-        ArrayKey::str("versionString"),
-        Value::from(phera_sqlite::version()),
-    );
-    values.insert(
-        ArrayKey::str("versionNumber"),
-        Value::Int(i64::from(phera_sqlite::version_number())),
-    );
-    Ok(Value::from(values))
+pub fn version<'a>(
+    _: &'a mut dyn Context,
+    _: Option<Rc<Object>>,
+    _: Vec<Value>,
+) -> phera_extension_api::LocalFuture<'a, NativeResult> {
+    Box::pin(async move {
+        let (version, number) = tokio_version().await?;
+        let mut values = PhpArray::new();
+        values.insert(ArrayKey::str("versionString"), Value::from(version));
+        values.insert(
+            ArrayKey::str("versionNumber"),
+            Value::Int(i64::from(number)),
+        );
+        Ok(Value::from(values))
+    })
+}
+
+async fn tokio_version() -> Result<(String, i32), phera_extension_api::NativeError> {
+    phera_sqlite::version_info()
+        .await
+        .map_err(|error| phera_extension_api::NativeError::error(error.message))
 }
 
 pub fn exceptions(

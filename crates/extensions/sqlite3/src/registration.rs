@@ -89,7 +89,7 @@ const DATABASE: &[MethodEntry] = &[
         ],
         query::single,
     ),
-    MethodEntry::public("version", &[], utility::version).static_(),
+    MethodEntry::public_async("version", &[], utility::version).static_(),
     MethodEntry::public(
         "escapeString",
         &[Param::new("string", ParamType::String)],

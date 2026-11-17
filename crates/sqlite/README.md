@@ -37,7 +37,7 @@ therefore consume one database thread per open SQLite connection.
 
 ## Version and compile options
 
-On the development machine, both PHP 8.5.12 (`php -n`) and Phera report SQLite
+On 2026-11-17 on the development machine, both PHP 8.5.12 (`php -n`) and Phera report SQLite
 **3.54.1**. The complete observed options and selected pragma defaults are in
 [php-compile-options.txt](php-compile-options.txt) and
 [phera-compile-options.txt](phera-compile-options.txt). These are dated development
@@ -72,7 +72,7 @@ combination. Remaining concrete differences are listed separately.
 | PDO SQLite driver / `Pdo\Sqlite` | PARTIAL | DSNs, native bindings, numeric/text/blob/null values, stringify, quoting, inserts, row counts, multi-statement exec, transactions, timeouts, metadata, supported attributes, subclass/factory and constants. Callbacks, blob streams and explain-mode mutation are absent. |
 | `SQLite3` | PARTIAL | `__construct`, `open`, `close`, `exec`, `query`, `querySingle`, `prepare`, `escapeString`, `lastInsertRowID`, error getters, `changes`, `busyTimeout`, exception/extended-code switches, `version`, loading refusal, basic `backup`. See backup, callbacks and query-result-use gaps below. |
 | `SQLite3Stmt` | PARTIAL | `bindValue`, `bindParam`, `execute`, `reset`, `clear`, `close`, `paramCount`, `readOnly`, `getSQL`, `busy`, `explain`, private construction and constants. `setExplain`, some diagnostic edges and SQL text truncation remain. |
-| `SQLite3Result` | DONE for compared operations | `fetchArray`, `fetchAll`, `numColumns`, `columnName`, `columnType`, `reset`, `finalize`, private construction; NUM/ASSOC/BOTH and reset/re-execution behavior. Diagnostic caveat below applies. |
+| `SQLite3Result` | PARTIAL | `fetchArray`, `fetchAll`, `numColumns`, `columnName`, `columnType`, `reset`, `finalize`, private construction; NUM/ASSOC/BOTH and reset/re-execution behavior. Diagnostic caveat below applies. |
 | `SQLite3Exception` | DONE | Native exception class, SQLite codes and warning/exception dispatch. |
 | Constants | DONE | `SQLITE3_*`, SQLite3 authorizer constants, PDO legacy constants/deprecations, `Pdo\Sqlite` constants and statement explain constants. |
 
@@ -149,7 +149,9 @@ The release CLI is selected with `PHERA_BIN`; PHP is resolved by the shared
   performance comparison.
 * Engine regressions exercise 100 cursor-release cycles, independent memory
   databases, statement retention and explicit close invalidation.
-* Workspace tests excluding the service-dependent PDO package pass locally.
+* 313 workspace tests excluding the service-dependent PDO package pass locally.
+  After the constructor diagnostic correction, all 48 VM tests pass again.
+  Formatting, workspace Clippy and the no-unsafe guard pass locally.
   Existing PostgreSQL/MySQL integration and pool tests require CI's owned services;
   no port 5432 was contacted. A combined Cargo command accidentally entered the
   existing PDO availability probes on ports 54329/33069 and was interrupted before

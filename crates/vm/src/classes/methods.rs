@@ -135,6 +135,14 @@ impl Vm {
 
     /// Visibility is checked against the lexical scope, never the receiver's class alone.
     pub(crate) fn check_method_visibility(&self, method: &Method) -> Result<(), NativeError> {
+        self.check_invocation_visibility(method, Invocation::Method)
+    }
+
+    pub(crate) fn check_invocation_visibility(
+        &self,
+        method: &Method,
+        invocation: Invocation,
+    ) -> Result<(), NativeError> {
         let initializer_scope = self
             .initializer_scope
             .as_ref()
@@ -166,7 +174,7 @@ impl Vm {
         let from = scope
             .map(|scope| format!("scope {}", scope.name))
             .unwrap_or_else(|| "global scope".into());
-        let kind = if method.name.eq_ignore_ascii_case("__construct") {
+        let kind = if invocation == Invocation::Constructor {
             ""
         } else {
             "method "

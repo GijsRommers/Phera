@@ -75,7 +75,7 @@ impl Vm {
         else {
             return Ok(None);
         };
-        self.check_method_visibility(&method)?;
+        self.check_invocation_visibility(&method, invocation)?;
         let scope = self
             .classes
             .get(&method.declaring)
