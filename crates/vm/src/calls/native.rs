@@ -49,7 +49,12 @@ impl Vm {
         origin: crate::calls::callback_binding::ArgumentOrigin,
     ) -> NativeResult {
         let previous = std::mem::replace(&mut self.argument_origin, origin);
-        let prepared = self.prepare_call_with_trace(entry.name, entry.params, &mut arguments);
+        let prepared = if arguments.iter().any(Value::is_object) {
+            self.prepare_stringable_arguments(entry, &mut arguments)
+                .await
+        } else {
+            self.prepare_call_with_trace(entry.name, entry.params, &mut arguments)
+        };
         self.argument_origin = previous;
         if let Err(error) = prepared {
             if !matches!(

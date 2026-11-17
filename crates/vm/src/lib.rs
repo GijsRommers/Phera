@@ -82,6 +82,7 @@ mod iterator_instructions;
 mod iterators;
 mod locals;
 mod native_diagnostics;
+mod native_strings;
 mod object_instructions;
 mod object_iteration;
 mod operators;
