@@ -13,29 +13,31 @@
 //! the platform's names: glibc on Linux, Apple's libiconv on macOS. Their
 //! results differ from each other in places, and so do PHP's.
 //!
-//! `iconv-native` gives safe access to the platform's iconv. It converts a
-//! whole string per call, which is CPU work without waiting, like any other
-//! string function.
+//! `iconv-native` gives safe access to the platform's iconv. A conversion
+//! is CPU work without waiting, but a large one can take long (a megabyte
+//! to `//IGNORE` takes a quarter of a second on macOS), so `iconv`,
+//! `iconv_strlen` and `iconv_substr` convert large strings on Tokio's
+//! blocking threads instead of the request's worker.
 
 mod mime;
 
 use iconv_native::ConvertError;
 use phera_extension_api::{
-    ArrayKey, Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, PhpArray,
-    Registry, Value, args,
+    ArrayKey, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType,
+    PhpArray, Registry, Value, args,
 };
 
 use crate::encoding::read_u32;
 use crate::text::bounds;
 
 pub fn register(registry: &mut Registry) {
-    registry.function(FunctionEntry::sync("iconv", ICONV, iconv));
-    registry.function(FunctionEntry::sync(
+    registry.function(FunctionEntry::asynchronous("iconv", ICONV, iconv));
+    registry.function(FunctionEntry::asynchronous(
         "iconv_strlen",
         ICONV_STRLEN,
         iconv_strlen,
     ));
-    registry.function(FunctionEntry::sync(
+    registry.function(FunctionEntry::asynchronous(
         "iconv_substr",
         ICONV_SUBSTR,
         iconv_substr,
@@ -132,15 +134,17 @@ fn stopped_at_incomplete_character() -> bool {
     std::io::Error::last_os_error().raw_os_error() == Some(EINVAL)
 }
 
-/// Converts with PHP's errors: a warning for an unknown encoding, a notice
-/// for bad input, and `None` for both.
-fn convert(
-    ctx: &mut dyn Context,
-    bytes: &[u8],
-    from: &str,
-    to: &str,
-    function: &str,
-) -> Option<Vec<u8>> {
+/// Why a conversion failed.
+#[derive(Clone, Copy)]
+enum Failure {
+    UnknownConversion,
+    IncompleteCharacter,
+    IllegalCharacter,
+}
+
+/// Converts the way PHP does, without reporting: the work that may run on
+/// another thread. `errno` is read here, on the thread that called iconv.
+fn try_convert(bytes: &[u8], from: &str, to: &str) -> Result<Vec<u8>, Failure> {
     let result = if to.to_ascii_uppercase().contains("//IGNORE") {
         // PHP returns what was converted unless the input ends in an
         // incomplete character. The probe must use the real target: glibc
@@ -155,26 +159,67 @@ fn convert(
     } else {
         iconv_native::convert(bytes, from, to)
     };
-    match result {
-        Ok(bytes) => Some(bytes),
-        Err(ConvertError::UnknownConversion) => {
-            ctx.warning(format!(
-                "{function}(): Wrong encoding, conversion from \"{from}\" to \"{to}\" is not allowed"
-            ));
-            None
+    result.map_err(|error| match error {
+        ConvertError::UnknownConversion => Failure::UnknownConversion,
+        ConvertError::InvalidInput if stopped_at_incomplete_character() => {
+            Failure::IncompleteCharacter
         }
-        Err(ConvertError::InvalidInput) => {
-            let problem = if stopped_at_incomplete_character() {
-                "incomplete multibyte character"
-            } else {
-                "illegal character"
-            };
-            ctx.notice(format!(
-                "{function}(): Detected an {problem} in input string"
-            ));
-            None
-        }
+        ConvertError::InvalidInput => Failure::IllegalCharacter,
+    })
+}
+
+/// PHP's warning for an unknown encoding, its notice for bad input.
+fn report(ctx: &mut dyn Context, failure: Failure, from: &str, to: &str, function: &str) {
+    match failure {
+        Failure::UnknownConversion => ctx.warning(format!(
+            "{function}(): Wrong encoding, conversion from \"{from}\" to \"{to}\" is not allowed"
+        )),
+        Failure::IncompleteCharacter => ctx.notice(format!(
+            "{function}(): Detected an incomplete multibyte character in input string"
+        )),
+        Failure::IllegalCharacter => ctx.notice(format!(
+            "{function}(): Detected an illegal character in input string"
+        )),
     }
+}
+
+/// Converts with PHP's diagnostics, and `None` after one.
+fn convert(
+    ctx: &mut dyn Context,
+    bytes: &[u8],
+    from: &str,
+    to: &str,
+    function: &str,
+) -> Option<Vec<u8>> {
+    try_convert(bytes, from, to)
+        .map_err(|failure| report(ctx, failure, from, to, function))
+        .ok()
+}
+
+/// From this size on, a conversion runs on a blocking thread: copying the
+/// input and handing it over costs microseconds, converting it about a
+/// millisecond or more.
+const OFF_THREAD_BYTES: usize = 64 * 1024;
+
+/// [`convert`] for a string that may be large.
+async fn convert_text(
+    ctx: &mut dyn Context,
+    bytes: &[u8],
+    from: &str,
+    to: &str,
+    function: &str,
+) -> Result<Option<Vec<u8>>, NativeError> {
+    if bytes.len() < OFF_THREAD_BYTES {
+        return Ok(convert(ctx, bytes, from, to, function));
+    }
+    // PHP strings cannot leave the thread, so the work takes copies.
+    let (input, source, target) = (bytes.to_vec(), from.to_owned(), to.to_owned());
+    let result = tokio::task::spawn_blocking(move || try_convert(&input, &source, &target))
+        .await
+        .map_err(|_| NativeError::error(format!("{function}(): The conversion did not finish")))?;
+    Ok(result
+        .map_err(|failure| report(ctx, failure, from, to, function))
+        .ok())
 }
 
 /// The code points of `bytes`, through UCS-4LE.
@@ -218,20 +263,33 @@ const ICONV: &[Param] = &[
 ];
 
 /// `iconv(string $from_encoding, string $to_encoding, string $string): string|false`
-fn iconv(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
-    let from = String::from_utf8_lossy(args::bytes(a, 0));
-    let to = String::from_utf8_lossy(args::bytes(a, 1));
-    let converted = convert(ctx, args::bytes(a, 2), &from, &to, "iconv");
-    Ok(converted.map_or(Value::Bool(false), Value::from))
+fn iconv(ctx: &mut dyn Context, a: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        let from = String::from_utf8_lossy(args::bytes(&a, 0));
+        let to = String::from_utf8_lossy(args::bytes(&a, 1));
+        let converted = convert_text(ctx, args::bytes(&a, 2), &from, &to, "iconv").await?;
+        Ok(converted.map_or(Value::Bool(false), Value::from))
+    })
 }
 
 const ICONV_STRLEN: &[Param] = &[crate::STRING, ENCODING];
 
 /// `iconv_strlen(string $string, ?string $encoding = null): int|false`
-fn iconv_strlen(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
-    let encoding = encoding_argument(ctx, a, 1);
-    let points = code_points(ctx, args::bytes(a, 0), &encoding, "iconv_strlen");
-    Ok(points.map_or(Value::Bool(false), |points| Value::Int(points.len() as i64)))
+fn iconv_strlen(ctx: &mut dyn Context, a: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        let encoding = encoding_argument(ctx, &a, 1);
+        let ucs4 = convert_text(
+            ctx,
+            args::bytes(&a, 0),
+            &encoding,
+            "UCS-4LE",
+            "iconv_strlen",
+        )
+        .await?;
+        Ok(ucs4.map_or(Value::Bool(false), |ucs4| {
+            Value::Int((ucs4.len() / 4) as i64)
+        }))
+    })
 }
 
 const ICONV_SUBSTR: &[Param] = &[
@@ -242,18 +300,21 @@ const ICONV_SUBSTR: &[Param] = &[
 ];
 
 /// `iconv_substr(string $string, int $offset, ?int $length = null, ?string $encoding = null): string|false`
-fn iconv_substr(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
-    let encoding = encoding_argument(ctx, a, 3);
-    let Some(points) = code_points(ctx, args::bytes(a, 0), &encoding, "iconv_substr") else {
-        return Ok(Value::Bool(false));
-    };
-    let (start, end) = bounds(points.len(), args::int(a, 1).unwrap_or(0), args::int(a, 2));
-    let ucs4: Vec<u8> = points[start..end]
-        .iter()
-        .flat_map(|point| point.to_le_bytes())
-        .collect();
-    let substring = convert(ctx, &ucs4, "UCS-4LE", &encoding, "iconv_substr");
-    Ok(substring.map_or(Value::Bool(false), Value::from))
+fn iconv_substr(ctx: &mut dyn Context, a: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        let function = "iconv_substr";
+        let encoding = encoding_argument(ctx, &a, 3);
+        let Some(ucs4) =
+            convert_text(ctx, args::bytes(&a, 0), &encoding, "UCS-4LE", function).await?
+        else {
+            return Ok(Value::Bool(false));
+        };
+        let characters = ucs4.len() / 4;
+        let (start, end) = bounds(characters, args::int(&a, 1).unwrap_or(0), args::int(&a, 2));
+        let selected = &ucs4[start * 4..end * 4];
+        let substring = convert_text(ctx, selected, "UCS-4LE", &encoding, function).await?;
+        Ok(substring.map_or(Value::Bool(false), Value::from))
+    })
 }
 
 const ICONV_STRPOS: &[Param] = &[

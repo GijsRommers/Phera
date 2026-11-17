@@ -1012,6 +1012,7 @@ dependencies = [
  "encoding_rs",
  "iconv-native",
  "phera-extension-api",
+ "tokio",
 ]
 
 [[package]]

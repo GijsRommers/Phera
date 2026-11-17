@@ -1,4 +1,6 @@
 //! One-megabyte subjects test real results independently of the timing harness.
+mod support;
+
 use phera_ext_mbstring::Mbstring;
 use phera_extension_api::testing::{TestContext, call, oracle};
 use phera_extension_api::{Extension, Registry, Value};
@@ -92,4 +94,39 @@ fn megabyte_strings() {
         let php = oracle::run_php(&format!("mbstring-large-{encoding}"), &script).unwrap();
         oracle::compare(&format!("megabyte {encoding}"), &[], &php, &rust);
     }
+}
+
+/// From 64 KiB on, iconv converts on Tokio's blocking threads; the results
+/// and diagnostics must stay PHP's.
+#[test]
+fn megabyte_iconv() {
+    let text = Value::from("AéΣ中👩🏽‍💻e\u{301}".repeat(30_000));
+    let mut invalid = "é".repeat(40_000).into_bytes();
+    invalid.push(0xFF);
+    let mut matrix = support::Matrix::new();
+    for (from, to) in [
+        ("UTF-8", "UTF-16LE"),
+        ("UTF-8", "ISO-8859-1//IGNORE"),
+        ("UTF-8", "ASCII"),
+    ] {
+        matrix.case(
+            "iconv",
+            vec![Value::from(from), Value::from(to), text.clone()],
+        );
+    }
+    matrix.case(
+        "iconv",
+        vec![
+            Value::from("UTF-8"),
+            Value::from("UTF-16BE"),
+            Value::from(invalid.clone()),
+        ],
+    );
+    matrix.case("iconv_strlen", vec![text.clone()]);
+    matrix.case("iconv_strlen", vec![Value::from(invalid)]);
+    matrix.case(
+        "iconv_substr",
+        vec![text, Value::Int(1000), Value::Int(100_000)],
+    );
+    matrix.compare("mbstring-large-iconv");
 }

@@ -4,7 +4,9 @@
 
 use phera_ext_mbstring::Mbstring;
 use phera_extension_api::testing::{TestContext, call, oracle};
-use phera_extension_api::{Extension, NativeError, NativeResult, Registry, Value};
+use phera_extension_api::{
+    Extension, NativeError, NativeFn, NativeResult, Registry, Value, prepare_arguments,
+};
 
 fn registry() -> Registry {
     let mut registry = Registry::new();
@@ -35,6 +37,8 @@ enum Comparison {
 pub struct Matrix {
     pub registry: Registry,
     pub context: TestContext,
+    /// Runs the async functions, and gives them Tokio's blocking threads.
+    runtime: tokio::runtime::Runtime,
     script: String,
     labels: Vec<String>,
     comparisons: Vec<Comparison>,
@@ -46,6 +50,9 @@ impl Matrix {
         Self {
             registry: registry(),
             context: TestContext::default(),
+            runtime: tokio::runtime::Builder::new_current_thread()
+                .build()
+                .expect("a Tokio runtime"),
             script: format!("<?php\n{}\n", oracle::PHP_PREAMBLE),
             labels: Vec::new(),
             comparisons: Vec::new(),
@@ -120,26 +127,35 @@ impl Matrix {
     /// at the call site, before the function's arguments are checked
     /// (`crates/vm/src/calls/sends.rs`). `testing::call` starts after that
     /// step, so it is taken here.
-    fn call(&mut self, function: &str, arguments: Vec<Value>) -> NativeResult {
-        if let Some(entry) = self.registry.get_function(function) {
-            for (index, argument) in arguments.iter().enumerate() {
-                let parameter = entry
-                    .params
-                    .get(index)
-                    .or(entry.params.last().filter(|last| last.variadic));
-                if let Some(parameter) = parameter
-                    && parameter.by_ref
-                    && !argument.is_reference()
-                {
-                    return Err(NativeError::error(format!(
-                        "{function}(): Argument #{} (${}) could not be passed by reference",
-                        index + 1,
-                        parameter.name
-                    )));
-                }
+    fn call(&mut self, function: &str, mut arguments: Vec<Value>) -> NativeResult {
+        let Some(entry) = self.registry.get_function(function) else {
+            return call(&self.registry, &mut self.context, function, arguments);
+        };
+        for (index, argument) in arguments.iter().enumerate() {
+            let parameter = entry
+                .params
+                .get(index)
+                .or(entry.params.last().filter(|last| last.variadic));
+            if let Some(parameter) = parameter
+                && parameter.by_ref
+                && !argument.is_reference()
+            {
+                return Err(NativeError::error(format!(
+                    "{function}(): Argument #{} (${}) could not be passed by reference",
+                    index + 1,
+                    parameter.name
+                )));
             }
         }
-        call(&self.registry, &mut self.context, function, arguments)
+        match entry.handler {
+            NativeFn::Sync(_) => call(&self.registry, &mut self.context, function, arguments),
+            // `testing::call` runs only sync functions; this does the same
+            // for an async one, awaiting it.
+            NativeFn::Async(handler) => {
+                prepare_arguments(entry, &mut arguments, &mut self.context)?;
+                self.runtime.block_on(handler(&mut self.context, arguments))
+            }
+        }
     }
 
     pub fn compare(self, name: &str) {
