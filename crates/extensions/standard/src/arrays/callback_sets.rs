@@ -191,7 +191,7 @@ async fn run(context: &mut dyn Context, arguments: Vec<Value>, name: &str) -> Na
         if !exact_keys {
             let entries: Vec<Entry> = array
                 .iter()
-                .map(|(key, value)| (key.clone(), value.clone()))
+                .map(|(key, value)| (key, value.clone()))
                 .collect();
             let indices = super::sort_order_async::order(entries.len(), async |left, right| {
                 comparison
@@ -226,7 +226,7 @@ async fn exact(
     for (key, value) in arrays[0].iter() {
         let mut keep = true;
         for array in arrays.iter().skip(1) {
-            let found = if let Some(other) = array.get(key) {
+            let found = if let Some(other) = array.get(&key) {
                 comparison
                     .data(
                         context,
@@ -245,7 +245,7 @@ async fn exact(
             }
         }
         if keep {
-            result.insert(key.clone(), value.clone());
+            result.insert(key, value.clone());
         }
     }
     Ok(Value::from(result))

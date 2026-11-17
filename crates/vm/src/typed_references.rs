@@ -87,7 +87,7 @@ impl Vm {
                 .to_array()
                 .iter()
                 .find_map(|(key, value)| match value {
-                    Value::Reference(cell) if Rc::ptr_eq(cell, &reference) => Some(key.clone()),
+                    Value::Reference(cell) if Rc::ptr_eq(cell, &reference) => Some(key),
                     _ => None,
                 });
             if let Some(key) = key {
