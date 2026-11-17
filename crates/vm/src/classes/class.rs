@@ -103,6 +103,10 @@ pub(crate) struct MethodContext {
 }
 
 impl ClassHandle for Class {
+    fn is_instance_of(&self, name: &str) -> bool {
+        self.is_a(name)
+    }
+
     fn name(&self) -> &str {
         &self.name
     }
