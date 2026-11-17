@@ -117,18 +117,7 @@ pub fn substring<'a>(
     if encoding == Encoding::Utf8
         && let Ok(text) = std::str::from_utf8(bytes)
     {
-        let (start, end) = bounds(text.chars().count(), start, length);
-        let mut offsets = text
-            .char_indices()
-            .map(|(offset, _)| offset)
-            .chain([bytes.len()]);
-        let first = offsets.nth(start).unwrap_or(bytes.len());
-        let last = if end == start {
-            first
-        } else {
-            offsets.nth(end - start - 1).unwrap_or(bytes.len())
-        };
-        return Cow::Borrowed(&bytes[first..last]);
+        return Cow::Borrowed(utf8_substring(text, start, length).as_bytes());
     }
     if let Some(width) = encoding.fixed_width() {
         return Cow::Borrowed(fixed_width_substring(bytes, width, start, length));
@@ -136,6 +125,35 @@ pub fn substring<'a>(
     let points = decode(bytes, encoding);
     let (start, end) = bounds(points.len(), start, length);
     Cow::Owned(encode_result(ctx, &points[start..end], encoding))
+}
+
+/// Valid UTF-8 is sliced at character boundaries. Counting the characters
+/// takes a pass over the whole string, which only negative offsets need.
+fn utf8_substring(text: &str, start: i64, length: Option<i64>) -> &str {
+    let from_end = start < 0 || length.is_some_and(|length| length < 0);
+    let (first, last) = if from_end {
+        let (start, end) = bounds(text.chars().count(), start, length);
+        let first = byte_offset(text, start);
+        (first, first + byte_offset(&text[first..], end - start))
+    } else {
+        let first = byte_offset(text, start as usize);
+        let last = match length {
+            None => text.len(),
+            Some(length) => first + byte_offset(&text[first..], length as usize),
+        };
+        (first, last)
+    };
+    &text[first..last]
+}
+
+/// Where character `index` starts, or the end of the text: the offset of
+/// the `index`th byte that does not continue a character (`0b10xxxxxx`).
+fn byte_offset(text: &str, index: usize) -> usize {
+    text.bytes()
+        .enumerate()
+        .filter(|&(_, byte)| byte & 0xC0 != 0x80)
+        .nth(index)
+        .map_or(text.len(), |(offset, _)| offset)
 }
 
 /// PHP slices fixed-width encodings by bytes, and unlike [`bounds`] lets a

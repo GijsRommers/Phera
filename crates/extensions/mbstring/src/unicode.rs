@@ -139,10 +139,10 @@ fn table(case: Case) -> &'static [[u32; 3]] {
 
 fn map_one(point: u32, table: &[[u32; 3]], output: &mut Vec<u32>) {
     match table.get(point as usize) {
-        Some(mapped) if mapped[0] != UNUSED => {
-            output.extend(mapped.iter().copied().take_while(|&point| point != UNUSED));
-        }
-        _ => output.push(point),
+        None | Some([UNUSED, _, _]) => output.push(point),
+        Some(&[first, UNUSED, _]) => output.push(first),
+        Some(&[first, second, UNUSED]) => output.extend([first, second]),
+        Some(&mapped) => output.extend(mapped),
     }
 }
 

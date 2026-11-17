@@ -75,6 +75,19 @@ pub fn encode(points: &[u32], encoding: Encoding, substitute: &Substitute) -> Ve
         _ => {}
     }
     let mut output = Vec::with_capacity(points.len());
+    if let Family::Utf8 = family {
+        // Most strings are UTF-8: one loop without the dispatch of `encode_one`.
+        for &point in points {
+            match char::from_u32(point) {
+                Some(character) if point < 0x80 => output.push(character as u8),
+                Some(character) => {
+                    output.extend_from_slice(character.encode_utf8(&mut [0; 4]).as_bytes());
+                }
+                None => encode_substitute(point, family, substitute, &mut output),
+            }
+        }
+        return output;
+    }
     for &point in points {
         if !encode_one(point, family, &mut output) {
             encode_substitute(point, family, substitute, &mut output);
