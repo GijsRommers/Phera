@@ -156,7 +156,7 @@ fn run(
             .iter()
             .map(|(key, value)| (key, value.clone()))
             .collect();
-        let indices = super::sort_order::order(entries.len(), |left, right| {
+        let indices = super::zend_sort::order(entries.len(), |left, right| {
             let (Some(left_entry), Some(right_entry)) = (entries.get(left), entries.get(right))
             else {
                 return Ok(Ordering::Equal);

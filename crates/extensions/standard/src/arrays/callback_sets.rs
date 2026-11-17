@@ -193,7 +193,7 @@ async fn run(context: &mut dyn Context, arguments: Vec<Value>, name: &str) -> Na
                 .iter()
                 .map(|(key, value)| (key, value.clone()))
                 .collect();
-            let indices = super::sort_order_async::order(entries.len(), async |left, right| {
+            let indices = super::zend_sort::order_async(entries.len(), async |left, right| {
                 comparison
                     .order(context, &entries[left], &entries[right])
                     .await

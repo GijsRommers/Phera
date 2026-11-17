@@ -20,11 +20,10 @@ mod range_values;
 mod sets;
 mod slice;
 mod sort;
-pub(crate) mod sort_order;
-mod sort_order_async;
 mod stack;
 mod tables;
 mod walk;
+pub(crate) mod zend_sort;
 
 pub(crate) fn register(registry: &mut Registry) {
     callback_sort::register(registry);

@@ -209,7 +209,7 @@ fn array_unique(context: &mut dyn Context, arguments: &[Value]) -> NativeResult 
     }
     let order = SortOrder::from_flags(flags);
     let entries: Vec<_> = array.iter().collect();
-    let indices = super::sort_order::order(entries.len(), |left, right| {
+    let indices = super::zend_sort::order(entries.len(), |left, right| {
         let (Some((_, left)), Some((_, right))) = (entries.get(left), entries.get(right)) else {
             return Ok(Ordering::Equal);
         };

@@ -28,7 +28,7 @@ impl Extension for Standard {
 
 /// Exposes PHP comparison traversal for adversarial comparator regression tests.
 #[doc(hidden)]
-pub use arrays::sort_order::order as php_sort_order;
+pub use arrays::zend_sort::order as php_sort_order;
 
 /// PHP argument errors name boolean literals rather than the general bool type.
 pub(crate) fn argument_type_name(value: &phera_extension_api::Value) -> String {

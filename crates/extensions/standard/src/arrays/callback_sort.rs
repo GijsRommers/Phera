@@ -63,7 +63,7 @@ async fn run(context: &mut dyn Context, arguments: Vec<Value>, name: &str) -> Na
     let mut failure = None;
     // Zend finishes its traversal after an exception. Further callback attempts
     // compare equal, with original ordinals breaking ties, then commits the copy.
-    let indices = super::sort_order_async::order(entries.len(), async |left, right| {
+    let indices = super::zend_sort::order_async(entries.len(), async |left, right| {
         let values = if name == "uksort" {
             (
                 super::key_value(&entries[left].0),
