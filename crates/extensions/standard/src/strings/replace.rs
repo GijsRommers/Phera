@@ -123,11 +123,7 @@ impl Replacements<'_> {
             let mut result = Vec::new();
             let mut start = 0;
             while let Some(tail) = string.get(start..) {
-                let Some(position) = (if self.sensitivity == CaseSensitivity::Insensitive {
-                    super::find_ignore_case(tail, needle.as_bytes())
-                } else {
-                    super::find(tail, needle.as_bytes())
-                }) else {
+                let Some(position) = self.sensitivity.find(tail, needle.as_bytes()) else {
                     break;
                 };
                 super::reserve(

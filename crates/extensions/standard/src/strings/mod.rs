@@ -4,6 +4,7 @@ use phera_extension_api::{NativeError, NativeResult, PhpArray, PhpString, Regist
 
 mod base64;
 mod case;
+mod compare;
 mod decimal;
 mod encode;
 mod escaping;
@@ -16,10 +17,10 @@ mod number_format;
 mod padding;
 mod replace;
 mod search;
-mod search_more;
 mod similarity;
 mod split;
 mod substitute;
+mod substring;
 mod tags;
 mod text;
 mod trim;
@@ -28,7 +29,14 @@ mod url;
 pub(crate) const MAX_STRING_BYTES: usize = 2 * 1024 * 1024 * 1024;
 
 pub(crate) fn register(registry: &mut Registry) {
-    let modules = [case::FUNCTIONS, padding::FUNCTIONS, trim::FUNCTIONS];
+    let modules = [
+        case::FUNCTIONS,
+        compare::FUNCTIONS,
+        padding::FUNCTIONS,
+        search::FUNCTIONS,
+        substring::FUNCTIONS,
+        trim::FUNCTIONS,
+    ];
     for entry in modules.into_iter().flatten() {
         registry.function(*entry);
     }
@@ -38,8 +46,6 @@ pub(crate) fn register(registry: &mut Registry) {
     encode::register(registry);
     replace::register(registry);
     split::register(registry);
-    search::register(registry);
-    search_more::register(registry);
     escaping::register(registry);
     html::register(registry);
     text::register(registry);
@@ -73,17 +79,15 @@ pub(super) fn buffer(length: usize) -> Result<Vec<u8>, NativeError> {
     Ok(result)
 }
 
-/// Skip directly to candidate first bytes; an empty needle matches at zero.
+/// The first position of `needle` in `haystack`; an empty needle is found
+/// at 0, as in PHP.
 pub(super) fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    find_bytes(haystack, needle, CaseSensitivity::Sensitive)
+    CaseSensitivity::Sensitive.find(haystack, needle)
 }
 
-/// PHP case-insensitive byte searches fold ASCII only, independent of locale.
-pub(super) fn find_ignore_case(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    find_bytes(haystack, needle, CaseSensitivity::Insensitive)
-}
-
-/// PHP byte searches fold ASCII without consulting the process locale.
+/// Whether a search tells upper and lower case apart. PHP's case-insensitive
+/// functions (`stripos`, `str_ireplace`, `strcasecmp`) fold the ASCII
+/// letters only, whatever the locale.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum CaseSensitivity {
     Sensitive,
@@ -91,22 +95,23 @@ pub(super) enum CaseSensitivity {
 }
 
 impl CaseSensitivity {
-    pub(super) fn matches(self, left: &[u8], right: &[u8]) -> bool {
+    pub(super) fn equal(self, left: &[u8], right: &[u8]) -> bool {
         match self {
             Self::Sensitive => left == right,
             Self::Insensitive => left.eq_ignore_ascii_case(right),
         }
     }
-}
 
-/// Empty needles match at zero; windows preserve byte offsets even in invalid UTF-8.
-fn find_bytes(haystack: &[u8], needle: &[u8], sensitivity: CaseSensitivity) -> Option<usize> {
-    if needle.is_empty() {
-        return Some(0);
+    /// The first position of `needle` in `haystack`; an empty needle is
+    /// found at 0.
+    pub(super) fn find(self, haystack: &[u8], needle: &[u8]) -> Option<usize> {
+        if needle.is_empty() {
+            return Some(0);
+        }
+        haystack
+            .windows(needle.len())
+            .position(|candidate| self.equal(candidate, needle))
     }
-    haystack
-        .windows(needle.len())
-        .position(|candidate| sensitivity.matches(candidate, needle))
 }
 
 /// Match PHP's startup LC_CTYPE alphabet for word and phonetic boundaries.
