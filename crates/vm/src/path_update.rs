@@ -5,7 +5,7 @@ use std::{cell::RefCell, rc::Rc};
 use phera_extension_api::NativeError;
 use phera_value::{ArrayKey, Diagnostics, PhpArray, Value, to_php_string};
 
-use crate::inline_stack::InlineStack;
+use crate::{inline_stack::InlineStack, reference_holders::ReferenceHolders};
 
 /// Parents retain each detached container while an iterative write visits its child.
 enum Parent {
@@ -32,10 +32,11 @@ pub(super) fn update(
     value: Value,
     mutation: crate::access_mode::Mutation,
     diagnostics: &mut dyn Diagnostics,
+    references: &Rc<RefCell<ReferenceHolders>>,
 ) -> Result<(), NativeError> {
     let mut parents = InlineStack::new();
     let result = walk(current, &mut parents, keys, value, mutation, diagnostics)
-        .and_then(|()| rebuild(current, &mut parents, mutation, diagnostics));
+        .and_then(|()| rebuild(current, &mut parents, mutation, diagnostics, references));
     if result.is_err() {
         restore(current, &mut parents);
     }
@@ -188,6 +189,7 @@ fn rebuild(
     parents: &mut InlineStack<Parent>,
     mutation: crate::access_mode::Mutation,
     diagnostics: &mut dyn Diagnostics,
+    references: &Rc<RefCell<ReferenceHolders>>,
 ) -> Result<(), NativeError> {
     let mut remove = mutation == crate::access_mode::Mutation::Unset;
     while let Some(parent) = parents.pop() {
@@ -235,8 +237,19 @@ fn rebuild(
             Parent::Object { object, key } => {
                 if remove {
                     object.remove(&key);
+                    ReferenceHolders::untrack_object(&object, &key);
                     remove = false;
                 } else {
+                    if let Value::Reference(reference) = current {
+                        if let Err(error) =
+                            ReferenceHolders::track_object(references, &object, &key, reference)
+                        {
+                            parents.push(Parent::Object { object, key });
+                            return Err(error);
+                        }
+                    } else if mutation == crate::access_mode::Mutation::Bind {
+                        ReferenceHolders::untrack_object(&object, &key);
+                    }
                     crate::property_storage::write(&object, key, std::mem::take(current));
                 }
                 Value::Object(object)

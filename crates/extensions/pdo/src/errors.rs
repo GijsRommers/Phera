@@ -31,6 +31,8 @@ impl DbError {
             "00000" => "No error",
             "HY093" => "Invalid parameter number",
             "42P01" => "Undefined table",
+            "42P02" => "Undefined parameter",
+            "42P18" => "Indeterminate datatype",
             "42703" => "Undefined column",
             "42601" => "Syntax error",
             "42000" => "Syntax error or access violation",

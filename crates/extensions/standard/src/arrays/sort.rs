@@ -154,7 +154,7 @@ fn run(
     super::stack::mutate(arguments, |array| {
         let entries: Vec<(ArrayKey, Value)> = array
             .iter()
-            .map(|(key, value)| (key.clone(), value.clone()))
+            .map(|(key, value)| (key, value.clone()))
             .collect();
         let indices = super::sort_order::order(entries.len(), |left, right| {
             let (Some(left_entry), Some(right_entry)) = (entries.get(left), entries.get(right))

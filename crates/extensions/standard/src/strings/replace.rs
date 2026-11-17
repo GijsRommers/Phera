@@ -74,7 +74,7 @@ fn replace_subjects(
     let result = if let Some(array) = args::array(arguments, 2) {
         let mut result = PhpArray::new();
         for (key, value) in array.iter() {
-            result.insert(key.clone(), replacements.replace_one(context, value)?);
+            result.insert(key, replacements.replace_one(context, value)?);
         }
         Value::Array(Rc::new(result))
     } else {

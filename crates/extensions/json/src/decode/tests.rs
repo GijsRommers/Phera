@@ -18,7 +18,7 @@ impl ClassHandle for StandardClass {
 fn factory(properties: PhpArray) -> Value {
     let object = Object::new(1, Rc::new(StandardClass));
     for (key, value) in properties.iter() {
-        object.set(key.clone(), value.clone());
+        object.set(key, value.clone());
     }
     Value::Object(Rc::new(object))
 }
