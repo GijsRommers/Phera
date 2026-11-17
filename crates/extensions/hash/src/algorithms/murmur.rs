@@ -71,35 +71,37 @@ fn sum32(h: &mut [u32; 4]) {
         h[i] = h[i].wrapping_add(h[0]);
     }
 }
+/// MurmurHash3's 128-bit x64 variant: two 64-bit lanes per 16-byte block.
 pub fn f(input: &[u8], seed: u64) -> Vec<u8> {
     let (mut a, mut b) = (seed, seed);
     for block in input.chunks(16) {
-        if block.len() > 8 {
-            b ^= word(&block[8..])
-                .wrapping_mul(0x4cf5ad432745937f)
-                .rotate_left(33)
-                .wrapping_mul(0x87c37b91114253d5);
-        }
-        a ^= word(&block[..block.len().min(8)])
+        let (low, high) = block.split_at(block.len().min(8));
+        let k1 = word(low)
             .wrapping_mul(0x87c37b91114253d5)
             .rotate_left(31)
             .wrapping_mul(0x4cf5ad432745937f);
+        let k2 = word(high)
+            .wrapping_mul(0x4cf5ad432745937f)
+            .rotate_left(33)
+            .wrapping_mul(0x87c37b91114253d5);
         if block.len() == 16 {
-            // The first accumulator uses the previous second accumulator.
-            let old_b = b ^ word(&block[8..])
-                .wrapping_mul(0x4cf5ad432745937f)
-                .rotate_left(33)
-                .wrapping_mul(0x87c37b91114253d5);
+            a ^= k1;
             a = a
                 .rotate_left(27)
-                .wrapping_add(old_b)
+                .wrapping_add(b)
                 .wrapping_mul(5)
                 .wrapping_add(0x52dce729);
+            b ^= k2;
             b = b
                 .rotate_left(31)
                 .wrapping_add(a)
                 .wrapping_mul(5)
                 .wrapping_add(0x38495ab5);
+        } else {
+            // The short last block is only mixed in. Without a high half
+            // `k2` is 0, which leaves `b` alone.
+            a ^= k1;
+            b ^= k2;
         }
     }
     a ^= input.len() as u64;
