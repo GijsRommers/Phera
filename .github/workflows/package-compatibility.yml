@@ -38,3 +38,13 @@ jobs:
           PHERA_BIN: ${{ github.workspace }}/target/release/phera
           PHERA_COMPOSER: ${{ github.workspace }}/target/composer.phar
           PHERA_PHP: php
+      - name: Preserve comparison diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: package-comparison-diagnostics
+          path: |
+            target/package-comparison/*.log
+            target/package-comparison/*-result.json
+            target/package-comparison/*-autoload.json
+            target/package-comparison/results.json

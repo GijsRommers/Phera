@@ -87,6 +87,9 @@ def source(fixture, destination):
         (bare / 'info/attributes').write_text('* -export-ignore\n')
         raw = subprocess.run(['git', '-C', str(bare), 'archive', '--format=tar', 'FETCH_HEAD'],
                              check=True, capture_output=True).stdout
+        if len(raw) < 512 or raw[257:262] != b'ustar':
+            raise RuntimeError('Unexpected git tar header: ' + repr(raw[:80])
+                               + ', bytes=' + str(len(raw)))
         with tarfile.open(fileobj=io.BytesIO(raw)) as archive:
             for entry in archive:
                 path = PurePosixPath(entry.name)
@@ -147,7 +150,12 @@ def compare(fixture):
         row['generated_differences'] = [path for path in different if generated(path)]
         if row['package_differences']:
             row['package_difference_types'] = {path: [repr(a.get(path))[:200],
-                repr(b.get(path))[:200]] for path in row['package_differences']}
+                repr(b.get(path))[:200]] for path in row['package_differences'][:5]}
+            row['phera_install_output'] = actual.stdout[-2000:] + actual.stderr[-2000:]
+            row['actual_tree_sample'] = sorted(b)[:30]
+            row['actual_directories'] = {str(path.relative_to(right / vendor)):
+                [child.name for child in path.iterdir()][:10]
+                for path in (right / vendor).glob('*/*') if path.is_dir()}
         a = json.loads((left / vendor / 'composer/installed.json').read_text())
         b = json.loads((right / vendor / 'composer/installed.json').read_text())
         row['installed_identical'] = a == b
