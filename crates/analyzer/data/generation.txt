@@ -1,0 +1,3 @@
+php-src commit: 95df0735ff20c5c108f225c199a21596aad88bc3
+Parsed files: 131; skipped files: 0
+Declarations: 10774; functions: 2406; classes: 424; globals: 3373
