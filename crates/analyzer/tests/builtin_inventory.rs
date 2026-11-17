@@ -12,15 +12,19 @@ fn native_inventory() -> String {
             "php".into()
         }
     });
-    let output = Command::new(php).args(["-n", "-r", r#"
+    let output = Command::new(php)
+        .args([
+            "-n",
+            "-r",
+            r#"
         if (PHP_MAJOR_VERSION !== 8 || PHP_MINOR_VERSION !== 5) { exit(2); }
         foreach (get_defined_functions()['internal'] as $name) {
             $f = new ReflectionFunction($name);
             $parameters = array_map(fn($p) => $p->name, $f->getParameters());
             echo "F\t$name\t", implode(',', $parameters), "\n";
         }
-        foreach (array_merge(get_declared_classes(), get_declared_interfaces(), get_declared_traits())
-                 as $name) {
+        foreach (array_merge(get_declared_classes(), get_declared_interfaces(),
+                 get_declared_traits()) as $name) {
             echo "C\t$name\n";
             foreach ((new ReflectionClass($name))->getMethods() as $method) {
                 echo "M\t$name::", $method->name, "\t",
@@ -29,7 +33,10 @@ fn native_inventory() -> String {
             }
         }
         foreach (array_keys(get_defined_constants()) as $name) { echo "K\t$name\n"; }
-    "#]).output().unwrap();
+    "#,
+        ])
+        .output()
+        .unwrap();
     assert!(
         output.status.success(),
         "PHP 8.5 is required: {:?}",

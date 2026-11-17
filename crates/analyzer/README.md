@@ -159,6 +159,8 @@ constant facts and existence guards. Joins keep only facts shared by continuing
 paths. Loops, switch fallthrough, exception edges and finally transfers have their
 own modules. Dynamic writes, extract/include/eval and unknown reference parameters
 remain uncertain. Closures have explicit capture scopes; arrows capture automatically.
+Non-static closures may receive an object through later rebinding; `$this` diagnostics
+are deferred until a known invocation without an object. Static closures remain unbound.
 
 The initial lattice has scalars, null, arrays, object, classes, unions, mixed, void,
 never and callable signatures. PHPDoc generics, shapes, array element types, full
@@ -176,7 +178,7 @@ allow/path attributes, leaked boxes or custom macros are used.
 
 ```sh
 cargo test -p phera-analyzer
-cargo test -p phera-cli --test check_corpus --test check_options
+cargo test -p phera-cli --test check_corpus --test check_options --test check_flow
 PHPSTAN=/outside/repo/vendor/bin/phpstan crates/analyzer/tests/compare-with-phpstan.sh
 ```
 
@@ -187,8 +189,13 @@ entry (including its level and both line sets) in `corpus/DIFFERENCES.md`. `.exp
 expectations for Phera. The public CLI is tested for every corpus file at both levels.
 PHPStan/Composer dependencies belong only in a scratch project outside this repository.
 
-The corpus currently contains 382 files. PHPStan 2.3.6 agrees on both levels for
-306 files; 76 have explicitly explained rule/level or PHP-semantic differences,
+The corpus currently contains 468 files. PHPStan 2.3.6 agrees on both levels for
+384 files; 84 have explicitly explained rule/level or PHP-semantic differences,
 with zero unexplained differences. The comparison cache can be reused with
 `--reuse-phpstan`; this requires an identical source SHA-256 and PHPStan version,
 and always reruns Phera. The default regenerates all PHPStan observations.
+
+See [VALIDATION.md](VALIDATION.md) for pinned real projects, timings, fixture review
+and the exact local and hosted verification boundaries. Real-project and PHPT
+comparison drivers live in `tests/benchmark-real-code.py` and
+`tests/check-project-fixtures.py`; both require external PHPStan and scratch output paths.

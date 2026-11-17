@@ -41,7 +41,9 @@ for name, roots in [('options-resolver', ['.', 'vendor/symfony']),
                 'phpstan': [phpstan, 'analyse', '-c', str(config), '--level', '0',
                             '--no-progress', '--error-format=json', *files],
             }
-            for tool, command in commands.items():
+            order = ['phera', 'phpstan'] if run % 2 == 0 else ['phpstan', 'phera']
+            for tool in order:
+                command = commands[tool]
                 start = time.perf_counter()
                 result = subprocess.run(command, capture_output=True, text=True)
                 timings[tool].append(time.perf_counter() - start)
