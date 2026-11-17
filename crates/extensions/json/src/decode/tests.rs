@@ -1,20 +1,24 @@
-//! Object-mode oracle tests inject a test-owned stdClass at the private boundary.
+//! Object-mode decoding against PHP. The parser is called directly with a
+//! factory that makes test stdClass objects, because the test context of
+//! the extension API has no real classes.
 use super::parser::parse;
-use crate::flags::Flags;
+use crate::flags::DecodeFlags;
 use phera_extension_api::testing::oracle;
 use phera_extension_api::value::ClassHandle;
 use phera_extension_api::{Object, PhpArray, Value};
 use std::{any::Any, rc::Rc};
-/// The test supplies class ownership; production must obtain it from the VM.
+
 struct StandardClass;
 impl ClassHandle for StandardClass {
     fn name(&self) -> &str {
         "stdClass"
     }
+
     fn as_any(&self) -> &dyn Any {
         self
     }
 }
+
 fn factory(properties: PhpArray) -> Value {
     let object = Object::new(1, Rc::new(StandardClass));
     for (key, value) in properties.iter() {
@@ -22,8 +26,12 @@ fn factory(properties: PhpArray) -> Value {
     }
     Value::Object(Rc::new(object))
 }
+
 #[test]
 fn object_parser_matches_php() {
+    // The preamble's enc() casts an object to an array, which in PHP turns
+    // the property "0" into the key 0, while the Rust side encodes property
+    // names as stored. A foreach over the object shows them as stored.
     let mut script = format!(
         "<?php\n{}",
         oracle::PHP_PREAMBLE.replace("foreach ((array) $v as", "foreach ($v as")
@@ -50,9 +58,9 @@ fn object_parser_matches_php() {
                 script.push_str(&format!(
                     "run('case',fn()=> [{expression},json_last_error()]);\n"
                 ));
-                let flags = Flags {
+                let flags = DecodeFlags {
                     associative,
-                    ..Flags::default()
+                    ..DecodeFlags::default()
                 };
                 let result = parse(document.as_bytes(), depth, flags, &mut factory);
                 let code = result.as_ref().err().map_or(0, |error| *error as i64);

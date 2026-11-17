@@ -1,27 +1,21 @@
-use super::{ArrayKey, PhpArray};
+//! `$a[$key]` normalises the key: `$a["5"]` and `$a[5]` are the same entry.
+
+use super::{k, ks};
+use crate::array::{ArrayKey, PhpArray};
 use crate::error::CollectDiagnostics;
 use crate::object::{ClassHandle, Object};
-use crate::string::PhpString;
 use crate::value::Value;
 use std::rc::Rc;
 
-fn k(i: i64) -> ArrayKey {
-    ArrayKey::Int(i)
-}
-fn ks(s: &str) -> ArrayKey {
-    // Normalise exactly like `$a[$s] = ...` does in PHP.
-    ArrayKey::from_value(&Value::String(PhpString::from(s))).unwrap()
-}
-
-/// Canonical numeric strings share integer keys; other strings and illegal types do not.
+/// Canonical decimal strings become integer keys; other strings stay strings,
+/// and arrays and objects cannot be keys at all.
 #[test]
 fn key_normalisation() {
-    let t = |s: &str| ArrayKey::from_value(&Value::String(PhpString::from(s))).unwrap();
-    assert_eq!(t("5"), k(5));
-    assert_eq!(t("-5"), k(-5));
-    assert_eq!(t("0"), k(0));
-    assert_eq!(t("9223372036854775807"), k(i64::MAX));
-    assert_eq!(t("-9223372036854775808"), k(i64::MIN));
+    assert_eq!(ks("5"), k(5));
+    assert_eq!(ks("-5"), k(-5));
+    assert_eq!(ks("0"), k(0));
+    assert_eq!(ks("9223372036854775807"), k(i64::MAX));
+    assert_eq!(ks("-9223372036854775808"), k(i64::MIN));
     for s in [
         "05",
         "5.0",
@@ -35,16 +29,14 @@ fn key_normalisation() {
         "-",
         "",
     ] {
-        assert_eq!(t(s), ks(s), "key {s:?} must stay a string");
+        assert_eq!(ks(s), ArrayKey::str(s), "key {s:?} must stay a string");
     }
-    // int/bool/null/float
     assert_eq!(ArrayKey::from_value(&Value::Int(-7)).unwrap(), k(-7));
     assert_eq!(ArrayKey::from_value(&Value::Bool(true)).unwrap(), k(1));
     assert_eq!(ArrayKey::from_value(&Value::Bool(false)).unwrap(), k(0));
     assert_eq!(ArrayKey::from_value(&Value::Null).unwrap(), ks(""));
     assert_eq!(ArrayKey::from_value(&Value::Float(5.0)).unwrap(), k(5));
     assert_eq!(ArrayKey::from_value(&Value::Float(-5.9)).unwrap(), k(-5));
-    // arrays and objects are TypeErrors
     let arr = Value::Array(Rc::new(PhpArray::new()));
     assert_eq!(
         ArrayKey::from_value(&arr).unwrap_err().message,
@@ -72,7 +64,7 @@ impl ClassHandle for DummyClass {
     }
 }
 
-/// Null normalizes to the empty string while retaining PHP 8.5 diagnostics.
+/// `$a[null]` is `$a[""]`, with a deprecation since PHP 8.5.
 #[test]
 fn null_key_deprecation() {
     let mut d = CollectDiagnostics::default();
