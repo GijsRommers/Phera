@@ -32,12 +32,9 @@ $b->readonly();
 echo $b->readonly, "\n";
 
 ?>
---EXPECTF--
-Deprecated: Calling a function "readonly" is deprecated since 8.6 in %s on line %d
+--EXPECT--
 Hi!
 Const hi!
 Static hi!
 Instance hi!
 Prop hi!
---XFAIL--
-The upstream expectation requires PHP 8.6 readonly-call deprecation; the PHP 8.5 oracle does not emit it.
