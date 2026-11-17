@@ -1,0 +1,542 @@
+[
+  {
+    "run": 1,
+    "runtime": "PHP",
+    "algorithm": "md5",
+    "length": 16,
+    "count": 1000000,
+    "seconds": 0.115509833,
+    "digest": "45ed9cc2f92b77cd8b2f5bd59ff635f8"
+  },
+  {
+    "run": 1,
+    "runtime": "PHP",
+    "algorithm": "sha1",
+    "length": 16,
+    "count": 1000000,
+    "seconds": 0.115775333,
+    "digest": "a7a7c2e911a47b967d34b5a8807c040e9d167815"
+  },
+  {
+    "run": 1,
+    "runtime": "PHP",
+    "algorithm": "sha256",
+    "length": 16,
+    "count": 1000000,
+    "seconds": 0.230560875,
+    "digest": "9c5729595fb287cc2a2256280448bbe706c0a866f0372515c7483de2af4e6532"
+  },
+  {
+    "run": 1,
+    "runtime": "PHP",
+    "algorithm": "xxh3",
+    "length": 16,
+    "count": 1000000,
+    "seconds": 0.054488458,
+    "digest": "df76ff0d7f0d9edf"
+  },
+  {
+    "run": 1,
+    "runtime": "PHP",
+    "algorithm": "crc32",
+    "length": 16,
+    "count": 1000000,
+    "seconds": 0.025163084,
+    "digest": "3139966991"
+  },
+  {
+    "run": 1,
+    "runtime": "PHP",
+    "algorithm": "md5",
+    "length": 1048576,
+    "count": 100,
+    "seconds": 0.130509,
+    "digest": "b561f87202d04959e37588ee05cf5b10"
+  },
+  {
+    "run": 1,
+    "runtime": "PHP",
+    "algorithm": "sha1",
+    "length": 1048576,
+    "count": 100,
+    "seconds": 0.10163275,
+    "digest": "e37f4d5be56713044d62525e406d250a722647d6"
+  },
+  {
+    "run": 1,
+    "runtime": "PHP",
+    "algorithm": "sha256",
+    "length": 1048576,
+    "count": 100,
+    "seconds": 0.285273708,
+    "digest": "8f990ba0b577b51cf009ea049368c16bbda1b21e1b93be07a824758bb253c39b"
+  },
+  {
+    "run": 1,
+    "runtime": "PHP",
+    "algorithm": "xxh3",
+    "length": 1048576,
+    "count": 100,
+    "seconds": 0.013203458,
+    "digest": "11ea1c8ad3937333"
+  },
+  {
+    "run": 1,
+    "runtime": "PHP",
+    "algorithm": "crc32",
+    "length": 1048576,
+    "count": 100,
+    "seconds": 0.213163916,
+    "digest": "356228146"
+  },
+  {
+    "run": 1,
+    "runtime": "Phera",
+    "algorithm": "md5",
+    "length": 16,
+    "count": 1000000,
+    "seconds": 0.285758375,
+    "digest": "45ed9cc2f92b77cd8b2f5bd59ff635f8"
+  },
+  {
+    "run": 1,
+    "runtime": "Phera",
+    "algorithm": "sha1",
+    "length": 16,
+    "count": 1000000,
+    "seconds": 0.268367875,
+    "digest": "a7a7c2e911a47b967d34b5a8807c040e9d167815"
+  },
+  {
+    "run": 1,
+    "runtime": "Phera",
+    "algorithm": "sha256",
+    "length": 16,
+    "count": 1000000,
+    "seconds": 0.359785083,
+    "digest": "9c5729595fb287cc2a2256280448bbe706c0a866f0372515c7483de2af4e6532"
+  },
+  {
+    "run": 1,
+    "runtime": "Phera",
+    "algorithm": "xxh3",
+    "length": 16,
+    "count": 1000000,
+    "seconds": 0.1810905,
+    "digest": "df76ff0d7f0d9edf"
+  },
+  {
+    "run": 1,
+    "runtime": "Phera",
+    "algorithm": "crc32",
+    "length": 16,
+    "count": 1000000,
+    "seconds": 0.20476075,
+    "digest": "3139966991"
+  },
+  {
+    "run": 1,
+    "runtime": "Phera",
+    "algorithm": "md5",
+    "length": 1048576,
+    "count": 100,
+    "seconds": 0.133252,
+    "digest": "b561f87202d04959e37588ee05cf5b10"
+  },
+  {
+    "run": 1,
+    "runtime": "Phera",
+    "algorithm": "sha1",
+    "length": 1048576,
+    "count": 100,
+    "seconds": 0.081313834,
+    "digest": "e37f4d5be56713044d62525e406d250a722647d6"
+  },
+  {
+    "run": 1,
+    "runtime": "Phera",
+    "algorithm": "sha256",
+    "length": 1048576,
+    "count": 100,
+    "seconds": 0.1951375,
+    "digest": "8f990ba0b577b51cf009ea049368c16bbda1b21e1b93be07a824758bb253c39b"
+  },
+  {
+    "run": 1,
+    "runtime": "Phera",
+    "algorithm": "xxh3",
+    "length": 1048576,
+    "count": 100,
+    "seconds": 0.002468875,
+    "digest": "11ea1c8ad3937333"
+  },
+  {
+    "run": 1,
+    "runtime": "Phera",
+    "algorithm": "crc32",
+    "length": 1048576,
+    "count": 100,
+    "seconds": 0.4447105,
+    "digest": "356228146"
+  },
+  {
+    "run": 2,
+    "runtime": "PHP",
+    "algorithm": "md5",
+    "length": 16,
+    "count": 1000000,
+    "seconds": 0.121413583,
+    "digest": "45ed9cc2f92b77cd8b2f5bd59ff635f8"
+  },
+  {
+    "run": 2,
+    "runtime": "PHP",
+    "algorithm": "sha1",
+    "length": 16,
+    "count": 1000000,
+    "seconds": 0.125880083,
+    "digest": "a7a7c2e911a47b967d34b5a8807c040e9d167815"
+  },
+  {
+    "run": 2,
+    "runtime": "PHP",
+    "algorithm": "sha256",
+    "length": 16,
+    "count": 1000000,
+    "seconds": 0.245569,
+    "digest": "9c5729595fb287cc2a2256280448bbe706c0a866f0372515c7483de2af4e6532"
+  },
+  {
+    "run": 2,
+    "runtime": "PHP",
+    "algorithm": "xxh3",
+    "length": 16,
+    "count": 1000000,
+    "seconds": 0.052506208,
+    "digest": "df76ff0d7f0d9edf"
+  },
+  {
+    "run": 2,
+    "runtime": "PHP",
+    "algorithm": "crc32",
+    "length": 16,
+    "count": 1000000,
+    "seconds": 0.035773875,
+    "digest": "3139966991"
+  },
+  {
+    "run": 2,
+    "runtime": "PHP",
+    "algorithm": "md5",
+    "length": 1048576,
+    "count": 100,
+    "seconds": 0.138983042,
+    "digest": "b561f87202d04959e37588ee05cf5b10"
+  },
+  {
+    "run": 2,
+    "runtime": "PHP",
+    "algorithm": "sha1",
+    "length": 1048576,
+    "count": 100,
+    "seconds": 0.111314417,
+    "digest": "e37f4d5be56713044d62525e406d250a722647d6"
+  },
+  {
+    "run": 2,
+    "runtime": "PHP",
+    "algorithm": "sha256",
+    "length": 1048576,
+    "count": 100,
+    "seconds": 0.295038709,
+    "digest": "8f990ba0b577b51cf009ea049368c16bbda1b21e1b93be07a824758bb253c39b"
+  },
+  {
+    "run": 2,
+    "runtime": "PHP",
+    "algorithm": "xxh3",
+    "length": 1048576,
+    "count": 100,
+    "seconds": 0.004563625,
+    "digest": "11ea1c8ad3937333"
+  },
+  {
+    "run": 2,
+    "runtime": "PHP",
+    "algorithm": "crc32",
+    "length": 1048576,
+    "count": 100,
+    "seconds": 0.211799625,
+    "digest": "356228146"
+  },
+  {
+    "run": 2,
+    "runtime": "Phera",
+    "algorithm": "md5",
+    "length": 16,
+    "count": 1000000,
+    "seconds": 0.346495833,
+    "digest": "45ed9cc2f92b77cd8b2f5bd59ff635f8"
+  },
+  {
+    "run": 2,
+    "runtime": "Phera",
+    "algorithm": "sha1",
+    "length": 16,
+    "count": 1000000,
+    "seconds": 0.336448667,
+    "digest": "a7a7c2e911a47b967d34b5a8807c040e9d167815"
+  },
+  {
+    "run": 2,
+    "runtime": "Phera",
+    "algorithm": "sha256",
+    "length": 16,
+    "count": 1000000,
+    "seconds": 0.454991708,
+    "digest": "9c5729595fb287cc2a2256280448bbe706c0a866f0372515c7483de2af4e6532"
+  },
+  {
+    "run": 2,
+    "runtime": "Phera",
+    "algorithm": "xxh3",
+    "length": 16,
+    "count": 1000000,
+    "seconds": 0.229655416,
+    "digest": "df76ff0d7f0d9edf"
+  },
+  {
+    "run": 2,
+    "runtime": "Phera",
+    "algorithm": "crc32",
+    "length": 16,
+    "count": 1000000,
+    "seconds": 0.271147542,
+    "digest": "3139966991"
+  },
+  {
+    "run": 2,
+    "runtime": "Phera",
+    "algorithm": "md5",
+    "length": 1048576,
+    "count": 100,
+    "seconds": 0.136243208,
+    "digest": "b561f87202d04959e37588ee05cf5b10"
+  },
+  {
+    "run": 2,
+    "runtime": "Phera",
+    "algorithm": "sha1",
+    "length": 1048576,
+    "count": 100,
+    "seconds": 0.081392292,
+    "digest": "e37f4d5be56713044d62525e406d250a722647d6"
+  },
+  {
+    "run": 2,
+    "runtime": "Phera",
+    "algorithm": "sha256",
+    "length": 1048576,
+    "count": 100,
+    "seconds": 0.198077958,
+    "digest": "8f990ba0b577b51cf009ea049368c16bbda1b21e1b93be07a824758bb253c39b"
+  },
+  {
+    "run": 2,
+    "runtime": "Phera",
+    "algorithm": "xxh3",
+    "length": 1048576,
+    "count": 100,
+    "seconds": 0.002478416,
+    "digest": "11ea1c8ad3937333"
+  },
+  {
+    "run": 2,
+    "runtime": "Phera",
+    "algorithm": "crc32",
+    "length": 1048576,
+    "count": 100,
+    "seconds": 0.427448166,
+    "digest": "356228146"
+  },
+  {
+    "run": 3,
+    "runtime": "PHP",
+    "algorithm": "md5",
+    "length": 16,
+    "count": 1000000,
+    "seconds": 0.11625525,
+    "digest": "45ed9cc2f92b77cd8b2f5bd59ff635f8"
+  },
+  {
+    "run": 3,
+    "runtime": "PHP",
+    "algorithm": "sha1",
+    "length": 16,
+    "count": 1000000,
+    "seconds": 0.114092709,
+    "digest": "a7a7c2e911a47b967d34b5a8807c040e9d167815"
+  },
+  {
+    "run": 3,
+    "runtime": "PHP",
+    "algorithm": "sha256",
+    "length": 16,
+    "count": 1000000,
+    "seconds": 0.234414958,
+    "digest": "9c5729595fb287cc2a2256280448bbe706c0a866f0372515c7483de2af4e6532"
+  },
+  {
+    "run": 3,
+    "runtime": "PHP",
+    "algorithm": "xxh3",
+    "length": 16,
+    "count": 1000000,
+    "seconds": 0.052382791,
+    "digest": "df76ff0d7f0d9edf"
+  },
+  {
+    "run": 3,
+    "runtime": "PHP",
+    "algorithm": "crc32",
+    "length": 16,
+    "count": 1000000,
+    "seconds": 0.027181125,
+    "digest": "3139966991"
+  },
+  {
+    "run": 3,
+    "runtime": "PHP",
+    "algorithm": "md5",
+    "length": 1048576,
+    "count": 100,
+    "seconds": 0.129178208,
+    "digest": "b561f87202d04959e37588ee05cf5b10"
+  },
+  {
+    "run": 3,
+    "runtime": "PHP",
+    "algorithm": "sha1",
+    "length": 1048576,
+    "count": 100,
+    "seconds": 0.099727458,
+    "digest": "e37f4d5be56713044d62525e406d250a722647d6"
+  },
+  {
+    "run": 3,
+    "runtime": "PHP",
+    "algorithm": "sha256",
+    "length": 1048576,
+    "count": 100,
+    "seconds": 0.263757375,
+    "digest": "8f990ba0b577b51cf009ea049368c16bbda1b21e1b93be07a824758bb253c39b"
+  },
+  {
+    "run": 3,
+    "runtime": "PHP",
+    "algorithm": "xxh3",
+    "length": 1048576,
+    "count": 100,
+    "seconds": 0.004271,
+    "digest": "11ea1c8ad3937333"
+  },
+  {
+    "run": 3,
+    "runtime": "PHP",
+    "algorithm": "crc32",
+    "length": 1048576,
+    "count": 100,
+    "seconds": 0.201070583,
+    "digest": "356228146"
+  },
+  {
+    "run": 3,
+    "runtime": "Phera",
+    "algorithm": "md5",
+    "length": 16,
+    "count": 1000000,
+    "seconds": 0.276539542,
+    "digest": "45ed9cc2f92b77cd8b2f5bd59ff635f8"
+  },
+  {
+    "run": 3,
+    "runtime": "Phera",
+    "algorithm": "sha1",
+    "length": 16,
+    "count": 1000000,
+    "seconds": 0.273607208,
+    "digest": "a7a7c2e911a47b967d34b5a8807c040e9d167815"
+  },
+  {
+    "run": 3,
+    "runtime": "Phera",
+    "algorithm": "sha256",
+    "length": 16,
+    "count": 1000000,
+    "seconds": 0.340549166,
+    "digest": "9c5729595fb287cc2a2256280448bbe706c0a866f0372515c7483de2af4e6532"
+  },
+  {
+    "run": 3,
+    "runtime": "Phera",
+    "algorithm": "xxh3",
+    "length": 16,
+    "count": 1000000,
+    "seconds": 0.182356291,
+    "digest": "df76ff0d7f0d9edf"
+  },
+  {
+    "run": 3,
+    "runtime": "Phera",
+    "algorithm": "crc32",
+    "length": 16,
+    "count": 1000000,
+    "seconds": 0.197939375,
+    "digest": "3139966991"
+  },
+  {
+    "run": 3,
+    "runtime": "Phera",
+    "algorithm": "md5",
+    "length": 1048576,
+    "count": 100,
+    "seconds": 0.130308584,
+    "digest": "b561f87202d04959e37588ee05cf5b10"
+  },
+  {
+    "run": 3,
+    "runtime": "Phera",
+    "algorithm": "sha1",
+    "length": 1048576,
+    "count": 100,
+    "seconds": 0.083691208,
+    "digest": "e37f4d5be56713044d62525e406d250a722647d6"
+  },
+  {
+    "run": 3,
+    "runtime": "Phera",
+    "algorithm": "sha256",
+    "length": 1048576,
+    "count": 100,
+    "seconds": 0.189019375,
+    "digest": "8f990ba0b577b51cf009ea049368c16bbda1b21e1b93be07a824758bb253c39b"
+  },
+  {
+    "run": 3,
+    "runtime": "Phera",
+    "algorithm": "xxh3",
+    "length": 1048576,
+    "count": 100,
+    "seconds": 0.002469375,
+    "digest": "11ea1c8ad3937333"
+  },
+  {
+    "run": 3,
+    "runtime": "Phera",
+    "algorithm": "crc32",
+    "length": 1048576,
+    "count": 100,
+    "seconds": 0.418337875,
+    "digest": "356228146"
+  }
+]

@@ -134,7 +134,7 @@ async fn hashes_verify_in_both_runtimes() {
             );
         }
     }
-    println!("password interoperability: 72 comparisons, zero mismatches");
+    println!("password interoperability: 12 cases, 60 assertions, zero mismatches");
 }
 #[tokio::test]
 async fn crypt_schemes_and_malformed_salts() {
