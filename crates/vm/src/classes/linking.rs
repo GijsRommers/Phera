@@ -272,13 +272,11 @@ impl Vm {
                 }
                 _ => phera_value::Value::Null,
             };
-            let value = if property.is_static {
-                phera_value::Value::Reference(Rc::new(std::cell::RefCell::new(value)))
-            } else {
-                value
-            };
             let mut linked = PropertyDefault {
                 key: key.clone(),
+                static_storage: property
+                    .is_static
+                    .then(|| crate::reference_holders::StaticProperty::new(value.clone())),
                 value,
                 name: property_name.clone(),
                 declaring: name.clone(),
@@ -306,8 +304,8 @@ impl Vm {
                 .and_then(super::class::literal_initializer)
             {
                 if property.is_static {
-                    if let phera_value::Value::Reference(cell) = &linked.value {
-                        *cell.borrow_mut() = value;
+                    if let Some(storage) = &linked.static_storage {
+                        *storage.reference.borrow().borrow_mut() = value;
                     }
                 } else {
                     linked.value = value;

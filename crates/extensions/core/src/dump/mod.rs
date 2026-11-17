@@ -106,7 +106,7 @@ pub(crate) fn walk(
         match entry {
             Some((position, (key, item))) => {
                 frame.next = frame.entries.next_position(position);
-                style.key(out, key, &frame.container, depth);
+                style.key(out, &key, &frame.container, depth);
                 match enter(style, out, item, depth, &mut active, context) {
                     Some(child) => frames.push(child),
                     None => style.after_entry(out),
