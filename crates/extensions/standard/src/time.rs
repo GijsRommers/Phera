@@ -1,0 +1,114 @@
+//! Clocks and waiting: `time()`, `microtime()`, `hrtime()`, `sleep()`, `usleep()`.
+//!
+//! ```php
+//! $start = hrtime(true);
+//! usleep(100_000);                       // wait a tenth of a second
+//! echo (hrtime(true) - $start) / 1e9;    // about 0.1
+//! ```
+//!
+//! `sleep` and `usleep` are the simplest functions that *wait* for something
+//! outside the program, the way a database query or an HTTP call does. In PHP
+//! a waiting script blocks its whole process. Here they are async native
+//! functions: while one request waits, the worker thread runs other requests,
+//! and a timer wakes this one up again. A thousand requests that each wait
+//! 100 ms finish in about 100 ms on a single thread.
+
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use phera_extension_api::{
+    Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, PhpArray,
+    Registry, Value, args,
+};
+
+pub(crate) fn register(registry: &mut Registry) {
+    registry.function(FunctionEntry::sync("time", &[], time));
+    registry.function(FunctionEntry::sync(
+        "microtime",
+        const { &[Param::new("as_float", ParamType::Bool).optional()] },
+        microtime,
+    ));
+    registry.function(FunctionEntry::sync(
+        "hrtime",
+        const { &[Param::new("as_number", ParamType::Bool).optional()] },
+        hrtime,
+    ));
+    registry.function(FunctionEntry::asynchronous(
+        "sleep",
+        const { &[Param::new("seconds", ParamType::Int)] },
+        sleep,
+    ));
+    registry.function(FunctionEntry::asynchronous(
+        "usleep",
+        const { &[Param::new("microseconds", ParamType::Int)] },
+        usleep,
+    ));
+}
+
+/// Time since 1 January 1970 according to the system clock.
+fn since_unix_epoch() -> Duration {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+}
+
+/// `time()`: the current Unix timestamp in whole seconds.
+fn time(_context: &mut dyn Context, _arguments: &[Value]) -> NativeResult {
+    Ok(Value::Int(since_unix_epoch().as_secs() as i64))
+}
+
+/// `microtime()`: `"0.12345600 1700000000"` (fraction, then seconds), or the
+/// same moment as one float when called with `true`.
+fn microtime(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let now = since_unix_epoch();
+    if args::bool(arguments, 0).unwrap_or(false) {
+        return Ok(Value::Float(now.as_secs_f64()));
+    }
+    let fraction = f64::from(now.subsec_micros()) / 1_000_000.0;
+    Ok(Value::from(format!("{fraction:.8} {}", now.as_secs())))
+}
+
+/// `hrtime()`: a clock that only moves forward, for measuring how long
+/// something took. `[seconds, nanoseconds]`, or nanoseconds as one integer
+/// when called with `true`. Like PHP's, it counts from an arbitrary point.
+fn hrtime(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    thread_local! {
+        /// The moment this worker thread first asked for the time.
+        static STARTED: Instant = Instant::now();
+    }
+    let elapsed = STARTED.with(|started| started.elapsed());
+    if args::bool(arguments, 0).unwrap_or(false) {
+        return Ok(Value::Int(elapsed.as_nanos() as i64));
+    }
+    let mut parts = PhpArray::new();
+    parts.push(Value::Int(elapsed.as_secs() as i64))?;
+    parts.push(Value::Int(i64::from(elapsed.subsec_nanos())))?;
+    Ok(Value::from(parts))
+}
+
+/// The amount to wait, or PHP's ValueError for a negative argument.
+fn wait_amount(function: &str, parameter: &str, amount: i64) -> Result<u64, NativeError> {
+    u64::try_from(amount).map_err(|_| {
+        NativeError::value_error(format!(
+            "{function}(): Argument #1 (${parameter}) must be greater than or equal to 0"
+        ))
+    })
+}
+
+/// `sleep($seconds)`: waits, letting other requests run meanwhile. Returns 0.
+fn sleep(_context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        let seconds = wait_amount("sleep", "seconds", args::int(&arguments, 0).unwrap_or(0))?;
+        tokio::time::sleep(Duration::from_secs(seconds)).await;
+        Ok(Value::Int(0))
+    })
+}
+
+/// `usleep($microseconds)`: the same in millionths of a second. Returns null.
+fn usleep(_context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        let amount = args::int(&arguments, 0).unwrap_or(0);
+        let microseconds = wait_amount("usleep", "microseconds", amount)?;
+        tokio::time::sleep(Duration::from_micros(microseconds)).await;
+        Ok(Value::Null)
+    })
+}

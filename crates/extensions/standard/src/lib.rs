@@ -1,4 +1,4 @@
-//! PHP's `ext/standard`: string, math and array functions.
+//! PHP's `ext/standard`: string, math, array and time functions.
 
 use phera_extension_api::{Extension, Registry};
 
@@ -7,6 +7,7 @@ mod constants;
 mod math;
 mod natural;
 mod strings;
+mod time;
 
 pub struct Standard;
 
@@ -21,6 +22,7 @@ impl Extension for Standard {
         arrays::register(registry);
         natural::register(registry);
         constants::register(registry);
+        time::register(registry);
     }
 }
 

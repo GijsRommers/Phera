@@ -311,9 +311,15 @@ each with its own fixtures checked against real PHP.
 
 ## 10. Speed
 
-Measured on 17 November 2026 against PHP 8.5 without its JIT, CPU time.
-Loops and arrays are within 1.4 to 2.2 times PHP. Anything that calls is
-4 to 10 times slower; a method call costs about ten times PHP's.
+Measured on 17 November 2026 against PHP 8.5 without its JIT, with a clock
+inside the script so that start-up is left out. Loops and arrays are 5 to 7
+times slower than PHP. Anything that calls is 9 to 22 times slower.
+(Earlier figures in this project used whole-process time and were too
+favourable by a factor of two to four; see benchmarks/README.md.)
+
+Waiting is where the design wins: one worker thread serves thousands of
+requests that wait at the same time, where PHP needs a process for each.
+See examples/concurrency.
 
 A profile of method calls shows no single hot spot. The time is spread over
 about forty small functions, because a call does far more bookkeeping than it

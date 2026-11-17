@@ -7,6 +7,8 @@ license.workspace = true
 
 [dependencies]
 phera-extension-api.workspace = true
+# Only for timers: `sleep` and `usleep` wait without blocking the thread.
+tokio.workspace = true
 
 [lints]
 workspace = true

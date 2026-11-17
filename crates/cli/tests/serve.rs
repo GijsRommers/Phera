@@ -16,6 +16,10 @@ struct Served {
 
 impl Served {
     fn start(name: &str, files: &[(&str, &str)]) -> Served {
+        Served::start_with_workers(name, 2, files)
+    }
+
+    fn start_with_workers(name: &str, workers: usize, files: &[(&str, &str)]) -> Served {
         let root = std::env::temp_dir().join(format!("phera-serve-{name}-{}", std::process::id()));
         for (path, contents) in files {
             let file = root.join(path);
@@ -24,7 +28,8 @@ impl Served {
         }
 
         let mut process = Command::new(env!("CARGO_BIN_EXE_phera"))
-            .args(["serve", "--listen", "127.0.0.1:0", "--workers", "2"])
+            .args(["serve", "--listen", "127.0.0.1:0", "--workers"])
+            .arg(workers.to_string())
             .arg(&root)
             .stdout(Stdio::piped())
             .spawn()
@@ -169,5 +174,72 @@ fn concurrent_requests_are_isolated() {
             let (id, response) = client.join().expect("client thread");
             assert_eq!(response, (200, format!("{id}:199990000")));
         }
+    });
+}
+
+/// Sixty requests that each wait 300 ms, sent at once to ONE worker thread.
+/// One after the other they would take 18 seconds. Because `usleep` waits
+/// without blocking the thread, they all finish in well under two.
+#[test]
+fn waiting_requests_do_not_block_each_other() {
+    let served = Served::start_with_workers(
+        "waiting",
+        1,
+        &[(
+            "wait.php",
+            "<?php usleep(300000); echo 'done ', $_GET['id'];",
+        )],
+    );
+    let started = std::time::Instant::now();
+    std::thread::scope(|scope| {
+        let clients: Vec<_> = (0..60)
+            .map(|id| {
+                let served = &served;
+                scope.spawn(move || (id, served.get(&format!("/wait.php?id={id}"))))
+            })
+            .collect();
+        for client in clients {
+            let (id, response) = client.join().expect("client thread");
+            assert_eq!(response, (200, format!("done {id}")));
+        }
+    });
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed < std::time::Duration::from_secs(2),
+        "60 waiting requests took {elapsed:?} on one thread"
+    );
+}
+
+/// A request that computes for a long time shares its thread: a quick
+/// request sent while it runs is answered long before it finishes.
+#[test]
+fn a_long_computation_lets_other_requests_through() {
+    let served = Served::start_with_workers(
+        "fairness",
+        1,
+        &[
+            (
+                "slow.php",
+                "<?php $s = 0; for ($i = 0; $i < 30000000; $i++) { $s += $i % 7; } echo $s;",
+            ),
+            ("quick.php", "<?php echo 'quick';"),
+        ],
+    );
+    std::thread::scope(|scope| {
+        let slow = scope.spawn(|| {
+            let started = std::time::Instant::now();
+            (served.get("/slow.php"), started.elapsed())
+        });
+        // Give the slow request time to start, then ask for the quick one.
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let started = std::time::Instant::now();
+        assert_eq!(served.get("/quick.php"), (200, "quick".to_string()));
+        let quick_took = started.elapsed();
+        let (slow_response, slow_took) = slow.join().expect("slow client");
+        assert_eq!(slow_response, (200, "89999995".to_string()));
+        assert!(
+            quick_took * 4 < slow_took,
+            "the quick request took {quick_took:?}, the slow one {slow_took:?}"
+        );
     });
 }

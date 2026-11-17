@@ -71,6 +71,24 @@ impl MethodEntry {
         }
     }
 
+    /// A public instance method that may wait: for a database, a socket, a
+    /// timer or a PHP callback. While it waits, the worker thread runs other
+    /// requests.
+    pub const fn public_async(
+        name: &'static str,
+        params: &'static [Param],
+        handler: AsyncMethod,
+    ) -> Self {
+        MethodEntry {
+            name,
+            params,
+            handler: NativeMethod::Async(handler),
+            visibility: Visibility::Public,
+            is_static: false,
+            is_final: false,
+        }
+    }
+
     /// A method an interface or abstract class requires.
     pub const fn required(name: &'static str, params: &'static [Param]) -> Self {
         MethodEntry {
