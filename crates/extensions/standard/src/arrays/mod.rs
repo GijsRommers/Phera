@@ -3,8 +3,14 @@
 use phera_extension_api::{ArrayKey, Registry, Value};
 
 mod build;
+mod callback;
+mod callback_set_merge;
+mod callback_sets;
+mod callback_sort;
 mod combine;
 mod combine_recursive;
+mod filter;
+mod find;
 mod keys;
 mod ordering;
 mod pointer;
@@ -15,10 +21,17 @@ mod sets;
 mod slice;
 mod sort;
 pub(crate) mod sort_order;
+mod sort_order_async;
 mod stack;
 mod tables;
+mod walk;
 
 pub(crate) fn register(registry: &mut Registry) {
+    callback_sort::register(registry);
+    callback_sets::register(registry);
+    walk::register(registry);
+    filter::register(registry);
+    find::register(registry);
     sort::register(registry);
     sets::register(registry);
     tables::register(registry);

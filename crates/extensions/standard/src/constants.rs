@@ -1,9 +1,28 @@
-//! PHP mathematical, rounding, sorting, and array-filter constants.
+//! PHP constants for implemented string, math and array operations.
 
 use phera_extension_api::Registry;
 
 /// Exact binary64 constants used by PHP.
 pub(crate) fn register(registry: &mut Registry) {
+    for (name, value) in [
+        ("STR_PAD_LEFT", 0i64),
+        ("STR_PAD_RIGHT", 1),
+        ("STR_PAD_BOTH", 2),
+        ("CASE_LOWER", 0),
+        ("CASE_UPPER", 1),
+        ("EXTR_OVERWRITE", 0),
+        ("EXTR_SKIP", 1),
+        ("EXTR_PREFIX_SAME", 2),
+        ("EXTR_PREFIX_ALL", 3),
+        ("EXTR_PREFIX_INVALID", 4),
+        ("EXTR_PREFIX_IF_EXISTS", 5),
+        ("EXTR_IF_EXISTS", 6),
+        ("EXTR_REFS", 256),
+        ("HTML_SPECIALCHARS", 0),
+        ("HTML_ENTITIES", 1),
+    ] {
+        registry.constant(name, value);
+    }
     registry.constant("M_PI", f64::from_bits(0x400921fb54442d18));
     registry.constant("M_E", f64::from_bits(0x4005bf0a8b145769));
     registry.constant("M_LOG2E", f64::from_bits(0x3ff71547652b82fe));
