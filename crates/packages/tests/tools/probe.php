@@ -12,7 +12,8 @@ $map = $loader->getClassMap();
 foreach ($map as $name => $path) {
     $result['classes'][$name] = $normalize($loader->findFile($name));
 }
-foreach (array('Phera\\DefinitelyMissing', 'NoSuchPheraClass', 'Composer\\DefinitelyMissing') as $name) {
+foreach (array('Phera\\DefinitelyMissing', 'NoSuchPheraClass',
+    'Composer\\DefinitelyMissing') as $name) {
     $result['classes'][$name] = $loader->findFile($name);
 }
 ksort($result['classes']);

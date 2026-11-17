@@ -137,7 +137,8 @@ def compare(fixture):
     row = {'fixture': fixture.name, 'composer_install': oracle.returncode,
            'phera_install': actual.returncode, 'composer_time': composer_time,
            'phera_time': phera_time}
-    vendor = json.loads((fixture / 'composer.json').read_text()).get('config', {}).get('vendor-dir', 'vendor')
+    vendor = json.loads((fixture / 'composer.json').read_text()).get('config', {}).get(
+        'vendor-dir', 'vendor')
     if not oracle.returncode and not actual.returncode:
         a, b = tree(left / vendor), tree(right / vendor)
         different = [path for path in sorted(a.keys() | b.keys()) if a.get(path) != b.get(path)]
@@ -160,24 +161,29 @@ def compare(fixture):
         b = json.loads((right / vendor / 'composer/installed.json').read_text())
         row['installed_identical'] = a == b
         if a != b:
-            row['installed_difference_packages'] = [x['name'] for x, y in zip(a['packages'], b['packages']) if x != y]
+            row['installed_difference_packages'] = [
+                x['name'] for x, y in zip(a['packages'], b['packages']) if x != y]
         probes = []
         for directory in [left, right]:
-            result, _ = run([PHP, '-n', '-d', 'display_errors=stderr', '-d', 'log_errors=0', str(TESTS / 'tools/probe.php'), vendor], directory, env, 'probe')
+            result, _ = run([PHP, '-n', '-d', 'display_errors=stderr', '-d', 'log_errors=0',
+                str(TESTS / 'tools/probe.php'), vendor], directory, env, 'probe')
             output = result.stdout.replace(str(directory), '.')
             diagnostics = result.stderr.replace(str(directory), '.')
             if not result.returncode:
                 prefix, payload = output.rsplit('\nPHERA_PROBE_JSON=', 1)
-                probes.append({'result': json.loads(payload), 'output': prefix, 'diagnostics': diagnostics})
+                probes.append({'result': json.loads(payload), 'output': prefix,
+                               'diagnostics': diagnostics})
             else:
-                probes.append({'status': result.returncode, 'output': output, 'diagnostics': diagnostics})
+                probes.append({'status': result.returncode, 'output': output,
+                               'diagnostics': diagnostics})
         row['autoload_identical'] = probes[0] == probes[1]
         if probes[0] != probes[1]:
             (WORK / (fixture.name + '-autoload.json')).write_text(json.dumps(probes, indent=2))
     for directory in [left, right]:
         (directory / 'composer.lock').unlink(missing_ok=True)
     oracle, composer_update = run([PHP, COMPOSER, 'update', '--no-install', '--no-plugins',
-        '--no-scripts', '--ignore-platform-reqs', '--no-interaction', '--no-audit'], left, env, 'update')
+        '--no-scripts', '--ignore-platform-reqs', '--no-interaction', '--no-audit'],
+        left, env, 'update')
     actual, phera_update = run([PHERA, 'update', '--no-install', '--no-scripts',
         '--ignore-platform-reqs'], right, env, 'update')
     row.update(composer_update=oracle.returncode, phera_update=actual.returncode,
@@ -186,8 +192,10 @@ def compare(fixture):
         versions = lambda path: {p['name']:p['version'] for key in ['packages','packages-dev']
                                 for p in json.loads(path.read_text())[key]}
         a, b = versions(left / 'composer.lock'), versions(right / 'composer.lock')
-        row['resolution_differences'] = {key: [a.get(key), b.get(key)] for key in sorted(a.keys() | b.keys()) if a.get(key) != b.get(key)}
-        validation, _ = run([PHP, COMPOSER, 'validate', '--no-check-publish'], right, env, 'validate')
+        row['resolution_differences'] = {key: [a.get(key), b.get(key)]
+            for key in sorted(a.keys() | b.keys()) if a.get(key) != b.get(key)}
+        validation, _ = run([PHP, COMPOSER, 'validate', '--no-check-publish'],
+                            right, env, 'validate')
         row['composer_accepts_lock'] = 'not up to date' not in validation.stdout + validation.stderr
         if (right / vendor).exists():
             shutil.rmtree(right / vendor)
@@ -201,7 +209,8 @@ def compare(fixture):
 
 if os.environ.get('PHERA_PACKAGES_NETWORK') != '1':
     raise SystemExit('Set PHERA_PACKAGES_NETWORK=1 to opt into registry comparisons.')
-fixtures = sorted(path for path in (TESTS / 'fixtures').iterdir() if (path / 'composer.lock').exists())
+fixtures = sorted(path for path in (TESTS / 'fixtures').iterdir()
+                  if (path / 'composer.lock').exists())
 if len(sys.argv) > 3:
     fixtures = [path for path in fixtures if path.name in sys.argv[3:]]
 rows = []

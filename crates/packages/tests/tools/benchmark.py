@@ -87,7 +87,8 @@ for name in NAMES:
         rows.append(row)
         print(json.dumps(row), flush=True)
     for tool in ['composer', 'phera']:
-        metadata = cache_root / ('composer-cache/repo' if tool == 'composer' else 'phera-store/metadata')
+        metadata = cache_root / (
+            'composer-cache/repo' if tool == 'composer' else 'phera-store/metadata')
         if metadata.exists():
             shutil.rmtree(metadata)
     for state in ['cold metadata', 'warm metadata']:
@@ -96,7 +97,8 @@ for name in NAMES:
             for tool in ['composer', 'phera']:
                 directory = directories[tool]
                 (directory / 'composer.lock').unlink(missing_ok=True)
-                command = [PHP, COMPOSER, 'update', '--no-plugins', '--no-interaction', '--no-audit'] \
+                command = [PHP, COMPOSER, 'update', '--no-plugins',
+                           '--no-interaction', '--no-audit'] \
                     if tool == 'composer' else [PHERA, 'update']
                 command.extend(['--no-install', '--no-scripts', '--ignore-platform-reqs'])
                 samples[tool].append(measure(command, directory, environment,
