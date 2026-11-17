@@ -196,6 +196,7 @@ Real PHP is the oracle at every layer.
 | 5 | **Web.** `phera serve` runs scripts with superglobals and `header()`. Then uploads, cookies, sessions, autoloading. | Started |
 | 6 | **Frameworks.** Reflection, sessions, PDO. Boot a bare Symfony kernel, then a Laravel hello world. | |
 | 7 | **Snapshot and fork.** Phase 2 of request isolation. | |
+| 8 | **Built-in tools.** `phera check` (a type checker) and `phera test` (a PHPUnit-compatible runner). Section 11. | Planned |
 
 ## 9. Objects, exceptions, closures, generators
 
@@ -446,3 +447,184 @@ would take a JIT. On everything else there is no such limit.
 Order: frames and dispatch (rules 6 and 7), functions and methods by index
 (1 to 3), objects as slots (4), then the compiler work of 10.3, with rule 5
 applied at each step.
+
+### 10.6 Second opinion, and the order that follows from it
+
+On 17 November 2026 Claude Opus reviewed the engine at commit cfed5d7 and
+built a 400-line register VM in safe Rust to the rules of 10.5 (kept in the
+scratch directory as `opus/proto/`). Independently, a 150-line model of one
+method call loop was measured here. Both agree, and they change the plan.
+
+**What a safe Rust interpreter with this layout reaches** (measured, in CPU
+cycles, PHP 8.5 without JIT as 1.0):
+
+| Shape | Prototype | Phera at cfed5d7 |
+| --- | --- | --- |
+| `fib(30)` | 1.3 | 7.7 |
+| Method call in a loop | 1.2 | 10 |
+| Objects created and used | 1.2 | 8.5 |
+| Method call loop, the model here | 1.0 (15.8 ns against PHP's 16.1) | 12 (198 ns) |
+
+So the design is right and the gap on calls is implementation, six to
+twelve times of it. No `unsafe` is needed for any of that. Unchecked
+register access would add 5 to 14 percent, most of which bytecode validated
+at load plus fixed-size register windows can recover safely.
+
+**What the review found that the plan did not have:**
+
+1. *Build settings.* No release profile and the system allocator. Fat LTO,
+   one codegen unit and mimalloc: 10 to 25 percent. Done in 54093d2.
+2. *String array keys were copied on every access*, and the hash was
+   SipHash. Done in 54093d2: 31 percent on a string-keyed loop.
+3. *A call to a native function costs 313 cycles against PHP's 17.* Every
+   native call leaves the synchronous loop, builds a 440-byte future, moves
+   its arguments into a `Vec` and converts each one. Synchronous natives must
+   run inside the loop, borrow their arguments from the register window, and
+   skip conversion when a bit test says the types already fit. PHP compiles
+   about twenty builtins (`strlen`, `count`, `is_*`, `in_array` with a
+   literal array, ...) to instructions; Phera may do the same under the same
+   conditions.
+4. *Some property and array operations are forty times slower than PHP*:
+   `$this->n += 1` costs 1,105 cycles (PHP 25) and `$this->a['x']++` 1,610
+   (PHP 35), because every shape without its own fast path rebuilds the
+   whole path with three allocations per property step. The remedy is one
+   general walker that descends with `&mut Value` and allocates nothing,
+   on top of objects as slots, not more fast paths.
+5. *The compiler's optimiser skips every function that contains `try`*, misses
+   obvious cases elsewhere, builds `[1, 2, 3]` with twelve instructions and
+   string interpolation with one allocation per piece. Rules 10.3 will not
+   hold as peephole passes. Expressions should be compiled with a
+   destination in mind (`compile(expression, wanted place)`), which gives
+   direct operands, consumed temporaries, fused branches and bottom-tested
+   loops by construction, plus constant arrays as one constant and one
+   `ConcatN` for a chain.
+6. *Arrays*: a list should be a `Vec<Value>` without keys, a hashed array
+   one entry list plus an index of positions. Measured 3.3 times on push and
+   read.
+7. *Strings*: two allocations each today. Short strings (up to 14 bytes) fit
+   inside the 16-byte value.
+8. *`Undef` as a value variant* instead of `Option<Value>` registers, so a
+   register window can be handed to a native function as `&[Value]`.
+9. *Callbacks* (`array_map`, `usort`) box two futures per element; natives
+   that call back should return "call this, then resume me" to the loop.
+10. *`foreach` by reference* re-resolves its place every round: 25 times PHP.
+11. *Errors are 48 bytes*, so every `Result` in the handler chain travels
+    through memory; a boxed error is 8.
+
+**Corrections to 10.5.**
+
+- The caches are about 6 percent of a call's cost, not the bulk of it. The
+  cost is the protocol around the call: records cloned and dropped, a
+  184-byte boxed frame reset per call, the dispatch chain. Deleting a cache
+  speeds nothing up by itself; the first redesign attempt showed that
+  (methods got 12 percent slower when the method cache was replaced by a
+  lookup per call; it is kept on the branch `wip/engine-redesign-1`).
+- Method slot numbers that stay stable in subclasses are not worth their
+  special cases (interfaces, traits, private methods, `__call`). A flat
+  per-class table from interned name to method costs about 1 ns per call.
+  Stable slots remain the rule for properties.
+- "No reference count is touched to make a call" cannot hold for a method:
+  the receiver must be kept alive, as in PHP. The rule is "only the
+  receiver's".
+- A callee known at compile time needs no `InitCall` and no `Send`: the
+  compiler evaluates the arguments into the top of the caller's window and
+  emits one `CallDirect`. A declared function cannot be redeclared, so this
+  is sound.
+
+**Order of work from here.**
+
+1. Calls and frames as in the prototype, with the instruction format for
+   calls settled at the same time.
+2. Native calls inside the loop; builtins as instructions.
+3. Objects as slots and the allocation-free place walker, with interned names.
+4. The destination-driven compiler.
+5. Arrays, short strings, `Undef`, in the value crate; these are independent
+   of 1 to 4 and can run beside them.
+6. Callbacks, `foreach`, exceptions, class checks by index, boxed errors.
+
+**Expected result**, from the prototypes: calls, methods and objects at 1.2
+to 1.4 times PHP, tight integer loops at 1.2 to 1.5, arrays and short
+strings at or near PHP. Beyond that only a JIT helps, and only for numeric
+loops.
+
+## 11. Tools built into the runtime
+
+Two tools that PHP projects today get from separate packages written in PHP
+are planned as part of the `phera` binary, sharing its lexer, parser and AST.
+One front end means the tools and the runtime cannot disagree about what a
+file means, and native code makes them fast enough to run on every save.
+
+### 11.1 `phera check`: a type checker
+
+What PHPStan and Psalm do: find errors without running the code.
+
+- **Pipeline.** Find the files; parse them in parallel (the parser is pure,
+  so this scales with cores); collect every declaration (classes,
+  interfaces, traits, enums, functions, constants, with their signatures)
+  into one index for the project; then analyse each function body: track the
+  type of every variable through the control flow, infer the type of every
+  expression, and let rules report what cannot be right.
+- **Types.** A small lattice: the scalar types, literal values, `null`,
+  unions, class names with their ancestry, `list<T>` and `array<K, V>`,
+  array shapes, `callable` signatures, `mixed`, `never`. Declared native
+  types are facts; everything else is inferred.
+- **Knowledge of PHP itself** comes from php-src's own `.stub.php` files,
+  parsed by Phera's parser at build time into a compact table. So the checker
+  knows every built-in function and class of PHP, not only those the runtime
+  implements so far.
+- **Levels**, as in PHPStan, so a project can adopt it gradually. Level 0:
+  unknown classes, functions, methods on `$this`, constants; wrong argument
+  counts; variables that are certainly undefined. Then: possibly undefined
+  variables; methods and properties on any expression whose type is known;
+  return and property types; dead code and comparisons that are always true
+  or false; argument types; and from there PHPDoc types (`@param`,
+  `@return`, `@var`, generics, shapes).
+- **Output**: a readable report, JSON, and annotations for CI; a baseline
+  file to adopt it on an existing code base; `@phpstan-ignore` and
+  `@psalm-suppress` comments are honoured so existing code needs no edits.
+- **How it is verified**: differentially. A corpus of small PHP files, each
+  with one deliberate error or none, is run through PHPStan at the matching
+  level and through `phera check`; both must flag the same lines. Then real
+  open-source projects, comparing the reports.
+- **Not in the first versions**: a plugin interface, and full parity with
+  PHPStan's generics inference.
+
+### 11.2 `phera test`: a test runner
+
+Existing PHPUnit tests should run unchanged.
+
+- **Compatible surface**: `PHPUnit\Framework\TestCase` with `setUp`,
+  `tearDown` and their class-level forms; the assertions; `expectException`
+  and friends; data providers; tests found by the `test` prefix and by
+  attributes; `phpunit.xml` for suites and bootstrap; PHPUnit's exit codes,
+  a familiar progress display, and JUnit XML for CI.
+- **Native**: the assertions are native methods; discovery and scheduling
+  belong to the runtime. Every test class runs in its own fresh VM as a
+  task, so tests are isolated from each other without extra processes and
+  run in parallel on all cores by default.
+- **Needs first**: namespaces with `use`, autoloading (Composer's PSR-4 and
+  class map), attributes, traits. So it follows those engine features.
+- **Later**: mock objects (`createMock`), which need classes generated at
+  run time.
+- **How it is verified**: the same test suites under real PHPUnit and under
+  `phera test` must give the same result per test.
+
+### 11.3 Order of feature work towards "it all matches"
+
+The measure stays the same: the same script, the same output as PHP 8.5.
+
+1. Magic methods (`__toString`, `__get`, `__set`, `__isset`, `__unset`,
+   `__call`, `__callStatic`, `__clone`, `__destruct`), and the engine's
+   interfaces (`Stringable`, `Countable`, `ArrayAccess`, `Iterator`,
+   `IteratorAggregate`, `Traversable`, `JsonSerializable`).
+2. Traits, enums, readonly classes, first-class enum functions.
+3. Namespaces end to end, autoloading, `include` paths, Composer.
+4. Attributes and reflection, as far as frameworks and PHPUnit use them.
+5. Generators.
+6. The standard library in breadth: date and time, mbstring, files and
+   streams, output buffering, hashing, serialization, SPL.
+7. Sessions, cookies, uploads for the web side.
+
+Items 1 to 5 change the engine and wait for the call redesign of section 10
+to land, so that they are built on the new call path and not twice. Item 6
+is independent of the engine and runs beside it.

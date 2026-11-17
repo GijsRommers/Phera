@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use phera_extension_api::NativeError;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DriverName {
     Postgres,
     Mysql,
@@ -19,7 +19,7 @@ impl DriverName {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Dsn {
     pub driver: DriverName,
     pub fields: BTreeMap<String, String>,
@@ -27,17 +27,22 @@ pub struct Dsn {
 
 impl Dsn {
     pub fn parse(input: &str) -> Result<Self, NativeError> {
+        Self::parse_named(input, "PDO::__construct")
+    }
+
+    pub fn parse_named(input: &str, method: &str) -> Result<Self, NativeError> {
         let (name, rest) = input.split_once(':').ok_or_else(|| {
-            NativeError::throw(
-                "PDOException",
-                "PDO::__construct(): Argument #1 ($dsn) must be a valid data source name",
+            crate::errors::exception(
+                format!("{method}(): Argument #1 ($dsn) must be a valid data source name"),
+                None,
+                0,
             )
         })?;
         let driver = match name {
             "pgsql" => DriverName::Postgres,
             "mysql" => DriverName::Mysql,
             "sqlite" => return Err(crate::errors::unsupported("SQLite")),
-            _ => return Err(NativeError::throw("PDOException", "could not find driver")),
+            _ => return Err(crate::errors::exception("could not find driver", None, 0)),
         };
         let mut fields = BTreeMap::new();
         for field in rest.split(';').filter(|field| !field.trim().is_empty()) {
@@ -47,9 +52,10 @@ impl Dsn {
         }
         for (key, value) in &fields {
             if key.starts_with("ssl") && !(key == "sslmode" && value == "disable") {
-                return Err(NativeError::throw(
-                    "PDOException",
+                return Err(crate::errors::exception(
                     "TLS is not supported yet",
+                    None,
+                    0,
                 ));
             }
         }
@@ -67,7 +73,7 @@ impl Dsn {
         };
         self.get("port", default)
             .parse()
-            .map_err(|_| NativeError::throw("PDOException", "Invalid port in data source name"))
+            .map_err(|_| crate::errors::exception("Invalid port in data source name", None, 0))
     }
 }
 

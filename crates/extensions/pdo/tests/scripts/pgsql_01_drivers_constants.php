@@ -9,7 +9,8 @@ $p->exec("CREATE TABLE $t (id SERIAL PRIMARY KEY, label VARCHAR(80), score INT,
 try {
     $p->exec("INSERT INTO $t (label,score,amount,active) VALUES
         ('A',10,1.25,true),('B',20,2.50,false),('C',30,3.75,true)");
-    var_dump(PDO::getAvailableDrivers(), PDO::PARAM_INT, PDO::FETCH_ASSOC,
+    var_dump(in_array('pgsql', PDO::getAvailableDrivers(), true),
+        in_array('mysql', pdo_drivers(), true), PDO::PARAM_INT, PDO::FETCH_ASSOC,
         PDO::ERRMODE_EXCEPTION, PDO::ATTR_EMULATE_PREPARES);
  } finally {
     if ($p->inTransaction()) {$p->rollBack();}

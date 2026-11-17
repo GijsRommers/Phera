@@ -45,6 +45,8 @@ fn queries(driver: &str) -> Vec<&'static str> {
 
 #[tokio::test(flavor = "current_thread")]
 async fn native_fetch_types_and_modes_match_php() {
+    tokio::task::LocalSet::new().run_until(async {
+
     if !support::databases_available() {
         return;
     }
@@ -138,4 +140,5 @@ async fn native_fetch_types_and_modes_match_php() {
             actual.len()
         );
     }
+    }).await;
 }

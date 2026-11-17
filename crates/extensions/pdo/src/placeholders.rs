@@ -80,7 +80,7 @@ fn name_start(byte: u8) -> bool {
     byte.is_ascii_alphabetic() || byte == b'_'
 }
 
-fn quoted(bytes: &[u8], start: usize) -> usize {
+pub(crate) fn quoted(bytes: &[u8], start: usize) -> usize {
     let delimiter = bytes[start];
     let mut index = start + 1;
     while index < bytes.len() {
@@ -99,14 +99,14 @@ fn quoted(bytes: &[u8], start: usize) -> usize {
     index
 }
 
-fn line(bytes: &[u8], start: usize) -> usize {
+pub(crate) fn line(bytes: &[u8], start: usize) -> usize {
     bytes[start..]
         .iter()
         .position(|b| *b == b'\n')
         .map_or(bytes.len(), |n| start + n + 1)
 }
 
-fn comment(bytes: &[u8], start: usize) -> usize {
+pub(crate) fn comment(bytes: &[u8], start: usize) -> usize {
     let mut depth = 1;
     let mut index = start + 2;
     while index + 1 < bytes.len() {
@@ -128,7 +128,7 @@ fn comment(bytes: &[u8], start: usize) -> usize {
     bytes.len()
 }
 
-fn dollar(bytes: &[u8], start: usize) -> Option<usize> {
+pub(crate) fn dollar(bytes: &[u8], start: usize) -> Option<usize> {
     let mut end = start + 1;
     while bytes
         .get(end)

@@ -94,7 +94,11 @@ pub fn convert(
     }
 }
 
-fn stringify(context: &mut dyn Context, value: Value, attributes: &Attributes) -> NativeResult {
+pub(crate) fn stringify(
+    context: &mut dyn Context,
+    value: Value,
+    attributes: &Attributes,
+) -> NativeResult {
     if !attributes.stringify || value.is_null() {
         return Ok(value);
     }
@@ -135,14 +139,15 @@ pub fn column(
     this: Option<&Rc<Object>>,
     arguments: &[Value],
 ) -> NativeResult {
-    let column = usize::try_from(args::int(arguments, 0).unwrap_or(0))
-        .map_err(|_| NativeError::value_error("Column index must be greater than or equal to 0"))?;
     let state = state(this)?;
     let mut statement = state.borrow_mut();
     let Some(row) = statement.rows.values.get(statement.cursor).cloned() else {
         return Ok(Value::Bool(false));
     };
     statement.cursor += 1;
+    let column = usize::try_from(args::int(arguments, 0).unwrap_or(0))
+        .map_err(|_| NativeError::value_error("Column index must be greater than or equal to 0"))?;
+
     let attributes = statement.connection.attributes.borrow().clone();
     convert(
         context,
@@ -154,88 +159,6 @@ pub fn column(
     )
 }
 
-#[derive(Clone, Copy)]
-enum Grouping {
-    None,
-    Group,
-    Unique,
-}
-
-pub fn all(
-    context: &mut dyn Context,
-    this: Option<&Rc<Object>>,
-    arguments: &[Value],
-) -> NativeResult {
-    let state = state(this)?;
-    let mut statement = state.borrow_mut();
-    let number = args::int(arguments, 0).unwrap_or(0);
-    let grouping = match number & 0x60 {
-        0 => Grouping::None,
-        32 => Grouping::Group,
-        64 => Grouping::Unique,
-        _ => return Err(unsupported("This PDO fetch mode")),
-    };
-    let mode = FetchMode::parse(number & !0x60, statement.fetch)?;
-    let column = usize::try_from(args::int(arguments, 1).unwrap_or(statement.column as i64))
-        .map_err(|_| NativeError::value_error("Invalid column index"))?;
-    let attributes = statement.connection.attributes.borrow().clone();
-    let mut result = PhpArray::new();
-    for row in &statement.rows.values[statement.cursor..] {
-        match grouping {
-            Grouping::None if matches!(mode, FetchMode::KeyPair) => {
-                if row.len() != 2 {
-                    return Err(NativeError::throw(
-                        "PDOException",
-                        "SQLSTATE[HY000]: General error: PDO::FETCH_KEY_PAIR fetch mode \
-                         requires the result set to contain exactly 2 columns.",
-                    ));
-                }
-                let key = stringify(context, row[0].clone(), &attributes)?;
-                result.insert(
-                    ArrayKey::from_value(&key)?,
-                    stringify(context, row[1].clone(), &attributes)?,
-                );
-            }
-            Grouping::None => {
-                result.push(convert(
-                    context,
-                    row,
-                    &statement.rows.columns,
-                    mode,
-                    column,
-                    &attributes,
-                )?)?;
-            }
-            Grouping::Group | Grouping::Unique => {
-                let Some(first) = row.first() else {
-                    continue;
-                };
-                let key = ArrayKey::from_value(first)?;
-                let value = convert(
-                    context,
-                    &row[1..],
-                    &statement.rows.columns[1..],
-                    mode,
-                    column,
-                    &attributes,
-                )?;
-                if matches!(grouping, Grouping::Unique) {
-                    result.insert(key, value);
-                } else {
-                    let mut group = match result.get(&key) {
-                        Some(Value::Array(values)) => (**values).clone(),
-                        _ => PhpArray::new(),
-                    };
-                    group.push(value)?;
-                    result.insert(key, Value::from(group));
-                }
-            }
-        }
-    }
-    statement.cursor = statement.rows.values.len();
-    Ok(Value::from(result))
-}
-
 pub fn set_mode(
     _: &mut dyn Context,
     this: Option<&Rc<Object>>,
@@ -243,9 +166,16 @@ pub fn set_mode(
 ) -> NativeResult {
     let state = state(this)?;
     let mut statement = state.borrow_mut();
-    statement.fetch = FetchMode::parse(args::int(arguments, 0).unwrap_or(0), statement.fetch)?;
-    statement.column = usize::try_from(args::int(arguments, 1).unwrap_or(0))
-        .map_err(|_| NativeError::value_error("Invalid column index"))?;
+    let configuration = crate::fetch_options::validate(
+        crate::fetch_options::Method::SetMode,
+        arguments,
+        statement.fetch,
+        statement.column,
+        statement.fetch_flags,
+    )?;
+    statement.fetch = configuration.mode;
+    statement.column = configuration.column;
+    statement.fetch_flags = configuration.flags;
     Ok(Value::Bool(true))
 }
 

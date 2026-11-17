@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use phera_extension_api::{Context, LocalFuture, NativeError, NativeResult, Object, Value};
+use phera_extension_api::{Context, LocalFuture, NativeResult, Object, Value};
 
 use crate::connection::session;
 
@@ -20,22 +20,28 @@ fn run<'a>(
 ) -> LocalFuture<'a, NativeResult> {
     Box::pin(async move {
         let session = session(this.as_ref())?;
-        let active = session.transaction.get();
+        let mut driver = session.driver.lock().await;
+        let active = driver
+            .transaction_state()
+            .await
+            .unwrap_or(session.transaction.get());
         let (sql, method, next) = match operation {
             Operation::Begin => {
                 if active {
-                    return Err(NativeError::throw(
-                        "PDOException",
+                    return Err(crate::errors::exception(
                         "There is already an active transaction",
+                        None,
+                        0,
                     ));
                 }
                 ("BEGIN", "PDO::beginTransaction", true)
             }
             Operation::Commit | Operation::Rollback => {
                 if !active {
-                    return Err(NativeError::throw(
-                        "PDOException",
+                    return Err(crate::errors::exception(
                         "There is no active transaction",
+                        None,
+                        0,
                     ));
                 }
                 match operation {
@@ -44,7 +50,7 @@ fn run<'a>(
                 }
             }
         };
-        let result = session.driver.lock().await.direct(sql).await;
+        let result = driver.direct(sql).await;
         match result {
             Ok(_) => {
                 session.transaction.set(next);
@@ -80,6 +86,21 @@ pub fn rollback<'a>(
     run(context, this, Operation::Rollback)
 }
 
-pub fn active(_: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
-    Ok(Value::Bool(session(this)?.transaction.get()))
+pub fn active<'a>(
+    _: &'a mut dyn Context,
+    this: Option<Rc<Object>>,
+    _: Vec<Value>,
+) -> LocalFuture<'a, NativeResult> {
+    Box::pin(async move {
+        let session = session(this.as_ref())?;
+        let active = session
+            .driver
+            .lock()
+            .await
+            .transaction_state()
+            .await
+            .unwrap_or(session.transaction.get());
+        session.transaction.set(active);
+        Ok(Value::Bool(active))
+    })
 }

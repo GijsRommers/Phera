@@ -28,12 +28,8 @@ For installations with shared modules, use
 `PHERA_PHP=$PWD/.github/scripts/php-oracle.sh make ci` (optionally set
 `PHERA_PHP_REAL` to the actual PHP binary).
 
-CI's separate **PDO end to end (known gaps)** job builds the release CLI, sets
-`PHERA_BIN` and runs `cargo test -p phera-ext-pdo --no-fail-fast`. It is informational
-until the VM links native class constants and the extension API carries string
-exception codes and properties. To run it locally, use `make ci-build`, then set
-`PHERA_BIN=$PWD/target/release/phera` for that Cargo command. Run one PDO suite at a
-time against shared local databases.
+CI's **PDO end to end** job builds the release CLI, sets `PHERA_BIN` and runs the PDO
+comparison scripts through it against both databases. It is part of the gate.
 
 Individual checks are `make fmt-check`, `make lint`, `make safe-rust` and
 `make test`. `make test` alone does not provision or verify prerequisites.

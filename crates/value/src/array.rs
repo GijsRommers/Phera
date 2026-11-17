@@ -1,6 +1,8 @@
 //! `ArrayKey` and `PhpArray`: PHP's ordered hash map.
 
 use std::collections::HashMap;
+
+use foldhash::fast::RandomState;
 use std::fmt;
 use std::rc::Rc;
 
@@ -46,7 +48,7 @@ impl ArrayKey {
                 );
                 Ok(ArrayKey::str(""))
             }
-            Value::String(s) => Ok(string_to_key(s.as_bytes())),
+            Value::String(s) => Ok(string_to_key(s)),
             Value::Array(_) => Err(OpError::type_error(
                 "Cannot access offset of type array on array".to_string(),
             )),
@@ -75,8 +77,13 @@ impl ArrayKey {
 /// `zend_handle_numeric_str_ex`: canonical decimal integer key. Rejects
 /// leading zeros (`"05"`, `"-0"`), `+`, whitespace, and anything that does
 /// not fit in `i64` (`"9223372036854775808"` stays a string).
-fn string_to_key(bytes: &[u8]) -> ArrayKey {
-    let not_a_key = || ArrayKey::String(PhpString::from(bytes));
+///
+/// A key that stays a string shares the caller's string (one reference
+/// count) instead of copying its bytes: `$row['name']` in a loop would
+/// otherwise allocate a new string on every access.
+fn string_to_key(string: &PhpString) -> ArrayKey {
+    let bytes = string.as_bytes();
+    let not_a_key = || ArrayKey::String(string.clone());
     let (digits, neg) = match bytes.split_first() {
         Some((b'-', rest)) => (rest, true),
         _ => (bytes, false),
@@ -123,7 +130,7 @@ enum Lookup {
     /// than hashing.
     Scan,
     /// Everything else: each live key with its position.
-    Hashed(HashMap<ArrayKey, u32>),
+    Hashed(HashMap<ArrayKey, u32, RandomState>),
 }
 
 /// The most entries an array looks through one by one before it builds a

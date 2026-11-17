@@ -3,6 +3,7 @@
 use phera_extension_api::ConstantValue;
 
 pub const CONSTANTS: &[(&str, ConstantValue)] = &[
+    ("PHERA_ATTR_POOL", ConstantValue::Int(100_000)),
     ("PARAM_NULL", ConstantValue::Int(0)),
     ("PARAM_BOOL", ConstantValue::Int(5)),
     ("PARAM_INT", ConstantValue::Int(1)),
