@@ -6,7 +6,7 @@ use phera_bytecode::{CompiledUnit, Reg};
 use phera_extension_api::NativeError;
 use phera_value::Value;
 
-use crate::{Vm, calls::frame::Frame};
+use crate::{Vm, calls::frame::FrameView};
 
 /// A callee register and its shared caller reference cell.
 pub(crate) struct ScopeBinding {
@@ -32,13 +32,8 @@ impl Vm {
         let mut bindings = Vec::with_capacity(names.len());
         for (index, name) in names.into_iter().enumerate() {
             let register = self.named_slot(&name)?;
-            let parent = self
-                .call_stack
-                .current_mut()
-                .ok_or_else(|| internal_error!("include without parent"))?;
-            let slot = parent
-                .slots_mut(&mut self.registers)
-                .get_mut(register.index())
+            let slot = self
+                .current_slot_mut(register)
                 .ok_or_else(|| internal_error!("include variable slot"))?;
             let value = slot.take().unwrap_or_default();
             let reference = if value.is_reference() {
@@ -75,8 +70,8 @@ impl Vm {
                 .function()
                 .locals
                 .iter()
-                .filter_map(|name| parent.unit.names.get(name.index()))
-                .chain(parent.dynamic.iter().map(|(name, _)| name));
+                .filter_map(|name| parent.unit().names.get(name.index()))
+                .chain(parent.extras.dynamic.iter().map(|(name, _)| name));
             for name in parent_names {
                 if !names.contains(name) {
                     names.push(name.clone());
@@ -91,37 +86,32 @@ impl Vm {
         let Some(frame) = self.current() else {
             return Ok(());
         };
-        if frame.function_id.is_some() || frame.destination.is_none() {
+        if frame.function_id().is_some() || frame.frame.destination().is_none() {
             return Ok(());
         }
         let entries = scope_entries(frame, &self.registers);
-        let mut frame = self
+        let frame = self
             .call_stack
             .pop()
             .ok_or_else(|| internal_error!("include return without frame"))?;
-        self.registers.truncate(frame.base);
+        self.registers.truncate(frame.base());
         for ScopeEntry { name, value } in entries {
             let register = self.named_slot(&name)?;
-            let parent = self
-                .call_stack
-                .current_mut()
-                .ok_or_else(|| internal_error!("include return without parent"))?;
-            if let Some(slot) = parent
-                .slots_mut(&mut self.registers)
-                .get_mut(register.index())
-            {
+            if let Some(slot) = self.current_slot_mut(register) {
                 *slot = value;
             }
         }
         // Ordinary return still owns recycling and writing the result register.
-        frame.base = self.registers.len();
-        self.call_stack.push(frame);
+        self.call_stack.push(frame.moved_to(self.registers.len()));
         Ok(())
     }
 }
 
 /// Snapshot raw bindings before releasing the included frame, preserving reference identity.
-fn scope_entries(frame: &Frame, registers: &crate::calls::registers::Registers) -> Vec<ScopeEntry> {
+fn scope_entries(
+    frame: FrameView<'_>,
+    registers: &crate::calls::registers::Registers,
+) -> Vec<ScopeEntry> {
     frame
         .function()
         .locals
@@ -129,13 +119,14 @@ fn scope_entries(frame: &Frame, registers: &crate::calls::registers::Registers) 
         .enumerate()
         .filter_map(|(index, name)| {
             frame
-                .unit
+                .unit()
                 .names
                 .get(name.index())
                 .map(|name| (name, Reg(index as u16)))
         })
         .chain(
             frame
+                .extras
                 .dynamic
                 .iter()
                 .map(|(name, register)| (name, *register)),

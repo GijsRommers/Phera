@@ -1,4 +1,16 @@
-//! PHP regular expressions: `preg_match('/hello/i', 'HELLO') === 1`.
+//! PHP's PCRE extension, the `preg_*` functions, on PCRE2 through the safe
+//! `pcre2` crate.
+//!
+//! ```php
+//! preg_match('/hello/i', 'HELLO');       // 1
+//! preg_replace('/\s+/', ' ', "a \n b");  // "a b"
+//! preg_split('/,/', 'a,b');              // ['a', 'b']
+//! ```
+//!
+//! A call goes through `cache`, which finds or compiles the pattern
+//! (`pattern` reads the delimiters and modifiers, `transform` rewrites the
+//! body, `compile` builds it); `scan` finds the matches and `matches` turns
+//! them into PHP arrays. `errors` keeps what `preg_last_error()` reports.
 
 mod cache;
 mod callable;
@@ -18,9 +30,9 @@ mod signatures;
 mod split;
 mod transform;
 
+use errors::Error;
 use phera_extension_api::{Extension, Registry};
 
-/// PHP's PCRE extension, backed exclusively by the safe PCRE2 API.
 pub struct Pcre;
 
 impl Extension for Pcre {
@@ -43,19 +55,19 @@ impl Extension for Pcre {
 }
 
 const CONSTANTS: &[(&str, i64)] = &[
-    ("PREG_PATTERN_ORDER", 1),
-    ("PREG_SET_ORDER", 2),
-    ("PREG_OFFSET_CAPTURE", 256),
-    ("PREG_UNMATCHED_AS_NULL", 512),
-    ("PREG_SPLIT_NO_EMPTY", 1),
-    ("PREG_SPLIT_DELIM_CAPTURE", 2),
-    ("PREG_SPLIT_OFFSET_CAPTURE", 4),
-    ("PREG_GREP_INVERT", 1),
-    ("PREG_NO_ERROR", 0),
-    ("PREG_INTERNAL_ERROR", 1),
-    ("PREG_BACKTRACK_LIMIT_ERROR", 2),
-    ("PREG_RECURSION_LIMIT_ERROR", 3),
-    ("PREG_BAD_UTF8_ERROR", 4),
-    ("PREG_BAD_UTF8_OFFSET_ERROR", 5),
-    ("PREG_JIT_STACKLIMIT_ERROR", 6),
+    ("PREG_PATTERN_ORDER", flags::PATTERN_ORDER),
+    ("PREG_SET_ORDER", flags::SET_ORDER),
+    ("PREG_OFFSET_CAPTURE", flags::OFFSET_CAPTURE),
+    ("PREG_UNMATCHED_AS_NULL", flags::UNMATCHED_AS_NULL),
+    ("PREG_SPLIT_NO_EMPTY", flags::SPLIT_NO_EMPTY),
+    ("PREG_SPLIT_DELIM_CAPTURE", flags::SPLIT_DELIM_CAPTURE),
+    ("PREG_SPLIT_OFFSET_CAPTURE", flags::SPLIT_OFFSET_CAPTURE),
+    ("PREG_GREP_INVERT", flags::GREP_INVERT),
+    ("PREG_NO_ERROR", Error::None as i64),
+    ("PREG_INTERNAL_ERROR", Error::Internal as i64),
+    ("PREG_BACKTRACK_LIMIT_ERROR", Error::Backtrack as i64),
+    ("PREG_RECURSION_LIMIT_ERROR", Error::Recursion as i64),
+    ("PREG_BAD_UTF8_ERROR", Error::Utf8 as i64),
+    ("PREG_BAD_UTF8_OFFSET_ERROR", Error::Utf8Offset as i64),
+    ("PREG_JIT_STACKLIMIT_ERROR", Error::JitStack as i64),
 ];

@@ -430,7 +430,7 @@ fn arrays_match_php() {
         // Break the cycle so the test does not leak it.
         *cell.borrow_mut() = Value::Null;
     }
-    table.finish("arrays");
+    table.finish("arrays", str::to_owned);
 }
 
 /// The task's explicit depth limit must use a PHP Error rather than a Rust stack overflow.

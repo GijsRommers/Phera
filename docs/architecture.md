@@ -547,6 +547,53 @@ to 1.4 times PHP, tight integer loops at 1.2 to 1.5, arrays and short
 strings at or near PHP. Beyond that only a JIT helps, and only for numeric
 loops.
 
+### 10.7 Item 1, calls: state after the first pass
+
+Done on the branch `engine/calls` (pull request #9):
+
+- A frame is `{ function, base, ip, destination, flags }`, 16 bytes in a
+  `Vec`. What only some frames need (dynamic names, `foreach` state,
+  argument facts, a closure, a class context) is in a side table by depth.
+- One flat code table per request; functions, methods, closures and
+  class initializers refer to code by `FunctionIndex`.
+- One `match` executes an instruction. The interpreter loop borrows the
+  code table, the call stack and the registers, and handles itself: simple
+  instructions, `CallDirect`, plain returns (also of methods, closures and
+  constructors), `InitMethodCall`, `InitStaticCall`, by-value `Send`s and
+  `Call` when the case is the plain one.
+- `CallDirect` replaces `InitCall`/`Send`/`Call` for calls to a file's own
+  top-level functions (compiler pass `passes/direct_calls.rs`).
+- Each class has a method table keyed by interned name. The per-site
+  method cache and the static-site caches are deleted.
+
+Measured on 17 November 2026 after merging `main` into the branch, in
+instructions retired and cycles, each net of start-up (an empty script),
+minimum of five runs, against `php -n` (load average 14 to 20, so cycles
+are rough):
+
+| script | start of the work | head before the merge | after the merge |
+| --- | --- | --- | --- |
+| fib | 8.0x (10.1x cycles) | 3.0x (3.1x) | 3.0x (3.0x) |
+| hierarchy | 5.9x (7.0x) | 3.9x (4.6x) | 3.9x (4.5x) |
+| methods | 7.0x (7.8x) | 5.7x (6.2x) | 5.7x (6.2x) |
+| objects | 7.2x (10.9x) | 6.3x (9.0x) | 6.1x (8.3x) |
+| closures | 7.4x (7.7x) | 7.2x (7.7x) | 7.1x (7.5x) |
+| exceptions | 7.1x (8.1x) | 5.4x (5.8x) | 5.4x (5.5x) |
+| calls | 13.5x (16.6x) | 12.3x (14.7x) | 12.6x (14.8x) |
+
+No script is more than 2 percent worse than at the start in instructions
+(typed-objects +1.0%, object-sort +1.2%, function-objects +1.6%); the
+array scripts gained 4 to 10 percent from main's array storage.
+
+Not reached: methods, hierarchy and objects at 3x and closures at 4x.
+What remains in a method call is the general call record (an 88-byte
+callee with two reference-counted signature parts and a 176-byte pending
+call, built and dropped per call), the method context's three reference
+counts (receiver, scope, called class as `Rc<Class>` rather than
+indexes), `$this` kept in the side table rather than in register 0, and
+about 35 machine instructions per simple bytecode instruction. Property
+access in `objects` still leaves the loop (objects as slots, item 3).
+
 ## 11. Tools built into the runtime
 
 Two tools that PHP projects today get from separate packages written in PHP
@@ -715,3 +762,51 @@ that a project can use either tool.
 The runtime side: when a script runs under Phera, autoloading reads the same
 metadata natively instead of executing the generated PHP autoloader, which
 needs namespaces and autoloading in the engine (11.3, item 3).
+
+## 12. What to take from Hack and HHVM, and what not
+
+Facebook's HHVM ran PHP much faster, then became the runtime of a different
+language, Hack. Both halves of that story are useful.
+
+**Worth taking, as implementation ideas:**
+
+- **Whole-program mode.** HHVM's "repo authoritative" mode compiles the whole
+  application once, at deploy time, and then refuses anything that would
+  change it (`eval`, includes computed at run time). With the whole program
+  known, every function, class and constant is resolved before the first
+  request, class layouts are final, and calls and property accesses compile
+  to indexes. Phera's link step (10.5) is the lazy version of this; a
+  `phera build` that produces one resolved image for production is the
+  eager one, and fits section 5 (start requests from a loaded image).
+- **Types that drive the compiler.** HHVM infers types across the whole
+  program and emits specialised bytecode. Phera will have the same
+  information from `phera check` (11.1), in the same binary, on the same
+  AST: where the checker proves that `$i` is an int and `$this->items` a
+  list, the compiler can emit the integer and list instructions directly.
+  No other PHP runtime has its checker and its compiler in one place.
+- **Lists and maps as different things.** Hack split PHP's array into `vec`,
+  `dict` and `keyset`. Phera does this inside the runtime (a list stores no
+  keys, 10.6) and the checker can tell the programmer which one a variable
+  is, without changing the language.
+- **A checker that is a service.** Hack's checker separates collecting
+  declarations from checking bodies, checks files in parallel, and keeps
+  running to re-check only what an edit touched. That is the right shape for
+  `phera check` and for editor integration.
+- **Awaiting several things at once.** Hack has `async`/`await`. Phera's
+  model is simpler for existing code (PHP stays synchronous and the runtime
+  suspends it), but Hack shows the missing piece: running several waits
+  concurrently inside one request (two queries, three HTTP calls). That
+  deserves a small native API later.
+
+**Not to take:**
+
+- **Forking the language.** Hack removed references, variable variables,
+  dynamic properties and more, and gained its speed and its type system
+  partly from that. It also lost the PHP ecosystem: frameworks and packages
+  stopped running, and HHVM dropped PHP support in 2019. Phera's whole
+  premise is that existing PHP runs unchanged. Dynamic features stay, and
+  cost only the code that uses them (a function that uses `extract` gets a
+  slower frame; the others do not).
+- **A JIT first.** HHVM's JIT is years of work by a large team. Section 10
+  shows that an interpreter with the right data layout gets within a small
+  factor of PHP's speed; the JIT question comes after that.

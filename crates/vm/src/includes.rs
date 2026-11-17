@@ -48,17 +48,12 @@ impl Vm {
         destination: Reg,
     ) -> Result<(), NativeError> {
         let bindings = self.include_bindings(&unit)?;
-        let cache = self.unit_caches.symbols(&unit);
+        let function = self.code.load(&unit);
         let base = self.registers.len();
-        let mut frame = Frame::new(
-            cache,
-            &mut self.registers,
-            unit,
-            None,
-            Some(destination),
-            base,
-        );
-        frame.call_start = self.call_stack.preparing.len();
+        let mut count = unit.main.registers as usize;
+        self.registers.grow_to(base + count);
+        self.call_stack
+            .push(Frame::new(function, base, Some(destination)));
         for ScopeBinding {
             register,
             name,
@@ -67,12 +62,13 @@ impl Vm {
         {
             if let Some(name) = name {
                 self.registers.push_undefined();
-                frame.count += 1;
-                frame.dynamic.insert(name, register);
+                count += 1;
+                let extras = self.call_stack.current_extras_mut();
+                extras.dynamic_count = Some(count);
+                extras.dynamic.insert(name, register);
             }
-            frame.set(&mut self.registers, register, value);
+            self.registers.window_mut(base + register.index(), 1)[0] = Some(value);
         }
-        self.call_stack.push(frame);
         Ok(())
     }
 }
@@ -170,15 +166,12 @@ impl Vm {
             if let Some(function) = unit.functions.get(id.index()) {
                 let key = function.name.to_ascii_lowercase();
                 if let Some(previous) = self.function_table.get(&key) {
-                    let previous_line = previous
-                        .unit
-                        .functions
-                        .get(previous.index)
-                        .map_or(1, |function| function.definition_line);
+                    let previous_line = self.code.function(previous).definition_line;
+                    let previous_file = &self.code.unit(previous).file;
                     let text = format!(
                         "\nFatal error: Cannot redeclare function {}() (previously declared \
                          in {}:{previous_line}) in {} on line {}\n",
-                        function.name, previous.unit.file, unit.file, function.definition_line,
+                        function.name, previous_file, unit.file, function.definition_line,
                     );
                     self.out(text.as_bytes());
                     self.status = 255;
@@ -186,13 +179,9 @@ impl Vm {
                         (),
                     ))));
                 }
-                self.function_table.insert(
-                    key,
-                    crate::function_table::FunctionRef {
-                        unit: unit.clone(),
-                        index: id.index(),
-                    },
-                );
+                let main = self.code.load(unit);
+                let index = self.code.declared(main, id.index());
+                self.function_table.insert(key, index);
             }
         }
         Ok(())

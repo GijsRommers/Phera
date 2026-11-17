@@ -32,6 +32,8 @@ pub(crate) struct Class {
     pub(crate) is_readonly: bool,
     pub(crate) allows_dynamic_properties: bool,
     pub(crate) methods: HashMap<String, Rc<Method>>,
+    /// The same methods by name key, built on first use by a fast call.
+    pub(crate) method_table: std::cell::OnceCell<super::method_table::MethodTable>,
     /// Constructor presence is immutable after linking, including inheritance.
     pub(crate) constructor: Option<Rc<Method>>,
     /// Root-first property keys reproduce the layout used by native testing helpers.
@@ -49,11 +51,12 @@ pub(crate) struct Class {
 pub(crate) struct PropertyDefault {
     pub(crate) key: ArrayKey,
     pub(crate) value: Value,
+    pub(crate) static_storage: Option<Rc<crate::reference_holders::StaticProperty>>,
     pub(crate) name: String,
     pub(crate) declaring: String,
     pub(crate) visibility: Visibility,
     pub(crate) initialized: bool,
-    pub(crate) initializer: Option<crate::function_table::FunctionRef>,
+    pub(crate) initializer: Option<crate::code_table::FunctionIndex>,
     pub(crate) ty: Option<phera_bytecode::Type>,
     pub(crate) is_readonly: bool,
     pub(crate) static_initialized: Rc<std::cell::Cell<bool>>,
@@ -85,7 +88,7 @@ pub(crate) enum ClassOrigin {
 /// Native and user methods share argument sends but execute through different handlers.
 pub(crate) enum MethodBody {
     Closure(crate::closure_methods::ClosureMethod),
-    User(crate::function_table::FunctionRef),
+    User(crate::code_table::FunctionIndex),
     Native(MethodEntry),
 }
 
@@ -141,7 +144,7 @@ pub(crate) struct LinkedConstant {
 /// Native values such as `PDO::FETCH_ASSOC` never need a compiled initializer or evaluation state.
 pub(crate) enum ConstantInitializer {
     Compiled {
-        function: crate::function_table::FunctionRef,
+        function: crate::code_table::FunctionIndex,
         state: std::cell::RefCell<ConstantState>,
     },
     Value(Value),
@@ -161,9 +164,12 @@ struct LiteralLoad {
 }
 
 /// Only literal loads followed by return can be folded without changing diagnostics.
-pub(crate) fn literal_initializer(reference: &crate::function_table::FunctionRef) -> Option<Value> {
+pub(crate) fn literal_initializer(
+    code: &crate::code_table::CodeTable,
+    reference: &crate::code_table::FunctionIndex,
+) -> Option<Value> {
     use phera_bytecode::Instruction;
-    let instructions = &reference.unit.functions.get(reference.index)?.instructions;
+    let instructions = &code.function(*reference).instructions;
     let [load, Instruction::Return { src }] = instructions.as_slice() else {
         return None;
     };
@@ -182,7 +188,9 @@ pub(crate) fn literal_initializer(reference: &crate::function_table::FunctionRef
         },
         Instruction::LoadConst { dst, constant } => LiteralLoad {
             destination: dst,
-            value: crate::calls::frame::value(reference.unit.constants.get(constant.index())?),
+            value: crate::calls::frame::value(
+                code.unit(*reference).constants.get(constant.index())?,
+            ),
         },
         _ => return None,
     };
@@ -251,14 +259,15 @@ impl Class {
 
 impl Method {
     /// Build receiver-independent argument metadata once for an immutable linked method.
-    pub(crate) fn signature(&self) -> &MethodSignature {
+    pub(crate) fn signature(&self, code: &crate::code_table::CodeTable) -> &MethodSignature {
         let method = self;
         method.signature.get_or_init(|| {
             let parameters: Rc<[ParameterSpec]> = match &method.body {
-                MethodBody::User(reference) => reference.unit.functions[reference.index]
+                MethodBody::User(reference) => code
+                    .function(*reference)
                     .parameters
                     .iter()
-                    .map(|parameter| ParameterSpec::user(&reference.unit, parameter))
+                    .map(|parameter| ParameterSpec::user(code.unit(*reference), parameter))
                     .collect(),
                 MethodBody::Closure(operation) => operation
                     .parameters()

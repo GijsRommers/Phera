@@ -93,13 +93,18 @@ impl OracleTable {
     }
 
     /// Runs PHP, fails on the first 30 differences, and prints how many
-    /// cases each function had.
-    pub fn finish(self, what: &str) {
+    /// cases each function had. Every result line of both sides goes through
+    /// `normalize` first, for results PHP does not fix exactly: `strcmp`
+    /// returns a number whose size differs between machines, only its sign
+    /// is defined. Pass `str::to_owned` to compare the lines as they are.
+    pub fn finish(self, what: &str, normalize: impl Fn(&str) -> String) {
         let file = format!("standard-{}", what.replace(' ', "-"));
         let php = oracle::run_php(&file, &self.script).expect("PHP oracle required");
-        oracle::compare(what, &self.labels, &php, &self.rust);
+        let php: Vec<String> = php.iter().map(|line| normalize(line)).collect();
+        let rust: Vec<String> = self.rust.iter().map(|line| normalize(line)).collect();
+        oracle::compare(what, &self.labels, &php, &rust);
         let mut counts = BTreeMap::new();
-        for line in &self.rust {
+        for line in &rust {
             if let Some((tag, _)) = line.split_once('=') {
                 *counts.entry(tag).or_insert(0_usize) += 1;
             }

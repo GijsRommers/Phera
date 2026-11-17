@@ -160,6 +160,16 @@ pub(crate) fn dead_after(function: &Function, index: usize, register: phera_byte
                         break;
                     }
                 }
+                Instruction::CallDirect {
+                    args, count, dst, ..
+                } => {
+                    if (args.0..args.0 + count).contains(&register.0) {
+                        return false;
+                    }
+                    if dst == register {
+                        break;
+                    }
+                }
                 Instruction::IterStart { src, .. } => {
                     if src == register {
                         return false;

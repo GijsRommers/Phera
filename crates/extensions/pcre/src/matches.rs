@@ -1,9 +1,16 @@
-//! Named matches have both keys: `preg_match('/(?<word>a)/', 'a', $m)`.
+//! Building `$matches` from the spans of each match.
+//!
+//! ```php
+//! preg_match('/(?<word>a)(b)?/', 'a', $m);
+//! // $m = [0 => 'a', 'word' => 'a', 1 => 'a']: a named group is there by
+//! // name and by number, and the trailing group 2, unmatched, is left out
+//! ```
 
 use crate::flags::{CaptureFlags, Order};
 use crate::scan::Captures;
 use phera_extension_api::{ArrayKey, NativeResult, PhpArray, Value, args};
 
+/// A PHP list of `values`.
 pub(crate) fn list(values: impl IntoIterator<Item = Value>) -> Value {
     Value::from(
         values
@@ -13,11 +20,18 @@ pub(crate) fn list(values: impl IntoIterator<Item = Value>) -> Value {
             .collect::<PhpArray>(),
     )
 }
+
+/// Writes `value` into the by-reference argument at `index`, if the
+/// caller passed one.
 pub(crate) fn assign(arguments: &[Value], index: usize, value: Value) {
     if let Some(reference) = args::reference(arguments, index) {
         *reference.borrow_mut() = value;
     }
 }
+
+/// One group as PHP shows it: its text (`""`, or null with
+/// `PREG_UNMATCHED_AS_NULL`, when it did not take part), or with
+/// `PREG_OFFSET_CAPTURE` the pair `[text, offset]`, the offset -1 then.
 pub(crate) fn captured(subject: &[u8], span: Option<(usize, usize)>, flags: CaptureFlags) -> Value {
     let value = match span {
         Some((start, end)) => Value::from(subject[start..end].to_vec()),
@@ -33,6 +47,10 @@ pub(crate) fn captured(subject: &[u8], span: Option<(usize, usize)>, flags: Capt
         value
     }
 }
+
+/// One match: each group by number, and a named group by its name too.
+/// Trailing groups that did not take part are left out, unless
+/// `PREG_UNMATCHED_AS_NULL`.
 pub(crate) fn row(
     subject: &[u8],
     captures: &Captures,
@@ -52,6 +70,8 @@ pub(crate) fn row(
         let value = captured(subject, *span, flags);
         if let Some(name) = &names[index] {
             let key = ArrayKey::str(name.as_str());
+            // With /J two groups may share a name; one that did not take
+            // part does not overwrite one that did.
             if span.is_some() || !result.contains_key(&key) {
                 result.insert(key, value.clone());
             }
@@ -60,6 +80,8 @@ pub(crate) fn row(
     }
     Value::from(result)
 }
+
+/// `$matches` in the shape `order` asks for.
 pub(crate) fn table(
     subject: &[u8],
     rows: &[Captures],
@@ -89,6 +111,8 @@ pub(crate) fn table(
         }
     }
 }
+
+/// Writes `$count` into the argument at `index` and returns `result`.
 pub(crate) fn finish(
     arguments: &[Value],
     index: usize,

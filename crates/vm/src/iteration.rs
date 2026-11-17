@@ -36,21 +36,19 @@ impl Vm {
             ));
             None
         };
-        if let Some(frame) = self.call_stack.current_mut() {
-            frame.iterators.insert(
-                iterator.0,
-                frame::IteratorState {
-                    snapshot: if object_iteration || place.is_none() {
-                        snapshot
-                    } else {
-                        None
-                    },
-                    source: if object_iteration { None } else { place },
-                    position: None,
-                    started: false,
+        self.call_stack.current_extras_mut().iterators.insert(
+            iterator.0,
+            frame::IteratorState {
+                snapshot: if object_iteration || place.is_none() {
+                    snapshot
+                } else {
+                    None
                 },
-            );
-        }
+                source: if object_iteration { None } else { place },
+                position: None,
+                started: false,
+            },
+        );
 
         Ok(())
     }
@@ -72,18 +70,25 @@ impl Vm {
                 }
             ));
         }
-        if let Some(frame) = self.call_stack.current_mut() {
-            frame.iterators.insert(
-                iterator.0,
-                frame::IteratorState {
-                    snapshot: None,
-                    source: Some(place),
-                    position: None,
-                    started: false,
-                },
-            );
-        }
+        self.call_stack.current_extras_mut().iterators.insert(
+            iterator.0,
+            frame::IteratorState {
+                snapshot: None,
+                source: Some(place),
+                position: None,
+                started: false,
+            },
+        );
+
         Ok(())
+    }
+
+    /// Put a `foreach` state back into the running frame's side table.
+    fn keep_iterator(&mut self, iterator: IterId, state: frame::IteratorState) {
+        self.call_stack
+            .current_extras_mut()
+            .iterators
+            .insert(iterator.0, state);
     }
 
     /// Advance in insertion order and bind a live element cell for reference iteration.
@@ -96,14 +101,13 @@ impl Vm {
     ) -> Result<(), NativeError> {
         let mut state = self
             .call_stack
-            .current_mut()
-            .and_then(|frame| frame.iterators.remove(&iterator.0))
+            .current_extras_mut()
+            .iterators
+            .remove(&iterator.0)
             .ok_or_else(|| internal_error!("missing iterator"))?;
         if state.source.is_none() {
             self.next_snapshot(&mut state, key, value, end)?;
-            if let Some(frame) = self.call_stack.current_mut() {
-                frame.iterators.insert(iterator.0, state);
-            }
+            self.keep_iterator(iterator, state);
             return Ok(());
         }
         let array = if let Some(position) = &state.source {
@@ -111,9 +115,7 @@ impl Vm {
                 Value::Array(array) => Some(array),
                 Value::Object(object) => {
                     self.next_object_reference(&mut state, &object, key, value, end)?;
-                    if let Some(frame) = self.call_stack.current_mut() {
-                        frame.iterators.insert(iterator.0, state);
-                    }
+                    self.keep_iterator(iterator, state);
                     return Ok(());
                 }
                 _ => None,
@@ -140,12 +142,10 @@ impl Vm {
         if let Some((element_key, element)) = entry {
             self.bind_iteration_entry(element_key, element, state.source.as_ref(), key, value)?;
         } else {
+            self.release_iterator_subject(&mut state)?;
             self.jump(end)?;
         }
-        if let Some(frame) = self.call_stack.current_mut() {
-            frame.iterators.insert(iterator.0, state);
-        }
-
+        self.keep_iterator(iterator, state);
         Ok(())
     }
 }
@@ -227,12 +227,11 @@ pub(crate) fn snapshot_step(
     iterator: IterId,
     destination: Reg,
     end: Target,
-    frame: Option<&mut frame::Frame>,
-    registers: &mut crate::calls::registers::Registers,
+    iterators: &mut crate::iterators::Iterators,
+    slots: &mut [Option<Value>],
     ip: &mut usize,
 ) -> bool {
-    let Some(frame) = frame else { return false };
-    let Some(state) = frame.iterators.get_mut(iterator.0) else {
+    let Some(state) = iterators.get_mut(iterator.0) else {
         return false;
     };
     if state.source.is_some() {
@@ -253,10 +252,30 @@ pub(crate) fn snapshot_step(
     let value = position
         .and_then(|position| array.entry_at(position))
         .map(|(_, value)| value.deref().clone());
-    if let Some(value) = value {
-        frame.set(registers, destination, value);
-    } else {
-        *ip = end.index();
+    match value {
+        Some(value) => {
+            if let Some(slot) = slots.get_mut(destination.index()) {
+                *slot = Some(value);
+            }
+        }
+        None => *ip = end.index(),
     }
     true
+}
+
+impl Vm {
+    /// Exhaustion and break must release the iterator's scratch alias to its subject.
+    pub(crate) fn release_iterator_subject(
+        &mut self,
+        state: &mut frame::IteratorState,
+    ) -> Result<(), NativeError> {
+        if let Some(subject) = state
+            .source
+            .take()
+            .and_then(|source| source.local_register())
+        {
+            self.clear_local(subject)?;
+        }
+        Ok(())
+    }
 }

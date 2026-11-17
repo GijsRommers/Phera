@@ -1,126 +1,274 @@
-//! The single synchronous frame loop delegates pure scalar work to a small borrowed batch.
+//! The interpreter loop: simple instructions, direct calls and plain returns
+//! on borrowed code and registers.
+//!
+//! ```php
+//! function fib($n) { if ($n < 2) return $n; return fib($n - 1) + fib($n - 2); }
+//! ```
+//!
+//! Every instruction of `fib` runs here without leaving the loop: the
+//! comparison and arithmetic in `fast::scalar_step`, the two calls in
+//! [`enter_direct`], the returns in [`leave_plain`]. The loop borrows the code
+//! table, the call stack and the registers, three separate fields of the VM,
+//! so it needs no owner of the code and no `&mut Vm`. Anything that needs
+//! more (a warning, a method, an exception) stops the loop with
+//! [`LoopExit::Slow`]; the VM runs that one instruction through
+//! `Vm::execute` and starts the loop again where the frame now is.
 
-use crate::Vm;
-use crate::scalar_batches::YIELD_AFTER_STEPS;
-use phera_bytecode::{CompiledUnit, Instruction};
+use phera_bytecode::{Instruction, Reg};
 use phera_extension_api::NativeError;
 use phera_value::Value;
-use std::sync::Arc;
 
-/// The async shell handles only suspension, cold operations and completed callbacks.
+use crate::Vm;
+use crate::calls::call_stack::CallStack;
+use crate::calls::frame::Frame;
+use crate::calls::registers::Registers;
+use crate::classes::ClassTable;
+use crate::code_table::CodeTable;
+use crate::fast::{ScalarStep, array_index_step, scalar_step};
+
+/// How many loop rounds or calls a script may run before it lets other tasks
+/// on the same thread have a turn.
+///
+/// Handing over is not free: the scheduler asks the operating system whether
+/// any socket or timer is ready, which is a system call. At 4,096 that cost
+/// 15 percent of a plain loop's time. 65,536 loop rounds are about a
+/// millisecond, which is still far shorter than anyone waiting for a response
+/// can notice.
+pub(crate) const YIELD_AFTER_STEPS: usize = 65_536;
+
+/// Why the async shell got control back.
 pub(crate) enum BatchExit {
+    /// An instruction that must be awaited (an include, a checked return).
     Instruction(Instruction),
-    NativeCall(phera_bytecode::Reg),
+    /// A prepared call to a native function, whose result goes to this register.
+    NativeCall(Reg),
+    /// The frame that native code called has returned this value.
     Returned(Value),
+    /// The work budget is spent; other tasks get a turn.
     Yield,
+    /// A warning queued a user error handler, which must run now.
     Handlers,
 }
 
+/// Why the loop stopped. Small enough to be returned in registers.
+enum LoopExit {
+    /// This instruction needs the VM; the frame's position is published.
+    Slow(Instruction),
+    Yield,
+    /// The instruction pointer left the function's code.
+    Invalid,
+}
+
+/// The parts of the VM the loop borrows, and its counters.
+pub(super) struct Machine<'a> {
+    pub(super) code: &'a CodeTable,
+    pub(super) classes: &'a ClassTable,
+    pub(super) stack: &'a mut CallStack,
+    pub(super) registers: &'a mut Registers,
+    /// Loop rounds and calls since the last hand-over.
+    work: usize,
+    /// Instructions run, for `Vm::executed_instructions`.
+    executed: u64,
+    /// The depth at which the function that native code called returns.
+    pub(super) stop: usize,
+    pub(super) frame_limit: usize,
+}
+
+/// Where the loop is: which function, its registers, its next instruction.
+#[derive(Clone, Copy)]
+pub(super) struct Position {
+    pub(super) frame: Frame,
+    pub(super) ip: usize,
+}
+
 impl Vm {
-    /// Retain code once across frame changes; no Rust recursion follows PHP call depth.
+    /// Run frames until an instruction needs the async shell, the work budget
+    /// is spent, or the frame at depth `stop` has returned.
     pub(crate) fn run_batch(
         &mut self,
-        unit: &mut Arc<CompiledUnit>,
         stop: usize,
         work: &mut usize,
     ) -> Result<BatchExit, NativeError> {
+        loop {
+            let mut machine = Machine {
+                code: &self.code,
+                classes: &self.classes,
+                stack: &mut self.call_stack,
+                registers: &mut self.registers,
+                work: *work,
+                executed: 0,
+                stop,
+                frame_limit: self.frame_limit,
+            };
+            let exit = machine.run();
+            *work = machine.work;
+            self.executed_instructions += machine.executed;
+            let instruction = match exit {
+                LoopExit::Slow(instruction) => instruction,
+                LoopExit::Yield => return Ok(BatchExit::Yield),
+                LoopExit::Invalid => return Err(internal_error!("invalid IP")),
+            };
+            if let Some(exit) = self.execute(instruction, stop, work)? {
+                return Ok(exit);
+            }
+            if !self.error_handlers.pending.is_empty() {
+                return Ok(BatchExit::Handlers);
+            }
+            if *work >= YIELD_AFTER_STEPS {
+                *work = 0;
+                return Ok(BatchExit::Yield);
+            }
+        }
+    }
+}
+
+impl Machine<'_> {
+    /// The loop itself. Simple instructions run in [`Machine::run_simple`];
+    /// this loop takes the others and switches frames on calls and returns.
+    fn run(&mut self) -> LoopExit {
+        let Some(frame) = self.stack.current().copied() else {
+            return LoopExit::Invalid;
+        };
+        let mut position = Position {
+            frame,
+            ip: frame.ip(),
+        };
+        let mut instructions = self.code.instructions(frame.function);
+        loop {
+            let instruction = match self.run_simple(instructions, &mut position) {
+                Ok(instruction) => instruction,
+                Err(exit) => return exit,
+            };
+            match self.step(instruction, position) {
+                Step::Done(ip) => position.ip = ip,
+                Step::Switched(next) => {
+                    position = next;
+                    instructions = self.code.instructions(next.frame.function);
+                }
+                Step::Slow => {
+                    self.publish(position.ip);
+                    return LoopExit::Slow(instruction);
+                }
+            }
+        }
+    }
+
+    /// Run simple instructions of one frame with its registers borrowed and
+    /// the counters in locals, until one is not simple. Returns that one,
+    /// with `position` just past it.
+    #[inline(always)]
+    fn run_simple(
+        &mut self,
+        instructions: &[Instruction],
+        position: &mut Position,
+    ) -> Result<Instruction, LoopExit> {
+        let slots = self.registers.tail_mut(position.frame.base());
+        let mut ip = position.ip;
         let mut executed = 0;
-        let result = self.run_batch_body(unit, stop, work, &mut executed);
-        self.executed_instructions += executed;
+        let mut work = self.work;
+        let result = loop {
+            let Some(&instruction) = instructions.get(ip) else {
+                break Err(LoopExit::Invalid);
+            };
+            let previous = ip;
+            ip += 1;
+            executed += 1;
+            let step = match scalar_step(instruction, slots, &mut ip) {
+                ScalarStep::Fallback => match instruction {
+                    Instruction::FetchIndex {
+                        dst, base, index, ..
+                    } => array_index_step(dst, base, index, slots),
+                    _ => ScalarStep::Fallback,
+                },
+                complete => complete,
+            };
+            if step == ScalarStep::Fallback {
+                break Ok(instruction);
+            }
+            // Only backward jumps count as work; comparing positions also
+            // covers fused compare-and-branch instructions.
+            if ip <= previous {
+                work += 1;
+                if work >= YIELD_AFTER_STEPS {
+                    work = 0;
+                    break Err(LoopExit::Yield);
+                }
+            }
+        };
+        self.executed += executed;
+        self.work = work;
+        position.ip = ip;
+        if result.is_err() {
+            self.publish(ip);
+        }
         result
     }
 
-    /// Scalar operations and the call protocol share one loop and one borrowed instruction slice.
-    fn run_batch_body(
-        &mut self,
-        unit: &mut Arc<CompiledUnit>,
-        stop: usize,
-        work: &mut usize,
-        executed: &mut u64,
-    ) -> Result<BatchExit, NativeError> {
-        loop {
-            let frame = self
-                .current()
-                .ok_or_else(|| internal_error!("missing frame"))?;
-            if !Arc::ptr_eq(unit, &frame.unit) {
-                *unit = frame.unit.clone();
+    /// The instructions that are not simple but need only the borrowed
+    /// state: `foreach` over a snapshot, direct calls and plain returns.
+    #[inline(always)]
+    fn step(&mut self, instruction: Instruction, position: Position) -> Step {
+        let base = position.frame.base();
+        let mut ip = position.ip;
+        match instruction {
+            Instruction::IterNext { iter, value, end } if position.frame.has_extras() => {
+                let iterators = &mut self.stack.current_extras_mut().iterators;
+                let slots = self.registers.tail_mut(base);
+                match crate::iteration::snapshot_step(iter, value, end, iterators, slots, &mut ip) {
+                    true => Step::Done(ip),
+                    false => Step::Slow,
+                }
             }
-            let function = frame
-                .function_id
-                .and_then(|index| unit.functions.get(index))
-                .unwrap_or(&unit.main);
-            let base = frame.base;
-            let mut ip = frame.ip;
-            loop {
-                let Some(instruction) = self.next_scalar_instruction(
-                    &function.instructions,
-                    base,
-                    &mut ip,
-                    work,
-                    executed,
-                )?
-                else {
-                    return Ok(BatchExit::Yield);
-                };
-                if let Instruction::IterNext { iter, value, end } = instruction
-                    && crate::iteration::snapshot_step(
-                        iter,
-                        value,
-                        end,
-                        self.call_stack.current_mut(),
-                        &mut self.registers,
-                        &mut ip,
-                    )
-                {
-                    continue;
-                }
-                if let Some(frame) = self.call_stack.current_mut() {
-                    frame.ip = ip;
-                }
-                if let Some(exit) = self.call_step(instruction, stop, work)? {
-                    return Ok(exit);
-                }
-                if !self.error_handlers.pending.is_empty() {
-                    return Ok(BatchExit::Handlers);
-                }
-                if *work >= YIELD_AFTER_STEPS {
-                    *work = 0;
-                    return Ok(BatchExit::Yield);
-                }
-                let frame = self
-                    .current()
-                    .ok_or_else(|| internal_error!("missing continuation"))?;
-                if frame.base != base {
-                    break;
-                }
-                ip = frame.ip;
+            Instruction::CallDirect {
+                function,
+                args,
+                count,
+                dst,
+            } => self.enter_direct(position, function, (args, count), dst),
+            Instruction::InitMethodCall { receiver, method } => {
+                self.prepare_method(position, receiver, method)
             }
+            Instruction::InitStaticCall {
+                class,
+                method,
+                binding,
+            } => self.prepare_static(position, (class, method), binding),
+            Instruction::SendValue { src } | Instruction::SendLocal { local: src } => {
+                self.send(position, src)
+            }
+            Instruction::Call { dst } => self.enter_prepared(position, dst),
+            Instruction::Return { src } => self.leave_plain(Some(src)),
+            Instruction::ReturnNull => self.leave_plain(None),
+            _ => Step::Slow,
         }
     }
-    /// Publish scalar progress before a diagnostic, frame switch or cooperative yield.
-    #[inline]
-    fn next_scalar_instruction(
-        &mut self,
-        instructions: &[Instruction],
-        base: usize,
-        ip: &mut usize,
-        work: &mut usize,
-        executed: &mut u64,
-    ) -> Result<Option<Instruction>, NativeError> {
-        let batch =
-            crate::scalar_batches::run(instructions, self.registers.tail_mut(base), *ip, *work);
-        *executed += batch.executed;
-        *work = batch.work;
-        *ip = batch.ip;
-        match batch.exit {
-            crate::scalar_batches::ScalarExit::Instruction(instruction) => Ok(Some(instruction)),
-            crate::scalar_batches::ScalarExit::Yield => {
-                if let Some(frame) = self.call_stack.current_mut() {
-                    frame.ip = *ip;
-                }
-                Ok(None)
-            }
-            crate::scalar_batches::ScalarExit::Invalid => Err(internal_error!("invalid IP")),
+
+    /// Count a loop round or a call; `true` when it is time to hand over.
+    #[inline(always)]
+    pub(super) fn spend_work(&mut self) -> bool {
+        self.work += 1;
+        if self.work >= YIELD_AFTER_STEPS {
+            self.work = 0;
+            return true;
+        }
+        false
+    }
+
+    /// Store the running frame's next instruction, before anything else
+    /// looks at the frame.
+    pub(super) fn publish(&mut self, ip: usize) {
+        if let Some(frame) = self.stack.current_mut() {
+            frame.set_ip(ip);
         }
     }
+}
+
+/// What a non-simple step did.
+pub(super) enum Step {
+    /// Finished; continue at this instruction.
+    Done(usize),
+    /// Entered or left a frame; continue there.
+    Switched(Position),
+    /// Needs the VM.
+    Slow,
 }

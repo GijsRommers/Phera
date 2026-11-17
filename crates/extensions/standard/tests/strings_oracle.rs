@@ -495,5 +495,63 @@ fn strings_match_php() {
             }
         }
     }
-    table.finish("strings");
+    table.finish("strings", sign_of_comparison);
+}
+
+/// The functions PHP implements with the C library's `memcmp`. PHP returns
+/// whatever `memcmp` returns for them, and that number is only specified by
+/// its sign: one machine answers -1, another -32, a third a large negative
+/// number, depending on the C library and even on the CPU model. PHP
+/// documents "less than, equal to, or greater than zero", so that is what
+/// the comparison with real PHP checks.
+const COMPARED_BY_SIGN: [&str; 7] = [
+    "strcmp",
+    "strcasecmp",
+    "strncmp",
+    "strncasecmp",
+    "substr_compare",
+    "strnatcmp",
+    "strnatcasecmp",
+];
+
+/// Replaces the integer result of one of those functions by its sign, and
+/// leaves every other line (other functions, errors, warnings) untouched.
+fn sign_of_comparison(line: &str) -> String {
+    for name in COMPARED_BY_SIGN {
+        let Some(number) = line
+            .strip_prefix(name)
+            .and_then(|rest| rest.strip_prefix("=I:"))
+        else {
+            continue;
+        };
+        // The encoded line may carry output or diagnostics after the number.
+        let (digits, rest) = match number.find('|') {
+            Some(end) => number.split_at(end),
+            None => (number, ""),
+        };
+        if let Ok(value) = digits.parse::<i64>() {
+            return format!("{name}=I:{}{rest}", value.signum());
+        }
+    }
+    line.to_owned()
+}
+
+#[test]
+fn comparison_results_are_reduced_to_their_sign() {
+    assert_eq!(sign_of_comparison("strcmp=I:-32"), "strcmp=I:-1");
+    assert_eq!(
+        sign_of_comparison("substr_compare=I:-269484064"),
+        "substr_compare=I:-1"
+    );
+    assert_eq!(sign_of_comparison("strcmp=I:0"), "strcmp=I:0");
+    assert_eq!(
+        sign_of_comparison("strncasecmp=I:7|O:"),
+        "strncasecmp=I:1|O:"
+    );
+    // Other functions and error results stay exact.
+    assert_eq!(sign_of_comparison("strlen=I:-32"), "strlen=I:-32");
+    assert_eq!(
+        sign_of_comparison("strcmp=E:TypeError:00"),
+        "strcmp=E:TypeError:00"
+    );
 }
