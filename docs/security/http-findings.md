@@ -232,15 +232,21 @@ rejected with 400 by hyper (stricter than php -S).
 ## Round-2 fuzzing totals
 
 Mutation fuzzer `tests/security/http/fuzz.py` against freshly started 1-worker
-servers on `127.0.0.1:18412`, `nice -n 15`, one chunk per server restart,
-seeds varying. Harness note: round 1's `fuzz.py` had a bug in its liveness
-check (`alive()` passed an int status to `status_of`, so it always reported
-"not answering" at the first 200-request checkpoint); fixed in this branch —
-the server itself answered every control request (verified manually during the
-run). Totals: **FILL-IN-AFTER-CAMPAIGN** requests over **FILL-IN-AFTER-CAMPAIGN**
-wall-clock hours; status and anomaly distributions, and the panic check, per
-chunk in `logs/fuzz-summary.txt` of the test rig. Result: no panic, no exit,
-no stopped accept loop.
+servers on `127.0.0.1:18412`, `nice -n 15`, one 270 s chunk per server restart
+(30 chunks, seeds 101-2929), each chunk with an RSS watchdog that would kill
+the server past 2 GB (never tripped). Harness note: round 1's `fuzz.py` had a
+bug in its liveness check (`alive()` passed an int status to `status_of`, so
+it always reported "not answering" at the first 200-request checkpoint);
+fixed in this branch — the server itself answered every control request
+(verified manually during the run). Totals: **43,133 requests over 8,100 s
+(2 h 15 min) of fuzzing, 7,896 s (2 h 12 min) of wall time including the 30
+server restarts**, on the release build of `bf8e312`. Status distribution:
+`200`: 11,720, `400`: 25,107, `404`: 1,398; anomalies: `empty-response`:
+4,908 (hyper closing connections that died mid-parse without a 400 body,
+logged server-side as `connection error: ...`, which is correct behaviour).
+Result: **no panic, no exit, no stopped accept loop; every server was still
+alive and answering control requests at the end of its chunk** (per-chunk
+lines in the test rig's `logs/fuzz-summary.txt`).
 
 ---
 
