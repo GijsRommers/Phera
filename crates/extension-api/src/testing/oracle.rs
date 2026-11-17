@@ -108,14 +108,14 @@ pub fn encode(value: &Value) -> String {
         Value::Array(array) => {
             let mut text = String::from("A(");
             for (key, item) in array.iter() {
-                text.push_str(&format!("{}>{};", encode_key(key), encode(item)));
+                text.push_str(&format!("{}>{};", encode_key(&key), encode(item)));
             }
             text + ")"
         }
         Value::Object(object) => {
             let mut text = format!("O:{}(", object.class.name());
             for (key, item) in object.to_array().iter() {
-                text.push_str(&format!("{}>{};", encode_key(key), encode(item)));
+                text.push_str(&format!("{}>{};", encode_key(&key), encode(item)));
             }
             text + ")"
         }
@@ -179,7 +179,7 @@ pub fn php_literal(value: &Value) -> String {
                 .iter()
                 .map(|(key, item)| {
                     let key = match key {
-                        ArrayKey::Int(int) => php_literal(&Value::Int(*int)),
+                        ArrayKey::Int(int) => php_literal(&Value::Int(int)),
                         ArrayKey::String(string) => php_literal(&Value::String(string.clone())),
                     };
                     format!("{key} => {}", php_literal(item))
