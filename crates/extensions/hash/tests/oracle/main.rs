@@ -4,6 +4,7 @@
 
 mod algorithms;
 mod compositions;
+mod context_errors;
 mod files;
 mod parameters;
 mod password_validation;

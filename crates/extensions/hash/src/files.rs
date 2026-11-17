@@ -1,7 +1,7 @@
 //! `hash_file('sha256', $path)` reads files asynchronously on Tokio.
 use crate::{
     algorithms::Algorithm,
-    functions,
+    functions, given,
     hmac::Hmac,
     incremental::{self, State},
     options::{self, Options},
@@ -151,14 +151,10 @@ pub fn update_file(
         if let Some(value) = arguments.get(2)
             && !matches!(value, Value::Null | Value::Resource(_))
         {
-            let given = match value {
-                Value::Bool(true) => "true".into(),
-                Value::Bool(false) => "false".into(),
-                value => value.type_name(),
-            };
             return Err(NativeError::type_error(format!(
                 "hash_update_file(): Argument #3 ($stream_context) must be of type \
-                 resource or null, {given} given"
+                 resource or null, {} given",
+                given(value)
             )));
         }
         let mut state = {

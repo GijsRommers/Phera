@@ -11,8 +11,18 @@ mod password_registry;
 mod passwords;
 use phera_extension_api::{
     ClassEntry, ClassKind, Extension, FunctionEntry, MethodEntry, Param, ParamType, Registry,
-    Visibility,
+    Value, Visibility,
 };
+
+/// How PHP names a wrong argument in a `TypeError`: `true` and `false`
+/// rather than `bool`, otherwise the type or the class.
+fn given(value: &Value) -> String {
+    match value {
+        Value::Bool(true) => "true".to_string(),
+        Value::Bool(false) => "false".to_string(),
+        other => other.type_name(),
+    }
+}
 pub struct Hash;
 impl Extension for Hash {
     fn name(&self) -> &'static str {

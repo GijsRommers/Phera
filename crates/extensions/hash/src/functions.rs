@@ -1,6 +1,7 @@
 //! One-shot hashing: `hash_hmac('sha256', 'message', 'key')` authenticates bytes.
 use crate::{
     algorithms::{ALGORITHMS, Algorithm},
+    given,
     hmac::Hmac,
     options::{self, Options},
 };
@@ -64,16 +65,12 @@ fn list(names: impl Iterator<Item = &'static str>) -> NativeResult {
 }
 pub fn equals(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     for (i, name) in ["known_string", "user_string"].iter().enumerate() {
-        let value = arguments[i].deref();
-        if !matches!(&*value, Value::String(_)) {
-            let given = match &*value {
-                Value::Bool(true) => "true".into(),
-                Value::Bool(false) => "false".into(),
-                value => value.type_name(),
-            };
+        let value = &arguments[i];
+        if !matches!(value, Value::String(_)) {
             return Err(NativeError::type_error(format!(
-                "hash_equals(): Argument #{} (${name}) must be of type string, {given} given",
-                i + 1
+                "hash_equals(): Argument #{} (${name}) must be of type string, {} given",
+                i + 1,
+                given(value)
             )));
         }
     }

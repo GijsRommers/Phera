@@ -1,7 +1,7 @@
 //! `$h=hash_init('sha256'); hash_update($h,'a'); hash_final(hash_copy($h));`.
 use crate::{
     algorithms::Algorithm,
-    functions,
+    functions, given,
     hmac::Hmac,
     options::{self, Options},
 };
@@ -99,9 +99,9 @@ pub fn object<'a>(arguments: &'a [Value], function: &str) -> Result<&'a Object, 
     {
         return Ok(object);
     }
-    let given = arguments.first().map_or("null".into(), Value::type_name);
     Err(NativeError::type_error(format!(
-        "{function}(): Argument #1 ($context) must be of type HashContext, {given} given"
+        "{function}(): Argument #1 ($context) must be of type HashContext, {} given",
+        given(args::value(arguments, 0))
     )))
 }
 pub fn invalid(function: &str) -> NativeError {
@@ -145,7 +145,7 @@ pub fn stream(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     object(arguments, "hash_update_stream")?;
     Err(NativeError::type_error(format!(
         "hash_update_stream(): Argument #2 ($stream) must be of type resource, {} given",
-        arguments.get(1).map_or("null".into(), Value::type_name)
+        given(args::value(arguments, 1))
     )))
 }
 pub fn construct(
