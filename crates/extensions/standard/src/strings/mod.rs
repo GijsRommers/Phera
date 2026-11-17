@@ -28,11 +28,14 @@ mod url;
 pub(crate) const MAX_STRING_BYTES: usize = 2 * 1024 * 1024 * 1024;
 
 pub(crate) fn register(registry: &mut Registry) {
+    let modules = [case::FUNCTIONS];
+    for entry in modules.into_iter().flatten() {
+        registry.function(*entry);
+    }
     number_format::register(registry);
     format::register(registry);
     url::register(registry);
     encode::register(registry);
-    case::register(registry);
     replace::register(registry);
     trim::register(registry);
     split::register(registry);
