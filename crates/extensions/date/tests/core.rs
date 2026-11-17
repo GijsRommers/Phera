@@ -99,7 +99,50 @@ fn embedded_zone_calendar_matrix() {
     for name in tzdb_data::TZ_NAMES {
         let zone = Zone::named(name.as_bytes()).expect("embedded zone");
         script.push_str(&format!("date_default_timezone_set('{name}');\n"));
-        for timestamp in timestamps {
+        let mut samples = timestamps.to_vec();
+        for year in [
+            Civil::from_timestamp(i64::MIN).year,
+            Civil::from_timestamp(i64::MAX).year,
+        ] {
+            for month in 1..=12 {
+                let civil = Civil {
+                    year,
+                    month,
+                    day: 1,
+                    hour: 12,
+                    minute: 0,
+                    second: 0,
+                };
+                if let Ok(timestamp) = i64::try_from(civil.timestamp()) {
+                    samples.push(timestamp);
+                }
+            }
+        }
+        for transition in zone.rules.transitions() {
+            for delta in [-86401, -1, 0, 1, 86401] {
+                if let Some(timestamp) = transition.unix_leap_time().checked_add(delta) {
+                    samples.push(timestamp);
+                }
+            }
+        }
+        for year in [1800, 1900, 1970, 2000, 2024, 2026, 2027, 2038, 2100, 2400] {
+            for month in 1..=12 {
+                samples.push(
+                    Civil {
+                        year,
+                        month,
+                        day: 15,
+                        hour: 12,
+                        minute: 0,
+                        second: 0,
+                    }
+                    .timestamp() as i64,
+                );
+            }
+        }
+        samples.sort_unstable();
+        samples.dedup();
+        for timestamp in samples {
             let literal = oracle::php_literal(&Value::Int(timestamp));
             script.push_str(&format!(
                 "echo date('Y-m-d H:i:s Z I T', {literal}), \"\\n\";\n"
@@ -139,10 +182,10 @@ fn embedded_zone_calendar_matrix() {
     )
     .unwrap();
     eprintln!(
-        "{} core comparisons; {} mismatches; Rust IANA {}",
+        "{} core comparisons; {} mismatches; Rust IANA {} (historical backzone 2026b)",
         labels.len(),
         mismatches.len(),
-        tzdb_data::VERSION
+        jiff_tzdb::VERSION.unwrap_or("unknown")
     );
     oracle::compare("calendar zones", &labels, &php, &rust);
 }

@@ -1,6 +1,9 @@
 //! PHP's date extension: `date_default_timezone_get()` starts at `UTC` per request.
 
 pub mod calendar;
+mod normalize;
+mod posix;
+pub mod resolve;
 pub mod zone;
 
 use phera_extension_api::{Extension, FunctionEntry, Param, ParamType, Registry};
