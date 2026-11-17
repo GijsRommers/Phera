@@ -1,6 +1,6 @@
 //! Byte string operations, with shared allocation and substring search helpers.
 
-use phera_extension_api::{NativeError, NativeResult, PhpArray, PhpString, Registry, Value};
+use phera_extension_api::{NativeError, PhpString, Registry, Value};
 
 mod base64;
 mod case;
@@ -33,7 +33,10 @@ pub(crate) fn register(registry: &mut Registry) {
         case::FUNCTIONS,
         compare::FUNCTIONS,
         padding::FUNCTIONS,
+        replace::FUNCTIONS,
         search::FUNCTIONS,
+        split::FUNCTIONS,
+        substitute::FUNCTIONS,
         substring::FUNCTIONS,
         trim::FUNCTIONS,
     ];
@@ -44,8 +47,6 @@ pub(crate) fn register(registry: &mut Registry) {
     format::register(registry);
     url::register(registry);
     encode::register(registry);
-    replace::register(registry);
-    split::register(registry);
     escaping::register(registry);
     html::register(registry);
     text::register(registry);
@@ -53,7 +54,6 @@ pub(crate) fn register(registry: &mut Registry) {
     tags::register(registry);
     similarity::register(registry);
     metaphone::register(registry);
-    substitute::register(registry);
 }
 
 pub(super) fn bytes(value: impl Into<Vec<u8>>) -> Value {
@@ -120,13 +120,4 @@ pub(super) fn alphabetic(byte: u8) -> bool {
     byte.is_ascii_alphabetic()
         || cfg!(target_vendor = "apple")
             && matches!(byte, 170 | 181 | 186 | 192..=214 | 216..=246 | 248..=255)
-}
-
-/// List-producing string functions assign consecutive integer keys in insertion order.
-pub(super) fn list_array(values: impl IntoIterator<Item = Value>) -> NativeResult {
-    let mut array = PhpArray::new();
-    for value in values {
-        array.push(value)?;
-    }
-    Ok(Value::from(array))
 }

@@ -130,7 +130,7 @@ async fn run(context: &mut dyn Context, arguments: Vec<Value>, recursive: bool) 
         if !matches!(&*value, Value::Array(_) | Value::Object(_)) {
             return Err(NativeError::type_error(format!(
                 "{name}(): Argument #1 ($array) must be of type array, {} given",
-                crate::argument_type_name(&value)
+                crate::arguments::given_type(&value)
             )));
         }
     }

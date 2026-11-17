@@ -184,7 +184,7 @@ async fn run(context: &mut dyn Context, arguments: Vec<Value>, name: &str) -> Na
             return Err(NativeError::type_error(format!(
                 "{name}(): Argument #{}{parameter} must be of type array, {} given",
                 index + 1,
-                crate::argument_type_name(value)
+                crate::arguments::given_type(value)
             )));
         };
         arrays.push(array.clone());

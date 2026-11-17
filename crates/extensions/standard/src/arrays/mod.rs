@@ -1,6 +1,6 @@
 //! PHP array registration and shared key-retention and list-construction helpers.
 
-use phera_extension_api::{ArrayKey, Registry, Value};
+use phera_extension_api::{ArrayKey, PhpArray, Registry, Value};
 
 mod build;
 mod callback;
@@ -67,13 +67,14 @@ impl Keys {
     }
 }
 
-/// List construction assigns fresh consecutive integer keys in iteration order.
-fn list_array(
-    values: impl IntoIterator<Item = Value>,
-) -> Result<phera_extension_api::PhpArray, phera_extension_api::NativeError> {
-    let mut array = phera_extension_api::PhpArray::new();
+/// A PHP list, `[0 => $a, 1 => $b, …]`, of these values.
+pub(crate) fn list(values: impl IntoIterator<Item = Value>) -> PhpArray {
+    let mut array = PhpArray::new();
     for value in values {
-        array.push(value)?;
+        // Only an array whose next key would pass PHP_INT_MAX refuses a push.
+        array
+            .push(value)
+            .expect("a new array has a free key for every value");
     }
-    Ok(array)
+    array
 }

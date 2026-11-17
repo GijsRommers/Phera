@@ -2,6 +2,7 @@
 
 use phera_extension_api::{Extension, Registry};
 
+mod arguments;
 mod arrays;
 mod constants;
 mod math;
@@ -30,12 +31,3 @@ impl Extension for Standard {
 /// Exposes PHP comparison traversal for adversarial comparator regression tests.
 #[doc(hidden)]
 pub use arrays::zend_sort::order as php_sort_order;
-
-/// PHP argument errors name boolean literals rather than the general bool type.
-pub(crate) fn argument_type_name(value: &phera_extension_api::Value) -> String {
-    match value {
-        phera_extension_api::Value::Bool(false) => "false".into(),
-        phera_extension_api::Value::Bool(true) => "true".into(),
-        _ => value.type_name(),
-    }
-}

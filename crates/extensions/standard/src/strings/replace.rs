@@ -1,145 +1,189 @@
-//! Replace operations for PHP values.
-
-use std::rc::Rc;
+//! `str_replace("fox", "cat", "the fox")` is `"the cat"`.
 
 use phera_extension_api::value::to_php_string;
 use phera_extension_api::{
     Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, PhpArray, PhpString,
-    Registry, Value, args,
+    Value, args,
 };
 
-use super::{CaseSensitivity, bytes};
+use super::{CaseSensitivity, reserve};
 
-const PARAMS_PARAMS: &[Param] = &[
-    Param::new("search", ParamType::ArrayOrString),
-    Param::new("replace", ParamType::ArrayOrString),
-    Param::new("subject", ParamType::ArrayOrString),
-    Param::new("count", ParamType::Mixed).by_ref().optional(),
-];
+pub(super) const FUNCTIONS: &[FunctionEntry] = &[STR_REPLACE, STR_IREPLACE];
 
-pub(crate) fn register(registry: &mut Registry) {
-    registry.function(FunctionEntry::sync("str_replace", PARAMS_PARAMS, replace));
-    registry.function(FunctionEntry::sync("str_ireplace", PARAMS_PARAMS, ireplace));
+/// `str_replace(array|string $search, array|string $replace,
+/// string|array $subject, &$count = null): string|array`
+///
+/// With arrays, each search string is replaced in turn, in the result of
+/// the one before, so a replacement can be replaced again by a later
+/// search. A missing replacement is the empty string. An array subject is
+/// replaced in value by value, keeping its keys.
+///
+/// ```php
+/// str_replace("fox", "cat", "the fox");      // "the cat"
+/// str_replace(["a", "b"], ["b", "c"], "ab"); // "cc"
+/// str_replace("a", "x", ["k" => "aa"], $n);  // ["k" => "xx"], and $n is 2
+/// ```
+const STR_REPLACE: FunctionEntry = FunctionEntry::sync(
+    "str_replace",
+    &[
+        Param::new("search", ParamType::ArrayOrString),
+        Param::new("replace", ParamType::ArrayOrString),
+        Param::new("subject", ParamType::ArrayOrString),
+        Param::new("count", ParamType::Mixed).by_ref().optional(),
+    ],
+    str_replace,
+);
+
+fn str_replace(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    replace_with(
+        context,
+        arguments,
+        "str_replace",
+        CaseSensitivity::Sensitive,
+    )
 }
 
-fn replace(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    replace_subjects(context, arguments, CaseSensitivity::Sensitive)
+/// `str_ireplace()`, `str_replace()` finding the search strings in any
+/// ASCII case.
+///
+/// ```php
+/// str_ireplace("FOX", "cat", "the Fox"); // "the cat"
+/// ```
+const STR_IREPLACE: FunctionEntry = FunctionEntry::sync(
+    "str_ireplace",
+    &[
+        Param::new("search", ParamType::ArrayOrString),
+        Param::new("replace", ParamType::ArrayOrString),
+        Param::new("subject", ParamType::ArrayOrString),
+        Param::new("count", ParamType::Mixed).by_ref().optional(),
+    ],
+    str_ireplace,
+);
+
+fn str_ireplace(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    replace_with(
+        context,
+        arguments,
+        "str_ireplace",
+        CaseSensitivity::Insensitive,
+    )
 }
 
-fn ireplace(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    replace_subjects(context, arguments, CaseSensitivity::Insensitive)
+fn replace_with(
+    context: &mut dyn Context,
+    arguments: &[Value],
+    function: &str,
+    case: CaseSensitivity,
+) -> NativeResult {
+    let search = args::value(arguments, 0);
+    let replace = args::value(arguments, 1);
+    if !search.is_array() && replace.is_array() {
+        return Err(NativeError::type_error(format!(
+            "{function}(): Argument #2 ($replace) must be of type string \
+             when argument #1 ($search) is a string"
+        )));
+    }
+    let search = strings(context, search)?;
+    let replacements = if replace.is_array() {
+        Replacements::OnePerSearch(strings(context, replace)?)
+    } else {
+        Replacements::Same(to_php_string(replace, context.diagnostics())?)
+    };
+    let mut replacer = Replacer {
+        search: &search,
+        replacements: &replacements,
+        case,
+        count: 0,
+    };
+    let result = if let Some(subjects) = args::array(arguments, 2) {
+        let mut result = PhpArray::new();
+        for (key, subject) in subjects.iter() {
+            let subject = to_php_string(subject, context.diagnostics())?;
+            result.insert(key, Value::String(replacer.replace(subject)?));
+        }
+        Value::from(result)
+    } else {
+        let subject = to_php_string(args::value(arguments, 2), context.diagnostics())?;
+        Value::String(replacer.replace(subject)?)
+    };
+    if let Some(count) = args::reference(arguments, 3) {
+        *count.borrow_mut() = Value::Int(replacer.count);
+    }
+    Ok(result)
 }
 
-/// Array replacements convert each element using PHP string coercion and diagnostics.
+/// A string, or the values of an array as strings, in order.
 fn strings(context: &mut dyn Context, value: &Value) -> Result<Vec<PhpString>, NativeError> {
     match value {
         Value::Array(array) => array
             .values()
-            .map(|value| to_php_string(value, context.diagnostics()).map_err(Into::into))
+            .map(|value| Ok(to_php_string(value, context.diagnostics())?))
             .collect(),
         _ => Ok(vec![to_php_string(value, context.diagnostics())?]),
     }
 }
 
-/// Search terms replace_subjects sequentially, so a replacement may match a later term.
-fn replace_subjects(
-    context: &mut dyn Context,
-    arguments: &[Value],
-    sensitivity: CaseSensitivity,
-) -> NativeResult {
-    let name = if sensitivity == CaseSensitivity::Insensitive {
-        "str_ireplace"
-    } else {
-        "str_replace"
-    };
-    if args::array(arguments, 0).is_none() && args::array(arguments, 1).is_some() {
-        return Err(NativeError::type_error(format!(
-            "{name}(): Argument #2 ($replace) must be of type string when argument #1 ($search) is a string"
-        )));
-    }
-    let search = strings(context, arguments.first().unwrap_or(&Value::Null))?;
-    let replacement = strings(context, arguments.get(1).unwrap_or(&Value::Null))?;
-    let repeated = if args::array(arguments, 1).is_none() {
-        ReplacementMode::Repeated
-    } else {
-        ReplacementMode::PerNeedle
-    };
-    let mut replacements = Replacements {
-        search: &search,
-        replacement: &replacement,
-        repeated,
-        sensitivity,
-        count: 0,
-    };
-    let result = if let Some(array) = args::array(arguments, 2) {
-        let mut result = PhpArray::new();
-        for (key, value) in array.iter() {
-            result.insert(key, replacements.replace_one(context, value)?);
+enum Replacements {
+    /// `$replace` was a string, which replaces every search string.
+    Same(PhpString),
+    /// `$replace` was an array: the n-th replaces the n-th search string.
+    OnePerSearch(Vec<PhpString>),
+}
+
+impl Replacements {
+    fn for_search(&self, index: usize) -> &[u8] {
+        match self {
+            Self::Same(replacement) => replacement.as_bytes(),
+            Self::OnePerSearch(list) => list.get(index).map_or(&[], PhpString::as_bytes),
         }
-        Value::Array(Rc::new(result))
-    } else {
-        replacements.replace_one(context, arguments.get(2).unwrap_or(&Value::Null))?
-    };
-    if let Some(cell) = args::reference(arguments, 3) {
-        *cell
-            .try_borrow_mut()
-            .map_err(|_| NativeError::error("Cannot modify borrowed reference"))? =
-            Value::Int(replacements.count);
     }
-    Ok(result)
 }
 
-enum ReplacementMode {
-    Repeated,
-    PerNeedle,
-}
-
-struct Replacements<'a> {
+struct Replacer<'a> {
     search: &'a [PhpString],
-    replacement: &'a [PhpString],
-    repeated: ReplacementMode,
-    sensitivity: CaseSensitivity,
+    replacements: &'a Replacements,
+    case: CaseSensitivity,
+    /// The replacements made so far, for `$count`.
     count: i64,
 }
 
-impl Replacements<'_> {
-    /// Each search sees the output of the preceding replacement, as in PHP.
-    fn replace_one(&mut self, context: &mut dyn Context, value: &Value) -> NativeResult {
-        let mut string = to_php_string(value, context.diagnostics())?
-            .as_bytes()
-            .to_vec();
-        for (i, needle) in self.search.iter().enumerate() {
+impl Replacer<'_> {
+    fn replace(&mut self, mut subject: PhpString) -> Result<PhpString, NativeError> {
+        for (index, needle) in self.search.iter().enumerate() {
+            // PHP skips empty search strings instead of matching everywhere.
             if needle.is_empty() {
                 continue;
             }
-            let replacement_bytes = self
-                .replacement
-                .get(if matches!(self.repeated, ReplacementMode::Repeated) {
-                    0
-                } else {
-                    i
-                })
-                .map_or(&[][..], PhpString::as_bytes);
-            let mut result = Vec::new();
-            let mut start = 0;
-            while let Some(tail) = string.get(start..) {
-                let Some(position) = self.sensitivity.find(tail, needle.as_bytes()) else {
-                    break;
-                };
-                super::reserve(
-                    &mut result,
-                    position.saturating_add(replacement_bytes.len()),
-                )?;
-                result.extend_from_slice(tail.get(..position).unwrap_or_default());
-                result.extend_from_slice(replacement_bytes);
-                start += position + needle.len();
-                self.count = self.count.saturating_add(1);
+            let replacement = self.replacements.for_search(index);
+            if let Some(replaced) = self.replace_all(subject.as_bytes(), needle, replacement)? {
+                subject = PhpString::from(replaced);
             }
-            let tail = string.get(start..).unwrap_or_default();
-            super::reserve(&mut result, tail.len())?;
-            result.extend_from_slice(tail);
-            string = result;
         }
-        Ok(bytes(string))
+        Ok(subject)
+    }
+
+    /// The subject with every `needle` replaced, or `None` when there is
+    /// none, so an unchanged subject keeps sharing its bytes.
+    fn replace_all(
+        &mut self,
+        subject: &[u8],
+        needle: &[u8],
+        replacement: &[u8],
+    ) -> Result<Option<Vec<u8>>, NativeError> {
+        let mut result = Vec::new();
+        let mut rest = subject;
+        while let Some(position) = self.case.find(rest, needle) {
+            reserve(&mut result, position + replacement.len())?;
+            result.extend_from_slice(&rest[..position]);
+            result.extend_from_slice(replacement);
+            rest = &rest[position + needle.len()..];
+            self.count += 1;
+        }
+        if rest.len() == subject.len() {
+            return Ok(None);
+        }
+        reserve(&mut result, rest.len())?;
+        result.extend_from_slice(rest);
+        Ok(Some(result))
     }
 }

@@ -59,7 +59,7 @@ fn candidates<'a>(arguments: &'a [Value], name: &str) -> Result<Vec<&'a Value>, 
         Some(Value::Array(array)) => Ok(array.values().collect()),
         Some(value) => Err(NativeError::type_error(format!(
             "{name}(): Argument #1 ($value) must be of type array, {} given",
-            crate::argument_type_name(value)
+            crate::arguments::given_type(value)
         ))),
         None => Ok(Vec::new()),
     }

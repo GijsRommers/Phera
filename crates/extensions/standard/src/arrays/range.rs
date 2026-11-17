@@ -31,7 +31,7 @@ fn range(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         let scalar = matches!(value, Value::Int(_) | Value::Float(_) | Value::String(_));
         let coercible = matches!(value, Value::Null | Value::Bool(_));
         if !scalar && (context.strict_types() || !coercible) {
-            let given = crate::argument_type_name(value);
+            let given = crate::arguments::given_type(value);
             return Err(NativeError::type_error(format!(
                 "range(): Argument #{} (${name}) must be of type string|int|float, {given} given",
                 index + 1

@@ -65,7 +65,7 @@ fn array_values(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let values = args::array(arguments, 0)
         .into_iter()
         .flat_map(|array| array.values().cloned());
-    Ok(Value::from(super::list_array(values)?))
+    Ok(Value::from(super::list(values)))
 }
 
 fn array_key_first(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
