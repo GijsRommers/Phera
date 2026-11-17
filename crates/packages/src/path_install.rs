@@ -42,11 +42,13 @@ pub(crate) fn link(project: &Project, package: &Package, destination: &Path) -> 
         fs::create_dir_all(parent)?;
         let staging = tempfile::tempdir_in(parent)?;
         let link = staging.path().join("package");
-        let target = if package.field("transport-options")["relative"] == false {
+        let mut target = if package.field("transport-options")["relative"] == false {
             source
         } else {
             PathBuf::from(crate::php::relative(parent, &source))
         };
+        // Composer preserves a trailing separator in directory link targets.
+        target.push("");
         std::os::unix::fs::symlink(target, &link)?;
         remove(destination)?;
         fs::rename(link, destination)?;

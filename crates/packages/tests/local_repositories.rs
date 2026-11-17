@@ -145,6 +145,13 @@ fn default_path_links_are_live_and_removal_preserves_the_source() {
     assert!(!map.contains("'Excluded'"));
     #[cfg(unix)]
     assert!(root.join("vendor/acme/live").is_symlink());
+    #[cfg(unix)]
+    assert_eq!(
+        fs::read_link(root.join("vendor/acme/live"))
+            .unwrap()
+            .as_os_str(),
+        "../../packages/live/"
+    );
     fs::write(source.join("data.txt"), "second").unwrap();
     #[cfg(unix)]
     assert_eq!(

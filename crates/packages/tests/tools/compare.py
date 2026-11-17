@@ -141,6 +141,9 @@ def compare(fixture):
         generated = lambda path: path == 'autoload.php' or path.startswith(('composer/', 'bin/'))
         row['package_differences'] = [path for path in different if not generated(path)]
         row['generated_differences'] = [path for path in different if generated(path)]
+        if row['package_differences']:
+            row['package_difference_types'] = {path: [repr(a.get(path))[:200],
+                repr(b.get(path))[:200]] for path in row['package_differences']}
         a = json.loads((left / vendor / 'composer/installed.json').read_text())
         b = json.loads((right / vendor / 'composer/installed.json').read_text())
         row['installed_identical'] = a == b
