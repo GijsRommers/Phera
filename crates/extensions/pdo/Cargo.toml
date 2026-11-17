@@ -6,6 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+phera-sqlite.workspace = true
 phera-extension-api.workspace = true
 tokio.workspace = true
 tokio-postgres.workspace = true
