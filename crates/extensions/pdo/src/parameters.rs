@@ -61,19 +61,32 @@ impl Binding {
     }
 }
 
-pub fn key(value: &Value, execute: bool) -> Result<String, NativeError> {
+pub fn key(value: &Value, method: Option<&str>) -> Result<String, NativeError> {
     match &*value.deref() {
         Value::Int(number) => {
-            let position = if execute { *number } else { number - 1 };
+            let position = if method.is_none() {
+                *number
+            } else {
+                number.saturating_sub(1)
+            };
             if position < 0 {
-                return Err(NativeError::value_error(
-                    "PDOStatement::bindValue(): Argument #1 ($param) \
-                     must be greater than or equal to 1",
-                ));
+                return Err(NativeError::value_error(format!(
+                    "{}(): Argument #1 ($param) must be greater than or equal to 1",
+                    method.unwrap_or("PDOStatement::execute")
+                )));
             }
             Ok(position.to_string())
         }
-        Value::String(name) => Ok(name.to_string_lossy().trim_start_matches(':').to_owned()),
+        Value::String(name) => {
+            if name.as_bytes().is_empty()
+                && let Some(method) = method
+            {
+                return Err(NativeError::value_error(format!(
+                    "{method}(): Argument #1 ($param) must not be empty"
+                )));
+            }
+            Ok(name.to_string_lossy().trim_start_matches(':').to_owned())
+        }
         _ => Err(NativeError::type_error(
             "Parameter must be an integer or string",
         )),
@@ -85,7 +98,7 @@ pub fn execute_bindings(params: &Value) -> Result<HashMap<String, Binding>, Nati
     if let Value::Array(array) = &*params.deref() {
         for (param, value) in array.iter() {
             let name = match param {
-                ArrayKey::Int(position) => key(&Value::Int(*position), true)?,
+                ArrayKey::Int(position) => key(&Value::Int(*position), None)?,
                 ArrayKey::String(name) => name.to_string_lossy().trim_start_matches(':').to_owned(),
             };
             bindings.insert(
@@ -113,7 +126,20 @@ pub fn ordered<'a>(
         };
         seen.insert(name.clone());
         result.push(bindings.get(&name).ok_or_else(|| {
-            DbError::parameter("number of bound variables does not match number of tokens")
+            let count = sql
+                .parameters
+                .iter()
+                .map(|parameter| match parameter {
+                    Parameter::Name(name) => name.clone(),
+                    Parameter::Position(position) => position.to_string(),
+                })
+                .collect::<std::collections::HashSet<_>>()
+                .len();
+            DbError::parameter(if count == bindings.len() {
+                "parameter was not defined"
+            } else {
+                "number of bound variables does not match number of tokens"
+            })
         })?);
     }
     if seen.len() != bindings.len() {

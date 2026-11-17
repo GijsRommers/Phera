@@ -41,6 +41,7 @@ impl DbError {
             "22P02" => "Invalid text representation",
             "22012" => "Division by zero",
             "08006" => "Connection failure",
+            "08P01" => "<<Unknown error>>",
             "42S02" => "Base table or view not found",
             "42S22" => "Column not found",
             "IM001" => "Driver does not support this function",
@@ -67,7 +68,7 @@ impl DbError {
             }
             // The extension API cannot yet attach SQLSTATE string codes or errorInfo.
             // Keep the real message, and document the missing exception payload in REPORT.md.
-            ErrorMode::Exception => Err(NativeError::throw("PDOException", self.message())),
+            ErrorMode::Exception => Err(exception(self.message(), Some(self), 0)),
         }
     }
 }
@@ -115,7 +116,13 @@ impl ErrorState {
 }
 
 pub fn unsupported(feature: &str) -> NativeError {
-    NativeError::throw("PDOException", format!("{feature} is not supported yet"))
+    exception(format!("{feature} is not supported yet"), None, 0)
+}
+
+/// Every PDOException is built here. The SQLSTATE and errorInfo source are retained
+/// at this boundary for the forthcoming native exception payload API.
+pub fn exception(message: impl Into<String>, _error: Option<&DbError>, code: i64) -> NativeError {
+    NativeError::throw_with_code("PDOException", message, code)
 }
 
 #[cfg(test)]

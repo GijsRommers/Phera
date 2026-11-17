@@ -24,6 +24,13 @@ pub fn register(registry: &mut Registry) {
         methods: PDO_METHODS,
         ..ClassEntry::class("PDO")
     });
+    for name in ["Pdo\\Pgsql", "Pdo\\Mysql"] {
+        registry.class(ClassEntry {
+            parent: Some("PDO"),
+            methods: PDO_METHODS,
+            ..ClassEntry::class(name)
+        });
+    }
     registry.class(ClassEntry {
         properties: const {
             &[PropertyEntry::new(
@@ -55,6 +62,23 @@ const PDO_METHODS: &[MethodEntry] = &[
         ],
         connection::construct,
     ),
+    MethodEntry::public_async(
+        "connect",
+        &[
+            Param::new("dsn", ParamType::String),
+            Param::new("username", ParamType::String)
+                .nullable()
+                .optional(),
+            Param::new("password", ParamType::String)
+                .nullable()
+                .optional(),
+            Param::new("options", ParamType::Array)
+                .nullable()
+                .optional(),
+        ],
+        connection::connect,
+    )
+    .static_(),
     MethodEntry::public("getAvailableDrivers", &[], connection::available).static_(),
     MethodEntry::public(
         "pgsqlCopyFromArray",
@@ -79,7 +103,7 @@ const PDO_METHODS: &[MethodEntry] = &[
     MethodEntry::public_async("beginTransaction", &[], transactions::begin),
     MethodEntry::public_async("commit", &[], transactions::commit),
     MethodEntry::public_async("rollBack", &[], transactions::rollback),
-    MethodEntry::public("inTransaction", &[], transactions::active),
+    MethodEntry::public_async("inTransaction", &[], transactions::active),
     MethodEntry::public("errorCode", &[], connection::error_code),
     MethodEntry::public("errorInfo", &[], connection::error_info),
     MethodEntry::public_async(
@@ -138,7 +162,7 @@ const STATEMENT_METHODS: &[MethodEntry] = &[
     MethodEntry::public_async(
         "execute",
         &[Param::new("params", ParamType::Array).nullable().optional()],
-        statement::execute,
+        crate::statement_execute::execute,
     ),
     MethodEntry::public(
         "bindValue",
@@ -147,7 +171,7 @@ const STATEMENT_METHODS: &[MethodEntry] = &[
             Param::new("value", ParamType::Mixed),
             Param::new("type", ParamType::Int).optional(),
         ],
-        statement::bind,
+        statement::bind_value,
     ),
     MethodEntry::public(
         "bindParam",
@@ -160,7 +184,7 @@ const STATEMENT_METHODS: &[MethodEntry] = &[
                 .nullable()
                 .optional(),
         ],
-        statement::bind,
+        statement::bind_param,
     ),
     MethodEntry::public(
         "fetch",
@@ -177,7 +201,7 @@ const STATEMENT_METHODS: &[MethodEntry] = &[
             Param::new("mode", ParamType::Int).optional(),
             Param::new("args", ParamType::Mixed).variadic(),
         ],
-        fetch::all,
+        crate::fetch_all::all,
     ),
     MethodEntry::public(
         "fetchColumn",
@@ -210,10 +234,10 @@ const STATEMENT_METHODS: &[MethodEntry] = &[
         &[Param::new("args", ParamType::Mixed).variadic()],
         statement::unsupported_method,
     ),
-    MethodEntry::public(
+    MethodEntry::public_async(
         "getColumnMeta",
-        &[Param::new("args", ParamType::Mixed).variadic()],
-        statement::unsupported_method,
+        &[Param::new("column", ParamType::Int)],
+        crate::metadata::get,
     ),
     MethodEntry::public(
         "nextRowset",

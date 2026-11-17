@@ -24,6 +24,7 @@ pub struct Attributes {
     pub emulate: bool,
     pub stringify: bool,
     pub case: ColumnCase,
+    pub persistent: bool,
 }
 
 impl Attributes {
@@ -34,6 +35,7 @@ impl Attributes {
             emulate: driver == DriverName::Mysql,
             stringify: false,
             case: ColumnCase::Natural,
+            persistent: false,
         }
     }
 
@@ -67,8 +69,7 @@ impl Attributes {
             17 => self.stringify = to_bool(value),
             19 => self.fetch = FetchMode::parse(to_int(value, context.diagnostics())?, self.fetch)?,
             20 => self.emulate = to_bool(value),
-            12 if !to_bool(value) => {}
-            12 => return Err(unsupported("Persistent connections")),
+            12 => self.persistent = to_bool(value),
             // MySQL's driver constants for SSL options must not be silently ignored.
             1007..=1011 | 1014 => return Err(unsupported("TLS")),
             _ => return Err(unsupported("This PDO attribute")),
@@ -102,7 +103,7 @@ pub fn get(_: &mut dyn Context, this: Option<&Rc<Object>>, arguments: &[Value]) 
             ColumnCase::Upper => 1,
             ColumnCase::Lower => 2,
         }),
-        12 => Value::Bool(false),
+        12 => Value::Bool(attributes.persistent),
         16 => Value::from(connection.name.name()),
         17 => Value::Bool(attributes.stringify),
         19 => Value::Int(attributes.fetch.number()),

@@ -1,0 +1,24 @@
+<?php
+$p = new PDO('pgsql:host=127.0.0.1;port=54329;dbname=phera_test', 'phera', 'phera');
+$p->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_SILENT);
+var_dump($p->inTransaction());
+$p->exec('BEGIN; SELECT missing_transaction_column');
+var_dump($p->inTransaction());
+var_dump($p->rollBack());
+var_dump($p->inTransaction());
+$p->exec('START TRANSACTION');
+$p->exec('SAVEPOINT checkpoint');
+$p->exec('SELECT 1/0');
+var_dump($p->inTransaction());
+$p->exec('ROLLBACK TO SAVEPOINT checkpoint');
+var_dump($p->inTransaction());
+$p->exec('COMMIT AND CHAIN');
+var_dump($p->inTransaction());
+$p->exec('ROLLBACK AND NO CHAIN');
+var_dump($p->inTransaction());
+$p->exec('BEGIN');
+$s = $p->prepare('SELECT missing_transaction_column');
+$s->execute();
+var_dump($p->inTransaction());
+var_dump($p->commit());
+var_dump($p->inTransaction());

@@ -14,16 +14,20 @@ use crate::errors::{DbError, ErrorState, unsupported};
 use crate::fetch::FetchMode;
 use crate::parameters::{self, Binding, ParameterType};
 use crate::placeholders::Sql;
+use crate::statement_execute::{execute_named, fail};
 
 pub struct Statement {
+    // Rust drops fields in declaration order. Queue statement cleanup before
+    // releasing the session, whose final drop may immediately start pool reset.
+    pub prepared: Prepared,
     pub connection: Rc<Session>,
     pub sql: Sql,
-    pub prepared: Prepared,
     pub bindings: HashMap<String, Binding>,
     pub rows: Rows,
     pub cursor: usize,
     pub fetch: FetchMode,
     pub column: usize,
+    pub fetch_flags: i64,
     pub error: ErrorState,
 }
 
@@ -87,18 +91,21 @@ async fn create(
         return Err(unsupported("Statement driver options"));
     }
     let attributes = connection.attributes.borrow().clone();
-    let fetch = if query {
-        FetchMode::parse(args::int(arguments, 1).unwrap_or(0), attributes.fetch)?
+    let configuration = if query {
+        crate::fetch_options::validate(
+            crate::fetch_options::Method::Query,
+            arguments,
+            attributes.fetch,
+            0,
+            0,
+        )?
     } else {
-        attributes.fetch
+        crate::fetch_options::Configuration {
+            mode: attributes.fetch,
+            column: 0,
+            flags: 0,
+        }
     };
-    let column = if query {
-        args::int(arguments, 2).unwrap_or(0)
-    } else {
-        0
-    };
-    let column = usize::try_from(column)
-        .map_err(|_| NativeError::value_error("Column index must be greater than or equal to 0"))?;
     let sql = match Sql::parse(source.clone()) {
         Ok(sql) => sql,
         Err(error) => return connection.fail(context, error, method),
@@ -106,7 +113,9 @@ async fn create(
     let prepared = if attributes.emulate {
         Prepared::Emulated
     } else if connection.name == crate::dsn::DriverName::Postgres {
-        Prepared::PostgresDeferred
+        let number = connection.statement_sequence.get() + 1;
+        connection.statement_sequence.set(number);
+        Prepared::PostgresDeferred(number)
     } else {
         let result = connection.driver.lock().await.prepare(&sql).await;
         match result {
@@ -139,104 +148,64 @@ async fn create(
         bindings: HashMap::new(),
         rows: Rows::default(),
         cursor: 0,
-        fetch,
-        column,
+        fetch: configuration.mode,
+        column: configuration.column,
+        fetch_flags: configuration.flags,
         error,
     }))));
     Ok(result)
 }
 
-pub fn execute<'a>(
-    context: &'a mut dyn Context,
-    this: Option<Rc<Object>>,
-    arguments: Vec<Value>,
-) -> LocalFuture<'a, NativeResult> {
-    execute_named(context, this, arguments, "PDOStatement::execute")
-}
-
-fn execute_named<'a>(
-    context: &'a mut dyn Context,
-    this: Option<Rc<Object>>,
-    arguments: Vec<Value>,
-    method: &'static str,
-) -> LocalFuture<'a, NativeResult> {
-    Box::pin(async move {
-        let state = state(this.as_ref())?;
-        if let Some(params) = arguments.first().filter(|value| !value.is_null()) {
-            state.borrow_mut().bindings = parameters::execute_bindings(params)?;
-        }
-        let (connection, sql, prepared, values) = {
-            let statement = state.borrow();
-            let mut ordered = parameters::ordered(&statement.sql, &statement.bindings);
-            if matches!(statement.prepared, Prepared::Mysql(_))
-                && statement.sql.parameters.len() > statement.bindings.len()
-            {
-                ordered = Err(DbError::parameter(""));
-            }
-            let values = match ordered {
-                Ok(bindings) => Ok(bindings
-                    .into_iter()
-                    .map(|b| b.read(context))
-                    .collect::<Result<Vec<_>, _>>()?),
-                Err(error) => Err(error),
-            };
-            (
-                statement.connection.clone(),
-                statement.sql.clone(),
-                statement.prepared.clone(),
-                values,
-            )
-        };
-        let values = match values {
-            Ok(values) => values,
-            Err(error) => return fail(&state, context, error, method),
-        };
-        let result = connection
-            .driver
-            .lock()
-            .await
-            .execute(&sql, &prepared, &values)
-            .await;
-        match result {
-            Ok(rows) => {
-                let mut statement = state.borrow_mut();
-                statement.rows = rows;
-                statement.cursor = 0;
-                statement.error = ErrorState::Success;
-                Ok(Value::Bool(true))
-            }
-            Err(error) => fail(&state, context, error, method),
-        }
-    })
-}
-
-fn fail(
-    state: &RefCell<Statement>,
-    context: &mut dyn Context,
-    error: DbError,
-    method: &str,
-) -> NativeResult {
-    let mode = {
-        let mut statement = state.borrow_mut();
-        *statement.connection.last_error.borrow_mut() = Some(error.clone());
-        statement.error = ErrorState::Failed(error.clone());
-        statement.rows = Rows::default();
-        statement.cursor = 0;
-        statement.connection.attributes.borrow().errors
-    };
-    error.report(context, mode, method)
-}
-
-pub fn bind(
+pub fn bind_value(
     context: &mut dyn Context,
     this: Option<&Rc<Object>>,
     arguments: &[Value],
+) -> NativeResult {
+    bind(context, this, arguments, "PDOStatement::bindValue")
+}
+
+pub fn bind_param(
+    context: &mut dyn Context,
+    this: Option<&Rc<Object>>,
+    arguments: &[Value],
+) -> NativeResult {
+    bind(context, this, arguments, "PDOStatement::bindParam")
+}
+
+fn bind(
+    context: &mut dyn Context,
+    this: Option<&Rc<Object>>,
+    arguments: &[Value],
+    method: &str,
 ) -> NativeResult {
     if args::int(arguments, 3).unwrap_or(0) != 0 || !args::value(arguments, 4).is_null() {
         return Err(unsupported("Output parameter bindings"));
     }
     let state = state(this)?;
-    let key = parameters::key(args::value(arguments, 0), false)?;
+    let key = parameters::key(args::value(arguments, 0), Some(method))?;
+    let invalid = {
+        let statement = state.borrow();
+        if matches!(
+            statement.prepared,
+            Prepared::PostgresDeferred(_) | Prepared::Postgres(_, _)
+        ) {
+            let valid = crate::native_parameters::valid_key(&statement.sql, &key);
+            if valid {
+                None
+            } else {
+                let detail = match args::value(arguments, 0) {
+                    Value::String(_) => format!(":{key}"),
+                    _ => "parameter was not defined".into(),
+                };
+                Some(DbError::parameter(&detail))
+            }
+        } else {
+            None
+        }
+    };
+    if let Some(error) = invalid {
+        return fail(&state, context, error, method);
+    }
     let kind = ParameterType::parse(args::int(arguments, 2).unwrap_or(2))?;
     let binding = Binding {
         value: args::value(arguments, 1).clone(),
