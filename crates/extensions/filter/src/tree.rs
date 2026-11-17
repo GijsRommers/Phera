@@ -10,7 +10,8 @@ use std::rc::Rc;
 
 use phera_extension_api::{ArrayKey, Context, NativeResult, PhpArray, Value};
 
-use crate::{apply, options::Options};
+use crate::apply::{self, Leaf};
+use crate::{exceptions, options::Options};
 
 struct Frame {
     source: Rc<PhpArray>,
@@ -53,6 +54,7 @@ pub async fn apply(
 ) -> NativeResult {
     let mut active = HashSet::from([Rc::as_ptr(&array)]);
     let mut frames = vec![Frame::new(array, None)];
+    let mut exception = None;
     while let Some(frame) = frames.last_mut() {
         if let Some((key, original)) = frame.next() {
             let item = original.deref().clone();
@@ -61,8 +63,16 @@ pub async fn apply(
                     frames.push(Frame::new(nested, Some((key, original))));
                 }
             } else {
-                let filtered = apply::leaf(context, item, options).await?;
-                frame.store(key, original, filtered);
+                match apply::leaf(context, item, options, exception.is_some()).await? {
+                    Leaf::Value(filtered) => frame.store(key, original, filtered),
+                    Leaf::Threw { replacement, error } => {
+                        frame.store(key, original, replacement);
+                        exception = Some(match exception {
+                            Some(previous) => exceptions::chain(context, error, previous),
+                            None => error,
+                        });
+                    }
+                }
             }
         } else if let Some(done) = frames.pop() {
             active.remove(&Rc::as_ptr(&done.source));
@@ -72,7 +82,7 @@ pub async fn apply(
             {
                 parent.store(key, original, result);
             } else {
-                return Ok(result);
+                return exception.map_or(Ok(result), Err);
             }
         }
     }

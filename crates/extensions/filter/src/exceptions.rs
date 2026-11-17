@@ -8,7 +8,7 @@
 //! }
 //! ```
 
-use phera_extension_api::{ClassEntry, NativeError, Registry, Value};
+use phera_extension_api::{ArrayKey, ClassEntry, Context, NativeError, Object, Registry, Value};
 
 const FILTER_EXCEPTION: &str = "Filter\\FilterException";
 const FAILED_EXCEPTION: &str = "Filter\\FilterFailedException";
@@ -54,4 +54,32 @@ pub fn rejected(filter: &str, input: &[u8]) -> NativeError {
     message.push(b'\'');
     NativeError::throw(FAILED_EXCEPTION, String::from_utf8_lossy(&message))
         .with_property("message", Value::from(message))
+}
+
+/// PHP keeps walking array leaves after throwing. A new native filter error
+/// keeps the preceding one in its chain.
+pub fn chain(context: &mut dyn Context, error: NativeError, previous: NativeError) -> NativeError {
+    let (class, message, code, mut properties) = match previous.into_exception_parts() {
+        Ok(parts) => parts,
+        Err(unwind) => return unwind,
+    };
+    let root = if class == FAILED_EXCEPTION {
+        "Exception"
+    } else {
+        "Error"
+    };
+
+    let message = properties
+        .remove(&ArrayKey::str("message"))
+        .unwrap_or_else(|| Value::from(message));
+    let previous = properties.remove(&ArrayKey::str("previous"));
+    properties.insert(Object::protected_key("message"), message);
+    properties.insert(Object::protected_key("code"), code);
+    if let Some(previous) = previous {
+        properties.insert(Object::private_key(root, "previous"), previous);
+    }
+    match context.create_object(class, properties) {
+        Ok(previous) => error.with_property("previous", previous),
+        Err(_) => error,
+    }
 }

@@ -5,7 +5,7 @@
 //! filter_var('no', FILTER_VALIDATE_BOOLEAN, ['options' => ['default' => 42]]); // 42
 //! ```
 
-use phera_extension_api::{Context, NativeError, NativeResult, PhpArray, Value};
+use phera_extension_api::{Context, NativeError, NativeResult, PhpArray, PhpString, Value};
 
 use crate::catalog::FILTERS;
 use crate::constants::*;
@@ -31,7 +31,10 @@ pub async fn value(context: &mut dyn Context, value: Value, options: &Options) -
         };
     }
 
-    let filtered = leaf(context, value, options).await?;
+    let filtered = match leaf(context, value, options, false).await? {
+        Leaf::Value(value) => value,
+        Leaf::Threw { error, .. } => return Err(error),
+    };
     if options.force_array {
         let mut array = PhpArray::new();
         array.push(filtered)?;
@@ -41,22 +44,81 @@ pub async fn value(context: &mut dyn Context, value: Value, options: &Options) -
     }
 }
 
-pub async fn leaf(context: &mut dyn Context, value: Value, options: &Options) -> NativeResult {
+pub enum Leaf {
+    Value(Value),
+    Threw {
+        replacement: Value,
+        error: NativeError,
+    },
+}
+
+pub async fn leaf(
+    context: &mut dyn Context,
+    value: Value,
+    options: &Options,
+    pending: bool,
+) -> Result<Leaf, NativeError> {
+    if pending && options.id == CALLBACK {
+        // PHP skips callback invocations during exception unwinding.
+        return Ok(Leaf::Value(Value::Null));
+    }
     let object_name = match (&value, options.failure) {
         (Value::Object(object), Failure::Throw) => Some(object.class.name().to_owned()),
         _ => None,
     };
     let Some(string) = stringify::value(context, value).await? else {
         if let Some(name) = object_name {
-            return Err(exceptions::failed(&format!(
-                "object of type {name} has no __toString() method",
-            )));
+            let error =
+                exceptions::failed(&format!("object of type {name} has no __toString() method"));
+            return Ok(Leaf::Threw {
+                replacement: Value::Null,
+                error,
+            });
         }
-        return Ok(or_default(options.failure.value(), options));
+        return Ok(Leaf::Value(or_default(options.failure.value(), options)));
     };
+    let result = match dispatch(context, &string, options).await {
+        Ok(result) => result,
+        Err(error) => {
+            let replacement = if options.id == CALLBACK {
+                Value::Null
+            } else {
+                Value::String(string)
+            };
+            return Ok(Leaf::Threw { replacement, error });
+        }
+    };
+    if result.is_none() {
+        if pending {
+            // PHP leaves rejected values as strings while an exception is pending.
+            return Ok(Leaf::Value(Value::String(string)));
+        }
+        if options.failure == Failure::Throw {
+            let name = FILTERS
+                .iter()
+                .find_map(|&(name, id)| (id == options.id).then_some(name))
+                .unwrap_or("unsafe_raw");
+            let error = exceptions::rejected(name, string.as_bytes());
+            return Ok(Leaf::Threw {
+                replacement: Value::Null,
+                error,
+            });
+        }
+    }
+    Ok(Leaf::Value(or_default(
+        result.unwrap_or_else(|| options.failure.value()),
+        options,
+    )))
+}
+
+async fn dispatch(
+    context: &mut dyn Context,
+    string: &PhpString,
+    options: &Options,
+) -> Result<Option<Value>, NativeError> {
     let bytes = string.as_bytes();
     let flags = options.flags;
-    let result = match options.id {
+    Ok(match options.id {
         VALIDATE_INT => numbers::integer(context, bytes, options)?.map(Value::Int),
         VALIDATE_BOOL => numbers::boolean(bytes).map(Value::Bool),
         VALIDATE_FLOAT => numbers::float(context, bytes, options)?.map(Value::Float),
@@ -68,7 +130,7 @@ pub async fn leaf(context: &mut dyn Context, value: Value, options: &Options) ->
         VALIDATE_MAC => domain::mac(bytes, options)?.then(|| Value::String(string.clone())),
         VALIDATE_URL => url::valid(bytes, options)?.then(|| Value::String(string.clone())),
         VALIDATE_REGEXP => {
-            regexp::valid(context, &string, options)?.then(|| Value::String(string.clone()))
+            regexp::valid(context, string, options)?.then(|| Value::String(string.clone()))
         }
         SANITIZE_ENCODED => Some(Value::from(sanitize::encoded(bytes, flags))),
         SANITIZE_SPECIAL_CHARS => Some(Value::from(sanitize::special(bytes, flags))),
@@ -85,19 +147,8 @@ pub async fn leaf(context: &mut dyn Context, value: Value, options: &Options) ->
                 "FILTER_SANITIZE_STRING is not supported by Phera: deprecated since PHP 8.1",
             ));
         }
-        _ => Some(sanitize::raw(&string, flags)),
-    };
-    if result.is_none() && options.failure == Failure::Throw {
-        let name = FILTERS
-            .iter()
-            .find_map(|&(name, id)| (id == options.id).then_some(name))
-            .unwrap_or("unsafe_raw");
-        return Err(exceptions::rejected(name, bytes));
-    }
-    Ok(or_default(
-        result.unwrap_or_else(|| options.failure.value()),
-        options,
-    ))
+        _ => Some(sanitize::raw(string, flags)),
+    })
 }
 
 fn or_default(value: Value, options: &Options) -> Value {

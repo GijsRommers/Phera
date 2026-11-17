@@ -11,6 +11,7 @@ pub mod inputs;
 
 mod byte_cases;
 mod option_cases;
+mod tree_cases;
 
 const HARNESS: &str = r#"<?php
 error_reporting(-1);
