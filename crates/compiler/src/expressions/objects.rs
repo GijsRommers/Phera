@@ -46,6 +46,9 @@ impl Compiler<'_> {
                 class: ast::NewTarget::Class(class),
                 arguments,
             } => {
+                if matches!(arguments, ast::Arguments::FirstClassCallable) {
+                    return Err(self.error("Cannot create Closure for new expression", line));
+                }
                 if matches!(class.kind, ast::ExpressionKind::Name(_)) {
                     let class = self.object_class_name(class, line)?;
                     self.emit(Instruction::New { class }, line);
@@ -62,7 +65,6 @@ impl Compiler<'_> {
                 nullsafe: false,
             } => {
                 let receiver = self.compile_expression(target)?;
-                self.reject_method_callable(arguments, line)?;
                 match name {
                     ast::MemberName::Identifier(name) => self.emit(
                         Instruction::MethodCall {
@@ -95,7 +97,6 @@ impl Compiler<'_> {
                 name,
                 arguments,
             } => {
-                self.reject_method_callable(arguments, line)?;
                 let binding = if matches!(&class.kind, ast::ExpressionKind::Name(name)
                     if matches!(name.text.to_ascii_lowercase().as_str(), "self" | "static" | "parent"))
                 {
@@ -165,18 +166,6 @@ impl Compiler<'_> {
             }
             _ => Err(self.error("Object expression not supported yet", line)),
         }
-    }
-
-    /// Method closures need a bound callable value, which is not represented yet.
-    fn reject_method_callable(
-        &self,
-        arguments: &ast::Arguments,
-        line: usize,
-    ) -> Result<(), CompileError> {
-        if matches!(arguments, ast::Arguments::FirstClassCallable) {
-            return Err(self.error("First-class method callables not supported yet", line));
-        }
-        Ok(())
     }
 
     /// Class targets may be literal identifiers, objects, or evaluated class-name strings.

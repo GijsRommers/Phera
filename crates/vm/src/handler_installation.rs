@@ -26,20 +26,7 @@ impl Vm {
         })?;
         if !callable.is_null() {
             self.resolve_callable(callable).map_err(|error| {
-                let detail = match (callable, error) {
-                    (Value::Array(_), NativeError::Throw { message, .. })
-                        if message.starts_with("Class ") =>
-                    {
-                        format!("class {}", &message[6..])
-                    }
-                    _ => format!(
-                        "function \"{}\" not found or invalid function name",
-                        scalar_text(callable)
-                    ),
-                };
-                NativeError::type_error(format!(
-                    "{name}(): Argument #1 ($callback) must be a valid callback or null, {detail}"
-                ))
+                self.invalid_callback(name, 1, "callback", callable, error, true)
             })?;
         }
         if matches!(function, HandlerFunction::SetException) {
@@ -72,11 +59,4 @@ impl Vm {
         });
         Ok(result)
     }
-}
-
-/// Callback validation messages do not invoke user conversion hooks.
-fn scalar_text(value: &Value) -> String {
-    phera_value::to_php_string(value, &mut phera_value::NoDiagnostics)
-        .map(|value| value.to_string_lossy())
-        .unwrap_or_default()
 }

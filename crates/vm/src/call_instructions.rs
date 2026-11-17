@@ -14,7 +14,8 @@ impl Vm {
             .current_mut()
             .and_then(|frame| frame.calls.pop())
             .ok_or_else(|| internal_error!("callable"))?;
-        self.set(destination, Value::from(call.callee.name.as_ref()));
+        let object = self.closure_from_callee(call.callee)?;
+        self.set(destination, Value::Object(object));
         Ok(())
     }
 

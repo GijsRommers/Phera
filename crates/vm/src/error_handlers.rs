@@ -81,6 +81,7 @@ impl Vm {
         &mut self,
         function: HandlerFunction,
         mut arguments: Vec<Value>,
+        origin: crate::callback_binding::ArgumentOrigin,
     ) -> NativeResult {
         let signature = function.signature();
         let tracking = self.error_handlers.error.is_some() && !self.error_handlers.active;
@@ -94,12 +95,14 @@ impl Vm {
         } else {
             None
         };
-        let prepared = phera_extension_api::prepare_call(
-            signature.name,
-            signature.parameters,
-            &mut arguments,
-            self,
-        );
+        let prepared = self.with_argument_origin(origin, |vm| {
+            phera_extension_api::prepare_call(
+                signature.name,
+                signature.parameters,
+                &mut arguments,
+                vm,
+            )
+        });
         if tracking {
             self.error_handlers.native_site = previous;
         }

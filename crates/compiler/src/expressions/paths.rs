@@ -14,6 +14,14 @@ impl Compiler<'_> {
                 self.lines.line(expression.span.start),
             ));
         }
+        if matches!(&expression.kind, ast::ExpressionKind::Variable(ast::Variable::Named(name))
+            if name == "this")
+        {
+            return Err(self.error(
+                "Cannot re-assign $this",
+                self.lines.line(expression.span.start),
+            ));
+        }
         match expression.kind {
             ast::ExpressionKind::Call { .. } => {
                 return Err(self.error(
@@ -48,9 +56,6 @@ impl Compiler<'_> {
         }
         let (base, scope) = match &node.kind {
             ast::ExpressionKind::Variable(ast::Variable::Named(name)) if name == "this" => {
-                if postfix.is_empty() {
-                    return Err(self.error("Cannot re-assign $this", line));
-                }
                 (self.allocate_register()?, PlaceScope::This)
             }
 

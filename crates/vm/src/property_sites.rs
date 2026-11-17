@@ -24,16 +24,16 @@ pub(crate) struct PropertyEntry {
 }
 
 impl Vm {
-    /// Resolve one literal property without converting its name into a PHP string.
+    /// Share immutable entries so cache hits avoid copying class, scope and property-key owners.
     fn property_entry(
         &mut self,
         object: &Object,
         name: NameId,
-    ) -> Result<PropertyEntry, NativeError> {
+    ) -> Result<Rc<PropertyEntry>, NativeError> {
         let frame = self
             .current()
             .ok_or_else(|| internal_error!("property site"))?;
-        let scope = frame.method.as_ref().map(|context| context.scope.clone());
+        let scope = frame.method.as_ref().map(|context| &context.scope);
         if let Some(slot) = frame.site_cache()
             && let crate::unit_caches::CachedSite::Property(entry) = &*slot.borrow()
             && Rc::ptr_eq(&entry.class, &object.class)
@@ -43,8 +43,9 @@ impl Vm {
                 _ => false,
             }
         {
-            return Ok((**entry).clone());
+            return Ok(entry.clone());
         }
+        let scope = scope.cloned();
         let unit = frame.unit.clone();
         let name = unit
             .names
@@ -74,15 +75,15 @@ impl Vm {
                 _ => PropertyWrite::General,
             }
         });
-        let entry = PropertyEntry {
+        let entry = Rc::new(PropertyEntry {
             class: object.class.clone(),
             scope,
             key,
             write_kind,
             slot,
-        };
+        });
         if let Some(slot) = self.current().and_then(|frame| frame.site_cache()) {
-            *slot.borrow_mut() = crate::unit_caches::CachedSite::Property(Box::new(entry.clone()));
+            *slot.borrow_mut() = crate::unit_caches::CachedSite::Property(entry.clone());
         }
         Ok(entry)
     }
@@ -152,7 +153,7 @@ impl Vm {
         let Some(new) = old.checked_add(delta) else {
             return Ok(None);
         };
-        crate::property_storage::write_at(&object, entry.key, entry.slot, Value::Int(new));
+        crate::property_storage::write_at(&object, entry.key.clone(), entry.slot, Value::Int(new));
         Ok(Some(Value::Int(
             if matches!(mode, IncDec::PostIncrement | IncDec::PostDecrement) {
                 old
@@ -200,7 +201,7 @@ impl Vm {
         {
             return Ok(false);
         }
-        crate::property_storage::write_at(&object, entry.key, entry.slot, value.clone());
+        crate::property_storage::write_at(&object, entry.key.clone(), entry.slot, value.clone());
         Ok(true)
     }
 

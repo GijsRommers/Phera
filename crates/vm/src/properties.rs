@@ -83,7 +83,8 @@ impl Vm {
             .find(|property| property.name == name)
             .ok_or_else(|| {
                 NativeError::error(format!(
-                    "Access to undeclared static property {class_name}::${name}"
+                    "Access to undeclared static property {}::${name}",
+                    class.name
                 ))
             })?;
         let scope = self

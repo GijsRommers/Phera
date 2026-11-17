@@ -127,6 +127,7 @@ impl Vm {
                     .unwrap_or_default();
                 Ok(Value::Bool(class.is_some_and(|class| {
                     class.methods.contains_key(&method.to_ascii_lowercase())
+                        || class.name == "Closure" && method.eq_ignore_ascii_case("__invoke")
                 })))
             }
             Function::IsA | Function::IsSubclassOf => {
@@ -258,6 +259,12 @@ impl Vm {
         }
         let declaration = match &method.body {
             crate::classes::MethodBody::User(reference) => reference.index,
+            crate::classes::MethodBody::Closure(operation) => {
+                crate::closure_methods::ClosureMethod::entries()
+                    .iter()
+                    .position(|(entry, _)| entry == operation)
+                    .unwrap_or(0)
+            }
             crate::classes::MethodBody::Native(_) => self
                 .registry
                 .classes()

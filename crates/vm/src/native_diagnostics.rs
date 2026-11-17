@@ -13,7 +13,11 @@ impl Vm {
         parameters: &[Param],
         arguments: &mut [Value],
     ) -> Result<(), NativeError> {
-        if self.error_handlers.error.is_none() || self.error_handlers.active {
+        let callbacks = parameters
+            .iter()
+            .any(|parameter| parameter.ty == phera_extension_api::ParamType::Callable);
+        let traced = self.error_handlers.error.is_some() && !self.error_handlers.active;
+        if !callbacks && !traced {
             return prepare_call(name, parameters, arguments, self);
         }
         let required = parameters
@@ -27,7 +31,9 @@ impl Vm {
             return prepare_call(name, parameters, arguments, self);
         }
         for index in 0..arguments.len() {
-            self.error_handlers.native_site = Some(NativeTrace::new(name, arguments));
+            if traced {
+                self.error_handlers.native_site = Some(NativeTrace::new(name, arguments));
+            }
             let parameter_end = (index + 1).min(parameters.len());
             prepare_call(
                 name,
@@ -35,6 +41,25 @@ impl Vm {
                 &mut arguments[..=index],
                 self,
             )?;
+            if let Some(parameter) = parameters
+                .get(index)
+                .filter(|parameter| parameter.ty == phera_extension_api::ParamType::Callable)
+            {
+                let value = &arguments[index];
+                if parameter.nullable && value.is_null() {
+                    continue;
+                }
+                self.resolve_callable(value).map_err(|error| {
+                    self.invalid_callback(
+                        name,
+                        index + 1,
+                        parameter.name,
+                        value,
+                        error,
+                        parameter.nullable,
+                    )
+                })?;
+            }
         }
         Ok(())
     }

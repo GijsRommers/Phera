@@ -9,6 +9,8 @@ use phera_value::{ArrayKey, ClassHandle, Object, Value};
 
 /// A linked class is immutable; its parent keeps inherited metadata alive.
 pub(crate) struct Class {
+    /// Only user class scopes may be assigned freely by Closure::bind.
+    pub(crate) origin: ClassOrigin,
     /// The owning Rc can be recovered from an object's borrowed ClassHandle without a name lookup.
     pub(crate) identity: std::rc::Weak<Class>,
     /// Only compiled declaration names enter this cache, not arbitrary is_a inputs.
@@ -72,8 +74,17 @@ pub(crate) struct Method {
     pub(crate) body: MethodBody,
 }
 
+/// Native class scopes cannot be assigned to a lexical closure.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ClassOrigin {
+    User,
+    Native,
+    Closure,
+}
+
 /// Native and user methods share argument sends but execute through different handlers.
 pub(crate) enum MethodBody {
+    Closure(crate::closure_methods::ClosureMethod),
     User(crate::function_table::FunctionRef),
     Native(MethodEntry),
 }
@@ -243,6 +254,15 @@ impl Method {
                     .map(|parameter| ParameterSpec {
                         name: reference.unit.names[parameter.name.index()].clone(),
                         by_reference: parameter.by_reference,
+                        variadic: parameter.variadic,
+                    })
+                    .collect(),
+                MethodBody::Closure(operation) => operation
+                    .parameters()
+                    .iter()
+                    .map(|parameter| ParameterSpec {
+                        name: parameter.name.into(),
+                        by_reference: parameter.by_ref,
                         variadic: parameter.variadic,
                     })
                     .collect(),

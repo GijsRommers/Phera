@@ -3,6 +3,8 @@
 /// VM services that need access to the caller scope or request state.
 #[derive(Clone, Copy)]
 pub(crate) enum Intrinsic {
+    /// Callback mapping needs the request callable resolver.
+    ArrayMap,
     /// Request-level PHP handlers use VM callable resolution.
     Handler(crate::error_handlers::HandlerFunction),
     /// Path basename is needed to inspect portable Throwable locations.
@@ -66,6 +68,7 @@ impl Intrinsic {
             "trigger_error" | "user_error" => {
                 Self::Handler(crate::error_handlers::HandlerFunction::TriggerError)
             }
+            "array_map" => Self::ArrayMap,
             "basename" => Self::Basename,
             "get_object_vars" => Self::GetObjectVars,
             "get_class_vars" => Self::GetClassVars,
@@ -103,6 +106,10 @@ impl Intrinsic {
             Self::Handler(HandlerFunction::TriggerError) => &["message", "error_level"],
             Self::ErrorReporting => &["error_level"],
             Self::FuncGetArg => &["position"],
+            Self::IsCallable => &["value", "syntax_only", "callable_name"],
+            Self::CallUserFunc => &["callback", "args"],
+            Self::CallUserFuncArray => &["callback", "args"],
+            Self::ArrayMap => &["callback", "array", "arrays"],
             Self::Basename => &["path", "suffix"],
             _ => &[],
         }

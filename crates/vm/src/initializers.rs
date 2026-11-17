@@ -24,6 +24,7 @@ impl Vm {
         let function = &reference.unit.functions[reference.index];
         let mut slots = vec![None; usize::from(function.registers)];
         let mut position = 0;
+        let mut prepared = None;
         let mut diagnostics = phera_value::CollectDiagnostics::default();
         while let Some(instruction) = function.instructions.get(position).copied() {
             position += 1;
@@ -35,6 +36,16 @@ impl Vm {
             ) == crate::fast::ScalarStep::Complete
             {
                 continue;
+            }
+            match self.initializer_callable(instruction, reference, scope, &mut prepared, &slots)? {
+                crate::closure_initializers::InitializerCallable::Prepared => continue,
+                crate::closure_initializers::InitializerCallable::Value(destination, value) => {
+                    if let Some(slot) = slots.get_mut(destination.index()) {
+                        *slot = Some(value);
+                    }
+                    continue;
+                }
+                crate::closure_initializers::InitializerCallable::Unrelated => {}
             }
             let (destination, value) = match instruction {
                 Instruction::LoadConst { dst, constant } => (

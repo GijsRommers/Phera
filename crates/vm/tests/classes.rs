@@ -31,6 +31,21 @@ fn later_milestones_remain_compile_errors() {
         "<?php class Example {public private(set) int $value;}",
         "<?php #[Other] class Example {}",
     ] {
+        if matches!(
+            source,
+            "<?php $callback = function () {};"
+                | "<?php $callback = fn () => 1;"
+                | "<?php class Example {static function method(){}} Example::method(...);"
+                | "<?php class Example {function method(){}} (new Example)->method(...);"
+        ) {
+            let unit = phera_compiler::compile(source, "supported.php").unwrap();
+            assert!(unit.main.instructions.iter().any(|instruction| matches!(
+                instruction,
+                phera_bytecode::Instruction::MakeClosure { .. }
+                    | phera_bytecode::Instruction::MakeCallable { .. }
+            )));
+            continue;
+        }
         let error = phera_compiler::compile(source, "unsupported.php").unwrap_err();
         assert!(
             error.message.contains("not supported yet"),

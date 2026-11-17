@@ -40,6 +40,7 @@ pub(crate) fn run(
                 exit: BatchExit::Invalid,
             };
         };
+        let previous_ip = ip;
         ip += 1;
         executed += 1;
         // The index arm mirrors the general interpreter's verified integer
@@ -55,10 +56,9 @@ pub(crate) fn run(
                 exit: BatchExit::Instruction(instruction),
             };
         }
-        if matches!(
-            instruction,
-            Instruction::Jump { .. } | Instruction::JumpIf { .. } | Instruction::JumpIfNot { .. }
-        ) {
+        // Only backward edges contribute to the fairness budget. Comparing IPs
+        // also covers fused conditional branches without another opcode match.
+        if ip <= previous_ip {
             work += 1;
             if work >= 4096 {
                 return ScalarBatch {

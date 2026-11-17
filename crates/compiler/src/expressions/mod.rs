@@ -21,6 +21,15 @@ impl Compiler<'_> {
             return self.literal(condition, line);
         }
         match &expression.kind {
+            ExpressionKind::Yield { .. } | ExpressionKind::YieldFrom(_) => {
+                Err(self.error("Generators not supported yet", line))
+            }
+            ExpressionKind::ArrowFunction(arrow) => {
+                self.compile_arrow(arrow, expression.span, line)
+            }
+            ExpressionKind::Closure(closure) => {
+                self.compile_closure(closure, expression.span, line)
+            }
             ExpressionKind::Throw(operand) => {
                 let source = self.compile_expression(operand)?;
                 self.emit(crate::ir::Instruction::Throw { source }, line);
@@ -128,6 +137,13 @@ impl Compiler<'_> {
                         self.function.name.as_bytes().to_vec()
                     })
                 }
+                ast::MagicConstant::Class => Constant::Bytes(
+                    self.class_scope
+                        .as_deref()
+                        .unwrap_or("")
+                        .as_bytes()
+                        .to_vec(),
+                ),
                 ast::MagicConstant::Namespace => {
                     Constant::Bytes(self.namespace.as_bytes().to_vec())
                 }
@@ -150,3 +166,7 @@ pub(crate) mod paths;
 pub(crate) mod places;
 pub(crate) mod spine;
 pub(crate) mod values;
+
+pub(crate) mod closures;
+
+pub(crate) mod arrows;

@@ -6,3 +6,4 @@ Preserve the baseline binary before changing code. Record a starting reference s
 
 The additional cases exercise five million mixed method iterations, typed and array property mutation, interface-typed hierarchy calls, and construction plus loop-based merge sorting of 200,000 objects. They intentionally include compilation and process startup in timings.
 Run `bench-exceptions.php` against Phera and `php -n` for one million calls, a throw every tenth call, and `finally`; its CPU target is at most 6 times PHP.
+Run `bench-closures.php` for captures, arrow callbacks and method factories; target: 6x PHP CPU.

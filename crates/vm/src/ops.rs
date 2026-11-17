@@ -3,8 +3,8 @@
 use phera_bytecode::{BinaryOp as Binary, UnaryOp as Unary};
 use phera_value::{
     Diagnostics, OpError, Value, add, bitwise_and, bitwise_not, bitwise_or, bitwise_xor,
-    compare_op, concat, div, less, less_equal, loose_equals, modulo, mul, negate, pow, shift_left,
-    shift_right, strict_equals, sub, to_bool, unary_plus,
+    compare_op, concat, div, less, less_equal, modulo, mul, negate, pow, shift_left, shift_right,
+    strict_equals, sub, to_bool, unary_plus,
 };
 
 /// Delegate coercion and warnings to the value layer for each PHP binary operator.
@@ -32,9 +32,9 @@ pub fn binary(
         Binary::BitwiseXor => bitwise_xor(left, right, diagnostics),
         Binary::ShiftLeft => shift_left(left, right, diagnostics),
         Binary::ShiftRight => shift_right(left, right, diagnostics),
-        Binary::Equal => loose_equals(left, right, diagnostics),
+        Binary::Equal => crate::closure_equality::equal(left, right, diagnostics),
         Binary::Identical => strict_equals(left, right, diagnostics),
-        Binary::NotEqual => Ok(Value::Bool(!to_bool(&loose_equals(
+        Binary::NotEqual => Ok(Value::Bool(!to_bool(&crate::closure_equality::equal(
             left,
             right,
             diagnostics,

@@ -2,23 +2,45 @@
 
 use std::rc::Rc;
 
-use phera_extension_api::{Context, NativeError, NativeResult};
+use phera_extension_api::{NativeError, NativeResult};
 use phera_value::{Value, to_php_string};
 
-use crate::{Vm, intrinsics::Intrinsic};
+use crate::{Vm, callback_binding::ArgumentOrigin, intrinsics::Intrinsic};
 
 impl Vm {
-    /// Execute a resolved intrinsic without matching its function name again.
-    pub(crate) async fn intrinsic(
+    /// Named arguments may skip syntax_only; a missing default differs from explicit null.
+    pub(crate) fn intrinsic_arguments(
+        intrinsic: Intrinsic,
+        mut arguments: Vec<Option<Value>>,
+    ) -> Vec<Value> {
+        if matches!(intrinsic, Intrinsic::IsCallable)
+            && let Some(value) = arguments.get_mut(1)
+            && value.is_none()
+        {
+            *value = Some(Value::Bool(false));
+        }
+        arguments
+            .into_iter()
+            .map(Option::unwrap_or_default)
+            .collect()
+    }
+
+    /// Callback entry preserves weak scalar binding without changing the PHP body mode.
+    pub(crate) async fn intrinsic_origin(
         &mut self,
         intrinsic: Intrinsic,
         arguments: Vec<Value>,
+        origin: ArgumentOrigin,
     ) -> NativeResult {
         let argument = arguments.first().cloned().unwrap_or_default();
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         match intrinsic {
+            Intrinsic::ArrayMap => diagnostics.vm.map_arrays(arguments).await,
             Intrinsic::Handler(function) => {
-                diagnostics.vm.handler_intrinsic(function, arguments).await
+                diagnostics
+                    .vm
+                    .handler_intrinsic(function, arguments, origin)
+                    .await
             }
             Intrinsic::Basename => {
                 let path = to_php_string(&argument, &mut diagnostics.buffer)?.to_string_lossy();
@@ -81,17 +103,33 @@ impl Vm {
                             }),
                 ))
             }
-            Intrinsic::IsCallable => Ok(Value::Bool(
-                diagnostics.vm.resolve_callable(&argument).is_ok(),
-            )),
+            Intrinsic::IsCallable => diagnostics
+                .vm
+                .with_argument_origin(origin, |vm| vm.callable_introspection(arguments)),
             Intrinsic::CallUserFunc => {
                 let rest = arguments.iter().skip(1).cloned().collect();
-                return diagnostics.vm.call(&argument, rest).await;
+                let callee = diagnostics
+                    .vm
+                    .resolve_callable(&argument)
+                    .map_err(|error| {
+                        diagnostics.vm.invalid_callback(
+                            "call_user_func",
+                            1,
+                            "callback",
+                            &argument,
+                            error,
+                            false,
+                        )
+                    })?;
+                return diagnostics
+                    .vm
+                    .invoke_callable_origin(callee, rest, origin)
+                    .await;
             }
             Intrinsic::CallUserFuncArray => {
                 diagnostics
                     .vm
-                    .call_user_func_array(argument, arguments)
+                    .call_user_func_array(argument, arguments, origin)
                     .await
             }
             Intrinsic::GetDefinedVars => diagnostics.vm.defined_variables(),
@@ -150,6 +188,7 @@ impl Vm {
         &mut self,
         argument: Value,
         arguments: Vec<Value>,
+        origin: ArgumentOrigin,
     ) -> NativeResult {
         let array = arguments.get(1).cloned().unwrap_or_default();
         let Value::Array(array) = array else {
@@ -157,9 +196,18 @@ impl Vm {
                 "call_user_func_array(): Argument #2 ($args) must be of type array",
             ));
         };
-        return self
-            .call(&argument, array.values().cloned().collect())
-            .await;
+        let callee = self.resolve_callable(&argument).map_err(|error| {
+            self.invalid_callback(
+                "call_user_func_array",
+                1,
+                "callback",
+                &argument,
+                error,
+                false,
+            )
+        })?;
+        self.invoke_array_callback_origin(callee, &array, origin)
+            .await
     }
 }
 

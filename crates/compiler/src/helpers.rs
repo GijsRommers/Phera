@@ -148,3 +148,11 @@ pub(crate) fn default_display(expression: &ast::Expression) -> String {
         _ => "<expression>".into(),
     }
 }
+
+/// PHP allows an alias of $this as an argument or return source; assigning that alias
+/// detaches it instead of replacing the method receiver.
+pub(crate) fn reference_capable(expression: &ast::Expression) -> bool {
+    writable(expression)
+        || matches!(&expression.kind,
+        ast::ExpressionKind::Variable(ast::Variable::Named(name)) if name == "this")
+}

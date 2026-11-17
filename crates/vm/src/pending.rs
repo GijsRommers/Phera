@@ -31,8 +31,10 @@ impl Vm {
                 .ok_or_else(|| internal_error!("invalid symbol"))?;
             let name = if self.exists(&definition.name) {
                 definition.name
+            } else if let Some(fallback) = definition.fallback.filter(|name| self.exists(name)) {
+                fallback
             } else {
-                definition.fallback.unwrap_or(definition.name)
+                definition.written
             };
             let callee = self.resolve_callee(name)?;
             if let Some(frame) = self.current()
@@ -48,71 +50,100 @@ impl Vm {
     /// Resolve a computed callable after publishing its conversion diagnostics.
     pub(crate) fn init_dynamic_call(&mut self, callee: Reg) -> Result<(), NativeError> {
         let value = self.read_local(callee);
-        let callee = self.resolve_callable(&value)?;
-        self.prepare_call(callee)
+        let usage = if self.current().is_some_and(|frame| {
+            matches!(
+                frame.function().instructions.get(frame.ip),
+                Some(phera_bytecode::Instruction::MakeCallable { .. })
+            )
+        }) {
+            crate::callables::CallableUse::FirstClass
+        } else {
+            crate::callables::CallableUse::Direct
+        };
+        let callee = self.resolve_callable_for(&value, usage)?;
+        self.prepare_call(callee)?;
+        if let Value::Object(object) = value
+            && object.class.name() == "Closure"
+            && let Some(call) = self
+                .call_stack
+                .current_mut()
+                .and_then(|frame| frame.calls.last_mut())
+        {
+            call.owner = Some(object);
+        }
+        Ok(())
     }
 
     /// Snapshot the signature and target so argument evaluation cannot change resolution.
     pub(crate) fn resolve_callee(&self, name: String) -> Result<Rc<Callee>, NativeError> {
-        let lower = name.to_ascii_lowercase();
-        let ResolvedSignature { target, parameters } =
-            if let Some(reference) = self.function_table.get(&lower) {
-                let unit = &reference.unit;
-                let index = reference.index;
-                let function = unit
-                    .functions
-                    .get(index)
-                    .ok_or_else(|| internal_error!("function table"))?;
-                let parameters = function
-                    .parameters
+        let lower = name.trim_start_matches('\\').to_ascii_lowercase();
+        let ResolvedSignature {
+            name,
+            target,
+            parameters,
+        } = if let Some(reference) = self.function_table.get(&lower) {
+            let unit = &reference.unit;
+            let index = reference.index;
+            let function = unit
+                .functions
+                .get(index)
+                .ok_or_else(|| internal_error!("function table"))?;
+            let parameters = function
+                .parameters
+                .iter()
+                .map(|parameter| ParameterSpec {
+                    name: unit
+                        .names
+                        .get(parameter.name.index())
+                        .cloned()
+                        .unwrap_or_default(),
+                    by_reference: parameter.by_reference,
+                    variadic: parameter.variadic,
+                })
+                .collect();
+            ResolvedSignature {
+                name: function.name.as_str().into(),
+                target: CallTarget::User(reference.clone()),
+                parameters,
+            }
+        } else if let Some(entry) = self.registry.get_function(name.trim_start_matches('\\')) {
+            ResolvedSignature {
+                name: entry.name.into(),
+                target: CallTarget::Native(*entry),
+                parameters: entry
+                    .params
                     .iter()
                     .map(|parameter| ParameterSpec {
-                        name: unit
-                            .names
-                            .get(parameter.name.index())
-                            .cloned()
-                            .unwrap_or_default(),
-                        by_reference: parameter.by_reference,
+                        name: parameter.name.to_owned(),
+                        by_reference: parameter.by_ref,
                         variadic: parameter.variadic,
                     })
-                    .collect();
-                ResolvedSignature {
-                    target: CallTarget::User(reference.clone()),
-                    parameters,
-                }
-            } else if let Some(entry) = self.registry.get_function(&name) {
-                ResolvedSignature {
-                    target: CallTarget::Native(*entry),
-                    parameters: entry
-                        .params
-                        .iter()
-                        .map(|parameter| ParameterSpec {
-                            name: parameter.name.to_owned(),
-                            by_reference: parameter.by_ref,
-                            variadic: parameter.variadic,
-                        })
-                        .collect(),
-                }
-            } else if let Some(intrinsic) = crate::intrinsics::Intrinsic::resolve(&name) {
-                ResolvedSignature {
-                    target: CallTarget::Intrinsic(intrinsic),
-                    parameters: intrinsic
-                        .parameter_names()
-                        .iter()
-                        .map(|name| ParameterSpec {
-                            name: (*name).to_owned(),
-                            by_reference: false,
-                            variadic: false,
-                        })
-                        .collect(),
-                }
-            } else {
-                return Err(NativeError::error(format!(
-                    "Call to undefined function {name}()"
-                )));
-            };
+                    .collect(),
+            }
+        } else if let Some(intrinsic) = crate::intrinsics::Intrinsic::resolve(&name) {
+            ResolvedSignature {
+                name: lower.into(),
+                target: CallTarget::Intrinsic(intrinsic),
+                parameters: intrinsic
+                    .parameter_names()
+                    .iter()
+                    .map(|name| ParameterSpec {
+                        name: (*name).to_owned(),
+                        by_reference: matches!(intrinsic, crate::intrinsics::Intrinsic::IsCallable)
+                            && *name == "callable_name",
+                        variadic: matches!(intrinsic, crate::intrinsics::Intrinsic::CallUserFunc)
+                            && *name == "args",
+                    })
+                    .collect(),
+            }
+        } else {
+            return Err(NativeError::error(format!(
+                "Call to undefined function {name}()"
+            )));
+        };
         Ok(Rc::new(Callee {
-            name: name.into(),
+            argument_binding: crate::callback_binding::ArgumentBinding::Caller,
+            name,
             parameters: parameters.into(),
             target,
         }))
@@ -126,6 +157,7 @@ impl Vm {
             .current_mut()
             .ok_or_else(|| internal_error!("call without frame"))?;
         frame.calls.push(PendingCall {
+            owner: None,
             callee,
             arguments,
             named: None,
@@ -222,98 +254,6 @@ impl Vm {
             frame.function_id,
             index,
         ))
-    }
-
-    /// Push a PHP heap frame or await native code without recursing for PHP calls.
-    pub(crate) async fn finish_call(&mut self, destination: Reg) -> Result<(), NativeError> {
-        let call = self
-            .call_stack
-            .current_mut()
-            .and_then(|frame| frame.calls.pop())
-            .ok_or_else(|| internal_error!("call not initialized"))?;
-        let mut arguments = call.arguments;
-        let mut named_keys = Vec::new();
-        let mut named_start = 0;
-        if let Some(extra_named) = call.extra_named {
-            named_start = arguments
-                .len()
-                .max(call.callee.parameters.len().saturating_sub(1));
-            arguments.resize_with(named_start, || None);
-            for argument in extra_named.values {
-                named_keys.push(argument.name);
-                arguments.push(Some(argument.value));
-            }
-        }
-        match &call.callee.target {
-            CallTarget::Vacant => return Err(internal_error!("vacant call")),
-            CallTarget::Method { method, context } => {
-                if let Some(value) = self.leaf_method_result(context) {
-                    // Mirrors push_prepared's release of unused extra arguments
-                    // before the body can return into the caller's destination.
-                    arguments.clear();
-                    self.call_stack.recycle_arguments(arguments);
-                    self.set(destination, value);
-                } else {
-                    self.invoke_method(method, context.clone(), destination, arguments)
-                        .await?;
-                    self.name_variadic_arguments(named_start, named_keys)?;
-                }
-            }
-            CallTarget::Constructed(object) => self.set(destination, Value::Object(object.clone())),
-            CallTarget::User(function) => {
-                let result = self.push_prepared(
-                    &function.unit,
-                    function.index,
-                    Some(destination),
-                    arguments,
-                );
-                self.name_variadic_arguments(named_start, named_keys)?;
-                result?;
-                // Symbol-cache callees never need the bound-call recycling path.
-                return Ok(());
-            }
-            CallTarget::Native(entry) => {
-                let had_error_handler = self.error_handlers.error.is_some();
-                let result = self
-                    .native_entry(
-                        *entry,
-                        arguments
-                            .into_iter()
-                            .map(Option::unwrap_or_default)
-                            .collect(),
-                    )
-                    .await?;
-                self.set(destination, result);
-                if !had_error_handler && self.error_handlers.error.is_some() {
-                    return Err(crate::error_handlers::HandlerModeChanged::signal());
-                }
-            }
-            CallTarget::Intrinsic(intrinsic) => {
-                let had_error_handler = self.error_handlers.error.is_some();
-                let result = self
-                    .intrinsic(
-                        *intrinsic,
-                        arguments
-                            .into_iter()
-                            .map(Option::unwrap_or_default)
-                            .collect(),
-                    )
-                    .await?;
-                self.set(destination, result);
-                if matches!(
-                    intrinsic,
-                    crate::intrinsics::Intrinsic::Handler(
-                        crate::error_handlers::HandlerFunction::SetError
-                            | crate::error_handlers::HandlerFunction::RestoreError
-                    )
-                ) || (!had_error_handler && self.error_handlers.error.is_some())
-                {
-                    return Err(crate::error_handlers::HandlerModeChanged::signal());
-                }
-            }
-        }
-        self.call_stack.recycle_bound_callee(call.callee);
-        Ok(())
     }
 
     /// Numeric exit values set status; strings are output before unwinding the request.

@@ -33,6 +33,11 @@ impl Context for Vm {
         let class = self.classes.get(name).ok_or_else(|| {
             phera_extension_api::NativeError::error(format!("Class \"{name}\" not found"))
         })?;
+        if class.origin == crate::classes::class::ClassOrigin::Closure {
+            return Err(phera_extension_api::NativeError::error(
+                "Instantiation of class Closure is not allowed",
+            ));
+        }
         if class.kind == phera_bytecode::ClassKind::Interface {
             return Err(phera_extension_api::NativeError::error(format!(
                 "Cannot instantiate interface {}",
@@ -72,7 +77,8 @@ impl Context for Vm {
     }
 
     fn strict_types(&self) -> bool {
-        self.current().is_some_and(|f| f.function().strict_types)
+        self.argument_origin == crate::callback_binding::ArgumentOrigin::Php
+            && self.current().is_some_and(|f| f.function().strict_types)
     }
 
     /// Native callbacks await the heap interpreter with a separate bound on Rust nesting.
@@ -95,57 +101,62 @@ impl Vm {
         callee: std::rc::Rc<crate::call_state::Callee>,
         arguments: Vec<Value>,
     ) -> LocalFuture<'_, NativeResult> {
+        self.invoke_prepared_callable(callee, arguments.into_iter().map(Some).collect())
+    }
+
+    pub(crate) fn invoke_prepared_callable(
+        &mut self,
+        callee: std::rc::Rc<crate::call_state::Callee>,
+        arguments: Vec<Option<Value>>,
+    ) -> LocalFuture<'_, NativeResult> {
+        self.invoke_named_callable(callee, arguments, 0, Vec::new())
+    }
+
+    pub(crate) fn invoke_named_callable(
+        &mut self,
+        callee: std::rc::Rc<crate::call_state::Callee>,
+        arguments: Vec<Option<Value>>,
+        named_start: usize,
+        named_keys: Vec<String>,
+    ) -> LocalFuture<'_, NativeResult> {
+        self.invoke_named_callable_origin(
+            callee,
+            arguments,
+            named_start,
+            named_keys,
+            crate::callback_binding::ArgumentOrigin::Callback,
+        )
+    }
+
+    pub(crate) fn invoke_callable_origin(
+        &mut self,
+        callee: std::rc::Rc<crate::call_state::Callee>,
+        arguments: Vec<Value>,
+        origin: crate::callback_binding::ArgumentOrigin,
+    ) -> LocalFuture<'_, NativeResult> {
+        self.invoke_named_callable_origin(
+            callee,
+            arguments.into_iter().map(Some).collect(),
+            0,
+            Vec::new(),
+            origin,
+        )
+    }
+
+    pub(crate) fn invoke_named_callable_origin(
+        &mut self,
+        callee: std::rc::Rc<crate::call_state::Callee>,
+        arguments: Vec<Option<Value>>,
+        named_start: usize,
+        named_keys: Vec<String>,
+        origin: crate::callback_binding::ArgumentOrigin,
+    ) -> LocalFuture<'_, NativeResult> {
+        let origin = callee.argument_binding.origin(origin);
         Box::pin(async move {
             self.call_stack.enter_callback()?;
-            let result = async {
-                let stop = self.call_stack.depth();
-                match &callee.target {
-                    crate::call_state::CallTarget::User(function) => {
-                        self.push_call(function.unit.clone(), function.index, None, arguments)?;
-                        self.interpret(stop).await
-                    }
-                    crate::call_state::CallTarget::Method { method, context } => {
-                        match &method.body {
-                            crate::classes::MethodBody::User(function) => {
-                                self.push_call(
-                                    function.unit.clone(),
-                                    function.index,
-                                    None,
-                                    arguments,
-                                )?;
-                                if let Some(frame) = self.call_stack.current_mut() {
-                                    frame.method = Some(Box::new(context.clone()));
-                                }
-                                self.interpret(stop).await
-                            }
-                            crate::classes::MethodBody::Native(entry) => {
-                                let mut arguments = arguments;
-                                phera_extension_api::prepare_call(
-                                    &callee.name,
-                                    entry.params,
-                                    &mut arguments,
-                                    self,
-                                )?;
-                                match entry.handler {
-                                    phera_extension_api::NativeMethod::Sync(handler) => {
-                                        handler(self, context.receiver.as_ref(), &arguments)
-                                    }
-                                    phera_extension_api::NativeMethod::Async(handler) => {
-                                        handler(self, context.receiver.clone(), arguments).await
-                                    }
-                                    phera_extension_api::NativeMethod::Abstract => {
-                                        Err(phera_extension_api::NativeError::error(
-                                            "Cannot call abstract method",
-                                        ))
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    _ => Box::pin(self.native(&callee.name, arguments)).await,
-                }
-            }
-            .await;
+            let result = self
+                .execute_callback(callee, arguments, named_start, named_keys, origin)
+                .await;
             let result = result.map_err(|error| self.materialize_error(error));
             self.call_stack.leave_callback();
             result

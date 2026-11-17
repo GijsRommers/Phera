@@ -499,6 +499,22 @@ pub enum Instruction {
         path: PathId,
         mode: FetchMode,
     },
+    // ----- Closures -------------------------------------------------------
+    /// Read $this without raising an error, for isset($this) and empty($this).
+    ThisOrNull {
+        dst: Reg,
+    },
+    /// Retain one lexical variable before MakeClosure; references share its local cell.
+    Capture {
+        src: Reg,
+        kind: CaptureKind,
+    },
+    /// Allocate an object with captures in the registers following its parameters.
+    MakeClosure {
+        dst: Reg,
+        function: FunctionId,
+        binding: ClosureBinding,
+    },
 }
 
 // The interpreter copies one instruction per step. Keep them register-sized;
@@ -609,4 +625,19 @@ pub enum FinallyEntry {
     Break,
     /// A loop continuation waits at the continuation.
     Continue,
+}
+
+/// Explicit uses warn for undefined values; arrows capture them silently.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaptureKind {
+    Value,
+    Reference,
+    Quiet,
+}
+
+/// Static closures retain lexical class scope but never inherit a receiver.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClosureBinding {
+    Bound,
+    Static,
 }

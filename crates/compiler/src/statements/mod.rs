@@ -93,6 +93,7 @@ pub(crate) mod bindings;
 pub(crate) mod classes;
 pub(crate) mod control;
 pub(crate) mod declarations;
+mod function_parameters;
 pub(crate) mod functions;
 pub(crate) mod loops;
 pub(crate) mod switching;

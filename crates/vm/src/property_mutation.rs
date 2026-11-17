@@ -147,7 +147,9 @@ impl Vm {
                     } else if !crate::property_storage::read(object, key).is_some()
                         && mutation != Mutation::Unset
                     {
-                        if class.is_readonly {
+                        if class.is_readonly
+                            || class.origin == crate::classes::class::ClassOrigin::Closure
+                        {
                             return Err(NativeError::error(format!(
                                 "Cannot create dynamic property {}::${name}",
                                 class.name

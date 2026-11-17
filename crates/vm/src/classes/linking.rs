@@ -303,6 +303,7 @@ impl Vm {
         self.classes.entries.insert(
             name.to_ascii_lowercase(),
             Rc::new_cyclic(|identity| Class {
+                origin: super::class::ClassOrigin::User,
                 identity: identity.clone(),
                 declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
                 ancestors: super::class::ancestor_names(&parent, &interfaces),

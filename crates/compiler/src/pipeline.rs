@@ -37,6 +37,7 @@ pub(super) fn compile_on_stack(
     compiler.emit(Instruction::Return(register), 1);
     let unit = CompiledUnit {
         main: compiler.finish(),
+        declaration_warnings: compiler.declaration_warnings,
         functions: compiler.functions,
         hoisted: compiler.hoisted,
         classes: compiler.classes,

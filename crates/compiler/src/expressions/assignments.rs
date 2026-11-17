@@ -77,7 +77,7 @@ impl Compiler<'_> {
             self.emit(Instruction::Rebind { place, source: src }, line);
             return Ok(src);
         }
-        let source = self.place(value)?;
+        let source = self.readable_place(value)?;
         self.emit(
             Instruction::Bind {
                 place: place.clone(),

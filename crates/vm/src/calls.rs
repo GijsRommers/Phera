@@ -41,45 +41,43 @@ impl Vm {
             || Intrinsic::resolve(name).is_some()
     }
 
-    /// Convert callback values to the same optional-argument representation as PHP calls.
-    pub(crate) fn push_call(
-        &mut self,
-        unit: Arc<CompiledUnit>,
-        function_id: usize,
-        destination: Option<Reg>,
-        arguments: Vec<Value>,
-    ) -> Result<(), NativeError> {
-        self.push_prepared(
-            &unit,
-            function_id,
-            destination,
-            arguments.into_iter().map(Some).collect(),
-        )
-    }
-
     /// Bound PHP recursion by heap frame count, then preserve observable arguments.
     pub(crate) fn push_prepared(
         &mut self,
         unit: &Arc<CompiledUnit>,
         function_id: usize,
         destination: Option<Reg>,
-        mut arguments: Vec<Option<Value>>,
+        arguments: Vec<Option<Value>>,
     ) -> Result<(), NativeError> {
+        self.check_frame_limit()?;
+        let frame = self.make_frame(unit, Some(function_id), destination);
+        self.push_frame_arguments(frame, arguments)
+    }
+
+    pub(crate) fn check_frame_limit(&self) -> Result<(), NativeError> {
         if self.call_stack.depth() >= self.frame_limit {
             return Err(NativeError::error(format!(
                 "Maximum call stack depth of {} exceeded",
                 self.frame_limit
             )));
         }
-        let mut frame = self.make_frame(unit, Some(function_id), destination);
+        Ok(())
+    }
+
+    /// The lexical context is installed before checks of relative parameter declarations.
+    #[inline]
+    pub(crate) fn push_frame_arguments(
+        &mut self,
+        mut frame: Box<crate::frame::Frame>,
+        mut arguments: Vec<Option<Value>>,
+    ) -> Result<(), NativeError> {
+        let function_id = frame
+            .function_id
+            .ok_or_else(|| internal_error!("call function"))?;
         frame.supplied_arguments = arguments.len();
         if frame.function().observes_arguments
             || (arguments.len() > frame.function().parameters.len()
-                && !frame
-                    .function()
-                    .parameters
-                    .last()
-                    .is_some_and(|parameter| parameter.variadic))
+                && frame.function().argument_layout == phera_bytecode::ArgumentLayout::Fixed)
         {
             frame.arguments = arguments
                 .iter()
@@ -134,7 +132,9 @@ impl Vm {
         }
         let crate::diagnostics::SourceLocation { file, line } = self.location();
         let mut resolved_type = declaration_type.clone();
-        if let Some((scope, _)) = function.split_once("::") {
+        if let Some((scope, _)) = function.split_once("::")
+            && !function.starts_with("{closure:")
+        {
             let parent = self
                 .classes
                 .get(scope)
@@ -162,16 +162,27 @@ impl Vm {
                 })
                 .collect();
         }
-        let result = types::coerce(value.deref().clone(),&resolved_type,self.strict_types().into(),self)
-            .map_err(|error| match error {
-                NativeError::Throw { class, message, .. } => {
-                    let number = index+1;
-                    let label = if parameter.is_empty() { String::new() } else { format!(" (${parameter})") };
-                    let message = format!("{function}(): Argument #{number}{label} {message}, called in {file} on line {line}");
-                    NativeError::throw(class,message)
-                },
-                other => other,
-            })?;
+        let location_suffix = self.argument_origin.location_suffix(&file, line);
+        let result = types::coerce(
+            value.deref().clone(),
+            &resolved_type,
+            self.strict_types().into(),
+            self,
+        )
+        .map_err(|error| match error {
+            NativeError::Throw { class, message, .. } => {
+                let number = index + 1;
+                let label = if parameter.is_empty() {
+                    String::new()
+                } else {
+                    format!(" (${parameter})")
+                };
+                let message =
+                    format!("{function}(): Argument #{number}{label} {message}{location_suffix}");
+                NativeError::throw(class, message)
+            }
+            other => other,
+        })?;
         if let Value::Reference(reference) = value {
             *reference
                 .try_borrow_mut()
@@ -182,28 +193,17 @@ impl Vm {
         }
     }
 
-    /// Resolve VM intrinsics before looking up extension handlers.
-    pub(crate) async fn native(&mut self, name: &str, arguments: Vec<Value>) -> NativeResult {
-        if let Some(intrinsic) = Intrinsic::resolve(name) {
-            return self.intrinsic(intrinsic, arguments).await;
-        }
-        let entry =
-            self.registry.get_function(name).copied().ok_or_else(|| {
-                NativeError::error(format!("Call to undefined function {name}()"))
-            })?;
-        self.native_entry(entry, arguments).await
-    }
-
-    /// Validate native arguments before executing or awaiting the extension handler.
-    pub(crate) async fn native_entry(
+    /// Validate native arguments using the calling syntax or internal callback rules.
+    pub(crate) async fn native_entry_origin(
         &mut self,
         entry: phera_extension_api::FunctionEntry,
         arguments: Vec<Value>,
+        origin: crate::callback_binding::ArgumentOrigin,
     ) -> NativeResult {
         if self.error_handlers.error.is_some() && !self.error_handlers.active {
-            self.native_entry_traced(entry, arguments).await
+            self.native_entry_traced(entry, arguments, origin).await
         } else {
-            self.native_entry_body(entry, arguments).await
+            self.native_entry_body(entry, arguments, origin).await
         }
     }
 
@@ -212,6 +212,7 @@ impl Vm {
         &mut self,
         entry: phera_extension_api::FunctionEntry,
         arguments: Vec<Value>,
+        origin: crate::callback_binding::ArgumentOrigin,
     ) -> phera_extension_api::LocalFuture<'_, NativeResult> {
         Box::pin(async move {
             let previous =
@@ -220,7 +221,7 @@ impl Vm {
                     .replace(crate::error_traces::NativeTrace::new(
                         entry.name, &arguments,
                     ));
-            let result = self.native_entry_body(entry, arguments).await;
+            let result = self.native_entry_body(entry, arguments, origin).await;
             self.error_handlers.native_site = previous;
             result
         })
@@ -231,8 +232,12 @@ impl Vm {
         &mut self,
         entry: phera_extension_api::FunctionEntry,
         mut arguments: Vec<Value>,
+        origin: crate::callback_binding::ArgumentOrigin,
     ) -> NativeResult {
-        if let Err(error) = self.prepare_call_with_trace(entry.name, entry.params, &mut arguments) {
+        let previous = std::mem::replace(&mut self.argument_origin, origin);
+        let prepared = self.prepare_call_with_trace(entry.name, entry.params, &mut arguments);
+        self.argument_origin = previous;
+        if let Err(error) = prepared {
             if !matches!(
                 entry.name,
                 "strlen" | "count" | "sizeof" | "array_key_exists"

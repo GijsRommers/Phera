@@ -4,12 +4,17 @@ use phera_value::Value;
 
 use crate::frame::Frame;
 
+/// Stable allocations make a push/pop move one pointer instead of copying every frame buffer.
+struct FrameOwner {
+    frame: Box<Frame>,
+}
+
 /// Owns the request state for call stack.
 pub(crate) struct CallStack {
     /// Request-owned frames.
-    frames: Vec<Frame>,
+    frames: Vec<FrameOwner>,
     /// Request-owned recycled frames.
-    recycled_frames: Vec<Frame>,
+    recycled_frames: Vec<FrameOwner>,
     /// Request-owned argument buffers.
     argument_buffers: Vec<Vec<Option<Value>>>,
     /// Request-owned callback depth.
@@ -36,28 +41,30 @@ impl CallStack {
 impl CallStack {
     #[inline]
     pub(crate) fn current(&self) -> Option<&Frame> {
-        self.frames.last()
+        self.frames.last().map(|owner| owner.frame.as_ref())
     }
 
     #[inline]
     pub(crate) fn current_mut(&mut self) -> Option<&mut Frame> {
-        self.frames.last_mut()
+        self.frames.last_mut().map(|owner| owner.frame.as_mut())
     }
 
     pub(crate) fn main_mut(&mut self) -> Option<&mut Frame> {
-        self.frames.first_mut()
+        self.frames.first_mut().map(|owner| owner.frame.as_mut())
     }
 
     pub(crate) fn depth(&self) -> usize {
         self.frames.len()
     }
 
-    pub(crate) fn push(&mut self, frame: Frame) {
-        self.frames.push(frame);
+    pub(crate) fn push(&mut self, frame: impl Into<Box<Frame>>) {
+        self.frames.push(FrameOwner {
+            frame: frame.into(),
+        });
     }
 
-    pub(crate) fn pop(&mut self) -> Option<Frame> {
-        self.frames.pop()
+    pub(crate) fn pop(&mut self) -> Option<Box<Frame>> {
+        self.frames.pop().map(|owner| owner.frame)
     }
 
     pub(crate) fn clear(&mut self) {
@@ -65,21 +72,22 @@ impl CallStack {
     }
 
     pub(crate) fn iter(&self) -> impl DoubleEndedIterator<Item = &Frame> + ExactSizeIterator {
-        self.frames.iter()
+        self.frames.iter().map(|owner| owner.frame.as_ref())
     }
 
     /// Recycle allocations without retaining a second active PHP frame.
-    pub(crate) fn recycle(&mut self, mut frame: Frame) {
+    pub(crate) fn recycle(&mut self, mut frame: Box<Frame>) {
         frame.arguments.clear();
+        frame.closure = None;
         if let Some(mut context) = frame.method.take() {
             context.receiver = None;
             self.method_context = Some(context);
         }
-        self.recycled_frames.push(frame);
+        self.recycled_frames.push(FrameOwner { frame });
     }
 
-    pub(crate) fn take_recycled(&mut self) -> Option<Frame> {
-        self.recycled_frames.pop()
+    pub(crate) fn take_recycled(&mut self) -> Option<Box<Frame>> {
+        self.recycled_frames.pop().map(|owner| owner.frame)
     }
 
     pub(crate) fn recycle_arguments(&mut self, arguments: Vec<Option<Value>>) {
@@ -129,7 +137,7 @@ impl CallStack {
         use crate::call_state::CallTarget;
         if !matches!(
             &storage.target,
-            CallTarget::Method { .. } | CallTarget::Constructed(_)
+            CallTarget::Method { .. } | CallTarget::Constructed(_) | CallTarget::Closure(_)
         ) {
             return;
         }
@@ -159,7 +167,7 @@ impl CallStack {
     pub(crate) fn retained_exception_values(&self) -> usize {
         self.recycled_frames
             .iter()
-            .map(|frame| frame.arguments.len() + frame.calls.len())
+            .map(|owner| owner.frame.arguments.len() + owner.frame.calls.len())
             .sum()
     }
 

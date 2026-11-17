@@ -38,6 +38,20 @@ impl Compiler<'_> {
             chain.push(root);
             root = target;
         }
+        if chain.iter().any(|expression| {
+            matches!(
+                &expression.kind,
+                ast::ExpressionKind::MethodCall {
+                    arguments: ast::Arguments::FirstClassCallable,
+                    ..
+                }
+            )
+        }) {
+            return Err(self.error(
+                "Cannot combine nullsafe operator with Closure creation",
+                line,
+            ));
+        }
         let destination = self.literal(Constant::Null, line)?;
         let mut current = self.compile_expression(root)?;
         let mut exits = Vec::new();

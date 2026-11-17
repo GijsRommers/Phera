@@ -22,6 +22,17 @@ impl Tables {
     ) {
         use ir::Instruction as Old;
         let instruction = match source {
+            Old::ThisOrNull { destination: dst } => Instruction::ThisOrNull { dst },
+            Old::Capture { source: src, kind } => Instruction::Capture { src, kind },
+            Old::Closure {
+                destination: dst,
+                function,
+                binding,
+            } => Instruction::MakeClosure {
+                dst,
+                function: FunctionId(function as u32),
+                binding,
+            },
             Old::CheckReturn { source } => Instruction::CheckReturn { source },
             Old::ReturnChecked { source } => Instruction::ReturnChecked { source },
             Old::FinallyCall {

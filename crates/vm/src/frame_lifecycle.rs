@@ -14,7 +14,7 @@ impl Vm {
         unit: &Arc<CompiledUnit>,
         function_id: Option<usize>,
         destination: Option<Reg>,
-    ) -> Frame {
+    ) -> Box<Frame> {
         if let Some(mut frame) = self.call_stack.take_recycled() {
             frame.method = None;
             // Mirrors replacing the unit/cache owners, without atomic Arc
@@ -37,13 +37,13 @@ impl Vm {
             frame
         } else {
             let cache = self.code_cache(unit);
-            Frame::new(
+            Box::new(Frame::new(
                 cache,
                 &mut self.registers,
                 unit.clone(),
                 function_id,
                 destination,
-            )
+            ))
         }
     }
 

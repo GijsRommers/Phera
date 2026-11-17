@@ -1,0 +1,62 @@
+//! Callable introspection also checks syntax-only shapes: `is_callable('missing', true, $name)`.
+
+use phera_extension_api::NativeResult;
+use phera_value::{ArrayKey, Value};
+
+use crate::Vm;
+
+impl Vm {
+    /// The output name is written even when resolution fails, as PHP's third argument requires.
+    pub(crate) fn callable_introspection(&mut self, mut arguments: Vec<Value>) -> NativeResult {
+        const PARAMETERS: &[phera_extension_api::Param] = &[
+            phera_extension_api::Param::new("value", phera_extension_api::ParamType::Mixed),
+            phera_extension_api::Param::new("syntax_only", phera_extension_api::ParamType::Bool)
+                .optional(),
+            phera_extension_api::Param::new("callable_name", phera_extension_api::ParamType::Mixed)
+                .optional()
+                .by_ref(),
+        ];
+        phera_extension_api::prepare_call("is_callable", PARAMETERS, &mut arguments, self)?;
+        let value = arguments.first().cloned().unwrap_or_default();
+        let syntax_only = arguments.get(1).is_some_and(phera_value::to_bool);
+        let shape = callable_shape(&value);
+        let valid = if syntax_only && !value.is_object() {
+            shape.is_some()
+        } else {
+            self.resolve_callable(&value).is_ok()
+        };
+        if let Some(Value::Reference(reference)) = arguments.get(2) {
+            *reference.borrow_mut() = Value::from(shape.unwrap_or_default());
+        }
+        Ok(Value::Bool(valid))
+    }
+}
+
+/// Callable names describe objects by class rather than running conversion hooks.
+fn callable_shape(value: &Value) -> Option<String> {
+    match &*value.deref() {
+        Value::String(name) => Some(name.to_string_lossy()),
+        Value::Object(object) if object.class.name() == "Closure" => {
+            let native = object.native.borrow();
+            native
+                .as_ref()
+                .and_then(|state| state.downcast_ref::<crate::closures::ClosureState>())
+                .map(|state| state.callee.name.to_string())
+        }
+        Value::Object(object) => Some(format!("{}::__invoke", object.class.name())),
+        Value::Array(array) if array.len() == 2 => {
+            let target = array.get(&ArrayKey::Int(0))?;
+            let method = array.get(&ArrayKey::Int(1))?;
+            let Value::String(method) = &*method.deref() else {
+                return None;
+            };
+            let class = match &*target.deref() {
+                Value::String(name) => name.to_string_lossy(),
+                Value::Object(object) => object.class.name().to_owned(),
+                _ => return None,
+            };
+            Some(format!("{class}::{}", method.to_string_lossy()))
+        }
+        _ => None,
+    }
+}

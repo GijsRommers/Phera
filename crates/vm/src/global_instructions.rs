@@ -38,6 +38,19 @@ impl Vm {
         variable: StaticId,
         initialized: Target,
     ) -> Result<(), NativeError> {
+        if let Some(object) = self.lexical_closure() {
+            let native = object.native.borrow();
+            let state = native
+                .as_ref()
+                .and_then(|state| state.downcast_ref::<crate::closures::ClosureState>())
+                .ok_or_else(|| internal_error!("closure static"))?;
+            let value = state.statics.borrow().get(&variable.0).cloned();
+            if let Some(value) = value {
+                self.set(local, value);
+                self.jump(initialized)?;
+            }
+            return Ok(());
+        }
         let key = self.static_key(variable)?;
         if let Some(value) = self.static_variables.get(&key).cloned() {
             self.set(local, value);
@@ -53,8 +66,18 @@ impl Vm {
         variable: StaticId,
         source: Reg,
     ) -> Result<(), NativeError> {
-        let key = self.static_key(variable)?;
         let value = Value::Reference(Rc::new(RefCell::new(self.get(source))));
+        if let Some(object) = self.lexical_closure() {
+            let native = object.native.borrow();
+            let state = native
+                .as_ref()
+                .and_then(|state| state.downcast_ref::<crate::closures::ClosureState>())
+                .ok_or_else(|| internal_error!("closure static"))?;
+            state.statics.borrow_mut().insert(variable.0, value.clone());
+            self.set(local, value);
+            return Ok(());
+        }
+        let key = self.static_key(variable)?;
         self.static_variables.insert(key, value.clone());
         self.set(local, value);
         Ok(())

@@ -15,6 +15,7 @@ impl ClassTable {
         table.entries.insert(
             "stdclass".into(),
             Rc::new_cyclic(|identity| Class {
+                origin: super::class::ClassOrigin::Native,
                 identity: identity.clone(),
                 declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
                 ancestors: std::collections::HashSet::new(),
@@ -37,7 +38,11 @@ impl ClassTable {
                 constants: HashMap::new(),
             }),
         );
-        for entry in registry.classes() {
+        let closure = phera_extension_api::ClassEntry {
+            kind: NativeKind::FinalClass,
+            ..phera_extension_api::ClassEntry::class("Closure")
+        };
+        for entry in registry.classes().chain(std::iter::once(&closure)) {
             let parent = entry.parent.and_then(|name| table.get(name));
             let mut methods = parent
                 .as_ref()
@@ -57,6 +62,27 @@ impl ClassTable {
                         body: MethodBody::Native(*method),
                     }),
                 );
+            }
+            if entry.name == "Closure" {
+                for &(operation, name) in crate::closure_methods::ClosureMethod::entries() {
+                    methods.insert(
+                        name.to_ascii_lowercase(),
+                        Rc::new(Method {
+                            signature: std::cell::OnceCell::new(),
+                            name: name.into(),
+                            declaring: "Closure".into(),
+                            visibility: Visibility::Public,
+                            is_static: matches!(
+                                operation,
+                                crate::closure_methods::ClosureMethod::Bind
+                                    | crate::closure_methods::ClosureMethod::FromCallable
+                            ),
+                            is_final: false,
+                            is_abstract: false,
+                            body: MethodBody::Closure(operation),
+                        }),
+                    );
+                }
             }
             let mut defaults = parent
                 .as_ref()
@@ -102,6 +128,11 @@ impl ClassTable {
             table.entries.insert(
                 entry.name.to_ascii_lowercase(),
                 Rc::new_cyclic(|identity| Class {
+                    origin: if entry.name == "Closure" {
+                        super::class::ClassOrigin::Closure
+                    } else {
+                        super::class::ClassOrigin::Native
+                    },
                     identity: identity.clone(),
                     declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
                     ancestors: super::class::ancestor_names(&parent, &interfaces),

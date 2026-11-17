@@ -71,6 +71,16 @@ impl Compiler<'_> {
 
     /// Read variables and indexes without undefined-value warnings; evaluate other expressions normally.
     pub(crate) fn quiet(&mut self, expression: &ast::Expression) -> Result<Reg, CompileError> {
+        if matches!(&expression.kind, ast::ExpressionKind::Variable(ast::Variable::Named(name))
+            if name == "this")
+        {
+            let destination = self.allocate_register()?;
+            self.emit(
+                Instruction::ThisOrNull { destination },
+                self.lines.line(expression.span.start),
+            );
+            return Ok(destination);
+        }
         if matches!(
             expression.kind,
             ast::ExpressionKind::Variable(_)

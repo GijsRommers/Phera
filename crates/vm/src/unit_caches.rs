@@ -40,7 +40,7 @@ pub(crate) struct ClassTypeEntry {
 /// Units are retained and immutable, so slot identity cannot be reused or missed.
 pub(crate) enum CachedSite {
     Empty,
-    Property(Box<crate::property_sites::PropertyEntry>),
+    Property(Rc<crate::property_sites::PropertyEntry>),
     Method(Box<crate::classes::method_cache::MethodEntry>),
     Static(Box<crate::classes::static_sites::StaticEntry>),
 }

@@ -220,6 +220,23 @@ impl Vm {
             Instruction::SendPath { path } => self.send(None, Some(self.path(path)?))?,
             Instruction::SendSpread { src: source } => self.spread(source)?,
             Instruction::Call { dst: destination } => self.execute_call(destination, work).await?,
+            Instruction::ThisOrNull { dst } => {
+                let value = self
+                    .current()
+                    .and_then(|frame| frame.method.as_ref())
+                    .and_then(|context| context.receiver.clone())
+                    .map(Value::Object)
+                    .unwrap_or_default();
+                self.set(dst, value);
+            }
+            Instruction::Capture { src, kind } => self.capture(src, kind)?,
+            Instruction::MakeClosure {
+                dst,
+                function,
+                binding,
+            } => {
+                self.make_closure(dst, function, binding)?;
+            }
             Instruction::MakeCallable { dst: destination } => self.make_callable(destination)?,
             Instruction::ReturnReference { src: source } => {
                 return self

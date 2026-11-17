@@ -12,6 +12,9 @@ impl Compiler<'_> {
         default: &Expression,
         line: usize,
     ) -> Result<(), CompileError> {
+        if let Some(message) = crate::constant_callables::callable_constant_error(default) {
+            return Err(self.error(message, line));
+        }
         if !parameter_expression(default) {
             return Err(self.error("Constant expression contains invalid operations", line));
         }
@@ -65,6 +68,24 @@ pub(crate) fn constant_expression(expression: &Expression) -> bool {
             true
         }
         ExpressionKind::ClassConstant { .. } => true,
+        ExpressionKind::Call {
+            callee,
+            arguments: phera_ast::Arguments::FirstClassCallable,
+        } => {
+            matches!(
+                callee.kind,
+                ExpressionKind::Name(_) | ExpressionKind::Literal(phera_ast::Literal::String(_))
+            )
+        }
+        ExpressionKind::StaticCall {
+            class,
+            name: phera_ast::MemberName::Identifier(_),
+            arguments: phera_ast::Arguments::FirstClassCallable,
+        } => {
+            matches!(class.kind, ExpressionKind::Name(_))
+        }
+        ExpressionKind::Closure(closure) => closure.is_static && closure.uses.is_empty(),
+        ExpressionKind::ArrowFunction(_) => false,
         ExpressionKind::Array(items) => items.iter().all(|item| {
             !item.by_reference
                 && item.key.as_ref().is_none_or(constant_expression)

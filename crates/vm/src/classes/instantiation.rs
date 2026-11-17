@@ -91,6 +91,11 @@ impl Vm {
 
     /// Mirrors named allocation after lookup; visibility and abstract checks stay shared.
     fn new_linked_object(&mut self, class: Rc<super::Class>) -> Result<(), NativeError> {
+        if class.origin == crate::classes::class::ClassOrigin::Closure {
+            return Err(NativeError::error(
+                "Instantiation of class Closure is not allowed",
+            ));
+        }
         if class.kind == ClassKind::Interface {
             return Err(NativeError::error(format!(
                 "Cannot instantiate interface {}",
@@ -151,6 +156,16 @@ impl Vm {
                 "Trying to clone an uncloneable object of class {}",
                 class.name
             )));
+        }
+        if class.origin == crate::classes::class::ClassOrigin::Closure {
+            let native = original.native.borrow();
+            let state = native
+                .as_ref()
+                .and_then(|state| state.downcast_ref::<crate::closures::ClosureState>())
+                .ok_or_else(|| internal_error!("clone closure"))?;
+            let cloned = self.allocate_closure(state.duplicate())?;
+            self.set(destination, Value::Object(cloned));
+            return Ok(());
         }
         let cloned = self.classes.allocate(class);
         cloned.update(|properties| *properties = original.to_array());

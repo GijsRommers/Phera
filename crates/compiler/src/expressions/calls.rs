@@ -5,7 +5,7 @@ use phera_bytecode::Reg;
 
 use crate::ir::{Argument, Instruction};
 use crate::policies::NameKind;
-use crate::{CompileError, Compiler, writable};
+use crate::{CompileError, Compiler};
 
 impl Compiler<'_> {
     /// Resolve the callee before sending arguments, since its signature governs references.
@@ -17,6 +17,7 @@ impl Compiler<'_> {
     ) -> Result<Reg, CompileError> {
         use ast::ExpressionKind;
         if let ExpressionKind::Name(name) = &callee.kind
+            && callee.span == name.span
             && matches!(
                 name.text.to_ascii_lowercase().as_str(),
                 "extract"
@@ -29,7 +30,9 @@ impl Compiler<'_> {
         {
             self.function.dynamic_scope = true;
         }
-        if let ExpressionKind::Name(name) = &callee.kind {
+        if let ExpressionKind::Name(name) = &callee.kind
+            && callee.span == name.span
+        {
             let (name, fallback) = self.resolve(name, NameKind::Function);
             self.emit(Instruction::StartCall { name, fallback }, line);
         } else {
@@ -51,14 +54,14 @@ impl Compiler<'_> {
             return Ok(dst);
         };
         for argument in arguments {
-            let place = if !argument.spread && writable(&argument.value) {
-                Some(self.place(&argument.value)?)
+            let place = if !argument.spread && crate::helpers::reference_capable(&argument.value) {
+                Some(self.readable_place(&argument.value)?)
             } else {
                 None
             };
             let source = if let Some(place) = place {
                 crate::ir::ArgumentSource::Place(place)
-            } else if argument.spread && writable(&argument.value) {
+            } else if argument.spread && crate::helpers::reference_capable(&argument.value) {
                 let place = self.place(&argument.value)?;
                 let destination = self.allocate_register()?;
                 self.emit(Instruction::Reference { destination, place }, line);

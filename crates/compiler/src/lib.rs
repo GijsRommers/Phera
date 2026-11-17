@@ -1,6 +1,7 @@
 //! Compile PHP source into immutable register bytecode on a dedicated stack.
 
 mod compile_error;
+mod constant_callables;
 mod context;
 mod errors;
 mod expressions;

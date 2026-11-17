@@ -8,6 +8,7 @@ use phera_value::Value;
 /// A signature and target resolved once for a symbol in this request.
 #[derive(Clone)]
 pub(crate) struct Callee {
+    pub(crate) argument_binding: crate::callback_binding::ArgumentBinding,
     pub(crate) name: Rc<str>,
     pub(crate) parameters: Rc<[ParameterSpec]>,
     pub(crate) target: CallTarget,
@@ -33,6 +34,7 @@ pub(crate) enum CallTarget {
     },
     /// A class without a constructor still consumes sends and returns the allocated handle.
     Constructed(Rc<phera_value::Object>),
+    Closure(Rc<phera_value::Object>),
     User(crate::function_table::FunctionRef),
     Native(FunctionEntry),
     Intrinsic(crate::intrinsics::Intrinsic),
@@ -58,6 +60,8 @@ pub(crate) enum ArgumentOrder {
 
 /// An unfinished call; nested argument calls push another entry.
 pub(crate) struct PendingCall {
+    /// Dynamic closure syntax retains the source object while arguments are evaluated.
+    pub(crate) owner: Option<Rc<phera_value::Object>>,
     pub(crate) callee: Rc<Callee>,
     pub(crate) arguments: Vec<Option<Value>>,
     pub(crate) named: Option<String>,
@@ -153,6 +157,7 @@ impl PendingCall {
 
 /// Signature metadata is built together with the resolved execution target.
 pub(crate) struct ResolvedSignature {
+    pub(crate) name: Rc<str>,
     pub(crate) target: CallTarget,
     pub(crate) parameters: Vec<ParameterSpec>,
 }

@@ -15,6 +15,9 @@ pub(crate) struct SourceLocation {
 impl Vm {
     /// Snapshot the current diagnostic location before mutable VM work.
     pub(crate) fn location(&self) -> SourceLocation {
+        if let Some(location) = &self.diagnostic_location {
+            return location.clone();
+        }
         self.current()
             .map(|frame| SourceLocation {
                 file: frame.unit.file.clone(),
@@ -138,9 +141,13 @@ mod tests {
         let mut vm = Vm::new(Arc::new(Registry::new()));
         let value = Value::Array(Rc::new(PhpArray::new()));
         to_php_string(&value, vm.diagnostic_reporter.operator()).unwrap();
-        vm.intrinsic(Intrinsic::FunctionExists, vec![Value::from("unknown")])
-            .await
-            .unwrap();
+        vm.intrinsic_origin(
+            Intrinsic::FunctionExists,
+            vec![Value::from("unknown")],
+            crate::callback_binding::ArgumentOrigin::Php,
+        )
+        .await
+        .unwrap();
         assert!(String::from_utf8_lossy(&vm.output).contains("Array to string conversion"));
         assert!(!vm.diagnostic_reporter.has_pending());
     }

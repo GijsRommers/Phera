@@ -126,6 +126,7 @@ impl Vm {
             let mut context = context.clone();
             context.receiver = None;
             let unbound = Rc::new(Callee {
+                argument_binding: crate::callback_binding::ArgumentBinding::Caller,
                 name: callee.name.clone(),
                 parameters: callee.parameters.clone(),
                 target: CallTarget::Method {
@@ -159,6 +160,7 @@ impl Vm {
             let mut context = context.clone();
             context.receiver = receiver;
             let bound = self.call_stack.bound_callee(Callee {
+                argument_binding: crate::callback_binding::ArgumentBinding::Caller,
                 name: callee.name.clone(),
                 parameters: callee.parameters.clone(),
                 target: CallTarget::Method {

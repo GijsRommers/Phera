@@ -5,7 +5,7 @@ use phera_ast::StatementKind;
 
 use crate::ir::{Constant, Instruction, Target};
 use crate::policies::DeclarationTiming;
-use crate::{CompileError, Compiler, Loop, writable};
+use crate::{CompileError, Compiler, Loop};
 
 impl Compiler<'_> {
     /// Run the body before testing, with continue targeting the test.
@@ -175,8 +175,10 @@ impl Compiler<'_> {
                 && name != "this"
             {
                 self.local(name)?
-            } else if self.function.returns_reference && writable(expression) {
-                let place = self.place(expression)?;
+            } else if self.function.returns_reference
+                && crate::helpers::reference_capable(expression)
+            {
+                let place = self.readable_place(expression)?;
                 let dst = self.allocate_register()?;
                 self.emit(
                     Instruction::Reference {

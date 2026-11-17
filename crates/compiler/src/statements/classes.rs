@@ -82,6 +82,22 @@ impl Compiler<'_> {
                     if !property.hooks.is_empty() {
                         return Err(self.error("Property hooks not supported yet", line));
                     }
+                    if ty.as_ref().is_some_and(|ty| {
+                        self.declaration_type(ty)
+                            .split(['|', '&', '?'])
+                            .any(|name| name == "callable")
+                    }) {
+                        return Err(self.error(
+                            format!(
+                                "Property {name}::${} cannot have type {}",
+                                property.name,
+                                ty.as_ref()
+                                    .map(|ty| self.declaration_type(ty))
+                                    .unwrap_or_default()
+                            ),
+                            self.lines.line(property.span.start),
+                        ));
+                    }
                     let readonly = modifiers.is_readonly || declaration.modifiers.is_readonly;
                     if readonly && modifiers.is_static {
                         return Err(self.error(
@@ -134,6 +150,21 @@ impl Compiler<'_> {
                     format!("Cannot redeclare {name}::{}()", method.name.name),
                     self.lines.line(method.name.span.start),
                 ));
+            }
+            if method.name.name.eq_ignore_ascii_case("__invoke")
+                && matches!(
+                    method.modifiers.visibility,
+                    Some(ast::Visibility::Private | ast::Visibility::Protected)
+                )
+            {
+                self.declaration_warnings
+                    .push(phera_bytecode::DeclarationWarning {
+                        message: format!(
+                            "The magic method {name}::{}() must have public visibility",
+                            method.name.name
+                        ),
+                        line: self.lines.line(method.name.span.start) as u32,
+                    });
             }
             for parameter in &method.parameters {
                 if parameter.modifiers.visibility.is_some() {
@@ -206,6 +237,9 @@ impl Compiler<'_> {
         expression: &ast::Expression,
         line: usize,
     ) -> Result<usize, CompileError> {
+        if let Some(message) = crate::constant_callables::callable_constant_error(expression) {
+            return Err(self.error(message, line));
+        }
         if !crate::parameter_defaults::constant_expression(expression) {
             return Err(self.error("Constant expression contains invalid operations", line));
         }
@@ -214,7 +248,21 @@ impl Compiler<'_> {
         let result = builder.compile_expression(expression)?;
         builder.emit(Instruction::Return(result), line);
         let index = self.functions.len();
-        self.functions.push(builder.finish());
+        let mut function = builder.finish();
+        for instruction in function.instructions.iter_mut().chain(
+            builder
+                .functions
+                .iter_mut()
+                .flat_map(|function| function.instructions.iter_mut()),
+        ) {
+            if let Instruction::Closure { function, .. } | Instruction::Declare(function) =
+                instruction
+            {
+                *function += index + 1;
+            }
+        }
+        self.functions.push(function);
+        self.functions.extend(builder.functions);
         Ok(index)
     }
 

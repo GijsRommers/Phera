@@ -58,9 +58,22 @@ impl Vm {
                 continue;
             }
             let function = &callee.function().name;
-            let name = function.rsplit("::").next().unwrap_or(function);
+            let closure = function.starts_with("{closure:");
+            let name = if closure {
+                function.as_str()
+            } else {
+                function.rsplit("::").next().unwrap_or(function)
+            };
             entry.insert(ArrayKey::str("function"), Value::from(name));
-            if let Some((class, _)) = function.split_once("::") {
+            let class = if closure {
+                callee
+                    .method
+                    .as_ref()
+                    .map(|context| context.scope.name.as_str())
+            } else {
+                function.split_once("::").map(|(class, _)| class)
+            };
+            if let Some(class) = class {
                 entry.insert(ArrayKey::str("class"), Value::from(class));
                 let kind = if callee
                     .method

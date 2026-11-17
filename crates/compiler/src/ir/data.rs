@@ -113,6 +113,7 @@ pub struct Function {
     pub constants: Vec<Constant>,
     pub registers: usize,
     pub parameters: Vec<Parameter>,
+    pub captures: usize,
     pub locals: Vec<String>,
     pub lines: Vec<usize>,
     pub dynamic_scope: bool,
@@ -123,6 +124,7 @@ pub struct Function {
 /// The top-level function and declarations awaiting final bytecode emission.
 #[derive(Debug, Clone)]
 pub struct CompiledUnit {
+    pub declaration_warnings: Vec<phera_bytecode::DeclarationWarning>,
     pub main: Function,
     pub functions: Vec<Function>,
     pub hoisted: Vec<usize>,

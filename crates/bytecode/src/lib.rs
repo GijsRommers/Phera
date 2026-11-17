@@ -26,7 +26,13 @@
 //! immutable fallback-path index and an access mode. Request-local resolution
 //! stays in the VM's side caches.
 //!
-//! See `docs/architecture.md`, section 4.
+//! `Capture` holds only a source register and a value/reference/quiet policy.
+//! `MakeClosure` holds a function index, destination and binding policy. Capture
+//! names and the registers after parameters are assigned by the compiler; the
+//! VM supplies request-local values and objects. Both instructions remain Copy
+//! within the same size assertion as every other instruction.
+//!
+//! See `docs/architecture.md`, sections 4 and 9.3.
 
 mod class;
 mod display;
@@ -39,12 +45,12 @@ pub use class::{
     ClassConstant, ClassDeclaration, ClassKind, Initializer, MethodDeclaration,
     PropertyDeclaration, Visibility,
 };
-pub use function::{Function, Handler, Parameter, Path, PathBase, Step};
+pub use function::{ArgumentLayout, Function, Handler, Parameter, Path, PathBase, Step};
 pub use ids::{
     ClassId, ConstId, FunctionId, IterId, NameId, PathId, Reg, StaticId, SymbolId, Target, TypeId,
 };
 pub use instruction::{
-    BinaryOp, CastKind, ClassBinding, FetchMode, FinallyEntry, IncDec, IncludeKind, Instruction,
-    RuntimeError, UnaryOp,
+    BinaryOp, CaptureKind, CastKind, ClassBinding, ClosureBinding, FetchMode, FinallyEntry, IncDec,
+    IncludeKind, Instruction, RuntimeError, UnaryOp,
 };
-pub use unit::{CompiledUnit, Constant, ConstantKey, Symbol, Type, TypeMask};
+pub use unit::{CompiledUnit, Constant, ConstantKey, DeclarationWarning, Symbol, Type, TypeMask};

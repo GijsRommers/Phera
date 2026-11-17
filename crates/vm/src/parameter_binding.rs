@@ -30,7 +30,14 @@ impl Vm {
                 continue;
             }
             let value = if parameter.variadic {
-                match self.variadic_arguments(&code, function, parameter, arguments, i) {
+                match self.variadic_arguments(
+                    &code,
+                    function,
+                    parameter,
+                    arguments,
+                    i,
+                    frame.method.as_deref(),
+                ) {
                     Ok(value) => value,
                     Err(error) => {
                         let mut original = PhpArray::new();
@@ -72,11 +79,23 @@ impl Vm {
                         continue;
                     }
                     let original = value.clone();
+                    let scoped_type = parameter
+                        .ty
+                        .filter(|_| scope == types::DeclarationScope::Relative)
+                        .and_then(|ty| {
+                            frame.method.as_ref().map(|context| {
+                                crate::closure_types::parameter_type(
+                                    &code.types[ty.index()],
+                                    context,
+                                )
+                            })
+                        });
+                    let declared_type = scoped_type
+                        .as_ref()
+                        .or_else(|| parameter.ty.map(|ty| &code.types[ty.index()]));
                     match self.check_argument(
                         value,
-                        parameter
-                            .ty
-                            .map(|declaration_type| &code.types[declaration_type.index()]),
+                        declared_type,
                         scope,
                         &function.name,
                         i,
@@ -142,24 +161,24 @@ impl Vm {
         parameter: &phera_bytecode::Parameter,
         arguments: &[Option<Value>],
         index: usize,
+        context: Option<&crate::classes::MethodContext>,
     ) -> NativeResult {
         let mut values = PhpArray::new();
         let scope = parameter
             .ty
             .map(|index| types::declaration_scope(&code.types[index.index()]))
             .unwrap_or(types::DeclarationScope::Absolute);
+        let declared_type = parameter.ty.map(|ty| &code.types[ty.index()]);
+        let scoped_type = declared_type.and_then(|ty| {
+            context
+                .filter(|_| scope == types::DeclarationScope::Relative)
+                .map(|context| crate::closure_types::parameter_type(ty, context))
+        });
+        let declared_type = scoped_type.as_ref().or(declared_type);
         for (offset, argument) in arguments.iter().enumerate().skip(index) {
             let value = argument.clone().unwrap_or_default();
-            let value = self.check_argument(
-                value,
-                parameter
-                    .ty
-                    .map(|declaration_type| &code.types[declaration_type.index()]),
-                scope,
-                &function.name,
-                offset,
-                "",
-            )?;
+            let value =
+                self.check_argument(value, declared_type, scope, &function.name, offset, "")?;
             values.push(value)?;
         }
         Ok(Value::Array(Rc::new(values)))

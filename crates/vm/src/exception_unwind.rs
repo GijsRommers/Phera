@@ -88,6 +88,8 @@ impl Vm {
             .or(handler.finally)
             .map_or(0, |target| target.index());
         if let Some(frame) = self.call_stack.current_mut() {
+            self.closure_captures
+                .retain(|capture| capture.base < frame.base);
             frame.calls.clear();
             for register in &handler.cleanup {
                 if let Some(slot) = frame
@@ -139,6 +141,8 @@ impl Vm {
     fn discard_exception_frame(&mut self) -> Result<(), NativeError> {
         self.finish_include_scope()?;
         if let Some(mut frame) = self.call_stack.pop() {
+            self.closure_captures
+                .retain(|capture| capture.base < frame.base);
             self.registers.truncate(frame.base);
             frame.arguments.clear();
             frame.calls.clear();

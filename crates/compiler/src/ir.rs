@@ -16,6 +16,19 @@ use phera_bytecode::Reg;
 /// Compiler IR with owned names and paths before table interning.
 #[derive(Debug, Clone)]
 pub enum Instruction {
+    /// Quiet receiver read for isset($this).
+    ThisOrNull { destination: Reg },
+    /// Copy a lexical binding before allocating a closure object.
+    Capture {
+        source: Reg,
+        kind: phera_bytecode::CaptureKind,
+    },
+    /// Instantiate an anonymous function with the preceding lexical captures.
+    Closure {
+        destination: Reg,
+        function: usize,
+        binding: phera_bytecode::ClosureBinding,
+    },
     /// Validate the saved return before finally may intercept its outcome.
     CheckReturn { source: Reg },
     /// Return a saved, already validated value or reference after finally.

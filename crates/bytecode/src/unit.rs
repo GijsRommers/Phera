@@ -7,6 +7,8 @@ use crate::{Function, FunctionId, NameId};
 pub struct CompiledUnit {
     /// The path the file was compiled from, as `__FILE__` reports it.
     pub file: String,
+    /// Non-fatal declaration diagnostics are emitted when this file is compiled for execution.
+    pub declaration_warnings: Vec<DeclarationWarning>,
     /// The file's top-level code.
     pub main: Function,
     /// Every function the file declares, in source order.
@@ -126,3 +128,10 @@ const _: fn() = || {
     fn shared_between_threads<T: Send + Sync>() {}
     shared_between_threads::<CompiledUnit>();
 };
+
+/// PHP reports these before executing file code, even for declarations in an untaken branch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeclarationWarning {
+    pub message: String,
+    pub line: u32,
+}

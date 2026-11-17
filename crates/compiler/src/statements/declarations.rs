@@ -34,6 +34,9 @@ impl Compiler<'_> {
         line: usize,
     ) -> Result<(), CompileError> {
         for i in items {
+            if let Some(message) = crate::constant_callables::callable_constant_error(&i.value) {
+                return Err(self.error(message, line));
+            }
             let register = self.compile_expression(&i.value)?;
             let name = if self.namespace.is_empty() {
                 i.name.name.clone()

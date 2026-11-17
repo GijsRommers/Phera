@@ -6,6 +6,7 @@ use phera_bytecode::{BinaryOp, CastKind, IncDec, Reg, UnaryOp};
 use phera_extension_api::NativeError;
 use phera_value::{Value, to_php_string};
 
+use crate::integer_arithmetic::{OverflowOperation, overflow_value};
 use crate::{Vm, ops};
 
 impl Vm {
@@ -116,15 +117,15 @@ pub(crate) fn fast_binary(operator: BinaryOp, left: &Value, right: &Value) -> Op
             Add => left
                 .checked_add(*right)
                 .map(Value::Int)
-                .unwrap_or(Value::Float(*left as f64 + *right as f64)),
+                .unwrap_or_else(|| overflow_value(OverflowOperation::Add, *left, *right)),
             Subtract => left
                 .checked_sub(*right)
                 .map(Value::Int)
-                .unwrap_or(Value::Float(*left as f64 - *right as f64)),
+                .unwrap_or_else(|| overflow_value(OverflowOperation::Subtract, *left, *right)),
             Multiply => left
                 .checked_mul(*right)
                 .map(Value::Int)
-                .unwrap_or(Value::Float(*left as f64 * *right as f64)),
+                .unwrap_or_else(|| overflow_value(OverflowOperation::Multiply, *left, *right)),
             Modulo if *right != 0 => Value::Int(if *right == -1 { 0 } else { left % right }),
             Less => Value::Bool(left < right),
             LessEqual => Value::Bool(left <= right),

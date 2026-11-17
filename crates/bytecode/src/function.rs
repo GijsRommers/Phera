@@ -21,6 +21,8 @@ pub struct Function {
     pub locals: Vec<NameId>,
     /// One entry per parameter; parameter `i` lives in register `i`.
     pub parameters: Vec<Parameter>,
+    /// Lexical captures follow parameters and precede ordinary locals.
+    pub captures: u16,
     pub return_type: Option<TypeId>,
     /// Return aliases are part of an inherited method contract.
     pub returns_reference: bool,
@@ -38,6 +40,8 @@ pub struct Function {
     /// Preserve the mutable argument view for `func_get_args`, `func_get_arg`
     /// and `func_num_args`, including dynamically selected intrinsics.
     pub observes_arguments: bool,
+    /// Fixed signatures retain surplus arguments for traces; variadics store them in a local.
+    pub argument_layout: ArgumentLayout,
     /// Whether the file declared `strict_types=1`, which governs the calls
     /// this function makes.
     pub strict_types: bool,
@@ -113,4 +117,12 @@ pub struct Handler {
     pub exception: Reg,
     /// Abandoned expression temporaries; named locals survive the transfer.
     pub cleanup: Vec<Reg>,
+}
+
+/// Precomputed call arity policy avoids inspecting the last parameter on every invocation.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ArgumentLayout {
+    #[default]
+    Fixed,
+    Variadic,
 }

@@ -30,6 +30,9 @@ impl Instruction {
             }
         }
         match self {
+            Instruction::ThisOrNull { destination } => *destination = map(*destination),
+            Instruction::Capture { source, .. } => *source = map(*source),
+            Instruction::Closure { destination, .. } => *destination = map(*destination),
             Instruction::CheckReturn { source } | Instruction::ReturnChecked { source } => {
                 *source = map(*source)
             }

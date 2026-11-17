@@ -25,40 +25,21 @@ enum Parent {
     },
 }
 
-/// A failed mutation returns its reconstructed root so a catch sees intact storage.
-pub(super) struct UpdateFailure {
-    pub(super) error: NativeError,
-    pub(super) root: Value,
-}
-
-/// Successful writes move owners, while failed writes rebuild the detached path.
+/// Mutate a detached root in place and restore it before returning any failure.
 pub(super) fn update(
-    mut current: Value,
+    current: &mut Value,
     keys: &InlineStack<PathKey>,
     value: Value,
     mutation: crate::access_mode::Mutation,
     diagnostics: &mut dyn Diagnostics,
-) -> Result<Value, UpdateFailure> {
+) -> Result<(), NativeError> {
     let mut parents = InlineStack::new();
-    let result = walk(
-        &mut current,
-        &mut parents,
-        keys,
-        value,
-        mutation,
-        diagnostics,
-    )
-    .and_then(|()| rebuild(&mut current, &mut parents, mutation, diagnostics));
-    match result {
-        Ok(()) => Ok(current),
-        Err(error) => {
-            restore(&mut current, &mut parents);
-            Err(UpdateFailure {
-                error,
-                root: current,
-            })
-        }
+    let result = walk(current, &mut parents, keys, value, mutation, diagnostics)
+        .and_then(|()| rebuild(current, &mut parents, mutation, diagnostics));
+    if result.is_err() {
+        restore(current, &mut parents);
     }
+    result
 }
 
 /// Validate each step before detaching its owner; no failure can lose the active child.
@@ -77,8 +58,10 @@ fn walk(
                     .try_borrow_mut()
                     .map_err(|_| internal_error!("borrowed reference"))?,
             );
-            parents.push(Parent::Reference(reference.clone()));
-            *current = child;
+            let Value::Reference(reference) = std::mem::replace(current, child) else {
+                return Err(internal_error!("detached reference"));
+            };
+            parents.push(Parent::Reference(reference));
         }
         match key {
             PathKey::Property(key) => {
@@ -90,11 +73,13 @@ fn walk(
                     )));
                 };
                 let child = crate::property_storage::take(object, key);
+                let Value::Object(object) = std::mem::replace(current, child) else {
+                    return Err(internal_error!("detached object"));
+                };
                 parents.push(Parent::Object {
-                    object: object.clone(),
+                    object,
                     key: key.clone(),
                 });
-                *current = child;
             }
             PathKey::Index(key) => {
                 if current.is_null() || matches!(current, Value::Bool(false)) {

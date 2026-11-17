@@ -20,6 +20,7 @@ pub(super) struct Loop {
 /// Mutable AST-to-IR state for one PHP function, sharing source locations.
 pub(super) struct Compiler<'ast> {
     pub(super) file: &'ast str,
+    pub(super) declaration_warnings: Vec<phera_bytecode::DeclarationWarning>,
     pub(super) lines: &'ast LineTable,
     pub(super) function: Function,
     pub(super) functions: Vec<Function>,
@@ -33,6 +34,8 @@ pub(super) struct Compiler<'ast> {
     /// Lexical cleanup scopes decide which finally blocks a structured exit crosses.
     pub(super) finalies: Vec<crate::statements::exceptions::FinallyScope>,
     pub(super) namespace: String,
+    /// __CLASS__ is lexical and does not change when a closure is rebound.
+    pub(super) class_scope: Option<String>,
     pub(super) imports: HashMap<(NameKind, String), String>,
 }
 impl<'ast> Compiler<'ast> {
@@ -45,6 +48,7 @@ impl<'ast> Compiler<'ast> {
     ) -> Self {
         Self {
             file,
+            declaration_warnings: Vec::new(),
             lines,
             function: Function {
                 name: name.into(),
@@ -60,6 +64,7 @@ impl<'ast> Compiler<'ast> {
             loops: vec![],
             finalies: vec![],
             namespace: namespace.into(),
+            class_scope: None,
             imports: HashMap::new(),
         }
     }

@@ -22,6 +22,7 @@ pub(crate) struct ClassTable {
 impl ClassTable {
     /// Class identifiers ignore case, including names produced by dynamic expressions.
     pub(crate) fn get(&self, name: &str) -> Option<Rc<Class>> {
+        let name = name.trim_start_matches('\\');
         if name.bytes().any(|byte| byte.is_ascii_uppercase()) {
             self.entries.get(&name.to_ascii_lowercase()).cloned()
         } else {
@@ -49,6 +50,9 @@ impl Drop for ClassTable {
     fn drop(&mut self) {
         for object in self.objects.iter().filter_map(Weak::upgrade) {
             object.update(|properties| *properties = phera_value::PhpArray::new());
+            if let Ok(mut native) = object.native.try_borrow_mut() {
+                *native = None;
+            }
         }
     }
 }

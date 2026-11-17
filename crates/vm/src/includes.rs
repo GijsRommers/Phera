@@ -36,6 +36,7 @@ impl Vm {
             )));
         }
         self.include_state.record(unit.file.clone());
+        self.publish_declaration_warnings(&unit);
         self.declare_included_functions(&unit)?;
         self.push_include_frame(unit, destination)
     }

@@ -66,3 +66,14 @@ fn class_paths_have_a_golden_listing() {
         include_str!("../../../tests/fixtures/classes/m3b-path-listing.txt")
     );
 }
+
+/// Captures, arrows and first-class callables keep a readable, stable bytecode contract.
+#[test]
+fn closures_have_a_golden_listing() {
+    let source = include_str!("../../../tests/fixtures/closures/bytecode.php");
+    let unit = compile(source, "closure-listing.php").unwrap();
+    assert_eq!(
+        unit.to_string(),
+        include_str!("../../../tests/fixtures/closures/bytecode.txt")
+    );
+}

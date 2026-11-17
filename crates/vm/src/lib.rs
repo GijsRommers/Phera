@@ -19,22 +19,41 @@ macro_rules! internal_error {
 
 mod access_mode;
 mod argument_errors;
+mod array_map;
 mod array_slots;
 mod arrays;
+mod call_execution;
 mod call_instructions;
 mod call_stack;
 mod call_state;
+mod callable_classes;
+mod callable_introspection;
 mod callables;
+mod callback_arguments;
+mod callback_binding;
+mod callback_errors;
+mod callback_execution;
+mod callback_references;
 mod calls;
 mod class_constants;
 mod class_intrinsics;
 mod class_types;
 mod classes;
+mod closure_binding;
+mod closure_drop;
+mod closure_equality;
+mod closure_initializers;
+mod closure_methods;
+#[cfg(test)]
+mod closure_tests;
+mod closure_types;
+mod closures;
 mod constant_table;
 mod constants;
 mod constructed_calls;
 mod context;
 mod control_flow;
+mod declaration_diagnostics;
 mod diagnostic_reporter;
 mod diagnostics;
 mod dispatch;
@@ -65,6 +84,7 @@ mod include_state;
 mod includes;
 mod initializers;
 mod inline_stack;
+mod integer_arithmetic;
 mod interpreter;
 mod intrinsic_calls;
 mod intrinsics;
@@ -129,14 +149,17 @@ type SymbolCache = Rc<unit_caches::UnitCache>;
 /// One request interpreter; PHP calls use heap frames rather than Rust recursion.
 pub struct Vm {
     classes: classes::ClassTable,
+    closure_captures: Vec<closures::PendingCapture>,
     /// Pure defaults retain lexical class scope while running outside a method frame.
     initializer_scope: Option<String>,
+    argument_origin: callback_binding::ArgumentOrigin,
     prelinked_classes: std::collections::HashSet<(usize, usize)>,
     function_table: function_table::FunctionTable,
     unit_caches: unit_caches::UnitCaches,
     globals: globals::Globals,
     static_variables: static_variables::StaticVariables,
     diagnostic_reporter: diagnostic_reporter::DiagnosticReporter,
+    diagnostic_location: Option<diagnostics::SourceLocation>,
     include_state: include_state::IncludeState,
     call_stack: call_stack::CallStack,
     /// Only entered finally subroutines allocate continuation storage.
@@ -167,13 +190,16 @@ impl Vm {
             .collect();
         Self {
             classes: classes::ClassTable::native(&registry),
+            closure_captures: Vec::new(),
             initializer_scope: None,
+            argument_origin: callback_binding::ArgumentOrigin::Php,
             prelinked_classes: std::collections::HashSet::new(),
             function_table: function_table::FunctionTable::new(),
             unit_caches: unit_caches::UnitCaches::new(),
             globals: globals::Globals::new(),
             static_variables: static_variables::StaticVariables::new(),
             diagnostic_reporter: diagnostic_reporter::DiagnosticReporter::new(),
+            diagnostic_location: None,
             include_state: include_state::IncludeState::new(),
             call_stack: call_stack::CallStack::new(),
             finally_stack: Vec::new(),
@@ -255,6 +281,7 @@ impl Vm {
             }
         }
         self.call_stack.push(frame);
+        self.publish_declaration_warnings(&class_unit);
         if let Err(error) = self.hoist_classes(&class_unit) {
             self.unwind(error);
             return self.status;

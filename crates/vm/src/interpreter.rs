@@ -174,6 +174,10 @@ impl Vm {
                             }
                             self.return_value(value, stop)
                                 .map(crate::dispatch::DispatchResult::from_return)?
+                        } else if function.return_type.is_none() {
+                            let value = self.read_local(src);
+                            self.finish_return_value(value, stop)
+                                .map(crate::dispatch::DispatchResult::from_return)?
                         } else {
                             self.return_register(src, stop)?
                         }

@@ -57,7 +57,7 @@ impl Vm {
             self.validate_property_mutation(root_value, &keys, &mut value, binding.into())?;
             keys
         };
-        let root = self
+        let mut root = self
             .call_stack
             .current_mut()
             .and_then(|frame| {
@@ -77,15 +77,19 @@ impl Vm {
             None
         };
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
-        let updated = update(root, &keys, value, binding.into(), &mut diagnostics.buffer);
+        let result = update(
+            &mut root,
+            &keys,
+            value,
+            binding.into(),
+            &mut diagnostics.buffer,
+        );
         drop(diagnostics);
-        let updated = match updated {
-            Ok(updated) => updated,
-            Err(failure) => {
-                self.set(register, failure.root);
-                return Err(failure.error);
-            }
-        };
+        if let Err(error) = result {
+            self.set(register, root);
+            return Err(error);
+        }
+        let updated = root;
         if let PathBase::GlobalNamed { name, .. } = place.base()? {
             let name = self.get(name);
             if let Value::String(name) = name {
@@ -162,7 +166,7 @@ impl Vm {
         let root_value = self.read_root(register, Missing::Silent);
         let keys = self.property_keys(place, root_value.clone())?;
         self.validate_property_mutation(root_value, &keys, &mut Value::Null, Mutation::Unset)?;
-        let root = self
+        let mut root = self
             .call_stack
             .current_mut()
             .and_then(|frame| {
@@ -173,21 +177,19 @@ impl Vm {
             .and_then(Option::take)
             .unwrap_or_default();
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
-        let updated = update(
-            root,
+        let result = update(
+            &mut root,
             &keys,
             Value::Null,
             Mutation::Unset,
             &mut diagnostics.buffer,
         );
         drop(diagnostics);
-        let updated = match updated {
-            Ok(updated) => updated,
-            Err(failure) => {
-                self.set(register, failure.root);
-                return Err(failure.error);
-            }
-        };
+        if let Err(error) = result {
+            self.set(register, root);
+            return Err(error);
+        }
+        let updated = root;
         self.set(register, updated);
         Ok(())
     }

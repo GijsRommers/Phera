@@ -148,6 +148,16 @@ impl Tables {
                     has_default: parameter.has_default,
                 })
                 .collect(),
+            captures: source.captures as u16,
+            argument_layout: if source
+                .parameters
+                .last()
+                .is_some_and(|parameter| parameter.variadic)
+            {
+                phera_bytecode::ArgumentLayout::Variadic
+            } else {
+                phera_bytecode::ArgumentLayout::Fixed
+            },
             returns_reference: source.returns_reference,
             return_type: source.return_type.as_deref().map(|ty| self.ty(ty)),
             dynamic_scope: source.dynamic_scope,
@@ -237,6 +247,7 @@ impl Tables {
 pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
     let mut tables = Tables::default();
     tables.unit.file = source.file;
+    tables.unit.declaration_warnings = source.declaration_warnings;
     tables.unit.main = tables.function(source.main);
     tables.unit.functions = source
         .functions
