@@ -1,32 +1,91 @@
-//! PHP `/end$/D` requires the actual end; `/a/A` begins at the supplied offset.
+//! The pattern body PCRE2 is given, rewritten where PHP and the safe pcre2
+//! API differ.
+//!
+//! ```php
+//! preg_match('/end$/D', "end\n");    // 0: with /D, $ is the very end (\z)
+//! preg_match('/a$(?m:b$)/D', 'ab');  // the second $ is in a multiline group
+//!                                    // and stays $
+//! preg_match("/\xff/", "\xff");      // a byte that is not UTF-8 becomes \xff
+//! ```
+//!
+//! PCRE2 takes the pattern as `&str` through the safe API, so a byte that
+//! is not UTF-8 is written as an escape. The rewritten text keeps a map back
+//! to offsets in the original body, because compile errors report offsets.
 
 use crate::pattern::Options;
 
 pub(crate) struct Source {
     pub text: String,
+    /// For each byte of `text`, the offset in the body it came from; one
+    /// more entry at the end for the end of the body.
     pub offsets: Vec<usize>,
+    /// Text that must close the pattern when it is wrapped in a group: the
+    /// end of a `#` comment, or of a `\Q` quote, left open by the body.
     pub closing: &'static str,
 }
+
 impl Source {
+    /// Appends text that replaces the body byte at `offset`.
     fn rewritten(&mut self, text: &str, offset: usize) {
         self.text.push_str(text);
         self.offsets.extend(std::iter::repeat_n(offset, text.len()));
     }
+
+    /// Appends body bytes, starting at `offset`, as they are.
     fn original(&mut self, bytes: &[u8], offset: usize) {
         let text = std::str::from_utf8(bytes).expect("ASCII or checked UTF-8");
         self.text.push_str(text);
         self.offsets.extend(offset..offset + bytes.len());
     }
+
+    /// Appends the character that starts with the non-ASCII byte at
+    /// `cursor`, or an escape for that byte when it does not start a valid
+    /// UTF-8 character. Returns the number of body bytes used.
+    fn non_ascii(&mut self, body: &[u8], cursor: usize, quoted: bool) -> usize {
+        let byte = body[cursor];
+        let length = match byte {
+            0xc2..=0xdf => 2,
+            0xe0..=0xef => 3,
+            0xf0..=0xf4 => 4,
+            _ => 1,
+        };
+        let character = &body[cursor..(cursor + length).min(body.len())];
+        if std::str::from_utf8(character).is_ok() {
+            self.original(character, cursor);
+            return character.len();
+        }
+        // Inside \Q...\E an escape would be literal text: close the quote
+        // around it.
+        if quoted {
+            self.rewritten(r"\E", cursor);
+        }
+        self.rewritten(&format!("\\x{byte:02x}"), cursor);
+        if quoted {
+            self.rewritten(r"\Q", cursor);
+        }
+        1
+    }
 }
 
+/// The options that decide what `$` and `#` mean at a point of the pattern.
 #[derive(Clone, Copy)]
 struct Mode {
     multiline: bool,
     extended: bool,
 }
 
-/// Track local option scopes so `/a$(?m:b$)/D` only rewrites the first dollar.
-fn inline_options(tail: &[u8], current: Mode) -> Option<(Mode, usize, bool)> {
+/// An option setting at the start of a group: `(?m)`, `(?-x:`, `(?^:`.
+struct InlineOptions {
+    mode: Mode,
+    /// Bytes from the `(` to the `)` or `:` that ends the setting.
+    length: usize,
+    /// `(?m:...)` sets them for its group only; `(?m)` for the rest of the
+    /// enclosing group.
+    scoped: bool,
+}
+
+/// Reads an option setting at the start of `tail`, from mode `current`.
+fn inline_options(tail: &[u8], current: Mode) -> Option<InlineOptions> {
     let tail = tail.strip_prefix(b"(?")?;
     let mut mode = current;
     let mut enabled = true;
@@ -42,14 +101,20 @@ fn inline_options(tail: &[u8], current: Mode) -> Option<(Mode, usize, bool)> {
             b'm' => mode.multiline = enabled,
             b'x' => mode.extended = enabled,
             b'i' | b's' | b'n' | b'r' | b'J' | b'U' | b'a' | b'T' | b'P' | b'S' | b'W' => {}
-            b':' | b')' if index > 0 => return Some((mode, index + 3, byte == b':')),
+            b':' | b')' if index > 0 => {
+                return Some(InlineOptions {
+                    mode,
+                    length: index + 3,
+                    scoped: byte == b':',
+                });
+            }
             _ => return None,
         }
     }
     None
 }
 
-/// Keep a source map because PCRE2 reports byte offsets in the rewritten pattern.
+/// Rewrites a pattern body: `$` under `/D` and bytes that are not UTF-8.
 pub(crate) fn source(body: &[u8], options: &Options) -> Result<Source, String> {
     let mut source = Source {
         text: String::new(),
@@ -132,13 +197,13 @@ pub(crate) fn source(body: &[u8], options: &Options) -> Result<Source, String> {
                         class_initial = true;
                     }
                     b'(' => {
-                        if let Some((updated, length, scoped)) = inline_options(tail, mode) {
-                            if scoped {
+                        if let Some(inline) = inline_options(tail, mode) {
+                            if inline.scoped {
                                 scopes.push(mode);
                             }
-                            mode = updated;
-                            source.original(&tail[..length], cursor);
-                            cursor += length;
+                            mode = inline.mode;
+                            source.original(&tail[..inline.length], cursor);
+                            cursor += inline.length;
                             continue;
                         }
                         scopes.push(mode);
@@ -161,28 +226,7 @@ pub(crate) fn source(body: &[u8], options: &Options) -> Result<Source, String> {
             source.original(&body[cursor..cursor + 1], cursor);
             cursor += 1;
         } else {
-            // Decode one character rather than requiring the entire suffix to be UTF-8.
-            let length = match byte {
-                0xc2..=0xdf => 2,
-                0xe0..=0xef => 3,
-                0xf0..=0xf4 => 4,
-                _ => 1,
-            };
-            let character = &body[cursor..(cursor + length).min(body.len())];
-            if std::str::from_utf8(character).is_ok() {
-                source.original(character, cursor);
-                cursor += character.len();
-            } else {
-                // The safe compiler requires &str; escapes preserve arbitrary byte patterns.
-                if quoted {
-                    source.rewritten(r"\E", cursor);
-                }
-                source.rewritten(&format!("\\x{byte:02x}"), cursor);
-                if quoted {
-                    source.rewritten(r"\Q", cursor);
-                }
-                cursor += 1;
-            }
+            cursor += source.non_ascii(body, cursor, quoted);
         }
     }
     if quoted {
@@ -192,7 +236,9 @@ pub(crate) fn source(body: &[u8], options: &Options) -> Result<Source, String> {
     Ok(source)
 }
 
-/// Startup directives must stay ahead of inline options and the anchor wrapper.
+/// Length of the directives that open the pattern, such as `(*UTF)` and
+/// `(*LIMIT_MATCH=10)`: PCRE2 accepts them only at the very start, so the
+/// limits and wrappers `compile` adds go after them.
 pub(crate) fn startup_end(body: &str) -> usize {
     let mut position = 0;
     while let Some(tail) = body
