@@ -32,3 +32,15 @@ CI builds the release CLI, exports `PHERA_BIN`, and verifies the PHP version,
 extensions and both database connections before running `cargo test --workspace`.
 `make ci` performs the same checks locally. Missing prerequisites fail this preflight
 instead of silently skipping the database suites.
+
+## Current end-to-end blockers
+
+With `PHERA_BIN` enabled at the CI implementation base (`cfed5d7`), the local
+PHP 8.5.12 run fails 70 of 94 CLI oracle scripts. Native API suites and the
+single-worker CLI concurrency proof pass. Most CLI failures report undefined
+`PDO::*` constants despite their native registration. Exception comparisons
+also lose SQLSTATE string codes and `PDOException::errorInfo`: the current
+`NativeError::Throw` API carries only an integer code and no property payload.
+These are runtime/API integration gaps, not a reason to skip the oracle gate.
+The CI PR leaves that gate red pending a design decision for native exception
+payloads and the associated runtime work.
