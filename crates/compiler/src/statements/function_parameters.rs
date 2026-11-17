@@ -2,7 +2,7 @@
 
 use phera_ast as ast;
 
-use crate::ir::{Constant, Instruction, Place, Target};
+use crate::ir::{Instruction, Place, Target};
 use crate::{CompileError, Compiler};
 
 impl Compiler<'_> {
@@ -37,22 +37,16 @@ impl Compiler<'_> {
     ) -> Result<(), CompileError> {
         for parameter in parameters {
             if parameter.modifiers.visibility.is_some() {
-                let receiver = self.allocate_register()?;
-                self.emit(
-                    Instruction::This {
-                        destination: receiver,
-                    },
-                    line,
-                );
-                let name =
-                    self.literal(Constant::Bytes(parameter.name.as_bytes().to_vec()), line)?;
+                // Compiled exactly like a hand-written `$this->name = $name;`,
+                // so promotion gets the same cached property write.
+                let scratch = self.allocate_register()?;
                 let source = self.local(&parameter.name)?;
                 self.emit(
                     Instruction::Write {
                         place: Place {
-                            base: receiver,
-                            scope: crate::ir::PlaceScope::Local,
-                            path: vec![crate::ir::PathStep::DynamicProperty(name)],
+                            base: scratch,
+                            scope: crate::ir::PlaceScope::This,
+                            path: vec![crate::ir::PathStep::Property(parameter.name.clone())],
                         },
                         source,
                     },

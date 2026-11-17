@@ -12,6 +12,12 @@ impl Vm {
         property: &crate::classes::class::PropertyDefault,
         declaration_type: &phera_bytecode::Type,
     ) -> Result<Value, NativeError> {
+        if crate::types::accepts_as_is(&value, declaration_type) {
+            return Ok(value);
+        }
+        if let Some(float) = crate::types::widen_int_to_float(&value, declaration_type.mask) {
+            return Ok(float);
+        }
         if let Value::Object(object) = &*value.deref() {
             let matches = declaration_type
                 .display

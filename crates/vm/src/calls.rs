@@ -122,8 +122,13 @@ impl Vm {
         index: usize,
         parameter: &str,
     ) -> NativeResult {
-        // Mirrors the class arm of types::coerce without cloning declarations or
-        // formatting a source location for successful non-relative class types.
+        if types::accepts_as_is(&value, declaration_type) {
+            return Ok(value);
+        }
+        if let Some(float) = types::widen_int_to_float(&value, declaration_type.mask) {
+            return Ok(float);
+        }
+        // An object of the declared class needs no conversion either.
         if value.deref().is_object()
             && scope == types::DeclarationScope::Absolute
             && self.matches_class_type(&value, declaration_type)

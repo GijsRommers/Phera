@@ -58,6 +58,14 @@ impl Vm {
     pub(crate) fn check_return_value(&mut self, mut value: Value) -> Result<Value, NativeError> {
         let typed_return = self.current().and_then(|frame| {
             let declaration = frame.function().return_type?;
+            if frame
+                .unit
+                .types
+                .get(declaration.index())
+                .is_some_and(|declared| crate::types::accepts_as_is(&value, declared))
+            {
+                return None;
+            }
             // Mirrors the already-matching object arm of types::coerce. A plain
             // accepted object needs neither coercion nor an owned declaration;
             // references retain the ordinary cell-write and borrow checks below.

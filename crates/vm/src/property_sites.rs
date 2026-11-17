@@ -4,7 +4,7 @@ use crate::{
     AccessPath, Vm,
     property_targets::{PropertyShape, PropertyTarget},
 };
-use phera_bytecode::{NameId, Step};
+use phera_bytecode::{NameId, Step, TypeMask};
 use phera_extension_api::NativeError;
 use phera_value::{ArrayKey, ClassHandle, Object, Value};
 use std::rc::Rc;
@@ -19,7 +19,7 @@ pub(crate) struct PropertyEntry {
     class: Rc<dyn ClassHandle>,
     scope: Option<Rc<crate::classes::Class>>,
     key: ArrayKey,
-    write_kind: PropertyWrite,
+    write_rule: WriteRule,
     slot: Option<usize>,
 }
 
@@ -64,22 +64,18 @@ impl Vm {
                     .find(|(_, property)| property.key == key)
             });
         let slot = property.map(|(slot, _)| slot);
-        let write_kind = property.map_or(PropertyWrite::General, |(_, property)| {
-            if property.is_readonly {
-                return PropertyWrite::General;
-            }
-            match property.ty.as_ref().map(|ty| ty.display.as_str()) {
-                None => PropertyWrite::Untyped,
-                Some("int") => PropertyWrite::Integer,
-                Some("array") => PropertyWrite::Array,
-                _ => PropertyWrite::General,
-            }
-        });
+        let write_rule = match property {
+            Some((_, property)) if !property.is_readonly => match &property.ty {
+                None => WriteRule::Untyped,
+                Some(declared) => WriteRule::Typed(declared.mask),
+            },
+            _ => WriteRule::General,
+        };
         let entry = Rc::new(PropertyEntry {
             class: object.class.clone(),
             scope,
             key,
-            write_kind,
+            write_rule,
             slot,
         });
         if let Some(slot) = self.current().and_then(|frame| frame.site_cache()) {
@@ -134,10 +130,7 @@ impl Vm {
             return Ok(None);
         };
         let entry = self.property_entry(&object, name)?;
-        if !matches!(
-            entry.write_kind,
-            PropertyWrite::Integer | PropertyWrite::Untyped
-        ) {
+        if !entry.write_rule.allows(TypeMask::INT) {
             return Ok(None);
         }
         let Some(Value::Int(old)) =
@@ -164,13 +157,28 @@ impl Vm {
     }
 }
 
-/// Only these declaration types can accept a value without coercion or readonly checks.
+/// What a cached write may store without running the full type check.
 #[derive(Clone, Copy)]
-enum PropertyWrite {
-    Integer,
-    Array,
+enum WriteRule {
+    /// The property has no declared type: any value fits.
     Untyped,
+    /// The property has a declared type: a value fits when its own built-in
+    /// type is in this set (`int` for `public int $n`, `int` or `null` for
+    /// `?int`). A class type has no bit here, so objects take the full check.
+    Typed(TypeMask),
+    /// Readonly, or not a declared property: always take the full path.
     General,
+}
+
+impl WriteRule {
+    /// Whether a value of this built-in type may be stored as it is.
+    fn allows(self, own_type: TypeMask) -> bool {
+        match self {
+            WriteRule::Untyped => true,
+            WriteRule::Typed(declared) => declared.intersects(own_type),
+            WriteRule::General => false,
+        }
+    }
 }
 
 impl Vm {
@@ -187,12 +195,14 @@ impl Vm {
             return Ok(false);
         };
         let entry = self.property_entry(&object, name)?;
-        let accepted = match entry.write_kind {
-            PropertyWrite::Integer => matches!(value, Value::Int(_)),
-            PropertyWrite::Array => matches!(value, Value::Array(_)),
-            PropertyWrite::Untyped => !matches!(value, Value::Reference(_)),
-            PropertyWrite::General => false,
+        // `public float $x` assigned an int stores the float, as PHP does.
+        let widened = match entry.write_rule {
+            WriteRule::Typed(declared) => crate::types::widen_int_to_float(value, declared),
+            _ => None,
         };
+        let value = widened.as_ref().unwrap_or(value);
+        let accepted = !matches!(value, Value::Reference(_))
+            && entry.write_rule.allows(crate::types::own_type(value));
         if !accepted
             || matches!(
                 crate::property_storage::read_at(&object, &entry.key, entry.slot),
@@ -218,10 +228,7 @@ impl Vm {
             return Ok(false);
         };
         let entry = self.property_entry(&object, name)?;
-        if !matches!(
-            entry.write_kind,
-            PropertyWrite::Array | PropertyWrite::Untyped
-        ) {
+        if !entry.write_rule.allows(TypeMask::ARRAY) {
             return Ok(false);
         }
         match crate::property_storage::append_at(&object, &entry.key, entry.slot, value) {

@@ -40,6 +40,45 @@ impl From<bool> for TypeChecking {
     }
 }
 
+/// The bit of the built-in type a value has itself.
+pub(crate) fn own_type(value: &Value) -> TypeMask {
+    match value {
+        Value::Null => TypeMask::NULL,
+        Value::Bool(true) => TypeMask::TRUE,
+        Value::Bool(false) => TypeMask::FALSE,
+        Value::Int(_) => TypeMask::INT,
+        Value::Float(_) => TypeMask::FLOAT,
+        Value::String(_) => TypeMask::STRING,
+        Value::Array(_) => TypeMask::ARRAY,
+        Value::Object(_) => TypeMask::OBJECT,
+        _ => TypeMask::default(),
+    }
+}
+
+/// Whether a value passes a declared type exactly as it is: `5` for `int`,
+/// `"a"` for `?string`, anything for `mixed`.
+///
+/// This is the usual case, and deciding it takes one bit test: no class
+/// lookup, no conversion, no error message. Every type check asks this first.
+/// A PHP reference is not accepted here, because the check may have to write
+/// a converted value back through it.
+#[inline]
+pub(crate) fn accepts_as_is(value: &Value, declaration: &Type) -> bool {
+    !matches!(value, Value::Reference(_)) && declaration.mask.intersects(own_type(value))
+}
+
+/// PHP accepts an int wherever `float` is declared and `int` is not, also
+/// under `strict_types`: `function f(float $x)` called as `f(5)` gets `5.0`.
+/// Returns the float, or `None` when this rule does not apply.
+#[inline]
+pub(crate) fn widen_int_to_float(value: &Value, mask: TypeMask) -> Option<Value> {
+    let Value::Int(integer) = value else {
+        return None;
+    };
+    (mask.intersects(TypeMask::FLOAT) && !mask.intersects(TypeMask::INT))
+        .then_some(Value::Float(*integer as f64))
+}
+
 /// Apply the declaration's PHP type policy while retaining diagnostic ordering.
 pub(crate) fn coerce(
     value: Value,
@@ -57,22 +96,13 @@ pub(crate) fn coerce(
     if mask == TypeMask::MIXED {
         return Ok(value);
     }
-    let actual = match &value {
-        Value::Null => TypeMask::NULL,
-        Value::Bool(true) => TypeMask::TRUE,
-        Value::Bool(false) => TypeMask::FALSE,
-        Value::Int(_) => TypeMask::INT,
-        Value::Float(_) => TypeMask::FLOAT,
-        Value::String(_) => TypeMask::STRING,
-        Value::Array(_) => TypeMask::ARRAY,
-        Value::Object(_) => TypeMask::OBJECT,
-        _ => TypeMask::default(),
-    };
+    if mask.intersects(own_type(&value)) {
+        return Ok(value);
+    }
     if vm.matches_class_type(&value, declaration_type) {
         return Ok(value);
     }
-    if mask.intersects(actual)
-        || mask.intersects(TypeMask::VOID) && value.is_null()
+    if mask.intersects(TypeMask::VOID) && value.is_null()
         || mask.intersects(TypeMask::ITERABLE) && value.is_array()
     {
         return Ok(value);
