@@ -9,3 +9,5 @@ Run `bench-exceptions.php` against Phera and `php -n` for one million calls, a t
 Run `bench-closures.php` for captures, arrow callbacks and method factories; target: 6x PHP CPU.
 
 The three `bench-function-*.php` scripts run their loops inside functions, which is where real code spends its time. The older scripts keep their loops at the top level of the file, and until November 2026 top-level code had its own, faster interpreter path, so those scripts alone gave too good a picture. Keep both kinds when comparing builds.
+
+`bench-calls.php` mixes calls of many shapes (typed and untyped functions, defaults, variadics, instance, static, private and parent methods, getters returning floats, strings and arrays, constructors) inside one function. On 17 November 2026 it ran at 12 times PHP's CPU time; it is the reference for the call work in docs/architecture.md section 10.
