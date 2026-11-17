@@ -134,7 +134,7 @@ pub fn encode_case(
 ) -> String {
     let mut line = match result {
         Ok(value) => format!("{tag}={}", encode(value)),
-        Err(NativeError::Throw { class, message }) => format!("{tag}=E:{class}:{message}"),
+        Err(NativeError::Throw { class, message, .. }) => format!("{tag}=E:{class}:{message}"),
         Err(NativeError::Unwind(_)) => format!("{tag}=UNWIND"),
     };
     if !output.is_empty() {

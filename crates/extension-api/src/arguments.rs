@@ -465,7 +465,7 @@ mod tests {
         let mut arguments = vec![Value::Null; given];
         match prepare_arguments(&entry, &mut arguments, &mut TestContext::default()) {
             Ok(()) => None,
-            Err(NativeError::Throw { class, message }) => Some(format!("{class}: {message}")),
+            Err(NativeError::Throw { class, message, .. }) => Some(format!("{class}: {message}")),
             Err(NativeError::Unwind(_)) => Some("unwind".to_string()),
         }
     }

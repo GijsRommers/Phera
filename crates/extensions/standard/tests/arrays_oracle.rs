@@ -551,7 +551,7 @@ fn recursive_depth_guard() {
             vec![value.clone(), value.clone()],
         );
         assert!(
-            matches!(result, Err(phera_extension_api::NativeError::Throw {class, message})
+            matches!(result, Err(phera_extension_api::NativeError::Throw {class, message, ..})
             if class == "Error" && message == "Maximum array recursion depth exceeded")
         );
     }

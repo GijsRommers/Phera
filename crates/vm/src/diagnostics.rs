@@ -59,7 +59,7 @@ impl Vm {
     pub(crate) fn unwind(&mut self, error: NativeError) {
         self.diagnostic_reporter.end_all_silence();
         match error {
-            NativeError::Throw { class, message } => {
+            NativeError::Throw { class, message, .. } => {
                 let SourceLocation { file, line } = self.location();
                 let text = self.error_trace(class, &message, &file, line);
                 self.out(text.as_bytes());

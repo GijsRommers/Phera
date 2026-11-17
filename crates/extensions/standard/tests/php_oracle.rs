@@ -778,7 +778,7 @@ function invoke($name,$args){global $diag;$diag='';$refs=[];if(in_array($name,['
         let result = call(&registry, &mut c, name, a.clone());
         let mut actual = match result {
             Ok(v) => enc(&v),
-            Err(NativeError::Throw { class, message }) => {
+            Err(NativeError::Throw { class, message, .. }) => {
                 format!("E:{class}:{}", hex(message.as_bytes()))
             }
             Err(e) => panic!("{e:?}"),

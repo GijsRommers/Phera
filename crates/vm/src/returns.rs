@@ -103,7 +103,7 @@ impl Vm {
             let checked =
                 crate::types::coerce(value, declaration_type, function.strict_types.into(), self)
                     .map_err(|error| match error {
-                    NativeError::Throw { class, message } => {
+                    NativeError::Throw { class, message, .. } => {
                         let message = message
                             .strip_suffix(" given")
                             .map(|message| format!("{message} returned"))

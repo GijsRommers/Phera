@@ -44,7 +44,13 @@ pub(crate) fn finish(
 ) -> NativeResult {
     if throw {
         if error != Error::None {
-            return Err(NativeError::throw("JsonException", error.message()));
+            // The exception's code is the same number json_last_error()
+            // would report.
+            return Err(NativeError::throw_with_code(
+                "JsonException",
+                error.message(),
+                error as i64,
+            ));
         }
     } else {
         *context.state().get_or_default::<Error>() = error;

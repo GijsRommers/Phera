@@ -67,8 +67,13 @@ fn replace(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let entry = FunctionEntry::sync("substr_replace", REPLACE_SCALAR_PARAMS, replace);
     if let Err(error) = prepare_arguments(&entry, &mut converted, context) {
         return Err(match error {
-            NativeError::Throw { class, message } => NativeError::Throw {
+            NativeError::Throw {
                 class,
+                message,
+                code,
+            } => NativeError::Throw {
+                class,
+                code,
                 message: message
                     .replace("of type ?int", "of type array|int|null")
                     .replace("of type int,", "of type array|int,"),

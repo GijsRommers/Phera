@@ -156,7 +156,7 @@ impl Vm {
         }
         let result = types::coerce(value.deref().clone(),&resolved_type,self.strict_types().into(),self)
             .map_err(|error| match error {
-                NativeError::Throw { class,message } => {
+                NativeError::Throw { class, message, .. } => {
                     let number = index+1;
                     let label = if parameter.is_empty() { String::new() } else { format!(" (${parameter})") };
                     let message = format!("{function}(): Argument #{number}{label} {message}, called in {file} on line {line}");

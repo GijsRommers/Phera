@@ -18,7 +18,7 @@ fn encode(args: &[Value]) -> NativeResult {
 /// The class and message of the error a call throws.
 fn thrown(args: &[Value]) -> (&'static str, String) {
     match encode(args) {
-        Err(NativeError::Throw { class, message }) => (class, message),
+        Err(NativeError::Throw { class, message, .. }) => (class, message),
         other => panic!("expected a thrown error, got {other:?}"),
     }
 }

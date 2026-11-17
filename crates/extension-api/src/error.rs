@@ -13,6 +13,8 @@ pub enum NativeError {
     Throw {
         class: &'static str,
         message: String,
+        /// What `getCode()` returns; 0 unless the function sets one.
+        code: i64,
     },
     /// The runtime is already unwinding: a callback threw, or called `exit()`.
     /// Native code passes this on untouched.
@@ -33,6 +35,17 @@ impl NativeError {
         NativeError::Throw {
             class,
             message: message.into(),
+            code: 0,
+        }
+    }
+
+    /// Like [`NativeError::throw`], for exceptions whose code matters, such
+    /// as `JsonException`.
+    pub fn throw_with_code(class: &'static str, message: impl Into<String>, code: i64) -> Self {
+        NativeError::Throw {
+            class,
+            message: message.into(),
+            code,
         }
     }
 
@@ -58,6 +71,7 @@ impl From<OpError> for NativeError {
         NativeError::Throw {
             class: error.kind.class_name(),
             message: error.message,
+            code: 0,
         }
     }
 }
