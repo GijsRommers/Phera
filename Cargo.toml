@@ -45,6 +45,9 @@ phera-extension-api = { path = "crates/extension-api" }
 phera-ext-core = { path = "crates/extensions/core" }
 phera-ext-ctype = { path = "crates/extensions/ctype" }
 phera-ext-http = { path = "crates/extensions/http" }
+phera-ext-mbstring = { path = "crates/extensions/mbstring" }
+encoding_rs = "0.8.35"
+base64 = "0.22"
 phera-ext-json = { path = "crates/extensions/json" }
 phera-ext-pcre = { path = "crates/extensions/pcre" }
 phera-ext-pdo = { path = "crates/extensions/pdo" }

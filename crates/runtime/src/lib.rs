@@ -52,6 +52,7 @@ impl Runtime {
         registry.load(&phera_ext_standard::Standard);
         registry.load(&phera_ext_ctype::Ctype);
         registry.load(&phera_ext_json::Json);
+        registry.load(&phera_ext_mbstring::Mbstring);
         registry.load(&phera_ext_pcre::Pcre);
         registry.load(&phera_ext_pdo::Pdo);
         registry.load(&phera_ext_http::Http);

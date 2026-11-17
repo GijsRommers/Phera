@@ -12,6 +12,7 @@ phera-extension-api.workspace = true
 phera-ext-core.workspace = true
 phera-ext-ctype.workspace = true
 phera-ext-http.workspace = true
+phera-ext-mbstring.workspace = true
 phera-ext-json.workspace = true
 phera-ext-pcre.workspace = true
 phera-ext-pdo.workspace = true
