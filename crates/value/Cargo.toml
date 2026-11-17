@@ -12,5 +12,8 @@ license.workspace = true
 foldhash.workspace = true
 hashbrown.workspace = true
 
+[dev-dependencies]
+phera-extension-api.workspace = true
+
 [lints]
 workspace = true

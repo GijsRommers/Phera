@@ -81,7 +81,7 @@ async fn silent_driver_errors_match_php() {
                         &harness.call(&statement, method, vec![]).await.unwrap(),
                     ));
                 }
-                let expected = Command::new(support::PHP)
+                let expected = Command::new(support::php())
                     .args(["-r", &php])
                     .output()
                     .unwrap();
@@ -93,8 +93,7 @@ async fn silent_driver_errors_match_php() {
                 let expected = String::from_utf8(expected.stdout).unwrap();
                 let actual = format!("{}\n", actual.join("\n"));
                 std::fs::write(
-                    std::path::Path::new(support::SCRATCH)
-                        .join(format!("native-errors-{driver}.php.out")),
+                    support::scratch().join(format!("native-errors-{driver}.php.out")),
                     &expected,
                 )
                 .unwrap();

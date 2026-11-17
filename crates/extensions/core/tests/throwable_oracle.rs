@@ -331,3 +331,118 @@ fn the_hierarchy_matches_php() {
     };
     oracle::compare("class hierarchy", &labels, &php, &rust);
 }
+
+/// Driver codes remain strings through getters, dumps, cached text and previous-exception chains.
+#[test]
+fn native_string_codes_and_properties_match_php() {
+    use phera_extension_api::testing::materialize_exception;
+    use phera_extension_api::{ClassEntry, ConstantValue, NativeError, PropertyEntry, Visibility};
+
+    const DRIVER_PROPERTIES: &[PropertyEntry] = &[PropertyEntry::new(
+        "errorInfo",
+        ConstantValue::Null,
+        Visibility::Public,
+    )];
+    let mut registry = registry();
+    registry.class(ClassEntry {
+        parent: Some("Exception"),
+        properties: DRIVER_PROPERTIES,
+        ..ClassEntry::class("DriverException")
+    });
+    let information = list(vec![
+        Value::from("42P01"),
+        Value::Int(7),
+        Value::from("missing"),
+    ]);
+    let previous = materialize_exception(
+        &registry,
+        NativeError::throw("DriverException", "first")
+            .with_code("42P01")
+            .with_property("errorInfo", information.clone())
+            .with_property("file", Value::from("/srv/first.php"))
+            .with_property("line", Value::Int(12)),
+    )
+    .unwrap();
+    let object = materialize_exception(
+        &registry,
+        NativeError::throw("DriverException", "second")
+            .with_code("HY000")
+            .with_property("errorInfo", information)
+            .with_property("file", Value::from("/srv/second.php"))
+            .with_property("line", Value::Int(20))
+            .with_property("previous", Value::Object(previous.clone())),
+    )
+    .unwrap();
+
+    let mut script = String::from("<?php\n");
+    script.push_str(oracle::PHP_PREAMBLE);
+    script.push_str(
+        r#"
+class DriverException extends PDOException {
+    public function setCode($code) { $this->code=$code; }
+}
+$previous=new DriverException('first');
+$previous->setCode('42P01');
+$previous->errorInfo=['42P01',7,'missing'];
+$object=new DriverException('second',0,$previous);
+$object->setCode('HY000');
+$object->errorInfo=['42P01',7,'missing'];
+foreach ([$previous,$object] as $index=>$exception) {
+    foreach (['file'=>$index ? '/srv/second.php' : '/srv/first.php',
+              'line'=>$index ? 20 : 12, 'trace'=>[]] as $name=>$value) {
+        (new ReflectionProperty(Exception::class,$name))->setValue($exception,$value);
+    }
+}
+"#,
+    );
+    let mut labels = Vec::new();
+    let mut rust = Vec::new();
+    for method in ["getCode", "getMessage", "__toString"] {
+        script.push_str(&format!("run('{method}',fn()=>$object->{method}());\n"));
+        labels.push(method.to_string());
+        let mut context = TestContext::default();
+        let result = call_method(&registry, &mut context, &object, method, vec![]);
+        rust.push(oracle::encode_case(
+            method,
+            &result,
+            &context.output,
+            &context.diagnostics,
+        ));
+    }
+    script.push_str("run('previous',fn()=>$object->getPrevious()->getCode());\n");
+    labels.push("previous".to_string());
+    let mut context = TestContext::default();
+    let Value::Object(found) =
+        call_method(&registry, &mut context, &object, "getPrevious", vec![]).unwrap()
+    else {
+        panic!("previous exception expected");
+    };
+    assert!(Rc::ptr_eq(&found, &previous));
+    let result = call_method(&registry, &mut context, &found, "getCode", vec![]);
+    rust.push(oracle::encode_case(
+        "previous",
+        &result,
+        &context.output,
+        &context.diagnostics,
+    ));
+
+    script.push_str("run('dump',function()use($object){\n");
+    script.push_str("ob_start();var_dump($object);$dump=ob_get_clean();\n");
+    script.push_str("echo preg_replace('/(object\\([^)]+\\)#)[0-9]+ /','${1}1 ',$dump);});\n");
+    labels.push("dump".to_string());
+    let mut context = TestContext::default();
+    let result = call(
+        &registry,
+        &mut context,
+        "var_dump",
+        vec![Value::Object(object)],
+    );
+    rust.push(oracle::encode_case(
+        "dump",
+        &result,
+        &context.output,
+        &context.diagnostics,
+    ));
+    let php = oracle::run_php("native-string-codes", &script).expect("PHP 8.5 oracle required");
+    oracle::compare("native string codes", &labels, &php, &rust);
+}

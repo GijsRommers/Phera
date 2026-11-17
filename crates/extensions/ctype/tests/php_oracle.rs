@@ -127,11 +127,10 @@ fn php_oracle() {
     run(cases);
 }
 fn run(cases: Vec<(&str, Vec<Value>)>) {
-    let php_bin = "/opt/homebrew/bin/php";
-    if !std::path::Path::new(php_bin).exists() {
+    let Some(php_bin) = phera_extension_api::testing::oracle::find_php() else {
         eprintln!("PHP missing; skipping oracle");
         return;
-    }
+    };
     let mut script = String::from(
         r#"<?php
 setlocale(LC_CTYPE, 'C');
@@ -148,10 +147,8 @@ function invoke($name,$args){global $diag;$diag='';ob_start();try{$v=enc($name(.
         )
         .expect("format");
     }
-    let dir = std::path::Path::new(
-        "/private/tmp/claude-501/-Users-gijsr--t3-worktrees-phera-t3-f1d03fb9/8823bb04-57b9-49e9-a9e2-fe9f0dede31c/scratchpad/stdlib",
-    );
-    std::fs::create_dir_all(dir).expect("mkdir");
+    let dir = std::env::temp_dir().join("phera-stdlib-oracle");
+    std::fs::create_dir_all(&dir).expect("mkdir");
     let path = dir.join("ctype-oracle.php");
     std::fs::write(&path, script).expect("write");
     let output = Command::new(php_bin)

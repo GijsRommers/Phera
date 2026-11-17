@@ -19,7 +19,7 @@ struct Server {
 
 impl Server {
     fn start(binary: &str, driver: &str) -> Self {
-        let root = PathBuf::from(support::SCRATCH).join(format!("serve-{driver}"));
+        let root = support::scratch().join(format!("serve-{driver}"));
         std::fs::create_dir_all(&root).unwrap();
         let query = match driver {
             "pgsql" => "SELECT pg_sleep(0.3)",

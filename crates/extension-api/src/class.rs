@@ -145,6 +145,9 @@ pub struct ClassEntry {
     /// Must be registered before this class.
     pub parent: Option<&'static str>,
     pub interfaces: &'static [&'static str],
+    /// Public, overridable values whose PHP types are inferred from their registered values.
+    /// Linked immediately so `PDO::FETCH_ASSOC` also works in defaults.
+    /// For example, PHP may declare `function rows($mode = PDO::FETCH_ASSOC) {}`.
     pub constants: &'static [(&'static str, ConstantValue)],
     pub properties: &'static [PropertyEntry],
     pub methods: &'static [MethodEntry],

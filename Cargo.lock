@@ -1014,6 +1014,7 @@ name = "phera-parser"
 version = "0.1.0"
 dependencies = [
  "phera-ast",
+ "phera-extension-api",
  "phera-lexer",
  "phera-phpt",
  "phera-source",
@@ -1023,6 +1024,7 @@ dependencies = [
 name = "phera-phpt"
 version = "0.1.0"
 dependencies = [
+ "phera-extension-api",
  "phera-lexer",
 ]
 
@@ -1067,6 +1069,7 @@ version = "0.1.0"
 dependencies = [
  "foldhash",
  "hashbrown",
+ "phera-extension-api",
 ]
 
 [[package]]
@@ -1075,6 +1078,7 @@ version = "0.1.0"
 dependencies = [
  "phera-bytecode",
  "phera-compiler",
+ "phera-ext-core",
  "phera-extension-api",
  "phera-value",
  "tokio",

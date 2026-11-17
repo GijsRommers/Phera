@@ -4,7 +4,7 @@
 //! has real PHP (one process) evaluate both forms. The `var_export` of both
 //! must be identical, which proves the parse tree matches PHP's precedence.
 //!
-//! Needs a `php` binary (override with `PHP=/path/to/php`); skipped without
+//! Needs a `php` binary (override with `PHERA_PHP=/path/to/php`); skipped without
 //! one. Uses a fixed-seed hand-written PRNG (no dependencies).
 
 use std::io::Write;
@@ -308,12 +308,10 @@ fn hex_encode(text: &str) -> String {
 }
 
 fn main() -> ExitCode {
-    let php = std::env::var("PHP").unwrap_or_else(|_| "php".into());
-
-    if Command::new(&php).arg("-v").output().is_err() {
-        println!("skipping precedence oracle: `{php}` not found (set PHP=/path/to/php)");
+    let Some(php) = phera_extension_api::testing::oracle::find_php() else {
+        println!("skipping oracle: PHP not found (set PHERA_PHP=/path/to/php)");
         return ExitCode::SUCCESS;
-    }
+    };
 
     let mut rng = Rng(SEED);
     let mut cases: Vec<(String, Option<String>)> = Vec::new(); // (original, parenthesised)

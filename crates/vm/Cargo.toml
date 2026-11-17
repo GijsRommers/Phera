@@ -17,3 +17,5 @@ workspace = true
 
 [dev-dependencies]
 phera-compiler.workspace = true
+# The VM's tests use the real exception classes.
+phera-ext-core.workspace = true

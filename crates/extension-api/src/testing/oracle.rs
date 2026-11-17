@@ -30,9 +30,7 @@ set_error_handler(function ($no, $msg) {
 function enck($k) { return is_int($k) ? "I:$k" : 'S:' . bin2hex($k); }
 function encf($f) {
     if (is_nan($f)) return 'F:NAN';
-    if (is_infinite($f)) return $f > 0 ? 'F:INF' : 'F:-INF';
-    if ($f == 0.0) return (string) $f === '-0' ? 'F:-0' : 'F:0';
-    return 'F:' . sprintf('%.*H', -1, $f);
+    return 'F:' . bin2hex(pack('E', $f));
 }
 function enc($v) {
     if (is_object($v)) {
@@ -73,21 +71,38 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-fn encode_float(float: f64) -> String {
+/// Encodes IEEE 754 bits in big-endian hex, canonicalizing only NaNs.
+pub fn encode_float(float: f64) -> String {
     if float.is_nan() {
         "F:NAN".to_string()
-    } else if float.is_infinite() {
-        if float > 0.0 { "F:INF" } else { "F:-INF" }.to_string()
-    } else if float == 0.0 {
-        if float.is_sign_negative() {
-            "F:-0"
-        } else {
-            "F:0"
-        }
-        .to_string()
     } else {
-        format!("F:{}", float_repr(float))
+        format!("F:{:016x}", float.to_bits())
     }
+}
+
+/// Checks two untagged encoded float results within one ULP. Callers must
+/// explicitly opt in for platform-libm functions; `compare` remains exact.
+/// Output, reference mutations and diagnostics after the result stay exact.
+pub fn float_results_within_one_ulp(php: &str, rust: &str) -> bool {
+    fn decode(line: &str) -> Option<(f64, &str)> {
+        let (result, rest) = line.split_at(line.find('|').unwrap_or(line.len()));
+        let bits = result.strip_prefix("F:")?;
+        if bits.len() != 16 {
+            return None;
+        }
+        Some((f64::from_bits(u64::from_str_radix(bits, 16).ok()?), rest))
+    }
+
+    let (Some((php, php_rest)), Some((rust, rust_rest))) = (decode(php), decode(rust)) else {
+        return false;
+    };
+    // Within one sign, IEEE 754 bit patterns are monotonic (reversed for
+    // negatives), so their absolute integer distance is the ULP distance.
+    php_rest == rust_rest
+        && php.is_finite()
+        && rust.is_finite()
+        && php.is_sign_negative() == rust.is_sign_negative()
+        && php.to_bits().abs_diff(rust.to_bits()) <= 1
 }
 
 fn encode_key(key: &ArrayKey) -> String {
@@ -194,7 +209,8 @@ pub fn php_literal(value: &Value) -> String {
     }
 }
 
-fn find_php() -> Option<PathBuf> {
+/// Resolves the shared oracle binary: `PHERA_PHP`, Homebrew, then `PATH`.
+pub fn find_php() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("PHERA_PHP").map(PathBuf::from)
         && path.exists()
     {
@@ -266,4 +282,50 @@ pub fn compare(what: &str, labels: &[String], php: &[String], rust: &[String]) {
             .join("\n")
     );
     println!("{what}: {} cases, zero mismatches", php.len());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{encode_float, float_results_within_one_ulp};
+
+    #[test]
+    fn one_ulp_requires_finite_floats_with_the_same_sign() {
+        for number in [0.5_f64, -0.5, f64::MIN_POSITIVE, -f64::MIN_POSITIVE] {
+            let encoded = encode_float(number);
+            let adjacent = encode_float(f64::from_bits(number.to_bits() + 1));
+            let farther = encode_float(f64::from_bits(number.to_bits() + 2));
+            assert!(float_results_within_one_ulp(&encoded, &adjacent));
+            assert!(float_results_within_one_ulp(&adjacent, &encoded));
+            assert!(!float_results_within_one_ulp(&encoded, &farther));
+        }
+        assert!(!float_results_within_one_ulp(
+            &encode_float(0.0),
+            &encode_float(-0.0)
+        ));
+        for number in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(!float_results_within_one_ulp(
+                &encode_float(number),
+                &encode_float(number)
+            ));
+            assert!(!float_results_within_one_ulp(
+                &encode_float(number),
+                &encode_float(f64::MAX)
+            ));
+        }
+    }
+
+    #[test]
+    fn one_ulp_keeps_other_values_and_diagnostics_exact() {
+        let php = "F:3fe193ea7aad030b|2:7761726e696e67|O:";
+        let rust = "F:3fe193ea7aad030a|2:7761726e696e67|O:";
+        assert!(float_results_within_one_ulp(php, rust));
+        assert!(!float_results_within_one_ulp(php, "F:3fe193ea7aad030a|O:"));
+        assert!(!float_results_within_one_ulp(
+            php,
+            "F:3fe193ea7aad030a|2:7761726e696e67|O:78"
+        ));
+        for value in ["I:1", "S:31", "N", "B:1", "A(I:0>F:3fe193ea7aad030a;)"] {
+            assert!(!float_results_within_one_ulp(php, value));
+        }
+    }
 }
