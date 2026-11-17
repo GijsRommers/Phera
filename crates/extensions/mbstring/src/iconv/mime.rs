@@ -131,25 +131,25 @@ const ICONV_MIME_DECODE_HEADERS: &[Param] = &[
 ];
 
 /// `iconv_mime_decode_headers(string $headers, int $mode = 0, ?string $encoding = null): array|false`:
-/// the fields up to the first empty line, a repeated field as a list.
+/// the fields up to the first empty line, a repeated field as a list. Each
+/// field is decoded whole, name included, and then split at its colon.
 fn iconv_mime_decode_headers(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     let target = encoding_argument(ctx, a, 2);
     let mode = Mode::from_flags(args::int(a, 1).unwrap_or(0));
     let mut result = PhpArray::new();
-    for line in header_lines(args::bytes(a, 0)) {
-        if decode(ctx, &line, &target, &mode, "iconv_mime_decode_headers").is_none() {
+    for field in fields(args::bytes(a, 0)) {
+        let Some(decoded) = decode(ctx, field, &target, &mode, "iconv_mime_decode_headers") else {
             return Ok(Value::Bool(false));
-        }
-        let Some(colon) = line.iter().position(|&byte| byte == b':') else {
+        };
+        let Some(colon) = decoded.iter().position(|&byte| byte == b':') else {
             continue;
         };
-        let key = ArrayKey::str(&line[..colon]);
-        let mut value = &line[colon + 1..];
+        let key = ArrayKey::str(&decoded[..colon]);
+        let mut value = &decoded[colon + 1..];
         while let [b' ' | b'\t', rest @ ..] = value {
             value = rest;
         }
-        let value = decode(ctx, value, &target, &mode, "iconv_mime_decode")
-            .map_or(Value::Bool(false), Value::from);
+        let value = Value::from(value);
         let Some(previous) = result.get(&key).cloned() else {
             result.insert(key, value);
             continue;
@@ -168,29 +168,34 @@ fn iconv_mime_decode_headers(ctx: &mut dyn Context, a: &[Value]) -> NativeResult
     Ok(Value::from(result))
 }
 
-/// The header lines before the first empty one, with continuation lines
-/// (starting with a space or tab) appended to the line before.
-fn header_lines(headers: &[u8]) -> Vec<Vec<u8>> {
-    let mut lines: Vec<Vec<u8>> = Vec::new();
-    for line in headers.split(|&byte| byte == b'\n') {
-        let line = line.strip_suffix(b"\r").unwrap_or(line);
-        if line.is_empty() {
+/// The header fields before the first empty line, each with its
+/// continuation lines (which start with a space or tab) and line breaks.
+fn fields(headers: &[u8]) -> Vec<&[u8]> {
+    let mut fields: Vec<std::ops::Range<usize>> = Vec::new();
+    let mut offset = 0;
+    for line in headers.split_inclusive(|&byte| byte == b'\n') {
+        let range = offset..offset + line.len();
+        offset = range.end;
+        let content = line.strip_suffix(b"\n").unwrap_or(line);
+        let content = content.strip_suffix(b"\r").unwrap_or(content);
+        if content.is_empty() {
             break;
         }
-        if matches!(line.first(), Some(b' ' | b'\t')) {
-            if let Some(last) = lines.last_mut() {
-                last.extend_from_slice(line);
+        if matches!(content.first(), Some(b' ' | b'\t')) {
+            if let Some(field) = fields.last_mut() {
+                field.end = range.end;
             }
         } else {
-            lines.push(line.to_vec());
+            fields.push(range);
         }
     }
-    lines
+    fields.into_iter().map(|range| &headers[range]).collect()
 }
 
 /// Joins folded lines: a line break followed by spaces or tabs becomes one
-/// space, and a line break without them ends the header.
-fn unfold(bytes: &[u8]) -> Vec<u8> {
+/// space, and a line break without them ends the header. Also says whether
+/// the header ran to the end of the input, without such a line break.
+fn unfold(bytes: &[u8]) -> (Vec<u8>, bool) {
     let mut unfolded = Vec::with_capacity(bytes.len());
     let mut index = 0;
     while index < bytes.len() {
@@ -204,7 +209,7 @@ fn unfold(bytes: &[u8]) -> Vec<u8> {
         }
         index += 1;
         if !matches!(bytes.get(index), Some(b' ' | b'\t')) {
-            break;
+            return (unfolded, false);
         }
         while matches!(bytes.get(index), Some(b' ' | b'\t')) {
             index += 1;
@@ -214,7 +219,7 @@ fn unfold(bytes: &[u8]) -> Vec<u8> {
         }
         unfolded.push(b' ');
     }
-    unfolded
+    (unfolded, true)
 }
 
 /// An encoded word at the start of the input.
@@ -251,7 +256,7 @@ fn decode(
     mode: &Mode,
     function: &str,
 ) -> Option<Vec<u8>> {
-    let input = unfold(input);
+    let (input, ends_input) = unfold(input);
     let mut decoded = Vec::new();
     let mut index = 0;
     let mut after_word = false;
@@ -267,9 +272,10 @@ fn decode(
                         after_word = true;
                     }
                     Err(error) if mode.continue_on_error => {
-                        // PHP drops the last byte of an invalid word at the
-                        // very end.
-                        let at_end = end == input.len()
+                        // PHP drops the last byte of an invalid word that
+                        // ends the input, but not one before a line break.
+                        let at_end = ends_input
+                            && end == input.len()
                             && matches!(error, iconv_native::ConvertError::InvalidInput);
                         decoded.extend_from_slice(&input[index..end - usize::from(at_end)]);
                         after_word = false;

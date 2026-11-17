@@ -136,6 +136,13 @@ fn option_matrix() {
         "=?bogus?B?YQ==?=",
         "=?UTF-8?B?w6k=?= \r\n =?UTF-8?B?w6k=?=",
         "Subject: hello\r\nX-Test: a\r\nX-Test: b\r\n",
+        // Header values are decoded as part of their line.
+        "X:=?bogus?B?YQ==?=\r\n",
+        "X:=?UTF-8?B?w6k=?=\r\nY:\t =?UTF-8?Q?a?= b\r\n",
+        "=?UTF-8?B?WC1F?=: value\r\n",
+        "X: a\r\n\t b\r\nY: =?UTF-8?B?w6k=?=",
+        "=?UTF-8?B?w6k=?=",
+        "=?UTF-8?B?w6k=?=\r\n",
     ] {
         m.case("mb_decode_mimeheader", vec![Value::from(input)]);
         for mode in [0, 1, 2, 3, 4] {
