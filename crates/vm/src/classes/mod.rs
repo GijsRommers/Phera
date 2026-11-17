@@ -13,7 +13,6 @@ mod native;
 mod signatures;
 mod static_calls;
 mod static_known;
-pub(crate) mod static_sites;
 
 pub(crate) use class::{
     Class, ConstantState, Invocation, LinkedConstant, Method, MethodBody, MethodContext,

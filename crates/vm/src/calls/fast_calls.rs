@@ -203,6 +203,9 @@ impl Machine<'_> {
         let Some(call) = self.stack.preparing.last() else {
             return Step::Slow;
         };
+        if let CallTarget::Constructed(_) = call.callee.target {
+            return self.finish_construction(position, destination);
+        }
         let Some(function) = php_function(&call.callee) else {
             return Step::Slow;
         };
@@ -247,6 +250,20 @@ impl Machine<'_> {
 }
 
 impl Machine<'_> {
+    /// `Call` after `new` of a class without a constructor: the object is the
+    /// result, and the arguments, already evaluated, are dropped.
+    fn finish_construction(&mut self, position: Position, destination: Reg) -> Step {
+        let Some(call) = self.stack.preparing.pop() else {
+            return Step::Slow;
+        };
+        self.registers.truncate(call.window.base);
+        if let CallTarget::Constructed(object) = call.callee.target {
+            let slot = position.frame.base() + destination.index();
+            self.registers.put(slot, Value::Object(object));
+        }
+        Step::Done(position.ip)
+    }
+
     /// Copy a closure's captured values into the registers after its
     /// parameters, and return the class context it was created in.
     fn copy_captures(

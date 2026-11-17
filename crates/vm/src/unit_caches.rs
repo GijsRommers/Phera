@@ -38,7 +38,6 @@ pub(crate) struct ClassTypeEntry {
 pub(crate) enum CachedSite {
     Empty,
     Property(Rc<crate::property_sites::PropertyEntry>),
-    Static(Box<crate::classes::static_sites::StaticEntry>),
 }
 
 impl UnitCache {
