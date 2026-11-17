@@ -17,12 +17,18 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     timeout-minutes: 40
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target/package-build
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           toolchain: '1.99.1'
       - uses: Swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2
+        with:
+          # Test package/source caches must never be pruned as Cargo artifacts.
+          prefix-key: package-build-v1
+          workspaces: . -> target/package-build
       - uses: shivammathur/setup-php@d52fc211a0436f8839a587b3b5b8efddab4744ea # v2
         with:
           php-version: '8.5'
@@ -35,7 +41,7 @@ jobs:
         run: cargo test -p phera-packages --test network -- --nocapture
         env:
           PHERA_PACKAGES_NETWORK: '1'
-          PHERA_BIN: ${{ github.workspace }}/target/release/phera
+          PHERA_BIN: ${{ github.workspace }}/target/package-build/release/phera
           PHERA_COMPOSER: ${{ github.workspace }}/target/composer.phar
           PHERA_PHP: php
       - name: Preserve comparison diagnostics
