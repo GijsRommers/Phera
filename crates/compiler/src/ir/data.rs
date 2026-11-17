@@ -167,7 +167,14 @@ pub struct ClassProperty {
     pub is_static: bool,
     pub is_readonly: bool,
     pub ty: Option<String>,
-    pub default: Option<usize>,
+    pub default: Option<PropertyInitializer>,
+}
+
+/// A property literal is data; other constant expressions retain their initializer function.
+#[derive(Debug, Clone)]
+pub enum PropertyInitializer {
+    Literal(Constant),
+    Function(usize),
 }
 
 /// Constant initializers execute only when the linked class first needs their value.

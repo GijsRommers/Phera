@@ -72,11 +72,16 @@ impl Vm {
             .collect();
         if let Some(parent) = self.current() {
             let parent_names = parent
-                .function()
+                .function(&self.code)
                 .locals
                 .iter()
-                .filter_map(|name| parent.unit.names.get(name.index()))
-                .chain(parent.dynamic.iter().map(|(name, _)| name));
+                .filter_map(|name| parent.unit(&self.code).names.get(name.index()))
+                .chain(
+                    self.call_stack.extras[parent.depth]
+                        .dynamic
+                        .iter()
+                        .map(|(name, _)| name),
+                );
             for name in parent_names {
                 if !names.contains(name) {
                     names.push(name.clone());
@@ -91,10 +96,10 @@ impl Vm {
         let Some(frame) = self.current() else {
             return Ok(());
         };
-        if frame.function_id.is_some() || frame.destination.is_none() {
+        if frame.function_id(&self.code).is_some() || frame.destination.is_none() {
             return Ok(());
         }
-        let entries = scope_entries(frame, &self.registers);
+        let entries = scope_entries(self, frame, &self.registers);
         let mut frame = self
             .call_stack
             .pop()
@@ -121,21 +126,25 @@ impl Vm {
 }
 
 /// Snapshot raw bindings before releasing the included frame, preserving reference identity.
-fn scope_entries(frame: &Frame, registers: &crate::calls::registers::Registers) -> Vec<ScopeEntry> {
+fn scope_entries(
+    vm: &Vm,
+    frame: &Frame,
+    registers: &crate::calls::registers::Registers,
+) -> Vec<ScopeEntry> {
     frame
-        .function()
+        .function(&vm.code)
         .locals
         .iter()
         .enumerate()
         .filter_map(|(index, name)| {
             frame
-                .unit
+                .unit(&vm.code)
                 .names
                 .get(name.index())
                 .map(|name| (name, Reg(index as u16)))
         })
         .chain(
-            frame
+            vm.call_stack.extras[frame.depth]
                 .dynamic
                 .iter()
                 .map(|(name, register)| (name, *register)),

@@ -28,32 +28,28 @@ impl Vm {
             "Deprecated",
             format!("Use of \"{name}\" in callables is deprecated"),
         );
-        let context = self
-            .current()
-            .and_then(|frame| frame.method.as_ref())
-            .cloned()
-            .ok_or_else(|| {
-                NativeError::error(format!(
-                    "Cannot access \"{name}\" when no class scope is active"
-                ))
-            })?;
+        let context = self.current_method_context().ok_or_else(|| {
+            NativeError::error(format!(
+                "Cannot access \"{name}\" when no class scope is active"
+            ))
+        })?;
         let class = match name {
-            "parent" => context.scope.parent.clone(),
-            "static" => Some(context.called.clone()),
-            _ => Some(context.scope.clone()),
+            "parent" => self.classes.at(context.scope).parent.clone(),
+            "static" => Some(self.classes.at(context.called).clone()),
+            _ => Some(self.classes.at(context.scope).clone()),
         }
         .ok_or_else(|| {
             NativeError::error("Cannot access \"parent\" when current class scope has no parent")
         })?;
         self.prepare_method(class, context.receiver, method, Invocation::Method)?;
-        self.forward_callback_class(context.called)
+        self.forward_callback_class(self.classes.at(context.called).clone())
     }
 
     /// Parent-qualified callback lookup changes visibility scope but retains late static binding.
     pub(crate) fn forward_callback_class(&mut self, class: Rc<Class>) -> Result<(), NativeError> {
         let pending = self.call_stack.pending_mut()?;
         if let CallTarget::Method { context, .. } = &mut pending.callee.target {
-            context.called = class;
+            context.called = class.index;
         }
         Ok(())
     }

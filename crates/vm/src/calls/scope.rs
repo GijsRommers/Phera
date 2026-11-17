@@ -7,31 +7,46 @@ use phera_extension_api::NativeError;
 impl Vm {
     /// Dynamic-scope operations reuse declared locals before allocating a new named slot.
     pub(crate) fn named_slot(&mut self, name: &str) -> Result<Reg, NativeError> {
-        let frame = self
+        let mut frame = self
             .call_stack
-            .current_mut()
+            .current()
+            .copied()
             .ok_or_else(|| internal_error!("no variable frame"))?;
-        if let Some(i) = frame.function().locals.iter().position(|candidate| {
-            frame
-                .unit
-                .names
-                .get(candidate.index())
-                .is_some_and(|value| value == name)
-        }) {
+        if let Some(i) = frame
+            .function(&self.code)
+            .locals
+            .iter()
+            .position(|candidate| {
+                frame
+                    .unit(&self.code)
+                    .names
+                    .get(candidate.index())
+                    .is_some_and(|value| value == name)
+            })
+        {
             return Ok(Reg(i as u16));
         }
-        if let Some(register) = frame.dynamic.get(name) {
+        if let Some(register) = self.call_stack.extras[frame.depth].dynamic.get(name) {
             return Ok(*register);
         }
         let register = Reg(u16::try_from(frame.count)
             .map_err(|_| NativeError::error("Phera register limit exceeded"))?);
         let insertion = frame.base + frame.count;
         self.registers.insert_undefined(insertion);
-        if let Some(base) = &mut frame.saved_arguments {
+        if let Some(base) = &mut self.call_stack.extras[frame.depth].saved_arguments {
             *base += 1;
         }
+        if let Some(context) = &mut self.call_stack.extras[frame.depth].method
+            && let Some(receiver) = &mut context.receiver
+            && *receiver >= insertion
+        {
+            *receiver += 1;
+        }
         frame.count += 1;
-        frame.dynamic.insert(name.into(), register);
+        *self.call_stack.current_mut().expect("active frame") = frame;
+        self.call_stack.extras[frame.depth]
+            .dynamic
+            .insert(name.into(), register);
         for call in &mut self.call_stack.preparing {
             if call.window.base >= insertion {
                 call.window.base += 1;

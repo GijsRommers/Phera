@@ -9,7 +9,7 @@ use phera_extension_api::NativeError;
 use phera_value::{Object, Value};
 
 use crate::Vm;
-use crate::calls::call_state::{CallTarget, Callee, ParameterSpec};
+use crate::calls::call_state::Callee;
 use crate::classes::MethodContext;
 
 /// A pending capture belongs to a frame, so throwing from its warning handler releases it.
@@ -79,14 +79,19 @@ impl Vm {
         let frame = self
             .current()
             .ok_or_else(|| internal_error!("closure frame"))?;
-        let unit = frame.unit.clone();
+        let unit = frame.unit(&self.code).clone();
         let body = unit
             .functions
             .get(function.index())
             .ok_or_else(|| internal_error!("closure body"))?;
         let capture_count = body.captures as usize;
         let context = self.closure_context(binding);
-        let callee = closure_callee(unit, function)?;
+        let address = self.code.index(&unit, Some(function.index()));
+        let callee = Callee {
+            argument_binding: crate::calls::callback_binding::ArgumentBinding::Caller,
+            signature: self.code.functions[address.0 as usize].signature,
+            target: crate::calls::call_state::CallTarget::User { function: address },
+        };
         let first_capture = self
             .closure_captures
             .len()
@@ -113,7 +118,7 @@ impl Vm {
 
     /// A static closure keeps private class access while deliberately omitting the receiver.
     fn closure_context(&self, binding: ClosureBinding) -> Option<MethodContext> {
-        let mut context = self.current()?.method.as_ref()?.clone();
+        let mut context = self.current_method_context()?;
         context.invocation = crate::classes::Invocation::Method;
         if binding == ClosureBinding::Static {
             context.receiver = None;
@@ -165,7 +170,9 @@ impl ClosureState {
 impl Vm {
     /// Function-derived closures share the original named function's statics.
     pub(crate) fn lexical_closure(&self) -> Option<Rc<Object>> {
-        let object = self.current()?.closure.as_ref()?;
+        let object = self.call_stack.extras[self.current()?.depth]
+            .closure
+            .as_ref()?;
         let lexical = object
             .native
             .borrow()
@@ -174,29 +181,4 @@ impl Vm {
             .is_some_and(|state| state.origin == ClosureOrigin::Lexical);
         lexical.then(|| object.clone())
     }
-}
-
-/// Captured values remain per object; the signature only holds immutable unit metadata.
-fn closure_callee(
-    unit: std::sync::Arc<phera_bytecode::CompiledUnit>,
-    function: FunctionId,
-) -> Result<Callee, NativeError> {
-    let body = unit
-        .functions
-        .get(function.index())
-        .ok_or_else(|| internal_error!("closure body"))?;
-    let parameters: Vec<ParameterSpec> = body
-        .parameters
-        .iter()
-        .map(|parameter| ParameterSpec::user(&unit, parameter))
-        .collect();
-    Ok(Callee {
-        argument_binding: crate::calls::callback_binding::ArgumentBinding::Caller,
-        name: body.name.as_str().into(),
-        parameters: parameters.into(),
-        target: CallTarget::User {
-            unit,
-            index: function.index(),
-        },
-    })
 }

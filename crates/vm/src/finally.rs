@@ -51,7 +51,7 @@ impl Vm {
             .call_stack
             .current_mut()
             .ok_or_else(|| internal_error!("finally without frame"))?;
-        let end = frame.function().instructions.iter().enumerate().skip(target.index())
+        let end = frame.function(&self.code).instructions.iter().enumerate().skip(target.index())
             .find_map(|(index, instruction)| matches!(instruction, Instruction::FinallyReturn { state: found } if *found == state).then_some(index))
             .ok_or_else(|| internal_error!("finally without return"))?;
         self.finally_stack.push(SavedFinally {

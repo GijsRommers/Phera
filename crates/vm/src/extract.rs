@@ -95,18 +95,23 @@ impl Vm {
     fn extracted_symbol_status(&self, name: &str) -> SymbolStatus {
         self.current().map_or(SymbolStatus::Missing, |frame| {
             let register = frame
-                .function()
+                .function(&self.code)
                 .locals
                 .iter()
                 .position(|candidate| {
                     frame
-                        .unit
+                        .unit(&self.code)
                         .names
                         .get(candidate.index())
                         .is_some_and(|candidate| candidate == name)
                 })
                 .map(|index| phera_bytecode::Reg(index as u16))
-                .or_else(|| frame.dynamic.get(name).copied());
+                .or_else(|| {
+                    self.call_stack.extras[frame.depth]
+                        .dynamic
+                        .get(name)
+                        .copied()
+                });
             match register.and_then(|register| frame.slots(&self.registers).get(register.index())) {
                 Some(Some(_)) => SymbolStatus::Defined,
                 Some(None) => SymbolStatus::Undefined,

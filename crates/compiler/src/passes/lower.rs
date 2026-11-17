@@ -297,8 +297,13 @@ pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
                     is_static: property.is_static,
                     is_readonly: property.is_readonly,
                     ty: property.ty.map(|name| tables.ty(&name)),
-                    default: property.default.map(|index| {
-                        phera_bytecode::Initializer::Function(FunctionId(index as u32))
+                    default: property.default.map(|initializer| match initializer {
+                        ir::PropertyInitializer::Literal(value) => {
+                            phera_bytecode::Initializer::Literal(tables.constant(&value))
+                        }
+                        ir::PropertyInitializer::Function(index) => {
+                            phera_bytecode::Initializer::Function(FunctionId(index as u32))
+                        }
                     }),
                 })
                 .collect(),

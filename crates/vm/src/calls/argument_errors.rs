@@ -67,7 +67,7 @@ impl Vm {
         }
         let frame = self
             .current()
-            .filter(|frame| frame.function_id.is_some())
+            .filter(|frame| frame.function_id(&self.code).is_some())
             .ok_or_else(|| {
                 NativeError::error(match function {
                     ArgumentFunction::Count => {
@@ -82,16 +82,19 @@ impl Vm {
                 })
             })?;
         match function {
-            ArgumentFunction::Count => Ok(Value::Int(frame.argument_count as i64)),
+            ArgumentFunction::Count => Ok(Value::Int(
+                self.call_stack.extras[frame.depth].argument_count as i64,
+            )),
             ArgumentFunction::All => {
                 let mut result = PhpArray::new();
-                for index in 0..frame.argument_count {
-                    result.push(frame.argument(&self.registers, index))?;
+                for index in 0..self.call_stack.extras[frame.depth].argument_count {
+                    result.push(self.frame_argument(frame, index))?;
                 }
                 Ok(Value::Array(Rc::new(result)))
             }
-            ArgumentFunction::One => (position < frame.argument_count as i64)
-                .then(|| frame.argument(&self.registers, position as usize))
+            ArgumentFunction::One => (position
+                < self.call_stack.extras[frame.depth].argument_count as i64)
+                .then(|| self.frame_argument(frame, position as usize))
                 .ok_or_else(|| {
                     NativeError::value_error(
                         "func_get_arg(): Argument #1 ($position) must be less than the number \
@@ -155,5 +158,28 @@ impl Vm {
             self.error_handlers.trace_string_limit = limit;
         }
         Ok(Value::from(previous.to_string()))
+    }
+}
+
+impl Vm {
+    /// Fixed parameters stay live while variadic introspection uses the saved argument view.
+    fn frame_argument(&self, frame: &crate::calls::frame::Frame, index: usize) -> Value {
+        let function = frame.function(&self.code);
+        let fixed = function.parameters.len()
+            - usize::from(function.argument_layout == phera_bytecode::ArgumentLayout::Variadic);
+        let extra = &self.call_stack.extras[frame.depth];
+        let slot = if index < fixed {
+            frame.base + index
+        } else if let Some(base) = extra.saved_arguments {
+            base + index
+        } else {
+            frame.base + frame.count + index - fixed
+        };
+        self.registers
+            .window(slot, 1)
+            .first()
+            .and_then(Option::as_ref)
+            .map(|value| value.deref().clone())
+            .unwrap_or_default()
     }
 }

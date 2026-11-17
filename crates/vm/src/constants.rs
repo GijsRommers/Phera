@@ -14,7 +14,7 @@ impl Vm {
     ) -> Result<(), NativeError> {
         let value = self
             .current()
-            .and_then(|frame| frame.cache.constants.get(constant.index()))
+            .and_then(|frame| frame.cache(&self.code).constants.get(constant.index()))
             .cloned()
             .ok_or_else(|| internal_error!("constant"))?;
         self.set(destination, value);
@@ -30,7 +30,7 @@ impl Vm {
         let unit = self
             .current()
             .ok_or_else(|| internal_error!("constant frame"))?
-            .unit
+            .unit(&self.code)
             .clone();
         let value = self.constants.fetch(unit, constant)?;
         self.set(destination, value);

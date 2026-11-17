@@ -7,7 +7,7 @@ use phera_extension_api::NativeError;
 use phera_value::Value;
 
 use crate::Vm;
-use crate::calls::call_state::{CallTarget, Callee, ParameterSpec};
+use crate::calls::call_state::{CallTarget, Callee};
 use crate::classes::{Invocation, MethodContext};
 use crate::closures::{ClosureOrigin, ClosureState};
 use crate::function_table::FunctionRef;
@@ -81,26 +81,17 @@ impl Vm {
         binding: phera_bytecode::ClosureBinding,
     ) -> Result<Rc<phera_value::Object>, NativeError> {
         let index = function.index();
-        let body = &reference.unit.functions[index];
-        let parameters = body
-            .parameters
-            .iter()
-            .map(|parameter| ParameterSpec::user(&reference.unit, parameter))
-            .collect();
+        let address = self.code.index(&reference.unit, Some(index));
         let context = self.classes.get(scope).map(|scope| MethodContext {
-            called: scope.clone(),
-            scope,
+            called: scope.index,
+            scope: scope.index,
             receiver: None,
             invocation: Invocation::Method,
         });
         let callee = Callee {
             argument_binding: crate::calls::callback_binding::ArgumentBinding::Caller,
-            name: body.name.as_str().into(),
-            parameters,
-            target: CallTarget::User {
-                unit: reference.unit.clone(),
-                index,
-            },
+            signature: self.code.functions[address.0 as usize].signature,
+            target: CallTarget::User { function: address },
         };
         let state = ClosureState {
             origin: ClosureOrigin::Lexical,

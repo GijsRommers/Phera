@@ -33,9 +33,12 @@ impl Vm {
         let frame = self
             .current()
             .ok_or_else(|| internal_error!("property site"))?;
-        let scope = frame.method.as_ref().map(|context| &context.scope);
-        if let Some(slot) = frame.site_cache()
-            && let crate::unit_caches::CachedSite::Property(entry) = &*slot.borrow()
+        let scope = self.call_stack.extras[frame.depth]
+            .method
+            .as_ref()
+            .map(|context| self.classes.at(context.scope));
+        if let Some(slot) = frame.site_cache(&self.code)
+            && let crate::unit_data::CachedSite::Property(entry) = &*slot.borrow()
             && Rc::ptr_eq(&entry.class, &object.class)
             && match (&entry.scope, &scope) {
                 (None, None) => true,
@@ -46,7 +49,7 @@ impl Vm {
             return Ok(entry.clone());
         }
         let scope = scope.cloned();
-        let unit = frame.unit.clone();
+        let unit = frame.unit(&self.code).clone();
         let name = unit
             .names
             .get(name.index())
@@ -78,8 +81,11 @@ impl Vm {
             write_rule,
             slot,
         });
-        if let Some(slot) = self.current().and_then(|frame| frame.site_cache()) {
-            *slot.borrow_mut() = crate::unit_caches::CachedSite::Property(entry.clone());
+        if let Some(slot) = self
+            .current()
+            .and_then(|frame| frame.site_cache(&self.code))
+        {
+            *slot.borrow_mut() = crate::unit_data::CachedSite::Property(entry.clone());
         }
         Ok(entry)
     }

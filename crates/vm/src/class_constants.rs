@@ -35,8 +35,8 @@ impl Vm {
             .and_then(|name| self.classes.get(name))
             .or_else(|| {
                 self.current()
-                    .and_then(|frame| frame.method.as_ref())
-                    .map(|context| context.scope.clone())
+                    .and_then(|frame| self.call_stack.extras[frame.depth].method.as_ref())
+                    .map(|context| self.classes.at(context.scope).clone())
             });
         let allowed = match constant.visibility {
             Visibility::Public => true,

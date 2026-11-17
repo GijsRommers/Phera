@@ -89,8 +89,8 @@ impl Vm {
             })?;
         let scope = self
             .current()
-            .and_then(|frame| frame.method.as_ref())
-            .map(|context| &context.scope);
+            .and_then(|frame| self.call_stack.extras[frame.depth].method.as_ref())
+            .map(|context| self.classes.at(context.scope));
         let allowed = match property.visibility {
             Visibility::Public => true,
             Visibility::Private => scope.is_some_and(|scope| scope.name == property.declaring),
@@ -242,8 +242,8 @@ impl Vm {
             .ok_or_else(|| internal_error!("property class"))?;
         let scope = self
             .current()
-            .and_then(|frame| frame.method.as_ref())
-            .map(|context| &context.scope);
+            .and_then(|frame| self.call_stack.extras[frame.depth].method.as_ref())
+            .map(|context| self.classes.at(context.scope));
         let property = scope
             .and_then(|scope| {
                 class.defaults.iter().find(|property| {

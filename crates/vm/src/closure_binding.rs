@@ -44,8 +44,8 @@ impl Vm {
         let effective_scope =
             scope.or_else(|| receiver.as_ref().and_then(|_| self.classes.get("Closure")));
         state.context = effective_scope.map(|scope| MethodContext {
-            called: receiver_class.unwrap_or_else(|| scope.clone()),
-            scope,
+            called: receiver_class.map_or(scope.index, |class| class.index),
+            scope: scope.index,
             receiver,
             invocation: Invocation::Method,
         });
@@ -56,10 +56,9 @@ impl Vm {
             }
             state.callee = Callee {
                 argument_binding: state.callee.argument_binding,
-                name: state.callee.name.clone(),
-                parameters: state.callee.parameters.clone(),
+                signature: state.callee.signature,
                 target: CallTarget::Method {
-                    method: method.clone(),
+                    method: *method,
                     context,
                 },
             };
@@ -79,7 +78,7 @@ impl Vm {
             Value::String(name) if name.as_bytes() == b"static" => original
                 .context
                 .as_ref()
-                .map(|context| context.scope.clone()),
+                .map(|context| self.classes.at(context.scope).clone()),
             Value::String(name) => {
                 let name = name.to_string_lossy();
                 let Some(class) = self.classes.get(&name) else {
@@ -110,7 +109,10 @@ impl Vm {
         if let Some(message) = self.receiver_binding_error(state, receiver) {
             return Some(message);
         }
-        let original_scope = state.context.as_ref().map(|context| &context.scope);
+        let original_scope = state
+            .context
+            .as_ref()
+            .map(|context| self.classes.at(context.scope));
         let same_scope = match (original_scope, scope) {
             (Some(left), Some(right)) => Rc::ptr_eq(left, right),
             (None, None) => true,
@@ -143,7 +145,10 @@ impl Vm {
         state: &ClosureState,
         receiver: Option<&Object>,
     ) -> Option<String> {
-        let original_scope = state.context.as_ref().map(|context| &context.scope);
+        let original_scope = state
+            .context
+            .as_ref()
+            .map(|context| self.classes.at(context.scope));
         if let Some(receiver) = receiver {
             if state.binding == ClosureBinding::Static {
                 return Some("Cannot bind an instance to a static closure".into());
@@ -157,7 +162,7 @@ impl Vm {
             {
                 return Some(format!(
                     "Cannot bind method {}() to object of class {}",
-                    state.callee.name,
+                    self.signatures.get(state.callee.signature).name,
                     receiver.class.name()
                 ));
             }
@@ -171,7 +176,7 @@ impl Vm {
                 .context
                 .as_ref()
                 .is_some_and(|context| context.receiver.is_some())
-            && closure_uses_this(state)
+            && closure_uses_this(state, &self.code)
         {
             return Some("Cannot unbind $this of closure using $this".into());
         }
@@ -180,11 +185,11 @@ impl Vm {
 }
 
 /// The compiled receiver operations also cover `$this` used through property paths.
-fn closure_uses_this(state: &ClosureState) -> bool {
-    let CallTarget::User { unit, index } = &state.callee.target else {
+fn closure_uses_this(state: &ClosureState, code: &crate::code_table::CodeTable) -> bool {
+    let CallTarget::User { function } = &state.callee.target else {
         return false;
     };
-    let function = &unit.functions[*index];
+    let function = code.function(*function);
     function.instructions.iter().any(|instruction| {
         matches!(
             instruction,

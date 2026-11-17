@@ -48,7 +48,7 @@ impl Vm {
         let unit = self
             .current()
             .ok_or_else(|| internal_error!("class frame"))?
-            .unit
+            .unit(&self.code)
             .clone();
         if self
             .prelinked_classes
@@ -73,6 +73,7 @@ impl Vm {
     ) -> Result<(), NativeError> {
         let declaration = &unit.classes[index.index()];
         let name = &declaration.name;
+        let class_index = super::class_table::ClassIndex(self.classes.entries.len() as u32);
         if let Some(existing) = self.classes.get(name) {
             return Err(NativeError::error(format!(
                 "Cannot redeclare class {}",
@@ -138,7 +139,17 @@ impl Vm {
         for method in &declaration.methods {
             let method_name = &unit.names[method.name.index()];
             let linked = Rc::new(Method {
-                signature: std::cell::OnceCell::new(),
+                declaring_index: class_index,
+                signature: self.signatures.insert(
+                    format!("{name}::{method_name}"),
+                    unit.functions[method.function.index()]
+                        .parameters
+                        .iter()
+                        .map(|parameter| {
+                            crate::calls::call_state::ParameterSpec::user(&unit, parameter)
+                        })
+                        .collect(),
+                ),
                 name: method_name.clone(),
                 declaring: name.clone(),
                 visibility: method.visibility,
@@ -146,6 +157,7 @@ impl Vm {
                 is_final: method.is_final,
                 is_abstract: method.is_abstract,
                 body: MethodBody::User(crate::function_table::FunctionRef {
+                    address: self.code.index(&unit, Some(method.function.index())),
                     unit: unit.clone(),
                     index: method.function.index(),
                 }),
@@ -154,16 +166,24 @@ impl Vm {
                 super::inheritance_checks::check_override(name, inherited, &linked)?;
                 self.check_method_contract(inherited, &linked, &unit)?;
             }
-            methods.insert(method_name.to_ascii_lowercase(), linked);
+            methods.insert(
+                self.classes.names.intern(method_name),
+                method_name.to_ascii_lowercase(),
+                linked,
+            );
         }
         for interface in &interfaces {
-            for (name, method) in &interface.methods {
+            for (name, method) in interface.methods.iter() {
                 if let Some(implementation) = methods.get(name) {
                     self.check_method_contract(method, implementation, &unit)?;
                 }
-                methods
-                    .entry(name.clone())
-                    .or_insert_with(|| method.clone());
+                if methods.get(name).is_none() {
+                    methods.insert(
+                        self.classes.names.intern(name),
+                        name.clone(),
+                        method.clone(),
+                    );
+                }
             }
         }
         super::inheritance_checks::check_abstract(
@@ -206,6 +226,7 @@ impl Vm {
                     visibility: constant.visibility,
                     is_final: constant.is_final,
                     initializer: crate::function_table::FunctionRef {
+                        address: self.code.index(&unit, Some(constant.initializer.index())),
                         unit: unit.clone(),
                         index: constant.initializer.index(),
                     },
@@ -236,7 +257,7 @@ impl Vm {
             } else {
                 value
             };
-            let mut linked = PropertyDefault {
+            let linked = PropertyDefault {
                 key: key.clone(),
                 value,
                 name: property_name.clone(),
@@ -246,6 +267,7 @@ impl Vm {
                 initializer: match property.default {
                     Some(phera_bytecode::Initializer::Function(index)) => {
                         Some(crate::function_table::FunctionRef {
+                            address: self.code.index(&unit, Some(index.index())),
                             unit: unit.clone(),
                             index: index.index(),
                         })
@@ -259,20 +281,6 @@ impl Vm {
                     property.default.is_some() || property.ty.is_none(),
                 )),
             };
-            if let Some(value) = linked
-                .initializer
-                .as_ref()
-                .and_then(super::class::literal_initializer)
-            {
-                if property.is_static {
-                    if let phera_value::Value::Reference(cell) = &linked.value {
-                        *cell.borrow_mut() = value;
-                    }
-                } else {
-                    linked.value = value;
-                }
-                linked.initializer = None;
-            }
             let inherited = if property.is_static {
                 &static_properties
             } else {
@@ -302,14 +310,16 @@ impl Vm {
         let is_throwable = parent.as_ref().is_some_and(|parent| parent.is_throwable)
             || interfaces.iter().any(|interface| interface.is_throwable);
         self.classes.order.push(name.clone());
-        self.classes.entries.insert(
+        self.classes.insert(
             name.to_ascii_lowercase(),
             Rc::new_cyclic(|identity| Class {
+                index: class_index,
+                ancestry: super::class::ancestor_indexes(&parent, &interfaces),
                 origin: super::class::ClassOrigin::User,
                 identity: identity.clone(),
                 declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
                 ancestors: super::class::ancestor_names(&parent, &interfaces),
-                empty_constructor: super::class::empty_constructor(name),
+                empty_constructor: super::class::empty_constructor(name, &mut self.signatures),
                 name_value: phera_value::Value::from(name.as_str()),
                 name: name.clone(),
                 parent,

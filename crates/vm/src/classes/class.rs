@@ -2,13 +2,14 @@
 
 use std::{any::Any, collections::HashMap, rc::Rc};
 
-use crate::calls::call_state::ParameterSpec;
 use phera_bytecode::{ClassKind, Visibility};
 use phera_extension_api::MethodEntry;
 use phera_value::{ArrayKey, ClassHandle, Object, Value};
 
 /// A linked class is immutable; its parent keeps inherited metadata alive.
 pub(crate) struct Class {
+    pub(crate) index: super::class_table::ClassIndex,
+    pub(crate) ancestry: Vec<super::class_table::ClassIndex>,
     /// Only user class scopes may be assigned freely by Closure::bind.
     pub(crate) origin: ClassOrigin,
     /// The owning Rc can be recovered from an object's borrowed ClassHandle without a name lookup.
@@ -31,7 +32,7 @@ pub(crate) struct Class {
     pub(crate) is_final: bool,
     pub(crate) is_readonly: bool,
     pub(crate) allows_dynamic_properties: bool,
-    pub(crate) methods: HashMap<String, Rc<Method>>,
+    pub(crate) methods: super::method_table::MethodTable,
     /// Constructor presence is immutable after linking, including inheritance.
     pub(crate) constructor: Option<Rc<Method>>,
     /// Root-first property keys reproduce the layout used by native testing helpers.
@@ -39,7 +40,7 @@ pub(crate) struct Class {
     /// Literal defaults are materialized once at linking; objects clone this COW table.
     pub(crate) property_template: Option<phera_value::PhpArray>,
     /// An absent constructor still has a shared signature for argument diagnostics.
-    pub(crate) empty_constructor: MethodSignature,
+    pub(crate) empty_constructor: crate::signatures::SignatureIndex,
     pub(crate) static_properties: Vec<PropertyDefault>,
     pub(crate) constants: HashMap<String, Rc<LinkedConstant>>,
 }
@@ -62,9 +63,10 @@ pub(crate) struct PropertyDefault {
 
 /// A method remembers its declaring scope independently of the receiver's class.
 pub(crate) struct Method {
+    pub(crate) declaring_index: super::class_table::ClassIndex,
     /// Keyed by this immutable linked method; populated on first call. The
     /// method owns the entry for its request lifetime, so invalidation is unnecessary.
-    pub(crate) signature: std::cell::OnceCell<MethodSignature>,
+    pub(crate) signature: crate::signatures::SignatureIndex,
     pub(crate) name: String,
     pub(crate) declaring: String,
     pub(crate) visibility: Visibility,
@@ -93,8 +95,8 @@ pub(crate) enum MethodBody {
 #[derive(Clone)]
 pub(crate) struct MethodContext {
     pub(crate) receiver: Option<Rc<Object>>,
-    pub(crate) scope: Rc<Class>,
-    pub(crate) called: Rc<Class>,
+    pub(crate) scope: super::class_table::ClassIndex,
+    pub(crate) called: super::class_table::ClassIndex,
     /// A constructor's return value is discarded in favor of its allocated receiver.
     pub(crate) invocation: Invocation,
 }
@@ -146,41 +148,6 @@ pub(crate) enum ConstantState {
     Ready(Value),
 }
 
-/// A literal load records its destination for the return-register check.
-struct LiteralLoad {
-    destination: phera_bytecode::Reg,
-    value: Value,
-}
-
-/// Only literal loads followed by return can be folded without changing diagnostics.
-pub(crate) fn literal_initializer(reference: &crate::function_table::FunctionRef) -> Option<Value> {
-    use phera_bytecode::Instruction;
-    let instructions = &reference.unit.functions.get(reference.index)?.instructions;
-    let [load, Instruction::Return { src }] = instructions.as_slice() else {
-        return None;
-    };
-    let LiteralLoad { destination, value } = match *load {
-        Instruction::LoadInt { dst, value } => LiteralLoad {
-            destination: dst,
-            value: Value::Int(value.into()),
-        },
-        Instruction::LoadBool { dst, value } => LiteralLoad {
-            destination: dst,
-            value: Value::Bool(value),
-        },
-        Instruction::LoadNull { dst } => LiteralLoad {
-            destination: dst,
-            value: Value::Null,
-        },
-        Instruction::LoadConst { dst, constant } => LiteralLoad {
-            destination: dst,
-            value: crate::calls::frame::value(reference.unit.constants.get(constant.index())?),
-        },
-        _ => return None,
-    };
-    (destination == *src).then_some(value)
-}
-
 /// Templates are valid for the immutable linked class and contain no evaluated expressions.
 pub(crate) fn property_template(defaults: &[PropertyDefault]) -> Option<phera_value::PhpArray> {
     let mut template = phera_value::PhpArray::new();
@@ -193,12 +160,6 @@ pub(crate) fn property_template(defaults: &[PropertyDefault]) -> Option<phera_va
         }
     }
     Some(template)
-}
-
-/// Argument routing metadata is independent of the receiver and shared by calls.
-pub(crate) struct MethodSignature {
-    pub(crate) name: Rc<str>,
-    pub(crate) parameters: Rc<[crate::calls::call_state::ParameterSpec]>,
 }
 
 /// Linked parents/interfaces already carry their transitive ancestry. The set is
@@ -217,11 +178,11 @@ pub(crate) fn ancestor_names(
 }
 
 /// Missing constructors have no parameters; their diagnostic name is linked once.
-pub(crate) fn empty_constructor(name: &str) -> MethodSignature {
-    MethodSignature {
-        name: format!("{name}::__construct").into(),
-        parameters: Rc::from([]),
-    }
+pub(crate) fn empty_constructor(
+    name: &str,
+    signatures: &mut crate::signatures::Signatures,
+) -> crate::signatures::SignatureIndex {
+    signatures.insert(format!("{name}::__construct"), Vec::new())
 }
 
 impl Class {
@@ -241,34 +202,6 @@ impl Class {
     }
 }
 
-impl Method {
-    /// Build receiver-independent argument metadata once for an immutable linked method.
-    pub(crate) fn signature(&self) -> &MethodSignature {
-        let method = self;
-        method.signature.get_or_init(|| {
-            let parameters: Rc<[ParameterSpec]> = match &method.body {
-                MethodBody::User(reference) => reference.unit.functions[reference.index]
-                    .parameters
-                    .iter()
-                    .map(|parameter| ParameterSpec::user(&reference.unit, parameter))
-                    .collect(),
-                MethodBody::Closure(operation) => operation
-                    .parameters()
-                    .iter()
-                    .map(ParameterSpec::native)
-                    .collect(),
-                MethodBody::Native(entry) => {
-                    entry.params.iter().map(ParameterSpec::native).collect()
-                }
-            };
-            MethodSignature {
-                name: format!("{}::{}", method.declaring, method.name).into(),
-                parameters,
-            }
-        })
-    }
-}
-
 impl Class {
     /// A complete simple declaration can reuse the same membership result that
     /// matches_declaration made after resolution. Relative keywords are excluded
@@ -279,4 +212,30 @@ impl Class {
         }
         self.declaration_matches.borrow().get(name).copied()
     }
+}
+
+impl Class {
+    /// Scope compatibility is integer membership in immutable linked ancestry.
+    pub(crate) fn includes(&self, ancestor: super::class_table::ClassIndex) -> bool {
+        self.index == ancestor
+            || self
+                .ancestry
+                .binary_search_by_key(&ancestor.0, |index| index.0)
+                .is_ok()
+    }
+}
+
+/// Link transitive class indexes once for method visibility and receiver compatibility.
+pub(crate) fn ancestor_indexes(
+    parent: &Option<Rc<Class>>,
+    interfaces: &[Rc<Class>],
+) -> Vec<super::class_table::ClassIndex> {
+    let mut indexes = Vec::new();
+    for class in parent.iter().chain(interfaces) {
+        indexes.push(class.index);
+        indexes.extend_from_slice(&class.ancestry);
+    }
+    indexes.sort_by_key(|index| index.0);
+    indexes.dedup();
+    indexes
 }

@@ -81,7 +81,7 @@ fn same_callable(left: &phera_value::Object, right: &phera_value::Object) -> boo
     };
     if left.origin != crate::closures::ClosureOrigin::Callable
         || right.origin != crate::closures::ClosureOrigin::Callable
-        || !left.callee.name.eq_ignore_ascii_case(&right.callee.name)
+        || left.callee.signature != right.callee.signature
         || implementation(&left.callee.target) != implementation(&right.callee.target)
     {
         return false;
@@ -94,9 +94,7 @@ fn same_callable(left: &phera_value::Object, right: &phera_value::Object) -> boo
                 (Some(left), Some(right)) => Rc::ptr_eq(left, right),
                 _ => false,
             };
-            same_receiver
-                && Rc::ptr_eq(&left.scope, &right.scope)
-                && Rc::ptr_eq(&left.called, &right.called)
+            same_receiver && left.scope == right.scope && left.called == right.called
         }
         _ => false,
     }
@@ -114,12 +112,11 @@ fn implementation(target: &crate::calls::call_state::CallTarget) -> Option<Imple
     match target {
         CallTarget::User { .. } => Some(Implementation::Php),
         CallTarget::Native(_) | CallTarget::Intrinsic(_) => Some(Implementation::Internal),
-        CallTarget::Method { method, .. } => match method.body {
-            crate::classes::MethodBody::User(_) => Some(Implementation::Php),
-            crate::classes::MethodBody::Native(_) | crate::classes::MethodBody::Closure(_) => {
-                Some(Implementation::Internal)
-            }
-        },
+        CallTarget::Method { method, .. } => Some(if method.function.is_some() {
+            Implementation::Php
+        } else {
+            Implementation::Internal
+        }),
         CallTarget::Constructed(_) | CallTarget::Closure(_) => None,
     }
 }

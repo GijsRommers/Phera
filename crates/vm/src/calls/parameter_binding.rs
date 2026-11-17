@@ -17,12 +17,8 @@ impl Vm {
         frame: &mut Frame,
         call: &CallWindow,
     ) -> Result<(), NativeError> {
-        let function = frame.function();
-        let required = frame
-            .function_id
-            .and_then(|index| frame.cache.required_parameters.get(index))
-            .copied()
-            .unwrap_or(0);
+        let function = frame.function(&self.code);
+        let required = self.code.functions[frame.function.0 as usize].required;
         if call.checks == TypeChecks::Complete
             && call.order == crate::calls::call_state::ArgumentOrder::Positional
             && call.supplied >= required
@@ -30,8 +26,8 @@ impl Vm {
         {
             return Ok(());
         }
-        for index in 0..frame.function().parameters.len() {
-            let parameter = &frame.function().parameters[index];
+        for index in 0..frame.function(&self.code).parameters.len() {
+            let parameter = &frame.function(&self.code).parameters[index];
             if parameter.variadic {
                 self.collect_variadic(frame, call, index)?;
                 break;
@@ -106,44 +102,56 @@ impl Vm {
         offset: usize,
         value: Value,
     ) -> Result<Value, NativeError> {
-        let function = frame.function();
+        let unit = frame.unit(&self.code).clone();
+        let function = frame
+            .function_id(&self.code)
+            .map_or(&unit.main, |index| &unit.functions[index]);
         let parameter = &function.parameters[index];
         let Some(declaration) = parameter.ty else {
             return Ok(value);
         };
-        let scope = frame.cache.type_scopes[declaration.index()];
-        if types::accepts_as_is(&value, &frame.unit.types[declaration.index()]) {
+        let scope = frame.cache(&self.code).type_scopes[declaration.index()];
+        if types::accepts_as_is(&value, &frame.unit(&self.code).types[declaration.index()]) {
             return Ok(value);
         }
         if scope == types::DeclarationScope::Absolute
-            && self.matches_cached_class_type(&value, declaration, &frame.unit, &frame.cache)
+            && self.matches_cached_class_type(
+                &value,
+                declaration,
+                frame.unit(&self.code),
+                frame.cache(&self.code),
+            )
         {
             return Ok(value);
         }
-        let scoped = frame
+        let scoped = self.call_stack.extras[frame.depth]
             .method
             .as_ref()
             .filter(|_| scope == types::DeclarationScope::Relative)
             .map(|context| {
                 crate::closure_types::parameter_type(
-                    &frame.unit.types[declaration.index()],
-                    context,
+                    &frame.unit(&self.code).types[declaration.index()],
+                    context.scope,
+                    context.called,
+                    &self.classes,
                 )
             });
         let ty = scoped
             .as_ref()
-            .unwrap_or(&frame.unit.types[declaration.index()]);
+            .unwrap_or(&frame.unit(&self.code).types[declaration.index()]);
         let name = if parameter.variadic {
             ""
         } else {
-            &frame.unit.names[parameter.name.index()]
+            &frame.unit(&self.code).names[parameter.name.index()]
         };
-        self.check_argument(value, ty, &function.name, offset, name)
+        let ty = ty.clone();
+        let name = name.to_owned();
+        self.check_argument(value, &ty, &function.name, offset, &name)
     }
 
     /// Arity errors keep the caller's source location and the complete supplied arity.
     fn missing_argument(&self, frame: &Frame, supplied: usize) -> NativeError {
-        let function = frame.function();
+        let function = frame.function(&self.code);
         let required = function
             .parameters
             .iter()
@@ -164,13 +172,13 @@ impl Vm {
 
     /// Observable argument snapshots occupy a tail of the same window; ordinary calls skip it.
     pub(crate) fn save_window_arguments(&mut self, frame: &mut Frame, call: &CallWindow) {
-        frame.supplied_arguments = call.supplied;
-        frame.extra_arguments = call
+        self.call_stack.extras[frame.depth].supplied_arguments = call.supplied;
+        self.call_stack.extras[frame.depth].extra_arguments = call
             .supplied
-            .saturating_sub(frame.function().parameters.len());
-        frame.argument_count = call.argument_count;
-        if !frame.function().observes_arguments
-            || frame.function().argument_layout == ArgumentLayout::Fixed
+            .saturating_sub(frame.function(&self.code).parameters.len());
+        self.call_stack.extras[frame.depth].argument_count = call.argument_count;
+        if !frame.function(&self.code).observes_arguments
+            || frame.function(&self.code).argument_layout == ArgumentLayout::Fixed
         {
             return;
         }
@@ -181,6 +189,6 @@ impl Vm {
             let value = self.registers.window(call.slot(index), 1)[0].clone();
             self.registers.window_mut(base + index, 1)[0] = value;
         }
-        frame.saved_arguments = Some(base);
+        self.call_stack.extras[frame.depth].saved_arguments = Some(base);
     }
 }

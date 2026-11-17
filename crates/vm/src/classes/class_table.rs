@@ -1,20 +1,23 @@
 //! Request class lookup, leased object ids, and weak cycle-cleanup records.
 
-use std::{
-    collections::HashMap,
-    rc::{Rc, Weak},
-};
+use std::rc::{Rc, Weak};
 
 use phera_value::{Object, ObjectIds};
 
 use super::Class;
+
+/// A stable class address shared by call contexts and unit class links.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ClassIndex(pub(crate) u32);
 
 /// One request owns the id pool; weak records exist solely for cycle cleanup.
 #[derive(Default)]
 pub(crate) struct ClassTable {
     /// Preserve registration/declaration order for get_declared_classes.
     pub(crate) order: Vec<String>,
-    pub(crate) entries: HashMap<String, Rc<Class>>,
+    pub(crate) entries: Vec<Rc<Class>>,
+    pub(crate) names: crate::names::Names,
+    links: Vec<Option<ClassIndex>>,
     pub(crate) objects: Vec<Weak<Object>>,
     ids: Rc<ObjectIds>,
 }
@@ -22,12 +25,29 @@ pub(crate) struct ClassTable {
 impl ClassTable {
     /// Class identifiers ignore case, including names produced by dynamic expressions.
     pub(crate) fn get(&self, name: &str) -> Option<Rc<Class>> {
-        let name = name.trim_start_matches('\\');
-        if name.bytes().any(|byte| byte.is_ascii_uppercase()) {
-            self.entries.get(&name.to_ascii_lowercase()).cloned()
-        } else {
-            self.entries.get(name).cloned()
-        }
+        self.names
+            .find(name)
+            .and_then(|name| self.named(name))
+            .map(|index| self.at(index).clone())
+    }
+
+    /// Loaded identifiers use a flat link array instead of string lookup.
+    pub(crate) fn named(&self, name: crate::names::Name) -> Option<ClassIndex> {
+        self.links.get(name.0 as usize).copied().flatten()
+    }
+
+    /// An index borrows its request-owned class without changing its reference count.
+    pub(crate) fn at(&self, index: ClassIndex) -> &Rc<Class> {
+        &self.entries[index.0 as usize]
+    }
+
+    /// Class publication is permanent for the request, so links never invalidate.
+    pub(crate) fn insert(&mut self, name: String, class: Rc<Class>) {
+        let name = self.names.intern(&name);
+        self.links
+            .resize(self.links.len().max(name.0 as usize + 1), None);
+        self.links[name.0 as usize] = Some(class.index);
+        self.entries.push(class);
     }
 
     /// Value-owned leases implement PHP's LIFO reuse without inspecting weak handles.
@@ -70,6 +90,22 @@ impl ClassTable {
     }
 }
 
+impl ClassTable {
+    /// Objects of VM classes already carry their numeric request-local class identity.
+    pub(crate) fn index_for_object(&self, object: &Object) -> Option<ClassIndex> {
+        object
+            .class
+            .as_any()
+            .downcast_ref::<Class>()
+            .map(|class| class.index)
+            .or_else(|| {
+                self.names
+                    .find(object.class.name())
+                    .and_then(|name| self.named(name))
+            })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::rc::Rc;
@@ -81,7 +117,10 @@ mod tests {
 
     #[test]
     fn freed_object_ids_reuse_the_most_recently_freed_slot() {
-        let mut table = ClassTable::native(&Registry::new());
+        let mut table = ClassTable::native(
+            &Registry::new(),
+            &mut crate::signatures::Signatures::default(),
+        );
         let class = table.get("stdClass").unwrap();
         let first = table.allocate(class.clone());
         let second = table.allocate(class.clone());
@@ -103,7 +142,10 @@ mod tests {
 
     #[test]
     fn a_million_linked_objects_drop_without_rust_recursion() {
-        let table = ClassTable::native(&Registry::new());
+        let table = ClassTable::native(
+            &Registry::new(),
+            &mut crate::signatures::Signatures::default(),
+        );
         let class = table.get("stdClass").unwrap();
         let mut head = Value::Null;
         for index in 0..1_000_000 {

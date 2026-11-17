@@ -76,8 +76,8 @@ impl Vm {
                 if arguments.is_empty() {
                     return self
                         .current()
-                        .and_then(|frame| frame.method.as_ref())
-                        .map(|context| Value::from(context.scope.name.clone()))
+                        .and_then(|frame| self.call_stack.extras[frame.depth].method.as_ref())
+                        .map(|context| Value::from(self.classes.at(context.scope).name.clone()))
                         .ok_or_else(|| {
                             NativeError::error(
                                 "get_class() without arguments must be called from within a class",
@@ -93,8 +93,8 @@ impl Vm {
                 let class = class.or_else(|| {
                     if arguments.is_empty() {
                         self.current()
-                            .and_then(|frame| frame.method.as_ref())
-                            .map(|context| context.scope.clone())
+                            .and_then(|frame| self.call_stack.extras[frame.depth].method.as_ref())
+                            .map(|context| self.classes.at(context.scope).clone())
                     } else {
                         None
                     }
@@ -106,8 +106,8 @@ impl Vm {
             }
             Function::GetCalledClass => self
                 .current()
-                .and_then(|frame| frame.method.as_ref())
-                .map(|context| Value::from(context.called.name.clone()))
+                .and_then(|frame| self.call_stack.extras[frame.depth].method.as_ref())
+                .map(|context| Value::from(self.classes.at(context.called).name.clone()))
                 .ok_or_else(|| {
                     NativeError::error("get_called_class() must be called from within a class")
                 }),

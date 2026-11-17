@@ -112,12 +112,21 @@ impl Vm {
         self.registers.truncate(call.window.base);
         let origin = call.callee.argument_binding.origin(self.argument_origin);
         let result = match &call.callee.target {
-            CallTarget::Native(entry) => self.native_entry_origin(*entry, arguments, origin).await,
+            CallTarget::Native(entry) => {
+                self.native_entry_origin(self.signatures.native(*entry), arguments, origin)
+                    .await
+            }
             CallTarget::Intrinsic(intrinsic) => {
                 Box::pin(self.intrinsic_origin(*intrinsic, arguments, origin)).await
             }
             CallTarget::Method { method, context } => {
-                self.native_method_window(method, context, arguments, &call, origin)
+                let method = self
+                    .classes
+                    .at(method.class)
+                    .methods
+                    .at(method.slot)
+                    .clone();
+                self.native_method_window(&method, context, arguments, &call, origin)
                     .await
             }
             _ => Err(internal_error!("native target")),

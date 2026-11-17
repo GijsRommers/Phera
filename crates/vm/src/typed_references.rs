@@ -32,7 +32,7 @@ impl Vm {
                 }
             }
         }
-        for class in self.classes.entries.values() {
+        for class in self.classes.entries.iter() {
             for property in &class.static_properties {
                 if property.ty.is_some()
                     && let Value::Reference(cell) = &property.value

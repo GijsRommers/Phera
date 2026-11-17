@@ -39,7 +39,7 @@ impl Vm {
         }
         let strict = self
             .current()
-            .is_some_and(|frame| frame.function().strict_types);
+            .is_some_and(|frame| frame.function(&self.code).strict_types);
         let actual = value.type_name();
         crate::types::coerce(value.clone(), declaration_type, strict.into(), self).map_err(|_| {
             NativeError::type_error(format!(
@@ -110,8 +110,10 @@ impl Vm {
                             }
                             let scope = self
                                 .current()
-                                .and_then(|frame| frame.method.as_ref())
-                                .map(|context| &context.scope);
+                                .and_then(|frame| {
+                                    self.call_stack.extras[frame.depth].method.as_ref()
+                                })
+                                .map(|context| self.classes.at(context.scope));
                             if crate::property_storage::read(object, key).is_some()
                                 || steps.peek().is_some()
                             {
@@ -199,8 +201,8 @@ impl Vm {
         }
         let scope = self
             .current()
-            .and_then(|frame| frame.method.as_ref())
-            .map(|context| context.scope.name.as_str());
+            .and_then(|frame| self.call_stack.extras[frame.depth].method.as_ref())
+            .map(|context| self.classes.at(context.scope).name.as_str());
         if class.defaults.iter().any(|property| {
             property.name == name
                 && (property.visibility != phera_bytecode::Visibility::Private

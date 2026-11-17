@@ -9,7 +9,8 @@
 mod data;
 pub use data::{
     Argument, ArgumentSource, Binary, ClassConstant, ClassDeclaration, ClassMethod, ClassProperty,
-    CompiledUnit, Constant, Function, Parameter, PathStep, Place, PlaceScope, Target, Unary,
+    CompiledUnit, Constant, Function, Parameter, PathStep, Place, PlaceScope, PropertyInitializer,
+    Target, Unary,
 };
 use phera_bytecode::Reg;
 

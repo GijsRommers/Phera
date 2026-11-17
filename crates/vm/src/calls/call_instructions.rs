@@ -1,12 +1,10 @@
 //! PHP call instructions instruction handlers, separate from dispatch.
 
-use phera_bytecode::{FunctionId, Instruction, Reg, Target};
+use phera_bytecode::{FunctionId, Reg, Target};
 use phera_extension_api::NativeError;
 use phera_value::Value;
 
 use crate::Vm;
-use crate::calls::execution_loop::BatchExit;
-use crate::fast::ScalarStep;
 
 impl Vm {
     /// Implements PHP MakeCallable semantics outside the dispatch loop.
@@ -39,7 +37,7 @@ impl Vm {
         let unit = self
             .current()
             .ok_or_else(|| internal_error!("declaration"))?
-            .unit
+            .unit(&self.code)
             .clone();
         let name = unit
             .functions
@@ -65,110 +63,12 @@ impl Vm {
         self.function_table.insert(
             name,
             crate::function_table::FunctionRef {
+                address: self.code.index(&unit, Some(function.index())),
                 unit,
                 index: function.index(),
             },
+            &self.code,
         );
         Ok(())
-    }
-    /// Call and Return switch heap activations without entering the async dispatcher.
-    pub(crate) fn call_step(
-        &mut self,
-        instruction: Instruction,
-        stop: usize,
-        work: &mut usize,
-    ) -> Result<Option<BatchExit>, NativeError> {
-        match instruction {
-            Instruction::Call { dst } => {
-                *work += 1;
-                if !self.enter_prepared_call(Some(dst))? {
-                    return Ok(Some(BatchExit::NativeCall(dst)));
-                }
-            }
-            Instruction::Return { src } => {
-                let Some(value) = self.read_defined_local(src) else {
-                    return Ok(Some(BatchExit::Instruction(instruction)));
-                };
-                if let Some(value) = self.return_value(value, stop)? {
-                    return Ok(Some(BatchExit::Returned(value)));
-                }
-            }
-            Instruction::ReturnNull => {
-                if let Some(value) = self.return_value(Value::Null, stop)? {
-                    return Ok(Some(BatchExit::Returned(value)));
-                }
-            }
-            _ => {
-                if self.prepare_target_instruction(instruction)? == ScalarStep::Fallback
-                    && self.send_instruction(instruction)? == ScalarStep::Fallback
-                    && self.dispatch_instruction(instruction, work)? == ScalarStep::Fallback
-                {
-                    return Ok(Some(BatchExit::Instruction(instruction)));
-                }
-            }
-        }
-        Ok(None)
-    }
-    /// Resolve the target before any argument expression can change the caller.
-    #[inline]
-    pub(crate) fn prepare_target_instruction(
-        &mut self,
-        instruction: Instruction,
-    ) -> Result<ScalarStep, NativeError> {
-        match instruction {
-            Instruction::InitCall { function } => self.init_call(function)?,
-            Instruction::InitDynamicCall { callee } => self.init_dynamic_call(callee)?,
-            Instruction::InitMethodCall { receiver, method } => {
-                self.init_method_call(receiver, method)?;
-            }
-            Instruction::InitStaticCall {
-                class,
-                method,
-                binding,
-            } => {
-                self.prepare_known_static_call(class, method, binding)?;
-            }
-            Instruction::DynamicMethodCall { receiver, method } => {
-                self.dynamic_method_call(receiver, method)?;
-            }
-            Instruction::StaticCall {
-                class,
-                method,
-                binding,
-            } => {
-                self.static_style_call(class, method, binding)?;
-            }
-            Instruction::New { class } => self.new_object(class)?,
-            Instruction::NewDynamic { class } => {
-                let name = self.class_target(class)?;
-                self.new_named_object(&name)?;
-            }
-            _ => return Ok(ScalarStep::Fallback),
-        }
-        Ok(ScalarStep::Complete)
-    }
-    /// All argument sources write through the same reserved window.
-    #[inline]
-    pub(crate) fn send_instruction(
-        &mut self,
-        instruction: Instruction,
-    ) -> Result<ScalarStep, NativeError> {
-        match instruction {
-            Instruction::SendValue { src } => {
-                self.send(crate::calls::sends::SentArgument::Value(src))?
-            }
-            Instruction::SendLocal { local } => {
-                self.send(crate::calls::sends::SentArgument::Local(local))?;
-            }
-            Instruction::SendPath { path } => {
-                self.send(crate::calls::sends::SentArgument::Path(self.path(path)?))?
-            }
-            Instruction::SendSpread { src } => self.spread(src)?,
-            Instruction::NameArgument { name } => self.name_argument(name)?,
-            Instruction::MakeCallable { dst } => self.make_callable(dst)?,
-            Instruction::ReceiveDefault { param, passed } => self.receive_default(param, passed)?,
-            _ => return Ok(ScalarStep::Fallback),
-        }
-        Ok(ScalarStep::Complete)
     }
 }

@@ -13,12 +13,12 @@ impl Vm {
     pub(crate) fn defined_variables(&mut self) -> NativeResult {
         let mut array = PhpArray::new();
         if let Some(frame) = self.current() {
-            for (i, name) in frame.function().locals.iter().enumerate() {
+            for (i, name) in frame.function(&self.code).locals.iter().enumerate() {
                 if let Some(Some(value)) = frame.slots(&self.registers).get(i) {
                     array.insert(
                         ArrayKey::String(
                             frame
-                                .unit
+                                .unit(&self.code)
                                 .names
                                 .get(name.index())
                                 .cloned()
@@ -29,7 +29,7 @@ impl Vm {
                     );
                 }
             }
-            for (name, register) in frame.dynamic.iter() {
+            for (name, register) in self.call_stack.extras[frame.depth].dynamic.iter() {
                 if let Some(Some(value)) = frame.slots(&self.registers).get(register.0 as usize) {
                     array.insert(ArrayKey::String(name.clone().into()), value.deref().clone());
                 }
@@ -56,18 +56,23 @@ impl Vm {
                     let name = string.to_string_lossy();
                     let register = self.current().and_then(|frame| {
                         frame
-                            .function()
+                            .function(&self.code)
                             .locals
                             .iter()
                             .position(|name_id| {
                                 frame
-                                    .unit
+                                    .unit(&self.code)
                                     .names
                                     .get(name_id.index())
                                     .is_some_and(|candidate| candidate == &name)
                             })
                             .map(|i| Reg(i as u16))
-                            .or_else(|| frame.dynamic.get(&name).copied())
+                            .or_else(|| {
+                                self.call_stack.extras[frame.depth]
+                                    .dynamic
+                                    .get(&name)
+                                    .copied()
+                            })
                     });
                     if let Some(register) = register {
                         array.insert(ArrayKey::String(string), self.get(register));

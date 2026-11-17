@@ -63,10 +63,10 @@ impl Vm {
                 None
             }
         };
-        let index = call.argument_index()?;
+        let index = call.argument_index(&self.signatures)?;
         let by_reference = call
             .callee
-            .parameter(index)
+            .parameter(index, &self.signatures)
             .is_some_and(|parameter| parameter.by_reference);
         let value = if by_reference {
             if entry.value.is_reference() {

@@ -2,10 +2,9 @@
 
 use crate::Vm;
 use crate::scalar_batches::YIELD_AFTER_STEPS;
-use phera_bytecode::{CompiledUnit, Instruction};
+use phera_bytecode::Instruction;
 use phera_extension_api::NativeError;
 use phera_value::Value;
-use std::sync::Arc;
 
 /// The async shell handles only suspension, cold operations and completed callbacks.
 pub(crate) enum BatchExit {
@@ -20,12 +19,12 @@ impl Vm {
     /// Retain code once across frame changes; no Rust recursion follows PHP call depth.
     pub(crate) fn run_batch(
         &mut self,
-        unit: &mut Arc<CompiledUnit>,
         stop: usize,
         work: &mut usize,
     ) -> Result<BatchExit, NativeError> {
         let mut executed = 0;
-        let result = self.run_batch_body(unit, stop, work, &mut executed);
+        let code = self.code.clone();
+        let result = self.run_batch_body(&code, stop, work, &mut executed);
         self.executed_instructions += executed;
         result
     }
@@ -33,7 +32,7 @@ impl Vm {
     /// Scalar operations and the call protocol share one loop and one borrowed instruction slice.
     fn run_batch_body(
         &mut self,
-        unit: &mut Arc<CompiledUnit>,
+        code: &crate::code_table::CodeTable,
         stop: usize,
         work: &mut usize,
         executed: &mut u64,
@@ -42,13 +41,7 @@ impl Vm {
             let frame = self
                 .current()
                 .ok_or_else(|| internal_error!("missing frame"))?;
-            if !Arc::ptr_eq(unit, &frame.unit) {
-                *unit = frame.unit.clone();
-            }
-            let function = frame
-                .function_id
-                .and_then(|index| unit.functions.get(index))
-                .unwrap_or(&unit.main);
+            let function = code.function(frame.function);
             let base = frame.base;
             let mut ip = frame.ip;
             loop {
@@ -67,7 +60,8 @@ impl Vm {
                         iter,
                         value,
                         end,
-                        self.call_stack.current_mut(),
+                        self.call_stack.current().copied(),
+                        &mut self.call_stack.extras,
                         &mut self.registers,
                         &mut ip,
                     )

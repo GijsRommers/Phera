@@ -2,14 +2,11 @@
 
 use std::rc::Rc;
 
-use phera_extension_api::FunctionEntry;
-
 /// A signature and target resolved once for a symbol in this request.
 #[derive(Clone)]
 pub(crate) struct Callee {
     pub(crate) argument_binding: crate::calls::callback_binding::ArgumentBinding,
-    pub(crate) name: Rc<str>,
-    pub(crate) parameters: Rc<[ParameterSpec]>,
+    pub(crate) signature: crate::signatures::SignatureIndex,
     pub(crate) target: CallTarget,
 }
 
@@ -28,7 +25,7 @@ pub(crate) struct ParameterSpec {
 pub(crate) enum CallTarget {
     /// Bound methods retain lexical and called scopes throughout argument evaluation.
     Method {
-        method: Rc<crate::classes::Method>,
+        method: crate::classes::method_table::MethodAddress,
         context: crate::classes::MethodContext,
     },
     /// A class without a constructor still consumes sends and returns the allocated handle.
@@ -36,10 +33,9 @@ pub(crate) enum CallTarget {
     Closure(Rc<phera_value::Object>),
     /// Compiled code ownership is shared without allocating a per-invocation callee record.
     User {
-        unit: std::sync::Arc<phera_bytecode::CompiledUnit>,
-        index: usize,
+        function: crate::code_table::FunctionIndex,
     },
-    Native(FunctionEntry),
+    Native(crate::signatures::NativeIndex),
     Intrinsic(crate::intrinsics::Intrinsic),
 }
 
@@ -92,17 +88,25 @@ impl CallWindow {
 
 impl PendingCall {
     /// Positional sends follow the high-water parameter index; names select declaration slots.
-    pub(crate) fn argument_index(&self) -> Result<usize, phera_extension_api::NativeError> {
+    pub(crate) fn argument_index(
+        &self,
+        signatures: &crate::signatures::Signatures,
+    ) -> Result<usize, phera_extension_api::NativeError> {
         let Some(name) = &self.window.named else {
             return Ok(self.window.supplied);
         };
-        if let Some(index) = self.callee.parameters.iter().position(|parameter| {
-            parameter.name.as_bytes() == name.as_bytes() && !parameter.variadic
-        }) {
+        if let Some(index) = signatures
+            .get(self.callee.signature)
+            .parameters
+            .iter()
+            .position(|parameter| {
+                parameter.name.as_bytes() == name.as_bytes() && !parameter.variadic
+            })
+        {
             return Ok(index);
         }
-        if let Some(index) = self
-            .callee
+        if let Some(index) = signatures
+            .get(self.callee.signature)
             .parameters
             .iter()
             .position(|parameter| parameter.variadic)

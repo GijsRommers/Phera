@@ -26,10 +26,10 @@ impl Vm {
             .current()
             .and_then(|frame| {
                 frame
-                    .function()
+                    .function(&self.code)
                     .locals
                     .get(register.index())
-                    .and_then(|name| frame.unit.names.get(name.index()))
+                    .and_then(|name| frame.unit(&self.code).names.get(name.index()))
             })
             .cloned()
         {
@@ -40,12 +40,14 @@ impl Vm {
 
     /// Only replacing a whole subject restarts foreach; array copy-on-write keeps its cursor.
     pub(crate) fn restart_subject_iterators(&mut self, register: Reg) {
-        let Some(frame) = self.call_stack.current_mut() else {
+        let Some(frame) = self.call_stack.current().copied() else {
             return;
         };
         let slots = self.registers.window(frame.base, frame.count);
         if let Some(Some(subject)) = slots.get(register.index()) {
-            frame.iterators.restart_for(subject, slots);
+            self.call_stack.extras[frame.depth]
+                .iterators
+                .restart_for(subject, slots);
         }
     }
 

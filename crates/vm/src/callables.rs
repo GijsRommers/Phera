@@ -28,16 +28,12 @@ impl Vm {
         match &*value.deref() {
             Value::Object(object) => self.resolve_callable_object(object, usage),
             Value::String(name) => {
-                if let Some(callee) = self.function_table.resolved(name) {
-                    return Ok(callee);
-                }
                 let written = String::from_utf8_lossy(name.as_bytes());
                 if let Some((class, method)) = written.split_once("::") {
                     self.prepare_callable_class(class, method, usage)?;
                     self.take_resolved_callable()
                 } else {
                     let callee = self.resolve_callee(&written)?;
-                    self.function_table.cache_resolution(name, &callee);
                     Ok(callee)
                 }
             }
@@ -74,8 +70,7 @@ impl Vm {
             }
             Ok(Callee {
                 argument_binding: crate::calls::callback_binding::ArgumentBinding::Caller,
-                name: state.callee.name.clone(),
-                parameters: state.callee.parameters.clone(),
+                signature: state.callee.signature,
                 target: crate::calls::call_state::CallTarget::Closure(object.clone()),
             })
         } else {
@@ -83,16 +78,26 @@ impl Vm {
                 .classes
                 .for_object(object)
                 .ok_or_else(|| internal_error!("invokable class"))?;
-            let method = class.methods.get("__invoke").cloned().ok_or_else(|| {
+            let name = self.classes.names.intern("__invoke");
+            let slot = class.methods.find(name).ok_or_else(|| {
                 NativeError::error(format!("Object of type {} is not callable", class.name))
             })?;
-            let scope = self
-                .classes
-                .get(&method.declaring)
-                .ok_or_else(|| internal_error!("invokable scope"))?;
-            let resolved = crate::classes::method_cache::ResolvedMethod { method, scope };
+            let method = class.methods.at(slot);
+            let function = match &method.body {
+                crate::classes::MethodBody::User(reference) => Some(reference.address),
+                _ => None,
+            };
+            let resolved = crate::classes::method_lookup::ResolvedMethod {
+                scope: method.declaring_index,
+                method: crate::classes::method_table::MethodAddress {
+                    class: class.index,
+                    slot,
+                    function,
+                    is_static: method.is_static,
+                },
+            };
             self.prepare_resolved_method(
-                class,
+                class.index,
                 Some(object.clone()),
                 resolved,
                 Invocation::Method,

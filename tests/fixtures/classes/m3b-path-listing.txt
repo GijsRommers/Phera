@@ -1,20 +1,13 @@
 file class-paths.php
   const#0 = String([116, 111, 116, 97, 108])
   const#1 = Null
+  const#2 = Int(0)
   symbol#0 = self
 
 function {main} (2 registers, dynamic scope)
   0000  line 1    DeclareClass { class: class#0 }
   0001  line 1    LoadInt { dst: r0, value: 1 }
   0002  line 1    Return { src: r0 }
-
-function {initializer} (2 registers)
-  0000  line 1    LoadInt { dst: r0, value: 0 }
-  0001  line 1    Return { src: r0 }
-
-function {initializer} (2 registers)
-  0000  line 1    LoadInt { dst: r0, value: 0 }
-  0001  line 1    Return { src: r0 }
 
 function Counter::tick (8 registers)
   path#0 = This { scratch: r1 } [Property(name#0)]

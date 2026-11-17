@@ -20,8 +20,8 @@ impl Vm {
         }
         self.current()
             .map(|frame| SourceLocation {
-                file: frame.unit.file.clone(),
-                line: frame.line(),
+                file: frame.unit(&self.code).file.clone(),
+                line: frame.line(&self.code),
             })
             .unwrap_or(SourceLocation {
                 file: "Unknown".into(),

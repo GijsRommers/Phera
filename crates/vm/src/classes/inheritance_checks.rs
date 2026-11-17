@@ -1,6 +1,6 @@
 //! Structural method checks run before publishing inherited tables, avoiding partially linked classes.
 
-use std::{collections::HashMap, rc::Rc};
+use std::rc::Rc;
 
 use phera_bytecode::{ClassKind, Visibility};
 use phera_extension_api::NativeError;
@@ -62,7 +62,7 @@ pub(crate) fn check_abstract(
     class: &str,
     kind: ClassKind,
     is_abstract: bool,
-    methods: &HashMap<String, Rc<Method>>,
+    methods: &super::method_table::MethodTable,
     interfaces: &[Rc<Class>],
 ) -> Result<(), NativeError> {
     if is_abstract || kind == ClassKind::Interface {
@@ -74,7 +74,7 @@ pub(crate) fn check_abstract(
         .map(|method| format!("{}::{}", method.declaring, method.name))
         .collect();
     for interface in interfaces {
-        for (name, method) in &interface.methods {
+        for (name, method) in interface.methods.iter() {
             if methods.get(name).is_none_or(|method| method.is_abstract) {
                 missing.push(format!("{}::{}", method.declaring, method.name));
             }

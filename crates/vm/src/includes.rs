@@ -6,7 +6,7 @@ use phera_bytecode::{IncludeKind, Reg};
 use phera_extension_api::NativeError;
 use phera_value::{Value, to_php_string};
 
-use crate::{Vm, calls::frame::Frame, include_scope::ScopeBinding};
+use crate::{Vm, include_scope::ScopeBinding};
 
 impl Vm {
     /// Execute included top-level code with references to the caller scope.
@@ -37,6 +37,7 @@ impl Vm {
         }
         self.include_state.record(unit.file.clone());
         self.publish_declaration_warnings(&unit);
+        self.load_unit(&unit);
         self.declare_included_functions(&unit)?;
         self.push_include_frame(unit, destination)
     }
@@ -48,16 +49,8 @@ impl Vm {
         destination: Reg,
     ) -> Result<(), NativeError> {
         let bindings = self.include_bindings(&unit)?;
-        let cache = self.unit_caches.symbols(&unit);
         let base = self.registers.len();
-        let mut frame = Frame::new(
-            cache,
-            &mut self.registers,
-            unit,
-            None,
-            Some(destination),
-            base,
-        );
+        let mut frame = self.make_frame(&unit, None, Some(destination), base);
         frame.call_start = self.call_stack.preparing.len();
         for ScopeBinding {
             register,
@@ -68,7 +61,9 @@ impl Vm {
             if let Some(name) = name {
                 self.registers.push_undefined();
                 frame.count += 1;
-                frame.dynamic.insert(name, register);
+                self.call_stack.extras[frame.depth]
+                    .dynamic
+                    .insert(name, register);
             }
             frame.set(&mut self.registers, register, value);
         }
@@ -189,9 +184,11 @@ impl Vm {
                 self.function_table.insert(
                     key,
                     crate::function_table::FunctionRef {
+                        address: self.code.index(unit, Some(id.index())),
                         unit: unit.clone(),
                         index: id.index(),
                     },
+                    &self.code,
                 );
             }
         }

@@ -19,7 +19,7 @@ impl Vm {
         phera_extension_api::prepare_call("is_callable", PARAMETERS, &mut arguments, self)?;
         let value = arguments.first().cloned().unwrap_or_default();
         let syntax_only = arguments.get(1).is_some_and(phera_value::to_bool);
-        let shape = callable_shape(&value);
+        let shape = callable_shape(&value, &self.signatures);
         let valid = if syntax_only && !value.is_object() {
             shape.is_some()
         } else {
@@ -33,7 +33,7 @@ impl Vm {
 }
 
 /// Callable names describe objects by class rather than running conversion hooks.
-fn callable_shape(value: &Value) -> Option<String> {
+fn callable_shape(value: &Value, signatures: &crate::signatures::Signatures) -> Option<String> {
     match &*value.deref() {
         Value::String(name) => Some(name.to_string_lossy()),
         Value::Object(object) if object.class.name() == "Closure" => {
@@ -41,7 +41,7 @@ fn callable_shape(value: &Value) -> Option<String> {
             native
                 .as_ref()
                 .and_then(|state| state.downcast_ref::<crate::closures::ClosureState>())
-                .map(|state| state.callee.name.to_string())
+                .map(|state| signatures.get(state.callee.signature).name.clone())
         }
         Value::Object(object) => Some(format!("{}::__invoke", object.class.name())),
         Value::Array(array) if array.len() == 2 => {

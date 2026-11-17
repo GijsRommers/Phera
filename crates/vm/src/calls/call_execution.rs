@@ -5,7 +5,6 @@ use phera_extension_api::NativeError;
 
 use crate::Vm;
 use crate::calls::call_state::{CallTarget, PendingCall};
-use crate::classes::MethodBody;
 
 impl Vm {
     /// The interpreter handles PHP entry synchronously, keeping native futures off the hot path.
@@ -39,7 +38,11 @@ impl Vm {
         let origin = callee.argument_binding.origin(self.argument_origin);
         let mut frame = self.frame_for_target(callee.target, owner, destination, window.base)?;
         self.save_window_arguments(&mut frame, &window);
-        let result = self.with_argument_origin(origin, |vm| vm.bind_window(&mut frame, &window));
+        let result = if window.checks == crate::calls::call_state::TypeChecks::Deferred {
+            self.with_argument_origin(origin, |vm| vm.bind_window(&mut frame, &window))
+        } else {
+            self.bind_window(&mut frame, &window)
+        };
         if window.extra_named.capacity() > 0 {
             window.extra_named.clear();
             self.call_stack.argument_names.push(window.extra_named);
@@ -55,24 +58,17 @@ impl Vm {
         owner: Option<std::rc::Rc<phera_value::Object>>,
         destination: Option<Reg>,
         base: usize,
-    ) -> Result<Box<crate::calls::frame::Frame>, NativeError> {
+    ) -> Result<crate::calls::frame::Frame, NativeError> {
         match target {
             CallTarget::Closure(object) => self.frame_for_closure(object, destination, base),
-            CallTarget::User { unit, index } => {
-                Ok(self.frame_for_function(&unit, index, None, owner, destination, base))
+            CallTarget::User { function } => {
+                Ok(self.frame_for_function(function, None, owner, destination, base))
             }
             CallTarget::Method { method, context } => {
-                let MethodBody::User(function) = &method.body else {
+                let Some(function) = method.function else {
                     return Err(internal_error!("native method in PHP entry"));
                 };
-                Ok(self.frame_for_function(
-                    &function.unit,
-                    function.index,
-                    Some(context),
-                    owner,
-                    destination,
-                    base,
-                ))
+                Ok(self.frame_for_function(function, Some(context), owner, destination, base))
             }
             _ => Err(internal_error!("native target in PHP entry")),
         }
@@ -81,16 +77,15 @@ impl Vm {
     /// Function metadata is borrowed while ownership of the receiver moves to the frame.
     fn frame_for_function(
         &mut self,
-        unit: &std::sync::Arc<phera_bytecode::CompiledUnit>,
-        index: usize,
+        function: crate::code_table::FunctionIndex,
         context: Option<crate::classes::MethodContext>,
         owner: Option<std::rc::Rc<phera_value::Object>>,
         destination: Option<Reg>,
         base: usize,
-    ) -> Box<crate::calls::frame::Frame> {
-        let mut frame = self.make_frame(unit, Some(index), destination, base);
-        frame.method = context;
-        frame.closure = owner;
+    ) -> crate::calls::frame::Frame {
+        let frame = self.make_indexed_frame(function, destination, base);
+        self.install_frame_method(&frame, context);
+        self.call_stack.extras[frame.depth].closure = owner;
         frame
     }
 
@@ -100,19 +95,19 @@ impl Vm {
         object: std::rc::Rc<phera_value::Object>,
         destination: Option<Reg>,
         base: usize,
-    ) -> Result<Box<crate::calls::frame::Frame>, NativeError> {
+    ) -> Result<crate::calls::frame::Frame, NativeError> {
         let native = object.native.borrow();
         let state = native
             .as_ref()
             .and_then(|value| value.downcast_ref::<crate::closures::ClosureState>())
             .ok_or_else(|| internal_error!("closure state"))?;
-        let (unit, index) = state
+        let function = state
             .callee
             .user_function()
             .ok_or_else(|| internal_error!("closure function"))?;
-        let mut frame = self.make_frame(unit, Some(index), destination, base);
-        frame.method = state.context.clone();
-        let offset = frame.function().parameters.len();
+        let frame = self.make_indexed_frame(function, destination, base);
+        self.install_frame_method(&frame, state.context.clone());
+        let offset = frame.function(&self.code).parameters.len();
         for (index, value) in state.captures.iter().enumerate() {
             if let Some(value) = value {
                 frame.set(
@@ -123,7 +118,7 @@ impl Vm {
             }
         }
         drop(native);
-        frame.closure = Some(object);
+        self.call_stack.extras[frame.depth].closure = Some(object);
         Ok(frame)
     }
 

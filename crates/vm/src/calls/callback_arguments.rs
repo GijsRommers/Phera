@@ -46,7 +46,7 @@ impl Vm {
                 ArrayKey::Int(_) => {}
                 ArrayKey::String(name) => call.window.named = Some(name.clone()),
             }
-            let index = call.argument_index()?;
+            let index = call.argument_index(&self.signatures)?;
             self.store_sent_value(index, value.clone())?;
         }
         Ok(())

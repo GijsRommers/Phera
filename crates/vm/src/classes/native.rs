@@ -9,17 +9,22 @@ use std::{collections::HashMap, rc::Rc};
 
 impl ClassTable {
     /// Registries guarantee parents-first order, allowing native classes to use ordinary inheritance.
-    pub(crate) fn native(registry: &phera_extension_api::Registry) -> Self {
+    pub(crate) fn native(
+        registry: &phera_extension_api::Registry,
+        signatures: &mut crate::signatures::Signatures,
+    ) -> Self {
         let mut table = Self::default();
         table.order.push("stdClass".into());
-        table.entries.insert(
+        table.insert(
             "stdclass".into(),
             Rc::new_cyclic(|identity| Class {
+                index: super::class_table::ClassIndex(0),
+                ancestry: Vec::new(),
                 origin: super::class::ClassOrigin::Native,
                 identity: identity.clone(),
                 declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
                 ancestors: std::collections::HashSet::new(),
-                empty_constructor: super::class::empty_constructor("stdClass"),
+                empty_constructor: super::class::empty_constructor("stdClass", signatures),
                 name_value: phera_value::Value::from("stdClass"),
                 name: "stdClass".into(),
                 parent: None,
@@ -30,7 +35,7 @@ impl ClassTable {
                 is_final: false,
                 is_readonly: false,
                 allows_dynamic_properties: true,
-                methods: HashMap::new(),
+                methods: super::method_table::MethodTable::default(),
                 constructor: None,
                 property_template: Some(phera_value::PhpArray::new()),
                 defaults: Vec::new(),
@@ -43,6 +48,7 @@ impl ClassTable {
             ..phera_extension_api::ClassEntry::class("Closure")
         };
         for entry in registry.classes().chain(std::iter::once(&closure)) {
+            let class_index = super::class_table::ClassIndex(table.entries.len() as u32);
             let parent = entry.parent.and_then(|name| table.get(name));
             let mut methods = parent
                 .as_ref()
@@ -50,9 +56,18 @@ impl ClassTable {
                 .unwrap_or_default();
             for method in entry.methods {
                 methods.insert(
+                    table.names.intern(method.name),
                     method.name.to_ascii_lowercase(),
                     Rc::new(Method {
-                        signature: std::cell::OnceCell::new(),
+                        declaring_index: class_index,
+                        signature: signatures.insert(
+                            format!("{}::{}", entry.name, method.name),
+                            method
+                                .params
+                                .iter()
+                                .map(crate::calls::call_state::ParameterSpec::native)
+                                .collect(),
+                        ),
                         name: method.name.into(),
                         declaring: entry.name.into(),
                         visibility: native_visibility(method.visibility),
@@ -66,9 +81,18 @@ impl ClassTable {
             if entry.name == "Closure" {
                 for &(operation, name) in crate::closure_methods::ClosureMethod::entries() {
                     methods.insert(
+                        table.names.intern(name),
                         name.to_ascii_lowercase(),
                         Rc::new(Method {
-                            signature: std::cell::OnceCell::new(),
+                            declaring_index: class_index,
+                            signature: signatures.insert(
+                                format!("Closure::{name}"),
+                                operation
+                                    .parameters()
+                                    .iter()
+                                    .map(crate::calls::call_state::ParameterSpec::native)
+                                    .collect(),
+                            ),
                             name: name.into(),
                             declaring: "Closure".into(),
                             visibility: Visibility::Public,
@@ -125,9 +149,11 @@ impl ClassTable {
                 || interfaces
                     .iter()
                     .any(|interface: &Rc<Class>| interface.is_throwable);
-            table.entries.insert(
+            table.insert(
                 entry.name.to_ascii_lowercase(),
                 Rc::new_cyclic(|identity| Class {
+                    index: class_index,
+                    ancestry: super::class::ancestor_indexes(&parent, &interfaces),
                     origin: if entry.name == "Closure" {
                         super::class::ClassOrigin::Closure
                     } else {
@@ -136,7 +162,7 @@ impl ClassTable {
                     identity: identity.clone(),
                     declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
                     ancestors: super::class::ancestor_names(&parent, &interfaces),
-                    empty_constructor: super::class::empty_constructor(entry.name),
+                    empty_constructor: super::class::empty_constructor(entry.name, signatures),
                     name_value: phera_value::Value::from(entry.name),
                     name: entry.name.into(),
                     parent,

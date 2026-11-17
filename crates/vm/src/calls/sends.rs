@@ -18,8 +18,8 @@ impl Vm {
     /// Resolve writable aliases only when the callee requires one.
     pub(crate) fn send(&mut self, argument: SentArgument) -> Result<(), NativeError> {
         let call = self.call_stack.pending()?;
-        let index = call.argument_index()?;
-        let parameter = call.callee.parameter(index);
+        let index = call.argument_index(&self.signatures)?;
+        let parameter = call.callee.parameter(index, &self.signatures);
         let reference = parameter.is_some_and(|parameter| parameter.by_reference)
             || (index == 0
                 && !matches!(argument, SentArgument::Value(_))
@@ -31,7 +31,7 @@ impl Vm {
             (true, SentArgument::Value(_)) => {
                 return Err(NativeError::error(format!(
                     "{}(): Argument #{} (${}) could not be passed by reference",
-                    call.callee.name,
+                    self.signatures.get(call.callee.signature).name,
                     index + 1,
                     parameter.map_or("", |parameter| parameter.name.as_str()),
                 )));
@@ -61,9 +61,14 @@ impl Vm {
         let slot = call.window.slot(index);
         let mut extra = false;
         if let Some(name) = call.window.named.take() {
-            extra = call.callee.parameters.iter().all(|parameter| {
-                parameter.variadic || parameter.name.as_bytes() != name.as_bytes()
-            });
+            extra = self
+                .signatures
+                .get(call.callee.signature)
+                .parameters
+                .iter()
+                .all(|parameter| {
+                    parameter.variadic || parameter.name.as_bytes() != name.as_bytes()
+                });
             call.window.order = crate::calls::call_state::ArgumentOrder::Named;
             let duplicate = if extra {
                 call.window.extra_named.iter().any(|(_, key)| key == &name)
@@ -87,7 +92,15 @@ impl Vm {
                 call.window.extra_named.push((index, name));
             }
         }
-        let parameter = call.callee.parameter(index);
+        let untyped_values = call
+            .callee
+            .user_function()
+            .is_some_and(|function| self.code.functions[function.0 as usize].untyped_values);
+        let parameter = if untyped_values {
+            None
+        } else {
+            call.callee.parameter(index, &self.signatures)
+        };
         if let Some(declaration) = parameter.and_then(|parameter| parameter.ty.as_ref())
             && !crate::types::accepts_as_is(&value, declaration)
         {
@@ -109,29 +122,29 @@ impl Vm {
 
 impl crate::calls::call_state::Callee {
     /// Every surplus value uses the variadic declaration when the signature has one.
-    pub(crate) fn parameter(
+    pub(crate) fn parameter<'a>(
         &self,
         index: usize,
-    ) -> Option<&crate::calls::call_state::ParameterSpec> {
-        self.parameters.get(index).or_else(|| {
-            self.parameters
-                .last()
-                .filter(|parameter| parameter.variadic)
-        })
+        signatures: &'a crate::signatures::Signatures,
+    ) -> Option<&'a crate::calls::call_state::ParameterSpec> {
+        signatures
+            .get(self.signature)
+            .parameters
+            .get(index)
+            .or_else(|| {
+                signatures
+                    .get(self.signature)
+                    .parameters
+                    .last()
+                    .filter(|parameter| parameter.variadic)
+            })
     }
 
     /// User functions and methods expose identical signature and register metadata.
-    pub(crate) fn user_function(
-        &self,
-    ) -> Option<(&std::sync::Arc<phera_bytecode::CompiledUnit>, usize)> {
+    pub(crate) fn user_function(&self) -> Option<crate::code_table::FunctionIndex> {
         match &self.target {
-            CallTarget::User { unit, index } => Some((unit, *index)),
-            CallTarget::Method { method, .. } => match &method.body {
-                crate::classes::MethodBody::User(function) => {
-                    Some((&function.unit, function.index))
-                }
-                _ => None,
-            },
+            CallTarget::User { function } => Some(*function),
+            CallTarget::Method { method, .. } => method.function,
             _ => None,
         }
     }

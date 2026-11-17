@@ -17,31 +17,33 @@ impl Vm {
         receiver: Reg,
         method: NameId,
     ) -> Result<(), NativeError> {
-        let unit = self
+        let frame = self
             .current()
-            .ok_or_else(|| internal_error!("method frame"))?
-            .unit
-            .clone();
-        let name = unit
-            .names
-            .get(method.index())
-            .ok_or_else(|| internal_error!("method name"))?;
+            .ok_or_else(|| internal_error!("method frame"))?;
+        let name = self.code.loaded(frame.function).names[method.index()];
         let value = self.read_local(receiver);
         let Value::Object(object) = value else {
             return Err(NativeError::error(format!(
-                "Call to a member function {name}() on {}",
+                "Call to a member function {}() on {}",
+                self.name(method)?,
                 value.type_name()
             )));
         };
         let class = self
             .classes
-            .for_object(&object)
+            .index_for_object(&object)
             .ok_or_else(|| internal_error!("receiver class"))?;
-        let resolved = self.cached_method(&class, name, Invocation::Method)?;
+        let resolved = self.resolve_method(class, name, Invocation::Method)?;
         if let Some(resolved) = resolved {
             self.prepare_resolved_method(class, Some(object), resolved, Invocation::Method)?;
         } else {
-            self.prepare_method(class, Some(object), name, Invocation::Method)?;
+            let name = self.name(method)?;
+            self.prepare_method(
+                self.classes.at(class).clone(),
+                Some(object),
+                &name,
+                Invocation::Method,
+            )?;
         }
         Ok(())
     }
@@ -60,7 +62,7 @@ impl Vm {
             })?;
             let instruction = self
                 .current()
-                .and_then(|frame| frame.function().instructions.get(frame.ip));
+                .and_then(|frame| frame.function(&self.code).instructions.get(frame.ip));
             let usage = match instruction {
                 Some(phera_bytecode::Instruction::MakeCallable { .. }) => {
                     crate::callables::CallableUse::FirstClass
@@ -69,12 +71,12 @@ impl Vm {
             };
             let callee = self.resolve_callable_for(&Value::Object(receiver), usage)?;
             let mut callee = callee;
-            callee.name = "Closure::__invoke".into();
+            callee.signature = self.signatures.get(callee.signature).closure_invoke;
             callee.argument_binding = crate::calls::callback_binding::ArgumentBinding::Internal;
             return self.prepare_call(callee);
         }
-        let resolved = self.cached_method(&class, name, invocation)?;
-        let Some(super::method_cache::ResolvedMethod { method, scope }) = resolved else {
+        let resolved = self.resolve_named_method(class.index, name, invocation)?;
+        let Some(super::method_lookup::ResolvedMethod { method, scope }) = resolved else {
             if invocation == Invocation::Constructor {
                 return self.prepare_constructed_object(
                     &class,
@@ -87,9 +89,9 @@ impl Vm {
             )));
         };
         self.prepare_resolved_method(
-            class,
+            class.index,
             receiver,
-            super::method_cache::ResolvedMethod { method, scope },
+            super::method_lookup::ResolvedMethod { method, scope },
             invocation,
         )
     }
@@ -97,12 +99,14 @@ impl Vm {
     /// Bind a validated lookup to this call's receiver without repeating resolution.
     pub(crate) fn prepare_resolved_method(
         &mut self,
-        class: Rc<Class>,
+        class: super::class_table::ClassIndex,
         receiver: Option<Rc<Object>>,
-        resolved: super::method_cache::ResolvedMethod,
+        resolved: super::method_lookup::ResolvedMethod,
         invocation: Invocation,
     ) -> Result<(), NativeError> {
-        let super::method_cache::ResolvedMethod { method, scope } = resolved;
+        let super::method_lookup::ResolvedMethod { method, scope } = resolved;
+        let address = method;
+        let method = self.classes.at(address.class).methods.at(address.slot);
         if method.is_abstract {
             return Err(NativeError::error(format!(
                 "Cannot call abstract method {}::{}()",
@@ -115,9 +119,7 @@ impl Vm {
                 method.declaring, method.name
             )));
         }
-        let signature = method.signature();
-        let call_name = signature.name.clone();
-        let parameters = signature.parameters.clone();
+        let signature = method.signature;
         let context = MethodContext {
             receiver: if method.is_static { None } else { receiver },
             scope,
@@ -126,33 +128,38 @@ impl Vm {
         };
         let callee = Callee {
             argument_binding: crate::calls::callback_binding::ArgumentBinding::Caller,
-            name: call_name,
-            parameters,
-            target: CallTarget::Method { method, context },
+            signature,
+            target: CallTarget::Method {
+                method: address,
+                context,
+            },
         };
         self.prepare_call(callee)
     }
 
     /// Visibility is checked against the lexical scope, never the receiver's class alone.
     pub(crate) fn check_method_visibility(&self, method: &Method) -> Result<(), NativeError> {
+        if method.visibility == Visibility::Public {
+            return Ok(());
+        }
         let initializer_scope = self
             .initializer_scope
             .as_ref()
             .and_then(|name| self.classes.get(name));
         let scope = initializer_scope.as_ref().or_else(|| {
             self.current()
-                .and_then(|frame| frame.method.as_ref())
-                .map(|context| &context.scope)
+                .and_then(|frame| self.call_stack.extras[frame.depth].method.as_ref())
+                .map(|context| self.classes.at(context.scope))
         });
         let allowed = match method.visibility {
             Visibility::Public => true,
-            Visibility::Private => scope.is_some_and(|scope| scope.name == method.declaring),
+            Visibility::Private => scope.is_some_and(|scope| scope.index == method.declaring_index),
             Visibility::Protected => scope.is_some_and(|scope| {
-                scope.is_a(&method.declaring)
+                scope.includes(method.declaring_index)
                     || self
                         .classes
-                        .get(&method.declaring)
-                        .is_some_and(|declaring| declaring.is_a(&scope.name))
+                        .at(method.declaring_index)
+                        .includes(scope.index)
             }),
         };
         if allowed {
@@ -182,8 +189,7 @@ impl Vm {
     ) -> Result<(), NativeError> {
         let callee = Callee {
             argument_binding: crate::calls::callback_binding::ArgumentBinding::Caller,
-            name: class.empty_constructor.name.clone(),
-            parameters: class.empty_constructor.parameters.clone(),
+            signature: class.empty_constructor,
             target: CallTarget::Constructed(object),
         };
         self.prepare_call(callee)

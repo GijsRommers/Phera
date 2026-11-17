@@ -120,7 +120,12 @@ impl Compiler<'_> {
                     let default = property
                         .default
                         .as_ref()
-                        .map(|value| self.compile_initializer(value, line))
+                        .map(|value| match crate::helpers::constant(value) {
+                            Some(value) => Ok(crate::ir::PropertyInitializer::Literal(value)),
+                            None => self
+                                .compile_initializer(value, line)
+                                .map(crate::ir::PropertyInitializer::Function),
+                        })
                         .transpose()?;
                     properties.push(ClassProperty {
                         name: property.name.clone(),

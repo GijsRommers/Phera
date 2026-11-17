@@ -38,7 +38,7 @@ fn argument(value: &Value) -> String {
 /// Read user parameter slots after coercion, as PHP's stack traces do.
 fn frame_arguments(vm: &Vm, frame: &Frame) -> String {
     let mut arguments = Vec::new();
-    for (index, parameter) in frame.function().parameters.iter().enumerate() {
+    for (index, parameter) in frame.function(&vm.code).parameters.iter().enumerate() {
         let Some(Some(value)) = frame.slots(&vm.registers).get(index) else {
             continue;
         };
@@ -72,7 +72,7 @@ impl Vm {
     ) -> String {
         let binding_failure = self
             .current()
-            .is_some_and(|frame| frame.ip == 0 && frame.function_id.is_some());
+            .is_some_and(|frame| frame.ip == 0 && frame.function_id(&self.code).is_some());
         let connective = if binding_failure {
             "and defined in"
         } else {
@@ -103,16 +103,16 @@ impl Vm {
         {
             text.push_str(&format!(
                 "#{number} {}({}): {}({})\n",
-                parent.unit.file,
-                parent.line(),
-                if child
+                parent.unit(&self.code).file,
+                parent.line(&self.code),
+                if self.call_stack.extras[child.depth]
                     .method
                     .as_ref()
                     .is_some_and(|context| context.receiver.is_some())
                 {
-                    child.function().name.replacen("::", "->", 1)
+                    child.function(&self.code).name.replacen("::", "->", 1)
                 } else {
-                    child.function().name.clone()
+                    child.function(&self.code).name.clone()
                 },
                 frame_arguments(self, child)
             ));

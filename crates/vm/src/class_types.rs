@@ -14,7 +14,7 @@ impl Vm {
         value: &Value,
         declaration: phera_bytecode::TypeId,
         unit: &phera_bytecode::CompiledUnit,
-        cache: &crate::unit_caches::UnitCache,
+        cache: &crate::unit_data::UnitData,
     ) -> bool {
         let Some(ty) = unit.types.get(declaration.index()) else {
             return false;
@@ -34,7 +34,7 @@ impl Vm {
             return entry.matches;
         }
         let matches = self.matches_class_type(value, ty);
-        *slot.borrow_mut() = Some(crate::unit_caches::ClassTypeEntry {
+        *slot.borrow_mut() = Some(crate::unit_data::ClassTypeEntry {
             class: object.class.clone(),
             matches,
         });
@@ -60,13 +60,15 @@ impl Vm {
         {
             return result;
         }
-        let context = self.current().and_then(|frame| frame.method.as_ref());
+        let context = self
+            .current()
+            .and_then(|frame| self.call_stack.extras[frame.depth].method.as_ref());
         let matches = |name: &str| {
             let resolved = match name.trim_matches(['(', ')']) {
-                "self" => context.map(|context| context.scope.name.as_str()),
-                "static" => context.map(|context| context.called.name.as_str()),
+                "self" => context.map(|context| self.classes.at(context.scope).name.as_str()),
+                "static" => context.map(|context| self.classes.at(context.called).name.as_str()),
                 "parent" => context
-                    .and_then(|context| context.scope.parent.as_ref())
+                    .and_then(|context| self.classes.at(context.scope).parent.as_ref())
                     .map(|parent| parent.name.as_str()),
                 name => Some(name),
             };

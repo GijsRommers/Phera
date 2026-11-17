@@ -37,11 +37,17 @@ impl Vm {
             .zip(self.call_stack.iter().enumerate().rev())
         {
             let mut entry = PhpArray::new();
-            entry.insert(ArrayKey::str("file"), Value::from(caller.unit.file.clone()));
-            entry.insert(ArrayKey::str("line"), Value::Int(caller.line() as i64));
-            if callee.function_id.is_none()
+            entry.insert(
+                ArrayKey::str("file"),
+                Value::from(caller.unit(&self.code).file.clone()),
+            );
+            entry.insert(
+                ArrayKey::str("line"),
+                Value::Int(caller.line(&self.code) as i64),
+            );
+            if callee.function_id(&self.code).is_none()
                 && let Some(phera_bytecode::Instruction::Include { kind, .. }) = caller
-                    .function()
+                    .function(&self.code)
                     .instructions
                     .get(caller.ip.saturating_sub(1))
             {
@@ -57,7 +63,7 @@ impl Vm {
                 let _ = trace.push(Value::Array(Rc::new(entry)));
                 continue;
             }
-            let function = &callee.function().name;
+            let function = &callee.function(&self.code).name;
             let closure = function.starts_with("{closure:");
             let name = if closure {
                 function.as_str()
@@ -66,16 +72,16 @@ impl Vm {
             };
             entry.insert(ArrayKey::str("function"), Value::from(name));
             let class = if closure {
-                callee
+                self.call_stack.extras[callee.depth]
                     .method
                     .as_ref()
-                    .map(|context| context.scope.name.as_str())
+                    .map(|context| self.classes.at(context.scope).name.as_str())
             } else {
                 function.split_once("::").map(|(class, _)| class)
             };
             if let Some(class) = class {
                 entry.insert(ArrayKey::str("class"), Value::from(class));
-                let kind = if callee
+                let kind = if self.call_stack.extras[callee.depth]
                     .method
                     .as_ref()
                     .is_some_and(|context| context.receiver.is_some())
@@ -113,12 +119,12 @@ impl Vm {
             }
         }
         if let Some(frame) = self.call_stack.iter().next()
-            && frame.function_id.is_some()
+            && frame.function_id(&self.code).is_some()
         {
             let mut entry = PhpArray::new();
             entry.insert(
                 ArrayKey::str("function"),
-                Value::from(frame.function().name.clone()),
+                Value::from(frame.function(&self.code).name.clone()),
             );
             entry.insert(ArrayKey::str("args"), trace_arguments(self, frame));
             let _ = trace.push(Value::Array(Rc::new(entry)));
@@ -131,11 +137,11 @@ impl Vm {
 fn trace_arguments(vm: &Vm, frame: &Frame) -> Value {
     let mut arguments = PhpArray::new();
     for (index, parameter) in frame
-        .function()
+        .function(&vm.code)
         .parameters
         .iter()
         .enumerate()
-        .take(frame.supplied_arguments)
+        .take(vm.call_stack.extras[frame.depth].supplied_arguments)
     {
         let Some(Some(value)) = frame.slots(&vm.registers).get(index) else {
             continue;
@@ -158,15 +164,15 @@ fn trace_arguments(vm: &Vm, frame: &Frame) -> Value {
         }
     }
     if !frame
-        .function()
+        .function(&vm.code)
         .parameters
         .iter()
         .any(|parameter| parameter.variadic)
     {
-        for value in vm
-            .registers
-            .window(frame.base + frame.count, frame.extra_arguments)
-        {
+        for value in vm.registers.window(
+            frame.base + frame.count,
+            vm.call_stack.extras[frame.depth].extra_arguments,
+        ) {
             let value = value.as_ref().unwrap_or(&Value::Null);
             let _ = arguments.push(value.deref().clone());
         }

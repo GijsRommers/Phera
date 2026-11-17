@@ -2,17 +2,12 @@
 
 use crate::calls::frame::Frame;
 
-/// Stable allocations make a push/pop move one pointer instead of copying every frame buffer.
-struct FrameOwner {
-    frame: Box<Frame>,
-}
-
 /// Owns the request state for call stack.
 pub(crate) struct CallStack {
     /// Request-owned frames.
-    frames: Vec<FrameOwner>,
-    /// Request-owned recycled frames.
-    recycled_frames: Vec<FrameOwner>,
+    frames: Vec<Frame>,
+    /// Optional activation storage, indexed by frame depth.
+    pub(crate) extras: Vec<super::frame_extras::FrameExtras>,
     /// Argument evaluation and native callbacks share this request-wide preparation stack.
     pub(crate) preparing: Vec<crate::calls::call_state::PendingCall>,
     /// Native callbacks have an independent bound because they await Rust futures.
@@ -27,7 +22,7 @@ impl CallStack {
     pub(crate) fn new() -> Self {
         Self {
             frames: vec![],
-            recycled_frames: vec![],
+            extras: vec![],
             callback_depth: 0,
             argument_names: Vec::new(),
             native_arguments: Vec::new(),
@@ -37,18 +32,18 @@ impl CallStack {
     /// The last activation owns the currently executing instruction.
     #[inline]
     pub(crate) fn current(&self) -> Option<&Frame> {
-        self.frames.last().map(|owner| owner.frame.as_ref())
+        self.frames.last()
     }
 
     /// Only the active activation may change its instruction pointer.
     #[inline]
     pub(crate) fn current_mut(&mut self) -> Option<&mut Frame> {
-        self.frames.last_mut().map(|owner| owner.frame.as_mut())
+        self.frames.last_mut()
     }
 
     /// Global aliases can refer to the retained top-level activation.
     pub(crate) fn main_mut(&mut self) -> Option<&mut Frame> {
-        self.frames.first_mut().map(|owner| owner.frame.as_mut())
+        self.frames.first_mut()
     }
 
     /// Callback boundaries and the PHP frame limit use heap depth.
@@ -57,39 +52,32 @@ impl CallStack {
     }
 
     /// Commit an activation without consuming Rust stack.
-    pub(crate) fn push(&mut self, frame: impl Into<Box<Frame>>) {
-        self.frames.push(FrameOwner {
-            frame: frame.into(),
-        });
+    pub(crate) fn push(&mut self, frame: Frame) {
+        self.frames.push(frame);
     }
 
-    /// Detach one activation before releasing its register window.
-    pub(crate) fn pop(&mut self) -> Option<Box<Frame>> {
-        self.frames.pop().map(|owner| owner.frame)
+    /// Detach a copy of the activation before releasing its register window.
+    pub(crate) fn pop(&mut self) -> Option<Frame> {
+        self.frames.pop()
     }
 
-    /// Exit discards preparations and all active activations.
+    /// Exit releases optional owners and abandons pending windows.
     pub(crate) fn clear(&mut self) {
         self.preparing.clear();
         self.frames.clear();
+        for extra in &mut self.extras {
+            extra.clear();
+        }
     }
 
-    /// Trace capture walks activations without copying their values.
+    /// Traces borrow compact activations without retaining any code owner.
     pub(crate) fn iter(&self) -> impl DoubleEndedIterator<Item = &Frame> + ExactSizeIterator {
-        self.frames.iter().map(|owner| owner.frame.as_ref())
+        self.frames.iter()
     }
 
-    /// Recycle allocations without retaining a second active PHP frame.
-    pub(crate) fn recycle(&mut self, mut frame: Box<Frame>) {
-        frame.closure = None;
-        frame.method = None;
-        frame.iterators.clear();
-        self.recycled_frames.push(FrameOwner { frame });
-    }
-
-    /// Reuse storage only after its PHP owners have been released.
-    pub(crate) fn take_recycled(&mut self) -> Option<Box<Frame>> {
-        self.recycled_frames.pop().map(|owner| owner.frame)
+    /// Return releases only the optional state belonging to this depth.
+    pub(crate) fn recycle(&mut self, frame: Frame) {
+        self.extras[frame.depth].clear();
     }
 
     /// Every Send must have a resolved target and reserved window.
@@ -149,16 +137,16 @@ impl CallStack {
 
 #[cfg(test)]
 impl CallStack {
-    /// Stress tests check that recycled frames own buffers, but no live PHP values.
+    /// Stress tests ensure inactive depths retain no closure owners.
     pub(crate) fn retained_exception_values(&self) -> usize {
-        self.recycled_frames
+        self.extras
             .iter()
-            .map(|owner| usize::from(owner.frame.closure.is_some()))
+            .map(|extra| usize::from(extra.closure.is_some()))
             .sum()
     }
 
-    /// A million sequential calls need no more recycled frames than a single call.
+    /// Stress tests inspect reusable depth storage after iterative unwinding.
     pub(crate) fn recycled_count(&self) -> usize {
-        self.recycled_frames.len()
+        self.extras.len().saturating_sub(self.frames.len())
     }
 }

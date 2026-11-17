@@ -12,12 +12,18 @@ impl Vm {
             .map_or(0, |call| call.window.supplied);
         for index in 0..count {
             let warning = self.call_stack.preparing.last().and_then(|call| {
-                let parameter = call.callee.parameters.get(index).or_else(|| {
-                    call.callee
-                        .parameters
-                        .last()
-                        .filter(|parameter| parameter.variadic)
-                })?;
+                let parameter = self
+                    .signatures
+                    .get(call.callee.signature)
+                    .parameters
+                    .get(index)
+                    .or_else(|| {
+                        self.signatures
+                            .get(call.callee.signature)
+                            .parameters
+                            .last()
+                            .filter(|parameter| parameter.variadic)
+                    })?;
                 let value = self
                     .registers
                     .window(call.window.slot(index), 1)
@@ -28,7 +34,7 @@ impl Vm {
                 }
                 Some(format!(
                     "{}(): Argument #{} (${}) must be passed by reference, value given",
-                    call.callee.name,
+                    self.signatures.get(call.callee.signature).name,
                     index + 1,
                     parameter.name,
                 ))

@@ -56,18 +56,24 @@ impl Vm {
         drop(diagnostics);
         let frame = self
             .call_stack
-            .current_mut()
+            .current()
+            .copied()
             .ok_or_else(|| internal_error!("place without frame"))?;
-        if let Some(index) = frame.function().locals.iter().position(|candidate| {
-            frame
-                .unit
-                .names
-                .get(candidate.index())
-                .is_some_and(|value| value == &name)
-        }) {
+        if let Some(index) = frame
+            .function(&self.code)
+            .locals
+            .iter()
+            .position(|candidate| {
+                frame
+                    .unit(&self.code)
+                    .names
+                    .get(candidate.index())
+                    .is_some_and(|value| value == &name)
+            })
+        {
             return Ok(Some(Reg(index as u16)));
         }
-        if let Some(register) = frame.dynamic.get(&name) {
+        if let Some(register) = self.call_stack.extras[frame.depth].dynamic.get(&name) {
             return Ok(Some(*register));
         }
         if creation == Creation::Create {
@@ -192,10 +198,10 @@ impl Vm {
                         .current()
                         .and_then(|frame| {
                             frame
-                                .function()
+                                .function(&self.code)
                                 .locals
                                 .get(register.0 as usize)
-                                .and_then(|name| frame.unit.names.get(name.index()))
+                                .and_then(|name| frame.unit(&self.code).names.get(name.index()))
                         })
                         .cloned()
                         .unwrap_or_default();

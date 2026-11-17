@@ -8,8 +8,6 @@ use phera_value::Value;
 
 use crate::Vm;
 use crate::calls::execution_loop::BatchExit;
-use crate::calls::frame::Frame;
-use crate::function_table::FunctionRef;
 
 /// A native checkpoint stops the interpreter without introducing another PHP frame.
 fn test_vm(source: &str) -> (Vm, Arc<CompiledUnit>) {
@@ -28,29 +26,35 @@ fn test_vm(source: &str) -> (Vm, Arc<CompiledUnit>) {
     }));
     let mut vm = Vm::new(Arc::new(registry));
     let unit = Arc::new(phera_compiler::compile(source, "windows.php").unwrap());
+    vm.load_unit(&unit);
     for function in &unit.hoisted {
         vm.function_table.insert(
             unit.functions[function.index()].name.to_ascii_lowercase(),
-            FunctionRef {
+            crate::function_table::FunctionRef {
+                address: vm.code.index(&unit, Some(function.index())),
                 unit: unit.clone(),
                 index: function.index(),
             },
+            &vm.code,
         );
     }
-    let cache = vm.unit_caches.symbols(&unit);
-    let frame = Frame::new(cache, &mut vm.registers, unit.clone(), None, None, 0);
+    let frame = vm.make_frame(&unit, None, None, 0);
     vm.call_stack.push(frame);
     (vm, unit)
 }
 
 /// Reach the next checkpoint after applying the same unwind algorithm as the async shell.
-async fn checkpoint(vm: &mut Vm, unit: &mut Arc<CompiledUnit>) -> (usize, usize, usize) {
+async fn checkpoint(vm: &mut Vm, _unit: &mut Arc<CompiledUnit>) -> (usize, usize, usize) {
     let mut work = 0;
     loop {
-        match vm.run_batch(unit, 0, &mut work) {
+        match vm.run_batch(0, &mut work) {
             Ok(BatchExit::NativeCall(destination)) => {
-                let checkpoint =
-                    vm.call_stack.preparing.last().unwrap().callee.name.as_ref() == "checkpoint";
+                let checkpoint = vm
+                    .signatures
+                    .get(vm.call_stack.preparing.last().unwrap().callee.signature)
+                    .name
+                    .as_str()
+                    == "checkpoint";
                 let value = vm.finish_native_window().await.unwrap();
                 vm.set(destination, value);
                 if checkpoint {

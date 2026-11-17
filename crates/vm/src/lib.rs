@@ -39,6 +39,7 @@ mod closure_methods;
 mod closure_tests;
 mod closure_types;
 mod closures;
+mod code_table;
 mod constant_table;
 mod constants;
 mod context;
@@ -81,8 +82,8 @@ mod iteration;
 mod iterator_instructions;
 mod iterators;
 mod locals;
+mod names;
 mod native_diagnostics;
-mod object_instructions;
 mod object_iteration;
 mod operators;
 mod ops;
@@ -100,14 +101,14 @@ mod property_targets;
 mod references;
 mod scalar_batches;
 mod scope_intrinsics;
+mod signatures;
 mod static_variables;
 mod string_offsets;
 mod trigger_errors;
 mod typed_references;
 mod types;
-mod unit_caches;
+mod unit_data;
 mod unpacking;
-mod value_instructions;
 
 /// Resolves PHP includes through the embedding runtime code cache.
 pub trait CodeLoader: Send + Sync {
@@ -127,11 +128,11 @@ impl OutputSink for Vec<u8> {
 
 /// Default limit permits 200,000-deep PHP recursion without consuming Rust stack.
 pub const DEFAULT_FRAME_LIMIT: usize = 250_000;
-/// Per-symbol resolved callees shared by frames of one compiled unit.
-type SymbolCache = Rc<unit_caches::UnitCache>;
 
 /// One request interpreter; PHP calls use heap frames rather than Rust recursion.
 pub struct Vm {
+    code: Rc<code_table::CodeTable>,
+    signatures: signatures::Signatures,
     classes: classes::ClassTable,
     closure_captures: Vec<closures::PendingCapture>,
     /// Pure defaults retain lexical class scope while running outside a method frame.
@@ -139,7 +140,6 @@ pub struct Vm {
     argument_origin: calls::callback_binding::ArgumentOrigin,
     prelinked_classes: std::collections::HashSet<(usize, usize)>,
     function_table: function_table::FunctionTable,
-    unit_caches: unit_caches::UnitCaches,
     globals: globals::Globals,
     static_variables: static_variables::StaticVariables,
     diagnostic_reporter: diagnostic_reporter::DiagnosticReporter,
@@ -172,14 +172,18 @@ impl Vm {
             .constants()
             .map(|(name, value)| (name.to_owned(), value.to_value()))
             .collect();
+        let mut signatures = signatures::Signatures::default();
+        let function_table = function_table::FunctionTable::new(&registry, &mut signatures);
+        let classes = classes::ClassTable::native(&registry, &mut signatures);
         Self {
-            classes: classes::ClassTable::native(&registry),
+            signatures,
+            code: Rc::new(code_table::CodeTable::default()),
+            classes,
             closure_captures: Vec::new(),
             initializer_scope: None,
             argument_origin: calls::callback_binding::ArgumentOrigin::Php,
             prelinked_classes: std::collections::HashSet::new(),
-            function_table: function_table::FunctionTable::new(),
-            unit_caches: unit_caches::UnitCaches::new(),
+            function_table,
             globals: globals::Globals::new(),
             static_variables: static_variables::StaticVariables::new(),
             diagnostic_reporter: diagnostic_reporter::DiagnosticReporter::new(),
@@ -239,27 +243,31 @@ impl Vm {
 
     /// Run a compiled top-level function on the request heap stack and report its exit status.
     pub async fn run(&mut self, unit: Arc<CompiledUnit>) -> i32 {
+        self.load_unit(&unit);
         for id in &unit.hoisted {
             if let Some(frame) = unit.functions.get(id.index()) {
                 self.function_table.insert(
                     frame.name.to_ascii_lowercase(),
                     crate::function_table::FunctionRef {
+                        address: self.code.index(&unit, Some(id.index())),
                         unit: unit.clone(),
                         index: id.index(),
                     },
+                    &self.code,
                 );
             }
         }
         self.include_state.record(unit.file.clone());
-        let cache = self.unit_caches.symbols(&unit);
         let class_unit = unit.clone();
-        let mut frame = Frame::new(cache, &mut self.registers, unit, None, None, 0);
+        let frame = self.make_frame(&unit, None, None, 0);
         for (name, value) in self.globals.iter() {
             if let Some(i) = frame
-                .function()
+                .function(&self.code)
                 .locals
                 .iter()
-                .position(|candidate| frame.unit.names.get(candidate.index()) == Some(name))
+                .position(|candidate| {
+                    frame.unit(&self.code).names.get(candidate.index()) == Some(name)
+                })
             {
                 frame.set(&mut self.registers, Reg(i as u16), value.clone());
             }

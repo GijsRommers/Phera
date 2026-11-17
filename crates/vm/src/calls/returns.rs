@@ -28,10 +28,11 @@ impl Vm {
         mut value: Value,
         stop: usize,
     ) -> Result<Option<Value>, NativeError> {
-        if self
-            .current()
-            .is_some_and(|frame| frame.function().return_type.is_some())
-        {
+        if self.current().is_some_and(|frame| {
+            self.code.functions[frame.function.0 as usize]
+                .return_mask
+                .is_some()
+        }) {
             value = self.check_return_value(value)?;
         }
         self.finish_return_value(value, stop)
@@ -41,17 +42,17 @@ impl Vm {
     pub(crate) fn check_return_value(&mut self, value: Value) -> Result<Value, NativeError> {
         if let Some(declaration) = self.current().and_then(|frame| {
             frame
-                .function()
+                .function(&self.code)
                 .return_type
-                .and_then(|ty| frame.unit.types.get(ty.index()))
+                .and_then(|ty| frame.unit(&self.code).types.get(ty.index()))
         }) && let Some(float) = crate::types::widen_int_to_float(&value, declaration.mask)
         {
             return Ok(float);
         }
         let typed_return = self.current().and_then(|frame| {
-            let declaration = frame.function().return_type?;
+            let declaration = frame.function(&self.code).return_type?;
             if frame
-                .unit
+                .unit(&self.code)
                 .types
                 .get(declaration.index())
                 .is_some_and(|declared| crate::types::accepts_as_is(&value, declared))
@@ -61,13 +62,18 @@ impl Vm {
             // A cached class identity can accept an object without cloning its declaration.
             // References still need the ordinary cell-write and borrow checks below.
             if matches!(&value, Value::Object(_))
-                && self.matches_cached_class_type(&value, declaration, &frame.unit, &frame.cache)
+                && self.matches_cached_class_type(
+                    &value,
+                    declaration,
+                    frame.unit(&self.code),
+                    frame.cache(&self.code),
+                )
             {
                 return None;
             }
             Some(ReturnTypeSite {
-                unit: frame.unit.clone(),
-                function: frame.function_id,
+                unit: frame.unit(&self.code).clone(),
+                function: frame.function_id(&self.code),
                 declaration,
             })
         });
@@ -128,12 +134,14 @@ impl Vm {
         mut value: Value,
         stop: usize,
     ) -> Result<Option<Value>, NativeError> {
-        if let Some(context) = self.current().and_then(|frame| frame.method.as_ref())
+        if let Some(context) = self
+            .current()
+            .and_then(|frame| self.call_stack.extras[frame.depth].method.as_ref())
             && context.invocation == crate::classes::Invocation::Constructor
         {
-            value = context
-                .receiver
-                .clone()
+            value = self
+                .frame_receiver(context)
+                .cloned()
                 .map(Value::Object)
                 .unwrap_or_default();
         }
@@ -179,7 +187,7 @@ impl Vm {
                 || (matches!(kind, DispatchedReturn::Checked(_))
                     && self
                         .current()
-                        .is_some_and(|frame| frame.function().returns_reference));
+                        .is_some_and(|frame| frame.function(&self.code).returns_reference));
             if reference_return && !value.is_reference() {
                 self.diagnostic(
                     "Notice",

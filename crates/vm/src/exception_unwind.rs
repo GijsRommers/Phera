@@ -43,7 +43,7 @@ impl Vm {
                     return None;
                 }
                 frame
-                    .function()
+                    .function(&self.code)
                     .handlers
                     .iter()
                     .find(|handler| {
@@ -90,14 +90,18 @@ impl Vm {
         if let Some(frame) = self.current() {
             self.call_stack.preparing.truncate(frame.call_start);
         }
-        if let Some(frame) = self.call_stack.current_mut() {
+        if let Some(frame) = self.call_stack.current().copied() {
             self.closure_captures
                 .retain(|capture| capture.base < frame.base);
-            let end = frame
-                .saved_arguments
-                .map_or(frame.base + frame.count + frame.extra_arguments, |base| {
-                    base + frame.argument_count
-                });
+            let end = self.call_stack.extras[frame.depth].saved_arguments.map_or(
+                frame.base + frame.count + self.call_stack.extras[frame.depth].extra_arguments,
+                |base| base + self.call_stack.extras[frame.depth].argument_count,
+            );
+            let end = self.call_stack.extras[frame.depth]
+                .method
+                .as_ref()
+                .and_then(|context| context.receiver)
+                .map_or(end, |receiver| end.max(receiver + 1));
             self.registers.truncate(end);
             for register in &handler.cleanup {
                 if let Some(slot) = frame
@@ -108,7 +112,7 @@ impl Vm {
                 }
             }
             let iterators: Vec<_> = frame
-                .function()
+                .function(&self.code)
                 .instructions
                 .iter()
                 .enumerate()
@@ -122,38 +126,42 @@ impl Vm {
                 })
                 .collect();
             for iterator in iterators {
-                frame.iterators.remove(&iterator.0);
+                self.call_stack.extras[frame.depth]
+                    .iterators
+                    .remove(&iterator.0);
             }
         }
-        let depth =
-            self.call_stack
-                .iter()
-                .rev()
-                .enumerate()
-                .map(|(index, frame)| {
-                    let end = if index == 0 { target } else { frame.ip };
-                    frame.function().instructions.iter().take(end).fold(
-                        0usize,
-                        |depth, instruction| match instruction {
-                            Instruction::BeginSilence => depth + 1,
-                            Instruction::EndSilence => depth.saturating_sub(1),
-                            _ => depth,
-                        },
-                    )
-                })
-                .sum();
+        let depth = self
+            .call_stack
+            .iter()
+            .rev()
+            .enumerate()
+            .map(|(index, frame)| {
+                let end = if index == 0 { target } else { frame.ip };
+                frame
+                    .function(&self.code)
+                    .instructions
+                    .iter()
+                    .take(end)
+                    .fold(0usize, |depth, instruction| match instruction {
+                        Instruction::BeginSilence => depth + 1,
+                        Instruction::EndSilence => depth.saturating_sub(1),
+                        _ => depth,
+                    })
+            })
+            .sum();
         self.diagnostic_reporter.restore_silence(depth);
     }
 
     /// Include symbol-table changes survive exceptional exit just as normal return.
     fn discard_exception_frame(&mut self) -> Result<(), NativeError> {
         self.finish_include_scope()?;
-        if let Some(mut frame) = self.call_stack.pop() {
+        if let Some(frame) = self.call_stack.pop() {
             self.closure_captures
                 .retain(|capture| capture.base < frame.base);
             self.registers.truncate(frame.base);
             self.call_stack.preparing.truncate(frame.call_start);
-            frame.iterators.resize(0);
+            self.call_stack.extras[frame.depth].iterators.resize(0);
             self.call_stack.recycle(frame);
         }
         Ok(())

@@ -44,7 +44,7 @@ impl Vm {
     ) -> Result<(), NativeError> {
         let declaration_type = self
             .current()
-            .and_then(|frame| frame.unit.types.get(declaration_type.index()))
+            .and_then(|frame| frame.unit(&self.code).types.get(declaration_type.index()))
             .cloned()
             .ok_or_else(|| internal_error!("type"))?;
         let value = crate::types::coerce(
