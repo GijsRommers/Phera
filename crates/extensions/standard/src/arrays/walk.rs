@@ -46,8 +46,8 @@ impl Frame {
         let keys = {
             let value = target.try_borrow().map_err(|_| borrowed())?;
             match &*value {
-                Value::Array(array) => array.keys().cloned().collect::<Vec<_>>(),
-                Value::Object(object) => object.to_array().keys().cloned().collect(),
+                Value::Array(array) => array.keys().collect::<Vec<_>>(),
+                Value::Object(object) => object.to_array().keys().collect(),
                 _ => return Err(changed_type()),
             }
         };

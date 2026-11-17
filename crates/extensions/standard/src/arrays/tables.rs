@@ -119,7 +119,7 @@ fn array_chunk(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     if let Some(array) = args::array(arguments, 0) {
         for (key, value) in array.iter() {
             if preserve {
-                chunk.insert(key.clone(), value.clone());
+                chunk.insert(key, value.clone());
             } else {
                 chunk.push(value.clone())?;
             }

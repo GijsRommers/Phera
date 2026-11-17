@@ -50,7 +50,7 @@ async fn run(context: &mut dyn Context, arguments: Vec<Value>, name: &str) -> Na
         };
         array
             .iter()
-            .map(|(key, value)| (key.clone(), value.clone()))
+            .map(|(key, value)| (key, value.clone()))
             .collect()
     };
     if entries.is_empty() {

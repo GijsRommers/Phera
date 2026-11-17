@@ -71,13 +71,13 @@ fn array_values(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
 fn array_key_first(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(args::array(arguments, 0)
         .and_then(|arguments| arguments.first())
-        .map_or(Value::Null, |(key, _)| key_value(key)))
+        .map_or(Value::Null, |(key, _)| key_value(&key)))
 }
 
 fn array_key_last(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(args::array(arguments, 0)
         .and_then(|arguments| arguments.last())
-        .map_or(Value::Null, |(key, _)| key_value(key)))
+        .map_or(Value::Null, |(key, _)| key_value(&key)))
 }
 
 fn array_first(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
@@ -137,7 +137,7 @@ fn array_keys(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
             if !args::given(arguments, 1)
                 || comparison.equal(context, value, arguments.get(1).unwrap_or(&Value::Null))?
             {
-                result.push(key_value(key))?;
+                result.push(key_value(&key))?;
             }
         }
     }
@@ -150,7 +150,7 @@ fn find(context: &mut dyn Context, arguments: &[Value]) -> Result<Option<Value>,
     if let Some(array) = args::array(arguments, 1) {
         for (key, value) in array.iter() {
             if comparison.equal(context, arguments.first().unwrap_or(&Value::Null), value)? {
-                return Ok(Some(key_value(key)));
+                return Ok(Some(key_value(&key)));
             }
         }
     }

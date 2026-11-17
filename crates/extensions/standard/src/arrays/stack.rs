@@ -103,7 +103,7 @@ fn array_unshift(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
             result.push(value.clone())?;
         }
         for (key, value) in array.iter() {
-            super::slice::insert(&mut result, key, value, super::Keys::Renumber)?;
+            super::slice::insert(&mut result, &key, value, super::Keys::Renumber)?;
         }
         result.reset();
         *array = result;
@@ -133,7 +133,7 @@ fn array_splice(context: &mut dyn Context, arguments: &[Value]) -> NativeResult 
         let mut removed = PhpArray::new();
         let mut result = PhpArray::new();
         for (key, value) in array.iter().take(start) {
-            super::slice::insert(&mut result, key, value, super::Keys::Renumber)?;
+            super::slice::insert(&mut result, &key, value, super::Keys::Renumber)?;
         }
         for value in replacement.values() {
             result.push(value.clone())?;
@@ -145,7 +145,7 @@ fn array_splice(context: &mut dyn Context, arguments: &[Value]) -> NativeResult 
                 } else {
                     &mut result
                 },
-                key,
+                &key,
                 value,
                 super::Keys::Renumber,
             )?;
