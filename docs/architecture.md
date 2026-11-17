@@ -566,10 +566,24 @@ Done on the branch `engine/calls` (pull request #9):
 - Each class has a method table keyed by interned name. The per-site
   method cache and the static-site caches are deleted.
 
-Measured in instructions retired against PHP 8.5 (cycles were unreliable
-at load averages of 10 to 33): fib 8.0x -> 3.0x (2.15x in cycles at a
-calmer moment), hierarchy 6.0x -> 4.0x, methods 7.0x -> 5.7x, objects
-7.2x -> 6.3x, calls 13.5x -> 12.3x; no script more than 2 percent worse.
+Measured on 17 November 2026 after merging `main` into the branch, in
+instructions retired and cycles, each net of start-up (an empty script),
+minimum of five runs, against `php -n` (load average 14 to 20, so cycles
+are rough):
+
+| script | start of the work | head before the merge | after the merge |
+| --- | --- | --- | --- |
+| fib | 8.0x (10.1x cycles) | 3.0x (3.1x) | 3.0x (3.0x) |
+| hierarchy | 5.9x (7.0x) | 3.9x (4.6x) | 3.9x (4.5x) |
+| methods | 7.0x (7.8x) | 5.7x (6.2x) | 5.7x (6.2x) |
+| objects | 7.2x (10.9x) | 6.3x (9.0x) | 6.1x (8.3x) |
+| closures | 7.4x (7.7x) | 7.2x (7.7x) | 7.1x (7.5x) |
+| exceptions | 7.1x (8.1x) | 5.4x (5.8x) | 5.4x (5.5x) |
+| calls | 13.5x (16.6x) | 12.3x (14.7x) | 12.6x (14.8x) |
+
+No script is more than 2 percent worse than at the start in instructions
+(typed-objects +1.0%, object-sort +1.2%, function-objects +1.6%); the
+array scripts gained 4 to 10 percent from main's array storage.
 
 Not reached: methods, hierarchy and objects at 3x and closures at 4x.
 What remains in a method call is the general call record (an 88-byte
