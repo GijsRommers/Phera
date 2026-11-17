@@ -20,7 +20,11 @@ pub fn convert_bytes(
     name: &str,
 ) -> Option<Vec<u8>> {
     let result = if to.to_ascii_uppercase().contains("//IGNORE") {
-        let probe = iconv_native::convert(bytes, from, "UCS-4LE//IGNORE");
+        // PHP returns what was converted unless the input ends in an
+        // incomplete character. The probe must use the real target: glibc
+        // reports EILSEQ instead of EINVAL once it has skipped a character
+        // the target cannot hold, and PHP then returns the string.
+        let probe = iconv_native::convert(bytes, from, to);
         if matches!(probe, Err(iconv_native::ConvertError::InvalidInput))
             && std::io::Error::last_os_error().raw_os_error() == Some(22)
         {
