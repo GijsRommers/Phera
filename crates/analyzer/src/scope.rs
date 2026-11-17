@@ -51,6 +51,14 @@ impl Scope {
         }
     }
 
+    pub fn unknown_writes(&mut self) {
+        self.dynamic = true;
+        self.values.clear();
+        for variable in self.variables.values_mut() {
+            variable.ty = ValueType::Mixed;
+        }
+    }
+
     pub fn get(&self, name: &str) -> VariableInfo {
         if matches!(
             name,

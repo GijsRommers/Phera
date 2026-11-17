@@ -1,8 +1,11 @@
 //! Exception edges: `try { $x = call(); } catch (...) {}` may leave `$x` undefined.
 //! Snapshots are taken at operations that may throw, rather than at every statement.
 
-use super::statements::Flow;
 use super::*;
+use super::{
+    finally::{ExitKind, ExitPath},
+    statements::Flow,
+};
 
 impl Analyzer<'_> {
     pub fn record_exception(&mut self, scope: &Scope) {
@@ -18,15 +21,49 @@ impl Analyzer<'_> {
         finally: Option<&[Statement]>,
         scope: &mut Scope,
     ) -> Flow {
+        let marks = self.exit_marks();
+        self.return_scopes.push(Vec::new());
         self.exception_scopes.push(Vec::new());
-        let body_flow = self.block(body, scope);
+        let flow = self.block(body, scope);
         let thrown = self.exception_scopes.pop().unwrap_or_default();
-        let caught = Scope::join(&thrown);
-        let mut live = Vec::new();
-        let mut all = vec![scope.clone()];
-        if body_flow == Flow::Next {
-            live.push(scope.clone());
+        let mut paths = Vec::new();
+        if flow == Flow::Next {
+            paths.push(ExitPath {
+                kind: ExitKind::Live,
+                scope: scope.clone(),
+            });
         }
+        self.exception_scopes.push(Vec::new());
+        self.catch_paths(catches, &thrown, &mut paths);
+        let escaping = self.exception_scopes.pop().unwrap_or_default();
+        let returned = self.return_scopes.pop().unwrap_or_default();
+        paths.extend(escaping.into_iter().map(|scope| ExitPath {
+            kind: ExitKind::Exception,
+            scope,
+        }));
+        paths.extend(returned.into_iter().map(|scope| ExitPath {
+            kind: ExitKind::Return,
+            scope,
+        }));
+        let catches_all = catches.iter().any(|c| {
+            c.types.iter().any(|n| {
+                self.context.names.resolve(n, UseKind::Class)[0].eq_ignore_ascii_case("Throwable")
+            })
+        });
+        if !catches_all {
+            paths.extend(thrown.into_iter().map(|scope| ExitPath {
+                kind: ExitKind::Exception,
+                scope,
+            }));
+        }
+        paths.extend(self.take_controls(&marks));
+        if let Some(finally) = finally {
+            self.transfer_finally(finally, &mut paths);
+        }
+        self.restore_paths(paths, scope)
+    }
+
+    fn catch_paths(&mut self, catches: &[Catch], thrown: &[Scope], paths: &mut Vec<ExitPath>) {
         for catch in catches {
             for ty in &catch.types {
                 self.class_name(ty, true);
@@ -34,52 +71,21 @@ impl Analyzer<'_> {
             if thrown.is_empty() {
                 continue;
             }
-            let mut branch = caught.clone();
+            let mut scope = Scope::join(thrown);
             if let Some(name) = &catch.variable {
                 let ty = catch
                     .types
                     .first()
                     .and_then(|t| self.class_name(t, false))
                     .map_or(ValueType::Mixed, ValueType::Class);
-                branch.define(name, ty);
+                scope.define(name, ty);
             }
-            if self.block(&catch.body, &mut branch) == Flow::Next {
-                live.push(branch.clone());
+            if self.block(&catch.body, &mut scope) == Flow::Next {
+                paths.push(ExitPath {
+                    kind: ExitKind::Live,
+                    scope,
+                });
             }
-            all.push(branch);
         }
-        // Unmatched exceptions also traverse finally, but cannot continue after try.
-        all.extend(thrown.iter().cloned());
-        if let Some(finally) = finally
-            && let Some(flow) = self.finally(finally, &all, &mut live)
-        {
-            return flow;
-        }
-        for thrown in &thrown {
-            self.record_exception(thrown);
-        }
-        if live.is_empty() {
-            Flow::Terminal
-        } else {
-            *scope = Scope::join(&live);
-            Flow::Next
-        }
-    }
-
-    fn finally(&mut self, body: &[Statement], all: &[Scope], live: &mut [Scope]) -> Option<Flow> {
-        let joined = Scope::join(all);
-        let mut final_scope = joined.clone();
-        let flow = self.block(body, &mut final_scope);
-        if flow != Flow::Next {
-            return Some(flow);
-        }
-        for path in live {
-            // Re-analyse with the live scope for transfer, while keeping diagnostics only
-            // from the join above. This also carries unset and changed property types.
-            let before_diagnostics = self.diagnostics.len();
-            self.block(body, path);
-            self.diagnostics.truncate(before_diagnostics);
-        }
-        None
     }
 }

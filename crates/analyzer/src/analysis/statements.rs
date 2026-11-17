@@ -15,7 +15,7 @@ impl Analyzer<'_> {
     pub fn block(&mut self, statements: &[Statement], scope: &mut Scope) -> Flow {
         if self.depth >= MAX_DEPTH {
             self.context.incomplete = true;
-            scope.dynamic = true;
+            scope.unknown_writes();
             return Flow::Next;
         }
         self.depth += 1;
@@ -32,44 +32,33 @@ impl Analyzer<'_> {
 
     fn statement(&mut self, statement: &Statement, scope: &mut Scope) -> Flow {
         match &statement.kind {
-            StatementKind::Namespace {
-                name, statements, ..
-            } => {
-                let previous = self.context.names.clone();
-                let namespace = name.as_ref().map_or(String::new(), |n| n.text.clone());
-                self.context.names = Names::for_block(namespace, statements);
-                self.block(statements, scope);
-                self.context.names = previous;
+            StatementKind::Namespace { .. }
+            | StatementKind::Function(_)
+            | StatementKind::Class(_) => return self.declaration_statement(statement, scope),
+            StatementKind::While { .. }
+            | StatementKind::DoWhile { .. }
+            | StatementKind::For { .. }
+            | StatementKind::Foreach { .. } => return self.iteration(statement, scope),
+            StatementKind::Global(_) | StatementKind::Static(_) | StatementKind::Unset(_) => {
+                self.binding_statement(statement, scope)
             }
-            StatementKind::Function(function) => self.function(function, statement.span),
-            StatementKind::Class(class) => self.class_declaration(class),
-            StatementKind::Block(body) => return self.block(body, scope),
+            StatementKind::Block(body)
+            | StatementKind::Declare {
+                body: Some(body), ..
+            } => return self.block(body, scope),
             StatementKind::Expression(expression) => {
                 if self.expression(expression, scope, false) == ValueType::Never {
                     return Flow::Terminal;
                 }
             }
             StatementKind::Return(value) => {
-                if let Some(value) = value {
-                    self.expression(value, scope, false);
-                    if self.context.returns == ValueType::Void {
-                        self.report(Finding::VoidReturn, statement.span);
-                    }
-                } else if self.context.declared_return && self.context.returns != ValueType::Void {
-                    self.report(
-                        Finding::MissingReturn(self.context.function.clone()),
-                        statement.span,
-                    );
-                }
-                return Flow::Terminal;
+                return self.return_statement(value.as_ref(), statement.span, scope);
             }
             StatementKind::If {
                 condition,
                 then,
                 otherwise,
-            } => {
-                return self.if_statement(condition, then, otherwise.as_deref(), scope);
-            }
+            } => return self.if_statement(condition, then, otherwise.as_deref(), scope),
             StatementKind::Switch { subject, cases } => {
                 self.expression(subject, scope, false);
                 return self.switch(cases, scope);
@@ -78,105 +67,9 @@ impl Analyzer<'_> {
                 body,
                 catches,
                 finally,
-            } => {
-                return self.try_statement(body, catches, finally.as_deref(), scope);
-            }
-            StatementKind::While { condition, body } => {
-                self.expression(condition, scope, false);
-                return self.loop_body(body, Some(condition), scope, false);
-            }
-            StatementKind::DoWhile { body, condition } => {
-                return self.loop_body(body, Some(condition), scope, true);
-            }
-            StatementKind::For {
-                init,
-                condition,
-                step,
-                body,
-            } => {
-                for e in init {
-                    self.expression(e, scope, false);
-                }
-                for e in condition {
-                    self.expression(e, scope, false);
-                }
-                if condition
-                    .last()
-                    .and_then(|e| self.condition_truth(e, scope))
-                    == Some(false)
-                {
-                    return Flow::Next;
-                }
-                let entered = condition
-                    .last()
-                    .and_then(|e| crate::constants::value(e, scope))
-                    .is_some_and(|v| v.truth())
-                    || condition.is_empty();
-                let before = scope.clone();
-                let flow = self.block(body, scope);
-                for e in step {
-                    self.expression(e, scope, false);
-                }
-                if !entered {
-                    *scope = Scope::join(&[before, scope.clone()]);
-                }
-                if entered && flow == Flow::Terminal {
-                    return Flow::Terminal;
-                }
-                if condition.is_empty() && flow != Flow::Break {
-                    return Flow::Terminal;
-                }
-            }
-            StatementKind::Foreach {
-                subject,
-                key,
-                value,
-                body,
-                ..
-            } => {
-                self.expression(subject, scope, false);
-                let before = scope.clone();
-                if let Some(key) = key {
-                    self.write(key, ValueType::Mixed, scope);
-                }
-                self.write(value, ValueType::Mixed, scope);
-                self.block(body, scope);
-                *scope = Scope::join(&[before, scope.clone()]);
-            }
-            StatementKind::Global(variables) => {
-                for variable in variables {
-                    match variable {
-                        Variable::Named(name) => scope.define(name, ValueType::Mixed),
-                        Variable::Dynamic(e) => {
-                            self.expression(e, scope, false);
-                            scope.dynamic = true;
-                        }
-                    }
-                }
-            }
-            StatementKind::Static(variables) => {
-                for variable in variables {
-                    let ty = variable
-                        .default
-                        .as_ref()
-                        .map_or(ValueType::Mixed, |e| self.expression(e, scope, false));
-                    scope.define(&variable.name, ty);
-                }
-            }
-            StatementKind::Unset(expressions) => {
-                for e in expressions {
-                    self.expression(e, scope, true);
-                    if let ExpressionKind::Variable(Variable::Named(name)) = &e.kind {
-                        scope.variables.remove(name);
-                        scope.aliases.remove(name);
-                    }
-                }
-            }
-            StatementKind::Break(_) => return Flow::Break,
-            StatementKind::Continue(_) => return Flow::Continue,
-            StatementKind::Declare {
-                body: Some(body), ..
-            } => return self.block(body, scope),
+            } => return self.try_statement(body, catches, finally.as_deref(), scope),
+            StatementKind::Break(levels) => return self.control_exit(*levels, false, scope),
+            StatementKind::Continue(levels) => return self.control_exit(*levels, true, scope),
             StatementKind::Goto(_) | StatementKind::Label(_) => scope.dynamic = true,
             _ => {
                 for e in crate::walk::statement_expressions(statement) {
@@ -185,6 +78,46 @@ impl Analyzer<'_> {
             }
         }
         Flow::Next
+    }
+
+    fn declaration_statement(&mut self, statement: &Statement, scope: &mut Scope) -> Flow {
+        match &statement.kind {
+            StatementKind::Namespace {
+                name, statements, ..
+            } => {
+                let previous = self.context.names.clone();
+                let namespace = name.as_ref().map_or(String::new(), |n| n.text.clone());
+                self.context.names = Names::for_block(namespace, statements);
+                let flow = self.block(statements, scope);
+                self.context.names = previous;
+                return flow;
+            }
+            StatementKind::Function(function) => self.function(function, statement.span),
+            StatementKind::Class(class) => self.class_declaration(class),
+            _ => {}
+        }
+        Flow::Next
+    }
+
+    fn return_statement(
+        &mut self,
+        value: Option<&Expression>,
+        span: Span,
+        scope: &mut Scope,
+    ) -> Flow {
+        if let Some(value) = value {
+            if self.context.by_reference && matches!(value.kind, ExpressionKind::Variable(_)) {
+                self.ensure_reference(value, scope);
+            }
+            self.expression(value, scope, false);
+            if self.context.returns == ValueType::Void {
+                self.report(Finding::VoidReturn, span);
+            }
+        } else if self.context.declared_return && self.context.returns != ValueType::Void {
+            self.report(Finding::MissingReturn(self.context.function.clone()), span);
+        }
+        self.record_return(scope);
+        Flow::Terminal
     }
 
     fn if_statement(
@@ -229,44 +162,11 @@ impl Analyzer<'_> {
         }
     }
 
-    fn loop_body(
-        &mut self,
-        body: &[Statement],
-        condition: Option<&Expression>,
-        scope: &mut Scope,
-        at_least_once: bool,
-    ) -> Flow {
-        if !at_least_once && condition.and_then(|e| self.condition_truth(e, scope)) == Some(false) {
-            return Flow::Next;
-        }
-        let entered = at_least_once
-            || condition
-                .and_then(|e| crate::constants::value(e, scope))
-                .is_some_and(|v| v.truth());
-        let before = scope.clone();
-        if !at_least_once && let Some(condition) = condition {
-            self.refine(condition, scope, true);
-        }
-        let flow = self.block(body, scope);
-        if at_least_once && flow == Flow::Terminal {
-            return Flow::Terminal;
-        }
-        if let Some(condition) = condition {
-            self.expression(condition, scope, false);
-        }
-        if !entered {
-            *scope = Scope::join(&[before, scope.clone()]);
-        }
-        if condition.is_some_and(always_true) && flow != Flow::Break {
-            Flow::Terminal
-        } else {
-            Flow::Next
-        }
-    }
-
     fn switch(&mut self, cases: &[SwitchCase], scope: &mut Scope) -> Flow {
+        use super::control::{ControlFrame, ControlKind};
         let before = scope.clone();
         let mut paths = Vec::new();
+        self.controls.push(ControlFrame::new(ControlKind::Switch));
         if !cases.iter().any(|c| c.condition.is_none()) {
             paths.push(before.clone());
         }
@@ -282,22 +182,13 @@ impl Analyzer<'_> {
                     break;
                 }
             }
-            if flow != Flow::Terminal {
+            if flow == Flow::Next {
                 paths.push(branch);
             }
         }
-        if paths.is_empty() && !cases.is_empty() {
-            Flow::Terminal
-        } else {
-            *scope = Scope::join(&paths);
-            Flow::Next
+        if let Some(frame) = self.controls.pop() {
+            paths.extend(frame.breaks);
         }
+        Self::finish_paths(paths, scope)
     }
-}
-
-fn always_true(e: &Expression) -> bool {
-    matches!(
-        e.kind,
-        ExpressionKind::Literal(Literal::Bool(true) | Literal::Int(1))
-    )
 }

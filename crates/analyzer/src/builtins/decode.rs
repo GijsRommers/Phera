@@ -71,6 +71,7 @@ fn class(f: &[&str]) -> ClassInfo {
         parents: list(f[5]),
         interfaces: list(f[6]),
         traits: list(f[7]),
+        adaptations: Vec::new(),
         methods: BTreeMap::new(),
         properties: BTreeMap::new(),
         constants: BTreeMap::new(),

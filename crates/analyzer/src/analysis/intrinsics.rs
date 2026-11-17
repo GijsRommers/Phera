@@ -9,8 +9,8 @@ impl Analyzer<'_> {
             return;
         };
         match name.to_lowercase().as_str() {
-            "extract" | "parse_str" if arguments.len() == 1 => scope.dynamic = true,
-            "extract" => scope.dynamic = true,
+            "extract" | "parse_str" if arguments.len() == 1 => scope.unknown_writes(),
+            "extract" => scope.unknown_writes(),
             "compact" => {
                 for argument in arguments {
                     let mut values = vec![&argument.value];

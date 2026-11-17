@@ -108,25 +108,29 @@ impl Options {
             if !inside {
                 continue;
             }
-            let scalar = || {
-                values
-                    .first()
-                    .ok_or_else(|| format!("phera.toml: missing {key}"))
-            };
-            match key.as_str() {
-                "level" if !array => self.level = level(scalar()?)?,
-                "paths" if array => {
-                    self.paths = values.iter().map(|s| string(s)).collect::<Result<_, _>>()?
-                }
-                "exclude" if array => {
-                    self.exclude = values.iter().map(|s| string(s)).collect::<Result<_, _>>()?
-                }
-                "baseline" if !array => self.baseline = Some(string(scalar()?)?),
-                _ => {
-                    return Err(format!(
-                        "phera.toml: unsupported check setting or value: {key}"
-                    ));
-                }
+            self.setting(&key, values, array)?;
+        }
+        Ok(())
+    }
+    fn setting(&mut self, key: &str, values: Vec<String>, array: bool) -> Result<(), String> {
+        let scalar = || {
+            values
+                .first()
+                .ok_or_else(|| format!("phera.toml: missing {key}"))
+        };
+        match key {
+            "level" if !array => self.level = level(scalar()?)?,
+            "paths" if array => {
+                self.paths = values.iter().map(|s| string(s)).collect::<Result<_, _>>()?
+            }
+            "exclude" if array => {
+                self.exclude = values.iter().map(|s| string(s)).collect::<Result<_, _>>()?
+            }
+            "baseline" if !array => self.baseline = Some(string(scalar()?)?),
+            _ => {
+                return Err(format!(
+                    "phera.toml: unsupported check setting or value: {key}"
+                ));
             }
         }
         Ok(())

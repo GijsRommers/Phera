@@ -15,11 +15,14 @@ impl Analyzer<'_> {
         } else {
             CallKind::Callable
         };
-        let (signature, label) = if let ExpressionKind::Name(name) = &callee.kind {
+        let (signature, label, intrinsic) = if let ExpressionKind::Name(name) = &callee.kind {
             let candidates = self.context.names.resolve(name, UseKind::Function);
-            let found = candidates
-                .iter()
-                .find_map(|n| self.index.functions.get(&n.to_lowercase()));
+            let found = candidates.iter().find_map(|n| {
+                self.index
+                    .functions
+                    .get(&n.to_lowercase())
+                    .map(|signature| (n, signature))
+            });
             if found.is_none()
                 && !candidates
                     .iter()
@@ -27,10 +30,15 @@ impl Analyzer<'_> {
             {
                 self.report(Finding::UnknownFunction(candidates[0].clone()), callee.span);
             }
-            if let Some(builtin) = candidates.iter().find(|n| !n.contains('\\')) {
-                self.intrinsic(builtin, arguments, scope);
-            }
-            (found.cloned(), format!("{}()", candidates[0]))
+            let intrinsic = found
+                .filter(|(name, _)| self.index.builtin_functions.contains(&name.to_lowercase()))
+                .map(|(name, _)| name.to_string());
+            let label = format!("{}()", found.map_or(&candidates[0], |(name, _)| name));
+            (
+                found.map(|(_, signature)| signature.clone()),
+                label,
+                intrinsic,
+            )
         } else {
             let ty = self.expression(callee, scope, false);
             (
@@ -40,6 +48,7 @@ impl Analyzer<'_> {
                     None
                 },
                 "callable".into(),
+                None,
             )
         };
         self.arguments(
@@ -50,6 +59,9 @@ impl Analyzer<'_> {
             callee.span,
             kind,
         );
+        if let Some(name) = intrinsic {
+            self.intrinsic(&name, arguments, scope);
+        }
         if matches!(arguments, Arguments::FirstClassCallable) {
             signature.map_or(ValueType::Mixed, |s| ValueType::Callable(Box::new(s)))
         } else {

@@ -5,6 +5,7 @@ mod analysis;
 pub mod baseline;
 pub mod builtins;
 pub mod collect;
+mod collect_class;
 pub mod config;
 mod constants;
 pub mod diagnostic;
@@ -50,7 +51,7 @@ fn check_project(options: &Options) -> Result<Report, String> {
     for file in &files {
         collect::collect(&mut index, &file.path, &file.source, &file.program);
     }
-    traits::link(&mut index, &files);
+    traits::link(&mut index);
     for file in &files {
         let found = analysis::Analyzer::new(&index, file, options.level).run();
         diagnostics.extend(found.into_iter().filter(|d| !suppress::suppressed(file, d)));

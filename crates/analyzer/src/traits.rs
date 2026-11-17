@@ -1,33 +1,45 @@
 //! Trait adaptations: `use T { original as alias; }` adds a second method name.
-//! Adaptations are linked after collection so a later file may supply the trait.
+//! Linking the owned index also covers anonymous and nested class declarations.
 
-use crate::{index::Index, names::Names, project::ParsedFile};
-use phera_ast::*;
+use crate::index::{Index, MemberAdaptation};
 
-pub fn link(index: &mut Index, files: &[ParsedFile]) {
+pub fn link(index: &mut Index) {
     for _ in 0..256 {
+        let classes: Vec<_> = index
+            .classes
+            .iter()
+            .map(|(name, c)| (name.clone(), c.adaptations.clone()))
+            .collect();
         let mut changed = false;
-        for file in files {
-            let mut pending = vec![(
-                &file.program.statements[..],
-                Names::for_block(String::new(), &file.program.statements),
-            )];
-            while let Some((block, names)) = pending.pop() {
-                for statement in block {
-                    match &statement.kind {
-                        StatementKind::Namespace {
-                            name, statements, ..
-                        } => {
-                            let namespace = name.as_ref().map_or(String::new(), |n| n.text.clone());
-                            pending.push((statements, Names::for_block(namespace, statements)));
-                        }
-                        StatementKind::Class(class) => changed |= adapt(index, class, &names),
-                        _ => {
-                            for block in crate::collect::child_blocks(statement) {
-                                pending.push((block, names.clone()));
-                            }
-                        }
+        for (class_name, adaptations) in classes {
+            for adaptation in adaptations {
+                let (source, method, alias, visibility) = match adaptation {
+                    MemberAdaptation::Alias {
+                        source,
+                        method,
+                        alias,
+                        visibility,
+                    } => (
+                        source.unwrap_or_else(|| class_name.clone()),
+                        method,
+                        alias,
+                        visibility,
+                    ),
+                    MemberAdaptation::Precedence { source, method } => {
+                        (source, method.clone(), method, None)
                     }
+                };
+                let Some(mut signature) = index.method(&source, &method).cloned() else {
+                    continue;
+                };
+                if let Some(visibility) = visibility {
+                    signature.modifiers.visibility = Some(visibility);
+                }
+                if let Some(class) = index.classes.get_mut(&class_name)
+                    && !class.methods.contains_key(&alias)
+                {
+                    class.methods.insert(alias, signature);
+                    changed = true;
                 }
             }
         }
@@ -35,57 +47,4 @@ pub fn link(index: &mut Index, files: &[ParsedFile]) {
             break;
         }
     }
-}
-
-fn adapt(index: &mut Index, class: &ClassDeclaration, names: &Names) -> bool {
-    let Some(name) = &class.name else {
-        return false;
-    };
-    let class_name = names.declaration(&name.name);
-    let mut changed = false;
-    for member in &class.members {
-        let ClassMemberKind::TraitUse { adaptations, .. } = &member.kind else {
-            continue;
-        };
-        for adaptation in adaptations {
-            match adaptation {
-                TraitAdaptation::Alias {
-                    trait_name,
-                    method,
-                    alias,
-                    visibility,
-                } => {
-                    let source = trait_name.as_ref().map_or(class_name.clone(), |n| {
-                        names.resolve(n, UseKind::Class)[0].clone()
-                    });
-                    let Some(mut signature) = index.method(&source, &method.name).cloned() else {
-                        continue;
-                    };
-                    if let Some(visibility) = visibility {
-                        signature.modifiers.visibility = Some(*visibility);
-                    }
-                    let target = alias.as_ref().unwrap_or(method).name.to_lowercase();
-                    if let Some(class) = index.classes.get_mut(&class_name.to_lowercase())
-                        && class.methods.get(&target) != Some(&signature)
-                    {
-                        class.methods.insert(target, signature);
-                        changed = true;
-                    }
-                }
-                TraitAdaptation::Precedence {
-                    trait_name, method, ..
-                } => {
-                    let source = names.resolve(trait_name, UseKind::Class)[0].clone();
-                    if let Some(signature) = index.method(&source, &method.name).cloned()
-                        && let Some(class) = index.classes.get_mut(&class_name.to_lowercase())
-                        && !class.methods.contains_key(&method.name.to_lowercase())
-                    {
-                        class.methods.insert(method.name.to_lowercase(), signature);
-                        changed = true;
-                    }
-                }
-            }
-        }
-    }
-    changed
 }

@@ -1,10 +1,10 @@
 //! Declaration collection: `namespace N; function f(int $x): string { ... }`.
 //! Imports belong to a namespace block, including declarations inside conditions.
 
-use crate::{index::*, names::Names, types::ValueType};
+pub use crate::collect_class::class_info;
+use crate::{index::*, names::Names};
 use phera_ast::*;
 use phera_source::LineTable;
-use std::collections::BTreeMap;
 
 pub fn collect(index: &mut Index, file: &str, source: &str, program: &Program) {
     let lines = LineTable::new(source);
@@ -16,7 +16,9 @@ pub fn collect(index: &mut Index, file: &str, source: &str, program: &Program) {
                 file: file.into(),
                 line: lines.line(offset),
             };
-            collect_expression_declarations(index, statement, &names, &location);
+            for block in collect_expression_declarations(index, statement, &names, &location) {
+                pending.push((block, names.clone()));
+            }
             match &statement.kind {
                 StatementKind::Namespace {
                     name, statements, ..
@@ -71,113 +73,6 @@ pub fn collect(index: &mut Index, file: &str, source: &str, program: &Program) {
     }
 }
 
-pub fn class_info(
-    class: &ClassDeclaration,
-    names: &Names,
-    location: &impl Fn(usize) -> Location,
-) -> ClassInfo {
-    let resolve = |n: &Name| names.resolve(n, UseKind::Class)[0].clone();
-    let mut info = ClassInfo {
-        name: names.declaration(class.name.as_ref().map_or("@anonymous", |n| &n.name)),
-        kind: class.kind,
-        modifiers: class.modifiers,
-        parents: class.extends.iter().map(resolve).collect(),
-        interfaces: class.implements.iter().map(resolve).collect(),
-        traits: Vec::new(),
-        methods: BTreeMap::new(),
-        properties: BTreeMap::new(),
-        constants: BTreeMap::new(),
-        location: location(class.span.start),
-        open_properties: false,
-    };
-    for member in &class.members {
-        match &member.kind {
-            ClassMemberKind::Method(method) => {
-                let mut signature = Signature::new(
-                    &method.parameters,
-                    method.return_type.as_ref(),
-                    names,
-                    location(member.span.start),
-                );
-                signature.modifiers = method.modifiers;
-                signature.abstract_body =
-                    method.body.is_none() || class.kind == ClassKind::Interface;
-                signature.accepts_extra = method
-                    .body
-                    .as_ref()
-                    .is_some_and(|body| uses_argument_introspection(body));
-                info.methods
-                    .insert(method.name.name.to_lowercase(), signature);
-                for p in &method.parameters {
-                    if p.modifiers.visibility.is_some() {
-                        info.properties.insert(
-                            p.name.clone(),
-                            PropertyInfo {
-                                ty: ValueType::declared(p.ty.as_ref(), names),
-                                modifiers: p.modifiers,
-                                location: location(p.span.start),
-                            },
-                        );
-                    }
-                }
-            }
-            ClassMemberKind::Property {
-                modifiers,
-                ty,
-                items,
-                ..
-            } => {
-                for p in items {
-                    info.properties.insert(
-                        p.name.clone(),
-                        PropertyInfo {
-                            ty: ValueType::declared(ty.as_ref(), names),
-                            modifiers: *modifiers,
-                            location: location(p.span.start),
-                        },
-                    );
-                }
-            }
-            ClassMemberKind::Constant {
-                modifiers,
-                ty,
-                items,
-                ..
-            } => {
-                for c in items {
-                    info.constants.insert(
-                        c.name.name.clone(),
-                        ConstantInfo {
-                            ty: ValueType::declared(ty.as_ref(), names),
-                            modifiers: *modifiers,
-                            location: location(c.span.start),
-                        },
-                    );
-                }
-            }
-            ClassMemberKind::EnumCase { name, .. } => {
-                info.constants.insert(
-                    name.name.clone(),
-                    ConstantInfo {
-                        ty: ValueType::Class(info.name.clone()),
-                        modifiers: Modifiers::default(),
-                        location: location(name.span.start),
-                    },
-                );
-            }
-            ClassMemberKind::TraitUse { traits, .. } => {
-                info.traits.extend(traits.iter().map(resolve));
-            }
-        }
-    }
-    crate::enums::add_members(&mut info, class, names);
-    info.open_properties = class
-        .attributes
-        .iter()
-        .any(|a| a.name.text.eq_ignore_ascii_case("AllowDynamicProperties"));
-    info
-}
-
 pub fn child_blocks(statement: &Statement) -> Vec<&[Statement]> {
     match &statement.kind {
         StatementKind::Block(body)
@@ -208,7 +103,7 @@ pub fn child_blocks(statement: &Statement) -> Vec<&[Statement]> {
     }
 }
 
-fn uses_argument_introspection(body: &[Statement]) -> bool {
+pub(crate) fn uses_argument_introspection(body: &[Statement]) -> bool {
     // The complete expression walker is iterative, including long postfix chains.
     let mut blocks = vec![body];
     while let Some(block) = blocks.pop() {
@@ -234,12 +129,13 @@ fn uses_argument_introspection(body: &[Statement]) -> bool {
     false
 }
 
-fn collect_expression_declarations(
+fn collect_expression_declarations<'a>(
     index: &mut Index,
-    statement: &Statement,
+    statement: &'a Statement,
     names: &Names,
     location: &impl Fn(usize) -> Location,
-) {
+) -> Vec<&'a [Statement]> {
+    let mut blocks = Vec::new();
     let mut pending = crate::walk::statement_expressions(statement);
     while let Some(expression) = pending.pop() {
         if let ExpressionKind::Call {
@@ -262,12 +158,25 @@ fn collect_expression_declarations(
             ..
         } = &expression.kind
         {
+            for member in &class.members {
+                if let ClassMemberKind::Method(method) = &member.kind
+                    && let Some(body) = &method.body
+                {
+                    blocks.push(body.as_slice());
+                }
+            }
             let mut info = class_info(class, names, location);
             info.name = anonymous_name(&location(class.span.start).file, class.span.start);
             index.classes.insert(info.name.to_lowercase(), info);
         }
+        match &expression.kind {
+            ExpressionKind::Closure(closure) => blocks.push(closure.body.as_slice()),
+            ExpressionKind::ArrowFunction(arrow) => pending.push(&arrow.body),
+            _ => {}
+        }
         pending.extend(crate::walk::children(expression));
     }
+    blocks
 }
 
 pub fn anonymous_name(file: &str, offset: usize) -> String {

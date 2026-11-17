@@ -6,28 +6,41 @@ use crate::index::{Location, Signature};
 
 impl Analyzer<'_> {
     pub fn write(&mut self, target: &Expression, ty: ValueType, scope: &mut Scope) {
-        let mut pending = vec![target];
-        while let Some(target) = pending.pop() {
+        let mut pending = vec![(target, ty)];
+        while let Some((target, ty)) = pending.pop() {
             match &target.kind {
                 ExpressionKind::Variable(Variable::Named(name)) => scope.define(name, ty.clone()),
                 ExpressionKind::Variable(Variable::Dynamic(e)) => {
                     self.expression(e, scope, false);
-                    scope.dynamic = true;
+                    scope.unknown_writes();
                 }
                 ExpressionKind::List(items) => {
                     for item in items.iter().flatten() {
                         if let Some(key) = &item.key {
                             self.expression(key, scope, false);
                         }
-                        pending.push(&item.value);
+                        pending.push((&item.value, ValueType::Mixed));
                     }
                 }
-                ExpressionKind::Array(items) => pending.extend(items.iter().map(|i| &i.value)),
+                ExpressionKind::Array(items) => {
+                    pending.extend(items.iter().map(|i| (&i.value, ValueType::Mixed)))
+                }
                 ExpressionKind::Index { target, index } => {
                     if let Some(index) = index {
                         self.expression(index, scope, false);
                     }
-                    pending.push(target);
+                    let array_type =
+                        if let ExpressionKind::Variable(Variable::Named(name)) = &target.kind {
+                            let old = scope.get(name);
+                            if old.definition == Definition::Absent {
+                                ValueType::Array
+                            } else {
+                                old.ty
+                            }
+                        } else {
+                            ValueType::Mixed
+                        };
+                    pending.push((target, array_type));
                 }
                 ExpressionKind::Property { target, name, .. } => {
                     let ty = self.expression(target, scope, false);
@@ -80,10 +93,13 @@ impl Analyzer<'_> {
         }
         let previous = self.context.clone();
         let exceptions = std::mem::take(&mut self.exception_scopes);
+        let controls = std::mem::take(&mut self.controls);
+        let returns = std::mem::take(&mut self.return_scopes);
         self.context.incomplete = false;
         self.context.object = previous.object && !closure.is_static;
         self.context.function = "Closure".into();
         self.context.declared_return = closure.return_type.is_some();
+        self.context.by_reference = closure.by_reference;
         self.context.returns =
             ValueType::declared(closure.return_type.as_ref(), &self.context.names);
         self.parameter_scope(&closure.parameters, &mut inner);
@@ -101,12 +117,16 @@ impl Analyzer<'_> {
         );
         self.context = previous;
         self.exception_scopes = exceptions;
+        self.controls = controls;
+        self.return_scopes = returns;
         ValueType::Callable(Box::new(signature))
     }
 
     pub fn arrow(&mut self, arrow: &ArrowFunction, outer: &mut Scope, span: Span) -> ValueType {
         let previous = self.context.clone();
         let exceptions = std::mem::take(&mut self.exception_scopes);
+        let controls = std::mem::take(&mut self.controls);
+        let returns = std::mem::take(&mut self.return_scopes);
         let mut inner = outer.clone();
         self.context.incomplete = false;
         self.context.object = previous.object && !arrow.is_static;
@@ -127,6 +147,8 @@ impl Analyzer<'_> {
         );
         self.context = previous;
         self.exception_scopes = exceptions;
+        self.controls = controls;
+        self.return_scopes = returns;
         ValueType::Callable(Box::new(signature))
     }
 }

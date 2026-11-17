@@ -14,12 +14,22 @@ use phera_ast::*;
 use phera_source::Span;
 
 mod arguments;
+mod assignments;
+mod atoms;
+mod binding_statements;
 mod bindings;
 mod calls;
+mod composite;
+mod control;
 mod declarations;
 mod exceptions;
 mod expressions;
+mod finally;
 mod intrinsics;
+mod invocations;
+mod logical;
+mod loops;
+mod member_expressions;
 mod members;
 mod refine;
 mod statements;
@@ -33,6 +43,7 @@ pub struct Context {
     pub object: bool,
     pub returns: ValueType,
     pub declared_return: bool,
+    pub by_reference: bool,
     pub function: String,
     pub incomplete: bool,
 }
@@ -45,6 +56,8 @@ pub struct Analyzer<'a> {
     pub context: Context,
     pub depth: usize,
     pub exception_scopes: Vec<Vec<Scope>>,
+    pub return_scopes: Vec<Vec<Scope>>,
+    pub controls: Vec<control::ControlFrame>,
 }
 
 impl<'a> Analyzer<'a> {
@@ -56,12 +69,15 @@ impl<'a> Analyzer<'a> {
             diagnostics: Vec::new(),
             depth: 0,
             exception_scopes: Vec::new(),
+            return_scopes: Vec::new(),
+            controls: Vec::new(),
             context: Context {
                 names: Names::for_block(String::new(), &file.program.statements),
                 class: None,
                 object: false,
                 returns: ValueType::Mixed,
                 declared_return: false,
+                by_reference: false,
                 function: "top level".into(),
                 incomplete: false,
             },

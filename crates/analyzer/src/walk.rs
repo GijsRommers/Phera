@@ -26,7 +26,26 @@ pub fn statement_expressions(statement: &Statement) -> Vec<&Expression> {
 }
 
 pub fn children(expression: &Expression) -> Vec<&Expression> {
-    let mut result = Vec::new();
+    match &expression.kind {
+        ExpressionKind::Array(_)
+        | ExpressionKind::List(_)
+        | ExpressionKind::InterpolatedString(_) => aggregate_children(expression),
+        ExpressionKind::Call { .. }
+        | ExpressionKind::MethodCall { .. }
+        | ExpressionKind::StaticCall { .. }
+        | ExpressionKind::New { .. } => call_children(expression),
+        ExpressionKind::Ternary { .. }
+        | ExpressionKind::Isset(_)
+        | ExpressionKind::Exit(_)
+        | ExpressionKind::Clone { .. }
+        | ExpressionKind::Yield { .. }
+        | ExpressionKind::Match(_) => branch_children(expression),
+        _ => simple_children(expression),
+    }
+}
+
+fn aggregate_children(expression: &Expression) -> Vec<&Expression> {
+    let mut result: Vec<&Expression> = Vec::new();
     match &expression.kind {
         ExpressionKind::Array(items) => {
             for item in items {
@@ -45,25 +64,14 @@ pub fn children(expression: &Expression) -> Vec<&Expression> {
                 }
             }
         }
-        ExpressionKind::Variable(Variable::Dynamic(e)) => result.push(e),
-        ExpressionKind::Index { target, index } => {
-            result.push(target);
-            result.extend(index.as_deref());
-        }
-        ExpressionKind::Property { target, name, .. }
-        | ExpressionKind::ClassConstant {
-            class: target,
-            name,
-        } => {
-            result.push(target);
-            member(name, &mut result);
-        }
-        ExpressionKind::StaticProperty { class, name } => {
-            result.push(class);
-            if let Variable::Dynamic(e) = name {
-                result.push(e);
-            }
-        }
+        _ => {}
+    }
+    result
+}
+
+fn call_children(expression: &Expression) -> Vec<&Expression> {
+    let mut result: Vec<&Expression> = Vec::new();
+    match &expression.kind {
         ExpressionKind::Call { callee, arguments } => {
             result.push(callee);
             arguments_children(arguments, &mut result);
@@ -88,6 +96,69 @@ pub fn children(expression: &Expression) -> Vec<&Expression> {
                 result.push(e);
             }
             arguments_children(arguments, &mut result);
+        }
+        _ => {}
+    }
+    result
+}
+
+fn branch_children(expression: &Expression) -> Vec<&Expression> {
+    let mut result: Vec<&Expression> = Vec::new();
+    match &expression.kind {
+        ExpressionKind::Ternary {
+            condition,
+            then,
+            otherwise,
+        } => {
+            result.push(condition);
+            result.extend(then.as_deref());
+            result.push(otherwise);
+        }
+        ExpressionKind::Isset(items) => result.extend(items),
+        ExpressionKind::Exit(value) => result.extend(value.as_deref()),
+        ExpressionKind::Clone { object, with } => {
+            result.push(object);
+            result.extend(with.as_deref());
+        }
+        ExpressionKind::Yield { key, value } => {
+            result.extend(key.as_deref());
+            result.extend(value.as_deref());
+        }
+        ExpressionKind::Match(m) => {
+            result.push(&m.subject);
+            for arm in &m.arms {
+                if let Some(conditions) = &arm.conditions {
+                    result.extend(conditions);
+                }
+                result.push(&arm.body);
+            }
+        }
+        _ => {}
+    }
+    result
+}
+
+fn simple_children(expression: &Expression) -> Vec<&Expression> {
+    let mut result: Vec<&Expression> = Vec::new();
+    match &expression.kind {
+        ExpressionKind::Variable(Variable::Dynamic(e)) => result.push(e),
+        ExpressionKind::Index { target, index } => {
+            result.push(target);
+            result.extend(index.as_deref());
+        }
+        ExpressionKind::Property { target, name, .. }
+        | ExpressionKind::ClassConstant {
+            class: target,
+            name,
+        } => {
+            result.push(target);
+            member(name, &mut result);
+        }
+        ExpressionKind::StaticProperty { class, name } => {
+            result.push(class);
+            if let Variable::Dynamic(e) = name {
+                result.push(e);
+            }
         }
         ExpressionKind::Unary { operand, .. }
         | ExpressionKind::Cast { operand, .. }
@@ -120,34 +191,6 @@ pub fn children(expression: &Expression) -> Vec<&Expression> {
         } => {
             result.push(left);
             result.push(right);
-        }
-        ExpressionKind::Ternary {
-            condition,
-            then,
-            otherwise,
-        } => {
-            result.push(condition);
-            result.extend(then.as_deref());
-            result.push(otherwise);
-        }
-        ExpressionKind::Isset(items) => result.extend(items),
-        ExpressionKind::Exit(value) => result.extend(value.as_deref()),
-        ExpressionKind::Clone { object, with } => {
-            result.push(object);
-            result.extend(with.as_deref());
-        }
-        ExpressionKind::Yield { key, value } => {
-            result.extend(key.as_deref());
-            result.extend(value.as_deref());
-        }
-        ExpressionKind::Match(m) => {
-            result.push(&m.subject);
-            for arm in &m.arms {
-                if let Some(conditions) = &arm.conditions {
-                    result.extend(conditions);
-                }
-                result.push(&arm.body);
-            }
         }
         _ => {}
     }

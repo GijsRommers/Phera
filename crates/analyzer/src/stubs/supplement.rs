@@ -13,14 +13,19 @@ pub fn add(index: &mut Index, source: &StubSource<'_>) -> Result<usize, String> 
         ("STDOUT", "sapi/cli/php_cli.c"),
         ("STDERR", "sapi/cli/php_cli.c"),
         ("PHP_CLI_PROCESS_TITLE", "sapi/cli/php_cli.c"),
-        ("IMAGETYPE_SVG", "ext/libxml/libxml.c"),
+        ("IMAGETYPE_SVG", "ext/libxml/image_svg.c"),
     ] {
         index.constants.insert(
             name.into(),
-            ConstantInfo::untyped(Location {
-                file: file.into(),
-                line: 0,
-            }),
+            ConstantInfo::untyped(native_location(
+                source,
+                file,
+                if name == "IMAGETYPE_SVG" {
+                    "PHP_IMAGE_CONST_NAME(\"SVG\")"
+                } else {
+                    name
+                },
+            )?),
         );
     }
     let hash = source.read("ext/hash/hash.c")?;
@@ -51,10 +56,11 @@ pub fn add(index: &mut Index, source: &StubSource<'_>) -> Result<usize, String> 
             &[],
             None,
             &crate::names::Names::default(),
-            Location {
-                file: "Zend/zend_closures.c".into(),
-                line: 0,
-            },
+            native_location(
+                source,
+                "Zend/zend_closures.c",
+                "ZEND_METHOD(Closure, __invoke)",
+            )?,
         );
         signature.accepts_extra = true;
         class.methods.insert("__invoke".into(), signature);
@@ -104,4 +110,17 @@ pub fn aliases(index: &mut Index, file: &str, source: &str) -> usize {
         }
     }
     added
+}
+
+fn native_location(source: &StubSource<'_>, file: &str, needle: &str) -> Result<Location, String> {
+    let text = source.read(file)?;
+    let line = text
+        .lines()
+        .position(|line| line.contains(needle))
+        .ok_or_else(|| format!("Missing native registration {needle} in {file}"))?
+        + 1;
+    Ok(Location {
+        file: file.into(),
+        line,
+    })
 }

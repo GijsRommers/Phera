@@ -142,7 +142,7 @@ M	callbackfilteriterator::accept		bool	0,false,false,false,false	false	false	ext
 C	closedgeneratorexception	ClosedGeneratorException	0	0,false,false,false,false	Exception			false	Zend/zend_generators.stub.php:30
 C	closure	Closure	0	0,false,false,true,false				false	Zend/zend_closures.stub.php:9
 M	closure::__construct		mixed	2,false,false,false,false	false	false	Zend/zend_closures.stub.php:11
-M	closure::__invoke		mixed	0,false,false,false,false	false	true	Zend/zend_closures.c:0
+M	closure::__invoke		mixed	0,false,false,false,false	false	true	Zend/zend_closures.c:45
 M	closure::bind	closure:@Closure:false:false:false,newThis:null|object:false:false:false,newScope:null|string|object:true:false:false	null|@Closure	0,true,false,false,false	false	false	Zend/zend_closures.stub.php:13
 M	closure::bindto	newThis:null|object:false:false:false,newScope:null|string|object:true:false:false	null|@Closure	0,false,false,false,false	false	false	Zend/zend_closures.stub.php:19
 M	closure::call	newThis:object:false:false:false,args:mixed:false:true:false	mixed	0,false,false,false,false	false	false	Zend/zend_closures.stub.php:21
@@ -7843,7 +7843,7 @@ G	IMAGETYPE_JPEG2000	mixed	0,false,false,false,false	ext/standard/basic_function
 G	IMAGETYPE_JPX	mixed	0,false,false,false,false	ext/standard/basic_functions.stub.php:577
 G	IMAGETYPE_PNG	mixed	0,false,false,false,false	ext/standard/basic_functions.stub.php:537
 G	IMAGETYPE_PSD	mixed	0,false,false,false,false	ext/standard/basic_functions.stub.php:547
-G	IMAGETYPE_SVG	mixed	0,false,false,false,false	ext/libxml/libxml.c:0
+G	IMAGETYPE_SVG	mixed	0,false,false,false,false	ext/libxml/image_svg.c:163
 G	IMAGETYPE_SWC	mixed	0,false,false,false,false	ext/standard/basic_functions.stub.php:588
 G	IMAGETYPE_SWF	mixed	0,false,false,false,false	ext/standard/basic_functions.stub.php:542
 G	IMAGETYPE_TIFF_II	mixed	0,false,false,false,false	ext/standard/basic_functions.stub.php:557
@@ -8609,7 +8609,7 @@ G	PHP_BINARY_READ	mixed	0,false,false,false,false	ext/sockets/sockets.stub.php:7
 G	PHP_BINDIR	mixed	0,false,false,false,false	main/main.stub.php:101
 G	PHP_BUILD_DATE	mixed	0,false,false,false,false	main/main.stub.php:42
 G	PHP_BUILD_PROVIDER	mixed	0,false,false,false,false	main/main.stub.php:49
-G	PHP_CLI_PROCESS_TITLE	mixed	0,false,false,false,false	sapi/cli/php_cli.c:0
+G	PHP_CLI_PROCESS_TITLE	mixed	0,false,false,false,false	sapi/cli/php_cli.c:937
 G	PHP_CONFIG_FILE_PATH	mixed	0,false,false,false,false	main/main.stub.php:138
 G	PHP_CONFIG_FILE_SCAN_DIR	mixed	0,false,false,false,false	main/main.stub.php:143
 G	PHP_DATADIR	mixed	0,false,false,false,false	main/main.stub.php:123
@@ -9289,9 +9289,9 @@ G	SQL_VARCHAR	mixed	0,false,false,false,false	ext/odbc/odbc.stub.php:150
 G	SQL_WCHAR	mixed	0,false,false,false,false	ext/odbc/odbc.stub.php:255
 G	SQL_WLONGVARCHAR	mixed	0,false,false,false,false	ext/odbc/odbc.stub.php:265
 G	SQL_WVARCHAR	mixed	0,false,false,false,false	ext/odbc/odbc.stub.php:260
-G	STDERR	mixed	0,false,false,false,false	sapi/cli/php_cli.c:0
-G	STDIN	mixed	0,false,false,false,false	sapi/cli/php_cli.c:0
-G	STDOUT	mixed	0,false,false,false,false	sapi/cli/php_cli.c:0
+G	STDERR	mixed	0,false,false,false,false	sapi/cli/php_cli.c:218
+G	STDIN	mixed	0,false,false,false,false	sapi/cli/php_cli.c:302
+G	STDOUT	mixed	0,false,false,false,false	sapi/cli/php_cli.c:215
 G	STREAM_BUFFER_FULL	mixed	0,false,false,false,false	main/streams/userspace.stub.php:83
 G	STREAM_BUFFER_LINE	mixed	0,false,false,false,false	main/streams/userspace.stub.php:78
 G	STREAM_BUFFER_NONE	mixed	0,false,false,false,false	main/streams/userspace.stub.php:73

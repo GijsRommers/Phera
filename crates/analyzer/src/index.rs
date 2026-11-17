@@ -82,6 +82,20 @@ impl ConstantInfo {
 }
 
 #[derive(Clone, Debug)]
+pub enum MemberAdaptation {
+    Alias {
+        source: Option<String>,
+        method: String,
+        alias: String,
+        visibility: Option<Visibility>,
+    },
+    Precedence {
+        source: String,
+        method: String,
+    },
+}
+
+#[derive(Clone, Debug)]
 pub struct ClassInfo {
     pub name: String,
     pub kind: ClassKind,
@@ -89,6 +103,7 @@ pub struct ClassInfo {
     pub parents: Vec<String>,
     pub interfaces: Vec<String>,
     pub traits: Vec<String>,
+    pub adaptations: Vec<MemberAdaptation>,
     pub methods: BTreeMap<String, Signature>,
     pub properties: BTreeMap<String, PropertyInfo>,
     pub constants: BTreeMap<String, ConstantInfo>,

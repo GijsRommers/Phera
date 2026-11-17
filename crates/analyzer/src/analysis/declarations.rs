@@ -42,11 +42,14 @@ impl Analyzer<'_> {
     pub fn function(&mut self, function: &FunctionDeclaration, span: Span) {
         let previous = self.context.clone();
         let exceptions = std::mem::take(&mut self.exception_scopes);
+        let controls = std::mem::take(&mut self.controls);
+        let returns = std::mem::take(&mut self.return_scopes);
         self.context.incomplete = false;
         self.context.class = None;
         self.context.object = false;
         self.context.function = self.context.names.declaration(&function.name.name);
         self.context.declared_return = function.return_type.is_some();
+        self.context.by_reference = function.by_reference;
         self.context.returns =
             ValueType::declared(function.return_type.as_ref(), &self.context.names);
         let mut scope = Scope::default();
@@ -56,11 +59,15 @@ impl Analyzer<'_> {
         self.check_return_path(flow, &function.body, span);
         self.context = previous;
         self.exception_scopes = exceptions;
+        self.controls = controls;
+        self.return_scopes = returns;
     }
 
     pub fn class_declaration(&mut self, class: &ClassDeclaration) {
         let previous = self.context.clone();
         let exceptions = std::mem::take(&mut self.exception_scopes);
+        let controls = std::mem::take(&mut self.controls);
+        let returns = std::mem::take(&mut self.return_scopes);
         self.context.class = Some(class.name.as_ref().map_or_else(
             || crate::collect::anonymous_name(&self.file.path, class.span.start),
             |n| self.context.names.declaration(&n.name),
@@ -78,6 +85,7 @@ impl Analyzer<'_> {
                     self.context.object = !method.modifiers.is_static;
                     self.context.function = method.name.name.clone();
                     self.context.declared_return = method.return_type.is_some();
+                    self.context.by_reference = method.by_reference;
                     self.context.returns =
                         ValueType::declared(method.return_type.as_ref(), &self.context.names);
                     let mut scope = Scope::default();
@@ -112,6 +120,8 @@ impl Analyzer<'_> {
         }
         self.context = previous;
         self.exception_scopes = exceptions;
+        self.controls = controls;
+        self.return_scopes = returns;
     }
 
     fn required_methods(&mut self, name: &str, span: Span) {
