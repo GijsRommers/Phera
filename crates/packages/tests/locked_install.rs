@@ -247,3 +247,42 @@ fn rejects_a_dist_checksum_mismatch() {
     assert!(format!("{:#}", install(root, &options).unwrap_err()).contains("Checksum mismatch"));
     assert!(!root.join("vendor/acme/base").exists());
 }
+
+#[test]
+fn incomplete_cached_objects_fail_offline_and_are_repaired_online() {
+    let directory = project();
+    let root = directory.path();
+    let package = archive(root, "acme/cache", &[("Thing.php", "<?php class Thing {}")]);
+    fs::write(root.join("composer.json"), "{}").unwrap();
+    fs::write(
+        root.join("composer.lock"),
+        json!({"content-hash":"fixture", "packages":[package]}).to_string(),
+    )
+    .unwrap();
+    let mut options = Options {
+        cache_dir: Some(root.join("cache")),
+        no_scripts: true,
+        ..Options::default()
+    };
+    install(root, &options).unwrap();
+    let object = fs::read_dir(root.join("cache/objects"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    fs::remove_file(object.join("Thing.php")).unwrap();
+    fs::remove_dir_all(root.join("vendor")).unwrap();
+    options.offline = true;
+    let error = format!("{:#}", install(root, &options).unwrap_err());
+    assert!(
+        error.contains("Offline store is missing acme/cache"),
+        "{error}"
+    );
+    options.offline = false;
+    install(root, &options).unwrap();
+    assert_eq!(
+        fs::read_to_string(root.join("vendor/acme/cache/Thing.php")).unwrap(),
+        "<?php class Thing {}"
+    );
+}

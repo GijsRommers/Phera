@@ -11,6 +11,8 @@ use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+mod inventory;
+
 pub(crate) struct Store {
     pub(crate) directory: PathBuf,
 }
@@ -77,11 +79,10 @@ impl Store {
             .open(self.directory.join("locks").join(&key))?;
         guard.lock_exclusive()?;
         let index = self.directory.join("index").join(&key);
-        if let Ok(digest) = fs::read_to_string(&index) {
-            let object = crate::paths::inside(&self.directory.join("objects"), digest.trim())?;
-            if object.is_dir() && (!path_dist || offline) {
-                return Ok(object);
-            }
+        if (!path_dist || offline)
+            && let Some(object) = inventory::cached(&index, &self.directory.join("objects"))?
+        {
+            return Ok(object);
         }
         if offline {
             bail!(
@@ -153,19 +154,7 @@ impl Store {
                 );
             }
         }
-        let object = self.directory.join("objects").join(&digest);
-        if !object.exists() {
-            match fs::rename(&source, &object) {
-                Ok(()) => {}
-                Err(_) if object.is_dir() => {}
-                Err(error) => return Err(error.into()),
-            }
-        }
-        let mut record = tempfile::NamedTempFile::new_in(self.directory.join("index"))?;
-        use std::io::Write;
-        record.write_all(digest.as_bytes())?;
-        record.persist(index)?;
-        Ok(object)
+        inventory::publish(&self.directory, &source, &index, &digest)
     }
 }
 
