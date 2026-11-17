@@ -5,7 +5,11 @@
 //! filter_id("Boolean"); // false
 //! ```
 
-use phera_extension_api::{Context, NativeResult, PhpArray, Value, args};
+use phera_extension_api::{
+    Context, LocalFuture, NativeResult, Param, ParamType, PhpArray, Value, args, prepare_call,
+};
+
+use crate::stringify;
 
 pub const FILTERS: &[(&str, i64)] = &[
     ("int", 257),
@@ -39,11 +43,26 @@ pub fn list(_context: &mut dyn Context, _arguments: &[Value]) -> NativeResult {
     Ok(Value::from(result))
 }
 
-pub fn id(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+pub fn id(context: &mut dyn Context, mut arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        const STRING: &[Param] = &[Param::new("name", ParamType::String)];
+        let value = args::value(&arguments, 0);
+        if value.is_object()
+            && !context.strict_types()
+            && let Some(name) = stringify::value(context, value.clone()).await?
+        {
+            return Ok(find_id(name.as_bytes()));
+        }
+        prepare_call("filter_id", STRING, &mut arguments, context)?;
+        Ok(find_id(args::bytes(&arguments, 0)))
+    })
+}
+
+fn find_id(bytes: &[u8]) -> Value {
     // PHP compares the name as a C string.
-    let name = args::bytes(arguments, 0).split(|&byte| byte == 0).next();
-    Ok(FILTERS
+    let name = bytes.split(|&byte| byte == 0).next();
+    FILTERS
         .iter()
         .find(|(candidate, _)| Some(candidate.as_bytes()) == name)
-        .map_or(Value::Bool(false), |&(_, id)| Value::Int(id)))
+        .map_or(Value::Bool(false), |&(_, id)| Value::Int(id))
 }

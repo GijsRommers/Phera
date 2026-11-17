@@ -36,24 +36,30 @@ pub fn full(input: &[u8], flags: Flags) -> String {
 }
 
 fn entity_length(tail: &str) -> Option<usize> {
-    let end = tail
-        .as_bytes()
-        .iter()
-        .take(32)
-        .position(|&byte| byte == b';')?;
-    let name = &tail[..end];
-    let valid = if let Some(number) = name.strip_prefix('#') {
-        let (digits, radix) = if let Some(hex) = number.strip_prefix(['x', 'X']) {
-            (hex, 16)
+    if let Some(number) = tail.strip_prefix('#') {
+        let (digits, radix, prefix) = if let Some(hex) = number.strip_prefix(['x', 'X']) {
+            (hex, 16, 2)
         } else {
-            (number, 10)
+            (number, 10, 1)
         };
-        !digits.starts_with(['+', '-'])
-            && u32::from_str_radix(digits, radix).is_ok_and(|value| value <= 0x10ffff)
-    } else {
-        ENTITIES.iter().any(|(_, encoded)| {
-            encoded.as_bytes().get(1..encoded.len() - 1) == Some(name.as_bytes())
-        })
-    };
-    valid.then_some(end)
+        let end = digits
+            .bytes()
+            .take_while(|byte| byte.is_ascii_digit() || radix == 16 && byte.is_ascii_hexdigit())
+            .count();
+        if digits.as_bytes().get(end) != Some(&b';') {
+            return None;
+        }
+        let value = u32::from_str_radix(&digits[..end], radix).ok()?;
+        return (value <= 0x10ffff).then_some(prefix + end);
+    }
+
+    let end = tail.bytes().take_while(u8::is_ascii_alphanumeric).count();
+    if tail.as_bytes().get(end) != Some(&b';') {
+        return None;
+    }
+    let name = &tail.as_bytes()[..end];
+    ENTITIES
+        .iter()
+        .any(|(_, encoded)| encoded.as_bytes().get(1..encoded.len() - 1) == Some(name))
+        .then_some(end)
 }

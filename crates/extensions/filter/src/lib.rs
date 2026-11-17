@@ -19,6 +19,7 @@ mod numbers;
 mod options;
 mod regexp;
 mod sanitize;
+mod stringify;
 mod tree;
 mod url;
 
@@ -33,8 +34,8 @@ impl Extension for Filter {
 
     fn register(&self, registry: &mut Registry) {
         registry.function(FunctionEntry::sync("filter_list", &[], catalog::list));
-        const ID: &[Param] = &[Param::new("name", ParamType::String)];
-        registry.function(FunctionEntry::sync("filter_id", ID, catalog::id));
+        const ID: &[Param] = &[Param::new("name", ParamType::Mixed)];
+        registry.function(FunctionEntry::asynchronous("filter_id", ID, catalog::id));
         functions::register(registry);
         exceptions::register(registry);
         for &(name, value) in constants::CONSTANTS {

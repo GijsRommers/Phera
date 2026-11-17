@@ -5,13 +5,12 @@
 //! filter_var('no', FILTER_VALIDATE_BOOLEAN, ['options' => ['default' => 42]]); // 42
 //! ```
 
-use phera_extension_api::value::to_php_string;
-use phera_extension_api::{Context, NativeError, NativeResult, PhpArray, PhpString, Value};
+use phera_extension_api::{Context, NativeError, NativeResult, PhpArray, Value};
 
 use crate::catalog::FILTERS;
 use crate::constants::*;
 use crate::options::{Failure, Options};
-use crate::{domain, email, exceptions, html, ip, numbers, regexp, sanitize, tree, url};
+use crate::{domain, email, exceptions, html, ip, numbers, regexp, sanitize, stringify, tree, url};
 
 pub async fn value(context: &mut dyn Context, value: Value, options: &Options) -> NativeResult {
     if let Value::Array(array) = value {
@@ -43,7 +42,16 @@ pub async fn value(context: &mut dyn Context, value: Value, options: &Options) -
 }
 
 pub async fn leaf(context: &mut dyn Context, value: Value, options: &Options) -> NativeResult {
-    let Some(string) = stringify(context, value, options).await? else {
+    let object_name = match (&value, options.failure) {
+        (Value::Object(object), Failure::Throw) => Some(object.class.name().to_owned()),
+        _ => None,
+    };
+    let Some(string) = stringify::value(context, value).await? else {
+        if let Some(name) = object_name {
+            return Err(exceptions::failed(&format!(
+                "object of type {name} has no __toString() method",
+            )));
+        }
         return Ok(or_default(options.failure.value(), options));
     };
     let bytes = string.as_bytes();
@@ -101,37 +109,6 @@ fn or_default(value: Value, options: &Options) -> Value {
         return default.deref().clone();
     }
     value
-}
-
-async fn stringify(
-    context: &mut dyn Context,
-    value: Value,
-    options: &Options,
-) -> Result<Option<PhpString>, NativeError> {
-    let Value::Object(object) = &value else {
-        return Ok(Some(to_php_string(&value, context.diagnostics())?));
-    };
-
-    let exists = context
-        .call(
-            &Value::from("method_exists"),
-            vec![value.clone(), Value::from("__toString")],
-        )
-        .await?;
-    if matches!(exists, Value::Bool(false)) {
-        if options.failure == Failure::Throw {
-            return Err(exceptions::failed(&format!(
-                "object of type {} has no __toString() method",
-                object.class.name(),
-            )));
-        }
-        return Ok(None);
-    }
-    let mut method = PhpArray::new();
-    method.push(value)?;
-    method.push(Value::from("__toString"))?;
-    let result = context.call(&Value::from(method), Vec::new()).await?;
-    Ok(Some(to_php_string(&result, context.diagnostics())?))
 }
 
 async fn callback(context: &mut dyn Context, input: Value, options: &Options) -> NativeResult {
