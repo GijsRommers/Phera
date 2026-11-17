@@ -9,4 +9,5 @@ options=()
 for module in "${modules[@]}"; do
     options+=(-d "extension=$module")
 done
-exec "$real_php" "${options[@]}" "$@"
+# Some PDO probes omit -n; keep those on the same ini-free oracle too.
+exec "$real_php" -n "${options[@]}" "$@"
