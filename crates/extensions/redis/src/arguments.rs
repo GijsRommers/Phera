@@ -68,11 +68,11 @@ pub fn prepare(
         "xclaim" => params[5].optional = true,
         "sdiffstore" | "sunionstore" => params[1].optional = true,
         "sort" | "sort_ro" => params[1].nullable = false,
-        "command" | "slaveof" | "replicaof" => {
+        "command" | "slaveof" | "replicaof"
+            if a.first().is_some_and(|v| matches!(v, Value::Object(_))) =>
+        {
             // These implementations use a non-nullable parser despite nullable stubs.
-            if a.first().is_some_and(|v| matches!(v, Value::Object(_))) {
-                params[0].nullable = false;
-            }
+            params[0].nullable = false;
         }
         _ => (),
     }

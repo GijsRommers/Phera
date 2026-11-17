@@ -84,8 +84,12 @@ jobs:
       - uses: shivammathur/setup-php@d52fc211a0436f8839a587b3b5b8efddab4744ea # v2
         with:
           php-version: '8.5'
-          extensions: json, pcre, ctype, pdo, pdo_pgsql, mysqlnd, pdo_mysql, mbstring, tokenizer, redis
+          extensions: json, pcre, ctype, pdo, pdo_pgsql, mysqlnd, pdo_mysql, mbstring, tokenizer, redis-phpredis/phpredis@6.3.0
           coverage: none
+        env:
+          REDIS_CONFIGURE_OPTS: >-
+            --enable-redis --disable-redis-igbinary --disable-redis-msgpack
+            --disable-redis-lzf --disable-redis-zstd --disable-redis-lz4
       - name: Export PHP oracle
         run: |
           echo "PHERA_PHP_REAL=$(command -v php)" >> "$GITHUB_ENV"
@@ -98,7 +102,7 @@ jobs:
         run: cargo test --workspace --no-fail-fast
 
   pdo-end-to-end:
-    name: PDO end to end
+    name: PDO and Redis end to end
     # Runs the 110 PHP comparison scripts through the release binary against
     # both databases. All of them match real PHP since native class constants
     # and exception codes landed, so this job is part of the gate.
@@ -143,8 +147,12 @@ jobs:
       - uses: shivammathur/setup-php@d52fc211a0436f8839a587b3b5b8efddab4744ea # v2
         with:
           php-version: '8.5'
-          extensions: json, pcre, ctype, pdo, pdo_pgsql, mysqlnd, pdo_mysql, mbstring, tokenizer, redis
+          extensions: json, pcre, ctype, pdo, pdo_pgsql, mysqlnd, pdo_mysql, mbstring, tokenizer, redis-phpredis/phpredis@6.3.0
           coverage: none
+        env:
+          REDIS_CONFIGURE_OPTS: >-
+            --enable-redis --disable-redis-igbinary --disable-redis-msgpack
+            --disable-redis-lzf --disable-redis-zstd --disable-redis-lz4
       - name: Export PHP oracle
         run: |
           echo "PHERA_PHP_REAL=$(command -v php)" >> "$GITHUB_ENV"
@@ -153,9 +161,9 @@ jobs:
       # Fail on missing prerequisites instead of silently skipping the PDO suites.
       - name: Verify PHP version, extensions and database connections
         run: make ci-prerequisites
-      - name: Build end-to-end PDO binary
+      - name: Build end-to-end binary
         run: make ci-build
-      - name: Run the PDO tests through the release binary
+      - name: Run PDO and Redis tests through the release binary
         run: cargo test -p phera-ext-pdo -p phera-ext-redis --no-fail-fast
         env:
           PHERA_BIN: ${{ github.workspace }}/target/release/phera

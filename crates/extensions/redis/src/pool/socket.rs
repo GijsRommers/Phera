@@ -53,14 +53,26 @@ impl Socket {
                 (endpoint.timeout_micros > 0)
                     .then(|| std::time::Duration::from_micros(endpoint.timeout_micros)),
             );
-        let connection = endpoint
-            .client()?
-            .get_multiplexed_async_connection_with_config(&config)
-            .await?;
-        Ok(Self {
-            connection,
-            reusable: true,
-        })
+        let client = endpoint.client()?;
+        for attempt in 0..3 {
+            match client
+                .get_multiplexed_async_connection_with_config(&config)
+                .await
+            {
+                Ok(connection) => {
+                    return Ok(Self {
+                        connection,
+                        reusable: true,
+                    });
+                }
+                Err(error) if error.is_io_error() && attempt < 2 => {
+                    // Only retry establishing a socket, before any PHP command is sent.
+                    tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        unreachable!("last handshake attempt returns")
     }
 }
 

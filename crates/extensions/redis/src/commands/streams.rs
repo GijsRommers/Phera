@@ -25,7 +25,7 @@ pub async fn build(
             if let Some(values) = array(a.get(2)) {
                 for (key, value) in values.iter() {
                     match key {
-                        phera_extension_api::ArrayKey::Int(i) => b.token(*i),
+                        phera_extension_api::ArrayKey::Int(i) => b.token(i),
                         phera_extension_api::ArrayKey::String(s) => b.token(s.as_bytes()),
                     }
                     b.value(c, value).await?;
@@ -53,7 +53,7 @@ pub async fn build(
             if let Some(streams) = array(a.get(offset)) {
                 for (key, _) in streams.iter() {
                     let key = match key {
-                        phera_extension_api::ArrayKey::Int(i) => Value::Int(*i),
+                        phera_extension_api::ArrayKey::Int(i) => Value::Int(i),
                         phera_extension_api::ArrayKey::String(s) => Value::String(s.clone()),
                     };
                     b.key(&key);

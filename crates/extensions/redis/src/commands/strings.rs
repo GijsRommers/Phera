@@ -70,7 +70,7 @@ pub async fn build(
             if let Some(values) = array(a.first()) {
                 for (key, value) in values.iter() {
                     let key = match key {
-                        phera_extension_api::ArrayKey::Int(i) => Value::Int(*i),
+                        phera_extension_api::ArrayKey::Int(i) => Value::Int(i),
                         phera_extension_api::ArrayKey::String(s) => Value::String(s.clone()),
                     };
                     b.key(&key);

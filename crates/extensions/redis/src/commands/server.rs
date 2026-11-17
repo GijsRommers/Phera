@@ -54,7 +54,7 @@ pub fn build(name: &str, a: &[Value], b: &mut Builder<'_>) -> Result<bool, Nativ
                 if let Some(values) = array(a.get(1)) {
                     for (key, value) in values.iter() {
                         match key {
-                            phera_extension_api::ArrayKey::Int(i) => b.token(*i),
+                            phera_extension_api::ArrayKey::Int(i) => b.token(i),
                             phera_extension_api::ArrayKey::String(s) => b.token(s.as_bytes()),
                         }
                         b.arg(value);

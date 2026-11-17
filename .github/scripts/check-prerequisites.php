@@ -34,5 +34,6 @@ echo 'PHP ', PHP_VERSION, ': extensions, both test databases and the pool test a
 
 $redis = new Redis();
 $redis->connect('127.0.0.1', 16399);
+$redis->config('SET', ['save' => '', 'appendonly' => 'no']);
 $redis->ping();
 echo 'phpredis ', phpversion('redis'), ': Redis test server ready', PHP_EOL;
