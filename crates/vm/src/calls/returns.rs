@@ -43,7 +43,7 @@ impl Vm {
             frame
                 .function()
                 .return_type
-                .and_then(|ty| frame.unit.types.get(ty.index()))
+                .and_then(|ty| frame.unit().types.get(ty.index()))
         }) && let Some(float) = crate::types::widen_int_to_float(&value, declaration.mask)
         {
             return Ok(float);
@@ -51,7 +51,7 @@ impl Vm {
         let typed_return = self.current().and_then(|frame| {
             let declaration = frame.function().return_type?;
             if frame
-                .unit
+                .unit()
                 .types
                 .get(declaration.index())
                 .is_some_and(|declared| crate::types::accepts_as_is(&value, declared))
@@ -61,13 +61,13 @@ impl Vm {
             // A cached class identity can accept an object without cloning its declaration.
             // References still need the ordinary cell-write and borrow checks below.
             if matches!(&value, Value::Object(_))
-                && self.matches_cached_class_type(&value, declaration, &frame.unit, &frame.cache)
+                && self.matches_cached_class_type(&value, declaration, frame.unit(), frame.cache())
             {
                 return None;
             }
             Some(ReturnTypeSite {
-                unit: frame.unit.clone(),
-                function: frame.function_id,
+                unit: frame.unit().clone(),
+                function: frame.function_id(),
                 declaration,
             })
         });
@@ -128,7 +128,7 @@ impl Vm {
         mut value: Value,
         stop: usize,
     ) -> Result<Option<Value>, NativeError> {
-        if let Some(context) = self.current().and_then(|frame| frame.method.as_ref())
+        if let Some(context) = self.current().and_then(|frame| frame.method())
             && context.invocation == crate::classes::Invocation::Constructor
         {
             value = context
@@ -142,14 +142,12 @@ impl Vm {
             .call_stack
             .pop()
             .ok_or_else(|| internal_error!("return without frame"))?;
-        self.call_stack.preparing.truncate(frame.call_start);
-        self.registers.truncate(frame.base);
-        let destination = frame.destination;
-        self.call_stack.recycle(frame);
+        self.call_stack.abandon_calls_from(frame.base());
+        self.registers.truncate(frame.base());
         if self.call_stack.depth() == stop {
             return Ok(Some(value));
         }
-        if let Some(destination) = destination {
+        if let Some(destination) = frame.destination() {
             self.set(destination, value);
         }
         Ok(None)

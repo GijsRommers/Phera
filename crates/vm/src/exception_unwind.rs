@@ -37,9 +37,9 @@ impl Vm {
         let mut skip_handlers = thrown.skip_handlers;
         while self.call_stack.depth() > stop {
             let handler = self.current().and_then(|frame| {
-                let position = frame.ip.saturating_sub(1);
+                let position = frame.ip().saturating_sub(1);
                 // Parameter checks occur before the body and cannot enter its catches.
-                if frame.ip == 0 || skip_handlers == Some(self.call_stack.depth()) {
+                if frame.ip() == 0 || skip_handlers == Some(self.call_stack.depth()) {
                     return None;
                 }
                 frame
@@ -87,51 +87,44 @@ impl Vm {
             .catch
             .or(handler.finally)
             .map_or(0, |target| target.index());
-        if let Some(frame) = self.current() {
-            self.call_stack.preparing.truncate(frame.call_start);
+        let Some(frame) = self.current() else {
+            return;
+        };
+        let (base, end) = (frame.base(), frame.end());
+        let iterators: Vec<_> = frame
+            .function()
+            .instructions
+            .iter()
+            .enumerate()
+            .filter_map(|(start, instruction)| {
+                let (iterator, end) = match instruction {
+                    Instruction::IterNext { iter, end, .. }
+                    | Instruction::IterNextKeyed { iter, end, .. } => (*iter, *end),
+                    _ => return None,
+                };
+                (!(start <= target && target < end.index())).then_some(iterator)
+            })
+            .collect();
+        self.call_stack.abandon_calls_from(end);
+        self.closure_captures.retain(|capture| capture.base < base);
+        self.registers.truncate(end);
+        for register in &handler.cleanup {
+            self.registers
+                .window_mut(base + register.index(), 1)
+                .fill(None);
         }
-        if let Some(frame) = self.call_stack.current_mut() {
-            self.closure_captures
-                .retain(|capture| capture.base < frame.base);
-            let end = frame
-                .saved_arguments
-                .map_or(frame.base + frame.count + frame.extra_arguments, |base| {
-                    base + frame.argument_count
-                });
-            self.registers.truncate(end);
-            for register in &handler.cleanup {
-                if let Some(slot) = frame
-                    .slots_mut(&mut self.registers)
-                    .get_mut(register.index())
-                {
-                    *slot = None;
-                }
-            }
-            let iterators: Vec<_> = frame
-                .function()
-                .instructions
-                .iter()
-                .enumerate()
-                .filter_map(|(start, instruction)| {
-                    let (iterator, end) = match instruction {
-                        Instruction::IterNext { iter, end, .. }
-                        | Instruction::IterNextKeyed { iter, end, .. } => (*iter, *end),
-                        _ => return None,
-                    };
-                    (!(start <= target && target < end.index())).then_some(iterator)
-                })
-                .collect();
+        if !iterators.is_empty() {
+            let extras = self.call_stack.current_extras_mut();
             for iterator in iterators {
-                frame.iterators.remove(&iterator.0);
+                extras.iterators.remove(&iterator.0);
             }
         }
         let depth =
-            self.call_stack
-                .iter()
+            self.frames()
                 .rev()
                 .enumerate()
                 .map(|(index, frame)| {
-                    let end = if index == 0 { target } else { frame.ip };
+                    let end = if index == 0 { target } else { frame.ip() };
                     frame.function().instructions.iter().take(end).fold(
                         0usize,
                         |depth, instruction| match instruction {
@@ -148,20 +141,18 @@ impl Vm {
     /// Include symbol-table changes survive exceptional exit just as normal return.
     fn discard_exception_frame(&mut self) -> Result<(), NativeError> {
         self.finish_include_scope()?;
-        if let Some(mut frame) = self.call_stack.pop() {
+        if let Some(frame) = self.call_stack.pop() {
             self.closure_captures
-                .retain(|capture| capture.base < frame.base);
-            self.registers.truncate(frame.base);
-            self.call_stack.preparing.truncate(frame.call_start);
-            frame.iterators.resize(0);
-            self.call_stack.recycle(frame);
+                .retain(|capture| capture.base < frame.base());
+            self.registers.truncate(frame.base());
+            self.call_stack.abandon_calls_from(frame.base());
         }
         Ok(())
     }
 
     /// A throw escaping finally appends its saved exception to the new previous chain.
     fn replace_finally_exceptions(&mut self, object: &Rc<Object>, target: Option<usize>) {
-        let Some(frame_base) = self.current().map(|frame| frame.base) else {
+        let Some(frame_base) = self.current().map(|frame| frame.base()) else {
             return;
         };
         let mut index = self.finally_stack.len();
