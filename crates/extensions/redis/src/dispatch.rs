@@ -148,6 +148,22 @@ pub fn dispatch<'a>(
                     crate::connection::select(&session, &value).await
                 };
             }
+            "reset" => {
+                // RESET goes out at once, also during MULTI, which it ends,
+                // and leaves the connection in database 0. phpredis raises
+                // a fatal error for it in pipeline mode; there it is queued.
+                let pipelining = session
+                    .batch
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|batch| !batch.transaction);
+                if !pipelining {
+                    let reply = session.query(redis::cmd("RESET")).await?;
+                    session.batch.borrow_mut().take();
+                    session.database.set(0);
+                    return Ok(Value::Bool(!matches!(reply, redis::Value::ServerError(_))));
+                }
+            }
             "multi" | "pipeline" | "exec" | "discard" => {
                 return crate::transaction::control(name, context, &object, &session, a).await;
             }
