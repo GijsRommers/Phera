@@ -62,8 +62,8 @@ impl Provider<'_> {
             }
         }
         candidates.sort_by(|left, right| {
-            let left = Version::parse(&left.package.version).ok();
-            let right = Version::parse(&right.package.version).ok();
+            let left = preference(&left.package);
+            let right = preference(&right.package);
             let stable = if self.project.data["prefer-stable"] == true {
                 left.as_ref()
                     .map(Version::stability)
@@ -150,4 +150,17 @@ impl Provider<'_> {
         }
         Ok(range)
     }
+}
+
+fn preference(package: &Package) -> Option<Version> {
+    if let Some(alias) = package.field("extra")["branch-alias"]
+        .get(&package.version)
+        .and_then(Value::as_str)
+    {
+        return Version::parse(alias).ok();
+    }
+    if package.field("default-branch") == true && package.version.starts_with("dev-") {
+        return Version::parse("9999999-dev").ok();
+    }
+    Version::parse(&package.version).ok()
 }

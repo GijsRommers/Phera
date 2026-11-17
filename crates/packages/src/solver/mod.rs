@@ -26,7 +26,19 @@ pub(crate) fn solve(
                 DefaultStringReporter::report(&tree)
             );
         }
-        Err(error) => bail!("Dependency resolution failed: {error}"),
+        Err(PubGrubError::ErrorRetrievingDependencies {
+            package, source, ..
+        }) => {
+            return Err(source
+                .0
+                .context(format!("Cannot resolve requirements of {package}.")));
+        }
+        Err(PubGrubError::ErrorChoosingVersion { package, source }) => {
+            return Err(source
+                .0
+                .context(format!("Cannot choose a version of {package}.")));
+        }
+        Err(PubGrubError::ErrorInShouldCancel(source)) => return Err(source.0),
     };
     let mut packages = BTreeMap::new();
     for (name, id) in selected {

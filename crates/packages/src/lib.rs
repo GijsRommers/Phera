@@ -65,7 +65,8 @@ fn install_locked(directory: &Path, options: &Options, updating: bool) -> Result
             }
             let source = cache.prepare(package, &network, options.offline, &project.directory)?;
             let destination = paths::inside(&vendor, &package.name)?;
-            let method = store::materialise(&source, &destination)?;
+            let method =
+                store::materialise(&source, &destination, package.field("target-dir").as_str())?;
             if options.verbose {
                 eprintln!("  {} {}: {method}", package.name, package.version);
             }
@@ -117,7 +118,15 @@ pub fn update(directory: &Path, options: &Options) -> Result<()> {
 pub fn dump_autoload(directory: &Path, options: &Options) -> Result<()> {
     let project = Project::read(directory)?;
     let lock = Lock::read(directory)?;
-    scripts::event(&project, options, "pre-autoload-dump")?;
-    autoload::generate(&project, &lock.packages(options.no_dev), options)?;
-    scripts::event(&project, options, "post-autoload-dump")
+    let mut options = options.clone();
+    let installed = project.vendor_dir()?.join("composer/installed.json");
+    if let Ok(bytes) = fs::read(installed)
+        && let Ok(record) = serde_json::from_slice::<serde_json::Value>(&bytes)
+        && record["dev"] == false
+    {
+        options.no_dev = true;
+    }
+    scripts::event(&project, &options, "pre-autoload-dump")?;
+    autoload::generate(&project, &lock.packages(options.no_dev), &options)?;
+    scripts::event(&project, &options, "post-autoload-dump")
 }

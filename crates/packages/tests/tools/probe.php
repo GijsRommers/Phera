@@ -4,7 +4,7 @@ $vendor = $argv[1];
 $loader = require $vendor . '/autoload.php';
 $normalize = static function ($path) {
     $root = getcwd() . '/';
-    return str_replace($root, '', str_replace('\\', '/', $path));
+    return str_replace($root, '', str_replace('\\', '/', realpath($path) ?: $path));
 };
 $result = array('classes' => array(), 'files' => array(), 'psr4' => array(), 'psr0' => array());
 $map = $loader->getClassMap();

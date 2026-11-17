@@ -40,7 +40,7 @@ pub(crate) fn write(project: &Project, lock: &Lock, options: &Options) -> Result
                 Value::Null
             } else {
                 {
-                    let relative = php::relative(&directory, &vendor.join(&package.name));
+                    let relative = php::relative(&directory, &package.install_path(&vendor)?);
                     if relative.starts_with('.') {
                         relative
                     } else {
@@ -87,13 +87,32 @@ pub(crate) fn write(project: &Project, lock: &Lock, options: &Options) -> Result
     let mut versions = serde_json::Map::<String, Value>::new();
     for package in &packages {
         let dev = dev_names.contains(&package.name.as_str());
+        let mut aliases = Vec::new();
+        if let Some(alias) = package.field("extra")["branch-alias"]
+            .get(&package.version)
+            .and_then(Value::as_str)
+        {
+            aliases.push(alias.to_owned());
+        }
+        if let Some(locked_aliases) = lock.other.get("aliases").and_then(Value::as_array) {
+            for alias in locked_aliases
+                .iter()
+                .filter(|alias| alias["package"] == package.name)
+            {
+                if let Some(alias) = alias["alias"].as_str() {
+                    aliases.push(alias.to_owned());
+                }
+            }
+        }
+        aliases.sort();
+        aliases.dedup();
         versions.insert(
             package.name.clone(),
             json!({
                 "pretty_version": package.version, "version": normalized(package),
                 "reference": package.field("dist")["reference"].as_str()
                     .or(package.field("source")["reference"].as_str()),
-                "type": package.kind(), "aliases": [], "dev_requirement": dev
+                "type": package.kind(), "aliases": aliases, "dev_requirement": dev
             }),
         );
     }
@@ -101,6 +120,9 @@ pub(crate) fn write(project: &Project, lock: &Lock, options: &Options) -> Result
         for (field, key) in [("replace", "replaced"), ("provide", "provided")] {
             if let Some(links) = package.field(field).as_object() {
                 for (name, constraint) in links {
+                    if crate::solver::is_platform(name) {
+                        continue;
+                    }
                     let constraint = if constraint == "self.version" {
                         Value::String(package.version.clone())
                     } else {
@@ -113,6 +135,9 @@ pub(crate) fn write(project: &Project, lock: &Lock, options: &Options) -> Result
                     });
                     if entry.get(key).is_none() {
                         entry[key] = json!([]);
+                    }
+                    if !dev_names.contains(&package.name.as_str()) {
+                        entry["dev_requirement"] = false.into();
                     }
                     if let Some(items) = entry[key].as_array_mut() {
                         items.push(constraint);
@@ -129,7 +154,11 @@ pub(crate) fn write(project: &Project, lock: &Lock, options: &Options) -> Result
                 .iter()
                 .any(|package| package.name == *name && package.kind() != "metapackage")
         {
-            php::static_path(&vendor.join(name), &directory)
+            let package = packages
+                .iter()
+                .find(|package| package.name == *name)
+                .ok_or_else(|| anyhow::anyhow!("Installed package record is missing."))?;
+            php::static_path(&package.install_path(&vendor)?, &directory)
         } else {
             "null".into()
         };

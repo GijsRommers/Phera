@@ -4,6 +4,7 @@
 
 mod emit;
 mod order;
+mod parse;
 mod platform;
 mod scan;
 
@@ -34,6 +35,7 @@ pub(crate) fn generate(project: &Project, packages: &[Package], options: &Option
     };
     ordered.push(&root);
     let mut scans = Vec::new();
+    let mut global_exclusions = Vec::new();
     for package in ordered.iter().rev() {
         if package.kind() == "metapackage" {
             continue;
@@ -55,10 +57,12 @@ pub(crate) fn generate(project: &Project, packages: &[Package], options: &Option
                     .map(|text| (*text).to_owned()),
             );
         }
+        global_exclusions.extend(scan::patterns(&base, &exclusions)?);
         for autoload in autoloads {
             collect_mappings(autoload, &base, &mut maps)?;
             for path in strings(&autoload["classmap"]) {
-                scans.push(scan::Source::new(&base, path, &exclusions, None)?);
+                let path = legacy_path(package, &base, path);
+                scans.push(scan::Source::new(&base, &path, &exclusions, None)?);
             }
             if options.optimize
                 || project.config_bool("optimize-autoloader")
@@ -80,6 +84,9 @@ pub(crate) fn generate(project: &Project, packages: &[Package], options: &Option
                 }
             }
         }
+    }
+    for source in &mut scans {
+        source.exclusions.extend(global_exclusions.iter().cloned());
     }
     let store = crate::store::Store::open(options.cache_dir.as_deref())?;
     maps.classes = scan::classes(&scans, &vendor, &store.directory.join("autoload"))?;
@@ -106,12 +113,22 @@ pub(crate) fn generate(project: &Project, packages: &[Package], options: &Option
                     "{:x}",
                     Md5::digest(format!("{}:{path}", package.name).as_bytes())
                 );
+                let path = legacy_path(package, base, path);
                 maps.files
-                    .push((identifier, crate::paths::inside(base, path)?));
+                    .push((identifier, crate::paths::inside(base, &path)?));
             }
         }
     }
     emit::write(project, &maps, options)
+}
+
+fn legacy_path(package: &Package, base: &Path, path: &str) -> String {
+    if !base.join(path).exists()
+        && let Some(target) = package.field("target-dir").as_str()
+    {
+        return format!("{target}/{path}");
+    }
+    path.into()
 }
 
 fn collect_mappings(autoload: &Value, base: &Path, maps: &mut Maps) -> Result<()> {

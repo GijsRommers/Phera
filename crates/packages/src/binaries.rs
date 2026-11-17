@@ -11,7 +11,7 @@ pub(crate) fn write(project: &Project, packages: &[Package]) -> Result<()> {
     let bin_dir = project.bin_dir()?;
     for package in packages {
         for bin in strings(package.field("bin")) {
-            let package_dir = vendor.join(&package.name);
+            let package_dir = package.install_path(&vendor)?;
             let source = crate::paths::inside(&package_dir, bin)?;
             if !source.is_file() {
                 continue;

@@ -85,7 +85,19 @@ impl PartialOrd for Version {
 impl Ord for Version {
     fn cmp(&self, other: &Self) -> Ordering {
         if self.is_branch() || other.is_branch() {
-            return self.normalized.cmp(&other.normalized);
+            let default = |version: &Version| {
+                matches!(
+                    version.normalized.as_str(),
+                    "dev-master" | "dev-trunk" | "dev-default"
+                )
+            };
+            return default(self).cmp(&default(other)).then_with(|| {
+                match (self.is_branch(), other.is_branch()) {
+                    (true, false) => Ordering::Less,
+                    (false, true) => Ordering::Greater,
+                    _ => self.normalized.cmp(&other.normalized),
+                }
+            });
         }
         let left = parts(&self.normalized);
         let right = parts(&other.normalized);

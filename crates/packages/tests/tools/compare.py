@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import time
+import tarfile
 import urllib.request
 import zipfile
 
@@ -61,6 +62,43 @@ def source(fixture, destination):
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(archive.read(entry))
             target.chmod(0o644 | ((entry.external_attr >> 16) & 0o111))
+    manifest = json.loads((fixture / 'composer.json').read_text())
+    required = []
+    for key in ['autoload', 'autoload-dev']:
+        required.extend(manifest.get(key, {}).get('files', []))
+    lock = json.loads((fixture / 'composer.lock').read_text())
+    required.extend(package['dist']['url'] for key in ['packages', 'packages-dev']
+                    for package in lock[key] if package.get('dist', {}).get('type') == 'path')
+    if any(not (destination / path).exists() for path in required):
+        # Release archives may export-ignore files referenced by root dev autoloading,
+        # or directories used by local repositories. Read the exact git tree instead.
+        parts = provenance['dist'].split('/')
+        if 'repos' not in parts:
+            raise RuntimeError('root source context needs a GitHub source reference')
+        index = parts.index('repos')
+        repo = '/'.join(parts[index + 1:index + 3])
+        bare = WORK / 'source-objects' / fixture.name
+        bare.parent.mkdir(parents=True, exist_ok=True)
+        if not bare.exists():
+            subprocess.run(['git', 'init', '--bare', '--quiet', str(bare)], check=True)
+            subprocess.run(['git', '-C', str(bare), 'fetch', '--quiet', '--depth=1',
+                            'https://github.com/' + repo + '.git', provenance['reference']],
+                           check=True, timeout=180)
+        (bare / 'info/attributes').write_text('* -export-ignore\n')
+        raw = subprocess.run(['git', '-C', str(bare), 'archive', '--format=tar', 'FETCH_HEAD'],
+                             check=True, capture_output=True).stdout
+        with tarfile.open(fileobj=io.BytesIO(raw)) as archive:
+            for entry in archive:
+                path = PurePosixPath(entry.name)
+                if path.is_absolute() or '..' in path.parts or entry.issym() or entry.islnk():
+                    raise RuntimeError('unsafe source tree entry')
+                target = destination.joinpath(*path.parts)
+                if entry.isdir():
+                    target.mkdir(parents=True, exist_ok=True)
+                elif entry.isfile():
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(archive.extractfile(entry).read())
+                    target.chmod(0o644 | (entry.mode & 0o111))
     for name in ['composer.json', 'composer.lock']:
         shutil.copyfile(fixture / name, destination / name)
     return provenance
@@ -69,8 +107,13 @@ def source(fixture, destination):
 def tree(directory):
     result = {}
     for path in directory.rglob('*'):
-        if path.is_file():
-            result[str(path.relative_to(directory))] = (path.read_bytes(), path.stat().st_mode & 0o111)
+        name = str(path.relative_to(directory))
+        if path.is_symlink():
+            result[name] = ('link', os.readlink(path))
+        elif path.is_file():
+            result[name] = (path.read_bytes(), path.stat().st_mode & 0o111)
+        elif path.is_dir():
+            result[name] = ('directory', path.stat().st_mode & 0o111)
     return result
 
 

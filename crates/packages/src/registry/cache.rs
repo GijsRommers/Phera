@@ -27,10 +27,8 @@ pub(super) fn fetch(store: &Store, network: &Network, url: &str, offline: bool) 
             .map(|record| record["body"].clone())
             .context("Repository returned 304 without a cached response; clear metadata cache.");
     }
-    if response.status().as_u16() == 404 {
-        return Ok(json!({"packages": {}}));
-    }
-    if !response.status().is_success() {
+    let missing = response.status().as_u16() == 404;
+    if !missing && !response.status().is_success() {
         bail!(
             "Repository returned HTTP {}; check repository access.",
             response.status()
@@ -46,8 +44,12 @@ pub(super) fn fetch(store: &Store, network: &Network, url: &str, offline: bool) 
         .get("last-modified")
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned);
-    let body: Value = serde_json::from_slice(&crate::network::bounded(response)?)
-        .context("Repository returned invalid JSON metadata.")?;
+    let body: Value = if missing {
+        json!({"packages": {}})
+    } else {
+        serde_json::from_slice(&crate::network::bounded(response)?)
+            .context("Repository returned invalid JSON metadata.")?
+    };
     let record = json!({"body": body, "etag": etag, "modified": modified});
     let mut file = tempfile::NamedTempFile::new_in(store.directory.join("metadata"))?;
     file.write_all(&serde_json::to_vec(&record)?)?;

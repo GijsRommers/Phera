@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 pub(super) struct Source {
     directory: PathBuf,
-    exclusions: Vec<Regex>,
+    pub(super) exclusions: Vec<Regex>,
     psr: Option<(String, bool)>,
 }
 
@@ -25,25 +25,31 @@ impl Source {
         exclusions: &[String],
         psr: Option<(String, bool)>,
     ) -> Result<Self> {
-        let exclusions = exclusions
-            .iter()
-            .map(|pattern| {
-                let escaped = regex::escape(pattern.trim_matches('/'))
-                    .replace("\\*\\*", ".+?")
-                    .replace("\\*", "[^/]+?");
-                Regex::new(&format!(
-                    "^{}/{}($|/)",
-                    regex::escape(&base.to_string_lossy()),
-                    escaped
-                ))
-            })
-            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let exclusions = patterns(base, exclusions)?;
+        let directory = base.join(crate::paths::relative(path)?);
         Ok(Self {
-            directory: base.join(crate::paths::relative(path)?),
+            directory: directory.canonicalize().unwrap_or(directory),
             exclusions,
             psr,
         })
     }
+}
+
+pub(super) fn patterns(base: &Path, exclusions: &[String]) -> Result<Vec<Regex>> {
+    exclusions
+        .iter()
+        .map(|pattern| {
+            let escaped = regex::escape(pattern.trim_matches('/'))
+                .replace("\\*\\*", ".+?")
+                .replace("\\*", "[^/]+?");
+            Regex::new(&format!(
+                "^{}/{}($|/)",
+                regex::escape(&base.to_string_lossy()),
+                escaped
+            ))
+        })
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(Into::into)
 }
 
 pub(super) fn classes(
@@ -55,7 +61,7 @@ pub(super) fn classes(
     let mut files = Vec::new();
     for source in sources {
         for path in glob::glob(&source.directory.to_string_lossy())? {
-            let path = path?;
+            let path = path?.canonicalize()?;
             let walker = walkdir::WalkDir::new(&path)
                 .sort_by_file_name()
                 .into_iter()
@@ -104,7 +110,7 @@ pub(super) fn classes(
                 let names = if let Some(names) = cached {
                     names
                 } else {
-                    let program = phera_parser::parse_on_current_stack(&text)
+                    let program = super::parse::source(&text)
                         .map_err(|error| anyhow::anyhow!("{}: {error}", path.display()))?;
                     let mut names = Vec::new();
                     declarations(&program.statements, "", &mut names);
@@ -151,7 +157,7 @@ fn compliant(name: &str, path: &Path, source: &Source) -> bool {
     source.directory.join(format!("{relative}.php")) == path
 }
 
-fn declarations(statements: &[Statement], namespace: &str, names: &mut Vec<String>) {
+pub(super) fn declarations(statements: &[Statement], namespace: &str, names: &mut Vec<String>) {
     for statement in statements {
         match &statement.kind {
             StatementKind::Namespace {

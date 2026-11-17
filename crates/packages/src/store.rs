@@ -186,13 +186,19 @@ fn clone_source(package: &Package, target: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn materialise(source: &Path, destination: &Path) -> Result<&'static str> {
+pub(crate) fn materialise(
+    source: &Path,
+    destination: &Path,
+    target_dir: Option<&str>,
+) -> Result<&'static str> {
     let parent = destination
         .parent()
         .context("Package destination has no parent.")?;
     fs::create_dir_all(parent)?;
     let stage = tempfile::tempdir_in(parent)?;
-    let method = copy_tree(source, stage.path())?;
+    let target = crate::paths::inside(stage.path(), target_dir.unwrap_or(""))?;
+    fs::create_dir_all(&target)?;
+    let method = copy_tree(source, &target)?;
     if destination.exists() {
         fs::remove_dir_all(destination)?;
     }

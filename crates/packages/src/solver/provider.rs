@@ -237,7 +237,7 @@ fn names(requirements: &Value) -> Vec<String> {
 }
 
 #[derive(Debug)]
-pub(super) struct SolveError(anyhow::Error);
+pub(super) struct SolveError(pub(super) anyhow::Error);
 
 impl std::fmt::Display for SolveError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

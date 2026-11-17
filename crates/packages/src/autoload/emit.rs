@@ -98,9 +98,9 @@ fn static_file(maps: &Maps, vendor: &Path, suffix: &str) -> String {
     let path = |path: &Path| php::static_path(path, &vendor.join("composer"));
     let mut prefixes = String::new();
     let mut directories = String::new();
-    let mut first_chars = std::collections::BTreeMap::<char, Vec<(&String, usize)>>::new();
+    let mut first_chars = std::collections::BTreeMap::<u8, Vec<(&String, usize)>>::new();
     for prefix in maps.psr4.keys().rev().filter(|prefix| !prefix.is_empty()) {
-        if let Some(first) = prefix.chars().next() {
+        if let Some(first) = prefix.as_bytes().first().copied() {
             first_chars
                 .entry(first)
                 .or_default()
@@ -108,10 +108,7 @@ fn static_file(maps: &Maps, vendor: &Path, suffix: &str) -> String {
         }
     }
     for (first, prefixes_for_char) in first_chars {
-        prefixes.push_str(&format!(
-            "        {} => array(\n",
-            php::quote(&first.to_string())
-        ));
+        prefixes.push_str(&format!("        \"\\x{first:02x}\" => array(\n"));
         for (prefix, length) in prefixes_for_char {
             prefixes.push_str(&format!(
                 "            {} => {length},\n",
@@ -154,18 +151,15 @@ fn static_file(maps: &Maps, vendor: &Path, suffix: &str) -> String {
             "\n    public static ${property} = array({items});\n"
         ));
     }
-    let mut psr0: std::collections::BTreeMap<char, Vec<_>> = Default::default();
+    let mut psr0: std::collections::BTreeMap<u8, Vec<_>> = Default::default();
     for (prefix, paths) in maps.psr0.iter().rev() {
-        if let Some(first) = prefix.chars().next() {
+        if let Some(first) = prefix.as_bytes().first().copied() {
             psr0.entry(first).or_default().push((prefix, paths));
         }
     }
     code.push_str("\n    public static $prefixesPsr0 = array(\n");
     for (first, items) in psr0 {
-        code.push_str(&format!(
-            "        {} => array(\n",
-            php::quote(&first.to_string())
-        ));
+        code.push_str(&format!("        \"\\x{first:02x}\" => array(\n"));
         for (prefix, paths) in items {
             code.push_str(&format!(
                 "            {} => array({}),\n",

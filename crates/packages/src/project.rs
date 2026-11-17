@@ -115,6 +115,14 @@ pub struct Package {
 }
 
 impl Package {
+    pub fn install_path(&self, vendor: &Path) -> Result<PathBuf> {
+        let base = crate::paths::inside(vendor, &self.name)?;
+        match self.field("target-dir").as_str() {
+            Some(target) => crate::paths::inside(&base, target),
+            None => Ok(base),
+        }
+    }
+
     pub fn field(&self, name: &str) -> &Value {
         self.data.get(name).unwrap_or(&Value::Null)
     }
@@ -124,6 +132,9 @@ impl Package {
     }
 
     pub fn validate(&self) -> Result<()> {
+        if let Some(target) = self.field("target-dir").as_str() {
+            crate::paths::relative(target)?;
+        }
         let parts: Vec<_> = self.name.split('/').collect();
         if parts.len() != 2
             || parts.iter().any(|part| {
