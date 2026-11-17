@@ -97,6 +97,7 @@ mod property_mutation;
 mod property_sites;
 mod property_storage;
 mod property_targets;
+mod reference_holders;
 mod references;
 mod scalar_batches;
 mod scope_intrinsics;
@@ -163,6 +164,7 @@ pub struct Vm {
     failed_native: Option<error_traces::NativeTrace>,
     /// What extensions remember during this request (response headers, ...).
     state: RequestState,
+    property_references: std::rc::Rc<std::cell::RefCell<reference_holders::ReferenceHolders>>,
 }
 
 impl Vm {
@@ -174,6 +176,7 @@ impl Vm {
             .collect();
         Self {
             classes: classes::ClassTable::native(&registry),
+            property_references: Default::default(),
             closure_captures: Vec::new(),
             initializer_scope: None,
             argument_origin: calls::callback_binding::ArgumentOrigin::Php,

@@ -36,7 +36,10 @@ impl Vm {
             let value = if let Some(initializer) = &property.initializer {
                 self.evaluate_initializer(initializer, &property.declaring)?
             } else {
-                property.value.deref().clone()
+                property.static_storage.as_ref().map_or_else(
+                    || property.value.deref().clone(),
+                    |storage| storage.reference.borrow().borrow().deref().clone(),
+                )
             };
             result.insert(ArrayKey::str(property.name.as_bytes()), value);
         }
@@ -110,13 +113,17 @@ impl Vm {
         if !property.static_initialized.get() {
             if let Some(initializer) = &property.initializer {
                 let value = self.evaluate_initializer(initializer, &property.declaring)?;
-                if let Value::Reference(cell) = &property.value {
-                    *cell.borrow_mut() = value;
+                if let Some(storage) = &property.static_storage {
+                    *storage.reference.borrow().borrow_mut() = value;
                 }
             }
             property.static_initialized.set(true);
         }
-        Ok(property.value.clone())
+        let storage = property
+            .static_storage
+            .as_ref()
+            .ok_or_else(|| internal_error!("static storage"))?;
+        Ok(Value::Reference(storage.reference.borrow().clone()))
     }
 
     /// Read declared and dynamic properties with PHP's quiet-access behavior.
