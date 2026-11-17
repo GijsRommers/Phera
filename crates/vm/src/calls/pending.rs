@@ -127,51 +127,8 @@ impl Vm {
 
     /// Resolution reserves the callee window before any argument expression executes.
     pub(crate) fn prepare_call(&mut self, callee: Callee) -> Result<(), NativeError> {
-        let registers = match &callee.target {
-            CallTarget::User(function) => self.code.facts(*function).registers as usize,
-            CallTarget::Method { method, .. } => match method.body {
-                crate::classes::MethodBody::User(function) => {
-                    self.code.facts(function).registers as usize
-                }
-                _ => callee.parameters.len(),
-            },
-            CallTarget::Closure(object) => {
-                let native = object.native.borrow();
-                let state = native
-                    .as_ref()
-                    .and_then(|value| value.downcast_ref::<crate::closures::ClosureState>())
-                    .ok_or_else(|| internal_error!("closure state"))?;
-                state
-                    .callee
-                    .user_function()
-                    .map_or(callee.parameters.len(), |function| {
-                        self.code.facts(function).registers as usize
-                    })
-            }
-            _ => callee.parameters.len(),
-        }
-        .max(callee.parameters.len())
-        // At least one register, so that every prepared call starts above the
-        // previous one: unwinding tells them apart by where they start.
-        .max(1);
-        let base = self.registers.len();
-        self.registers.grow_to(base + registers);
-        let parameters = callee.parameters.len();
-        self.call_stack.preparing.push(PendingCall {
-            owner: None,
-            callee,
-            window: crate::calls::call_state::CallWindow {
-                base,
-                registers,
-                parameters,
-                supplied: 0,
-                argument_count: 0,
-                checks: crate::calls::call_state::TypeChecks::Complete,
-                named: None,
-                extra_named: Vec::new(),
-                order: crate::calls::call_state::ArgumentOrder::Positional,
-            },
-        });
+        let registers = window_registers(&self.code, &callee)?;
+        push_prepared(&mut self.call_stack, &mut self.registers, callee, registers);
         Ok(())
     }
 
@@ -222,4 +179,54 @@ impl Vm {
             (),
         ))))
     }
+}
+
+/// How many registers the window of a call to `callee` needs: the callee's
+/// own registers for PHP code, one per parameter for native code, and at
+/// least one, so that every prepared call starts above the previous one
+/// (unwinding tells them apart by where they start).
+pub(crate) fn window_registers(
+    code: &crate::code_table::CodeTable,
+    callee: &Callee,
+) -> Result<usize, NativeError> {
+    let registers = match &callee.target {
+        CallTarget::Closure(object) => {
+            let native = object.native.borrow();
+            let state = native
+                .as_ref()
+                .and_then(|value| value.downcast_ref::<crate::closures::ClosureState>())
+                .ok_or_else(|| internal_error!("closure state"))?;
+            state.callee.user_function()
+        }
+        _ => callee.user_function(),
+    }
+    .map_or(0, |function| code.facts(function).registers as usize);
+    Ok(registers.max(callee.parameters.len()).max(1))
+}
+
+/// Reserve the window at the top of the register stack and record the call.
+pub(crate) fn push_prepared(
+    stack: &mut crate::calls::call_stack::CallStack,
+    registers: &mut crate::calls::registers::Registers,
+    callee: Callee,
+    size: usize,
+) {
+    let base = registers.len();
+    registers.grow_to(base + size);
+    let parameters = callee.parameters.len();
+    stack.preparing.push(PendingCall {
+        owner: None,
+        callee,
+        window: crate::calls::call_state::CallWindow {
+            base,
+            registers: size,
+            parameters,
+            supplied: 0,
+            argument_count: 0,
+            checks: crate::calls::call_state::TypeChecks::Complete,
+            named: None,
+            extra_named: Vec::new(),
+            order: crate::calls::call_state::ArgumentOrder::Positional,
+        },
+    });
 }

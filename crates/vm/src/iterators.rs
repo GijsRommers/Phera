@@ -17,6 +17,11 @@ impl Iterators {
         }
     }
 
+    /// Whether no `foreach` is active.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.slots.iter().all(Option::is_none)
+    }
+
     /// Return releases every iterator owner without freeing its backing storage.
     pub(crate) fn clear(&mut self) {
         self.slots.fill_with(|| None);

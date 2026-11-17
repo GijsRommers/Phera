@@ -49,6 +49,13 @@ pub(crate) struct ArgumentFacts {
     pub(crate) saved: Option<usize>,
 }
 
+impl ArgumentFacts {
+    /// One argument per parameter, nothing saved.
+    fn is_default(&self) -> bool {
+        self.supplied.is_none() && self.count.is_none() && self.extra == 0 && self.saved.is_none()
+    }
+}
+
 impl FrameExtras {
     /// An entry that holds nothing.
     pub(crate) fn new() -> Self {
@@ -60,6 +67,19 @@ impl FrameExtras {
             iterators: Iterators::new(0),
             arguments: ArgumentFacts::default(),
         }
+    }
+
+    /// Whether the entry holds only what a method or closure call keeps
+    /// (its class context, its closure object), so that returning only has
+    /// to drop those. A constructor's context makes the return special.
+    pub(crate) fn holds_only_call_context(&self) -> bool {
+        self.method
+            .as_ref()
+            .is_none_or(|context| context.invocation == crate::classes::Invocation::Method)
+            && self.dynamic_count.is_none()
+            && self.dynamic.is_empty()
+            && self.iterators.is_empty()
+            && self.arguments.is_default()
     }
 
     /// Releases what the frame owned, keeping the storage for the next frame

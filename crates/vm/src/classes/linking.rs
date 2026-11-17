@@ -315,6 +315,7 @@ impl Vm {
                 allows_dynamic_properties,
                 constructor: methods.get("__construct").cloned(),
                 methods,
+                method_table: std::cell::OnceCell::new(),
                 property_template: super::class::property_template(&defaults),
                 defaults,
                 static_properties,

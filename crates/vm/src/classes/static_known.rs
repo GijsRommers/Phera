@@ -1,6 +1,6 @@
 //! Compiler-known static calls avoid materializing class and method PHP strings.
 
-use super::{Invocation, static_sites::StaticNames};
+use super::Invocation;
 use crate::{Vm, calls::call_state::CallTarget};
 use phera_bytecode::{ClassBinding, SymbolId};
 use phera_extension_api::NativeError;
@@ -13,18 +13,11 @@ impl Vm {
         method: SymbolId,
         binding: ClassBinding,
     ) -> Result<(), NativeError> {
-        let context = self.static_context()?;
-        if let Some(callee) = self.known_static_callee(&context) {
-            self.bind_static_site(callee, context.receiver)?;
-        } else {
-            self.prepare_known_static_miss(class, method, binding)?;
-            self.record_static_site(context, StaticNames::Known)?;
-        }
-        Ok(())
+        self.prepare_known_static(class, method, binding)
     }
 
-    /// Visibility, abstract/static legality and receiver compatibility stay on cache misses.
-    fn prepare_known_static_miss(
+    /// Visibility, abstract/static legality and receiver compatibility.
+    fn prepare_known_static(
         &mut self,
         symbol: SymbolId,
         method: SymbolId,
@@ -44,6 +37,7 @@ impl Vm {
             .classes
             .get(&name)
             .ok_or_else(|| NativeError::error(format!("Class \"{name}\" not found")))?;
+        self.link_class_symbol(symbol, &class);
         let context = self.current().and_then(|frame| frame.method()).cloned();
         let receiver = context
             .as_ref()
@@ -54,12 +48,7 @@ impl Vm {
                     .is_some_and(|class| class.is_a(&name))
             });
         let resolved = self
-            .cached_method_lookup(
-                &class,
-                &method.written,
-                Some(&method.name),
-                Invocation::Method,
-            )?
+            .find_method_lowercase(&class, &method.name, Invocation::Method)?
             .ok_or_else(|| {
                 NativeError::error(format!(
                     "Call to undefined method {}::{}()",

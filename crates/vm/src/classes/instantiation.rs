@@ -41,6 +41,24 @@ impl Vm {
         }
     }
 
+    /// Remember which class a named class symbol of the running file means.
+    /// Relative names (`self`, `parent`, `static`) depend on the frame and
+    /// are never linked. A declared class cannot go away, so the link holds
+    /// for the rest of the request.
+    pub(crate) fn link_class_symbol(&self, symbol: SymbolId, class: &Rc<super::Class>) {
+        let Some(frame) = self.current() else {
+            return;
+        };
+        let relative = frame
+            .unit()
+            .symbols
+            .get(symbol.index())
+            .is_none_or(|symbol| matches!(symbol.written.as_str(), "self" | "parent" | "static"));
+        if !relative && let Some(slot) = frame.cache().classes.get(symbol.index()) {
+            *slot.borrow_mut() = Some(class.clone());
+        }
+    }
+
     /// Literal class cache is keyed by unit/symbol, filled after successful lookup.
     /// Relative keywords bypass it. Linked classes cannot be replaced in a request,
     /// and the unit/class owners keep identities alive until request teardown.

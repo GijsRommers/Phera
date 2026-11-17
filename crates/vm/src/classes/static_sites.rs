@@ -10,9 +10,8 @@ use phera_extension_api::NativeError;
 use phera_value::{ClassHandle, Object, Value};
 use std::rc::Rc;
 
-/// Known names are immutable instruction operands; dynamic names need byte guards.
+/// The class and method names a `$class::$method()` site was resolved for.
 pub(crate) enum StaticNames {
-    Known,
     Runtime { class: String, method: String },
 }
 
@@ -97,19 +96,6 @@ impl Vm {
         })
     }
 
-    /// Known symbols need only identity guards; their spelling is fixed by the instruction.
-    pub(crate) fn known_static_callee(&self, context: &StaticContext) -> Option<Callee> {
-        self.current()
-            .and_then(|frame| frame.site_cache())
-            .and_then(|slot| {
-                let entry = slot.borrow();
-                let crate::unit_caches::CachedSite::Static(entry) = &*entry else {
-                    return None;
-                };
-                matches_context(entry, context).then(|| entry.callee.clone())
-            })
-    }
-
     /// Strip the receiver from a prepared target before retaining it in the cache.
     pub(crate) fn record_static_site(
         &mut self,
@@ -166,12 +152,21 @@ impl Vm {
 
 /// No object identity is cached: only the class identity needed for compatibility.
 fn matches_context(entry: &StaticEntry, caller: &StaticContext) -> bool {
-    super::method_cache::same_scope(&entry.scope, &caller.scope)
-        && super::method_cache::same_scope(&entry.called, &caller.called)
+    same_scope(&entry.scope, &caller.scope)
+        && same_scope(&entry.called, &caller.called)
         && entry.receiver_class.as_ref().is_none_or(|class| {
             caller
                 .receiver
                 .as_ref()
                 .is_some_and(|object| Rc::ptr_eq(class, &object.class))
         })
+}
+
+/// Global callers and lexical class callers occupy distinct visibility domains.
+fn same_scope(left: &Option<Rc<Class>>, right: &Option<Rc<Class>>) -> bool {
+    match (left, right) {
+        (None, None) => true,
+        (Some(left), Some(right)) => Rc::ptr_eq(left, right),
+        _ => false,
+    }
 }

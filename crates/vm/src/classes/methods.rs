@@ -37,7 +37,7 @@ impl Vm {
             .classes
             .for_object(&object)
             .ok_or_else(|| internal_error!("receiver class"))?;
-        let resolved = self.cached_method(&class, name, Invocation::Method)?;
+        let resolved = self.find_method(&class, name, Invocation::Method)?;
         if let Some(resolved) = resolved {
             self.prepare_resolved_method(class, Some(object), resolved, Invocation::Method)?;
         } else {
@@ -73,8 +73,8 @@ impl Vm {
             callee.argument_binding = crate::calls::callback_binding::ArgumentBinding::Internal;
             return self.prepare_call(callee);
         }
-        let resolved = self.cached_method(&class, name, invocation)?;
-        let Some(super::method_cache::ResolvedMethod { method, scope }) = resolved else {
+        let resolved = self.find_method(&class, name, invocation)?;
+        let Some(super::method_lookup::ResolvedMethod { method, scope }) = resolved else {
             if invocation == Invocation::Constructor {
                 return self.prepare_constructed_object(
                     &class,
@@ -89,7 +89,7 @@ impl Vm {
         self.prepare_resolved_method(
             class,
             receiver,
-            super::method_cache::ResolvedMethod { method, scope },
+            super::method_lookup::ResolvedMethod { method, scope },
             invocation,
         )
     }
@@ -99,10 +99,10 @@ impl Vm {
         &mut self,
         class: Rc<Class>,
         receiver: Option<Rc<Object>>,
-        resolved: super::method_cache::ResolvedMethod,
+        resolved: super::method_lookup::ResolvedMethod,
         invocation: Invocation,
     ) -> Result<(), NativeError> {
-        let super::method_cache::ResolvedMethod { method, scope } = resolved;
+        let super::method_lookup::ResolvedMethod { method, scope } = resolved;
         if method.is_abstract {
             return Err(NativeError::error(format!(
                 "Cannot call abstract method {}::{}()",

@@ -14,7 +14,7 @@
 //! [`LoopExit::Slow`]; the VM runs that one instruction through
 //! `Vm::execute` and starts the loop again where the frame now is.
 
-use phera_bytecode::{FunctionId, Instruction, Reg};
+use phera_bytecode::{Instruction, Reg};
 use phera_extension_api::NativeError;
 use phera_value::Value;
 
@@ -22,7 +22,8 @@ use crate::Vm;
 use crate::calls::call_stack::CallStack;
 use crate::calls::frame::Frame;
 use crate::calls::registers::Registers;
-use crate::code_table::{CodeTable, FunctionShape};
+use crate::classes::ClassTable;
+use crate::code_table::CodeTable;
 use crate::fast::{ScalarStep, array_index_step, scalar_step};
 
 /// How many loop rounds or calls a script may run before it lets other tasks
@@ -59,24 +60,25 @@ enum LoopExit {
 }
 
 /// The parts of the VM the loop borrows, and its counters.
-struct Machine<'a> {
-    code: &'a CodeTable,
-    stack: &'a mut CallStack,
-    registers: &'a mut Registers,
+pub(super) struct Machine<'a> {
+    pub(super) code: &'a CodeTable,
+    pub(super) classes: &'a ClassTable,
+    pub(super) stack: &'a mut CallStack,
+    pub(super) registers: &'a mut Registers,
     /// Loop rounds and calls since the last hand-over.
     work: usize,
     /// Instructions run, for `Vm::executed_instructions`.
     executed: u64,
     /// The depth at which the function that native code called returns.
-    stop: usize,
-    frame_limit: usize,
+    pub(super) stop: usize,
+    pub(super) frame_limit: usize,
 }
 
 /// Where the loop is: which function, its registers, its next instruction.
 #[derive(Clone, Copy)]
-struct Position {
-    frame: Frame,
-    ip: usize,
+pub(super) struct Position {
+    pub(super) frame: Frame,
+    pub(super) ip: usize,
 }
 
 impl Vm {
@@ -90,6 +92,7 @@ impl Vm {
         loop {
             let mut machine = Machine {
                 code: &self.code,
+                classes: &self.classes,
                 stack: &mut self.call_stack,
                 registers: &mut self.registers,
                 work: *work,
@@ -130,15 +133,18 @@ impl Machine<'_> {
             frame,
             ip: frame.ip(),
         };
+        let mut instructions = self.code.instructions(frame.function);
         loop {
-            let instructions = self.code.instructions(position.frame.function);
             let instruction = match self.run_simple(instructions, &mut position) {
                 Ok(instruction) => instruction,
                 Err(exit) => return exit,
             };
             match self.step(instruction, position) {
                 Step::Done(ip) => position.ip = ip,
-                Step::Switched(next) => position = next,
+                Step::Switched(next) => {
+                    position = next;
+                    instructions = self.code.instructions(next.frame.function);
+                }
                 Step::Slow => {
                     self.publish(position.ip);
                     return LoopExit::Slow(instruction);
@@ -219,6 +225,18 @@ impl Machine<'_> {
                 count,
                 dst,
             } => self.enter_direct(position, function, (args, count), dst),
+            Instruction::InitMethodCall { receiver, method } => {
+                self.prepare_method(position, receiver, method)
+            }
+            Instruction::InitStaticCall {
+                class,
+                method,
+                binding,
+            } => self.prepare_static(position, (class, method), binding),
+            Instruction::SendValue { src } | Instruction::SendLocal { local: src } => {
+                self.send(position, src)
+            }
+            Instruction::Call { dst } => self.enter_prepared(position, dst),
             Instruction::Return { src } => self.leave_plain(Some(src)),
             Instruction::ReturnNull => self.leave_plain(None),
             _ => Step::Slow,
@@ -227,7 +245,7 @@ impl Machine<'_> {
 
     /// Count a loop round or a call; `true` when it is time to hand over.
     #[inline(always)]
-    fn spend_work(&mut self) -> bool {
+    pub(super) fn spend_work(&mut self) -> bool {
         self.work += 1;
         if self.work >= YIELD_AFTER_STEPS {
             self.work = 0;
@@ -238,7 +256,7 @@ impl Machine<'_> {
 
     /// Store the running frame's next instruction, before anything else
     /// looks at the frame.
-    fn publish(&mut self, ip: usize) {
+    pub(super) fn publish(&mut self, ip: usize) {
         if let Some(frame) = self.stack.current_mut() {
             frame.set_ip(ip);
         }
@@ -246,114 +264,11 @@ impl Machine<'_> {
 }
 
 /// What a non-simple step did.
-enum Step {
+pub(super) enum Step {
     /// Finished; continue at this instruction.
     Done(usize),
     /// Entered or left a frame; continue there.
     Switched(Position),
     /// Needs the VM.
     Slow,
-}
-
-impl Machine<'_> {
-    /// `CallDirect` to a plain function with valid arguments: move the
-    /// arguments into a new window at the top of the register stack and
-    /// push a frame. Anything unusual (too few arguments, an argument that
-    /// fails its type's bit test, the frame limit) takes the general path.
-    #[inline(always)]
-    fn enter_direct(
-        &mut self,
-        caller: Position,
-        declared: FunctionId,
-        (args, count): (Reg, u16),
-        destination: Reg,
-    ) -> Step {
-        let first = self.code.facts(caller.frame.function).unit_first;
-        let Some((function, facts)) = self.code.declared_facts(first, declared.index()) else {
-            return Step::Slow;
-        };
-        let count = count as usize;
-        if facts.shape != FunctionShape::Plain
-            || count < facts.required as usize
-            || count > facts.parameters as usize
-            || self.stack.depth() >= self.frame_limit
-        {
-            return Step::Slow;
-        }
-        let from = caller.frame.base() + args.index();
-        let arguments = self.registers.window(from, count);
-        let acceptable = arguments.iter().enumerate().all(|(index, argument)| {
-            argument.as_ref().is_some_and(|value| {
-                !value.is_reference()
-                    && (!facts.is_typed(index)
-                        || facts.parameter_masks[index].intersects(crate::types::own_type(value)))
-            })
-        });
-        if !acceptable {
-            return Step::Slow;
-        }
-        let base = self.registers.len();
-        self.registers.grow_to(base + facts.registers as usize);
-        for index in 0..count {
-            self.registers.move_slot(from + index, base + index);
-        }
-        self.publish(caller.ip);
-        let frame = Frame::new(function, base, Some(destination));
-        self.stack.push(frame);
-        if count < facts.parameters as usize {
-            let arguments = &mut self.stack.current_extras_mut().arguments;
-            arguments.supplied = Some(count);
-            arguments.count = Some(count);
-        }
-        self.spend_work();
-        Step::Switched(Position { frame, ip: 0 })
-    }
-
-    /// `Return` from a function frame that keeps nothing in the side table,
-    /// returns to PHP code, and whose value passes its return type's bit test:
-    /// write the value into the caller's register and empty the callee's.
-    #[inline(always)]
-    fn leave_plain(&mut self, source: Option<Reg>) -> Step {
-        let Some(frame) = self.stack.current().copied() else {
-            return Step::Slow;
-        };
-        let facts = self.code.facts(frame.function);
-        let Some(destination) = frame.destination() else {
-            return Step::Slow;
-        };
-        if frame.has_extras()
-            || self.stack.depth() <= self.stop + 1
-            || self.code.local(frame.function).is_none()
-            || self.stack.has_calls_from(frame.base())
-        {
-            return Step::Slow;
-        }
-        let Some(caller) = self.stack.caller().copied() else {
-            return Step::Slow;
-        };
-        let value = match source {
-            Some(source) => match self.registers.window(frame.base() + source.index(), 1) {
-                [Some(value)] if !value.is_reference() => value,
-                _ => return Step::Slow,
-            },
-            None => &Value::Null,
-        };
-        if let Some(mask) = facts.return_mask
-            && !mask.intersects(crate::types::own_type(value))
-        {
-            return Step::Slow;
-        }
-        let value = match source {
-            Some(source) => self.registers.take(frame.base() + source.index()),
-            None => Value::Null,
-        };
-        self.stack.pop();
-        self.registers.truncate(frame.base());
-        self.registers
-            .put(caller.base() + destination.index(), value);
-        Step::Switched(Position {
-            frame: caller,
-            ip: caller.ip(),
-        })
-    }
 }

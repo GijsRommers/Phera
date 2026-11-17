@@ -26,6 +26,11 @@ use crate::unit_caches::UnitCache;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct FunctionIndex(pub(crate) u32);
 
+/// A name, lowercased, as one number for the whole request: every file that
+/// writes `->add(` gets the same key for `add`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct NameKey(pub(crate) u32);
+
 /// A loaded file's position in the request's code table.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct UnitIndex(u32);
@@ -42,6 +47,11 @@ pub(crate) struct LoadedUnit {
     pub(crate) cache: UnitCache,
     /// The number of the file's top-level code; its functions follow it.
     first: FunctionIndex,
+    /// The key of each of the file's names, lowercased.
+    name_keys: Box<[NameKey]>,
+    /// The key of each of the file's symbols (functions, classes, methods
+    /// referred to by name), lowercased.
+    symbol_keys: Box<[NameKey]>,
 }
 
 /// What a call needs to know about the function it enters, read on every
@@ -130,6 +140,8 @@ impl FunctionFacts {
 pub(crate) struct CodeTable {
     units: Vec<LoadedUnit>,
     functions: Vec<FunctionFacts>,
+    /// Every lowercased name of every loaded file, numbered.
+    names: std::collections::HashMap<String, NameKey>,
 }
 
 impl CodeTable {
@@ -155,12 +167,55 @@ impl CodeTable {
             let facts = FunctionFacts::new((index, first, local), body, &unit.types);
             self.functions.push(facts);
         }
+        let name_keys = unit
+            .names
+            .iter()
+            .map(|name| self.intern(name.to_ascii_lowercase()))
+            .collect();
+        let symbol_keys = unit
+            .symbols
+            .iter()
+            .map(|symbol| self.intern(symbol.name.to_ascii_lowercase()))
+            .collect();
         self.units.push(LoadedUnit {
             unit: unit.clone(),
             cache: UnitCache::new(unit),
             first,
+            name_keys,
+            symbol_keys,
         });
         first
+    }
+
+    /// The key of a lowercased name, numbering it if it is new.
+    fn intern(&mut self, lowercase: String) -> NameKey {
+        let next = NameKey(self.names.len() as u32);
+        *self.names.entry(lowercase).or_insert(next)
+    }
+
+    /// The key of a lowercased name, if some loaded file uses the name.
+    pub(crate) fn name_key(&self, lowercase: &str) -> Option<NameKey> {
+        self.names.get(lowercase).copied()
+    }
+
+    /// The key of symbol `symbol` of the file `function` belongs to.
+    #[inline]
+    pub(crate) fn unit_symbol_key(
+        &self,
+        function: FunctionIndex,
+        symbol: phera_bytecode::SymbolId,
+    ) -> NameKey {
+        self.loaded(function).symbol_keys[symbol.index()]
+    }
+
+    /// The key of name `name` of the file `function` belongs to.
+    #[inline]
+    pub(crate) fn unit_name_key(
+        &self,
+        function: FunctionIndex,
+        name: phera_bytecode::NameId,
+    ) -> NameKey {
+        self.loaded(function).name_keys[name.index()]
     }
 
     /// The number of function `local` of the file whose top-level code is `first`.
