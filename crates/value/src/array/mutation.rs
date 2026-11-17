@@ -1,24 +1,37 @@
-//! Mutation preserves PHP's next-free index, insertion order, and iteration holes.
+//! Writing: `$a[$k] = $v`, `$a[] = $v`, `unset($a[$k])`, `array_pop`,
+//! `array_shift`.
+//!
+//! ```php
+//! $a = [5 => 'a'];
+//! $a[] = 'b';        // key 6: one more than the largest integer key so far
+//! unset($a[6]);
+//! $a[] = 'c';        // key 7: unset does not give a key back
+//! array_pop($a);
+//! $a[] = 'd';        // key 7 again: pop does give it back
+//! ```
 
-use super::storage::Storage;
+use super::lookup::list_position;
+use super::storage::{Entry, Storage};
 use super::{ArrayKey, INVALID, PhpArray};
 use crate::error::OpError;
 use crate::value::Value;
 
 impl PhpArray {
-    /// Replace in place, or append in insertion order even when reusing a deleted key.
+    /// Replaces the value of an existing key in place, or appends the entry
+    /// at the end, even when the key was unset earlier. Returns the old value.
     pub fn insert(&mut self, key: ArrayKey, value: Value) -> Option<Value> {
-        if let ArrayKey::Int(index) = &key {
-            self.note_int_key(*index);
+        if let ArrayKey::Int(index) = key {
+            self.note_int_key(index);
         }
-        if let Some(position) = self.find_pos(&key) {
-            return self.storage.slot_mut(position)?.replace(value);
+        if let Some(slot) = self.get_mut(&key) {
+            return Some(std::mem::replace(slot, value));
         }
         self.push_entry(key, value);
         None
     }
 
-    /// Negative keys participate too, as in PHP 8.3 and later.
+    /// Negative keys count too, as in PHP 8.3 and later: after `[-5 => 1]`,
+    /// `$a[]` uses -4.
     #[inline]
     fn note_int_key(&mut self, key: i64) {
         if self.next_free.is_none_or(|next| key >= next) {
@@ -26,27 +39,26 @@ impl PhpArray {
         }
     }
 
-    /// A list can extend only at its physical end: reusing a hole changes order.
+    /// Appends an entry whose key is not in the array. A list stays a list
+    /// only when the key is the next position: a key that fills a hole or
+    /// skips ahead goes at the end in PHP, so the list becomes a map.
     #[inline]
     fn push_entry(&mut self, key: ArrayKey, value: Value) {
-        if let Storage::List(values) = &mut self.storage
-            && key == ArrayKey::Int(values.len() as i64)
-        {
-            values.push(Some(value));
-        } else {
-            self.storage.promote();
-            if let Storage::Map(map) = &mut self.storage {
-                map.append(key, value);
+        match &mut self.storage {
+            Storage::List(values) if key == ArrayKey::Int(values.len() as i64) => {
+                values.push(Some(value));
             }
+            storage => storage.as_map().append(key, value),
         }
         self.maybe_compact();
     }
 
-    /// Append at PHP's next-free integer key, rejecting the saturated MAX state.
+    /// `$a[] = $value`: appends at the next free integer key. Fails once
+    /// that key has reached `PHP_INT_MAX`, as PHP does.
     #[inline]
     pub fn push(&mut self, value: Value) -> Result<ArrayKey, OpError> {
         let key = self.next_free.unwrap_or(0);
-        if self.next_free == Some(i64::MAX) {
+        if key == i64::MAX {
             return Err(OpError::error(
                 "Cannot add element to the array as the next element is already occupied",
             ));
@@ -56,70 +68,84 @@ impl PhpArray {
         Ok(ArrayKey::Int(key))
     }
 
-    /// Removal alone must never compact or truncate: foreach keeps physical positions.
+    /// `unset($a[$key])`: leaves a hole, so later slots keep their positions.
+    /// It never compacts, because a running foreach may hold one of them.
     pub fn remove(&mut self, key: &ArrayKey) -> Option<Value> {
-        let position = self.find_pos(key)?;
-        if let Storage::Map(map) = &mut self.storage {
-            map.remove_index(key);
-            // A hole has no key. Release strings immediately, including on reinsertion.
-            map.entries[position].key = ArrayKey::Int(0);
-        }
-        let value = self.storage.slot_mut(position)?.take();
+        let value = match &mut self.storage {
+            Storage::List(values) => values.get_mut(list_position(key)?)?.take()?,
+            Storage::Map(map) => map.remove(key)?,
+        };
         self.dead += 1;
-        value
+        Some(value)
     }
 
-    /// Preserve the existing compaction boundary: after append/pop, when dead > live.
+    /// Drops the holes once they outnumber the live entries. Runs after an
+    /// append or a pop, never after a plain unset (see [`PhpArray::remove`]).
     fn maybe_compact(&mut self) {
         if self.dead as usize <= self.len() {
             return;
         }
-        // A list's keys would change if its values alone were compacted.
-        self.storage.promote();
-        if let Storage::Map(map) = &mut self.storage {
-            map.entries.retain(|entry| entry.value.is_some());
-            map.reindex();
-        }
+        let entries: Vec<Entry> = match std::mem::take(&mut self.storage) {
+            Storage::List(values) => values
+                .into_iter()
+                .enumerate()
+                .filter_map(|(position, value)| {
+                    Some(Entry {
+                        key: ArrayKey::Int(position as i64),
+                        value: Some(value?),
+                    })
+                })
+                .collect(),
+            Storage::Map(mut map) => {
+                map.entries.retain(|entry| entry.value.is_some());
+                map.entries
+            }
+        };
+        self.storage = Storage::from_entries(entries);
         self.dead = 0;
-        self.storage.demote();
     }
 
-    /// Pop rolls the next-free key back only when the last key immediately precedes it.
+    /// `array_pop`: removes the last entry. The next free key goes back by
+    /// one when the popped key was the last one handed out.
     pub fn pop(&mut self) -> Option<Value> {
         let position = self.last_position()?;
-        let (key, _) = self.entry_at(position)?;
-        let value = self.remove(&key)?;
-        if let (ArrayKey::Int(key), Some(next)) = (key, self.next_free)
-            && next == key.saturating_add(1)
+        let (key, value) = match &mut self.storage {
+            Storage::List(values) => (ArrayKey::Int(position as i64), values[position].take()),
+            Storage::Map(map) => map.remove_at(position),
+        };
+        self.dead += 1;
+        if let ArrayKey::Int(key) = key
+            && self.next_free == Some(key.saturating_add(1))
         {
             self.next_free = Some(key);
         }
         self.maybe_compact();
-        Some(value)
+        value
     }
 
-    /// Shift closes every hole and renumbers integers; string keys retain their order.
+    /// `array_shift`: removes the first entry, drops every hole and numbers
+    /// the integer keys again from 0. String keys keep their place.
     pub fn shift(&mut self) -> Option<Value> {
         let first = self.first_position()?;
         let value = self.storage.slot_mut(first)?.take();
         let mut next = 0;
-        match &mut self.storage {
-            Storage::List(values) => {
+        self.storage = match std::mem::take(&mut self.storage) {
+            Storage::List(mut values) => {
                 values.retain(Option::is_some);
                 next = values.len() as i64;
+                Storage::List(values)
             }
-            Storage::Map(map) => {
+            Storage::Map(mut map) => {
                 map.entries.retain(|entry| entry.value.is_some());
                 for entry in &mut map.entries {
-                    if matches!(entry.key, ArrayKey::Int(_)) {
-                        entry.key = ArrayKey::Int(next);
+                    if let ArrayKey::Int(key) = &mut entry.key {
+                        *key = next;
                         next += 1;
                     }
                 }
-                map.reindex();
+                Storage::from_entries(map.entries)
             }
-        }
-        self.storage.demote();
+        };
         self.dead = 0;
         self.next_free = Some(next);
         self.pos = self
