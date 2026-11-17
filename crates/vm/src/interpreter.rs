@@ -4,6 +4,9 @@ use phera_bytecode::{Instruction, Target};
 use phera_extension_api::{LocalFuture, NativeError, NativeResult};
 
 use crate::Vm;
+use crate::dispatch::DispatchResult;
+use crate::fast::ArgumentTracking;
+use crate::scalar_batches::{BatchExit, YIELD_AFTER_STEPS};
 
 impl Vm {
     /// Runs frames until the call stack is back at depth `stop`.
@@ -19,15 +22,7 @@ impl Vm {
     pub(crate) fn interpret(&mut self, stop: usize) -> LocalFuture<'_, NativeResult> {
         Box::pin(async move {
             loop {
-                let at_top_level = self
-                    .current()
-                    .is_some_and(|frame| frame.function_id.is_none());
-                let result = if at_top_level {
-                    self.interpret_procedural(stop).await
-                } else {
-                    self.interpret_frames(stop).await
-                };
-                match result {
+                match self.interpret_frames(stop).await {
                     Ok(value) => return Ok(value),
                     Err(error) => {
                         let error = if self.error_handlers.pending.is_empty() {
@@ -47,8 +42,24 @@ impl Vm {
 }
 
 impl Vm {
-    /// Retain code and register windows across scalar steps; periodically yield for Tokio fairness.
+    /// Runs the current frame, and every frame it calls, until the call stack
+    /// is back at depth `stop` or an error leaves.
+    ///
+    /// Each round has two parts:
+    ///
+    /// 1. `scalar_batches::run` executes simple instructions (arithmetic on
+    ///    integers and floats, comparisons, jumps, copies) in a tight loop.
+    ///    It is a plain function, not async, so the compiler keeps its
+    ///    variables in CPU registers. It stops at the first instruction it
+    ///    cannot do.
+    /// 2. That instruction is executed here: the common ones for calls and
+    ///    returns directly, everything else through `dispatch`.
+    ///
+    /// The outer loop runs again whenever the current frame changes (a call
+    /// pushed one, or a return popped one).
     pub(crate) async fn interpret_frames(&mut self, stop: usize) -> NativeResult {
+        // Counts loop iterations and calls, so a long-running script gives
+        // other requests on this thread a turn every few thousand steps.
         let mut work = 0usize;
         let mut running_unit = self
             .current()
@@ -69,59 +80,37 @@ impl Vm {
             .ok_or_else(|| internal_error!("invalid function"))?;
             let instructions = &function.instructions;
             let base = frame.base;
-            // Keep the instruction pointer local until a slow instruction or suspension.
             let mut ip = frame.ip;
             let tracking = if frame.arguments.is_empty() {
-                crate::fast::ArgumentTracking::Unobserved
+                ArgumentTracking::Unobserved
             } else {
-                crate::fast::ArgumentTracking::Observed
+                ArgumentTracking::Observed
             };
             loop {
-                let instruction = instructions
-                    .get(ip)
-                    .copied()
-                    .ok_or_else(|| internal_error!("invalid instruction pointer"))?;
-                ip += 1;
-                self.executed_instructions += 1;
-                if crate::fast::scalar_step(
-                    instruction,
+                let batch = crate::scalar_batches::run(
+                    instructions,
                     self.registers.tail_mut(base),
-                    &mut ip,
+                    ip,
+                    work,
                     tracking,
-                ) == crate::fast::ScalarStep::Complete
-                {
-                    if matches!(
-                        instruction,
-                        Instruction::Jump { .. }
-                            | Instruction::JumpIf { .. }
-                            | Instruction::JumpIfNot { .. }
-                    ) {
-                        work += 1;
-                        if work >= 4096 {
-                            if let Some(frame) = self.call_stack.current_mut() {
-                                frame.ip = ip;
-                            }
-                            work = 0;
-                            tokio::task::yield_now().await;
+                );
+                self.executed_instructions += batch.executed;
+                work = batch.work;
+                ip = batch.ip;
+                let instruction = match batch.exit {
+                    BatchExit::Instruction(instruction) => instruction,
+                    BatchExit::Yield => {
+                        if let Some(frame) = self.call_stack.current_mut() {
+                            frame.ip = ip;
                         }
+                        tokio::task::yield_now().await;
+                        continue;
                     }
-                    continue;
-                }
-                if let Instruction::FetchIndex {
-                    dst,
-                    base: array,
-                    index,
-                    ..
-                } = instruction
-                    && crate::fast::array_index_step(
-                        dst,
-                        array,
-                        index,
-                        self.registers.tail_mut(base),
-                    ) == crate::fast::ScalarStep::Complete
-                {
-                    continue;
-                }
+                    BatchExit::Invalid => {
+                        return Err(internal_error!("invalid instruction pointer"));
+                    }
+                };
+                // `foreach` over a plain array copy needs no frame access.
                 if let Instruction::IterNext { iter, value, end } = instruction
                     && crate::iteration::snapshot_step(
                         iter,
@@ -134,37 +123,39 @@ impl Vm {
                 {
                     continue;
                 }
+                // From here on other code may read or change the frame, so it
+                // has to know where execution is.
                 if let Some(frame) = self.call_stack.current_mut() {
                     frame.ip = ip
                 }
-                // Mirrors the corresponding dispatcher arms, preserving the published
-                // IP and continuation handling while keeping synchronous hot operations
-                // out of the cold async dispatcher future.
+                // The instructions of a call and a return are handled here
+                // without going through the general dispatcher, because they
+                // are by far the most frequent slow instructions.
                 let result = match instruction {
                     Instruction::InitCall { function } => {
                         self.init_call(function)?;
-                        crate::dispatch::DispatchResult::Continue
+                        DispatchResult::Continue
                     }
                     Instruction::SendValue { src } => {
                         self.send_value(src)?;
-                        crate::dispatch::DispatchResult::Continue
+                        DispatchResult::Continue
                     }
                     Instruction::SendLocal { local } => {
                         self.send(None, Some(crate::AccessPath::local(local)))?;
-                        crate::dispatch::DispatchResult::Continue
+                        DispatchResult::Continue
                     }
                     Instruction::Call { dst } => {
                         self.execute_call(dst, &mut work).await?;
-                        crate::dispatch::DispatchResult::Continue
+                        DispatchResult::Continue
                     }
                     Instruction::Return { src } => match self.read_defined_local(src) {
                         // No declared return type: nothing to check or convert.
                         Some(value) if function.return_type.is_none() => self
                             .finish_return_value(value, stop)
-                            .map(crate::dispatch::DispatchResult::from_return)?,
+                            .map(DispatchResult::from_return)?,
                         Some(value) => self
                             .return_value(value, stop)
-                            .map(crate::dispatch::DispatchResult::from_return)?,
+                            .map(DispatchResult::from_return)?,
                         // `return $undefined;` warns. The general dispatcher runs a
                         // user error handler while this frame is still on the stack,
                         // which is what PHP does and what the stack trace shows.
@@ -177,17 +168,19 @@ impl Vm {
                         end,
                     } => {
                         self.iter_next(iterator, None, value, end)?;
-                        crate::dispatch::DispatchResult::Continue
+                        DispatchResult::Continue
                     }
                     _ => self.dispatch(instruction, stop, &mut work).await?,
                 };
-                if let crate::dispatch::DispatchResult::Returned(value) = result {
+                if let DispatchResult::Returned(value) = result {
                     return Ok(value);
                 }
-                if work >= 4096 {
+                if work >= YIELD_AFTER_STEPS {
                     work = 0;
                     tokio::task::yield_now().await;
                 }
+                // A warning raised by that instruction may be waiting for the
+                // user's error handler (`set_error_handler`).
                 if !self.error_handlers.pending.is_empty() {
                     self.drain_error_handlers().await?;
                 }
@@ -195,6 +188,7 @@ impl Vm {
                     .current()
                     .ok_or_else(|| internal_error!("missing continuation"))?;
                 if frame.base != base {
+                    // A call or a return changed the current frame.
                     break;
                 }
                 ip = frame.ip;

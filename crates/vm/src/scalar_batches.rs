@@ -4,6 +4,10 @@ use crate::fast::{ArgumentTracking, ScalarStep, scalar_step};
 use phera_bytecode::Instruction;
 use phera_value::Value;
 
+/// How many loop iterations or calls a script may run before it lets other
+/// tasks on the same thread have a turn.
+pub(crate) const YIELD_AFTER_STEPS: usize = 4096;
+
 /// A batch stops before a PHP handler, at a cooperative yield, or at invalid code.
 pub(crate) enum BatchExit {
     Instruction(Instruction),
@@ -60,7 +64,7 @@ pub(crate) fn run(
         // also covers fused conditional branches without another opcode match.
         if ip <= previous_ip {
             work += 1;
-            if work >= 4096 {
+            if work >= YIELD_AFTER_STEPS {
                 return ScalarBatch {
                     ip,
                     executed,
