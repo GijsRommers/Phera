@@ -26,6 +26,7 @@ pub use phera_vm::OutputSink;
 #[derive(Clone)]
 pub struct Runtime {
     registry: Arc<Registry>,
+    extensions: Arc<[&'static str]>,
     cache: CodeCache,
 }
 
@@ -48,17 +49,47 @@ impl Default for Runtime {
 impl Runtime {
     pub fn new() -> Self {
         let mut registry = Registry::new();
-        registry.load(&phera_ext_core::Core);
-        registry.load(&phera_ext_standard::Standard);
-        registry.load(&phera_ext_ctype::Ctype);
-        registry.load(&phera_ext_json::Json);
-        registry.load(&phera_ext_pcre::Pcre);
-        registry.load(&phera_ext_pdo::Pdo);
-        registry.load(&phera_ext_http::Http);
+        let linked: [&dyn phera_extension_api::Extension; 7] = [
+            &phera_ext_core::Core,
+            &phera_ext_standard::Standard,
+            &phera_ext_ctype::Ctype,
+            &phera_ext_json::Json,
+            &phera_ext_pcre::Pcre,
+            &phera_ext_pdo::Pdo,
+            &phera_ext_http::Http,
+        ];
+        let extensions: Arc<[&'static str]> = linked
+            .iter()
+            .map(|extension| {
+                registry.load(*extension);
+                extension.name()
+            })
+            .collect();
         Runtime {
             registry: Arc::new(registry),
+            extensions,
             cache: CodeCache::default(),
         }
+    }
+
+    /// Composer platform packages supplied by this runtime, without consulting system PHP.
+    /// Only extensions actually registered in this binary are advertised.
+    pub fn platform_packages(&self) -> std::collections::BTreeMap<String, String> {
+        let mut packages = std::collections::BTreeMap::new();
+        let Some(phera_extension_api::ConstantValue::String(version)) =
+            self.registry.get_constant("PHP_VERSION")
+        else {
+            return packages;
+        };
+        packages.insert("php".into(), (*version).into());
+        if cfg!(target_pointer_width = "64") {
+            packages.insert("php-64bit".into(), (*version).into());
+        }
+        for extension in self.extensions.iter() {
+            let name = extension.to_ascii_lowercase().replace(' ', "-");
+            packages.insert(format!("ext-{name}"), (*version).into());
+        }
+        packages
     }
 
     /// Compiles a file, or returns it from the cache.

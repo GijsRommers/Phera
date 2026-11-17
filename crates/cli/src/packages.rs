@@ -26,12 +26,15 @@ fn execute(arguments: &[String]) -> Result<(), String> {
             "-v" | "--verbose" => options.verbose = true,
             "--no-scripts" => options.no_scripts = true,
             "--prefer-lowest" => options.prefer_lowest = true,
+            "--ignore-platform-reqs" => options.ignore_platform = true,
             other => return Err(format!("Unknown package option: {other}")),
         }
     }
     let directory = std::env::current_dir().map_err(|error| error.to_string())?;
+    options.platform = phera_runtime::Runtime::new().platform_packages();
     let result = match arguments[0].as_str() {
         "install" => phera_packages::install(&directory, &options),
+        "update" => phera_packages::update(&directory, &options),
         "dump-autoload" => phera_packages::dump_autoload(&directory, &options),
         other => return Err(format!("Unknown package command: {other}")),
     };

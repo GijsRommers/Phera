@@ -17,7 +17,9 @@ pub struct Options {
     pub verbose: bool,
     pub no_scripts: bool,
     pub prefer_lowest: bool,
+    pub ignore_platform: bool,
     pub cache_dir: Option<PathBuf>,
+    pub platform: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug)]

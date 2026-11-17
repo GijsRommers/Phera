@@ -7,11 +7,15 @@ mod autoload;
 mod binaries;
 mod content_hash;
 mod installed;
+mod lock_writer;
 mod network;
 mod paths;
 mod php;
 mod project;
+mod registry;
+mod solver;
 mod store;
+pub mod version;
 
 pub use project::{Lock, Options, Package, Project};
 
@@ -22,6 +26,9 @@ use std::path::Path;
 
 /// Install the exact locked packages and generate a standalone PHP autoloader.
 pub fn install(directory: &Path, options: &Options) -> Result<()> {
+    if !directory.join("composer.lock").is_file() && !options.frozen {
+        return update(directory, options);
+    }
     let project = Project::read(directory)?;
     let lock = Lock::read(directory)?;
     if lock.content_hash != content_hash::compute(&project.data)? {
@@ -67,6 +74,15 @@ pub fn install(directory: &Path, options: &Options) -> Result<()> {
     }
     println!("Installed {} packages.", packages.len());
     Ok(())
+}
+
+/// Resolve composer.json through PubGrub, write a Composer lock and install it.
+pub fn update(directory: &Path, options: &Options) -> Result<()> {
+    let project = Project::read(directory)?;
+    let registry = registry::Registry::new(&project, options)?;
+    let packages = solver::solve(&project, options, &registry)?;
+    lock_writer::write(&project, options, &packages)?;
+    install(directory, options)
 }
 
 /// Rebuild the PHP autoloader from the installed lock file.

@@ -57,8 +57,7 @@ pub(crate) fn write(project: &Project, lock: &Lock, options: &Options) -> Result
         "version": "1.0.0.0", "reference": null, "type": "project",
         "aliases": [], "dev": true
     });
-    let mut output = php::header(&vendor, &project.directory, "installed.php");
-    output.push_str("return array(\n    'root' => ");
+    let mut output = String::from("<?php return array(\n    'root' => ");
     let root_code = php::value(&root);
     output.push_str(&root_code.replacen("array(", "array('install_path' => $baseDir, ", 1));
     output.push_str(",\n    'versions' => array(\n");
@@ -123,6 +122,18 @@ pub(crate) fn write(project: &Project, lock: &Lock, options: &Options) -> Result
         output.push_str(&format!("        {} => {code},\n", php::quote(name)));
     }
     output.push_str("    ),\n);\n");
+    output = output
+        .replace(
+            "$baseDir",
+            &format!(
+                "__DIR__ . {}",
+                php::quote(&format!(
+                    "/{}",
+                    php::relative(&directory, &project.directory)
+                ))
+            ),
+        )
+        .replace("$vendorDir", "__DIR__ . '/..'");
     fs::write(directory.join("installed.php"), output)?;
     Ok(())
 }
@@ -133,14 +144,6 @@ fn normalized(package: &Package) -> String {
         .as_str()
         .map(str::to_owned)
         .unwrap_or_else(|| {
-            let version = package.version.trim_start_matches('v');
-            if version.starts_with("dev-") {
-                return version.to_owned();
-            }
-            let mut parts: Vec<_> = version.split('.').map(str::to_owned).collect();
-            while parts.len() < 4 {
-                parts.push("0".into());
-            }
-            parts.join(".")
+            crate::version::normalize(&package.version).unwrap_or_else(|_| package.version.clone())
         })
 }
