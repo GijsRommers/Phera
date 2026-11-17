@@ -729,6 +729,7 @@ Zend/tests/gh12457.phpt
 Zend/tests/gh12826.phpt
 Zend/tests/gh13142.phpt
 Zend/tests/gh13178_3.phpt
+Zend/tests/gh13178_4.phpt
 Zend/tests/gh13178_5.phpt
 Zend/tests/gh15712.phpt
 Zend/tests/gh19613.phpt
@@ -1938,6 +1939,7 @@ ext/standard/tests/array/005.phpt
 ext/standard/tests/array/006.phpt
 ext/standard/tests/array/007.phpt
 ext/standard/tests/array/008.phpt
+ext/standard/tests/array/009.phpt
 ext/standard/tests/array/array_all_basic.phpt
 ext/standard/tests/array/array_any_basic.phpt
 ext/standard/tests/array/array_chunk2.phpt
@@ -2331,6 +2333,7 @@ ext/standard/tests/array/count_symbol_table.phpt
 ext/standard/tests/array/current_basic.phpt
 ext/standard/tests/array/current_variation3.phpt
 ext/standard/tests/array/current_variation5.phpt
+ext/standard/tests/array/current_variation6.phpt
 ext/standard/tests/array/end_basic.phpt
 ext/standard/tests/array/end_variation2.phpt
 ext/standard/tests/array/end_variation3.phpt
@@ -2350,6 +2353,7 @@ ext/standard/tests/array/gh14775.phpt
 ext/standard/tests/array/gh15982.phpt
 ext/standard/tests/array/gh16053.phpt
 ext/standard/tests/array/gh18480.phpt
+ext/standard/tests/array/gh19926_pointer.phpt
 ext/standard/tests/array/gh20043.phpt
 ext/standard/tests/array/gh23576.phpt
 ext/standard/tests/array/in_array_variation1.phpt

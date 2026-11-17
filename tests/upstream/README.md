@@ -11,9 +11,9 @@ section the runner does not implement or an extension that is not loaded.
 
 | Directory | Tests | Usable | Phera passes | Share of usable |
 | --- | ---: | ---: | ---: | ---: |
-| `Zend/tests` | 5396 | 4981 | 1698 | 34% |
+| `Zend/tests` | 5396 | 4981 | 1699 | 34% |
 | `tests` | 895 | 648 | 353 | 54% |
-| `ext/standard/tests` | 3880 | 2847 | 1126 | 39% |
+| `ext/standard/tests` | 3880 | 2847 | 1129 | 39% |
 | `ext/json/tests` | 94 | 78 | 59 | 75% |
 | `ext/pcre/tests` | 174 | 143 | 125 | 87% |
 | `ext/ctype/tests` | 49 | 46 | 1 | 2% |
