@@ -3,6 +3,7 @@
 //! A method containing ``return `whoami`;`` still contributes its enclosing class.
 //! Only complete shell-expression literals and deprecated interpolation openers change;
 //! declaration tokens remain intact and the Phera parser discovers every class.
+//! Cast assignments such as `(int) $handle = $info` are compared in scan-only input.
 
 use phera_ast::Program;
 use phera_parser::ParseError;
@@ -36,6 +37,14 @@ pub(super) fn source(text: &str) -> Result<Program, ParseError> {
                     text.to_mut().replace_range(start..end, "''");
                 } else if error.message.starts_with("unsupported syntax: `${...}`") {
                     text.to_mut().replace_range(start..start + 2, "{$");
+                } else if error.message
+                    == concat!(
+                        "syntax error: unexpected assignment operator, ",
+                        "cannot assign to this expression"
+                    )
+                    && &text[start..error.span.end] == "="
+                {
+                    text.to_mut().replace_range(start..error.span.end, "==");
                 } else {
                     return Err(error);
                 }
@@ -51,7 +60,8 @@ mod tests {
     #[test]
     fn preserves_declarations_around_shell_expressions_and_legacy_interpolation() {
         let source = "<?php namespace Acme; class Runner {\n\
-            function run($id) { echo \"${id}\"; return `echo 'class Fake {}'`; }\n\
+            function run($id) { $a = (int) $b = 1; echo \"${id}\"; \
+            return `echo 'class Fake {}'`; }\n\
             } interface Contract {} trait Helper {} enum State {}";
         let program = super::source(source).unwrap();
         let mut names = Vec::new();

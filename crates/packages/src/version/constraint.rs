@@ -78,6 +78,12 @@ impl Constraint {
         self.groups.iter().any(|left| {
             other.groups.iter().any(|right| {
                 let terms: Vec<_> = left.iter().chain(right).collect();
+                if terms.iter().any(|term| {
+                    term.version.is_branch()
+                        && !matches!(term.operator, Operator::Equal | Operator::NotEqual)
+                }) {
+                    return false;
+                }
                 if let Some(exact) = terms
                     .iter()
                     .find(|term| matches!(term.operator, Operator::Equal))

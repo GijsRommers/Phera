@@ -15,11 +15,54 @@ const MAX_ENTRIES: usize = 200_000;
 pub(crate) fn extract(bytes: &[u8], kind: &str, target: &Path) -> Result<()> {
     match kind {
         "zip" => unzip(bytes, target),
-        "tar" if bytes.starts_with(&[0x1f, 0x8b]) => untar(GzDecoder::new(bytes), target),
-        "tar" => untar(Cursor::new(bytes), target),
-        "tar.gz" | "tgz" | "gzip" => untar(GzDecoder::new(bytes), target),
+        "tar" if bytes.starts_with(&[0x1f, 0x8b]) => untar_bytes(bytes, Compression::Gzip, target),
+        "tar" => untar_bytes(bytes, Compression::Plain, target),
+        "tar.gz" | "tgz" | "gzip" => untar_bytes(bytes, Compression::Gzip, target),
         _ => bail!("Unsupported dist type {kind:?}; use zip or tar archives."),
     }
+}
+
+enum Compression {
+    Plain,
+    Gzip,
+}
+
+fn untar_bytes(bytes: &[u8], compression: Compression, target: &Path) -> Result<()> {
+    match compression {
+        Compression::Plain => {
+            preflight_tar(Cursor::new(bytes))?;
+            untar(Cursor::new(bytes), target)
+        }
+        Compression::Gzip => {
+            preflight_tar(GzDecoder::new(bytes))?;
+            untar(GzDecoder::new(bytes), target)
+        }
+    }
+}
+
+fn preflight_tar(reader: impl Read) -> Result<()> {
+    // Raw iteration checks long-name/PAX sizes before tar allocates their buffers.
+    let mut archive = tar::Archive::new(reader);
+    let mut total = 0;
+    for (index, entry) in archive.entries()?.raw(true).enumerate() {
+        if index >= MAX_ENTRIES {
+            bail!("Tar archive contains too many entries.");
+        }
+        let entry = entry?;
+        check_size(entry.size(), &mut total)?;
+        let kind = entry.header().entry_type();
+        let metadata = kind.is_gnu_longname()
+            || kind.is_gnu_longlink()
+            || kind.is_pax_local_extensions()
+            || kind.is_pax_global_extensions();
+        if metadata && entry.size() > 1024 * 1024 {
+            bail!("Tar filename/PAX metadata exceeds the 1 MiB safety limit.");
+        }
+        if kind.is_gnu_sparse() {
+            bail!("Sparse tar entries are not supported.");
+        }
+    }
+    Ok(())
 }
 
 fn unzip(bytes: &[u8], target: &Path) -> Result<()> {
@@ -44,7 +87,8 @@ fn unzip(bytes: &[u8], target: &Path) -> Result<()> {
         } else if entry.is_dir() {
             fs::create_dir_all(destination)?;
         } else {
-            write_file(&mut entry, &destination, mode)?;
+            let expected = entry.size();
+            write_file(&mut entry, &destination, mode, expected)?;
         }
     }
     write_links(target, links)
@@ -67,7 +111,8 @@ fn untar(reader: impl Read, target: &Path) -> Result<()> {
             fs::create_dir_all(destination)?;
         } else if kind.is_file() {
             let mode = entry.header().mode()?;
-            write_file(&mut entry, &destination, mode)?;
+            let expected = entry.size();
+            write_file(&mut entry, &destination, mode, expected)?;
         } else if kind.is_symlink() {
             let link = entry
                 .link_name()?
@@ -89,7 +134,7 @@ fn check_size(size: u64, total: &mut u64) -> Result<()> {
     Ok(())
 }
 
-fn write_file(reader: &mut impl Read, destination: &Path, mode: u32) -> Result<()> {
+fn write_file(reader: &mut impl Read, destination: &Path, mode: u32, expected: u64) -> Result<()> {
     fs::create_dir_all(
         destination
             .parent()
@@ -102,6 +147,9 @@ fn write_file(reader: &mut impl Read, destination: &Path, mode: u32) -> Result<(
     let written = std::io::copy(&mut reader.take(MAX_FILE + 1), &mut file)?;
     if written > MAX_FILE {
         bail!("Archive file exceeds its safety limit.");
+    }
+    if written != expected {
+        bail!("Archive file length does not match its header.");
     }
     set_mode(destination, mode)
 }
@@ -164,55 +212,4 @@ fn write_links(root: &Path, links: Vec<(PathBuf, PathBuf)>) -> Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::extract;
-    use std::fs;
-    use std::io::{Cursor, Write};
-    use zip::write::SimpleFileOptions;
-
-    #[test]
-    fn rejects_zip_traversal_absolute_paths_and_escaping_symlinks() {
-        for name in [
-            "../outside",
-            "/absolute",
-            "C:/windows",
-            "root/../../outside",
-        ] {
-            let directory = tempfile::tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
-            let target = directory.path().join("extract");
-            fs::create_dir(&target).unwrap();
-            let mut archive = zip::ZipWriter::new(Cursor::new(Vec::new()));
-            archive
-                .start_file(name, SimpleFileOptions::default())
-                .unwrap();
-            archive.write_all(b"hostile").unwrap();
-            let bytes = archive.finish().unwrap().into_inner();
-            assert!(extract(&bytes, "zip", &target).is_err(), "{name}");
-            assert!(!directory.path().join("outside").exists());
-        }
-        let directory = tempfile::tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
-        let mut archive = zip::ZipWriter::new(Cursor::new(Vec::new()));
-        archive
-            .add_symlink("root/link", "../../outside", SimpleFileOptions::default())
-            .unwrap();
-        let bytes = archive.finish().unwrap().into_inner();
-        assert!(extract(&bytes, "zip", directory.path()).is_err());
-    }
-
-    #[test]
-    fn rejects_tar_traversal_and_absurd_sizes() {
-        let directory = tempfile::tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
-        let mut header = tar::Header::new_gnu();
-        header.set_size(0);
-        header.set_mode(0o644);
-        header.as_mut_bytes()[..10].copy_from_slice(b"../outside");
-        header.set_cksum();
-        let mut bytes = header.as_bytes().to_vec();
-        bytes.extend_from_slice(&[0; 1024]);
-        assert!(extract(&bytes, "tar", directory.path()).is_err());
-        let mut total = 0;
-        assert!(super::check_size(super::MAX_FILE + 1, &mut total).is_err());
-        let mut total = super::MAX_PACKAGE;
-        assert!(super::check_size(1, &mut total).is_err());
-    }
-}
+mod tests;

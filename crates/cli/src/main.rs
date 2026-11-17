@@ -24,6 +24,10 @@ fn main() -> ExitCode {
         Ok(Command::Dump { script }) => run::dump(&script),
         Ok(Command::Serve(options)) => serve::serve(options),
         Ok(Command::Packages(arguments)) => packages::run(arguments),
+        Ok(Command::Help) => {
+            println!("{}", arguments::USAGE);
+            ExitCode::SUCCESS
+        }
         Ok(Command::Version) => {
             println!("Phera {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS

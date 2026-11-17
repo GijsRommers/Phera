@@ -8,17 +8,18 @@ use crate::version::{Constraint, Stability, Version};
 use anyhow::Result;
 use pubgrub::Ranges;
 use serde_json::Value;
+use std::sync::Arc;
 
 impl Provider<'_> {
-    pub(super) fn catalog(&self, name: &str) -> Result<Vec<Candidate>> {
+    pub(super) fn catalog(&self, name: &str) -> Result<Arc<Vec<Candidate>>> {
         if let Some(catalog) = self.catalogs.borrow().get(name) {
             return Ok(catalog.clone());
         }
         if name == self.root.name {
-            let catalog = vec![Candidate {
+            let catalog = Arc::new(vec![Candidate {
                 package: self.root.clone(),
                 offered: Some(self.root.version.clone()),
-            }];
+            }]);
             self.catalogs
                 .borrow_mut()
                 .insert(name.into(), catalog.clone());
@@ -61,9 +62,11 @@ impl Provider<'_> {
                 });
             }
         }
-        candidates.sort_by(|left, right| {
-            let left = preference(&left.package);
-            let right = preference(&right.package);
+        let mut ranked: Vec<_> = candidates
+            .into_iter()
+            .map(|candidate| (preference(&candidate.package), candidate))
+            .collect();
+        ranked.sort_by(|(left, _), (right, _)| {
             let stable = if self.project.data["prefer-stable"] == true {
                 left.as_ref()
                     .map(Version::stability)
@@ -72,7 +75,7 @@ impl Provider<'_> {
                 std::cmp::Ordering::Equal
             };
             stable.then_with(|| {
-                let order = left.cmp(&right);
+                let order = left.cmp(right);
                 if self.options.prefer_lowest {
                     order.reverse()
                 } else {
@@ -80,6 +83,12 @@ impl Provider<'_> {
                 }
             })
         });
+        let candidates = Arc::new(
+            ranked
+                .into_iter()
+                .map(|(_, candidate)| candidate)
+                .collect::<Vec<_>>(),
+        );
         self.catalogs
             .borrow_mut()
             .insert(name.into(), candidates.clone());
@@ -141,7 +150,8 @@ impl Provider<'_> {
                 normal
                     || inline
                     || aliases.is_some_and(|alias| {
-                        Version::parse(alias).is_ok_and(|version| constraint.matches(&version))
+                        Version::branch_alias(alias)
+                            .is_ok_and(|version| constraint.matches(&version))
                     })
             };
             if matched != negative {
@@ -157,7 +167,7 @@ fn preference(package: &Package) -> Option<Version> {
         .get(&package.version)
         .and_then(Value::as_str)
     {
-        return Version::parse(alias).ok();
+        return Version::branch_alias(alias).ok();
     }
     if package.field("default-branch") == true && package.version.starts_with("dev-") {
         return Version::parse("9999999-dev").ok();

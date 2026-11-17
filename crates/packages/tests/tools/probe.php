@@ -4,6 +4,7 @@ $vendor = $argv[1];
 $loader = require $vendor . '/autoload.php';
 $normalize = static function ($path) {
     $root = getcwd() . '/';
+    if (realpath($path) === getcwd()) { return '.'; }
     return str_replace($root, '', str_replace('\\', '/', realpath($path) ?: $path));
 };
 $result = array('classes' => array(), 'files' => array(), 'psr4' => array(), 'psr0' => array());
@@ -26,4 +27,4 @@ ksort($result['psr0']);
 foreach ($GLOBALS['__composer_autoload_files'] ?? array() as $key => $loaded) {
     $result['files'][] = $key;
 }
-echo json_encode($result, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+echo "\nPHERA_PROBE_JSON=" . json_encode($result, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);

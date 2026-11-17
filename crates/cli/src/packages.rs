@@ -16,6 +16,13 @@ pub(crate) fn run(arguments: Vec<String>) -> ExitCode {
 }
 
 fn execute(arguments: &[String]) -> Result<(), String> {
+    if arguments
+        .iter()
+        .any(|argument| matches!(argument.as_str(), "--help" | "-h"))
+    {
+        println!("{}", crate::arguments::USAGE);
+        return Ok(());
+    }
     let mut options = Options::default();
     let mut subject = None;
     let mut development = false;

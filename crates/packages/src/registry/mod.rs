@@ -211,9 +211,18 @@ impl Registry {
     }
 
     pub(crate) fn prefetch(&self, names: &[String]) -> Result<()> {
-        names
-            .par_iter()
-            .try_for_each(|name| self.packages(name).map(|_| ()))
+        names.par_iter().try_for_each(|name| {
+            let known = self
+                .known
+                .lock()
+                .map_err(|_| anyhow::anyhow!("Registry lock failed."))?
+                .contains_key(name);
+            if known {
+                Ok(())
+            } else {
+                self.packages(name).map(|_| ())
+            }
+        })
     }
 
     pub(crate) fn providers(&self, name: &str) -> Result<Vec<Package>> {
@@ -223,11 +232,25 @@ impl Registry {
             .map_err(|_| anyhow::anyhow!("Registry lock failed."))?
             .values()
             .flatten()
+            .filter(|package| {
+                ["provide", "replace"]
+                    .iter()
+                    .any(|key| package.field(key).get(name).is_some())
+            })
             .cloned()
             .collect();
         for repository in &self.repositories {
             if let Repository::Local { packages, .. } = repository {
-                all.extend(packages.clone());
+                all.extend(
+                    packages
+                        .iter()
+                        .filter(|package| {
+                            ["provide", "replace"]
+                                .iter()
+                                .any(|key| package.field(key).get(name).is_some())
+                        })
+                        .cloned(),
+                );
             }
         }
         Ok(all

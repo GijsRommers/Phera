@@ -63,7 +63,9 @@ fn install_locked(directory: &Path, options: &Options, updating: bool) -> Result
             if package.kind() == "metapackage" {
                 return Ok(());
             }
-            let source = cache.prepare(package, &network, options.offline, &project.directory)?;
+            let source = cache
+                .prepare(package, &network, options.offline, &project.directory)
+                .with_context(|| format!("Cannot install {} {}.", package.name, package.version))?;
             let destination = paths::inside(&vendor, &package.name)?;
             let method =
                 store::materialise(&source, &destination, package.field("target-dir").as_str())?;

@@ -89,6 +89,17 @@ impl Runtime {
             let name = extension.to_ascii_lowercase().replace(' ', "-");
             packages.insert(format!("ext-{name}"), (*version).into());
         }
+        for (constant, package) in [
+            ("PCRE_VERSION", "lib-pcre"),
+            ("PCRE_UNICODE_VERSION", "lib-pcre-unicode"),
+        ] {
+            if let Some(phera_extension_api::ConstantValue::String(version)) =
+                self.registry.get_constant(constant)
+                && let Some(version) = version.split_whitespace().next()
+            {
+                packages.insert(package.into(), version.into());
+            }
+        }
         packages
     }
 

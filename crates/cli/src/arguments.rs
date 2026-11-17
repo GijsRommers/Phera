@@ -10,6 +10,13 @@ Usage:
                                           serve PATH (a directory, or one
                                           script that answers every request)
   phera --dump <file.php>                 print the compiled bytecode
+  phera install [--no-dev] [--frozen-lockfile] [--offline] [-o]
+  phera update [--no-install] [--offline] [--prefer-lowest]
+  phera add vendor/package[:constraint] [--dev]
+  phera remove vendor/package
+  phera why vendor/package
+  phera outdated
+  phera dump-autoload [-o] [--no-dev]
   phera --version";
 
 pub(crate) enum Command {
@@ -24,6 +31,7 @@ pub(crate) enum Command {
     Serve(ServeOptions),
     Packages(Vec<String>),
     Version,
+    Help,
 }
 
 pub(crate) struct ServeOptions {
@@ -38,6 +46,7 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
     match arguments.peek().map(String::as_str) {
         None => Err("No script given.".to_string()),
         Some("--version") => Ok(Command::Version),
+        Some("--help" | "-h") => Ok(Command::Help),
         Some("--dump") => {
             arguments.next();
             let script = arguments.next().ok_or("--dump needs a file.")?;

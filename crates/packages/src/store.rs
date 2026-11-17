@@ -48,7 +48,11 @@ impl Store {
         offline: bool,
         project: &Path,
     ) -> Result<PathBuf> {
-        let identity = serde_json::to_vec(package)?;
+        let mut identity = serde_json::to_vec(package)?;
+        let path_dist = package.field("dist")["type"] == "path";
+        if path_dist {
+            identity.extend_from_slice(project.as_os_str().as_encoded_bytes());
+        }
         let key = format!("{:x}", Sha256::digest(&identity));
         let guard = File::options()
             .read(true)
@@ -60,7 +64,7 @@ impl Store {
         let index = self.directory.join("index").join(&key);
         if let Ok(digest) = fs::read_to_string(&index) {
             let object = crate::paths::inside(&self.directory.join("objects"), digest.trim())?;
-            if object.is_dir() {
+            if object.is_dir() && (!path_dist || offline) {
                 return Ok(object);
             }
         }

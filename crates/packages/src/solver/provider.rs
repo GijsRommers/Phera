@@ -14,6 +14,7 @@ use pubgrub::{
 use serde_json::Value;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub(super) struct Candidate {
@@ -27,7 +28,7 @@ pub(super) struct Provider<'a> {
     pub(super) options: &'a Options,
     pub(super) registry: &'a Registry,
     pub(super) platform: BTreeMap<String, Version>,
-    pub(super) catalogs: RefCell<BTreeMap<String, Vec<Candidate>>>,
+    pub(super) catalogs: RefCell<BTreeMap<String, Arc<Vec<Candidate>>>>,
 }
 
 impl<'a> Provider<'a> {
@@ -83,6 +84,9 @@ impl<'a> Provider<'a> {
     ) -> Result<DependencyConstraints<String, Ranges<u32>>> {
         self.registry.prefetch(&names(package.field("require")))?;
         let mut dependencies = BTreeMap::new();
+        if package.name == self.root.name {
+            dependencies.insert(self.root.name.clone(), Ranges::singleton(1u32));
+        }
         for (field, negative) in [("require", false), ("conflict", true)] {
             if let Some(requirements) = package.field(field).as_object() {
                 for (name, text) in requirements {

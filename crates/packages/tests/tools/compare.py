@@ -148,8 +148,14 @@ def compare(fixture):
             row['installed_difference_packages'] = [x['name'] for x, y in zip(a['packages'], b['packages']) if x != y]
         probes = []
         for directory in [left, right]:
-            result, _ = run([PHP, '-n', str(TESTS / 'tools/probe.php'), vendor], directory, env, 'probe')
-            probes.append(json.loads(result.stdout) if not result.returncode else result.stdout + result.stderr)
+            result, _ = run([PHP, '-n', '-d', 'display_errors=stderr', '-d', 'log_errors=0', str(TESTS / 'tools/probe.php'), vendor], directory, env, 'probe')
+            output = result.stdout.replace(str(directory), '.')
+            diagnostics = result.stderr.replace(str(directory), '.')
+            if not result.returncode:
+                prefix, payload = output.rsplit('\nPHERA_PROBE_JSON=', 1)
+                probes.append({'result': json.loads(payload), 'output': prefix, 'diagnostics': diagnostics})
+            else:
+                probes.append({'status': result.returncode, 'output': output, 'diagnostics': diagnostics})
         row['autoload_identical'] = probes[0] == probes[1]
         if probes[0] != probes[1]:
             (WORK / (fixture.name + '-autoload.json')).write_text(json.dumps(probes, indent=2))
@@ -168,6 +174,11 @@ def compare(fixture):
         row['resolution_differences'] = {key: [a.get(key), b.get(key)] for key in sorted(a.keys() | b.keys()) if a.get(key) != b.get(key)}
         validation, _ = run([PHP, COMPOSER, 'validate', '--no-check-publish'], right, env, 'validate')
         row['composer_accepts_lock'] = 'not up to date' not in validation.stdout + validation.stderr
+        if (right / vendor).exists():
+            shutil.rmtree(right / vendor)
+        handoff, _ = run([PHP, COMPOSER, 'install', '--no-plugins', '--no-interaction',
+                          '--no-scripts', '--ignore-platform-reqs', '-o'], right, env, 'handoff')
+        row['composer_installs_phera_lock'] = handoff.returncode == 0
     (WORK / (fixture.name + '-result.json')).write_text(json.dumps(row, indent=2))
     print(json.dumps(row), flush=True)
     return row
@@ -190,5 +201,6 @@ for fixture in fixtures:
 (WORK / 'results.json').write_text(json.dumps(rows, indent=2) + '\n')
 if any(row.get('error') or row.get('phera_install') or row.get('phera_update')
        or row.get('package_differences') or row.get('resolution_differences')
+       or row.get('composer_installs_phera_lock') is False
        or row.get('installed_identical') is False or row.get('autoload_identical') is False for row in rows):
     raise SystemExit(1)

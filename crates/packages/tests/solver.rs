@@ -230,3 +230,22 @@ fn reports_unsatisfied_platform_without_writing_a_lock() {
     assert!(error.contains("php ^9"), "{error}");
     assert!(!directory.path().join("composer.lock").exists());
 }
+
+#[test]
+fn conflicts_with_root_version_and_numeric_branch_alias_preferences() {
+    let packages = json!({"acme/a": {
+        "1": package("acme/a", "1.0.0", json!({})),
+        "2": package("acme/a", "2.0.0", json!({"conflict": {"test/root": "<2"}}))},
+        "acme/b": {"1": package("acme/b", "1.1.1", json!({})),
+            "dev-main": package("acme/b", "dev-main", json!({"extra": {
+                "branch-alias": {"dev-main": "1.1-dev"}}}))}});
+    assert_eq!(
+        resolve(
+            json!({"acme/a": "*", "acme/b": "^1"}),
+            packages,
+            json!({"minimum-stability": "dev"}),
+            false
+        ),
+        json!({"acme/a": "1.0.0", "acme/b": "dev-main"})
+    );
+}

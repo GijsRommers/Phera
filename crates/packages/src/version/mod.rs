@@ -29,6 +29,24 @@ impl Version {
         &self.normalized
     }
 
+    pub fn branch_alias(text: &str) -> Result<Self> {
+        let branch = text
+            .strip_suffix("-dev")
+            .ok_or_else(|| anyhow::anyhow!("A branch alias must end with -dev."))?;
+        let mut parts: Vec<_> = branch.split('.').map(str::to_owned).collect();
+        if parts.len() > 4
+            || parts.iter().any(|part| {
+                part != "x" && !part.chars().all(|character| character.is_ascii_digit())
+            })
+        {
+            anyhow::bail!("A branch alias must be numeric, for example 2.1.x-dev.");
+        }
+        while parts.len() < 4 {
+            parts.push("x".into());
+        }
+        Self::parse(&format!("{}-dev", parts.join(".").replace('x', "9999999")))
+    }
+
     pub fn stability(&self) -> Stability {
         let text = self.normalized.to_ascii_lowercase();
         if text.starts_with("dev-") || text.ends_with("-dev") {

@@ -239,11 +239,6 @@ fn rejects_a_dist_checksum_mismatch() {
         cache_dir: Some(root.join("cache")),
         ..Options::default()
     };
-    assert!(
-        install(root, &options)
-            .unwrap_err()
-            .to_string()
-            .contains("Checksum mismatch")
-    );
+    assert!(format!("{:#}", install(root, &options).unwrap_err()).contains("Checksum mismatch"));
     assert!(!root.join("vendor/acme/base").exists());
 }
