@@ -1,4 +1,11 @@
-//! `preg_split('/(,)/', 'a,b', -1, PREG_SPLIT_DELIM_CAPTURE)` includes the comma.
+//! `preg_split`.
+//!
+//! ```php
+//! preg_split('/,/', 'a,b,,c');                              // ['a', 'b', '', 'c']
+//! preg_split('/,/', 'a,b,,c', -1, PREG_SPLIT_NO_EMPTY);     // ['a', 'b', 'c']
+//! preg_split('/(,)/', 'a,b', -1, PREG_SPLIT_DELIM_CAPTURE); // ['a', ',', 'b']
+//! preg_split('/,/', 'a,b,c', 2);                            // ['a', 'b,c']
+//! ```
 
 use crate::errors::Error;
 use crate::flags::{CaptureFlags, SplitFlags};

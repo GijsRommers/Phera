@@ -3,8 +3,8 @@
 //!
 //! ```php
 //! preg_match('/end$/D', "end\n");    // 0: with /D, $ is the very end (\z)
-//! preg_match('/a$(?m:b$)/D', 'ab');  // the second $ is in a multiline group
-//!                                    // and stays $
+//!                                    // but in /a$(?m:b$)/D the second $ is
+//!                                    // in a multiline group and stays $
 //! preg_match("/\xff/", "\xff");      // a byte that is not UTF-8 becomes \xff
 //! ```
 //!
@@ -201,6 +201,7 @@ pub(crate) fn source(body: &[u8], options: &Options) -> Result<Source, String> {
                             if inline.scoped {
                                 scopes.push(mode);
                             }
+
                             mode = inline.mode;
                             source.original(&tail[..inline.length], cursor);
                             cursor += inline.length;

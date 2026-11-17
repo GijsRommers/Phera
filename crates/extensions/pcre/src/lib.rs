@@ -1,4 +1,16 @@
-//! PHP regular expressions: `preg_match('/hello/i', 'HELLO') === 1`.
+//! PHP's PCRE extension, the `preg_*` functions, on PCRE2 through the safe
+//! `pcre2` crate.
+//!
+//! ```php
+//! preg_match('/hello/i', 'HELLO');       // 1
+//! preg_replace('/\s+/', ' ', "a \n b");  // "a b"
+//! preg_split('/,/', 'a,b');              // ['a', 'b']
+//! ```
+//!
+//! A call goes through `cache`, which finds or compiles the pattern
+//! (`pattern` reads the delimiters and modifiers, `transform` rewrites the
+//! body, `compile` builds it); `scan` finds the matches and `matches` turns
+//! them into PHP arrays. `errors` keeps what `preg_last_error()` reports.
 
 mod cache;
 mod callable;
@@ -21,7 +33,6 @@ mod transform;
 use errors::Error;
 use phera_extension_api::{Extension, Registry};
 
-/// PHP's PCRE extension, backed exclusively by the safe PCRE2 API.
 pub struct Pcre;
 
 impl Extension for Pcre {

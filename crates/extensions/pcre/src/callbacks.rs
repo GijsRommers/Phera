@@ -1,4 +1,17 @@
-//! Callbacks await PHP: `preg_replace_callback('/a/', fn($m) => strtoupper($m[0]), 'a')`.
+//! `preg_replace_callback` and `preg_replace_callback_array`.
+//!
+//! ```php
+//! preg_replace_callback('/\d+/', fn($m) => $m[0] * 2, 'a1 b22');  // "a2 b44"
+//! preg_replace_callback_array(
+//!     ['/a/' => fn($m) => 'b', '/b/' => fn($m) => 'c'],
+//!     'a',
+//! );                                                              // "c"
+//! ```
+//!
+//! The callback is PHP code, so these functions are async and await the VM
+//! for each match. When a callback throws, PHP still matches the remaining
+//! subjects of an array, and counts their matches, but calls no callback;
+//! the exception is thrown when the call ends.
 
 use crate::errors::Error;
 use crate::flags::CaptureFlags;
@@ -11,15 +24,22 @@ use phera_extension_api::{
 };
 
 struct Operation<'a> {
+    /// The function, for warnings.
     name: &'static str,
     patterns: Vec<Value>,
     callback: &'a Value,
+    /// Matches to replace per pattern and subject.
     limit: usize,
     flags: CaptureFlags,
+    /// Matches replaced so far: PHP's `$count`.
     count: usize,
+    /// What a callback threw, to be thrown when the call ends.
     exception: Option<NativeError>,
 }
+
 impl Operation<'_> {
+    /// Every pattern over one subject, in turn. Null when a pattern does not
+    /// compile or a match fails.
     async fn subject(&mut self, context: &mut dyn Context, value: &Value) -> NativeResult {
         let mut subject = to_php_string(value, context.diagnostics())?
             .as_bytes()
@@ -27,7 +47,7 @@ impl Operation<'_> {
         for pattern in &self.patterns {
             let pattern = to_php_string(pattern, context.diagnostics())?;
             let compiled = if self.exception.is_some() {
-                // PHP suppresses new warnings while propagating an existing exception.
+                // While an exception is pending PHP gives no new warnings.
                 match cache::lookup(pattern.as_bytes()) {
                     Ok(compiled) => Some(compiled),
                     Err(_) => {
@@ -82,6 +102,9 @@ impl Operation<'_> {
         }
         Ok(Value::from(subject))
     }
+
+    /// One subject, or each value of an array of subjects, keeping its key
+    /// and leaving out those that became null.
     async fn apply(&mut self, context: &mut dyn Context, subject: &Value) -> NativeResult {
         if let Value::Array(subjects) = &*subject.deref() {
             let mut output = PhpArray::new();
@@ -125,6 +148,7 @@ pub(crate) fn replace(
         result
     })
 }
+
 pub(crate) fn replace_array(
     context: &mut dyn Context,
     arguments: Vec<Value>,
