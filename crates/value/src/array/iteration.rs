@@ -81,10 +81,16 @@ impl PhpArray {
         self.entry_at(self.last_position()?)
     }
 
-    /// Position of the first live slot.
+    /// Position of the first live slot. A plain scan: written as
+    /// `live_from(0)` it costs the positional foreach one more instruction
+    /// per step (measured, 381 million against 401 million for 20 million
+    /// steps).
     #[inline(always)]
     pub fn first_position(&self) -> Option<usize> {
-        self.live_from(0)
+        match &self.storage {
+            Storage::List(values) => values.iter().position(Option::is_some),
+            Storage::Map(map) => map.entries.iter().position(|entry| entry.value.is_some()),
+        }
     }
 
     /// Position of the last live slot.
