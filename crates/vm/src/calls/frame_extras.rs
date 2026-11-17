@@ -71,15 +71,22 @@ impl FrameExtras {
 
     /// Whether the entry holds only what a method or closure call keeps
     /// (its class context, its closure object), so that returning only has
-    /// to drop those. A constructor's context makes the return special.
+    /// to drop those.
     pub(crate) fn holds_only_call_context(&self) -> bool {
-        self.method
-            .as_ref()
-            .is_none_or(|context| context.invocation == crate::classes::Invocation::Method)
-            && self.dynamic_count.is_none()
+        self.dynamic_count.is_none()
             && self.dynamic.is_empty()
             && self.iterators.is_empty()
             && self.arguments.is_default()
+    }
+
+    /// The object a constructor frame is constructing: what `new` evaluates
+    /// to, whatever the constructor returns.
+    pub(crate) fn constructed_object(&self) -> Option<&Rc<Object>> {
+        let context = self.method.as_ref()?;
+        match context.invocation {
+            crate::classes::Invocation::Constructor => context.receiver.as_ref(),
+            crate::classes::Invocation::Method => None,
+        }
     }
 
     /// Releases what the frame owned, keeping the storage for the next frame

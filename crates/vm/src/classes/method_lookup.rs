@@ -28,7 +28,11 @@ impl Vm {
         name: &str,
         invocation: Invocation,
     ) -> Result<Option<ResolvedMethod>, NativeError> {
-        self.find_method_lowercase(class, &name.to_ascii_lowercase(), invocation)
+        let lower = match name.bytes().any(|byte| byte.is_ascii_uppercase()) {
+            true => std::borrow::Cow::Owned(name.to_ascii_lowercase()),
+            false => std::borrow::Cow::Borrowed(name),
+        };
+        self.find_method_lowercase(class, &lower, invocation)
     }
 
     /// [`Vm::find_method`] for a name that is lowercase already.
@@ -51,10 +55,21 @@ impl Vm {
             return Ok(None);
         };
         self.check_method_visibility(&method)?;
-        let scope = self
-            .classes
-            .get(&method.declaring)
+        let scope = declaring_class(class, &method)
+            .or_else(|| self.classes.get(&method.declaring))
             .ok_or_else(|| internal_error!("method scope"))?;
         Ok(Some(ResolvedMethod { method, scope }))
     }
+}
+
+/// The class among `class` and its ancestors that declares `method`.
+pub(crate) fn declaring_class(class: &Rc<Class>, method: &Method) -> Option<Rc<Class>> {
+    let mut candidate = Some(class);
+    while let Some(class) = candidate {
+        if class.name == method.declaring {
+            return Some(class.clone());
+        }
+        candidate = class.parent.as_ref();
+    }
+    None
 }

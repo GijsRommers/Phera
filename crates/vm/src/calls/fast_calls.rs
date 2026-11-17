@@ -76,8 +76,8 @@ impl Machine<'_> {
 
     /// `Return` from a function or method frame that keeps nothing else in
     /// the side table, returns to PHP code, and whose value passes its
-    /// return type's bit test: write the value into the caller's register
-    /// and empty the callee's.
+    /// return type's bit test: write the value (for a constructor, the new
+    /// object) into the caller's register and empty the callee's.
     #[inline(always)]
     pub(super) fn leave_plain(&mut self, source: Option<Reg>) -> Step {
         let Some(frame) = self.stack.current().copied() else {
@@ -121,9 +121,14 @@ impl Machine<'_> {
         {
             return Step::Slow;
         }
-        let value = match source {
-            Some(source) => self.registers.take(frame.base() + source.index()),
-            None => Value::Null,
+        let constructed = match frame.has_extras() {
+            true => self.stack.extras(depth - 1).constructed_object().cloned(),
+            false => None,
+        };
+        let value = match (constructed, source) {
+            (Some(object), _) => Value::Object(object),
+            (None, Some(source)) => self.registers.take(frame.base() + source.index()),
+            (None, None) => Value::Null,
         };
         self.stack.pop();
         self.registers.truncate(frame.base());

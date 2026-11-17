@@ -145,8 +145,18 @@ impl Vm {
         if class.is_throwable {
             self.initialize_throwable(&object, crate::exceptions::TraceOrigin::Construction);
         }
-        if class.constructor.is_none() {
+        let Some(constructor) = class.constructor.clone() else {
             return self.prepare_constructed_object(&class, object);
+        };
+        if constructor.visibility == phera_bytecode::Visibility::Public
+            && let Some(scope) = super::method_lookup::declaring_class(&class, &constructor)
+        {
+            let resolved = super::method_lookup::ResolvedMethod {
+                method: constructor,
+                scope,
+            };
+            let invocation = super::Invocation::Constructor;
+            return self.prepare_resolved_method(class, Some(object), resolved, invocation);
         }
         self.prepare_method(
             class,
