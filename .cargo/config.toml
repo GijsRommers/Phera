@@ -1,0 +1,3 @@
+# PHP's regex engine is built from the bundled PCRE2 source so the build does not depend on what is installed.
+[env]
+PCRE2_SYS_STATIC = "1"

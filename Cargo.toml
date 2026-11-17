@@ -46,6 +46,7 @@ phera-ext-core = { path = "crates/extensions/core" }
 phera-ext-ctype = { path = "crates/extensions/ctype" }
 phera-ext-http = { path = "crates/extensions/http" }
 phera-ext-json = { path = "crates/extensions/json" }
+phera-ext-pcre = { path = "crates/extensions/pcre" }
 phera-ext-pdo = { path = "crates/extensions/pdo" }
 phera-ext-standard = { path = "crates/extensions/standard" }
 bytes = "1"
@@ -54,3 +55,7 @@ hyper = { version = "1", default-features = false, features = ["http1", "server"
 hyper-util = { version = "0.1", default-features = false, features = ["tokio", "http1", "server-graceful"] }
 socket2 = { version = "0.5", features = ["all"] }
 tokio = { version = "1", features = ["rt", "net", "time", "sync", "signal", "macros"] }
+# PHP's own regex engine. Pinned because the bundled PCRE2 source version
+# (10.46) decides compile error texts.
+pcre2 = "=0.2.11"
+pcre2-sys = "=0.2.10"

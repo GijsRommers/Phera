@@ -1,0 +1,18 @@
+[package]
+name = "phera-ext-pcre"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+phera-extension-api.workspace = true
+pcre2.workspace = true
+# Pin the bundled engine version; this crate never calls the sys API.
+pcre2-sys.workspace = true
+
+[dev-dependencies]
+phera-ext-standard.workspace = true
+
+[lints]
+workspace = true
