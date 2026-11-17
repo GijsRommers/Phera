@@ -83,7 +83,8 @@ pub(crate) fn write(project: &Project, options: &Options, packages: &[Package]) 
     }
     let mut value = json!({
         "_readme": ["This file locks the dependencies of your project to a known state",
-            "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
+            concat!("Read more about it at https://getcomposer.org/doc/",
+                "01-basic-usage.md#installing-dependencies"),
             "This file is @generated automatically"],
         "content-hash": content_hash::compute(&project.data)?,
         "packages": regular, "packages-dev": development, "aliases": aliases,

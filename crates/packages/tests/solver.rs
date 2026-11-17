@@ -191,3 +191,42 @@ fn stability_lowest_platform_and_branch_aliases() {
         json!({"acme/a": "1.0.0"})
     );
 }
+
+#[test]
+fn inline_aliases_and_the_root_package_satisfy_transitive_requirements() {
+    let packages = json!({"acme/a": {"dev-main": package("acme/a", "dev-main", json!({}))},
+        "acme/b": {"1": package("acme/b", "1.0.0", json!({"require": {
+            "acme/a": "^2", "test/root": "^1"}}))}});
+    assert_eq!(
+        resolve(
+            json!({"acme/a": "dev-main as 2.0.0", "acme/b": "*"}),
+            packages,
+            json!({}),
+            false
+        ),
+        json!({"acme/a": "dev-main", "acme/b": "1.0.0"})
+    );
+}
+
+#[test]
+fn reports_unsatisfied_platform_without_writing_a_lock() {
+    let registry = Registry::start(json!({}));
+    let directory = tempfile::tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+    fs::write(
+        directory.path().join("composer.json"),
+        json!({"name": "test/root",
+        "require": {"php": "^9"}, "config": {"platform": {"php": "8.5.12"}},
+        "repositories": [{"type": "composer", "url": registry.url},
+            {"packagist.org": false}]})
+        .to_string(),
+    )
+    .unwrap();
+    let options = Options {
+        cache_dir: Some(directory.path().join("cache")),
+        no_scripts: true,
+        ..Options::default()
+    };
+    let error = update(directory.path(), &options).unwrap_err().to_string();
+    assert!(error.contains("php ^9"), "{error}");
+    assert!(!directory.path().join("composer.lock").exists());
+}

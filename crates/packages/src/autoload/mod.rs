@@ -4,6 +4,7 @@
 
 mod emit;
 mod order;
+mod platform;
 mod scan;
 
 use crate::{Options, Package, Project, project::strings};

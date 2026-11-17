@@ -2,6 +2,7 @@
 //!
 //! Root `"require": {"acme/a":"^2"}` pins the solve while PubGrub backtracks transitive choices.
 
+mod catalog;
 mod provider;
 
 use crate::{Options, Package, Project, registry::Registry, version::Version};

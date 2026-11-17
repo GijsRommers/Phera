@@ -59,21 +59,30 @@ pub(crate) fn write(project: &Project, lock: &Lock, options: &Options) -> Result
         serde_json::to_string_pretty(&record)? + "\n",
     )?;
     let root_version = project.root_version();
+    let normalized_root = crate::version::normalize(&root_version)?;
+    let root_path = php::static_path(&project.directory, &directory);
+    let root_type = project.data["type"].as_str().unwrap_or("library");
     let root = json!({
         "name": project.name(), "pretty_version": root_version,
-        "version": "1.0.0.0", "reference": null, "type": "project",
-        "aliases": [], "dev": true
+        "version": normalized_root, "reference": null, "type": root_type,
+        "aliases": [], "dev": !options.no_dev
     });
     let mut output = String::from("<?php return array(\n    'root' => ");
     let root_code = php::value(&root);
-    output.push_str(&root_code.replacen("array(", "array('install_path' => $baseDir, ", 1));
+    output.push_str(&root_code.replacen(
+        "array(",
+        &format!("array('install_path' => {root_path}, "),
+        1,
+    ));
     output.push_str(",\n    'versions' => array(\n");
     output.push_str(&format!(
         "        {} => array('pretty_version' => {}, \
-        'version' => '1.0.0.0', 'aliases' => array(), 'reference' => null, \
-        'type' => 'project', 'install_path' => $baseDir, 'dev_requirement' => false),\n",
+        'version' => {}, 'aliases' => array(), 'reference' => null, \
+        'type' => {}, 'install_path' => {root_path}, 'dev_requirement' => false),\n",
         php::quote(project.name()),
-        php::quote(&root_version)
+        php::quote(&root_version),
+        php::quote(&normalized_root),
+        php::quote(root_type)
     ));
     let mut versions = serde_json::Map::<String, Value>::new();
     for package in &packages {
@@ -120,7 +129,7 @@ pub(crate) fn write(project: &Project, lock: &Lock, options: &Options) -> Result
                 .iter()
                 .any(|package| package.name == *name && package.kind() != "metapackage")
         {
-            php::path(&vendor.join(name), &vendor, &project.directory)
+            php::static_path(&vendor.join(name), &directory)
         } else {
             "null".into()
         };
@@ -129,18 +138,6 @@ pub(crate) fn write(project: &Project, lock: &Lock, options: &Options) -> Result
         output.push_str(&format!("        {} => {code},\n", php::quote(name)));
     }
     output.push_str("    ),\n);\n");
-    output = output
-        .replace(
-            "$baseDir",
-            &format!(
-                "__DIR__ . {}",
-                php::quote(&format!(
-                    "/{}",
-                    php::relative(&directory, &project.directory)
-                ))
-            ),
-        )
-        .replace("$vendorDir", "__DIR__ . '/..'");
     fs::write(directory.join("installed.php"), output)?;
     Ok(())
 }

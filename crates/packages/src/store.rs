@@ -120,6 +120,15 @@ impl Store {
         } else {
             extracted
         };
+        for entry in walkdir::WalkDir::new(&source) {
+            let entry = entry?;
+            if entry.file_type().is_symlink() && !entry.path().canonicalize()?.starts_with(&source)
+            {
+                bail!(
+                    "Archive symlink escapes the package after removing its top-level directory."
+                );
+            }
+        }
         let object = self.directory.join("objects").join(&digest);
         if !object.exists() {
             match fs::rename(&source, &object) {
@@ -235,15 +244,27 @@ fn tree_digest(directory: &Path) -> Result<String> {
         .sort_by_file_name()
     {
         let entry = entry?;
-        hash.update(
-            entry
-                .path()
-                .strip_prefix(directory)?
-                .as_os_str()
-                .as_encoded_bytes(),
-        );
+        let path = entry
+            .path()
+            .strip_prefix(directory)?
+            .as_os_str()
+            .as_encoded_bytes();
+        hash.update((path.len() as u64).to_le_bytes());
+        hash.update(path);
         if entry.file_type().is_file() {
+            hash.update(b"file");
+            hash.update(entry.metadata()?.len().to_le_bytes());
             hash.update(fs::read(entry.path())?);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                hash.update((entry.metadata()?.permissions().mode() & 0o111).to_le_bytes());
+            }
+        } else if entry.file_type().is_symlink() {
+            hash.update(b"link");
+            hash.update(fs::read_link(entry.path())?.as_os_str().as_encoded_bytes());
+        } else {
+            hash.update(b"directory");
         }
     }
     Ok(format!("{:x}", hash.finalize()))

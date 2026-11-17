@@ -5,7 +5,7 @@
 use crate::{
     Options, Package, Project,
     registry::Registry,
-    version::{Constraint, Stability, Version},
+    version::{Constraint, Version},
 };
 use anyhow::{Context, Result};
 use pubgrub::{
@@ -16,18 +16,18 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 
 #[derive(Clone)]
-struct Candidate {
-    package: Package,
-    offered: Option<String>,
+pub(super) struct Candidate {
+    pub(super) package: Package,
+    pub(super) offered: Option<String>,
 }
 
 pub(super) struct Provider<'a> {
-    root: Package,
-    project: &'a Project,
-    options: &'a Options,
-    registry: &'a Registry,
-    platform: BTreeMap<String, Version>,
-    catalogs: RefCell<BTreeMap<String, Vec<Candidate>>>,
+    pub(super) root: Package,
+    pub(super) project: &'a Project,
+    pub(super) options: &'a Options,
+    pub(super) registry: &'a Registry,
+    pub(super) platform: BTreeMap<String, Version>,
+    pub(super) catalogs: RefCell<BTreeMap<String, Vec<Candidate>>>,
 }
 
 impl<'a> Provider<'a> {
@@ -66,106 +66,6 @@ impl<'a> Provider<'a> {
         })
     }
 
-    fn catalog(&self, name: &str) -> Result<Vec<Candidate>> {
-        if let Some(catalog) = self.catalogs.borrow().get(name) {
-            return Ok(catalog.clone());
-        }
-        if name == self.root.name {
-            let catalog = vec![Candidate {
-                package: self.root.clone(),
-                offered: Some(self.root.version.clone()),
-            }];
-            self.catalogs
-                .borrow_mut()
-                .insert(name.into(), catalog.clone());
-            return Ok(catalog);
-        }
-        let mut candidates = self
-            .registry
-            .packages(name)?
-            .into_iter()
-            .filter(|package| self.allowed(package))
-            .map(|package| Candidate {
-                package,
-                offered: None,
-            })
-            .collect::<Vec<_>>();
-        let mut providers = self.registry.providers(name)?;
-        if self.root.field("replace").get(name).is_some()
-            || self.root.field("provide").get(name).is_some()
-        {
-            providers.push(self.root.clone());
-        }
-        for package in providers
-            .into_iter()
-            .filter(|package| self.allowed(package))
-        {
-            let offer = package
-                .field("replace")
-                .get(name)
-                .or_else(|| package.field("provide").get(name))
-                .and_then(Value::as_str);
-            if let Some(offer) = offer {
-                let offer = if offer == "self.version" {
-                    package.version.clone()
-                } else {
-                    offer.into()
-                };
-                candidates.push(Candidate {
-                    package,
-                    offered: Some(offer),
-                });
-            }
-        }
-        candidates.sort_by(|left, right| {
-            let left = Version::parse(&left.package.version).ok();
-            let right = Version::parse(&right.package.version).ok();
-            let stable = if self.project.data["prefer-stable"] == true {
-                left.as_ref()
-                    .map(Version::stability)
-                    .cmp(&right.as_ref().map(Version::stability))
-            } else {
-                std::cmp::Ordering::Equal
-            };
-            stable.then_with(|| {
-                let order = left.cmp(&right);
-                if self.options.prefer_lowest {
-                    order.reverse()
-                } else {
-                    order
-                }
-            })
-        });
-        self.catalogs
-            .borrow_mut()
-            .insert(name.into(), candidates.clone());
-        Ok(candidates)
-    }
-
-    fn allowed(&self, package: &Package) -> bool {
-        let minimum = self.project.data["minimum-stability"]
-            .as_str()
-            .and_then(Stability::parse)
-            .unwrap_or(Stability::Stable);
-        let root = self
-            .root
-            .field("require")
-            .get(&package.name)
-            .and_then(Value::as_str);
-        let explicit = root
-            .and_then(|constraint| {
-                constraint
-                    .rsplit_once('@')
-                    .and_then(|(_, flag)| Stability::parse(flag))
-            })
-            .or_else(|| {
-                root.filter(|constraint| constraint.contains("dev"))
-                    .map(|_| Stability::Dev)
-            });
-        Version::parse(&package.version)
-            .is_ok_and(|version| version.stability() >= explicit.unwrap_or(minimum))
-    }
-
     pub(super) fn package(&self, name: &str, id: u32) -> Result<Option<Package>> {
         if id == 0 {
             return Ok(None);
@@ -175,33 +75,6 @@ impl<'a> Provider<'a> {
             .get(id as usize - 1)
             .filter(|candidate| candidate.offered.is_none())
             .map(|candidate| candidate.package.clone()))
-    }
-
-    fn matching(&self, name: &str, text: &str, negative: bool) -> Result<Ranges<u32>> {
-        let constraint = Constraint::parse(text)?;
-        let mut range = if negative {
-            Ranges::singleton(0u32)
-        } else {
-            Ranges::empty()
-        };
-        for (index, candidate) in self.catalog(name)?.iter().enumerate() {
-            let matched = if let Some(offer) = &candidate.offered {
-                constraint.intersects(&Constraint::parse(offer)?)
-            } else {
-                let normal = constraint.matches(&Version::parse(&candidate.package.version)?);
-                let aliases = candidate.package.field("extra")["branch-alias"]
-                    .get(&candidate.package.version)
-                    .and_then(Value::as_str);
-                normal
-                    || aliases.is_some_and(|alias| {
-                        Version::parse(alias).is_ok_and(|version| constraint.matches(&version))
-                    })
-            };
-            if matched != negative {
-                range = range.union(&Ranges::singleton(index as u32 + 1));
-            }
-        }
-        Ok(range)
     }
 
     fn dependencies(

@@ -15,6 +15,7 @@ const MAX_ENTRIES: usize = 200_000;
 pub(crate) fn extract(bytes: &[u8], kind: &str, target: &Path) -> Result<()> {
     match kind {
         "zip" => unzip(bytes, target),
+        "tar" if bytes.starts_with(&[0x1f, 0x8b]) => untar(GzDecoder::new(bytes), target),
         "tar" => untar(Cursor::new(bytes), target),
         "tar.gz" | "tgz" | "gzip" => untar(GzDecoder::new(bytes), target),
         _ => bail!("Unsupported dist type {kind:?}; use zip or tar archives."),

@@ -168,3 +168,82 @@ fn frozen_and_offline_fail_with_actionable_errors() {
             .contains("acme/missing")
     );
 }
+
+#[test]
+fn no_dev_removes_previous_packages_and_runs_root_events_in_order() {
+    let directory = project();
+    let root = directory.path();
+    let production = archive(root, "acme/base", &[("Base.php", "<?php class Base {}")]);
+    let development = archive(root, "acme/dev", &[("Dev.php", "<?php class Dev {}")]);
+    fs::write(
+        root.join("composer.json"),
+        json!({"scripts": {
+            "pre-install-cmd": "printf pre > events.txt",
+            "pre-autoload-dump": "@write-autoload",
+            "write-autoload": "printf autoload >> events.txt",
+            "post-autoload-dump": "printf post >> events.txt",
+            "post-install-cmd": "printf install >> events.txt"
+        }})
+        .to_string(),
+    )
+    .unwrap();
+    fs::write(
+        root.join("composer.lock"),
+        json!({"content-hash": "stale",
+        "packages": [production], "packages-dev": [development]})
+        .to_string(),
+    )
+    .unwrap();
+    let mut options = Options {
+        cache_dir: Some(root.join("cache")),
+        ..Options::default()
+    };
+    install(root, &options).unwrap();
+    assert_eq!(
+        fs::read_to_string(root.join("events.txt")).unwrap(),
+        "preautoloadpostinstall"
+    );
+    assert!(root.join("vendor/acme/dev").is_dir());
+    options.no_dev = true;
+    options.offline = true;
+    install(root, &options).unwrap();
+    assert!(!root.join("vendor/acme/dev").exists());
+    let installed: Value =
+        serde_json::from_slice(&fs::read(root.join("vendor/composer/installed.json")).unwrap())
+            .unwrap();
+    assert_eq!(installed["dev-package-names"], json!([]));
+    options.no_scripts = true;
+    fs::write(root.join("events.txt"), "unchanged").unwrap();
+    install(root, &options).unwrap();
+    assert_eq!(
+        fs::read_to_string(root.join("events.txt")).unwrap(),
+        "unchanged"
+    );
+}
+
+#[test]
+fn rejects_a_dist_checksum_mismatch() {
+    let directory = project();
+    let root = directory.path();
+    let mut package = archive(root, "acme/base", &[("Base.php", "<?php class Base {}")]);
+    package["dist"]["shasum"] = "0000000000000000000000000000000000000000".into();
+    fs::write(root.join("composer.json"), "{}").unwrap();
+    fs::write(
+        root.join("composer.lock"),
+        json!({"content-hash": "stale",
+        "packages": [package]})
+        .to_string(),
+    )
+    .unwrap();
+    let options = Options {
+        cache_dir: Some(root.join("cache")),
+        ..Options::default()
+    };
+    assert!(
+        install(root, &options)
+            .unwrap_err()
+            .to_string()
+            .contains("Checksum mismatch")
+    );
+    assert!(!root.join("vendor/acme/base").exists());
+}

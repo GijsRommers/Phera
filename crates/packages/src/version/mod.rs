@@ -2,8 +2,9 @@
 //!
 //! `Version::parse("v1.2.0RC1")` normalizes to `1.2.0.0-RC1`.
 
-mod constraint;
+pub(crate) mod constraint;
 mod normalize;
+mod syntax;
 
 pub use constraint::Constraint;
 pub use normalize::normalize;
