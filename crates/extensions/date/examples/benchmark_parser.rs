@@ -29,6 +29,7 @@ const INPUTS: [&str; 20] = [
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::args().nth(1).as_deref() == Some("worker") {
         let mut registry = Registry::new();
+        registry.load(&phera_ext_core::Core);
         Date.register(&mut registry);
         let NativeFn::Sync(function) = registry.get_function("strtotime").unwrap().handler else {
             unreachable!()

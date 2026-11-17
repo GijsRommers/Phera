@@ -1,14 +1,14 @@
 //! Hand-written timelib scanner: `strtotime('next Monday', $base)` and `date_parse()`.
 //! Every family offers its longest match; ties use parse_date.re's rule order.
 mod actions;
-mod apply;
+pub(crate) mod apply;
 mod compound;
 mod dates;
 mod scan;
 mod short_time;
-mod state;
+pub(crate) mod state;
 mod time;
-mod token;
+pub(crate) mod token;
 mod words;
 
 use phera_extension_api::{Context, NativeResult, Value, args};
@@ -35,20 +35,8 @@ pub fn strtotime(context: &mut dyn Context, arguments: &[Value]) -> NativeResult
     )
 }
 
-fn parse(input: &[u8]) -> State {
-    let whitespace = |b: &u8| {
-        matches!(b, b' ' | b'\t' | b'\n' | b'\r' | 11 | 12)
-            || (cfg!(target_os = "macos") && *b == 0xa0)
-    };
-    let start = input
-        .iter()
-        .position(|b| !whitespace(b))
-        .unwrap_or(input.len());
-    let end = input
-        .iter()
-        .rposition(|b| !whitespace(b))
-        .map_or(start, |p| p + 1);
-    let input = &input[start..end];
+pub(crate) fn parse(input: &[u8]) -> State {
+    let input = trim(input);
     let mut state = State::default();
     if input.is_empty() {
         state.error(0, "Empty string");
@@ -106,4 +94,21 @@ fn parse(input: &[u8]) -> State {
         }
     }
     state
+}
+
+/// timelib reports byte positions after trimming its platform's whitespace.
+pub(crate) fn trim(input: &[u8]) -> &[u8] {
+    let whitespace = |b: &u8| {
+        matches!(b, b' ' | b'\t' | b'\n' | b'\r' | 11 | 12)
+            || (cfg!(target_os = "macos") && *b == 0xa0)
+    };
+    let start = input
+        .iter()
+        .position(|b| !whitespace(b))
+        .unwrap_or(input.len());
+    let end = input
+        .iter()
+        .rposition(|b| !whitespace(b))
+        .map_or(start, |p| p + 1);
+    &input[start..end]
 }

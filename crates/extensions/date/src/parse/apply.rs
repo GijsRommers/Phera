@@ -12,6 +12,25 @@ pub fn timestamp(state: &State, base: i64, zone: &Zone) -> Option<i64> {
         zone.offset(base).seconds
     };
     let now = Civil::from_timestamp(base.wrapping_add(i64::from(seconds)));
+    let civil = wall(state, now);
+    Some(match &state.parsed.zone {
+        Some(ParsedZone::Offset(seconds)) => {
+            crate::normalize::timestamp(civil).wrapping_sub(*seconds)
+        }
+        Some(ParsedZone::Abbreviation {
+            seconds, daylight, ..
+        }) => {
+            crate::normalize::timestamp(civil).wrapping_sub(*seconds + i64::from(*daylight) * 3600)
+        }
+        Some(ParsedZone::Identifier { name, .. }) => {
+            crate::resolve::local_timestamp(&Zone::named(name.as_bytes())?, civil, Some(true))
+        }
+        _ if zone.name == "UTC" => crate::normalize::timestamp(civil),
+        _ => crate::resolve::local_timestamp(zone, civil, None),
+    })
+}
+
+pub fn wall(state: &State, now: Civil) -> Civil {
     let defaults = [
         now.year, now.month, now.day, now.hour, now.minute, now.second,
     ];
@@ -70,21 +89,7 @@ pub fn timestamp(state: &State, base: i64, zone: &Zone) -> Option<i64> {
         weekdays(&mut civil, count);
     }
     normalize(&mut civil);
-    Some(match &state.parsed.zone {
-        Some(ParsedZone::Offset(seconds)) => {
-            crate::normalize::timestamp(civil).wrapping_sub(*seconds)
-        }
-        Some(ParsedZone::Abbreviation {
-            seconds, daylight, ..
-        }) => {
-            crate::normalize::timestamp(civil).wrapping_sub(*seconds + i64::from(*daylight) * 3600)
-        }
-        Some(ParsedZone::Identifier { name, .. }) => {
-            crate::resolve::local_timestamp(&Zone::named(name.as_bytes())?, civil, Some(true))
-        }
-        _ if zone.name == "UTC" => crate::normalize::timestamp(civil),
-        _ => crate::resolve::local_timestamp(zone, civil, None),
-    })
+    civil
 }
 
 fn normalize(civil: &mut Civil) {

@@ -51,6 +51,39 @@ pub fn list(zone: &Zone, begin: i64, end: i64) -> NativeResult {
     Ok(result.into())
 }
 
+/// The latest transition is needed by timelib's DST difference corrections.
+pub fn latest(zone: &Zone, timestamp: i64) -> i64 {
+    let Some(location) = Location::find(&zone.name) else {
+        return i64::MIN;
+    };
+    let explicit = location
+        .transitions()
+        .rev()
+        .find(|(time, _)| *time <= timestamp);
+    let Some((last, _)) = explicit else {
+        return i64::MIN;
+    };
+    if location
+        .transitions()
+        .next_back()
+        .is_some_and(|(time, _)| time > timestamp)
+    {
+        return last;
+    }
+    let Some(TransitionRule::Alternate(rule)) = posix_rule(location) else {
+        return last;
+    };
+    let year = Civil::from_timestamp(timestamp).year;
+    [year - 1, year]
+        .into_iter()
+        .flat_map(|year| year_transitions(&rule, year))
+        .filter(|(time, _)| *time <= timestamp)
+        .map(|(time, _)| time)
+        .max()
+        .unwrap_or(last)
+        .max(last)
+}
+
 fn append(
     result: &mut PhpArray,
     utc: &Zone,

@@ -99,7 +99,7 @@ impl DateFormat {
             // timelib explicitly narrows the year to a C int for this letter.
             b'L' => u8::from(leap(i64::from(c.year as i32))).to_string(),
             b'y' => format!("{:02}", c.year % 100),
-            b'Y' => format!("{sign}{:04}", c.year.abs()),
+            b'Y' => format!("{sign}{:04}", c.year.unsigned_abs()),
             b'X' | b'x' => {
                 let sign = if c.year < 0 {
                     "-"
@@ -108,7 +108,7 @@ impl DateFormat {
                 } else {
                     ""
                 };
-                format!("{sign}{:04}", c.year.abs())
+                format!("{sign}{:04}", c.year.unsigned_abs())
             }
             b'a' => if c.hour >= 12 { "pm" } else { "am" }.into(),
             b'A' => if c.hour >= 12 { "PM" } else { "AM" }.into(),

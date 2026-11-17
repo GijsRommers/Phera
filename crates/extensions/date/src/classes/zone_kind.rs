@@ -1,5 +1,7 @@
 //! `EDT` stays four hours west of UTC in winter, while an identifier follows its rules.
 use crate::{
+    calendar::Civil,
+    format::DateFormat,
     parse_format::result::ParsedZone,
     zone::{Offset, Zone},
 };
@@ -67,6 +69,25 @@ impl ZoneKind {
                     s.unsigned_abs() / 60 % 60
                 ),
             },
+        }
+    }
+
+    pub fn format(&self, timestamp: i64, microsecond: i64) -> DateFormat {
+        let offset = self.offset(timestamp);
+        DateFormat {
+            civil: Civil::from_timestamp(timestamp.wrapping_add(i64::from(offset.seconds))),
+            offset,
+            timestamp,
+            microsecond: microsecond as u32,
+            zone: self.name(),
+            gmt: false,
+        }
+    }
+
+    pub fn resolve(&self, civil: Civil, daylight: Option<bool>) -> i64 {
+        match self {
+            Self::Identifier(z) => super::wall_time::resolve(z, civil, daylight),
+            _ => crate::normalize::timestamp(civil).wrapping_sub(i64::from(self.offset(0).seconds)),
         }
     }
 }

@@ -3,10 +3,22 @@
 
 mod abbreviations;
 mod catalog;
+mod datetime;
+mod datetime_factory;
+mod datetime_functions;
+mod datetime_registration;
+mod datetime_serialization;
 mod instant;
+mod interval;
+mod interval_arithmetic;
+mod interval_diff;
+mod interval_iso;
+mod interval_registration;
+mod interval_serialization;
 mod timezone;
 mod timezone_registration;
 mod transition_list;
+mod wall_time;
 mod zone_kind;
 
 use std::rc::Rc;
@@ -34,6 +46,9 @@ pub fn register(registry: &mut Registry) {
         });
     }
     timezone_registration::register(registry);
+    datetime_registration::register(registry);
+    datetime_functions::register(registry);
+    interval_registration::register(registry);
 }
 
 fn receiver(this: This<'_>) -> Result<&Rc<Object>, NativeError> {
