@@ -29,7 +29,8 @@ impl Extremum {
 
 enum ComparisonPath {
     Numeric,
-    Generic,
+    Variadic,
+    Array,
 }
 
 const MINMAX_PARAMS: &[Param] = &[
@@ -75,7 +76,7 @@ fn select(context: &mut dyn Context, arguments: &[Value], extremum: Extremum) ->
         )));
     };
     let mut path = if arguments.len() == 1 {
-        ComparisonPath::Generic
+        ComparisonPath::Array
     } else {
         ComparisonPath::Numeric
     };
@@ -92,9 +93,16 @@ fn select(context: &mut dyn Context, arguments: &[Value], extremum: Extremum) ->
         let replace = if let Some(result) = numeric {
             result
         } else {
-            path = ComparisonPath::Generic;
-            // PHP compares the current winner on the left, which matters for cycles.
-            extremum.prefers(0, value::compare(best, candidate, context.diagnostics())?)
+            match path {
+                ComparisonPath::Array => {
+                    // PHP's array overload compares the current winner on the left.
+                    extremum.prefers(0, value::compare(best, candidate, context.diagnostics())?)
+                }
+                ComparisonPath::Numeric | ComparisonPath::Variadic => {
+                    path = ComparisonPath::Variadic;
+                    extremum.prefers(value::compare(candidate, best, context.diagnostics())?, 0)
+                }
+            }
         };
         if replace {
             best = candidate;
