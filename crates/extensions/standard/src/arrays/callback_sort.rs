@@ -106,16 +106,18 @@ async fn sort_with_callback(
 ) -> NativeResult {
     let callback = &arguments[1];
     check_callback(function, callback)?;
-    let variable = args::reference(&arguments, 0)
-        .expect("prepare_arguments passes by-reference parameters as references");
+    let variable = args::reference(&arguments, 0).ok_or_else(super::not_a_variable)?;
     // A copy of the entries, so that no borrow of the variable is held while
     // the callback runs; it may even change the array.
-    let entries: Vec<(ArrayKey, Value)> = match &*variable.borrow() {
+    let entries: Vec<(ArrayKey, Value)> = match &*variable
+        .try_borrow()
+        .map_err(|_| super::variable_in_use())?
+    {
         Value::Array(array) => array
             .iter()
             .map(|(key, value)| (key, value.clone()))
             .collect(),
-        _ => unreachable!("prepare_arguments checked that the variable holds an array"),
+        _ => return Err(super::not_a_variable()),
     };
     if entries.is_empty() {
         return Ok(Value::Bool(true));

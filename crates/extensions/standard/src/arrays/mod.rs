@@ -89,20 +89,31 @@ pub(super) fn append_entry(
 /// Runs `change` on the array behind the by-reference parameter 0, as
 /// `sort($array)` and `array_push($array, …)` need.
 ///
-/// `prepare_arguments` passes a by-reference parameter as a reference and
-/// has checked that it holds an array; nothing else can borrow the variable
-/// while a synchronous native function runs.
+/// The VM passes a by-reference parameter as a reference and has checked
+/// that it holds an array. Should a caller ever break that, or should the
+/// variable be in use (an array that contains itself), the script gets an
+/// `Error`; a worker thread must not die for it.
 pub(super) fn change_array_argument<T>(
     arguments: &[Value],
-    change: impl FnOnce(&mut PhpArray) -> T,
-) -> T {
-    let variable = args::reference(arguments, 0)
-        .expect("prepare_arguments passes by-reference parameters as references");
-    let mut value = variable.borrow_mut();
-    let Value::Array(array) = &mut *value else {
-        unreachable!("prepare_arguments checked that the variable holds an array");
-    };
-    change(Rc::make_mut(array))
+    change: impl FnOnce(&mut PhpArray) -> Result<T, NativeError>,
+) -> Result<T, NativeError> {
+    let variable = args::reference(arguments, 0).ok_or_else(not_a_variable)?;
+    let mut value = variable.try_borrow_mut().map_err(|_| variable_in_use())?;
+    match &mut *value {
+        Value::Array(array) => change(Rc::make_mut(array)),
+        _ => Err(not_a_variable()),
+    }
+}
+
+/// The by-reference array parameter did not arrive as a variable holding an
+/// array, which the VM rules out before a native function runs.
+pub(super) fn not_a_variable() -> NativeError {
+    NativeError::error("Internal error: a by-reference array argument is not an array variable")
+}
+
+/// The variable is being read or written further up the same call.
+pub(super) fn variable_in_use() -> NativeError {
+    NativeError::error("Internal error: the array variable is already in use")
 }
 
 /// A PHP list, `[0 => $a, 1 => $b, …]`, of these values.

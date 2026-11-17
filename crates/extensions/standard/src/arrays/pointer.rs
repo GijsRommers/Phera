@@ -59,7 +59,7 @@ const NEXT: FunctionEntry = FunctionEntry::sync(
 );
 
 fn next(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(move_pointer(arguments, PhpArray::advance))
+    move_pointer(arguments, PhpArray::advance)
 }
 
 /// `prev(array|object &$array): mixed`, moving the pointer back.
@@ -70,7 +70,7 @@ const PREV: FunctionEntry = FunctionEntry::sync(
 );
 
 fn prev(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(move_pointer(arguments, PhpArray::rewind_back))
+    move_pointer(arguments, PhpArray::rewind_back)
 }
 
 /// `reset(array|object &$array): mixed`, the pointer to the first entry.
@@ -81,7 +81,7 @@ const RESET: FunctionEntry = FunctionEntry::sync(
 );
 
 fn reset(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(move_pointer(arguments, PhpArray::reset))
+    move_pointer(arguments, PhpArray::reset)
 }
 
 /// `end(array|object &$array): mixed`, the pointer to the last entry.
@@ -92,13 +92,13 @@ const END: FunctionEntry = FunctionEntry::sync(
 );
 
 fn end(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(move_pointer(arguments, PhpArray::end))
+    move_pointer(arguments, PhpArray::end)
 }
 
 /// Moves the pointer of the caller's array and returns the value there.
-fn move_pointer(arguments: &[Value], movement: fn(&mut PhpArray)) -> Value {
+fn move_pointer(arguments: &[Value], movement: fn(&mut PhpArray)) -> NativeResult {
     change_array_argument(arguments, |array| {
         movement(array);
-        current_value(array)
+        Ok(current_value(array))
     })
 }
