@@ -3,6 +3,7 @@ resolver = "3"
 
 members = [
     "crates/cli",
+    "crates/packages",
     "crates/lexer",
     "crates/parser",
     "crates/ast",
@@ -31,6 +32,7 @@ unsafe_code = "forbid"
 
 [workspace.dependencies]
 phera-lexer = { path = "crates/lexer" }
+phera-packages = { path = "crates/packages" }
 phera-parser = { path = "crates/parser" }
 phera-ast = { path = "crates/ast" }
 phera-source = { path = "crates/source" }

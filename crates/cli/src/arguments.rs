@@ -22,6 +22,7 @@ pub(crate) enum Command {
         script: String,
     },
     Serve(ServeOptions),
+    Packages(Vec<String>),
     Version,
 }
 
@@ -46,6 +47,7 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
             arguments.next();
             parse_serve(arguments).map(Command::Serve)
         }
+        Some("install" | "dump-autoload") => Ok(Command::Packages(arguments.collect())),
         Some(_) => {
             // `phera run file.php` and `phera file.php` mean the same.
             arguments.next_if(|argument| argument == "run");

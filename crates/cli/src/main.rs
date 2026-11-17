@@ -2,6 +2,7 @@
 //! of a file.
 
 mod arguments;
+mod packages;
 mod run;
 mod serve;
 
@@ -22,6 +23,7 @@ fn main() -> ExitCode {
         Ok(Command::Run { script, arguments }) => run::script(&script, &arguments),
         Ok(Command::Dump { script }) => run::dump(&script),
         Ok(Command::Serve(options)) => serve::serve(options),
+        Ok(Command::Packages(arguments)) => packages::run(arguments),
         Ok(Command::Version) => {
             println!("Phera {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
