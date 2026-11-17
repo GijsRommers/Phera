@@ -308,3 +308,73 @@ each with its own fixtures checked against real PHP.
 3. Closures, arrow functions, callables.
 4. Traits, enums, readonly, magic methods, the engine's interfaces.
 5. Generators.
+
+## 10. Speed
+
+Measured on 17 November 2026 against PHP 8.5 without its JIT, CPU time.
+Loops and arrays are within 1.4 to 2.2 times PHP. Anything that calls is
+4 to 10 times slower; a method call costs about ten times PHP's.
+
+A profile of method calls shows no single hot spot. The time is spread over
+about forty small functions, because a call does far more bookkeeping than it
+needs to. That is a design problem, and it is fixed by a simpler design, not
+by tuning.
+
+### 10.1 Rules for speed work
+
+- Benchmarks keep their loops inside functions, since that is where real
+  code runs, and cover different shapes: typed and untyped, ints, floats and
+  strings, getters, constructors.
+- No shortcut may recognise a particular sequence of instructions or a
+  particular type spelling. A fast path must be general (a cache checked by
+  identity, a bit test), and the benchmark must not be the only code it helps.
+- Every claim is measured side by side against the previous commit, on
+  scripts the author of the change did not write.
+
+### 10.2 Step A: a call writes its arguments where the callee reads them
+
+Today `InitCall` creates a pending-call record with its own argument list,
+each `Send` pushes into that list, and `Call` then creates a frame and moves
+the arguments into its registers, through a chain of helper records.
+
+The new protocol, which is how PHP and Lua do it:
+
+- `InitCall` resolves the callee (through the per-site cache) and reserves
+  the callee's register window at the top of the register stack.
+- Each `Send` writes the argument straight into its parameter's register in
+  that window. A typed parameter is checked right there.
+- `Call` only pushes the frame and continues at its first instruction.
+  `Return` pops the frame and the window.
+- A nested call inside an argument list (`f(g($x))`) reserves its window
+  above the outer one, so the windows form a stack.
+- The less common features build on the same window instead of a second
+  protocol: a named argument writes to its parameter's register; spread
+  writes several; extra arguments and a variadic parameter are collected
+  from the registers past the declared parameters when `Call` runs;
+  `func_get_args` and stack traces read the window.
+
+### 10.3 Step B: fewer instructions per statement
+
+`$sum += $p->add($i, 2)` inside a `for` loop is 17 instructions per round
+where PHP needs about 8. Three causes, each a compiler rule with a VM
+counterpart:
+
+- A temporary is cleared by a separate `Clear` after the statement. Instead,
+  the instruction that uses a temporary last takes it.
+- An operator copies a local variable into a temporary before using it.
+  Instead, operators read locals directly.
+- Comparing and branching are fused only when one side is a literal.
+  Instead, any comparison followed by a branch is one instruction.
+
+### 10.4 Step C: beyond the interpreter
+
+Only after A and B, because a faster way to run instructions gains little
+while each call still costs what it costs now.
+
+- A JIT (machine code generated at run time) cannot be written without
+  `unsafe`: running generated code is unsafe by definition, and that code
+  works on values behind raw pointers. PHP's own JIT gives roughly 1.5 to 3
+  times on numeric loops and very little on web applications. It stays a
+  proposal until A and B are measured.
+- The larger gain for web applications is section 5: serving requests from
+  an already loaded application instead of starting it for each request.
