@@ -4,9 +4,15 @@ use crate::fast::{ScalarStep, scalar_step};
 use phera_bytecode::Instruction;
 use phera_value::Value;
 
-/// How many loop iterations or calls a script may run before it lets other
-/// tasks on the same thread have a turn.
-pub(crate) const YIELD_AFTER_STEPS: usize = 4096;
+/// How many loop rounds or calls a script may run before it lets other tasks
+/// on the same thread have a turn.
+///
+/// Handing over is not free: the scheduler asks the operating system whether
+/// any socket or timer is ready, which is a system call. At 4,096 that cost
+/// 15 percent of a plain loop's time. 65,536 loop rounds are about a
+/// millisecond, which is still far shorter than anyone waiting for a response
+/// can notice.
+pub(crate) const YIELD_AFTER_STEPS: usize = 65_536;
 
 /// A batch stops before a PHP handler, at a cooperative yield, or at invalid code.
 pub(crate) enum ScalarExit {
