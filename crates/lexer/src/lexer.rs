@@ -107,7 +107,7 @@ enum Mode {
 }
 
 pub struct Lexer<'src> {
-    source: &'src str,
+    source: &'src [u8],
     position: usize,
     /// The mode stack; never empty.
     modes: Vec<Mode>,
@@ -124,7 +124,7 @@ impl<'src> Lexer<'src> {
     /// first `<?php` or `<?=` tag.
     pub fn new(source: &'src str) -> Self {
         Self {
-            source,
+            source: source.as_bytes(),
             position: 0,
             modes: vec![Mode::Html],
             halt_countdown: None,
@@ -202,10 +202,10 @@ impl<'src> Lexer<'src> {
 
     /// Finds the next `<?php` or `<?=` tag, returning its offset, kind and length.
     fn find_open_tag(&self) -> Option<(usize, TokenKind, usize)> {
-        let bytes = self.source.as_bytes();
+        let bytes = self.source;
         let mut from = self.position;
 
-        while let Some(index) = self.source[from..].find("<?") {
+        while let Some(index) = find_bytes(&self.source[from..], b"<?") {
             let tag = from + index;
             let after = &bytes[tag + 2..];
 
@@ -291,7 +291,7 @@ impl<'src> Lexer<'src> {
             self.advance();
             self.lex_quoted_string(start)?
         } else if matches!(c, 'b' | 'B')
-            && self.source[self.position + 1..].starts_with("<<<")
+            && self.source[self.position + 1..].starts_with(b"<<<")
             && let Some(kind) = self.lex_heredoc_start(self.position + 1)
         {
             kind
@@ -358,7 +358,7 @@ impl<'src> Lexer<'src> {
 
         if self.starts_with("\r\n") {
             self.position += 2;
-        } else if self.starts_with("\n") {
+        } else if matches!(self.peek(), Some('\r' | '\n')) {
             self.position += 1;
         }
 
@@ -376,7 +376,7 @@ impl<'src> Lexer<'src> {
         if self.starts_qualified_part() {
             self.eat_qualified_name();
 
-            return if name == "namespace" {
+            return if name == b"namespace" {
                 TokenKind::RelativeName
             } else {
                 TokenKind::QualifiedName
@@ -384,16 +384,16 @@ impl<'src> Lexer<'src> {
         }
 
         // A few keywords depend on what follows them.
-        match name.as_str() {
+        match name.as_slice() {
             // `enum` is only a keyword when it starts a declaration, so that
             // `enum` stays usable as a class or function name.
-            "enum" => {
+            b"enum" => {
                 let after = self.trivia_end(self.position).unwrap_or(self.position);
                 let following = self.name_at(after).to_ascii_lowercase();
 
                 let declares = !following.is_empty()
-                    && !following.starts_with("extends")
-                    && !following.starts_with("implements");
+                    && !following.starts_with(b"extends")
+                    && !following.starts_with(b"implements");
 
                 return if declares {
                     TokenKind::Enum
@@ -402,34 +402,37 @@ impl<'src> Lexer<'src> {
                 };
             }
             // `yield from` is one token, even across whitespace and comments.
-            "yield" => {
+            b"yield" => {
                 if let Ok(after) = self.trivia_end(self.position)
-                    && self.name_at(after).eq_ignore_ascii_case("from")
+                    && self.name_at(after).eq_ignore_ascii_case(b"from")
                 {
                     self.position = after + "from".len();
                     return TokenKind::YieldFrom;
                 }
             }
             // Asymmetric visibility: `private(set)` with no whitespace inside.
-            "public" | "protected" | "private" if self.starts_with_ignore_case("(set)") => {
+            b"public" | b"protected" | b"private" if self.starts_with_ignore_case("(set)") => {
                 self.position += "(set)".len();
 
-                return match name.as_str() {
-                    "public" => TokenKind::PublicSet,
-                    "protected" => TokenKind::ProtectedSet,
+                return match name.as_slice() {
+                    b"public" => TokenKind::PublicSet,
+                    b"protected" => TokenKind::ProtectedSet,
                     _ => TokenKind::PrivateSet,
                 };
             }
             _ => {}
         }
 
-        keyword(&name).unwrap_or(TokenKind::Identifier)
+        name_kind(&name)
     }
 
     /// The name starting at `position`, or `""` if there is none.
-    fn name_at(&self, position: usize) -> &'src str {
+    fn name_at(&self, position: usize) -> &'src [u8] {
         let end = self.source[position..]
-            .char_indices()
+            .iter()
+            .copied()
+            .map(char::from)
+            .enumerate()
             .find(|&(i, c)| {
                 !(if i == 0 {
                     is_name_start(c)
@@ -450,7 +453,6 @@ impl<'src> Lexer<'src> {
         let skip_blanks = |position: &mut usize| {
             while self
                 .source
-                .as_bytes()
                 .get(*position)
                 .is_some_and(|b| b" \t".contains(b))
             {
@@ -463,20 +465,20 @@ impl<'src> Lexer<'src> {
         position += word.len();
         skip_blanks(&mut position);
 
-        if self.source.as_bytes().get(position) != Some(&b')') {
+        if self.source.get(position) != Some(&b')') {
             return Ok(None);
         }
 
-        let kind = match word.to_ascii_lowercase().as_str() {
-            "int" | "integer" => TokenKind::IntCast,
-            "float" | "double" => TokenKind::FloatCast,
-            "string" | "binary" => TokenKind::StringCast,
-            "array" => TokenKind::ArrayCast,
-            "object" => TokenKind::ObjectCast,
-            "bool" | "boolean" => TokenKind::BoolCast,
-            "unset" => TokenKind::UnsetCast,
-            "void" => TokenKind::VoidCast,
-            "real" => {
+        let kind = match word.to_ascii_lowercase().as_slice() {
+            b"int" | b"integer" => TokenKind::IntCast,
+            b"float" | b"double" => TokenKind::FloatCast,
+            b"string" | b"binary" => TokenKind::StringCast,
+            b"array" => TokenKind::ArrayCast,
+            b"object" => TokenKind::ObjectCast,
+            b"bool" | b"boolean" => TokenKind::BoolCast,
+            b"unset" => TokenKind::UnsetCast,
+            b"void" => TokenKind::VoidCast,
+            b"real" => {
                 self.position = position + 1;
                 return self.unsupported(start, "the (real) cast, removed in PHP 8");
             }
@@ -505,9 +507,9 @@ impl<'src> Lexer<'src> {
 
         if matches!(self.peek(), Some('e' | 'E')) {
             let exponent = &self.source[self.position + 1..];
-            let sign = usize::from(exponent.starts_with(['+', '-']));
+            let sign = usize::from(matches!(exponent.first(), Some(b'+' | b'-')));
 
-            if exponent[sign..].starts_with(|c: char| c.is_ascii_digit()) {
+            if exponent.get(sign).is_some_and(u8::is_ascii_digit) {
                 self.position += 1 + sign;
                 self.eat_digits(10);
                 kind = TokenKind::Float;
@@ -519,7 +521,7 @@ impl<'src> Lexer<'src> {
 
     /// Consumes a `0x`, `0o` or `0b` integer, if there is one here.
     fn eat_prefixed_integer(&mut self) -> bool {
-        let radix = match self.source.as_bytes()[self.position..] {
+        let radix = match self.source[self.position..] {
             [b'0', b'x' | b'X', ..] => 16,
             [b'0', b'o' | b'O', ..] => 8,
             [b'0', b'b' | b'B', ..] => 2,
@@ -527,7 +529,7 @@ impl<'src> Lexer<'src> {
         };
 
         // A prefix only counts if a digit follows, so `0x` is `0` then `x`.
-        let after_prefix = self.source[self.position..].chars().nth(2);
+        let after_prefix = self.source.get(self.position + 2).copied().map(char::from);
 
         if !after_prefix.is_some_and(|c| c.is_digit(radix)) {
             return false;
@@ -666,11 +668,12 @@ impl<'src> Lexer<'src> {
         // this when it lexes the variable, so `"$a->"` stays literal text.
         let rest = &self.source[self.position..];
         let property_follows = |arrow: &str| {
-            rest.strip_prefix(arrow)
-                .is_some_and(|after| after.starts_with(is_name_start))
+            rest.strip_prefix(arrow.as_bytes())
+                .and_then(|after| after.first())
+                .is_some_and(|&byte| is_name_start(char::from(byte)))
         };
 
-        if rest.starts_with('[') {
+        if rest.starts_with(b"[") {
             self.push(Mode::VarOffset);
         } else if property_follows("->") || property_follows("?->") {
             self.push(Mode::Property);
@@ -719,7 +722,7 @@ impl<'src> Lexer<'src> {
             _ if is_name_start(c) => {
                 self.eat_name();
                 let name = self.source[start..self.position].to_ascii_lowercase();
-                keyword(&name).unwrap_or(TokenKind::Identifier)
+                name_kind(&name)
             }
             _ => {
                 self.advance();
@@ -748,7 +751,7 @@ impl<'src> Lexer<'src> {
             self.eat_name();
             self.pop();
             let name = self.source[start..self.position].to_ascii_lowercase();
-            keyword(&name).unwrap_or(TokenKind::Identifier)
+            name_kind(&name)
         };
 
         self.token(kind, start)
@@ -759,7 +762,7 @@ impl<'src> Lexer<'src> {
     /// Lexes `<<<LABEL`, `<<<"LABEL"` or `<<<'LABEL'` plus the newline after it,
     /// starting at the `<<<` at `from`. `None` if that isn't how the text continues.
     fn lex_heredoc_start(&mut self, from: usize) -> Option<TokenKind> {
-        let bytes = self.source.as_bytes();
+        let bytes = self.source;
         let mut position = from + 3;
 
         while bytes.get(position).is_some_and(|b| b" \t".contains(b)) {
@@ -860,7 +863,7 @@ impl<'src> Lexer<'src> {
     }
 
     fn at_line_start(&self) -> bool {
-        self.position == 0 || matches!(self.source.as_bytes()[self.position - 1], b'\n' | b'\r')
+        self.position == 0 || matches!(self.source[self.position - 1], b'\n' | b'\r')
     }
 
     /// If the current line is `label` after optional indentation, returns where
@@ -868,7 +871,7 @@ impl<'src> Lexer<'src> {
     /// continue a name, so `EOT;` closes but `EOTX` doesn't, and neither does
     /// `EOT` at the very end of the file.
     fn closing_label_end(&self, label: Span) -> Option<usize> {
-        let bytes = self.source.as_bytes();
+        let bytes = self.source;
         let mut position = self.position;
 
         while bytes.get(position).is_some_and(|b| b" \t".contains(b)) {
@@ -881,9 +884,11 @@ impl<'src> Lexer<'src> {
             return None;
         }
 
-        let closed = self.source[end..]
-            .chars()
-            .next()
+        let closed = self
+            .source
+            .get(end)
+            .copied()
+            .map(char::from)
             .is_some_and(|c| !is_name_char(c));
 
         closed.then_some(end)
@@ -904,17 +909,25 @@ impl<'src> Lexer<'src> {
         loop {
             let rest = &source[position..];
 
-            if rest.starts_with(is_whitespace) {
+            if rest
+                .first()
+                .is_some_and(|&byte| is_whitespace(char::from(byte)))
+            {
                 position += 1;
-            } else if rest.starts_with("//") || (rest.starts_with('#') && !rest.starts_with("#[")) {
+            } else if rest.starts_with(b"//")
+                || (rest.starts_with(b"#") && !rest.starts_with(b"#["))
+            {
                 // Line comments end at a newline or a `?>` tag.
                 let end = rest
-                    .char_indices()
-                    .find(|&(i, c)| c == '\n' || rest[i..].starts_with("?>"))
+                    .iter()
+                    .copied()
+                    .map(char::from)
+                    .enumerate()
+                    .find(|&(i, c)| matches!(c, '\n' | '\r') || rest[i..].starts_with(b"?>"))
                     .map_or(rest.len(), |(i, _)| i);
                 position += end;
-            } else if let Some(comment) = rest.strip_prefix("/*") {
-                match comment.find("*/") {
+            } else if let Some(comment) = rest.strip_prefix(b"/*") {
+                match find_bytes(comment, b"*/") {
                     Some(index) => position += 2 + index + 2,
                     None => {
                         return Err(LexError {
@@ -966,35 +979,45 @@ impl<'src> Lexer<'src> {
     }
 
     fn starts_with(&self, value: &str) -> bool {
-        self.source[self.position..].starts_with(value)
+        self.source[self.position..].starts_with(value.as_bytes())
     }
 
     fn starts_with_ignore_case(&self, value: &str) -> bool {
-        self.source.as_bytes()[self.position..]
+        self.source[self.position..]
             .get(..value.len())
             .is_some_and(|bytes| bytes.eq_ignore_ascii_case(value.as_bytes()))
     }
 
     fn peek(&self) -> Option<char> {
-        self.source[self.position..].chars().next()
+        self.source.get(self.position).copied().map(char::from)
     }
 
     fn peek_next(&self) -> Option<char> {
-        let mut chars = self.source[self.position..].chars();
-
-        chars.next()?;
-        chars.next()
+        self.source.get(self.position + 1).copied().map(char::from)
     }
 
     fn advance(&mut self) -> Option<char> {
         let c = self.peek()?;
-        self.position += c.len_utf8();
+        self.position += 1;
         Some(c)
     }
 
     fn is_eof(&self) -> bool {
         self.position >= self.source.len()
     }
+}
+
+fn find_bytes(source: &[u8], pattern: &[u8]) -> Option<usize> {
+    source
+        .windows(pattern.len())
+        .position(|bytes| bytes == pattern)
+}
+
+fn name_kind(lowercase_name: &[u8]) -> TokenKind {
+    std::str::from_utf8(lowercase_name)
+        .ok()
+        .and_then(keyword)
+        .unwrap_or(TokenKind::Identifier)
 }
 
 /// PHP only treats these four characters as whitespace.
