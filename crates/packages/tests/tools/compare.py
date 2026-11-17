@@ -138,7 +138,11 @@ def compare(fixture):
     if not oracle.returncode and not actual.returncode:
         a, b = tree(left / vendor), tree(right / vendor)
         different = [path for path in sorted(a.keys() | b.keys()) if a.get(path) != b.get(path)]
-        generated = lambda path: path == 'autoload.php' or path.startswith(('composer/', 'bin/'))
+        generated_files = {'autoload.php', 'composer/LICENSE', 'composer/installed.json',
+            'composer/installed.php', 'composer/platform_check.php'}
+        generated_files.update('composer/autoload_' + name + '.php' for name in
+            ['psr4', 'namespaces', 'classmap', 'files', 'static', 'real'])
+        generated = lambda path: path in generated_files or path.startswith('bin/')
         row['package_differences'] = [path for path in different if not generated(path)]
         row['generated_differences'] = [path for path in different if generated(path)]
         if row['package_differences']:

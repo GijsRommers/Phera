@@ -14,6 +14,7 @@ mod network;
 mod path_install;
 mod paths;
 mod php;
+mod platform;
 mod project;
 mod registry;
 mod scripts;
@@ -51,6 +52,7 @@ fn install_locked(
         }
         eprintln!("Warning: composer.lock is out of date; installing its exact versions.");
     }
+    platform::validate(&project, &lock, options)?;
     if !updating {
         runner.event(&project, options, "pre-install-cmd")?;
     }

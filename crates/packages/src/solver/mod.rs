@@ -67,7 +67,7 @@ pub(crate) fn is_platform(name: &str) -> bool {
         || name.starts_with("lib-")
 }
 
-fn platform(project: &Project, options: &Options) -> Result<BTreeMap<String, Version>> {
+pub(crate) fn platform(project: &Project, options: &Options) -> Result<BTreeMap<String, Version>> {
     let mut platform = options
         .platform
         .iter()
