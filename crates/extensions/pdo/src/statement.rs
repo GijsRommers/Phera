@@ -189,7 +189,8 @@ fn bind(
             statement.prepared,
             Prepared::PostgresDeferred(_) | Prepared::Postgres(_, _)
         ) {
-            let valid = crate::native_parameters::valid_key(&statement.sql, &key);
+            let valid = crate::native_parameters::valid_key(&statement.sql, &key)
+                || (statement.sql.parameters.is_empty() && key.parse::<usize>().is_ok());
             if valid {
                 None
             } else {

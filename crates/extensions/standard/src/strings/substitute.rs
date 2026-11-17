@@ -95,7 +95,7 @@ fn replace(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         let mut result = PhpArray::new();
         for (position, (key, value)) in array.iter().enumerate() {
             result.insert(
-                key.clone(),
+                key,
                 replace_one(context, value, position, arguments, &converted)?,
             );
         }

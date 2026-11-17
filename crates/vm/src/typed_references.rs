@@ -96,7 +96,7 @@ impl Vm {
                 crate::reference_holders::ReferenceHolders::track_object(
                     &self.property_references,
                     object,
-                    key,
+                    &key,
                     reference,
                 )?;
             }
