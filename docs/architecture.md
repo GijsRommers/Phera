@@ -545,3 +545,36 @@ at load plus fixed-size register windows can recover safely.
 to 1.4 times PHP, tight integer loops at 1.2 to 1.5, arrays and short
 strings at or near PHP. Beyond that only a JIT helps, and only for numeric
 loops.
+
+### 10.7 Item 1, calls: state after the first pass
+
+Done on the branch `engine/calls` (pull request #9):
+
+- A frame is `{ function, base, ip, destination, flags }`, 16 bytes in a
+  `Vec`. What only some frames need (dynamic names, `foreach` state,
+  argument facts, a closure, a class context) is in a side table by depth.
+- One flat code table per request; functions, methods, closures and
+  class initializers refer to code by `FunctionIndex`.
+- One `match` executes an instruction. The interpreter loop borrows the
+  code table, the call stack and the registers, and handles itself: simple
+  instructions, `CallDirect`, plain returns (also of methods, closures and
+  constructors), `InitMethodCall`, `InitStaticCall`, by-value `Send`s and
+  `Call` when the case is the plain one.
+- `CallDirect` replaces `InitCall`/`Send`/`Call` for calls to a file's own
+  top-level functions (compiler pass `passes/direct_calls.rs`).
+- Each class has a method table keyed by interned name. The per-site
+  method cache and the static-site caches are deleted.
+
+Measured in instructions retired against PHP 8.5 (cycles were unreliable
+at load averages of 10 to 33): fib 8.0x -> 3.0x (2.15x in cycles at a
+calmer moment), hierarchy 6.0x -> 4.0x, methods 7.0x -> 5.7x, objects
+7.2x -> 6.3x, calls 13.5x -> 12.3x; no script more than 2 percent worse.
+
+Not reached: methods, hierarchy and objects at 3x and closures at 4x.
+What remains in a method call is the general call record (an 88-byte
+callee with two reference-counted signature parts and a 176-byte pending
+call, built and dropped per call), the method context's three reference
+counts (receiver, scope, called class as `Rc<Class>` rather than
+indexes), `$this` kept in the side table rather than in register 0, and
+about 35 machine instructions per simple bytecode instruction. Property
+access in `objects` still leaves the loop (objects as slots, item 3).
