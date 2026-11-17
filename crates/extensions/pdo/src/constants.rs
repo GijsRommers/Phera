@@ -3,6 +3,16 @@
 use phera_extension_api::ConstantValue;
 
 pub const CONSTANTS: &[(&str, ConstantValue)] = &[
+    ("SQLITE_DETERMINISTIC", ConstantValue::Int(2048)),
+    ("SQLITE_ATTR_OPEN_FLAGS", ConstantValue::Int(1000)),
+    ("SQLITE_ATTR_READONLY_STATEMENT", ConstantValue::Int(1001)),
+    (
+        "SQLITE_ATTR_EXTENDED_RESULT_CODES",
+        ConstantValue::Int(1002),
+    ),
+    ("SQLITE_OPEN_READONLY", ConstantValue::Int(1)),
+    ("SQLITE_OPEN_READWRITE", ConstantValue::Int(2)),
+    ("SQLITE_OPEN_CREATE", ConstantValue::Int(4)),
     ("PHERA_ATTR_POOL", ConstantValue::Int(100_000)),
     ("PARAM_NULL", ConstantValue::Int(0)),
     ("PARAM_BOOL", ConstantValue::Int(5)),
@@ -78,4 +88,64 @@ pub const CONSTANTS: &[(&str, ConstantValue)] = &[
     ("FETCH_ORI_REL", ConstantValue::Int(5)),
     ("CURSOR_FWDONLY", ConstantValue::Int(0)),
     ("CURSOR_SCROLL", ConstantValue::Int(1)),
+];
+
+pub const SQLITE: &[(&str, ConstantValue)] = &[
+    ("DETERMINISTIC", ConstantValue::Int(2048)),
+    ("OPEN_READONLY", ConstantValue::Int(1)),
+    ("OPEN_READWRITE", ConstantValue::Int(2)),
+    ("OPEN_CREATE", ConstantValue::Int(4)),
+    ("ATTR_OPEN_FLAGS", ConstantValue::Int(1000)),
+    ("ATTR_READONLY_STATEMENT", ConstantValue::Int(1001)),
+    ("ATTR_EXTENDED_RESULT_CODES", ConstantValue::Int(1002)),
+    ("ATTR_BUSY_STATEMENT", ConstantValue::Int(1003)),
+    ("ATTR_EXPLAIN_STATEMENT", ConstantValue::Int(1004)),
+    ("ATTR_TRANSACTION_MODE", ConstantValue::Int(1005)),
+    ("TRANSACTION_MODE_DEFERRED", ConstantValue::Int(0)),
+    ("TRANSACTION_MODE_IMMEDIATE", ConstantValue::Int(1)),
+    ("TRANSACTION_MODE_EXCLUSIVE", ConstantValue::Int(2)),
+    ("EXPLAIN_MODE_PREPARED", ConstantValue::Int(0)),
+    ("EXPLAIN_MODE_EXPLAIN", ConstantValue::Int(1)),
+    ("EXPLAIN_MODE_EXPLAIN_QUERY_PLAN", ConstantValue::Int(2)),
+    ("OK", ConstantValue::Int(0)),
+    ("DENY", ConstantValue::Int(1)),
+    ("IGNORE", ConstantValue::Int(2)),
+];
+
+pub const SQLITE_DEPRECATED: &[(&str, &str)] = &[
+    (
+        "SQLITE_DETERMINISTIC",
+        "Constant PDO::SQLITE_DETERMINISTIC is \
+            deprecated since 8.5, use Pdo\\Sqlite::DETERMINISTIC instead",
+    ),
+    (
+        "SQLITE_ATTR_OPEN_FLAGS",
+        "Constant PDO::SQLITE_ATTR_OPEN_FLAGS is \
+            deprecated since 8.5, use Pdo\\Sqlite::ATTR_OPEN_FLAGS instead",
+    ),
+    (
+        "SQLITE_ATTR_READONLY_STATEMENT",
+        "Constant PDO::SQLITE_ATTR_READONLY_STATEMENT is \
+            deprecated since 8.5, use Pdo\\Sqlite::ATTR_READONLY_STATEMENT instead",
+    ),
+    (
+        "SQLITE_ATTR_EXTENDED_RESULT_CODES",
+        "Constant PDO::SQLITE_ATTR_EXTENDED_RESULT_CODES is \
+            deprecated since 8.5, use Pdo\\Sqlite::ATTR_EXTENDED_RESULT_CODES instead",
+    ),
+    (
+        "SQLITE_OPEN_READONLY",
+        "Constant PDO::SQLITE_OPEN_READONLY is \
+            deprecated since 8.5, use Pdo\\Sqlite::OPEN_READONLY instead",
+    ),
+    (
+        "SQLITE_OPEN_READWRITE",
+        "Constant PDO::SQLITE_OPEN_READWRITE is \
+            deprecated since 8.5, use Pdo\\Sqlite::OPEN_READWRITE instead",
+    ),
+    (
+        "SQLITE_OPEN_CREATE",
+        "Constant PDO::SQLITE_OPEN_CREATE is \
+            deprecated since 8.5, use Pdo\\Sqlite::OPEN_CREATE instead",
+    ),
 ];

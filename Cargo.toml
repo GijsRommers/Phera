@@ -53,6 +53,7 @@ phera-ext-sqlite3 = { path = "crates/extensions/sqlite3" }
 rusqlite = { version = "=0.43.0", default-features = false, features = ["bundled", "column_metadata", "column_decltype", "backup"] }
 phera-ext-pdo = { path = "crates/extensions/pdo" }
 phera-ext-standard = { path = "crates/extensions/standard" }
+tempfile = "3"
 bytes = "1"
 http-body-util = "0.1"
 hyper = { version = "1", default-features = false, features = ["http1", "server"] }

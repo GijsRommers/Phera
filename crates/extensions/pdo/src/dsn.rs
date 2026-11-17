@@ -8,6 +8,7 @@ use phera_extension_api::NativeError;
 pub enum DriverName {
     Postgres,
     Mysql,
+    Sqlite,
 }
 
 impl DriverName {
@@ -15,6 +16,7 @@ impl DriverName {
         match self {
             Self::Postgres => "pgsql",
             Self::Mysql => "mysql",
+            Self::Sqlite => "sqlite",
         }
     }
 }
@@ -41,10 +43,14 @@ impl Dsn {
         let driver = match name {
             "pgsql" => DriverName::Postgres,
             "mysql" => DriverName::Mysql,
-            "sqlite" => return Err(crate::errors::unsupported("SQLite")),
+            "sqlite" => DriverName::Sqlite,
             _ => return Err(crate::errors::exception("could not find driver", None, 0)),
         };
         let mut fields = BTreeMap::new();
+        if driver == DriverName::Sqlite {
+            fields.insert("filename".into(), rest.into());
+            return Ok(Self { driver, fields });
+        }
         for field in rest.split(';').filter(|field| !field.trim().is_empty()) {
             if let Some((key, value)) = field.split_once('=') {
                 fields.insert(key.trim().to_owned(), value.trim().to_owned());
@@ -70,6 +76,7 @@ impl Dsn {
         let default = match self.driver {
             DriverName::Postgres => "5432",
             DriverName::Mysql => "3306",
+            DriverName::Sqlite => "0",
         };
         self.get("port", default)
             .parse()
@@ -93,7 +100,7 @@ mod tests {
     fn rejects_tls_and_unknown_drivers() {
         assert!(Dsn::parse("pgsql:sslmode=require").is_err());
         assert!(Dsn::parse("mysql:ssl_ca=ca.pem").is_err());
-        assert!(Dsn::parse("sqlite:foo").is_err());
+        assert_eq!(Dsn::parse("sqlite:foo").unwrap().get("filename", ""), "foo");
         assert!(Dsn::parse("pgsql:sslmode=disable").is_ok());
     }
 }

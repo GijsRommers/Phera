@@ -149,6 +149,7 @@ pub struct ClassEntry {
     /// Linked immediately so `PDO::FETCH_ASSOC` also works in defaults.
     /// For example, PHP may declare `function rows($mode = PDO::FETCH_ASSOC) {}`.
     pub constants: &'static [(&'static str, ConstantValue)],
+    pub deprecated_constants: &'static [(&'static str, &'static str)],
     pub properties: &'static [PropertyEntry],
     pub methods: &'static [MethodEntry],
 }
@@ -164,6 +165,7 @@ impl ClassEntry {
             parent: None,
             interfaces: &[],
             constants: &[],
+            deprecated_constants: &[],
             properties: &[],
             methods: &[],
         }

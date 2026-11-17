@@ -15,6 +15,22 @@ use crate::placeholders::Sql;
 type Operation<'a, T> = Pin<Box<dyn Future<Output = Result<T, DbError>> + Send + 'a>>;
 
 impl Lease {
+    pub async fn sqlite_timeout(&mut self, milliseconds: u64) -> Result<(), DbError> {
+        self.run(move |driver| {
+            Box::pin(async move {
+                match driver {
+                    Driver::Sqlite(driver) => driver
+                        .database
+                        .timeout(milliseconds)
+                        .await
+                        .map_err(crate::drivers::sqlite::error),
+                    _ => Err(connection_error("Mismatched driver")),
+                }
+            })
+        })
+        .await
+    }
+
     async fn run<T, F>(&mut self, operation: F) -> Result<T, DbError>
     where
         T: Send + 'static,
@@ -88,6 +104,9 @@ impl Lease {
                 Ok(crate::metadata::postgres_values(column, length, table))
             }
             (Metadata::Mysql(column), None) => Ok(crate::metadata::mysql(column)),
+            (Metadata::Sqlite(column, kind), None) => {
+                Ok(crate::sqlite_statement::metadata(column, *kind))
+            }
             _ => Err(connection_error("Mismatched metadata driver")),
         }
     }

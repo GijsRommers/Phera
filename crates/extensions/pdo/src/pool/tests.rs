@@ -92,6 +92,7 @@ async fn id(driver: &mut Lease) -> i64 {
     let sql = match driver.name {
         DriverName::Postgres => "SELECT pg_backend_pid()",
         DriverName::Mysql => "SELECT CONNECTION_ID()",
+        DriverName::Sqlite => panic!("SQLite is never part of a server connection pool"),
     };
     let Value::Int(id) = scalar(driver, sql).await else {
         panic!("integer connection id")

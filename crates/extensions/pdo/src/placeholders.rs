@@ -18,6 +18,15 @@ pub struct Sql {
 }
 
 impl Sql {
+    pub fn sqlite(source: String) -> Self {
+        Self {
+            source,
+            parameters: Vec::new(),
+            spans: Vec::new(),
+            has_dollar_parameters: false,
+        }
+    }
+
     pub fn parse(source: String) -> Result<Self, DbError> {
         let bytes = source.as_bytes();
         let mut parameters = Vec::new();

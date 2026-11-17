@@ -1,15 +1,20 @@
 //! Live cursors: `$s->execute(); $s->fetch()` steps once per fetch and retains read locks.
 //! The statement borrows its connection inside a local task on the database thread.
 
-use crate::{Cell, Database, Description, Error, Execution};
+use crate::{Cell, Description, Error, Execution};
 use rusqlite::{Connection, Rows};
 use std::rc::Rc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use tokio::sync::{mpsc, oneshot};
 
 type Reply<T> = oneshot::Sender<Result<T, Error>>;
 
 enum Command {
     Execute(Vec<(usize, Cell)>, Reply<Execution>),
+    Bind(Vec<(usize, Cell)>, Reply<()>),
     Fetch(Reply<Option<Vec<Cell>>>),
     Reset(Reply<()>),
     Clear(Reply<()>),
@@ -20,11 +25,24 @@ enum Command {
 pub struct Statement {
     sender: mpsc::UnboundedSender<Command>,
     pub description: Description,
+    busy: Arc<AtomicBool>,
     // Keeps the connection actor alive until the last statement handle disappears.
-    pub database: Database,
+    _lifetime: Arc<crate::lifetime::CursorTask>,
 }
 
 impl Statement {
+    pub fn busy(&self) -> bool {
+        self.busy.load(Ordering::Acquire)
+    }
+
+    pub async fn bind(&self, bindings: Vec<(usize, Cell)>) -> Result<(), Error> {
+        let (sender, receiver) = oneshot::channel();
+        self.sender
+            .send(Command::Bind(bindings, sender))
+            .map_err(|_| Error::closed())?;
+        receiver.await.map_err(|_| Error::closed())?
+    }
+
     pub async fn execute(&self, bindings: Vec<(usize, Cell)>) -> Result<Execution, Error> {
         let (sender, receiver) = oneshot::channel();
         self.sender
@@ -68,7 +86,7 @@ impl Statement {
 
 pub(crate) async fn serve(
     connection: Rc<Connection>,
-    database: Database,
+    lifetime: Arc<crate::lifetime::CursorTask>,
     sql: String,
     ready: Reply<Statement>,
 ) {
@@ -80,10 +98,12 @@ pub(crate) async fn serve(
         }
     };
     let (sender, mut receiver) = mpsc::unbounded_channel();
+    let busy = Arc::new(AtomicBool::new(false));
     let handle = Statement {
+        busy: busy.clone(),
         sender,
         description: Description::read(&statement),
-        database,
+        _lifetime: lifetime,
     };
     if ready.send(Ok(handle)).is_err() {
         return;
@@ -97,6 +117,7 @@ pub(crate) async fn serve(
                 None => break,
             },
         };
+        busy.store(false, Ordering::Release);
         match command {
             Command::Execute(bindings, reply) => {
                 let bound = bindings
@@ -110,6 +131,7 @@ pub(crate) async fn serve(
                 let mut rows = statement.raw_query();
                 let first = read(&mut rows);
                 let active = matches!(&first, Ok(Some(_)));
+                busy.store(active, Ordering::Release);
                 let result = first.map(|first| Execution {
                     description,
                     first,
@@ -125,6 +147,7 @@ pub(crate) async fn serve(
                         Command::Fetch(reply) => {
                             let result = read(&mut rows);
                             let finished = !matches!(&result, Ok(Some(_)));
+                            busy.store(!finished, Ordering::Release);
                             let _ = reply.send(result);
                             if finished {
                                 break;
@@ -139,6 +162,13 @@ pub(crate) async fn serve(
                         }
                     }
                 }
+            }
+            Command::Bind(bindings, reply) => {
+                let result = bindings
+                    .into_iter()
+                    .try_for_each(|(index, value)| statement.raw_bind_parameter(index, value))
+                    .map_err(Error::from);
+                let _ = reply.send(result);
             }
             Command::Fetch(reply) => {
                 let _ = reply.send(Ok(None));

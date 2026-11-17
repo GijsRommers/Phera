@@ -166,8 +166,13 @@ impl Vm {
         let from = scope
             .map(|scope| format!("scope {}", scope.name))
             .unwrap_or_else(|| "global scope".into());
+        let kind = if method.name.eq_ignore_ascii_case("__construct") {
+            ""
+        } else {
+            "method "
+        };
         Err(NativeError::error(format!(
-            "Call to {visibility} method {}::{}() from {from}",
+            "Call to {visibility} {kind}{}::{}() from {from}",
             method.declaring, method.name
         )))
     }

@@ -34,7 +34,15 @@ fn run<'a>(
                         0,
                     ));
                 }
-                ("BEGIN", "PDO::beginTransaction", true)
+                (
+                    match session.attributes.borrow().transaction_mode {
+                        1 => "BEGIN IMMEDIATE",
+                        2 => "BEGIN EXCLUSIVE",
+                        _ => "BEGIN",
+                    },
+                    "PDO::beginTransaction",
+                    true,
+                )
             }
             Operation::Commit | Operation::Rollback => {
                 if !active {

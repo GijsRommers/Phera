@@ -131,6 +131,11 @@ impl ClassTable {
                 constants.insert(
                     (*name).into(),
                     Rc::new(super::LinkedConstant {
+                        deprecated: entry
+                            .deprecated_constants
+                            .iter()
+                            .find(|(key, _)| key == name)
+                            .map(|(_, message)| *message),
                         declaring: entry.name.into(),
                         visibility: Visibility::Public,
                         is_final: false,

@@ -8,16 +8,29 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::{Error, Statement};
 
-type Operation = Box<dyn FnOnce(&Rc<Connection>) + Send>;
+type Operation = Box<dyn FnOnce(&mut Rc<Connection>) + Send>;
+enum Request {
+    Call(Operation),
+    Close(oneshot::Sender<()>),
+    FinishCursor(tokio::task::JoinHandle<()>),
+}
 
 #[derive(Clone)]
 pub struct Database {
-    sender: mpsc::UnboundedSender<Operation>,
+    sender: mpsc::UnboundedSender<Request>,
 }
 
 impl Database {
+    pub async fn close(&self) -> Result<(), Error> {
+        let (sender, receiver) = oneshot::channel();
+        self.sender
+            .send(Request::Close(sender))
+            .map_err(|_| Error::closed())?;
+        receiver.await.map_err(|_| Error::closed())
+    }
+
     pub async fn open(filename: String, flags: i32, timeout_ms: u64) -> Result<Self, Error> {
-        let (sender, mut receiver) = mpsc::unbounded_channel::<Operation>();
+        let (sender, mut receiver) = mpsc::unbounded_channel::<Request>();
         let (ready, opened) = oneshot::channel();
         // Even thread creation is moved off the PHP worker.
         tokio::task::spawn_blocking(move || {
@@ -36,7 +49,7 @@ impl Database {
                             connection.busy_timeout(Duration::from_millis(timeout_ms))?;
                             Ok(connection)
                         });
-                    let connection = match connection {
+                    let mut connection = match connection {
                         Ok(connection) => Rc::new(connection),
                         Err(error) => {
                             let _ = ready.send(Err(error));
@@ -54,12 +67,25 @@ impl Database {
                         }
                     };
                     let _ = ready.send(Ok(()));
-                    tokio::task::LocalSet::new().block_on(&runtime, async move {
-                        while let Some(operation) = receiver.recv().await {
-                            operation(&connection);
+                    let local = tokio::task::LocalSet::new();
+                    let closed = local.block_on(&runtime, async move {
+                        while let Some(request) = receiver.recv().await {
+                            match request {
+                                Request::Call(operation) => operation(&mut connection),
+                                Request::Close(reply) => return Some(reply),
+                                Request::FinishCursor(task) => {
+                                    task.abort();
+                                    let _ = task.await;
+                                }
+                            }
                         }
+                        None
                     });
-                    // Local tasks (and their cursors) are dropped before the connection.
+                    // Finalize all cursors and close the database before acknowledging close().
+                    drop(local);
+                    if let Some(reply) = closed {
+                        let _ = reply.send(());
+                    }
                 })
                 .map_err(|error| Error {
                     code: 1,
@@ -79,9 +105,9 @@ impl Database {
     {
         let (sender, receiver) = oneshot::channel();
         self.sender
-            .send(Box::new(move |connection| {
+            .send(Request::Call(Box::new(move |connection| {
                 let _ = sender.send(operation(connection));
-            }))
+            })))
             .map_err(|_| Error::closed())?;
         receiver.await.map_err(|_| Error::closed())?
     }
@@ -90,14 +116,49 @@ impl Database {
         let (sender, receiver) = oneshot::channel();
         let database = self.clone();
         self.sender
-            .send(Box::new(move |connection| {
+            .send(Request::Call(Box::new(move |connection| {
                 let connection = connection.clone();
-                tokio::task::spawn_local(async move {
-                    crate::cursor::serve(connection, database, sql, sender).await;
+                let lifetime = std::sync::Arc::new(crate::lifetime::CursorTask {
+                    database,
+                    task: std::sync::OnceLock::new(),
                 });
-            }))
+                let cursor_lifetime = lifetime.clone();
+                let task = tokio::task::spawn_local(async move {
+                    crate::cursor::serve(connection, cursor_lifetime, sql, sender).await;
+                });
+                let _ = lifetime.task.set(task);
+            })))
             .map_err(|_| Error::closed())?;
         receiver.await.map_err(|_| Error::closed())?
+    }
+
+    pub(crate) fn finish_cursor(&self, task: tokio::task::JoinHandle<()>) {
+        let _ = self.sender.send(Request::FinishCursor(task));
+    }
+
+    pub async fn exclusive<T, F>(&self, operation: F) -> Result<T, Error>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut Connection) -> Result<T, Error> + Send + 'static,
+    {
+        let (sender, receiver) = oneshot::channel();
+        self.sender
+            .send(Request::Call(Box::new(move |connection| {
+                let result = match Rc::get_mut(connection) {
+                    Some(connection) => operation(connection),
+                    None => Err(Error {
+                        code: 6,
+                        message: "destination has outstanding prepared statements".into(),
+                    }),
+                };
+                let _ = sender.send(result);
+            })))
+            .map_err(|_| Error::closed())?;
+        receiver.await.map_err(|_| Error::closed())?
+    }
+
+    pub fn same_connection(&self, other: &Self) -> bool {
+        self.sender.same_channel(&other.sender)
     }
 
     pub async fn exec(&self, sql: String) -> Result<u64, Error> {

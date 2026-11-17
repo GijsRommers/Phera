@@ -94,6 +94,7 @@ impl Lease {
             name: match &driver {
                 Driver::Postgres(_) => DriverName::Postgres,
                 Driver::Mysql(_) => DriverName::Mysql,
+                Driver::Sqlite(_) => DriverName::Sqlite,
             },
             shared: Arc::new(SharedLease {
                 driver: Mutex::new(Some(driver)),
@@ -114,6 +115,12 @@ pub async fn acquire(
     password: &str,
     policy: Policy,
 ) -> Result<Lease, DbError> {
+    // Neither memory nor file databases can be reset completely for a new PHP object.
+    let policy = if dsn.driver == DriverName::Sqlite {
+        Policy::Disabled
+    } else {
+        policy
+    };
     let options = options::application()?;
     let (dsn, username, password) = (dsn.clone(), username.to_owned(), password.to_owned());
     let handle = runtime::handle().await?;
@@ -135,12 +142,13 @@ pub async fn acquire(
                     .or_insert_with(|| match dsn.driver {
                         DriverName::Postgres => "5432".into(),
                         DriverName::Mysql => "3306".into(),
+                        DriverName::Sqlite => String::new(),
                     });
                 fields
                     .entry("dbname".into())
                     .or_insert_with(|| match dsn.driver {
                         DriverName::Postgres => username.clone(),
-                        DriverName::Mysql => String::new(),
+                        DriverName::Mysql | DriverName::Sqlite => String::new(),
                     });
                 let key = Key {
                     driver: dsn.driver,

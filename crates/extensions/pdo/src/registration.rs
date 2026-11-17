@@ -21,6 +21,7 @@ pub fn register(registry: &mut Registry) {
     });
     registry.class(ClassEntry {
         constants: constants::CONSTANTS,
+        deprecated_constants: constants::SQLITE_DEPRECATED,
         methods: PDO_METHODS,
         ..ClassEntry::class("PDO")
     });
@@ -31,6 +32,12 @@ pub fn register(registry: &mut Registry) {
             ..ClassEntry::class(name)
         });
     }
+    registry.class(ClassEntry {
+        parent: Some("PDO"),
+        constants: crate::constants::SQLITE,
+        methods: SQLITE_METHODS,
+        ..ClassEntry::class("Pdo\\Sqlite")
+    });
     registry.class(ClassEntry {
         properties: const {
             &[PropertyEntry::new(
@@ -143,7 +150,7 @@ const PDO_METHODS: &[MethodEntry] = &[
         &[Param::new("name", ParamType::String).nullable().optional()],
         connection::last_id,
     ),
-    MethodEntry::public(
+    MethodEntry::public_async(
         "setAttribute",
         &[
             Param::new("attribute", ParamType::Int),
@@ -186,27 +193,27 @@ const STATEMENT_METHODS: &[MethodEntry] = &[
         ],
         statement::bind_param,
     ),
-    MethodEntry::public(
+    MethodEntry::public_async(
         "fetch",
         &[
             Param::new("mode", ParamType::Int).optional(),
             Param::new("cursorOrientation", ParamType::Int).optional(),
             Param::new("cursorOffset", ParamType::Int).optional(),
         ],
-        fetch::fetch,
+        crate::sqlite_fetch::fetch,
     ),
-    MethodEntry::public(
+    MethodEntry::public_async(
         "fetchAll",
         &[
             Param::new("mode", ParamType::Int).optional(),
             Param::new("args", ParamType::Mixed).variadic(),
         ],
-        crate::fetch_all::all,
+        crate::sqlite_fetch::all,
     ),
-    MethodEntry::public(
+    MethodEntry::public_async(
         "fetchColumn",
         &[Param::new("column", ParamType::Int).optional()],
-        fetch::column,
+        crate::sqlite_fetch::column,
     ),
     MethodEntry::public(
         "setFetchMode",
@@ -216,18 +223,18 @@ const STATEMENT_METHODS: &[MethodEntry] = &[
         ],
         fetch::set_mode,
     ),
-    MethodEntry::public("closeCursor", &[], statement::close),
+    MethodEntry::public_async("closeCursor", &[], crate::sqlite_fetch::close),
     MethodEntry::public("columnCount", &[], statement::column_count),
     MethodEntry::public("rowCount", &[], statement::row_count),
     MethodEntry::public("errorCode", &[], statement::error_code),
     MethodEntry::public("errorInfo", &[], statement::error_info),
-    MethodEntry::public(
+    MethodEntry::public_async(
         "fetchObject",
         &[
             Param::new("class", ParamType::String).nullable().optional(),
             Param::new("constructorArgs", ParamType::Array).optional(),
         ],
-        fetch::object,
+        crate::sqlite_fetch::object,
     ),
     MethodEntry::public(
         "bindColumn",
@@ -256,8 +263,8 @@ const STATEMENT_METHODS: &[MethodEntry] = &[
     ),
     MethodEntry::public(
         "getAttribute",
-        &[Param::new("args", ParamType::Mixed).variadic()],
-        statement::unsupported_method,
+        &[Param::new("name", ParamType::Int)],
+        crate::sqlite_methods::statement_attribute,
     ),
     MethodEntry::public(
         "setAttribute",
@@ -265,3 +272,9 @@ const STATEMENT_METHODS: &[MethodEntry] = &[
         statement::unsupported_method,
     ),
 ];
+
+const SQLITE_METHODS: &[MethodEntry] = &[MethodEntry::public(
+    "loadExtension",
+    &[Param::new("name", ParamType::String)],
+    crate::sqlite_methods::load,
+)];
