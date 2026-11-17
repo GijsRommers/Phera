@@ -1,18 +1,61 @@
-//! PHP hashing: `hash('sha256', 'hello')` returns a lowercase hexadecimal digest.
+//! PHP's hash extension: digests, HMAC, key derivation, incremental
+//! hashing, and the password functions:
+//!
+//! ```php
+//! hash('sha256', 'hello');            // "2cf24dba5fb0a30e26e83b2ac5b9e29e..."
+//! md5('hello', true);                 // 16 raw bytes
+//! $h = hash_init('sha256');
+//! hash_update($h, 'hel');
+//! hash_update($h, 'lo');
+//! hash_final($h);                     // the same digest as hash('sha256', 'hello')
+//! password_verify('secret', password_hash('secret', PASSWORD_DEFAULT));  // true
+//! ```
+//!
+//! `crc32()` itself belongs to the standard extension.
+
 mod algorithms;
+mod digests;
 mod files;
-mod functions;
 mod hmac;
 mod incremental;
+mod kdf;
 mod options;
 mod password_info;
 mod password_options;
-mod password_registry;
 mod passwords;
-use phera_extension_api::{
-    ClassEntry, ClassKind, Extension, FunctionEntry, MethodEntry, Param, ParamType, Registry,
-    Value, Visibility,
-};
+
+use phera_extension_api::{Extension, Registry, Value};
+
+pub struct Hash;
+
+impl Extension for Hash {
+    fn name(&self) -> &'static str {
+        "hash"
+    }
+
+    fn register(&self, registry: &mut Registry) {
+        registry.constant("HASH_HMAC", incremental::HASH_HMAC);
+        for &(name, value) in passwords::STRING_CONSTANTS {
+            registry.constant(name, value);
+        }
+        for &(name, value) in passwords::INT_CONSTANTS {
+            registry.constant(name, value);
+        }
+        registry.class(incremental::HASH_CONTEXT);
+        for functions in [
+            digests::FUNCTIONS,
+            kdf::FUNCTIONS,
+            incremental::FUNCTIONS,
+            files::FUNCTIONS,
+            passwords::FUNCTIONS,
+            password_info::FUNCTIONS,
+        ] {
+            for &entry in functions {
+                registry.function(entry);
+            }
+        }
+    }
+}
 
 /// How PHP names a wrong argument in a `TypeError`: `true` and `false`
 /// rather than `bool`, otherwise the type or the class.
@@ -23,183 +66,3 @@ fn given(value: &Value) -> String {
         other => other.type_name(),
     }
 }
-pub struct Hash;
-impl Extension for Hash {
-    fn name(&self) -> &'static str {
-        "hash"
-    }
-    fn register(&self, registry: &mut Registry) {
-        registry.constant("HASH_HMAC", 1i64);
-        password_registry::register(registry);
-        registry.class(CLASS);
-        for entry in FUNCTIONS {
-            registry.function(*entry);
-        }
-    }
-}
-const CLASS: ClassEntry = ClassEntry {
-    kind: ClassKind::FinalClass,
-    methods: &[
-        MethodEntry::public("__construct", &[], incremental::construct)
-            .with_visibility(Visibility::Private),
-    ],
-    ..ClassEntry::class("HashContext")
-};
-
-const FUNCTIONS: &[FunctionEntry] = &[
-    FunctionEntry::sync(
-        "hash",
-        &[
-            Param::new("algo", ParamType::String),
-            Param::new("data", ParamType::String),
-            Param::new("binary", ParamType::Bool).optional(),
-            Param::new("options", ParamType::Array).optional(),
-        ],
-        functions::hash,
-    ),
-    FunctionEntry::asynchronous(
-        "hash_file",
-        &[
-            Param::new("algo", ParamType::String),
-            Param::new("filename", ParamType::String),
-            Param::new("binary", ParamType::Bool).optional(),
-            Param::new("options", ParamType::Array).optional(),
-        ],
-        files::hash_file,
-    ),
-    FunctionEntry::sync(
-        "hash_hmac",
-        &[
-            Param::new("algo", ParamType::String),
-            Param::new("data", ParamType::String),
-            Param::new("key", ParamType::String),
-            Param::new("binary", ParamType::Bool).optional(),
-        ],
-        functions::hash_hmac,
-    ),
-    FunctionEntry::asynchronous(
-        "hash_hmac_file",
-        &[
-            Param::new("algo", ParamType::String),
-            Param::new("filename", ParamType::String),
-            Param::new("key", ParamType::String),
-            Param::new("binary", ParamType::Bool).optional(),
-        ],
-        files::hmac_file,
-    ),
-    FunctionEntry::sync("hash_algos", &[], functions::algos),
-    FunctionEntry::sync("hash_hmac_algos", &[], functions::hmac_algos),
-    FunctionEntry::sync(
-        "hash_equals",
-        &[
-            Param::new("known_string", ParamType::Mixed),
-            Param::new("user_string", ParamType::Mixed),
-        ],
-        functions::equals,
-    ),
-    FunctionEntry::sync(
-        "md5",
-        &[
-            Param::new("string", ParamType::String),
-            Param::new("binary", ParamType::Bool).optional(),
-        ],
-        functions::md5,
-    ),
-    FunctionEntry::sync(
-        "sha1",
-        &[
-            Param::new("string", ParamType::String),
-            Param::new("binary", ParamType::Bool).optional(),
-        ],
-        functions::sha1,
-    ),
-    FunctionEntry::asynchronous(
-        "md5_file",
-        &[
-            Param::new("filename", ParamType::String),
-            Param::new("binary", ParamType::Bool).optional(),
-        ],
-        files::md5_file,
-    ),
-    FunctionEntry::asynchronous(
-        "sha1_file",
-        &[
-            Param::new("filename", ParamType::String),
-            Param::new("binary", ParamType::Bool).optional(),
-        ],
-        files::sha1_file,
-    ),
-    FunctionEntry::sync(
-        "hash_pbkdf2",
-        &[
-            Param::new("algo", ParamType::String),
-            Param::new("password", ParamType::String),
-            Param::new("salt", ParamType::String),
-            Param::new("iterations", ParamType::Int),
-            Param::new("length", ParamType::Int).optional(),
-            Param::new("binary", ParamType::Bool).optional(),
-            Param::new("options", ParamType::Array).optional(),
-        ],
-        functions::pbkdf2,
-    ),
-    FunctionEntry::sync(
-        "hash_hkdf",
-        &[
-            Param::new("algo", ParamType::String),
-            Param::new("key", ParamType::String),
-            Param::new("length", ParamType::Int).optional(),
-            Param::new("info", ParamType::String).optional(),
-            Param::new("salt", ParamType::String).optional(),
-        ],
-        functions::hkdf,
-    ),
-    FunctionEntry::sync(
-        "hash_init",
-        &[
-            Param::new("algo", ParamType::String),
-            Param::new("flags", ParamType::Int).optional(),
-            Param::new("key", ParamType::String).optional(),
-            Param::new("options", ParamType::Array).optional(),
-        ],
-        incremental::init,
-    ),
-    FunctionEntry::sync(
-        "hash_update",
-        &[
-            Param::new("context", ParamType::Mixed),
-            Param::new("data", ParamType::String),
-        ],
-        incremental::update,
-    ),
-    FunctionEntry::sync(
-        "hash_final",
-        &[
-            Param::new("context", ParamType::Mixed),
-            Param::new("binary", ParamType::Bool).optional(),
-        ],
-        incremental::finish,
-    ),
-    FunctionEntry::sync(
-        "hash_copy",
-        &[Param::new("context", ParamType::Mixed)],
-        incremental::copy,
-    ),
-    FunctionEntry::asynchronous(
-        "hash_update_file",
-        &[
-            Param::new("context", ParamType::Mixed),
-            Param::new("filename", ParamType::String),
-            Param::new("stream_context", ParamType::Mixed).optional(),
-        ],
-        files::update_file,
-    ),
-    FunctionEntry::sync(
-        "hash_update_stream",
-        &[
-            Param::new("context", ParamType::Mixed),
-            Param::new("stream", ParamType::Mixed),
-            Param::new("length", ParamType::Int).optional(),
-        ],
-        incremental::stream,
-    ),
-];

@@ -1,18 +1,43 @@
-//! `password_hash($password, PASSWORD_BCRYPT, ['cost'=>12])` validates options first.
-use phera_extension_api::{ArrayKey, Context, NativeError, Value, args, value};
-#[derive(Clone, Copy, PartialEq, Eq)]
+//! The `$algo` and `$options` of `password_hash()` and
+//! `password_needs_rehash()`. Bcrypt takes a cost, Argon2 a memory cost, a
+//! time cost and a number of threads; each ignores the others' options:
+//!
+//! ```php
+//! password_hash('secret', PASSWORD_BCRYPT, ['cost' => 10]);
+//! password_hash('secret', PASSWORD_ARGON2ID, ['memory_cost' => 1 << 16, 'time_cost' => 4]);
+//! password_hash('secret', PASSWORD_BCRYPT, ['cost' => 3]);  // ValueError
+//! ```
+
+use phera_extension_api::{ArrayKey, Context, NativeError, PhpArray, Value, args, value};
+
+pub const DEFAULT_COST: i64 = 12;
+/// In KiB.
+pub const DEFAULT_MEMORY_COST: i64 = 65536;
+pub const DEFAULT_TIME_COST: i64 = 4;
+pub const DEFAULT_THREADS: i64 = 1;
+
+/// Argon2 needs at least 8 KiB of memory per thread.
+const MIN_MEMORY_PER_THREAD: i64 = 8;
+
+/// libargon2's limit, which PHP checks before calling it.
+const MAX_THREADS: i64 = 0xff_ffff;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Algorithm {
     Bcrypt,
     Argon2i,
     Argon2id,
 }
+
 impl Algorithm {
-    pub fn parse(value: Option<&Value>) -> Option<Self> {
+    /// The `$algo` argument: `null`, one of the `PASSWORD_*` strings, or
+    /// the integers PHP used for them before 7.4.
+    pub fn parse(value: &Value) -> Option<Self> {
         match value {
-            None | Some(Value::Null) | Some(Value::Int(0 | 1)) => Some(Self::Bcrypt),
-            Some(Value::Int(2)) => Some(Self::Argon2i),
-            Some(Value::Int(3)) => Some(Self::Argon2id),
-            Some(Value::String(s)) => match s.as_bytes() {
+            Value::Null | Value::Int(0 | 1) => Some(Self::Bcrypt),
+            Value::Int(2) => Some(Self::Argon2i),
+            Value::Int(3) => Some(Self::Argon2id),
+            Value::String(name) => match name.as_bytes() {
                 b"2y" => Some(Self::Bcrypt),
                 b"argon2i" => Some(Self::Argon2i),
                 b"argon2id" => Some(Self::Argon2id),
@@ -21,6 +46,8 @@ impl Algorithm {
             _ => None,
         }
     }
+
+    /// The `PASSWORD_*` value, which `password_get_info()` calls `algo`.
     pub fn id(self) -> &'static str {
         match self {
             Self::Bcrypt => "2y",
@@ -28,82 +55,94 @@ impl Algorithm {
             Self::Argon2id => "argon2id",
         }
     }
+
+    /// What `password_get_info()` calls `algoName`.
     pub fn name(self) -> &'static str {
-        if self == Self::Bcrypt {
-            "bcrypt"
-        } else {
-            self.id()
+        match self {
+            Self::Bcrypt => "bcrypt",
+            Self::Argon2i | Self::Argon2id => self.id(),
         }
     }
 }
-#[derive(Clone)]
+
+/// The costs of a password hash; bcrypt uses only `cost`, Argon2 the rest.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Options {
     pub cost: i64,
+    /// In KiB.
     pub memory: i64,
     pub time: i64,
     pub threads: i64,
 }
+
 impl Default for Options {
     fn default() -> Self {
         Self {
-            cost: 12,
-            memory: 65536,
-            time: 4,
-            threads: 1,
+            cost: DEFAULT_COST,
+            memory: DEFAULT_MEMORY_COST,
+            time: DEFAULT_TIME_COST,
+            threads: DEFAULT_THREADS,
         }
     }
 }
+
 impl Options {
+    /// The defaults, changed by what the `$options` argument (the third)
+    /// sets for `algorithm`, each converted to int the way PHP does.
     pub fn read(
         context: &mut dyn Context,
         arguments: &[Value],
         algorithm: Algorithm,
     ) -> Result<Self, NativeError> {
         let mut result = Self::default();
-        if let Some(options) = args::array(arguments, 2) {
-            for (name, slot) in [
-                ("cost", &mut result.cost),
-                ("memory_cost", &mut result.memory),
-                ("time_cost", &mut result.time),
-                ("threads", &mut result.threads),
-            ] {
-                if (name == "cost") != (algorithm == Algorithm::Bcrypt) {
-                    continue;
-                }
-                if let Some(value) = options.get(&ArrayKey::str(name)) {
-                    *slot = value::to_int(value, context.diagnostics())?;
-                }
+        let Some(options) = args::array(arguments, 2) else {
+            return Ok(result);
+        };
+        match algorithm {
+            Algorithm::Bcrypt => read_int(context, options, "cost", &mut result.cost)?,
+            Algorithm::Argon2i | Algorithm::Argon2id => {
+                read_int(context, options, "memory_cost", &mut result.memory)?;
+                read_int(context, options, "time_cost", &mut result.time)?;
+                read_int(context, options, "threads", &mut result.threads)?;
             }
         }
         Ok(result)
     }
-    pub fn validate(&self, algorithm: Algorithm, password: &[u8]) -> Result<(), NativeError> {
-        let error = if algorithm == Algorithm::Bcrypt {
-            if password.contains(&0) {
-                Some("Bcrypt password must not contain null character".into())
-            } else if !(4..=31).contains(&self.cost) {
-                Some(format!(
-                    "Invalid bcrypt cost parameter specified: {}",
-                    self.cost
-                ))
-            } else {
-                None
+
+    /// PHP's checks of the costs, before anything is hashed.
+    pub fn validate(&self, algorithm: Algorithm) -> Result<(), NativeError> {
+        let error = match algorithm {
+            Algorithm::Bcrypt if !(4..=31).contains(&self.cost) => {
+                format!("Invalid bcrypt cost parameter specified: {}", self.cost)
             }
-        } else if !(8..=u32::MAX as i64).contains(&self.memory) {
-            Some("Memory cost is outside of allowed memory range".into())
-        } else if !(1..=u32::MAX as i64).contains(&self.time) {
-            Some("Time cost is outside of allowed time range".into())
-        } else if !(1..=0xffffff).contains(&self.threads) {
-            Some("Invalid number of threads".into())
-        } else if self.memory < 8 * self.threads {
-            Some("Memory cost is too small".into())
-        } else {
-            None
+            Algorithm::Bcrypt => return Ok(()),
+            _ if !(MIN_MEMORY_PER_THREAD..=i64::from(u32::MAX)).contains(&self.memory) => {
+                "Memory cost is outside of allowed memory range".to_string()
+            }
+            _ if !(1..=i64::from(u32::MAX)).contains(&self.time) => {
+                "Time cost is outside of allowed time range".to_string()
+            }
+            _ if !(1..=MAX_THREADS).contains(&self.threads) => {
+                "Invalid number of threads".to_string()
+            }
+            _ if self.memory < MIN_MEMORY_PER_THREAD * self.threads => {
+                "Memory cost is too small".to_string()
+            }
+            _ => return Ok(()),
         };
-        if let Some(error) = error {
-            Err(NativeError::value_error(error))
-        } else {
-            Ok(())
-        }
+        Err(NativeError::value_error(error))
     }
+}
+
+/// Sets `slot` from `options[name]`, if it is there.
+fn read_int(
+    context: &mut dyn Context,
+    options: &PhpArray,
+    name: &str,
+    slot: &mut i64,
+) -> Result<(), NativeError> {
+    if let Some(option) = options.get(&ArrayKey::str(name)) {
+        *slot = value::to_int(option, context.diagnostics())?;
+    }
+    Ok(())
 }
