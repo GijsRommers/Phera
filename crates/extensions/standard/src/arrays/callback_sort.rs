@@ -98,6 +98,8 @@ async fn run(context: &mut dyn Context, arguments: Vec<Value>, name: &str) -> Na
             sorted.insert(key.clone(), value.clone());
         }
     }
+    // Like every PHP sort, the internal pointer starts at the first entry again.
+    sorted.reset();
     *target
         .try_borrow_mut()
         .map_err(|_| NativeError::error("Array is already being modified"))? = Value::from(sorted);
