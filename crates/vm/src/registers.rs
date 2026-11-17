@@ -7,14 +7,19 @@ use phera_value::Value;
 use crate::Vm;
 
 impl Vm {
-    /// Undefined named locals warn and read as null; assigned slots dereference aliases.
-    pub(crate) fn read_local(&mut self, register: Reg) -> Value {
-        if let Some(value) = self
-            .current()
+    /// The value of a local variable, or `None` when it was never assigned.
+    /// A PHP reference is followed to the value it points at.
+    pub(crate) fn read_defined_local(&self, register: Reg) -> Option<Value> {
+        self.current()
             .and_then(|frame| frame.slots(&self.registers).get(register.index()))
             .and_then(Option::as_ref)
             .map(|value| value.deref().clone())
-        {
+    }
+
+    /// Like `read_defined_local`, but an unassigned variable warns
+    /// ("Undefined variable $name") and reads as null, as in PHP.
+    pub(crate) fn read_local(&mut self, register: Reg) -> Value {
+        if let Some(value) = self.read_defined_local(register) {
             return value;
         }
         if let Some(name) = self

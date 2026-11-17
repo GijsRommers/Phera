@@ -225,7 +225,6 @@ impl Vm {
         arguments: Vec<Option<Value>>,
         origin: crate::callback_binding::ArgumentOrigin,
     ) -> Result<(), NativeError> {
-        let had_error_handler = self.error_handlers.error.is_some();
         let arguments = match target {
             NativeTarget::Intrinsic(intrinsic) => Self::intrinsic_arguments(intrinsic, arguments),
             NativeTarget::Function(_) => arguments
@@ -242,16 +241,6 @@ impl Vm {
             }
         };
         self.set(destination, value);
-        let restore_handler = matches!(
-            target,
-            NativeTarget::Intrinsic(Intrinsic::Handler(
-                crate::error_handlers::HandlerFunction::SetError
-                    | crate::error_handlers::HandlerFunction::RestoreError
-            ))
-        );
-        if restore_handler || (!had_error_handler && self.error_handlers.error.is_some()) {
-            return Err(crate::error_handlers::HandlerModeChanged::signal());
-        }
         Ok(())
     }
 }

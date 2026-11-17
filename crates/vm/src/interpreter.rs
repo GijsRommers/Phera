@@ -6,35 +6,29 @@ use phera_extension_api::{LocalFuture, NativeError, NativeResult};
 use crate::Vm;
 
 impl Vm {
-    /// One erased engine future per runtime entry keeps procedural batching code
-    /// out of the general call loop. PHP-to-PHP calls still use recycled heap
-    /// frames; this allocation occurs only at an interpreter boundary.
+    /// Runs frames until the call stack is back at depth `stop`.
+    ///
+    /// The inner loops return an error for anything that goes wrong. This outer
+    /// loop turns that error into a PHP exception and looks for a `catch` or
+    /// `finally` (`handle_exception`). If one is found, execution continues in
+    /// that frame; if not, the error leaves the interpreter.
+    ///
+    /// The future is boxed because the interpreter is re-entered recursively
+    /// (a native function calling back into PHP), and a recursive `async fn`
+    /// needs a known size.
     pub(crate) fn interpret(&mut self, stop: usize) -> LocalFuture<'_, NativeResult> {
         Box::pin(async move {
             loop {
-                let result = if self
+                let at_top_level = self
                     .current()
-                    .is_some_and(|frame| frame.function_id.is_none())
-                {
-                    if self.error_handlers.error.is_some() {
-                        self.interpret_procedural::<true>(stop).await
-                    } else {
-                        self.interpret_procedural::<false>(stop).await
-                    }
+                    .is_some_and(|frame| frame.function_id.is_none());
+                let result = if at_top_level {
+                    self.interpret_procedural(stop).await
                 } else {
-                    if self.error_handlers.error.is_some() {
-                        self.interpret_frames::<true>(stop).await
-                    } else {
-                        self.interpret_frames::<false>(stop).await
-                    }
+                    self.interpret_frames(stop).await
                 };
                 match result {
                     Ok(value) => return Ok(value),
-                    Err(NativeError::Unwind(payload))
-                        if payload.0.is::<crate::error_handlers::HandlerModeChanged>() =>
-                    {
-                        continue;
-                    }
                     Err(error) => {
                         let error = if self.error_handlers.pending.is_empty() {
                             error
@@ -54,10 +48,7 @@ impl Vm {
 
 impl Vm {
     /// Retain code and register windows across scalar steps; periodically yield for Tokio fairness.
-    pub(crate) async fn interpret_frames<const USER_ERROR_HANDLERS: bool>(
-        &mut self,
-        stop: usize,
-    ) -> NativeResult {
+    pub(crate) async fn interpret_frames(&mut self, stop: usize) -> NativeResult {
         let mut work = 0usize;
         let mut running_unit = self
             .current()
@@ -166,22 +157,19 @@ impl Vm {
                         self.execute_call(dst, &mut work).await?;
                         crate::dispatch::DispatchResult::Continue
                     }
-                    Instruction::Return { src } => {
-                        if USER_ERROR_HANDLERS {
-                            let value = self.read_local(src);
-                            if USER_ERROR_HANDLERS && !self.error_handlers.pending.is_empty() {
-                                self.drain_return_handlers().await?;
-                            }
-                            self.return_value(value, stop)
-                                .map(crate::dispatch::DispatchResult::from_return)?
-                        } else if function.return_type.is_none() {
-                            let value = self.read_local(src);
-                            self.finish_return_value(value, stop)
-                                .map(crate::dispatch::DispatchResult::from_return)?
-                        } else {
-                            self.return_register(src, stop)?
-                        }
-                    }
+                    Instruction::Return { src } => match self.read_defined_local(src) {
+                        // No declared return type: nothing to check or convert.
+                        Some(value) if function.return_type.is_none() => self
+                            .finish_return_value(value, stop)
+                            .map(crate::dispatch::DispatchResult::from_return)?,
+                        Some(value) => self
+                            .return_value(value, stop)
+                            .map(crate::dispatch::DispatchResult::from_return)?,
+                        // `return $undefined;` warns. The general dispatcher runs a
+                        // user error handler while this frame is still on the stack,
+                        // which is what PHP does and what the stack trace shows.
+                        None => self.dispatch(instruction, stop, &mut work).await?,
+                    },
                     Instruction::ReturnNull => self.return_null(stop)?,
                     Instruction::IterNext {
                         iter: iterator,
@@ -200,7 +188,7 @@ impl Vm {
                     work = 0;
                     tokio::task::yield_now().await;
                 }
-                if USER_ERROR_HANDLERS && !self.error_handlers.pending.is_empty() {
+                if !self.error_handlers.pending.is_empty() {
                     self.drain_error_handlers().await?;
                 }
                 let frame = self

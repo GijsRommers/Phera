@@ -249,16 +249,6 @@ impl Vm {
     }
 }
 
-/// Restart only when installing/restoring a handler, keeping ordinary dispatch free of warning polls.
-pub(crate) struct HandlerModeChanged;
-
-impl HandlerModeChanged {
-    /// This is an interpreter scheduling signal, never a PHP exception or a frame unwind.
-    pub(crate) fn signal() -> NativeError {
-        NativeError::Unwind(phera_extension_api::Unwind(Box::new(Self)))
-    }
-}
-
 impl Vm {
     /// Zend leaves a returning frame's catch region before invoking its warning callback.
     pub(crate) async fn drain_return_handlers(&mut self) -> Result<(), NativeError> {

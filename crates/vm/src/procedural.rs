@@ -9,10 +9,7 @@ impl Vm {
     /// Mirrors the general interpreter at a procedural entry. A user frame or
     /// include switches permanently to the general heap-frame engine; ordinary
     /// PHP function calls therefore never pay a batching branch per instruction.
-    pub(crate) async fn interpret_procedural<const USER_ERROR_HANDLERS: bool>(
-        &mut self,
-        stop: usize,
-    ) -> NativeResult {
+    pub(crate) async fn interpret_procedural(&mut self, stop: usize) -> NativeResult {
         let unit = self
             .current()
             .ok_or_else(|| internal_error!("missing frame"))?
@@ -24,7 +21,7 @@ impl Vm {
                 .current()
                 .ok_or_else(|| internal_error!("missing continuation"))?;
             if frame.function_id.is_some() || !Arc::ptr_eq(&unit, &frame.unit) {
-                return self.interpret_frames::<USER_ERROR_HANDLERS>(stop).await;
+                return self.interpret_frames(stop).await;
             }
             let base = frame.base;
             let tracking = if frame.arguments.is_empty() {
@@ -61,7 +58,7 @@ impl Vm {
             {
                 return Ok(value);
             }
-            if USER_ERROR_HANDLERS && !self.error_handlers.pending.is_empty() {
+            if !self.error_handlers.pending.is_empty() {
                 self.drain_error_handlers().await?;
             }
             if work >= 4096 {

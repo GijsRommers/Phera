@@ -21,17 +21,6 @@ struct ReturnTypeSite {
 }
 
 impl Vm {
-    /// Ordinary returns dereference the source before releasing its frame.
-    pub(crate) fn return_register(
-        &mut self,
-        source: Reg,
-        stop: usize,
-    ) -> Result<DispatchResult, NativeError> {
-        let value = self.read_local(source);
-        self.return_value(value, stop)
-            .map(DispatchResult::from_return)
-    }
-
     pub(crate) fn return_null(&mut self, stop: usize) -> Result<DispatchResult, NativeError> {
         self.return_value(Value::Null, stop)
             .map(DispatchResult::from_return)
