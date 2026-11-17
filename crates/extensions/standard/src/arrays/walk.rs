@@ -73,7 +73,7 @@ impl Frame {
         {
             return Ok(Value::from(number.to_string()));
         }
-        Ok(super::key_value(key))
+        Ok(Value::from(key.clone()))
     }
 
     /// Install the cell before calling PHP. Never hold a table or cell borrow

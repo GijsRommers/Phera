@@ -9,6 +9,7 @@ use phera_extension_api::{
 };
 
 use super::callback::Comparison;
+use super::ordering::SortFlags;
 
 pub(super) type Entry = (phera_extension_api::ArrayKey, Value);
 
@@ -87,8 +88,8 @@ impl SetComparison<'_> {
                 .compare(
                     context,
                     callback,
-                    super::key_value(&left.0),
-                    super::key_value(&right.0),
+                    Value::from(left.0.clone()),
+                    Value::from(right.0.clone()),
                     true,
                 )
                 .await
@@ -113,8 +114,8 @@ impl SetComparison<'_> {
                 .compare(
                     context,
                     callback,
-                    super::key_value(&left.0),
-                    super::key_value(&right.0),
+                    Value::from(left.0.clone()),
+                    Value::from(right.0.clone()),
                     true,
                 )
                 .await;
@@ -140,12 +141,7 @@ impl SetComparison<'_> {
                 )
                 .await
         } else {
-            super::ordering::compare_values(
-                context,
-                &left.1,
-                &right.1,
-                super::ordering::SortOrder::String { ignore_case: false },
-            )
+            SortFlags::STRING.compare(context, &left.1, &right.1)
         }
     }
 }

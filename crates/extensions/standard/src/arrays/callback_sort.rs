@@ -66,8 +66,8 @@ async fn run(context: &mut dyn Context, arguments: Vec<Value>, name: &str) -> Na
     let indices = super::zend_sort::order_async(entries.len(), async |left, right| {
         let values = if name == "uksort" {
             (
-                super::key_value(&entries[left].0),
-                super::key_value(&entries[right].0),
+                Value::from(entries[left].0.clone()),
+                Value::from(entries[right].0.clone()),
             )
         } else {
             (entries[left].1.clone(), entries[right].1.clone())

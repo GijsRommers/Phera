@@ -6,7 +6,7 @@ use phera_extension_api::{
     Context, FunctionEntry, NativeResult, Param, ParamType, PhpArray, Registry, Value, args,
 };
 
-use super::ordering::SortOrder;
+use super::ordering::SortFlags;
 
 #[derive(Clone, Copy)]
 enum SetOperation {
@@ -161,12 +161,8 @@ fn set(
                         continue;
                     }
                     if matches!(match_by, MatchBy::Key)
-                        || super::ordering::compare_values(
-                            context,
-                            value,
-                            other_value,
-                            SortOrder::String { ignore_case: false },
-                        )? == Ordering::Equal
+                        || SortFlags::STRING.compare(context, value, other_value)?
+                            == Ordering::Equal
                     {
                         found = true;
                         break;
@@ -207,13 +203,13 @@ fn array_unique(context: &mut dyn Context, arguments: &[Value]) -> NativeResult 
         }
         return Ok(Value::from(result));
     }
-    let order = SortOrder::from_flags(flags);
+    let order = SortFlags::from_flags(flags);
     let entries: Vec<_> = array.iter().collect();
     let indices = super::zend_sort::order(entries.len(), |left, right| {
         let (Some((_, left)), Some((_, right))) = (entries.get(left), entries.get(right)) else {
             return Ok(Ordering::Equal);
         };
-        super::ordering::compare_values(context, left, right, order)
+        order.compare(context, left, right)
     })?;
     let mut result = (**array).clone();
     let mut previous: Option<usize> = None;
@@ -221,8 +217,7 @@ fn array_unique(context: &mut dyn Context, arguments: &[Value]) -> NativeResult 
         if let Some(last) = previous
             && let (Some((last_key, last_value)), Some((key, value))) =
                 (entries.get(last), entries.get(index))
-            && super::ordering::compare_values(context, last_value, value, order)?
-                == Ordering::Equal
+            && order.compare(context, last_value, value)? == Ordering::Equal
         {
             if last > index {
                 result.remove(last_key);
