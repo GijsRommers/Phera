@@ -1,5 +1,251 @@
 # Security findings: `phera serve` (HTTP server and request boundary)
 
+---
+
+## Round 2 — 2026-11-17, current `main` merged into `security/http-server`
+
+Second round of the authorized defensive testing. Tested commit:
+`bf8e312aaae09264a299fb26c68c572bdcc92fbc` (`http-round-2` =
+`origin/security/http-server` + `origin/main` at `904cfdb6`), release build
+`cargo build --release -p phera-cli`, i.e. current `main` plus round 1's
+security files. The three fixes from round 1 are in commit `88a0bb4`
+(`crates/cli/src/serve/site.rs:85-88`, `crates/server/src/connection.rs:123-124`,
+`crates/runtime/src/http/superglobals.rs:31`, one test in
+`crates/cli/tests/serve.rs`). Method as in round 1: raw-socket Python (stdlib
+only), every reproducer confirmed three times against freshly started servers
+(`--workers 1`, `127.0.0.1:18400-18499` only, `nice -n 15`), compared with real
+PHP 8.5.12 (`/opt/homebrew/bin/php -n -S`) on the same fixture site wherever PHP
+semantics matter. The only commits touching the request path since round 1's
+`cfed5d7` are `88a0bb4` (the fixes) and `54093d2` (LTO/mimalloc build), per
+`git log cfed5d7..origin/main -- crates/server crates/cli crates/runtime crates/extensions/http`.
+
+## Status of the round-1 findings
+
+| # | Status | Evidence (3/3 fresh servers each) |
+| --- | --- | --- |
+| F1 | **fixed and verified** (88a0bb4) | `GET /secret.PHP` and `/secret.pHp` now execute the script (`200`, body `REAL secret.php ran`), never its source. |
+| F2 | **fixed and verified** (88a0bb4) | `GET /cl.php` on a keep-alive connection now gets `content-length: 101` with exactly 101 body bytes; the script's `Content-Length: 5` is dropped. No desync in any pipelined case (below). |
+| F3 | **still present** | `grow_bounded.php`: one request grew the server to 417 MB peak RSS in 26 s, 3/3 runs. Known and open. |
+| F4 | **still present** | Trickled body (6 of 1,000,000 bytes over 35 s): connection still open, no response, no close, 3/3 runs. Known and open. |
+| F5 | **still present** | 5 clients reading 1 KB of a 50 MB static file pinned 259 MB RSS, 3/3 runs. Known and open. |
+| F6 | **fixed and verified** (88a0bb4) | `GET`/`PUT` with a form body now give `$_POST=[]`, 3/3 runs. But see F8: the fix's method match is case-insensitive. |
+| F7 | **still present** | 500 body still contains the absolute path of `broken.php`, 3/3 runs. Known and open. |
+
+## New findings
+
+| # | Name | Severity | One line |
+| --- | --- | --- | --- |
+| F8 | `$_POST` filled for case-variants of the method (`post`, `Post`) | low | The F6 fix matches the method with `eq_ignore_ascii_case("POST")`; RFC 9110 §9.1 makes methods case-sensitive and PHP only fills `$_POST` for exactly `POST`. |
+| F9 | Duplicate `Content-Type` headers: `$_POST` and `$_SERVER['CONTENT_TYPE']` disagree | low | `$_POST` is parsed from the first `Content-Type` while `$_SERVER['CONTENT_TYPE']` reports the last; PHP comma-joins duplicates and would not fill `$_POST`. |
+
+### F8 — `$_POST`/`$_REQUEST` filled for case-variant method tokens (low)
+
+- **Reproducer:** `tests/security/http/repro_f8_lowercase_post_method.py`.
+- **Request:** `post /post.php HTTP/1.1` (also `Post`, `pOsT`) with
+  `Content-Type: application/x-www-form-urlencoded` and body `a=1`.
+- **Observed (3/3 fresh servers):** `200`, `$_SERVER['REQUEST_METHOD']='post'`,
+  `$_POST={"a":"1"}`, `$_REQUEST={"a":"1"}`. Real PHP 8.5.12 (`php -n -S` on the
+  same site) does not treat `post` as POST: it answers with an empty `$_POST`
+  (its CLI server 501s `Post`), because php-src compares the method with a
+  case-sensitive `strcmp`.
+- **Expected:** RFC 9110 §9.1: "method names are case-sensitive"; `post` is not
+  the registered POST method, so `$_POST` must stay empty, exactly as PHP does.
+- **Why (code):** `crates/runtime/src/http/superglobals.rs:31` —
+  `request.method.eq_ignore_ascii_case("POST")` (the F6 fix) accepts any
+  ASCII case of the method token.
+- **Suggested fix:** compare exactly: `request.method == "POST"`.
+- **Severity:** low — an app that assumes "`$_POST` non-empty implies the
+  request method was POST" (the very property F6 restored) can still be
+  surprised by a `post` token; apps that check `REQUEST_METHOD === 'POST'`
+  are unaffected, and an attacker could just send `POST` anyway.
+
+### F9 — duplicate `Content-Type` headers split the decision from the report (low)
+
+- **Reproducer:** `tests/security/http/repro_f9_duplicate_content_type.py`.
+- **Request:** `POST /post.php` with two header lines,
+  `Content-Type: application/x-www-form-urlencoded` then
+  `Content-Type: application/json`, body `a=1`.
+- **Observed (3/3 fresh servers):** `200`, `$_SERVER['CONTENT_TYPE']="application/json"`
+  but `$_POST={"a":"1"}`. Real PHP 8.5.12 combines duplicate field lines
+  (`CONTENT_TYPE` becomes `application/x-www-form-urlencoded, application/json`)
+  and does **not** fill `$_POST` for that combined value.
+- **Expected:** one consistent view of the request: either `$_POST` and
+  `$_SERVER['CONTENT_TYPE']` agree, or a duplicated singleton field is rejected
+  with 400 (RFC 9110 §5.5 lets a recipient combine or reject; hyper accepts the
+  duplicate).
+- **Why (code):** `is_form` reads `HttpRequest::header("Content-Type")`
+  (`crates/runtime/src/http/mod.rs:64`), which returns the **first** match, while
+  the `$_SERVER` builder (`crates/runtime/src/http/superglobals.rs:122`) inserts
+  every header in order so the **last** one wins for `CONTENT_TYPE`.
+- **Suggested fix:** use the same value for both (e.g. have `is_form` read what
+  `$_SERVER` reports), or reject requests with a duplicated `Content-Type`.
+- **Severity:** low — an app branching on `$_SERVER['CONTENT_TYPE']` (e.g.
+  expecting JSON and reading the raw body) can observe `$_POST` populated from
+  a header value it was never shown; no parser-level desync results from it.
+
+## Attacking the fixes
+
+### F1 fix — extension spellings and encodings (`t_f1.py` battery, Phera vs php -S on the same site)
+
+Every shape below was requested from both servers; "runs" means the script
+executed (200, its output), "front" means the front controller answered:
+
+- Case variants `/secret.PHP`, `/secret.pHp`, `/secret.Php`, `/SECRET.php`,
+  `/SeCrEt.pHp`: **run** on both Phera and php -S.
+- Percent-encoded letters `/secret.p%68p`, `/secret.%70hp`, `/secret.p%68%70`,
+  `/secre%74.php`, `/%73ecret.php`, `/secret%2Ephp`: **run** on both (single
+  decode, then the case-insensitive extension check on the canonical path).
+- NUL `/secret.php%00`, `/secret.php%00.txt`, `/a%00b.php`: Phera 404 (decode
+  rejects NUL, `site.rs` `percent_decode`); php -S 400 or runs a truncated
+  path — Phera safe.
+- Trailing dots/spaces/slashes `/secret.php.`, `/secret.php%2e`,
+  `/secret.php%20`, `/secret.php/`, `/secret.php//`, `/secret.php/.`: front
+  controller on both (this macOS volume does not resolve `secret.php.` to
+  `secret.php` — verified with `stat`); a file literally named `trail.php.` or
+  `trail.php ` **is** served raw by both Phera and php -S (parity).
+- Unicode look-alikes (`/%EF%BC%90hp` full-width P, `p%C4%B0p`), 8.3 names
+  (`/SECRE~1.PHP`), alternate-data-stream shapes (`/secret.php:stream`,
+  `/secret.php/..namedfork/rsrc` and its percent-encoded form): front
+  controller / 404 on Phera — no source, and `eq_ignore_ascii_case` is
+  ASCII-only so no non-ASCII case folding can fake the extension.
+- Directory named `x.php` (`/x.php`, `/x.php/`): Phera falls back to the front
+  controller, no listing (php -S 404s).
+- Symlink with another name (`link-inside.txt` -> `secret.php`): **Phera runs
+  the script** because the extension is checked on the canonicalized path
+  (`site.rs:76-88`); php -S serves the target's source — Phera is strictly
+  safer here. `link-txt.php` -> `data.txt` serves the text on both.
+- Symlinks out of the site (`evil.php`, `link-out.txt`, `dirlink/...`): Phera
+  front controller (canonicalize + prefix test); php -S follows them out of the
+  docroot and serves the outside file.
+- PHP source under other extensions — `config.php5`, `page.phtml`, `lib.inc`,
+  `p.phar`, `config.php.bak`, `config.php~`, `config.php.swp`, `config.PHP.bak`,
+  `config.Php5` — is served as `application/octet-stream` raw source by
+  **both** Phera and php -S (byte-identical bodies); the hidden
+  `/.config.php.swp` is refused by Phera (hidden files 404). This matches real
+  PHP's built-in server, so it is recorded, not rated.
+
+**Conclusion:** the F1 fix holds against every spelling and encoding tried; no
+path was found that still serves `.php` source. The only source-serving cases
+left are files that are not `.php` by name, and those behave exactly like real
+PHP.
+
+### F2 fix — every response shape where the server now decides framing
+
+Battery `t_f2.py`/`t_f2b.py`/`t_f2c.py` (wire bytes inspected, pipelined second
+request sent after each), compared with php -S where useful:
+
+- `HEAD /head.php?n=50`: `content-length: 50`, no body. `HEAD /big.bin`:
+  `content-length: 52428800`, no body. `HEAD /cl.php` (script sets CL:5):
+  `content-length: 101`, no body — correct on all.
+- Statuses that must not have a body: `204`/`304` with a script echoing output
+  -> Phera sends no `content-length` and no body (php -S wrongly sends a
+  10-byte body after `204`); `205` -> `content-length: 10` + body, framing
+  consistent (same as php -S); `100`/`103` -> final `500` with
+  `content-length: 0` and the connection closed; `101` (script adds
+  `Upgrade:`) -> `101` sent, then the connection is closed — contained, no
+  desync, no stuck socket.
+- Script-set `Content-Length` larger than the body (`clbig.php`): server sends
+  `content-length: 1` + `x`. Script-set `Transfer-Encoding: chunked` with the
+  script writing its own chunk framing (`te.php`): TE dropped, server frames
+  `content-length: 15`, the chunk text is just body bytes.
+- Header-name shapes via `header()`: uppercase `CONTENT-LENGTH`, name with
+  trailing/leading space, duplicate CL (5 then 100000), CL+TE together, TE
+  twice, 10×CL + 10×TE, CL with empty/junk values (`-1`, `abc`, `1e20`, `0x10`,
+  `5, 6`): **all dropped** in every case (`connection.rs:123-124` matches the
+  normalized `HeaderName`, so case and surrounding whitespace cannot dodge
+  it); the server always frames with the true length.
+- `Connection`/`Keep-Alive` set by a script are passed through and honored
+  (`Connection: close` really closes the socket; `keep-alive` keeps it); a
+  junk value (`keep-alive, close`) is passed verbatim but framing stays
+  CL-based, so no desync. php -S emits duplicate `Connection` headers here;
+  Phera does not.
+- Keep-alive/pipelined desync attempts — after `cl.php`, `te.php`, a 204, a
+  304, a `HEAD`, and the 10×CL+TE case, a second pipelined request was always
+  answered with correct framing; leftover bytes never appeared on the wire.
+- HTTP/1.0: without `Connection` the response carries no `connection` header
+  and the socket closes after (a second request gets EOF); with
+  `Connection: keep-alive` two requests are answered on one 1.0 socket;
+  HTTP/1.1 `Connection: close` closes; 1.1 keep-alive answered 5/5 sequential;
+  a pipeline whose first request says `close` yields exactly one response then
+  close.
+
+**Conclusion:** the F2 fix holds; the server alone controls framing in every
+case tried, and no combination desynchronised a keep-alive or pipelined
+connection.
+
+### F6 fix — methods, content types, `$_REQUEST`
+
+Battery `t_f6.py`/`t_f6b.py` vs php -S: `GET`/`PUT`/`DELETE`/`PATCH`/`OPTIONS`/
+`HEAD`/`PROPFIND` with a form body all give `$_POST=[]` now (fixed). `POST` with
+a form body (plain or chunked), with charset parameter, upper/mixed-case media
+type, or surrounding OWS behaves identically to PHP. `$_REQUEST` is the
+GET+POST merge (PHP's default `request_order=GP`) in every case. Divergences
+found: F8 (method case) and F9 (duplicate Content-Type) above; a
+`Content-Type` list (`application/x-www-form-urlencoded, ...`) is *not* a form
+in Phera while php -S prefix-matches it — Phera is the stricter side.
+`multipart/form-data` still does not fill `$_POST` (known missing feature from
+round 1). Methods with trailing space/tab or a NUL in the header value are
+rejected with 400 by hyper (stricter than php -S).
+
+## Areas covered more deeply this round
+
+- **HTTP/1.0 clients and `Connection: close`:** see the F2 section — all
+  correct (close-by-default on 1.0, keep-alive honored, close honored,
+  pipelining with `close` drops the remainder as RFC 9112 requires).
+- **Extreme query strings** (`t_deep.py` part B): 1 MB query / 1 MB single key /
+  1 MB single value -> connection reset (hyper head cap); 20 000 params, 100 k
+  target, 50 000 bare params, 100 k `%` signs -> `414`; nesting 2000 deep ->
+  `200` in 0.00 s, the variable dropped at depth 64 while `QUERY_STRING` keeps
+  the raw 6 kB; invalid `%`, `%00`, `;` separators, `+` signs, empty query,
+  `%2f` in the path, `%3f` in the path all answered sanely and match round 1's
+  PHP-diffed semantics.
+- **Concurrency fairness** (`t_deep.py` part C, 1 worker): 10 slow keep-alive
+  clients (300 ms script) + 10 fast clients (30 requests each) + one request
+  running a 3 s PHP loop: 300/300 fast requests answered with 0.001 s median
+  latency (max 0.009 s), 60/60 slow answered at ~0.30 s, the loop request
+  completed in 3.01 s. No starvation.
+- **Requests during shutdown** (`t_deep.py` part D + big-write probe): SIGTERM
+  mid-load with an in-flight 300 ms script — the request was answered in full
+  (`200`, complete body) after the signal; the port then refused new
+  connections. SIGTERM while a 20 MB response was mid-write: the client
+  received all 20 971 520 bytes, `complete=True`, uncorrupted. The graceful
+  shutdown in `crates/server/src/worker.rs` (watcher + `shutdown_timeout`)
+  works.
+- **New surface since `cfed5d7`** (`git log cfed5d7..origin/main -- crates/server
+  crates/cli crates/runtime crates/extensions/http` = only `88a0bb4` +
+  `54093d2`): the time functions `sleep`/`usleep`
+  (`crates/extensions/standard/src/time.rs`) are async tokio sleeps. Negative
+  arguments raise `ValueError` exactly like PHP 8 (Phera answers 500 with the
+  message; php -S shows a fatal but sends 200 — Phera's status is the more
+  correct one). `usleep(PHP_INT_MAX)`/`sleep(PHP_INT_MAX)` park the request
+  without panicking (tokio clamps the deadline) and cost nothing but the task
+  and fd; measured: 60 concurrent `sleep(3600)` requests = 60 sockets and
+  ~15 MB RSS total, control-request latency 11 ms, worker never blocked —
+  strictly better than php -S, which is single-threaded and would block every
+  request for the hour. Holding such requests forever is the already-open F4
+  (no request timeout / connection cap), not a new class.
+- **Regression run of the round-1 batteries** (`attack_paths`,
+  `attack_parsing`, `attack_headers`, `attack_superglobals`,
+  `attack_isolation`) against the merged build: same results as round 1, no
+  panics, per-request isolation clean.
+
+## Round-2 fuzzing totals
+
+Mutation fuzzer `tests/security/http/fuzz.py` against freshly started 1-worker
+servers on `127.0.0.1:18412`, `nice -n 15`, one chunk per server restart,
+seeds varying. Harness note: round 1's `fuzz.py` had a bug in its liveness
+check (`alive()` passed an int status to `status_of`, so it always reported
+"not answering" at the first 200-request checkpoint); fixed in this branch —
+the server itself answered every control request (verified manually during the
+run). Totals: **FILL-IN-AFTER-CAMPAIGN** requests over **FILL-IN-AFTER-CAMPAIGN**
+wall-clock hours; status and anomaly distributions, and the panic check, per
+chunk in `logs/fuzz-summary.txt` of the test rig. Result: no panic, no exit,
+no stopped accept loop.
+
+---
+
+## Round 1 — original report (commit `cfed5d7`, branch `security/http-server`)
+
 Authorized defensive testing of Phera's built-in HTTP server, done from
 `security/http-server` against the release build of `cfed5d7`. Scope: the
 HTTP server and everything between a network request and a running PHP

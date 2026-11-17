@@ -18,13 +18,15 @@ itself.
 | `repro_f5_buffered_response_pinning.py` | F5: clients that stop reading pin whole buffered responses in memory. |
 | `repro_f6_post_on_get.py` | F6: `$_POST` is filled for GET/PUT form bodies (PHP only does POST). |
 | `repro_f7_error_path_leak.py` | F7: error bodies leak absolute filesystem paths. |
+| `repro_f8_lowercase_post_method.py` | F8 (round 2): `$_POST` filled for case-variant method tokens (`post`), which PHP rejects (methods are case-sensitive). |
+| `repro_f9_duplicate_content_type.py` | F9 (round 2): duplicate `Content-Type` headers make `$_POST` and `$_SERVER['CONTENT_TYPE']` disagree. |
 | `attack_paths.py` | Area 1 battery: traversal encodings, hidden files, symlinks, source disclosure shapes. |
 | `attack_parsing.py` | Area 2 battery: CL/TE conflicts, chunked malformations, control bytes, pipelining. |
 | `attack_headers.py` | Area 3 battery: CRLF/NUL/control-byte payloads through `header()`. |
 | `attack_superglobals.py` | Area 5 battery: nesting/param caps, duplicate keys, `$_SERVER` spoofing. |
 | `attack_isolation.py` | Area 6: per-request state on a single worker, across fatal errors, exit, disconnects. |
 | `attack_resources.py` | Area 4 battery (bounded): slow headers, huge declared bodies, idle keep-alives, 500 connections. |
-| `fuzz.py` | Area 8: mutation fuzzer over recorded valid requests; run for hours at low priority. |
+| `fuzz.py` | Area 8: mutation fuzzer over recorded valid requests; run for hours at low priority. (Round 2 fixed its `alive()` check, which passed an int to `status_of` and always aborted at the first checkpoint.) |
 | `lib.py` | Shared raw-socket helpers. |
 
 ## Running
