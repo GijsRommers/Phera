@@ -157,14 +157,15 @@ impl Vm {
     /// makes a closure of it instead of calling it.
     pub(crate) fn take_prepared_callee(&mut self) -> Result<Callee, NativeError> {
         let (call, details) = self.call_stack.pop_call()?;
-        self.registers.truncate(call.base());
-        match (call.callee, details.and_then(|details| details.callee)) {
+        let callee = match (call.callee, details.and_then(|details| details.callee)) {
             (crate::calls::prepared_call::PreparedCallee::Php(function), _) => {
-                Ok(self.function_callee(function))
+                self.php_callee(function, &call)
             }
             (_, Some(callee)) => Ok(callee),
             (_, None) => Err(internal_error!("prepared callee")),
-        }
+        };
+        self.registers.truncate(call.start());
+        callee
     }
 }
 

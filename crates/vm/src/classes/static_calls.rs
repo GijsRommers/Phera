@@ -60,7 +60,7 @@ impl Vm {
             .classes
             .get(name)
             .ok_or_else(|| NativeError::error(format!("Class \"{name}\" not found")))?;
-        let context = self.current().and_then(|frame| frame.method()).cloned();
+        let context = self.current().and_then(|frame| frame.method());
         let receiver = context
             .as_ref()
             .and_then(|context| context.receiver.clone())

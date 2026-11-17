@@ -31,7 +31,6 @@ impl Vm {
         let context = self
             .current()
             .and_then(|frame| frame.method())
-            .cloned()
             .ok_or_else(|| {
                 NativeError::error(format!(
                     "Cannot access \"{name}\" when no class scope is active"

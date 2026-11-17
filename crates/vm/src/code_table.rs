@@ -76,6 +76,9 @@ pub(crate) struct FunctionFacts {
     /// The declared return type's built-in types, when there is a return type.
     pub(crate) return_mask: Option<TypeMask>,
     pub(crate) shape: FunctionShape,
+    /// The class that declares this function as a method: a method frame's
+    /// class scope.
+    pub(crate) class: Option<crate::classes::ClassIndex>,
 }
 
 /// Whether entering a function is just moving arguments into place.
@@ -144,6 +147,7 @@ impl FunctionFacts {
             } else {
                 FunctionShape::Plain
             },
+            class: None,
         }
     }
 }
@@ -260,6 +264,15 @@ impl CodeTable {
         let function = self.declared(first, local);
         let facts = self.functions.get(function.index())?;
         (facts.unit_first == first).then_some((function, facts))
+    }
+
+    /// Record that `function` is a method of `class`, once the class is linked.
+    pub(crate) fn set_declaring_class(
+        &mut self,
+        function: FunctionIndex,
+        class: crate::classes::ClassIndex,
+    ) {
+        self.functions[function.index()].class = Some(class);
     }
 
     #[inline]

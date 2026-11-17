@@ -17,8 +17,7 @@ use phera_extension_api::{NativeError, NativeResult};
 use phera_value::{Value, to_php_string};
 
 use crate::calls::call_state::{CallTarget, Callee, ParameterSpec};
-use crate::calls::callback_binding::ArgumentBinding;
-use crate::calls::prepared_call::{CallDetails, PreparedCall, PreparedCallee};
+use crate::calls::prepared_call::{CallDetails, CallKind, PreparedCall, PreparedCallee};
 use crate::code_table::{CodeTable, FunctionIndex};
 use crate::{AccessPath, Vm};
 
@@ -166,29 +165,29 @@ impl Vm {
     /// Reserve the window of a call to a PHP function and record the call.
     #[inline]
     pub(crate) fn prepare_php_call(&mut self, function: FunctionIndex) {
-        let base = self.registers.len();
-        self.registers
-            .grow_to(base + php_window(&self.code, function));
-        let call = PreparedCall::new(PreparedCallee::Php(function), base);
-        self.call_stack.push_call(call, None);
+        let (code, stack, registers) = (&self.code, &mut self.call_stack, &mut self.registers);
+        crate::calls::php_windows::push_php_call(
+            code,
+            (stack, registers),
+            function,
+            CallKind::Function,
+            [],
+        );
     }
 
-    /// Reserve the window of a call to `callee` and record the call. A plain
-    /// PHP function needs only the record; anything else keeps its
+    /// Reserve the window of a call to `callee` and record the call. A call
+    /// to PHP code needs only the record; anything else keeps its
     /// description in the call's details.
     pub(crate) fn prepare_call(&mut self, callee: Callee) -> Result<(), NativeError> {
-        if let CallTarget::User(function) = callee.target
-            && matches!(callee.argument_binding, ArgumentBinding::Caller)
-        {
-            self.prepare_php_call(function);
-            return Ok(());
+        match self.prepare_php_callee(callee) {
+            Ok(()) => Ok(()),
+            Err(callee) => prepare_general(
+                &self.code,
+                &mut self.call_stack,
+                &mut self.registers,
+                callee,
+            ),
         }
-        prepare_general(
-            &self.code,
-            &mut self.call_stack,
-            &mut self.registers,
-            callee,
-        )
     }
 
     /// The following send routes to a named parameter rather than the next position.

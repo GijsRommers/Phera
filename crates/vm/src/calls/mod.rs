@@ -31,6 +31,7 @@ pub(crate) mod frame_extras;
 mod native;
 pub(crate) mod parameter_binding;
 pub(crate) mod pending;
+pub(crate) mod php_windows;
 pub(crate) mod prepared_call;
 pub(crate) mod registers;
 pub(crate) mod returns;
@@ -38,3 +39,4 @@ mod scope;
 pub(crate) mod sends;
 #[cfg(test)]
 mod tests;
+pub(crate) mod window_context;

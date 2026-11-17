@@ -94,7 +94,7 @@ impl Vm {
             .call_stack
             .pop()
             .ok_or_else(|| internal_error!("include return without frame"))?;
-        self.registers.truncate(frame.base());
+        self.registers.truncate(frame.start());
         for ScopeEntry { name, value } in entries {
             let register = self.named_slot(&name)?;
             if let Some(slot) = self.current_slot_mut(register) {

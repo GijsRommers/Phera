@@ -15,8 +15,10 @@ use phera_extension_api::NativeError;
 
 use crate::calls::call_stack::CallStack;
 use crate::calls::call_state::{CallTarget, Callee};
-use crate::calls::prepared_call::{CallDetails, Parameters, PreparedCall, PreparedCallee};
-use crate::code_table::{CodeTable, FunctionIndex};
+use crate::calls::prepared_call::{
+    CallDetails, CallFlags, Parameters, PreparedCall, PreparedCallee,
+};
+use crate::code_table::CodeTable;
 
 /// A prepared call together with what is needed to read about it.
 #[derive(Clone, Copy)]
@@ -68,14 +70,6 @@ impl<'a> CallView<'a> {
         self.details?.callee.as_ref()
     }
 
-    /// The PHP function the call enters, if its callee is PHP code.
-    pub(crate) fn function(&self) -> Option<FunctionIndex> {
-        match self.call.callee {
-            PreparedCallee::Php(function) => Some(function),
-            PreparedCallee::General => self.callee()?.php_function(),
-        }
-    }
-
     /// The callee's parameters.
     pub(crate) fn parameters(&self) -> Parameters<'a> {
         match (self.call.callee, self.callee()) {
@@ -90,6 +84,9 @@ impl<'a> CallView<'a> {
 
     /// The callee's name, as messages spell it.
     pub(crate) fn name(&self) -> &'a str {
+        if self.call.flags.contains(CallFlags::INVOKE) {
+            return "Closure::__invoke";
+        }
         match (self.call.callee, self.callee()) {
             (PreparedCallee::Php(function), _) => &self.code.function(function).name,
             (PreparedCallee::General, Some(callee)) => &callee.name,

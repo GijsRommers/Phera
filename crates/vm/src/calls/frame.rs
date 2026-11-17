@@ -22,6 +22,10 @@ use phera_value::{PhpArray, Value};
 
 use crate::AccessPath;
 use crate::calls::frame_extras::FrameExtras;
+use crate::calls::prepared_call::CallKind;
+use crate::calls::registers::Registers;
+use crate::calls::window_context::WindowContext;
+use crate::classes::{Class, ClassTable, MethodContext};
 use crate::code_table::{CodeTable, FunctionIndex};
 use crate::unit_caches::UnitCache;
 
@@ -59,6 +63,24 @@ impl FrameFlags {
     /// Native code called this function: its result goes back to Rust, not
     /// to a register.
     const CALLBACK: u16 = 1 << 1;
+    /// The frame runs a method: `$this` (or nothing, for a static method) is
+    /// in the register below its first.
+    const METHOD: u16 = 1 << 2;
+    /// The frame runs a constructor, which is a method whose call evaluates
+    /// to `$this`.
+    const CONSTRUCTOR: u16 = 1 << 3;
+    /// The frame runs a closure: the closure object is two registers below
+    /// its first, its bound `$this` (or nothing) one below.
+    const CLOSURE: u16 = 1 << 4;
+
+    fn of_kind(kind: CallKind) -> u16 {
+        match kind {
+            CallKind::Function => 0,
+            CallKind::Method => Self::METHOD,
+            CallKind::Constructor => Self::METHOD | Self::CONSTRUCTOR,
+            CallKind::Closure => Self::CLOSURE,
+        }
+    }
 }
 
 const _: () = assert!(std::mem::size_of::<Frame>() == 16);
@@ -66,7 +88,18 @@ const _: () = assert!(std::mem::size_of::<Frame>() == 16);
 impl Frame {
     /// A frame about to run `function` from its first instruction.
     pub(crate) fn new(function: FunctionIndex, base: usize, destination: Option<Reg>) -> Self {
-        let mut flags = FrameFlags::default();
+        Self::of_kind(function, CallKind::Function, base, destination)
+    }
+
+    /// A frame of `kind` whose first parameter is at register `base`.
+    #[inline]
+    pub(crate) fn of_kind(
+        function: FunctionIndex,
+        kind: CallKind,
+        base: usize,
+        destination: Option<Reg>,
+    ) -> Self {
+        let mut flags = FrameFlags(FrameFlags::of_kind(kind));
         if destination.is_none() {
             flags.0 |= FrameFlags::CALLBACK;
         }
@@ -83,6 +116,28 @@ impl Frame {
     #[inline]
     pub(crate) fn base(&self) -> usize {
         self.base as usize
+    }
+
+    /// What kind of code the frame runs.
+    #[inline]
+    pub(crate) fn kind(&self) -> CallKind {
+        let flags = self.flags.0;
+        if flags & FrameFlags::CONSTRUCTOR != 0 {
+            CallKind::Constructor
+        } else if flags & FrameFlags::METHOD != 0 {
+            CallKind::Method
+        } else if flags & FrameFlags::CLOSURE != 0 {
+            CallKind::Closure
+        } else {
+            CallKind::Function
+        }
+    }
+
+    /// Where the frame's window starts, below its first register when it
+    /// keeps `$this` or a closure there. Returning empties from here.
+    #[inline]
+    pub(crate) fn start(&self) -> usize {
+        self.base() - self.kind().prefix()
     }
 
     /// The next instruction to run.
@@ -128,6 +183,8 @@ pub(crate) struct FrameView<'a> {
     pub(crate) frame: Frame,
     pub(crate) code: &'a CodeTable,
     pub(crate) extras: &'a FrameExtras,
+    pub(crate) registers: &'a Registers,
+    pub(crate) classes: &'a ClassTable,
 }
 
 impl<'a> FrameView<'a> {
@@ -156,14 +213,43 @@ impl<'a> FrameView<'a> {
         self.code.local(self.frame.function)
     }
 
-    /// The class context of a method frame.
-    pub(crate) fn method(&self) -> Option<&'a crate::classes::MethodContext> {
-        self.extras.method.as_ref()
+    /// What the frame's window holds below its first register: `$this`, the
+    /// closure, and from them the class scope and the called class.
+    pub(crate) fn context(&self) -> WindowContext<'a> {
+        WindowContext {
+            kind: self.frame.kind(),
+            function: self.frame.function,
+            base: self.base(),
+            called: self.extras.called,
+            code: self.code,
+            registers: self.registers,
+            classes: self.classes,
+        }
     }
 
-    /// The closure object a frame runs, which keeps its captures alive.
+    /// `$this` of a method or closure frame.
+    pub(crate) fn this(&self) -> Option<&'a Rc<phera_value::Object>> {
+        self.context().this()
+    }
+
+    /// The closure object a closure frame runs.
     pub(crate) fn closure(&self) -> Option<&'a Rc<phera_value::Object>> {
-        self.extras.closure.as_ref()
+        self.context().closure()
+    }
+
+    /// The class scope (`self::`).
+    pub(crate) fn scope(&self) -> Option<&'a Rc<Class>> {
+        self.context().scope()
+    }
+
+    /// The called class (`static::`).
+    pub(crate) fn called(&self) -> Option<Rc<Class>> {
+        self.context().called()
+    }
+
+    /// The class context of a method or closure frame.
+    pub(crate) fn method(&self) -> Option<MethodContext> {
+        self.context().method()
     }
 
     /// How many registers belong to the frame: its declared registers plus
@@ -176,10 +262,7 @@ impl<'a> FrameView<'a> {
 
     /// Local operands address only this activation, excluding saved arguments.
     #[inline]
-    pub(crate) fn slots<'r>(
-        &self,
-        registers: &'r crate::calls::registers::Registers,
-    ) -> &'r [Option<Value>] {
+    pub(crate) fn slots<'r>(&self, registers: &'r Registers) -> &'r [Option<Value>] {
         registers.window(self.base(), self.count())
     }
 

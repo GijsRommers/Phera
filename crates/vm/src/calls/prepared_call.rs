@@ -29,6 +29,11 @@ use crate::code_table::FunctionIndex;
 #[derive(Clone, Copy)]
 pub(crate) struct PreparedCall {
     pub(crate) callee: PreparedCallee,
+    pub(crate) kind: CallKind,
+    /// The called class (`static::`) of a static method call, when it is not
+    /// the class that declares the method. An instance method's called class
+    /// is the class of `$this`.
+    pub(crate) called: Option<crate::classes::ClassIndex>,
     /// Where the callee's first parameter goes in the register stack.
     base: u32,
     /// One past the highest argument position filled so far.
@@ -48,6 +53,35 @@ pub(crate) enum PreparedCallee {
     General,
 }
 
+/// What kind of code a call runs, which says what its window holds below
+/// the first parameter.
+///
+/// ```text
+/// function:     [ $a, $b, locals... ]
+/// method:       [ $this | $a, $b, locals... ]       (empty for a static method)
+/// closure:      [ closure, $this | $a, locals... ]  ($this empty when unbound)
+/// ```
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum CallKind {
+    Function,
+    Method,
+    /// A constructor called by `new`: the call evaluates to `$this`.
+    Constructor,
+    Closure,
+}
+
+impl CallKind {
+    /// How many registers the window holds below the first parameter.
+    #[inline]
+    pub(crate) fn prefix(self) -> usize {
+        match self {
+            Self::Function => 0,
+            Self::Method | Self::Constructor => 1,
+            Self::Closure => 2,
+        }
+    }
+}
+
 /// Small facts about a prepared call, one bit each.
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct CallFlags(u8);
@@ -60,6 +94,10 @@ impl CallFlags {
     pub(crate) const NAMED: Self = Self(1 << 1);
     /// The call has an entry on the details stack.
     pub(crate) const DETAILS: Self = Self(1 << 2);
+    /// The call is an explicit `Closure::__invoke`: it binds its arguments
+    /// as an internal function does (weakly typed, without the caller's
+    /// location in errors), and messages name it `Closure::__invoke`.
+    pub(crate) const INVOKE: Self = Self(1 << 3);
 
     pub(crate) fn contains(self, flag: Self) -> bool {
         self.0 & flag.0 != 0
@@ -73,9 +111,18 @@ impl CallFlags {
 impl PreparedCall {
     /// A call to `callee` whose first parameter goes to register `base`.
     pub(crate) fn new(callee: PreparedCallee, base: usize) -> Self {
+        Self::of_kind(callee, CallKind::Function, base)
+    }
+
+    /// A call of `kind` whose window starts at register `start`: its first
+    /// parameter goes after what the kind keeps below it.
+    #[inline]
+    pub(crate) fn of_kind(callee: PreparedCallee, kind: CallKind, start: usize) -> Self {
         Self {
             callee,
-            base: base as u32,
+            kind,
+            called: None,
+            base: (start + kind.prefix()) as u32,
             sent: 0,
             counted: 0,
             flags: CallFlags::default(),
@@ -86,6 +133,13 @@ impl PreparedCall {
     #[inline]
     pub(crate) fn base(&self) -> usize {
         self.base as usize
+    }
+
+    /// Where the call's window starts: `$this` or the closure object, if the
+    /// kind keeps one, else the first parameter.
+    #[inline]
+    pub(crate) fn start(&self) -> usize {
+        self.base() - self.kind.prefix()
     }
 
     /// The register stack moved up by one below this call's window (a

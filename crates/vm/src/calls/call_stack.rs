@@ -63,7 +63,7 @@ impl CallStack {
     pub(crate) fn has_calls_from(&self, base: usize) -> bool {
         self.preparing
             .last()
-            .is_some_and(|call| call.base() >= base)
+            .is_some_and(|call| call.start() >= base)
     }
 
     /// The frame at `depth` (0 is the script's top-level code).
@@ -263,11 +263,14 @@ impl CallStack {
 
 #[cfg(test)]
 impl CallStack {
-    /// Stress tests ensure inactive depths retain no closure owners.
+    /// Stress tests ensure that the side-table entries of depths no frame
+    /// uses hold nothing (closures and `$this` live in the registers, which
+    /// returning empties).
     pub(crate) fn retained_exception_values(&self) -> usize {
         self.extras
             .iter()
-            .map(|extra| usize::from(extra.closure.is_some()))
+            .skip(self.frames.len())
+            .map(|extra| usize::from(extra.called.is_some() || !extra.holds_only_called_class()))
             .sum()
     }
 

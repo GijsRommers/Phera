@@ -17,8 +17,7 @@ use phera_value::Value;
 use crate::calls::call_state::CallTarget;
 use crate::calls::execution_loop::{Machine, Position, Step};
 use crate::calls::frame::Frame;
-use crate::calls::prepared_call::{CallFlags, PreparedCallee};
-use crate::classes::MethodContext;
+use crate::calls::prepared_call::{CallFlags, CallKind, PreparedCallee};
 use crate::code_table::{FunctionIndex, FunctionShape};
 
 impl Machine<'_> {
@@ -89,10 +88,10 @@ impl Machine<'_> {
             return Step::Slow;
         };
         let depth = self.stack.depth();
-        if (frame.has_extras() && !self.stack.extras(depth - 1).holds_only_call_context())
+        if (frame.has_extras() && !self.stack.extras(depth - 1).holds_only_called_class())
             || self.stack.depth() <= self.stop + 1
             || self.code.local(frame.function).is_none()
-            || self.stack.has_calls_from(frame.base())
+            || self.stack.has_calls_from(frame.start())
         {
             return Step::Slow;
         }
@@ -122,17 +121,13 @@ impl Machine<'_> {
         {
             return Step::Slow;
         }
-        let constructed = match frame.has_extras() {
-            true => self.stack.extras(depth - 1).constructed_object().cloned(),
-            false => None,
-        };
-        let value = match (constructed, source) {
-            (Some(object), _) => Value::Object(object),
-            (None, Some(source)) => self.registers.take(frame.base() + source.index()),
-            (None, None) => Value::Null,
+        let value = match (frame.kind(), source) {
+            (CallKind::Constructor, _) => self.registers.take(frame.base() - 1),
+            (_, Some(source)) => self.registers.take(frame.base() + source.index()),
+            (_, None) => Value::Null,
         };
         self.stack.pop();
-        self.registers.truncate(frame.base());
+        self.registers.truncate(frame.start());
         self.registers
             .put(caller.base() + destination.index(), value);
         Step::Switched(Position {
@@ -214,31 +209,28 @@ impl Machine<'_> {
         })
     }
 
-    /// `Call` of a prepared function or method written in PHP whose
+    /// `Call` of a prepared function, method or closure written in PHP whose
     /// arguments all arrived positionally and passed their checks: push the
-    /// frame, with the method's class context beside it.
+    /// frame. `$this` and a closure's captures are in the window already.
     #[inline(always)]
     pub(super) fn enter_prepared(&mut self, position: Position, destination: Reg) -> Step {
         let Some(call) = self.stack.last_call().copied() else {
             return Step::Slow;
         };
-        let callee = self
-            .stack
-            .top_details()
-            .and_then(|details| details.callee.as_ref());
-        if let Some(CallTarget::Constructed(_)) = callee.map(|callee| &callee.target) {
-            return self.finish_construction(position, destination);
-        }
-        let function = match call.callee {
-            PreparedCallee::Php(function) => Some(function),
-            PreparedCallee::General => callee.and_then(|callee| callee.php_function()),
-        };
-        let Some(function) = function else {
-            return Step::Slow;
+        let PreparedCallee::Php(function) = call.callee else {
+            let callee = self
+                .stack
+                .top_details()
+                .and_then(|details| details.callee.as_ref());
+            return match callee.map(|callee| &callee.target) {
+                Some(CallTarget::Constructed(_)) => self.finish_construction(position, destination),
+                _ => Step::Slow,
+            };
         };
         let facts = self.code.facts(function);
         let sent = call.sent as usize;
         if !call.is_plain()
+            || call.flags.contains(CallFlags::INVOKE)
             || sent < facts.required as usize
             || sent > facts.parameters as usize
             || facts.shape != FunctionShape::Plain
@@ -246,27 +238,15 @@ impl Machine<'_> {
         {
             return Step::Slow;
         }
-        let Ok((call, details)) = self.stack.pop_call() else {
+        let Ok((call, _)) = self.stack.pop_call() else {
             return Step::Slow;
         };
-        let (target, owner) = details.map_or((None, None), |details| {
-            (details.callee.map(|callee| callee.target), details.owner)
-        });
-        let (method, closure) = match target {
-            Some(CallTarget::Method { context, .. }) => (Some(context), owner),
-            Some(CallTarget::Closure(object)) => {
-                let context = self.copy_captures(&object, function, call.base());
-                (context, Some(object))
-            }
-            _ => (None, owner),
-        };
         self.publish(position.ip);
-        let frame = Frame::new(function, call.base(), Some(destination));
+        let frame = Frame::of_kind(function, call.kind, call.base(), Some(destination));
         self.stack.push(frame);
-        if method.is_some() || closure.is_some() || sent < facts.parameters as usize {
+        if call.called.is_some() || sent < facts.parameters as usize {
             let extras = self.stack.current_extras_mut();
-            extras.method = method;
-            extras.closure = closure;
+            extras.called = call.called;
             if sent < facts.parameters as usize {
                 extras.arguments.supplied = Some(sent);
                 extras.arguments.count = Some(call.counted as usize);
@@ -284,7 +264,7 @@ impl Machine<'_> {
         let Ok((call, details)) = self.stack.pop_call() else {
             return Step::Slow;
         };
-        self.registers.truncate(call.base());
+        self.registers.truncate(call.start());
         let target = details
             .and_then(|details| details.callee)
             .map(|callee| callee.target);
@@ -293,26 +273,5 @@ impl Machine<'_> {
             self.registers.put(slot, Value::Object(object));
         }
         Step::Done(position.ip)
-    }
-
-    /// Copy a closure's captured values into the registers after its
-    /// parameters, and return the class context it was created in.
-    fn copy_captures(
-        &mut self,
-        object: &std::rc::Rc<phera_value::Object>,
-        function: FunctionIndex,
-        base: usize,
-    ) -> Option<MethodContext> {
-        let native = object.native.borrow();
-        let state = native
-            .as_ref()?
-            .downcast_ref::<crate::closures::ClosureState>()?;
-        let offset = base + self.code.function(function).parameters.len();
-        for (index, value) in state.captures.iter().enumerate() {
-            if let Some(value) = value {
-                self.registers.put(offset + index, value.clone());
-            }
-        }
-        state.context.clone()
     }
 }

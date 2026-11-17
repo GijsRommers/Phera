@@ -334,9 +334,15 @@ impl Vm {
         let is_throwable = parent.as_ref().is_some_and(|parent| parent.is_throwable)
             || interfaces.iter().any(|interface| interface.is_throwable);
         self.classes.order.push(name.clone());
-        self.classes.entries.insert(
+        let index = self.classes.next_index();
+        for method in &declaration.methods {
+            let function = self.code.index_in(&unit, Some(method.function.index()));
+            self.code.set_declaring_class(function, index);
+        }
+        self.classes.insert(
             name.to_ascii_lowercase(),
             Rc::new_cyclic(|identity| Class {
+                index,
                 origin: super::class::ClassOrigin::User,
                 identity: identity.clone(),
                 declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),

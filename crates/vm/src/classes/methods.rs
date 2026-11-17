@@ -139,11 +139,9 @@ impl Vm {
             .initializer_scope
             .as_ref()
             .and_then(|name| self.classes.get(name));
-        let scope = initializer_scope.as_ref().or_else(|| {
-            self.current()
-                .and_then(|frame| frame.method())
-                .map(|context| &context.scope)
-        });
+        let scope = initializer_scope
+            .as_ref()
+            .or_else(|| self.current().and_then(|frame| frame.scope()));
         let allowed = match method.visibility {
             Visibility::Public => true,
             Visibility::Private => scope.is_some_and(|scope| scope.name == method.declaring),

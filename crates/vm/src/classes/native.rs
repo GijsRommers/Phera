@@ -12,9 +12,11 @@ impl ClassTable {
     pub(crate) fn native(registry: &phera_extension_api::Registry) -> Self {
         let mut table = Self::default();
         table.order.push("stdClass".into());
-        table.entries.insert(
+        let index = table.next_index();
+        table.insert(
             "stdclass".into(),
             Rc::new_cyclic(|identity| Class {
+                index,
                 origin: super::class::ClassOrigin::Native,
                 identity: identity.clone(),
                 declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
@@ -146,9 +148,11 @@ impl ClassTable {
                 || interfaces
                     .iter()
                     .any(|interface: &Rc<Class>| interface.is_throwable);
-            table.entries.insert(
+            let index = table.next_index();
+            table.insert(
                 entry.name.to_ascii_lowercase(),
                 Rc::new_cyclic(|identity| Class {
+                    index,
                     origin: if entry.name == "Closure" {
                         super::class::ClassOrigin::Closure
                     } else {
