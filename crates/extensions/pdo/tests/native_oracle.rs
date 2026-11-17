@@ -45,6 +45,8 @@ fn queries(driver: &str) -> Vec<&'static str> {
 
 #[tokio::test(flavor = "current_thread")]
 async fn native_fetch_types_and_modes_match_php() {
+    tokio::task::LocalSet::new().run_until(async {
+
     if !support::databases_available() {
         return;
     }
@@ -103,7 +105,7 @@ async fn native_fetch_types_and_modes_match_php() {
                 }
             }
         }
-        let expected = Command::new(support::PHP)
+        let expected = Command::new(support::php())
             .args(["-r", &php])
             .output()
             .unwrap();
@@ -123,7 +125,7 @@ async fn native_fetch_types_and_modes_match_php() {
                 format!("{}\nPHP {expected}\nPDO {actual}", labels[index])
             })
             .collect();
-        let log = std::path::Path::new(support::SCRATCH).join(format!("native-{driver}.log"));
+        let log = support::scratch().join(format!("native-{driver}.log"));
         std::fs::write(log, differences.join("\n")).unwrap();
         assert_eq!(actual.len(), expected.len());
         assert!(
@@ -138,4 +140,5 @@ async fn native_fetch_types_and_modes_match_php() {
             actual.len()
         );
     }
+    }).await;
 }

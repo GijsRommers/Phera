@@ -197,7 +197,7 @@ impl Vm {
                                     phera_value::ArrayKey::Int(index) => {
                                         phera_value::ArrayKey::str(index.to_string())
                                     }
-                                    key => key.clone(),
+                                    key => key,
                                 };
                                 object.set(key, value.clone());
                             }

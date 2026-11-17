@@ -10,6 +10,10 @@ license.workspace = true
 # be prepared in advance; the standard library's default is several times
 # slower on the short keys PHP arrays have.
 foldhash.workspace = true
+hashbrown.workspace = true
+
+[dev-dependencies]
+phera-extension-api.workspace = true
 
 [lints]
 workspace = true

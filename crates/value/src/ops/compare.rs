@@ -343,7 +343,7 @@ fn compare_arrays(a: &PhpArray, b: &PhpArray, d: &mut dyn Diagnostics) -> Result
     while let Some(mut cur) = stack.pop() {
         while let Some(pos) = cur.pos {
             let (k, v) = cur.a.entry_at(pos).unwrap();
-            let bv = match cur.b.get(k) {
+            let bv = match cur.b.get(&k) {
                 Some(bv) => bv,
                 None => return Ok(1),
             };

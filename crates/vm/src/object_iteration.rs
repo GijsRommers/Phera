@@ -28,17 +28,25 @@ impl Vm {
             let Some((stored_key, value)) = properties.entry_at(index) else {
                 break;
             };
-            let name = crate::path_update::property_name(stored_key);
+            let name = crate::path_update::property_name(&stored_key);
             if self
                 .property_key(object, &name)
-                .is_ok_and(|resolved| resolved == *stored_key)
+                .is_ok_and(|resolved| resolved == stored_key)
             {
-                self.check_iteration_reference(object, stored_key)?;
+                self.check_iteration_reference(object, &stored_key)?;
                 let reference = if value.is_reference() {
                     value.clone()
                 } else {
                     Value::Reference(Rc::new(RefCell::new(value.clone())))
                 };
+                if let Value::Reference(cell) = &reference {
+                    crate::reference_holders::ReferenceHolders::track_object(
+                        &self.property_references,
+                        object,
+                        &stored_key,
+                        cell,
+                    )?;
+                }
                 object.set(stored_key.clone(), reference.clone());
                 state.position = Some(index);
                 state.started = true;
@@ -59,6 +67,7 @@ impl Vm {
             }
             position = properties.next_position(index);
         }
+        self.release_iterator_subject(state)?;
         self.jump(end)
     }
 

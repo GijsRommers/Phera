@@ -146,7 +146,7 @@ fn trace_arguments(vm: &Vm, frame: FrameView<'_>) -> Value {
                             let _ = arguments.push(value.deref().clone());
                         }
                         key => {
-                            arguments.insert(key.clone(), value.deref().clone());
+                            arguments.insert(key, value.deref().clone());
                         }
                     }
                 }

@@ -186,6 +186,25 @@ impl Vm {
         )?;
         for constant in &declaration.constants {
             let constant_name = unit.names[constant.name.index()].clone();
+            if let Some(inherited) = constants.get(&constant_name) {
+                let narrower = match inherited.visibility {
+                    Visibility::Public => constant.visibility != Visibility::Public,
+                    Visibility::Protected => constant.visibility == Visibility::Private,
+                    Visibility::Private => false,
+                };
+                if narrower {
+                    let visibility = match inherited.visibility {
+                        Visibility::Public => "public",
+                        Visibility::Protected => "protected",
+                        Visibility::Private => unreachable!(),
+                    };
+                    return Err(NativeError::error(format!(
+                        "Access level to {name}::{constant_name} must be {visibility} \
+                         (as in class {})",
+                        inherited.declaring
+                    )));
+                }
+            }
             if constants
                 .get(&constant_name)
                 .is_some_and(|constant| constant.is_final)
@@ -196,16 +215,38 @@ impl Vm {
                      {declaring}::{constant_name}"
                 )));
             }
+            if let Some(inherited) = constants.get(&constant_name)
+                && inherited.visibility != Visibility::Private
+                && let Some(expected) = &inherited.ty
+            {
+                let declared = constant.ty.map(|index| &unit.types[index.index()]);
+                let compatible = self.type_subset(
+                    declared.map(|declared| declared.display.as_str()),
+                    name,
+                    Some(&expected.display),
+                    &inherited.declaring,
+                    &unit,
+                );
+                if !compatible {
+                    return Err(NativeError::error(format!(
+                        "Type of {name}::{constant_name} must be compatible with \
+                         {}::{constant_name} of type {}",
+                        inherited.declaring, expected.display
+                    )));
+                }
+            }
             constants.insert(
                 constant_name,
                 Rc::new(super::LinkedConstant {
                     declaring: name.clone(),
                     visibility: constant.visibility,
                     is_final: constant.is_final,
-                    initializer: self
-                        .code
-                        .index_in(&unit, Some(constant.initializer.index())),
-                    state: std::cell::RefCell::new(super::ConstantState::Uninitialized),
+                    initializer: super::class::ConstantInitializer::Compiled {
+                        function: self
+                            .code
+                            .index_in(&unit, Some(constant.initializer.index())),
+                        state: std::cell::RefCell::new(super::ConstantState::Uninitialized),
+                    },
                     ty: constant.ty.map(|index| unit.types[index.index()].clone()),
                 }),
             );
@@ -227,13 +268,11 @@ impl Vm {
                 }
                 _ => phera_value::Value::Null,
             };
-            let value = if property.is_static {
-                phera_value::Value::Reference(Rc::new(std::cell::RefCell::new(value)))
-            } else {
-                value
-            };
             let mut linked = PropertyDefault {
                 key: key.clone(),
+                static_storage: property
+                    .is_static
+                    .then(|| crate::reference_holders::StaticProperty::new(value.clone())),
                 value,
                 name: property_name.clone(),
                 declaring: name.clone(),
@@ -258,8 +297,8 @@ impl Vm {
                 .and_then(|reference| super::class::literal_initializer(&self.code, reference))
             {
                 if property.is_static {
-                    if let phera_value::Value::Reference(cell) = &linked.value {
-                        *cell.borrow_mut() = value;
+                    if let Some(storage) = &linked.static_storage {
+                        *storage.reference.borrow().borrow_mut() = value;
                     }
                 } else {
                     linked.value = value;

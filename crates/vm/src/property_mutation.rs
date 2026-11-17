@@ -64,6 +64,7 @@ impl Vm {
         let property = class
             .static_properties
             .iter()
+            .rev()
             .find(|property| property.name == name)
             .ok_or_else(|| internal_error!("static property"))?;
         if let Some(declaration_type) = &property.ty {
@@ -170,6 +171,11 @@ impl Vm {
                                 ),
                             );
                         }
+                    }
+                    if mutation == Mutation::Bind && steps.peek().is_none() {
+                        crate::reference_holders::ReferenceHolders::check_object_storage(
+                            object, key,
+                        )?;
                     }
                     current = crate::property_storage::read(object, key)
                         .unwrap_or_default()

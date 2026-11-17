@@ -197,6 +197,7 @@ impl Vm {
         }
         let cloned = self.classes.allocate(class);
         cloned.update(|properties| *properties = original.to_array());
+        self.track_object_property_references(&cloned)?;
         self.set(destination, Value::Object(cloned));
         Ok(())
     }

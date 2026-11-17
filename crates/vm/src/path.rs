@@ -52,6 +52,14 @@ impl AccessPath {
         }
     }
 
+    /// Iterator-created local paths name their owned subject scratch register.
+    pub(crate) fn local_register(&self) -> Option<Reg> {
+        match self.source {
+            PathSource::Local(register) if self.key.is_none() => Some(register),
+            _ => None,
+        }
+    }
+
     /// Borrow a compiled path while the access handle keeps its owning unit alive.
     fn definition(&self) -> Result<Option<&Path>, NativeError> {
         let PathSource::Compiled {

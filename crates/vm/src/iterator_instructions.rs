@@ -24,10 +24,14 @@ impl Vm {
 
     /// Implements PHP IterEnd semantics outside the dispatch loop.
     pub(crate) fn end_iterator(&mut self, iterator: IterId) -> Result<(), NativeError> {
-        self.call_stack
+        let state = self
+            .call_stack
             .current_extras_mut()
             .iterators
             .remove(&iterator.0);
+        if let Some(mut state) = state {
+            self.release_iterator_subject(&mut state)?;
+        }
         Ok(())
     }
 }

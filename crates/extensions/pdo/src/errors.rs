@@ -31,6 +31,8 @@ impl DbError {
             "00000" => "No error",
             "HY093" => "Invalid parameter number",
             "42P01" => "Undefined table",
+            "42P02" => "Undefined parameter",
+            "42P18" => "Indeterminate datatype",
             "42703" => "Undefined column",
             "42601" => "Syntax error",
             "42000" => "Syntax error or access violation",
@@ -41,6 +43,7 @@ impl DbError {
             "22P02" => "Invalid text representation",
             "22012" => "Division by zero",
             "08006" => "Connection failure",
+            "08P01" => "<<Unknown error>>",
             "42S02" => "Base table or view not found",
             "42S22" => "Column not found",
             "IM001" => "Driver does not support this function",
@@ -65,9 +68,7 @@ impl DbError {
                 context.warning(format!("{method}(): {}", self.message()));
                 Ok(Value::Bool(false))
             }
-            // The extension API cannot yet attach SQLSTATE string codes or errorInfo.
-            // Keep the real message, and document the missing exception payload in REPORT.md.
-            ErrorMode::Exception => Err(NativeError::throw("PDOException", self.message())),
+            ErrorMode::Exception => Err(exception(self.message(), Some(self), 0)),
         }
     }
 }
@@ -115,7 +116,38 @@ impl ErrorState {
 }
 
 pub fn unsupported(feature: &str) -> NativeError {
-    NativeError::throw("PDOException", format!("{feature} is not supported yet"))
+    exception(format!("{feature} is not supported yet"), None, 0)
+}
+
+/// Every PDOException is built here.
+///
+/// ```php
+/// try { $pdo->query('SELECT * FROM missing'); }
+/// catch (PDOException $e) {
+///     $e->getCode();     // "42P01": the SQLSTATE, a string
+///     $e->errorInfo;     // ["42P01", 7, "ERROR:  relation ... does not exist"]
+/// }
+/// ```
+///
+/// With a driver error, the exception carries the SQLSTATE as its code and the
+/// three-element `errorInfo` array. A failed connection is the one case where
+/// PHP reports the driver's own number as the code, so a non-zero `code` wins.
+/// Without a driver error (a misuse caught by PDO itself) there is only the
+/// message and the numeric code.
+pub fn exception(message: impl Into<String>, error: Option<&DbError>, code: i64) -> NativeError {
+    let thrown = NativeError::throw("PDOException", message);
+    let Some(error) = error else {
+        return thrown.with_code(code);
+    };
+    let thrown = if code == 0 {
+        thrown.with_code(error.state.as_str())
+    } else {
+        thrown.with_code(code)
+    };
+    match ErrorState::Failed(error.clone()).info() {
+        Ok(information) => thrown.with_property("errorInfo", information),
+        Err(_) => thrown,
+    }
 }
 
 #[cfg(test)]

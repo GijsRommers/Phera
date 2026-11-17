@@ -10,10 +10,10 @@ impl Vm {
     pub(crate) fn visible_properties(&self, object: &phera_value::Object) -> phera_value::PhpArray {
         let mut result = phera_value::PhpArray::new();
         for (key, value) in object.to_array().iter() {
-            let name = crate::path_update::property_name(key);
+            let name = crate::path_update::property_name(&key);
             if self
                 .property_key(object, &name)
-                .is_ok_and(|resolved| resolved == *key)
+                .is_ok_and(|resolved| resolved == key)
             {
                 result.insert(ArrayKey::str(name), value.deref().clone());
             }
@@ -36,7 +36,10 @@ impl Vm {
             let value = if let Some(initializer) = &property.initializer {
                 self.evaluate_initializer(initializer, &property.declaring)?
             } else {
-                property.value.deref().clone()
+                property.static_storage.as_ref().map_or_else(
+                    || property.value.deref().clone(),
+                    |storage| storage.reference.borrow().borrow().deref().clone(),
+                )
             };
             result.insert(ArrayKey::str(property.name.as_bytes()), value);
         }
@@ -110,13 +113,17 @@ impl Vm {
         if !property.static_initialized.get() {
             if let Some(initializer) = &property.initializer {
                 let value = self.evaluate_initializer(initializer, &property.declaring)?;
-                if let Value::Reference(cell) = &property.value {
-                    *cell.borrow_mut() = value;
+                if let Some(storage) = &property.static_storage {
+                    *storage.reference.borrow().borrow_mut() = value;
                 }
             }
             property.static_initialized.set(true);
         }
-        Ok(property.value.clone())
+        let storage = property
+            .static_storage
+            .as_ref()
+            .ok_or_else(|| internal_error!("static storage"))?;
+        Ok(Value::Reference(storage.reference.borrow().clone()))
     }
 
     /// Read declared and dynamic properties with PHP's quiet-access behavior.

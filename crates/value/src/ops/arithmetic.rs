@@ -11,8 +11,8 @@ use crate::value::Value;
 fn array_union(a: &PhpArray, b: &PhpArray) -> Value {
     let mut out = a.clone();
     for (k, v) in b.iter() {
-        if !out.contains_key(k) {
-            out.insert(k.clone(), v.clone());
+        if !out.contains_key(&k) {
+            out.insert(k, v.clone());
         }
     }
     Value::Array(std::rc::Rc::new(out))

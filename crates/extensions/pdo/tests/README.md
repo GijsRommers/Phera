@@ -10,7 +10,8 @@ docker run -d --name phera-test-mysql -e MYSQL_DATABASE=phera_test -e MYSQL_USER
 Wait until both accept connections. PHP 8.5 at `/opt/homebrew/bin/php` must have
 `pdo_pgsql` and `pdo_mysql`. Each oracle script creates a uniquely named table and
 drops it in `finally`; run the suite serially rather than launching duplicate suites.
-There are 47 scripts per driver, including five application scenarios per driver.
+There are 94 original scripts, plus fetch/binding/factory/transaction/metadata/type oracles.
+The original scripts include five application scenarios per driver.
 
 ```sh
 cargo test -p phera-ext-pdo -- --nocapture
@@ -20,8 +21,8 @@ cargo fmt -p phera-ext-pdo --check
 cargo clippy -p phera-ext-pdo --no-deps --all-targets -- -D warnings
 ```
 
-Without `PHERA_BIN`, the CLI tests print a skip notice. Without the databases or
-PHP, database tests print a skip notice. Once prerequisites exist, mismatches fail;
+Without `PHERA_BIN`, the CLI tests print a skip notice. Live pool tests require both databases and fail if unavailable. Some older tests
+print a skip notice without the databases or PHP. Once prerequisites exist, mismatches fail;
 there are no expected-failure exclusions. Outputs are saved in the task's authorized
 scratch directory under `pdo/oracle`. `native.rs` calls registered methods directly;
 it does not prove compiler/VM integration. `concurrency.rs` runs the actual CLI with
@@ -30,13 +31,39 @@ within two seconds for each driver.
 
 ## Current integration blockers
 
-HEAD 652efcc does not register PDO in the runtime, contrary to the task premise.
-The owner needs to add `phera-ext-pdo.workspace = true` to `crates/runtime/Cargo.toml`
-and `registry.load(&phera_ext_pdo::Pdo)` to `Runtime::new`. Those files are outside
-this implementation's scope. Until then the CLI oracle and concurrency tests fail
-with `Class "PDO" not found` rather than being marked as passing or expected failures.
+The committed runtime registers PDO. Native class constant linkage depends on the VM;
+use the numeric scratch-copy option below when it is not available in the chosen HEAD.
 
-The extension API also cannot throw an exception with a string code and properties.
+The extension API cannot throw an exception with a string code and properties.
 PDO exception SQLSTATE codes and `errorInfo` need a native throw payload supporting
 `code: Value` and `properties: PhpArray`. Exception-parity scripts retain the real
-PHP expectations. See the scratch `REPORT.md` for all remaining limitations.
+PHP expectations. See the scratch `REPORT-pool.md` for current results and remaining limitations.
+
+## Pool regression tests
+
+The pool is process-wide and owns a dedicated I/O runtime. Tests create independent
+current-thread runtimes on several OS threads; no worker-local pool is involved.
+`cargo test -p phera-ext-pdo` includes the live pool contract against both containers.
+The pool tests use a separate `phera_pool` account so server connection counts are
+not contaminated by other tests using `phera`. Create it in these test containers:
+
+```sh
+docker exec phera-test-postgres psql -U phera -d phera_test \
+  -c "CREATE ROLE phera_pool LOGIN PASSWORD 'phera_pool'"
+docker exec phera-test-mysql mysql -uroot -pphera-root \
+  -e "CREATE USER 'phera_pool'@'%' IDENTIFIED BY 'phera_pool'; \
+      GRANT ALL ON phera_test.* TO 'phera_pool'@'%';"
+```
+
+`make ci-prerequisites` creates that account too, which is how CI gets it.
+
+Application settings live in the environment and are documented in [../README.md](../README.md).
+Only `PHERA_ATTR_POOL` (100000, default true) is a constructor option. The previous
+per-connection size/timeout attributes no longer exist. `ATTR_PERSISTENT` changes
+no pooling behavior. Statements retain their parent's lease; reset is asynchronous.
+
+Pool tests cover N=3 with 13 workers and server counts, cross-worker reuse, FIFO admission,
+timeouts, cancellation while waiting and during a query, idle/lifetime retirement, dead
+socket replacement, failed reset, and session/credential isolation. The unit test also
+prints paired query-dispatch and reset timings; use a release build without competing
+benchmarks for useful measurements.

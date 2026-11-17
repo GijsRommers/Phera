@@ -130,7 +130,7 @@ impl Vm {
         let entries: Vec<_> = array
             .iter()
             .map(|(key, value)| ExtractEntry {
-                key: key.clone(),
+                key,
                 value: value.clone(),
             })
             .collect();
