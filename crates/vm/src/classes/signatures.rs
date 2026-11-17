@@ -171,7 +171,7 @@ impl Vm {
     }
 
     /// Union members must each fit some destination member; intersections require all bounds.
-    fn type_subset(
+    pub(super) fn type_subset(
         &self,
         narrow: Option<&str>,
         narrow_scope: &str,

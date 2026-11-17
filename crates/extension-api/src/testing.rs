@@ -2,9 +2,11 @@
 //! a VM, and [`oracle`] for comparing them against real PHP.
 
 mod classes;
+mod exceptions;
 pub mod oracle;
 
 pub use classes::{call_method, instantiate};
+pub use exceptions::materialize_exception;
 
 use std::rc::Rc;
 

@@ -66,8 +66,6 @@ impl DbError {
                 context.warning(format!("{method}(): {}", self.message()));
                 Ok(Value::Bool(false))
             }
-            // The extension API cannot yet attach SQLSTATE string codes or errorInfo.
-            // Keep the real message, and document the missing exception payload in REPORT.md.
             ErrorMode::Exception => Err(exception(self.message(), Some(self), 0)),
         }
     }
@@ -119,10 +117,35 @@ pub fn unsupported(feature: &str) -> NativeError {
     exception(format!("{feature} is not supported yet"), None, 0)
 }
 
-/// Every PDOException is built here. The SQLSTATE and errorInfo source are retained
-/// at this boundary for the forthcoming native exception payload API.
-pub fn exception(message: impl Into<String>, _error: Option<&DbError>, code: i64) -> NativeError {
-    NativeError::throw_with_code("PDOException", message, code)
+/// Every PDOException is built here.
+///
+/// ```php
+/// try { $pdo->query('SELECT * FROM missing'); }
+/// catch (PDOException $e) {
+///     $e->getCode();     // "42P01": the SQLSTATE, a string
+///     $e->errorInfo;     // ["42P01", 7, "ERROR:  relation ... does not exist"]
+/// }
+/// ```
+///
+/// With a driver error, the exception carries the SQLSTATE as its code and the
+/// three-element `errorInfo` array. A failed connection is the one case where
+/// PHP reports the driver's own number as the code, so a non-zero `code` wins.
+/// Without a driver error (a misuse caught by PDO itself) there is only the
+/// message and the numeric code.
+pub fn exception(message: impl Into<String>, error: Option<&DbError>, code: i64) -> NativeError {
+    let thrown = NativeError::throw("PDOException", message);
+    let Some(error) = error else {
+        return thrown.with_code(code);
+    };
+    let thrown = if code == 0 {
+        thrown.with_code(error.state.as_str())
+    } else {
+        thrown.with_code(code)
+    };
+    match ErrorState::Failed(error.clone()).info() {
+        Ok(information) => thrown.with_property("errorInfo", information),
+        Err(_) => thrown,
+    }
 }
 
 #[cfg(test)]

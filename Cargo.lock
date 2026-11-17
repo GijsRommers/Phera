@@ -1074,6 +1074,7 @@ version = "0.1.0"
 dependencies = [
  "phera-bytecode",
  "phera-compiler",
+ "phera-ext-core",
  "phera-extension-api",
  "phera-value",
  "tokio",

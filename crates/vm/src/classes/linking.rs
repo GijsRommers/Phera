@@ -189,6 +189,25 @@ impl Vm {
         )?;
         for constant in &declaration.constants {
             let constant_name = unit.names[constant.name.index()].clone();
+            if let Some(inherited) = constants.get(&constant_name) {
+                let narrower = match inherited.visibility {
+                    Visibility::Public => constant.visibility != Visibility::Public,
+                    Visibility::Protected => constant.visibility == Visibility::Private,
+                    Visibility::Private => false,
+                };
+                if narrower {
+                    let visibility = match inherited.visibility {
+                        Visibility::Public => "public",
+                        Visibility::Protected => "protected",
+                        Visibility::Private => unreachable!(),
+                    };
+                    return Err(NativeError::error(format!(
+                        "Access level to {name}::{constant_name} must be {visibility} \
+                         (as in class {})",
+                        inherited.declaring
+                    )));
+                }
+            }
             if constants
                 .get(&constant_name)
                 .is_some_and(|constant| constant.is_final)
@@ -199,17 +218,39 @@ impl Vm {
                      {declaring}::{constant_name}"
                 )));
             }
+            if let Some(inherited) = constants.get(&constant_name)
+                && inherited.visibility != Visibility::Private
+                && let Some(expected) = &inherited.ty
+            {
+                let declared = constant.ty.map(|index| &unit.types[index.index()]);
+                let compatible = self.type_subset(
+                    declared.map(|declared| declared.display.as_str()),
+                    name,
+                    Some(&expected.display),
+                    &inherited.declaring,
+                    &unit,
+                );
+                if !compatible {
+                    return Err(NativeError::error(format!(
+                        "Type of {name}::{constant_name} must be compatible with \
+                         {}::{constant_name} of type {}",
+                        inherited.declaring, expected.display
+                    )));
+                }
+            }
             constants.insert(
                 constant_name,
                 Rc::new(super::LinkedConstant {
                     declaring: name.clone(),
                     visibility: constant.visibility,
                     is_final: constant.is_final,
-                    initializer: crate::function_table::FunctionRef {
-                        unit: unit.clone(),
-                        index: constant.initializer.index(),
+                    initializer: super::class::ConstantInitializer::Compiled {
+                        function: crate::function_table::FunctionRef {
+                            unit: unit.clone(),
+                            index: constant.initializer.index(),
+                        },
+                        state: std::cell::RefCell::new(super::ConstantState::Uninitialized),
                     },
-                    state: std::cell::RefCell::new(super::ConstantState::Uninitialized),
                     ty: constant.ty.map(|index| unit.types[index.index()].clone()),
                 }),
             );
