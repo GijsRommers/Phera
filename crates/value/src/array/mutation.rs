@@ -12,7 +12,7 @@
 
 use super::lookup::list_position;
 use super::storage::{Entry, Storage};
-use super::{ArrayKey, INVALID, PhpArray};
+use super::{ArrayKey, PhpArray};
 use crate::error::OpError;
 use crate::value::Value;
 
@@ -86,6 +86,7 @@ impl PhpArray {
         if self.dead as usize <= self.len() {
             return;
         }
+        let pointer = self.pointer_after_compaction();
         let entries: Vec<Entry> = match std::mem::take(&mut self.storage) {
             Storage::List(values) => values
                 .into_iter()
@@ -104,6 +105,7 @@ impl PhpArray {
         };
         self.storage = Storage::from_entries(entries);
         self.dead = 0;
+        self.set_pointer(pointer);
     }
 
     /// `array_pop`: removes the last entry. The next free key goes back by
@@ -149,9 +151,7 @@ impl PhpArray {
         };
         self.dead = 0;
         self.next_free = Some(next);
-        self.pos = self
-            .first_position()
-            .map_or(INVALID, |position| position as u32);
+        self.reset();
         value
     }
 }

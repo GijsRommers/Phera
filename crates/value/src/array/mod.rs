@@ -39,9 +39,6 @@ pub use key::ArrayKey;
 use std::fmt;
 use storage::Storage;
 
-/// The internal pointer's value when it points at nothing.
-const INVALID: u32 = u32::MAX;
-
 #[derive(Clone, Default)]
 pub struct PhpArray {
     storage: Storage,
@@ -50,7 +47,8 @@ pub struct PhpArray {
     next_free: Option<i64>,
     /// Number of holes in `storage`.
     dead: u32,
-    /// The internal pointer of `current()` and `next()`: a slot position.
+    /// The internal pointer of `current()` and `next()`: a slot position;
+    /// see `pointer.rs`.
     pos: u32,
 }
 
@@ -62,7 +60,6 @@ impl PhpArray {
     pub fn with_capacity(cap: usize) -> Self {
         Self {
             storage: Storage::List(Vec::with_capacity(cap)),
-            pos: INVALID,
             ..Self::default()
         }
     }

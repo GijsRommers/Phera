@@ -186,8 +186,7 @@ fn positional_iteration_under_modification() {
 #[test]
 fn internal_pointer() {
     let mut a = PhpArray::from_iter([(ks("a"), vi(1)), (ks("b"), vi(2)), (ks("c"), vi(3))]);
-    assert_eq!(a.current(), None); // pointer unset until reset
-    a.reset();
+    // A new array points at its first entry: current(['a' => 1, ...]) is 1.
     assert_eq!(a.current(), Some(&vi(1)));
     assert_eq!(a.key(), Some(ks("a")));
     a.advance();
@@ -197,12 +196,59 @@ fn internal_pointer() {
     a.rewind_back();
     assert_eq!(a.current(), Some(&vi(2)));
     a.rewind_back();
-    a.rewind_back(); // past the start
+    a.rewind_back(); // before the first entry: past the end
     assert_eq!(a.current(), None);
-    a.advance();
-    assert_eq!(a.current(), Some(&vi(1)));
+    a.advance(); // and next() does not start over
+    assert_eq!(a.current(), None);
     a.reset();
     assert_eq!(a.current(), Some(&vi(1)));
+}
+
+/// Each step checked against PHP 8.5; see the comments for the PHP code.
+#[test]
+fn internal_pointer_over_holes_and_appends() {
+    // $a = [1, 2, 3]; unset($a[0]); current($a) is 2, key($a) is 1.
+    let mut a = PhpArray::from_iter([(k(0), vi(1)), (k(1), vi(2)), (k(2), vi(3))]);
+    a.remove(&k(0));
+    assert_eq!((a.current(), a.key()), (Some(&vi(2)), Some(k(1))));
+    // next($a) after that goes to 3: the hole counts as the entry after it.
+    a.advance();
+    assert_eq!(a.current(), Some(&vi(3)));
+
+    // $a = [1, 2]; next($a); next($a); next($a); prev($a); all past the end.
+    let mut a = PhpArray::from_iter([(k(0), vi(1)), (k(1), vi(2))]);
+    a.advance();
+    a.advance();
+    a.advance();
+    assert_eq!(a.current(), None);
+    a.rewind_back();
+    assert_eq!(a.current(), None);
+    // $a[] = 3; current($a) is 3: past the end is where the append goes.
+    a.push(vi(3)).unwrap();
+    assert_eq!(a.current(), Some(&vi(3)));
+
+    // $a = [1, 2, 3]; end($a); unset($a[2]); current($a) is false;
+    // $a[] = 9; current($a) is 9.
+    let mut a = PhpArray::from_iter([(k(0), vi(1)), (k(1), vi(2)), (k(2), vi(3))]);
+    a.end();
+    a.remove(&k(2));
+    assert_eq!(a.current(), None);
+    a.push(vi(9)).unwrap();
+    assert_eq!(a.current(), Some(&vi(9)));
+}
+
+/// Compaction moves the pointer with the entry it is on.
+#[test]
+fn internal_pointer_survives_compaction() {
+    let mut a: PhpArray = (0..10).map(|i| (k(i), vi(i))).collect();
+    a.end();
+    a.rewind_back(); // on 8
+    for i in 0..8 {
+        a.remove(&k(i));
+    }
+    a.push(vi(10)).unwrap(); // 8 holes, 3 live: compacts
+    assert_eq!(a.storage.len(), 3);
+    assert_eq!((a.current(), a.key()), (Some(&vi(8)), Some(k(8))));
 }
 
 /// Writing through `Rc::make_mut` copies the array and leaves the original alone.

@@ -15,7 +15,7 @@ use crate::value::Value;
 impl Storage {
     /// The slots of both shapes as two slices, one of them empty. Chaining
     /// an iterator over each gives one iterator type for either shape.
-    fn parts(&self) -> (&[Option<Value>], &[Entry]) {
+    pub(super) fn parts(&self) -> (&[Option<Value>], &[Entry]) {
         match self {
             Self::List(values) => (values, &[]),
             Self::Map(map) => (&[], &map.entries),
@@ -84,10 +84,7 @@ impl PhpArray {
     /// Position of the first live slot.
     #[inline(always)]
     pub fn first_position(&self) -> Option<usize> {
-        match &self.storage {
-            Storage::List(values) => values.iter().position(Option::is_some),
-            Storage::Map(map) => map.entries.iter().position(|entry| entry.value.is_some()),
-        }
+        self.live_from(0)
     }
 
     /// Position of the last live slot.
@@ -104,8 +101,13 @@ impl PhpArray {
     /// range.
     #[inline(always)]
     pub fn next_position(&self, pos: usize) -> Option<usize> {
-        let start = pos.checked_add(1)?;
-        // Without holes the next slot is live; most arrays have none.
+        self.live_from(pos.checked_add(1)?)
+    }
+
+    /// Position of the first live slot at or after `start`.
+    #[inline(always)]
+    pub(super) fn live_from(&self, start: usize) -> Option<usize> {
+        // Without holes every slot is live; most arrays have none.
         if self.dead == 0 {
             return (start < self.storage.len()).then_some(start);
         }
