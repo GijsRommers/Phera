@@ -185,7 +185,8 @@ fn no_dev_removes_previous_packages_and_runs_root_events_in_order() {
             "pre-install-cmd": ["@putenv PHERA_SCRIPT_TEST=present", "printf pre > events.txt"],
             "pre-autoload-dump": "@write-autoload",
             "write-autoload": "printf autoload >> events.txt",
-            "post-autoload-dump": "test \"$PHERA_SCRIPT_TEST\" = present && printf post >> events.txt",
+            "post-autoload-dump":
+                "test \"$PHERA_SCRIPT_TEST\" = present && printf post >> events.txt",
             "post-install-cmd": "printf install >> events.txt"
         }})
         .to_string(),
