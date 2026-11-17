@@ -8,29 +8,29 @@ try {
         try {
             try {
                 throw new Exception();
-            } catch (Throwable $e) {
-                echo $e::class, ': "', $e->getMessage(), '"', "\n";
+            } catch (Exception $e) {
+                var_dump($e->getMessage());
                 throw $e;
             }
-        } catch (Throwable $e) {
-            echo $e::class, ': "', $e->getMessage(), '"', "\n";
+        } catch (Exception $e) {
+            var_dump($e->getMessage());
             throw $e;
         }
-    } catch (Throwable $e) {
-        echo $e::class, ': "', $e->getMessage(), '"', "\n";
+    } catch (Exception $e) {
+        var_dump($e->getMessage());
         throw $e;
     }
-} catch (Throwable $e) {
-    echo $e::class, ': "', $e->getMessage(), '"', "\n";
+} catch (Exception $e) {
+    var_dump($e->getMessage());
     throw $e;
 }
 
 ?>
 --EXPECTF--
-Exception: ""
-Exception: ""
-Exception: ""
-Exception: ""
+string(0) ""
+string(0) ""
+string(0) ""
+string(0) ""
 
 Fatal error: Uncaught Exception in %s:%d
 Stack trace:
