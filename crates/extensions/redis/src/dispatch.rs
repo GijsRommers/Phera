@@ -18,7 +18,19 @@ pub fn dispatch<'a>(
             "connect" | "open" | "pconnect" | "popen" => {
                 return crate::connection::connect(name, &session, a).await;
             }
-            "__destruct" | "close" => {
+            "__destruct" => {
+                let transaction = session
+                    .batch
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|b| b.transaction);
+                if transaction {
+                    // phpredis discards MULTI but keeps its local mode until exec/discard.
+                    session.query(redis::cmd("DISCARD")).await?;
+                }
+                return Ok(Value::Null);
+            }
+            "close" => {
                 let connected = session.lease.borrow().is_some();
                 session.lease.borrow_mut().take();
                 session.batch.borrow_mut().take();

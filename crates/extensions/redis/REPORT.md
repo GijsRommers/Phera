@@ -44,8 +44,8 @@ optional serializers/codecs disabled, loads Redis through
 `PHERA_PHP_SHARED_EXTENSIONS`, and checks it in `check-prerequisites.php`.
 CI includes the health-checked Redis service and disables persistence before testing.
 
-The final **192-script** release run matched **2,014 instrumented calls with zero
-mismatches**. Its 500-request concurrency proof completed in **409.9 ms**. The fixture
+The final **193-script** release run matched **2,029 instrumented calls with zero
+mismatches**. Its 500-request concurrency proof completed in **627.4 ms**. The fixture
 count excludes the separate Unix, blocking-pop and six pub/sub comparisons.
 Comparisons use the same PHP files through real PHP and the release Phera executable,
 checking stdout, stderr and successful exit status. Mismatches fail the suite.
@@ -63,11 +63,11 @@ Clippy with warnings denied, formatting, the unsafe-token scanner, and the affec
 extension API/VM/runtime unit suites pass.
 The HTTP proof sends 500 simultaneous 300 ms BLPOP requests through `serve --workers 1`.
 
-PDO's six non-database unit tests passed locally. Hosted CI at `a9166b0` passed all
-PDO unit/integration tests and its release-binary PHP comparisons with the shared
-pool crate. No other local container or database was used. The same hosted run passed
-Redis's pool, blocking-pop, concurrency, pub/sub and Unix tests; its older AUTH
-comparison failure is fixed by the subsequent implementation changes.
+PDO's six non-database unit tests passed locally. Hosted CI at `6b4e153` passed all
+five CI jobs, including the full workspace suite and PDO/Redis release comparisons
+with the shared pool crate. No other local container or database was used. The
+follow-up lifecycle regression also compares explicit destruction during MULTI and
+pipeline execution; it preserves the connection and discards an active transaction.
 
 ## Remaining limits
 
