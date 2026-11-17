@@ -13,12 +13,16 @@ impl Analyzer<'_> {
         match &expression.kind {
             ExpressionKind::Isset(items) => {
                 for item in items {
-                    self.expression(item, scope, true);
+                    if self.expression(item, scope, true) == ValueType::Never {
+                        return ValueType::Never;
+                    }
                 }
                 ValueType::Bool
             }
             ExpressionKind::Empty(item) => {
-                self.expression(item, scope, true);
+                if self.expression(item, scope, true) == ValueType::Never {
+                    return ValueType::Never;
+                }
                 ValueType::Bool
             }
             ExpressionKind::Binary {
@@ -32,8 +36,12 @@ impl Analyzer<'_> {
                 otherwise,
             } => self.ternary(condition, then.as_deref(), otherwise, scope),
             ExpressionKind::InstanceOf { value, class } => {
-                self.expression(value, scope, quiet);
-                self.class_expression(class, scope);
+                if self.expression(value, scope, quiet) == ValueType::Never {
+                    return ValueType::Never;
+                }
+                if self.class_expression(class, scope).is_never() {
+                    return ValueType::Never;
+                }
                 ValueType::Bool
             }
             _ => ValueType::Mixed,

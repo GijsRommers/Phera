@@ -62,26 +62,20 @@ impl Analyzer<'_> {
         scope: &mut Scope,
         quiet: bool,
     ) -> ValueType {
-        let left_ty = self.expression(
-            left,
-            scope,
-            quiet || operator == BinaryOperator::NullCoalesce,
-        );
         if matches!(
             operator,
             BinaryOperator::And | BinaryOperator::Or | BinaryOperator::NullCoalesce
         ) {
-            let before = scope.clone();
-            self.refine(left, scope, operator != BinaryOperator::Or);
-            let right_ty = self.expression(right, scope, quiet);
-            *scope = Scope::join(&[before, scope.clone()]);
-            return if operator == BinaryOperator::NullCoalesce {
-                left_ty.join(&right_ty)
-            } else {
-                ValueType::Bool
-            };
+            return self.short_circuit(operator, left, right, scope, quiet);
+        }
+        let left_ty = self.expression(left, scope, quiet);
+        if left_ty == ValueType::Never {
+            return left_ty;
         }
         let right_ty = self.expression(right, scope, quiet);
+        if right_ty == ValueType::Never {
+            return right_ty;
+        }
         if matches!(
             operator,
             BinaryOperator::Divide | BinaryOperator::Modulo | BinaryOperator::Power
@@ -109,14 +103,34 @@ impl Analyzer<'_> {
         otherwise: &Expression,
         scope: &mut Scope,
     ) -> ValueType {
+        let truth = self.condition_truth(condition, scope);
         let condition_ty = self.expression(condition, scope, false);
+        if condition_ty == ValueType::Never {
+            return condition_ty;
+        }
+        if let Some(truth) = truth {
+            return if truth {
+                then.map_or(condition_ty, |e| self.expression(e, scope, false))
+            } else {
+                self.expression(otherwise, scope, false)
+            };
+        }
         let mut left = scope.clone();
         let mut right = scope.clone();
         self.refine(condition, &mut left, true);
         self.refine(condition, &mut right, false);
         let left_ty = then.map_or(condition_ty, |e| self.expression(e, &mut left, false));
         let right_ty = self.expression(otherwise, &mut right, false);
-        *scope = Scope::join(&[left, right]);
+        let mut paths = Vec::new();
+        if left_ty != ValueType::Never {
+            paths.push(left);
+        }
+        if right_ty != ValueType::Never {
+            paths.push(right);
+        }
+        if !paths.is_empty() {
+            *scope = Scope::join(&paths);
+        }
         left_ty.join(&right_ty)
     }
 }

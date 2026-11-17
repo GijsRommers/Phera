@@ -43,7 +43,7 @@ impl Signature {
                 .iter()
                 .map(|p| ParameterInfo {
                     name: p.name.clone(),
-                    ty: ValueType::declared(p.ty.as_ref(), names),
+                    ty: ValueType::parameter(p, names),
                     optional: p.default.is_some(),
                     variadic: p.variadic,
                     by_reference: p.by_reference,

@@ -20,9 +20,11 @@ mod binding_statements;
 mod bindings;
 mod calls;
 mod closure_binding;
+mod coalesce_assignment;
 mod composite;
 mod control;
 mod declarations;
+mod deferred_declarations;
 mod exceptions;
 mod expressions;
 mod finally;
@@ -30,16 +32,21 @@ mod intrinsics;
 mod invocations;
 mod logical;
 mod loops;
+mod match_expression;
 mod member_expressions;
 mod members;
 mod refine;
+mod short_circuit;
 mod statements;
+mod switch;
+mod write;
 
 pub const MAX_DEPTH: usize = 256;
 
 #[derive(Clone)]
 pub struct Context {
     pub names: Names,
+    pub known: std::collections::BTreeSet<Symbol>,
     pub class: Option<String>,
     pub this_class: Option<String>,
     pub object: bool,
@@ -58,6 +65,7 @@ pub struct Analyzer<'a> {
     pub diagnostics: Vec<Diagnostic>,
     pub context: Context,
     pub depth: usize,
+    pub checked_declarations: std::collections::BTreeSet<usize>,
     pub exception_scopes: Vec<Vec<Scope>>,
     pub return_scopes: Vec<Vec<Scope>>,
     pub controls: Vec<control::ControlFrame>,
@@ -72,12 +80,14 @@ impl<'a> Analyzer<'a> {
             level,
             diagnostics: Vec::new(),
             depth: 0,
+            checked_declarations: std::collections::BTreeSet::new(),
             exception_scopes: Vec::new(),
             return_scopes: Vec::new(),
             controls: Vec::new(),
             pending_binding: None,
             context: Context {
                 names: Names::for_block(String::new(), &file.program.statements),
+                known: std::collections::BTreeSet::new(),
                 class: None,
                 this_class: None,
                 object: false,
@@ -96,6 +106,7 @@ impl<'a> Analyzer<'a> {
         scope.define("argc", ValueType::Int);
         scope.define("argv", ValueType::Array);
         self.block(&self.file.program.statements, &mut scope);
+        self.deferred_declarations();
         self.diagnostics
     }
 
@@ -151,6 +162,10 @@ impl<'a> Analyzer<'a> {
         };
         if let Some(class) = &resolved
             && self.index.class(class).is_none()
+            && !self
+                .context
+                .known
+                .contains(&Symbol::Class(class.to_ascii_lowercase()))
             && report
         {
             self.report(Finding::UnknownClass(class.clone()), name.span);
@@ -158,11 +173,7 @@ impl<'a> Analyzer<'a> {
         resolved
     }
 
-    pub fn class_expression(
-        &mut self,
-        expression: &Expression,
-        scope: &mut Scope,
-    ) -> Option<String> {
+    pub fn class_expression(&mut self, expression: &Expression, scope: &mut Scope) -> ClassTarget {
         if let ExpressionKind::Name(name) = &expression.kind {
             let class = self.class_name(name, false);
             if let Some(class) = &class
@@ -170,13 +181,18 @@ impl<'a> Analyzer<'a> {
                 && !scope
                     .known
                     .contains(&Symbol::Class(class.to_ascii_lowercase()))
+                && !self
+                    .context
+                    .known
+                    .contains(&Symbol::Class(class.to_ascii_lowercase()))
             {
                 self.report(Finding::UnknownClass(class.clone()), name.span);
             }
-            class
+            class.map_or(ClassTarget::Unknown, ClassTarget::Known)
+        } else if self.expression(expression, scope, false) == ValueType::Never {
+            ClassTarget::Never
         } else {
-            self.expression(expression, scope, false);
-            None
+            ClassTarget::Unknown
         }
     }
 }
@@ -225,4 +241,28 @@ pub enum PropertyAccess {
 pub enum ScopeKind {
     Global,
     Function,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Evaluation {
+    Completes,
+    Never,
+}
+
+pub enum ClassTarget {
+    Known(String),
+    Unknown,
+    Never,
+}
+impl ClassTarget {
+    pub fn is_never(&self) -> bool {
+        matches!(self, Self::Never)
+    }
+    pub fn name(self) -> Option<String> {
+        if let Self::Known(name) = self {
+            Some(name)
+        } else {
+            None
+        }
+    }
 }

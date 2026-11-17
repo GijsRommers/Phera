@@ -43,8 +43,8 @@ M	arrayiterator::rewind		void	0,false,false,false,false,-	false	false	ext/spl/sp
 M	arrayiterator::seek	offset:int:false:false:false	void	0,false,false,false,false,-	false	false	ext/spl/spl_array.stub.php:226
 M	arrayiterator::serialize		string	0,false,false,false,false,-	false	false	ext/spl/spl_array.stub.php:196
 M	arrayiterator::setflags	flags:int:false:false:false	void	0,false,false,false,false,-	false	false	ext/spl/spl_array.stub.php:148
-M	arrayiterator::uasort	callback:mixed:false:false:false	bool	0,false,false,false,false,-	false	false	ext/spl/spl_array.stub.php:166
-M	arrayiterator::uksort	callback:mixed:false:false:false	bool	0,false,false,false,false,-	false	false	ext/spl/spl_array.stub.php:172
+M	arrayiterator::uasort	callback:unknowncallable:false:false:false	bool	0,false,false,false,false,-	false	false	ext/spl/spl_array.stub.php:166
+M	arrayiterator::uksort	callback:unknowncallable:false:false:false	bool	0,false,false,false,false,-	false	false	ext/spl/spl_array.stub.php:172
 M	arrayiterator::unserialize	data:string:false:false:false	void	0,false,false,false,false,-	false	false	ext/spl/spl_array.stub.php:190
 M	arrayiterator::valid		bool	0,false,false,false,false,-	false	false	ext/spl/spl_array.stub.php:223
 K	arrayiterator::ARRAY_AS_PROPS	int	0,false,false,false,false,-	ext/spl/spl_array.stub.php:92
@@ -72,8 +72,8 @@ M	arrayobject::offsetunset	key:mixed:false:false:false	void	0,false,false,false,
 M	arrayobject::serialize		string	0,false,false,false,false,-	false	false	ext/spl/spl_array.stub.php:63
 M	arrayobject::setflags	flags:int:false:false:false	void	0,false,false,false,false,-	false	false	ext/spl/spl_array.stub.php:39
 M	arrayobject::setiteratorclass	iteratorClass:string:false:false:false	void	0,false,false,false,false,-	false	false	ext/spl/spl_array.stub.php:78
-M	arrayobject::uasort	callback:mixed:false:false:false	bool	0,false,false,false,false,-	false	false	ext/spl/spl_array.stub.php:48
-M	arrayobject::uksort	callback:mixed:false:false:false	bool	0,false,false,false,false,-	false	false	ext/spl/spl_array.stub.php:51
+M	arrayobject::uasort	callback:unknowncallable:false:false:false	bool	0,false,false,false,false,-	false	false	ext/spl/spl_array.stub.php:48
+M	arrayobject::uksort	callback:unknowncallable:false:false:false	bool	0,false,false,false,false,-	false	false	ext/spl/spl_array.stub.php:51
 M	arrayobject::unserialize	data:string:false:false:false	void	0,false,false,false,false,-	false	false	ext/spl/spl_array.stub.php:60
 K	arrayobject::ARRAY_AS_PROPS	int	0,false,false,false,false,-	ext/spl/spl_array.stub.php:10
 K	arrayobject::STD_PROP_LIST	int	0,false,false,false,false,-	ext/spl/spl_array.stub.php:8
@@ -137,7 +137,7 @@ K	cachingiterator::TOSTRING_USE_CURRENT	int	0,false,false,false,false,-	ext/spl/
 K	cachingiterator::TOSTRING_USE_INNER	int	0,false,false,false,false,-	ext/spl/spl_iterators.stub.php:221
 K	cachingiterator::TOSTRING_USE_KEY	int	0,false,false,false,false,-	ext/spl/spl_iterators.stub.php:217
 C	callbackfilteriterator	CallbackFilterIterator	0	0,false,false,false,false,-	FilterIterator			false	ext/spl/spl_iterators.stub.php:23
-M	callbackfilteriterator::__construct	iterator:@Iterator:false:false:false,callback:mixed:false:false:false	mixed	0,false,false,false,false,-	false	false	ext/spl/spl_iterators.stub.php:25
+M	callbackfilteriterator::__construct	iterator:@Iterator:false:false:false,callback:unknowncallable:false:false:false	mixed	0,false,false,false,false,-	false	false	ext/spl/spl_iterators.stub.php:25
 M	callbackfilteriterator::accept		bool	0,false,false,false,false,-	false	false	ext/spl/spl_iterators.stub.php:28
 C	closedgeneratorexception	ClosedGeneratorException	0	0,false,false,false,false,-	Exception			false	Zend/zend_generators.stub.php:30
 C	closure	Closure	0	0,false,false,true,false,-				false	Zend/zend_closures.stub.php:9
@@ -146,7 +146,7 @@ M	closure::__invoke		mixed	0,false,false,false,false,-	false	true	Zend/zend_clos
 M	closure::bind	closure:@Closure:false:false:false,newThis:null|object:false:false:false,newScope:null|string|object:true:false:false	null|@Closure	0,true,false,false,false,-	false	false	Zend/zend_closures.stub.php:13
 M	closure::bindto	newThis:null|object:false:false:false,newScope:null|string|object:true:false:false	null|@Closure	0,false,false,false,false,-	false	false	Zend/zend_closures.stub.php:19
 M	closure::call	newThis:object:false:false:false,args:mixed:false:true:false	mixed	0,false,false,false,false,-	false	false	Zend/zend_closures.stub.php:21
-M	closure::fromcallable	callback:mixed:false:false:false	@Closure	0,true,false,false,false,-	false	false	Zend/zend_closures.stub.php:23
+M	closure::fromcallable	callback:unknowncallable:false:false:false	@Closure	0,true,false,false,false,-	false	false	Zend/zend_closures.stub.php:23
 M	closure::getcurrent		@Closure	0,true,false,false,false,-	false	false	Zend/zend_closures.stub.php:25
 C	collator	Collator	0	0,false,false,false,false,-				false	ext/intl/collator/collator.stub.php:17
 M	collator::__construct	locale:string:false:false:false	mixed	0,false,false,false,false,-	false	false	ext/intl/collator/collator.stub.php:78
@@ -692,7 +692,7 @@ M	dom\xpath::evaluate	expression:string:false:false:false,contextNode:null|@Dom\
 M	dom\xpath::query	expression:string:false:false:false,contextNode:null|@Dom\Node:true:false:false,registerNodeNS:bool:true:false:false	@Dom\NodeList	0,false,false,false,false,-	false	false	ext/dom/php_dom.stub.php:2174
 M	dom\xpath::quote	str:string:false:false:false	string	0,true,false,false,false,-	false	false	ext/dom/php_dom.stub.php:2186
 M	dom\xpath::registernamespace	prefix:string:false:false:false,namespace:string:false:false:false	bool	0,false,false,false,false,-	false	false	ext/dom/php_dom.stub.php:2177
-M	dom\xpath::registerphpfunctionns	namespaceURI:string:false:false:false,name:string:false:false:false,callable:mixed:false:false:false	void	0,false,false,false,false,-	false	false	ext/dom/php_dom.stub.php:2183
+M	dom\xpath::registerphpfunctionns	namespaceURI:string:false:false:false,name:string:false:false:false,callable:unknowncallable:false:false:false	void	0,false,false,false,false,-	false	false	ext/dom/php_dom.stub.php:2183
 M	dom\xpath::registerphpfunctions	restrict:null|array|string:true:false:false	void	0,false,false,false,false,-	false	false	ext/dom/php_dom.stub.php:2180
 P	dom\xpath::document	@Dom\Document	0,false,false,false,false,-	ext/dom/php_dom.stub.php:2165
 P	dom\xpath::registerNodeNamespaces	bool	0,false,false,false,false,-	ext/dom/php_dom.stub.php:2168
@@ -953,7 +953,7 @@ M	domxpath::evaluate	expression:string:false:false:false,contextNode:null|@DOMNo
 M	domxpath::query	expression:string:false:false:false,contextNode:null|@DOMNode:true:false:false,registerNodeNS:bool:true:false:false	mixed	0,false,false,false,false,-	false	false	ext/dom/php_dom.stub.php:1223
 M	domxpath::quote	str:string:false:false:false	string	0,true,false,false,false,-	false	false	ext/dom/php_dom.stub.php:1233
 M	domxpath::registernamespace	prefix:string:false:false:false,namespace:string:false:false:false	bool	0,false,false,false,false,-	false	false	ext/dom/php_dom.stub.php:1226
-M	domxpath::registerphpfunctionns	namespaceURI:string:false:false:false,name:string:false:false:false,callable:mixed:false:false:false	void	0,false,false,false,false,-	false	false	ext/dom/php_dom.stub.php:1231
+M	domxpath::registerphpfunctionns	namespaceURI:string:false:false:false,name:string:false:false:false,callable:unknowncallable:false:false:false	void	0,false,false,false,false,-	false	false	ext/dom/php_dom.stub.php:1231
 M	domxpath::registerphpfunctions	restrict:null|array|string:true:false:false	void	0,false,false,false,false,-	false	false	ext/dom/php_dom.stub.php:1229
 P	domxpath::document	@DOMDocument	0,false,false,false,false,-	ext/dom/php_dom.stub.php:1212
 P	domxpath::registerNodeNamespaces	bool	0,false,false,false,false,-	ext/dom/php_dom.stub.php:1215
@@ -1087,7 +1087,7 @@ K	ffi\ctype::TYPE_VOID	int	0,false,false,false,false,-	ext/ffi/ffi.stub.php:81
 C	ffi\exception	FFI\Exception	0	0,false,false,false,false,-	Error			false	ext/ffi/ffi.stub.php:185
 C	ffi\parserexception	FFI\ParserException	0	0,false,false,true,false,-	FFI\Exception			false	ext/ffi/ffi.stub.php:188
 C	fiber	Fiber	0	0,false,false,true,false,-				false	Zend/zend_fibers.stub.php:9
-M	fiber::__construct	callback:mixed:false:false:false	mixed	0,false,false,false,false,-	false	false	Zend/zend_fibers.stub.php:11
+M	fiber::__construct	callback:unknowncallable:false:false:false	mixed	0,false,false,false,false,-	false	false	Zend/zend_fibers.stub.php:11
 M	fiber::getcurrent		null|@Fiber	0,true,false,false,false,-	false	false	Zend/zend_fibers.stub.php:29
 M	fiber::getreturn		mixed	0,false,false,false,false,-	false	false	Zend/zend_fibers.stub.php:27
 M	fiber::isrunning		bool	0,false,false,false,false,-	false	false	Zend/zend_fibers.stub.php:23
@@ -1307,8 +1307,8 @@ M	intlchar::charname	codepoint:string|int:false:false:false,type:int:true:false:
 M	intlchar::chartype	codepoint:string|int:false:false:false	null|int	0,true,false,false,false,-	false	false	ext/intl/uchar/uchar.stub.php:1410
 M	intlchar::chr	codepoint:string|int:false:false:false	null|string	0,true,false,false,false,-	false	false	ext/intl/uchar/uchar.stub.php:1413
 M	intlchar::digit	codepoint:string|int:false:false:false,base:int:true:false:false	null|bool|int	0,true,false,false,false,-	false	false	ext/intl/uchar/uchar.stub.php:1416
-M	intlchar::enumcharnames	start:string|int:false:false:false,end:string|int:false:false:false,callback:mixed:false:false:false,type:int:true:false:false	bool	0,true,false,false,false,-	false	false	ext/intl/uchar/uchar.stub.php:1419
-M	intlchar::enumchartypes	callback:mixed:false:false:false	void	0,true,false,false,false,-	false	false	ext/intl/uchar/uchar.stub.php:1422
+M	intlchar::enumcharnames	start:string|int:false:false:false,end:string|int:false:false:false,callback:unknowncallable:false:false:false,type:int:true:false:false	bool	0,true,false,false,false,-	false	false	ext/intl/uchar/uchar.stub.php:1419
+M	intlchar::enumchartypes	callback:unknowncallable:false:false:false	void	0,true,false,false,false,-	false	false	ext/intl/uchar/uchar.stub.php:1422
 M	intlchar::foldcase	codepoint:string|int:false:false:false,options:int:true:false:false	null|string|int	0,true,false,false,false,-	false	false	ext/intl/uchar/uchar.stub.php:1425
 M	intlchar::fordigit	digit:int:false:false:false,base:int:true:false:false	int	0,true,false,false,false,-	false	false	ext/intl/uchar/uchar.stub.php:1428
 M	intlchar::getbidipairedbracket	codepoint:string|int:false:false:false	null|string|int	0,true,false,false,false,-	false	false	ext/intl/uchar/uchar.stub.php:1431
@@ -2666,7 +2666,7 @@ M	pdo\pgsql::getpid		int	0,false,false,false,false,-	false	false	ext/pdo_pgsql/p
 M	pdo\pgsql::lobcreate		bool|string	0,false,false,false,false,-	false	false	ext/pdo_pgsql/pdo_pgsql.stub.php:51
 M	pdo\pgsql::lobopen	oid:string:false:false:false,mode:string:true:false:false	mixed	0,false,false,false,false,-	false	false	ext/pdo_pgsql/pdo_pgsql.stub.php:57
 M	pdo\pgsql::lobunlink	oid:string:false:false:false	bool	0,false,false,false,false,-	false	false	ext/pdo_pgsql/pdo_pgsql.stub.php:59
-M	pdo\pgsql::setnoticecallback	callback:mixed:false:false:false	void	0,false,false,false,false,-	false	false	ext/pdo_pgsql/pdo_pgsql.stub.php:65
+M	pdo\pgsql::setnoticecallback	callback:null|unknowncallable:false:false:false	void	0,false,false,false,false,-	false	false	ext/pdo_pgsql/pdo_pgsql.stub.php:65
 K	pdo\pgsql::ATTR_DISABLE_PREPARES	int	0,false,false,false,false,-	ext/pdo_pgsql/pdo_pgsql.stub.php:14
 K	pdo\pgsql::ATTR_RESULT_MEMORY_SIZE	int	0,false,false,false,false,-	ext/pdo_pgsql/pdo_pgsql.stub.php:18
 K	pdo\pgsql::TRANSACTION_ACTIVE	int	0,false,false,false,false,-	ext/pdo_pgsql/pdo_pgsql.stub.php:27
@@ -2675,12 +2675,12 @@ K	pdo\pgsql::TRANSACTION_INERROR	int	0,false,false,false,false,-	ext/pdo_pgsql/p
 K	pdo\pgsql::TRANSACTION_INTRANS	int	0,false,false,false,false,-	ext/pdo_pgsql/pdo_pgsql.stub.php:31
 K	pdo\pgsql::TRANSACTION_UNKNOWN	int	0,false,false,false,false,-	ext/pdo_pgsql/pdo_pgsql.stub.php:39
 C	pdo\sqlite	Pdo\Sqlite	0	0,false,false,false,false,-	PDO			false	ext/pdo_sqlite/pdo_sqlite.stub.php:11
-M	pdo\sqlite::createaggregate	name:string:false:false:false,step:mixed:false:false:false,finalize:mixed:false:false:false,numArgs:int:true:false:false	bool	0,false,false,false,false,-	false	false	ext/pdo_sqlite/pdo_sqlite.stub.php:66
-M	pdo\sqlite::createcollation	name:string:false:false:false,callback:mixed:false:false:false	bool	0,false,false,false,false,-	false	false	ext/pdo_sqlite/pdo_sqlite.stub.php:74
-M	pdo\sqlite::createfunction	function_name:string:false:false:false,callback:mixed:false:false:false,num_args:int:true:false:false,flags:int:true:false:false	bool	0,false,false,false,false,-	false	false	ext/pdo_sqlite/pdo_sqlite.stub.php:76
+M	pdo\sqlite::createaggregate	name:string:false:false:false,step:unknowncallable:false:false:false,finalize:unknowncallable:false:false:false,numArgs:int:true:false:false	bool	0,false,false,false,false,-	false	false	ext/pdo_sqlite/pdo_sqlite.stub.php:66
+M	pdo\sqlite::createcollation	name:string:false:false:false,callback:unknowncallable:false:false:false	bool	0,false,false,false,false,-	false	false	ext/pdo_sqlite/pdo_sqlite.stub.php:74
+M	pdo\sqlite::createfunction	function_name:string:false:false:false,callback:unknowncallable:false:false:false,num_args:int:true:false:false,flags:int:true:false:false	bool	0,false,false,false,false,-	false	false	ext/pdo_sqlite/pdo_sqlite.stub.php:76
 M	pdo\sqlite::loadextension	name:string:false:false:false	void	0,false,false,false,false,-	false	false	ext/pdo_sqlite/pdo_sqlite.stub.php:84
 M	pdo\sqlite::openblob	table:string:false:false:false,column:string:false:false:false,rowid:int:false:false:false,dbname:null|string:true:false:false,flags:int:true:false:false	mixed	0,false,false,false,false,-	false	false	ext/pdo_sqlite/pdo_sqlite.stub.php:88
-M	pdo\sqlite::setauthorizer	callback:mixed:false:false:false	void	0,false,false,false,false,-	false	false	ext/pdo_sqlite/pdo_sqlite.stub.php:96
+M	pdo\sqlite::setauthorizer	callback:null|unknowncallable:false:false:false	void	0,false,false,false,false,-	false	false	ext/pdo_sqlite/pdo_sqlite.stub.php:96
 K	pdo\sqlite::ATTR_BUSY_STATEMENT	int	0,false,false,false,false,-	ext/pdo_sqlite/pdo_sqlite.stub.php:37
 K	pdo\sqlite::ATTR_EXPLAIN_STATEMENT	int	0,false,false,false,false,-	ext/pdo_sqlite/pdo_sqlite.stub.php:40
 K	pdo\sqlite::ATTR_EXTENDED_RESULT_CODES	int	0,false,false,false,false,-	ext/pdo_sqlite/pdo_sqlite.stub.php:34
@@ -2711,9 +2711,9 @@ M	pdo_pgsql_ext::pgsqllobcreate		bool|string	0,false,false,false,false,-	false	f
 M	pdo_pgsql_ext::pgsqllobopen	oid:string:false:false:false,mode:string:true:false:false	mixed	0,false,false,false,false,-	false	false	ext/pdo_pgsql/pgsql_driver.stub.php:26
 M	pdo_pgsql_ext::pgsqllobunlink	oid:string:false:false:false	bool	0,false,false,false,false,-	false	false	ext/pdo_pgsql/pgsql_driver.stub.php:29
 C	pdo_sqlite_ext	PDO_SQLite_Ext	0	0,false,false,false,false,-				false	ext/pdo_sqlite/sqlite_driver.stub.php:9
-M	pdo_sqlite_ext::sqlitecreateaggregate	name:string:false:false:false,step:mixed:false:false:false,finalize:mixed:false:false:false,numArgs:int:true:false:false	bool	0,false,false,false,false,-	false	false	ext/pdo_sqlite/sqlite_driver.stub.php:14
-M	pdo_sqlite_ext::sqlitecreatecollation	name:string:false:false:false,callback:mixed:false:false:false	bool	0,false,false,false,false,-	false	false	ext/pdo_sqlite/sqlite_driver.stub.php:17
-M	pdo_sqlite_ext::sqlitecreatefunction	name:string:false:false:false,callback:mixed:false:false:false,numArgs:int:true:false:false,flags:int:true:false:false	bool	0,false,false,false,false,-	false	false	ext/pdo_sqlite/sqlite_driver.stub.php:11
+M	pdo_sqlite_ext::sqlitecreateaggregate	name:string:false:false:false,step:unknowncallable:false:false:false,finalize:unknowncallable:false:false:false,numArgs:int:true:false:false	bool	0,false,false,false,false,-	false	false	ext/pdo_sqlite/sqlite_driver.stub.php:14
+M	pdo_sqlite_ext::sqlitecreatecollation	name:string:false:false:false,callback:unknowncallable:false:false:false	bool	0,false,false,false,false,-	false	false	ext/pdo_sqlite/sqlite_driver.stub.php:17
+M	pdo_sqlite_ext::sqlitecreatefunction	name:string:false:false:false,callback:unknowncallable:false:false:false,numArgs:int:true:false:false,flags:int:true:false:false	bool	0,false,false,false,false,-	false	false	ext/pdo_sqlite/sqlite_driver.stub.php:11
 C	pdoexception	PDOException	0	0,false,false,false,false,-	RuntimeException			false	ext/pdo/pdo.stub.php:5
 P	pdoexception::code	mixed	1,false,false,false,false,-	ext/pdo/pdo.stub.php:8
 P	pdoexception::errorInfo	null|array	0,false,false,false,false,-	ext/pdo/pdo.stub.php:9
@@ -2800,7 +2800,7 @@ M	phar::setstub	stub:mixed:false:false:false,length:int:true:false:false	bool	0,
 M	phar::startbuffering		void	0,false,false,false,false,-	false	false	ext/phar/phar_object.stub.php:208
 M	phar::stopbuffering		void	0,false,false,false,false,-	false	false	ext/phar/phar_object.stub.php:211
 M	phar::unlinkarchive	filename:string:false:false:false	bool	0,true,false,true,false,-	false	false	ext/phar/phar_object.stub.php:239
-M	phar::webphar	alias:null|string:true:false:false,index:null|string:true:false:false,fileNotFoundScript:null|string:true:false:false,mimeTypes:array:true:false:false,rewrite:mixed:true:false:false	void	0,true,false,true,false,-	false	false	ext/phar/phar_object.stub.php:241
+M	phar::webphar	alias:null|string:true:false:false,index:null|string:true:false:false,fileNotFoundScript:null|string:true:false:false,mimeTypes:array:true:false:false,rewrite:null|unknowncallable:true:false:false	void	0,true,false,true,false,-	false	false	ext/phar/phar_object.stub.php:241
 K	phar::BZ2	int	0,false,false,false,false,-	ext/phar/phar_object.stub.php:14
 K	phar::COMPRESSED	int	0,false,false,false,false,-	ext/phar/phar_object.stub.php:38
 K	phar::GZ	int	0,false,false,false,false,-	ext/phar/phar_object.stub.php:18
@@ -2873,7 +2873,7 @@ M	phardata::setstub	stub:mixed:false:false:false,length:int:true:false:false	boo
 M	phardata::startbuffering		void	0,false,false,false,false,-	false	false	ext/phar/phar_object.stub.php:485
 M	phardata::stopbuffering		void	0,false,false,false,false,-	false	false	ext/phar/phar_object.stub.php:491
 M	phardata::unlinkarchive	filename:string:false:false:false	bool	0,true,false,true,false,-	false	false	ext/phar/phar_object.stub.php:533
-M	phardata::webphar	alias:null|string:true:false:false,index:null|string:true:false:false,fileNotFoundScript:null|string:true:false:false,mimeTypes:array:true:false:false,rewrite:mixed:true:false:false	void	0,true,false,true,false,-	false	false	ext/phar/phar_object.stub.php:536
+M	phardata::webphar	alias:null|string:true:false:false,index:null|string:true:false:false,fileNotFoundScript:null|string:true:false:false,mimeTypes:array:true:false:false,rewrite:null|unknowncallable:true:false:false	void	0,true,false,true,false,-	false	false	ext/phar/phar_object.stub.php:536
 C	pharexception	PharException	0	0,false,false,false,false,-	Exception			false	ext/phar/phar_object.stub.php:5
 C	pharfileinfo	PharFileInfo	0	0,false,false,false,false,-	SplFileInfo			false	ext/phar/phar_object.stub.php:541
 M	pharfileinfo::__construct	filename:string:false:false:false	mixed	0,false,false,false,false,-	false	false	ext/phar/phar_object.stub.php:543
@@ -2977,7 +2977,7 @@ M	recursivecachingiterator::__construct	iterator:@Iterator:false:false:false,fla
 M	recursivecachingiterator::getchildren		null|@RecursiveCachingIterator	0,false,false,false,false,-	false	false	ext/spl/spl_iterators.stub.php:286
 M	recursivecachingiterator::haschildren		bool	0,false,false,false,false,-	false	false	ext/spl/spl_iterators.stub.php:283
 C	recursivecallbackfilteriterator	RecursiveCallbackFilterIterator	0	0,false,false,false,false,-	CallbackFilterIterator	RecursiveIterator		false	ext/spl/spl_iterators.stub.php:31
-M	recursivecallbackfilteriterator::__construct	iterator:@RecursiveIterator:false:false:false,callback:mixed:false:false:false	mixed	0,false,false,false,false,-	false	false	ext/spl/spl_iterators.stub.php:33
+M	recursivecallbackfilteriterator::__construct	iterator:@RecursiveIterator:false:false:false,callback:unknowncallable:false:false:false	mixed	0,false,false,false,false,-	false	false	ext/spl/spl_iterators.stub.php:33
 M	recursivecallbackfilteriterator::getchildren		@RecursiveCallbackFilterIterator	0,false,false,false,false,-	false	false	ext/spl/spl_iterators.stub.php:42
 M	recursivecallbackfilteriterator::haschildren		bool	0,false,false,false,false,-	false	false	ext/spl/spl_iterators.stub.php:39
 C	recursivedirectoryiterator	RecursiveDirectoryIterator	0	0,false,false,false,false,-	FilesystemIterator	RecursiveIterator		false	ext/spl/spl_directory.stub.php:193
@@ -3067,7 +3067,7 @@ M	reflectionclass::getextensionname		bool|string	0,false,false,false,false,-	fal
 M	reflectionclass::getfilename		bool|string	0,false,false,false,false,-	false	false	ext/reflection/php_reflection.stub.php:281
 M	reflectionclass::getinterfacenames		array	0,false,false,false,false,-	false	false	ext/reflection/php_reflection.stub.php:332
 M	reflectionclass::getinterfaces		array	0,false,false,false,false,-	false	false	ext/reflection/php_reflection.stub.php:329
-M	reflectionclass::getlazyinitializer	object:object:false:false:false	mixed	0,false,false,false,false,-	false	false	ext/reflection/php_reflection.stub.php:388
+M	reflectionclass::getlazyinitializer	object:object:false:false:false	null|unknowncallable	0,false,false,false,false,-	false	false	ext/reflection/php_reflection.stub.php:388
 M	reflectionclass::getmethod	name:string:false:false:false	@ReflectionMethod	0,false,false,false,false,-	false	false	ext/reflection/php_reflection.stub.php:299
 M	reflectionclass::getmethods	filter:null|int:true:false:false	array	0,false,false,false,false,-	false	false	ext/reflection/php_reflection.stub.php:302
 M	reflectionclass::getmodifiers		int	0,false,false,false,false,-	false	false	ext/reflection/php_reflection.stub.php:360
@@ -3111,10 +3111,10 @@ M	reflectionclass::marklazyobjectasinitialized	object:object:false:false:false	o
 M	reflectionclass::newinstance	args:mixed:false:true:false	object	0,false,false,false,false,-	false	false	ext/reflection/php_reflection.stub.php:366
 M	reflectionclass::newinstanceargs	args:array:true:false:false	null|object	0,false,false,false,false,-	false	false	ext/reflection/php_reflection.stub.php:372
 M	reflectionclass::newinstancewithoutconstructor		object	0,false,false,false,false,-	false	false	ext/reflection/php_reflection.stub.php:369
-M	reflectionclass::newlazyghost	initializer:mixed:false:false:false,options:int:true:false:false	object	0,false,false,false,false,-	false	false	ext/reflection/php_reflection.stub.php:374
-M	reflectionclass::newlazyproxy	factory:mixed:false:false:false,options:int:true:false:false	object	0,false,false,false,false,-	false	false	ext/reflection/php_reflection.stub.php:376
-M	reflectionclass::resetaslazyghost	object:object:false:false:false,initializer:mixed:false:false:false,options:int:true:false:false	void	0,false,false,false,false,-	false	false	ext/reflection/php_reflection.stub.php:378
-M	reflectionclass::resetaslazyproxy	object:object:false:false:false,factory:mixed:false:false:false,options:int:true:false:false	void	0,false,false,false,false,-	false	false	ext/reflection/php_reflection.stub.php:380
+M	reflectionclass::newlazyghost	initializer:unknowncallable:false:false:false,options:int:true:false:false	object	0,false,false,false,false,-	false	false	ext/reflection/php_reflection.stub.php:374
+M	reflectionclass::newlazyproxy	factory:unknowncallable:false:false:false,options:int:true:false:false	object	0,false,false,false,false,-	false	false	ext/reflection/php_reflection.stub.php:376
+M	reflectionclass::resetaslazyghost	object:object:false:false:false,initializer:unknowncallable:false:false:false,options:int:true:false:false	void	0,false,false,false,false,-	false	false	ext/reflection/php_reflection.stub.php:378
+M	reflectionclass::resetaslazyproxy	object:object:false:false:false,factory:unknowncallable:false:false:false,options:int:true:false:false	void	0,false,false,false,false,-	false	false	ext/reflection/php_reflection.stub.php:380
 M	reflectionclass::setstaticpropertyvalue	name:string:false:false:false,value:mixed:false:false:false	void	0,false,false,false,false,-	false	false	ext/reflection/php_reflection.stub.php:403
 P	reflectionclass::name	string	0,false,false,false,false,-	ext/reflection/php_reflection.stub.php:254
 K	reflectionclass::IS_EXPLICIT_ABSTRACT	int	0,false,false,false,false,-	ext/reflection/php_reflection.stub.php:242
@@ -3193,7 +3193,7 @@ M	reflectionextension::istemporary		bool	0,false,false,false,false,-	false	false
 P	reflectionextension::name	string	0,false,false,false,false,-	ext/reflection/php_reflection.stub.php:750
 C	reflectionfiber	ReflectionFiber	0	0,false,false,true,false,-				false	ext/reflection/php_reflection.stub.php:888
 M	reflectionfiber::__construct	fiber:@Fiber:false:false:false	mixed	0,false,false,false,false,-	false	false	ext/reflection/php_reflection.stub.php:890
-M	reflectionfiber::getcallable		mixed	0,false,false,false,false,-	false	false	ext/reflection/php_reflection.stub.php:898
+M	reflectionfiber::getcallable		unknowncallable	0,false,false,false,false,-	false	false	ext/reflection/php_reflection.stub.php:898
 M	reflectionfiber::getexecutingfile		null|string	0,false,false,false,false,-	false	false	ext/reflection/php_reflection.stub.php:894
 M	reflectionfiber::getexecutingline		null|int	0,false,false,false,false,-	false	false	ext/reflection/php_reflection.stub.php:896
 M	reflectionfiber::getfiber		@Fiber	0,false,false,false,false,-	false	false	ext/reflection/php_reflection.stub.php:892
@@ -3840,9 +3840,9 @@ M	sqlite3::backup	destination:@SQLite3:false:false:false,sourceDatabase:string:t
 M	sqlite3::busytimeout	milliseconds:int:false:false:false	bool	0,false,false,false,false,-	false	false	ext/sqlite3/sqlite3.stub.php:195
 M	sqlite3::changes		int	0,false,false,false,false,-	false	false	ext/sqlite3/sqlite3.stub.php:192
 M	sqlite3::close		bool	0,false,false,false,false,-	false	false	ext/sqlite3/sqlite3.stub.php:174
-M	sqlite3::createaggregate	name:string:false:false:false,stepCallback:mixed:false:false:false,finalCallback:mixed:false:false:false,argCount:int:true:false:false	bool	0,false,false,false,false,-	false	false	ext/sqlite3/sqlite3.stub.php:226
-M	sqlite3::createcollation	name:string:false:false:false,callback:mixed:false:false:false	bool	0,false,false,false,false,-	false	false	ext/sqlite3/sqlite3.stub.php:229
-M	sqlite3::createfunction	name:string:false:false:false,callback:mixed:false:false:false,argCount:int:true:false:false,flags:int:true:false:false	bool	0,false,false,false,false,-	false	false	ext/sqlite3/sqlite3.stub.php:223
+M	sqlite3::createaggregate	name:string:false:false:false,stepCallback:unknowncallable:false:false:false,finalCallback:unknowncallable:false:false:false,argCount:int:true:false:false	bool	0,false,false,false,false,-	false	false	ext/sqlite3/sqlite3.stub.php:226
+M	sqlite3::createcollation	name:string:false:false:false,callback:unknowncallable:false:false:false	bool	0,false,false,false,false,-	false	false	ext/sqlite3/sqlite3.stub.php:229
+M	sqlite3::createfunction	name:string:false:false:false,callback:unknowncallable:false:false:false,argCount:int:true:false:false,flags:int:true:false:false	bool	0,false,false,false,false,-	false	false	ext/sqlite3/sqlite3.stub.php:223
 M	sqlite3::enableexceptions	enable:bool:true:false:false	bool	0,false,false,false,false,-	false	false	ext/sqlite3/sqlite3.stub.php:235
 M	sqlite3::enableextendedresultcodes	enable:bool:true:false:false	bool	0,false,false,false,false,-	false	false	ext/sqlite3/sqlite3.stub.php:238
 M	sqlite3::escapestring	string:string:false:false:false	string	0,true,false,false,false,-	false	false	ext/sqlite3/sqlite3.stub.php:208
@@ -3857,7 +3857,7 @@ M	sqlite3::openblob	table:string:false:false:false,column:string:false:false:fal
 M	sqlite3::prepare	query:string:false:false:false	bool|@SQLite3Stmt	0,false,false,false,false,-	false	false	ext/sqlite3/sqlite3.stub.php:211
 M	sqlite3::query	query:string:false:false:false	bool|@SQLite3Result	0,false,false,false,false,-	false	false	ext/sqlite3/sqlite3.stub.php:217
 M	sqlite3::querysingle	query:string:false:false:false,entireRow:bool:true:false:false	mixed	0,false,false,false,false,-	false	false	ext/sqlite3/sqlite3.stub.php:220
-M	sqlite3::setauthorizer	callback:mixed:false:false:false	bool	0,false,false,false,false,-	false	false	ext/sqlite3/sqlite3.stub.php:241
+M	sqlite3::setauthorizer	callback:null|unknowncallable:false:false:false	bool	0,false,false,false,false,-	false	false	ext/sqlite3/sqlite3.stub.php:241
 M	sqlite3::version		array	0,true,false,false,false,-	false	false	ext/sqlite3/sqlite3.stub.php:177
 K	sqlite3::ALTER_TABLE	int	0,false,false,false,false,-	ext/sqlite3/sqlite3.stub.php:144
 K	sqlite3::ANALYZE	int	0,false,false,false,false,-	ext/sqlite3/sqlite3.stub.php:148
@@ -4306,7 +4306,7 @@ M	xsltprocessor::getparameter	namespace:string:false:false:false,name:string:fal
 M	xsltprocessor::getsecurityprefs		int	0,false,false,false,false,-	false	false	ext/xsl/php_xsl.stub.php:127
 M	xsltprocessor::hasexsltsupport		bool	0,false,false,false,false,-	false	false	ext/xsl/php_xsl.stub.php:113
 M	xsltprocessor::importstylesheet	stylesheet:object:false:false:false	bool	0,false,false,false,false,-	false	false	ext/xsl/php_xsl.stub.php:83
-M	xsltprocessor::registerphpfunctionns	namespaceURI:string:false:false:false,name:string:false:false:false,callable:mixed:false:false:false	void	0,false,false,false,false,-	false	false	ext/xsl/php_xsl.stub.php:118
+M	xsltprocessor::registerphpfunctionns	namespaceURI:string:false:false:false,name:string:false:false:false,callable:unknowncallable:false:false:false	void	0,false,false,false,false,-	false	false	ext/xsl/php_xsl.stub.php:118
 M	xsltprocessor::registerphpfunctions	functions:null|string|array:true:false:false	void	0,false,false,false,false,-	false	false	ext/xsl/php_xsl.stub.php:116
 M	xsltprocessor::removeparameter	namespace:string:false:false:false,name:string:false:false:false	bool	0,false,false,false,false,-	false	false	ext/xsl/php_xsl.stub.php:110
 M	xsltprocessor::setparameter	namespace:string:false:false:false,name:string|array:false:false:false,value:null|string:true:false:false	bool	0,false,false,false,false,-	false	false	ext/xsl/php_xsl.stub.php:104
@@ -4348,8 +4348,8 @@ M	ziparchive::iscompressionmethodsupported	method:int:false:false:false,enc:bool
 M	ziparchive::isencryptionmethodsupported	method:int:false:false:false,enc:bool:true:false:false	bool	0,true,false,false,false,-	false	false	ext/zip/php_zip.stub.php:822
 M	ziparchive::locatename	name:string:false:false:false,flags:int:true:false:false	bool|int	0,false,false,false,false,-	false	false	ext/zip/php_zip.stub.php:734
 M	ziparchive::open	filename:string:false:false:false,flags:int:true:false:false	int|bool	0,false,false,false,false,-	false	false	ext/zip/php_zip.stub.php:649
-M	ziparchive::registercancelcallback	callback:mixed:false:false:false	bool	0,false,false,false,false,-	false	false	ext/zip/php_zip.stub.php:816
-M	ziparchive::registerprogresscallback	rate:float:false:false:false,callback:mixed:false:false:false	bool	0,false,false,false,false,-	false	false	ext/zip/php_zip.stub.php:811
+M	ziparchive::registercancelcallback	callback:unknowncallable:false:false:false	bool	0,false,false,false,false,-	false	false	ext/zip/php_zip.stub.php:816
+M	ziparchive::registerprogresscallback	rate:float:false:false:false,callback:unknowncallable:false:false:false	bool	0,false,false,false,false,-	false	false	ext/zip/php_zip.stub.php:811
 M	ziparchive::renameindex	index:int:false:false:false,new_name:string:false:false:false	bool	0,false,false,false,false,-	false	false	ext/zip/php_zip.stub.php:686
 M	ziparchive::renamename	name:string:false:false:false,new_name:string:false:false:false	bool	0,false,false,false,false,-	false	false	ext/zip/php_zip.stub.php:689
 M	ziparchive::replacefile	filepath:string:false:false:false,index:int:false:false:false,start:int:true:false:false,length:int:true:false:false,flags:int:true:false:false	bool	0,false,false,false,false,-	false	false	ext/zip/php_zip.stub.php:677
@@ -4496,8 +4496,8 @@ F	addcslashes	string:string:false:false:false,characters:string:false:false:fals
 F	addslashes	string:string:false:false:false	string	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:2496
 F	apache_request_headers		array	0,false,false,false,false,-	false	false	sapi/cli/php_cli_server.stub.php:3
 F	apache_response_headers		array	0,false,false,false,false,-	false	false	sapi/cli/php_cli_server.stub.php:5
-F	array_all	array:array:false:false:false,callback:mixed:false:false:false	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1871
-F	array_any	array:array:false:false:false,callback:mixed:false:false:false	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1869
+F	array_all	array:array:false:false:false,callback:unknowncallable:false:false:false	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1871
+F	array_any	array:array:false:false:false,callback:unknowncallable:false:false:false	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1869
 F	array_change_key_case	array:array:false:false:false,case:int:true:false:false	array	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1743
 F	array_chunk	array:array:false:false:false,length:int:false:false:false,preserve_keys:bool:true:false:false	array	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1890
 F	array_column	array:array:false:false:false,column_key:null|string|int:false:false:false,index_key:null|string|int:true:false:false	array	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1722
@@ -4510,9 +4510,9 @@ F	array_diff_uassoc	array:array:false:false:false,rest:mixed:false:true:false	ar
 F	array_diff_ukey	array:array:false:false:false,rest:mixed:false:true:false	array	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1803
 F	array_fill	start_index:int:false:false:false,count:int:false:false:false,value:mixed:false:false:false	array	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1637
 F	array_fill_keys	keys:array:false:false:false,value:mixed:false:false:false	array	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1640
-F	array_filter	array:array:false:false:false,callback:mixed:true:false:false,mode:int:true:false:false	array	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1863
-F	array_find	array:array:false:false:false,callback:mixed:false:false:false	mixed	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1865
-F	array_find_key	array:array:false:false:false,callback:mixed:false:false:false	mixed	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1867
+F	array_filter	array:array:false:false:false,callback:null|unknowncallable:true:false:false,mode:int:true:false:false	array	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1863
+F	array_find	array:array:false:false:false,callback:unknowncallable:false:false:false	mixed	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1865
+F	array_find_key	array:array:false:false:false,callback:unknowncallable:false:false:false	mixed	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1867
 F	array_first	array:array:false:false:false	mixed	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1698
 F	array_flip	array:array:false:false:false	array	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1737
 F	array_intersect	array:array:false:false:false,arrays:array:false:true:false	array	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1764
@@ -4526,7 +4526,7 @@ F	array_key_first	array:array:false:false:false	null|string|int	0,false,false,fa
 F	array_key_last	array:array:false:false:false	null|string|int	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1693
 F	array_keys	array:array:false:false:false,filter_value:mixed:true:false:false,strict:bool:true:false:false	array	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1683
 F	array_last	array:array:false:false:false	mixed	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1703
-F	array_map	callback:mixed:false:false:false,array:array:false:false:false,arrays:array:false:true:false	array	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1873
+F	array_map	callback:null|unknowncallable:false:false:false,array:array:false:false:false,arrays:array:false:true:false	array	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1873
 F	array_merge	arrays:array:false:true:false	array	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1662
 F	array_merge_recursive	arrays:array:false:true:false	array	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1667
 F	array_multisort	array:mixed:false:false:true,rest:mixed:false:true:true	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1846
@@ -4535,7 +4535,7 @@ F	array_pop	array:array:false:false:true	mixed	0,false,false,false,false,-	false
 F	array_product	array:array:false:false:false	float|int	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1859
 F	array_push	array:array:false:false:true,values:mixed:false:true:false	int	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1552
 F	array_rand	array:array:false:false:false,num:int:true:false:false	array|string|int	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1849
-F	array_reduce	array:array:false:false:false,callback:mixed:false:false:false,initial:mixed:true:false:false	mixed	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1861
+F	array_reduce	array:array:false:false:false,callback:unknowncallable:false:false:false,initial:mixed:true:false:false	mixed	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1861
 F	array_replace	array:array:false:false:false,replacements:array:false:true:false	array	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1672
 F	array_replace_recursive	array:array:false:false:false,replacements:array:false:true:false	array	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1677
 F	array_reverse	array:array:false:false:false,preserve_keys:bool:true:false:false	array	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1728
@@ -4553,8 +4553,8 @@ F	array_uintersect_uassoc	array:array:false:false:false,rest:mixed:false:true:fa
 F	array_unique	array:array:false:false:false,flags:int:true:false:false	array	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1748
 F	array_unshift	array:array:false:false:true,values:mixed:false:true:false	int	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1650
 F	array_values	array:array:false:false:false	array	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1709
-F	array_walk	array:object|array:false:false:true,callback:mixed:false:false:false,arg:mixed:true:false:false	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1609
-F	array_walk_recursive	array:object|array:false:false:true,callback:mixed:false:false:false,arg:mixed:true:false:false	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1611
+F	array_walk	array:object|array:false:false:true,callback:unknowncallable:false:false:false,arg:mixed:true:false:false	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1609
+F	array_walk_recursive	array:object|array:false:false:true,callback:unknowncallable:false:false:false,arg:mixed:true:false:false	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1611
 F	arsort	array:array:false:false:true,flags:int:true:false:false	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1570
 F	asin	num:float:false:false:false	float	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:3133
 F	asinh	num:float:false:false:false	float	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:3157
@@ -4601,8 +4601,8 @@ F	cal_days_in_month	calendar:int:false:false:false,month:int:false:false:false,y
 F	cal_from_jd	julian_day:int:false:false:false,calendar:int:false:false:false	array	0,false,false,false,false,-	false	false	ext/calendar/calendar.stub.php:121
 F	cal_info	calendar:int:true:false:false	array	0,false,false,false,false,-	false	false	ext/calendar/calendar.stub.php:127
 F	cal_to_jd	calendar:int:false:false:false,month:int:false:false:false,day:int:false:false:false,year:int:false:false:false	int	0,false,false,false,false,-	false	false	ext/calendar/calendar.stub.php:129
-F	call_user_func	callback:mixed:false:false:false,args:mixed:false:true:false	mixed	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1972
-F	call_user_func_array	callback:mixed:false:false:false,args:array:false:false:false	mixed	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1974
+F	call_user_func	callback:unknowncallable:false:false:false,args:mixed:false:true:false	mixed	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1972
+F	call_user_func_array	callback:unknowncallable:false:false:false,args:array:false:false:false	mixed	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1974
 F	ceil	num:float|int:false:false:false	float	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:3104
 F	chdir	directory:string:false:false:false	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:2650
 F	checkdate	month:int:false:false:false,day:int:false:false:false,year:int:false:false:false	bool	0,false,false,false,false,-	false	false	ext/date/php_date.stub.php:111
@@ -4882,8 +4882,8 @@ F	flush		void	0,false,false,false,false,-	false	false	ext/standard/basic_functio
 F	fmod	num1:float:false:false:false,num2:float:false:false:false	float	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:3250
 F	fnmatch	pattern:string:false:false:false,filename:string:false:false:false,flags:int:true:false:false	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:2868
 F	fopen	filename:string:false:false:false,mode:string:false:false:false,use_include_path:bool:true:false:false,context:mixed:true:false:false	mixed	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:2771
-F	forward_static_call	callback:mixed:false:false:false,args:mixed:false:true:false	mixed	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1976
-F	forward_static_call_array	callback:mixed:false:false:false,args:array:false:false:false	mixed	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1978
+F	forward_static_call	callback:unknowncallable:false:false:false,args:mixed:false:true:false	mixed	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1976
+F	forward_static_call_array	callback:unknowncallable:false:false:false,args:array:false:false:false	mixed	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1978
 F	fpassthru	stream:mixed:false:false:false	int	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:2781
 F	fpow	num:float:false:false:false,exponent:float:false:false:false	float	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:3260
 F	fprintf	stream:mixed:false:false:false,format:string:false:false:false,values:mixed:false:true:false	int	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:2970
@@ -4961,8 +4961,8 @@ F	get_declared_traits		array	0,false,false,false,false,-	false	false	Zend/zend_b
 F	get_defined_constants	categorize:bool:true:false:false	array	0,false,false,false,false,-	false	false	Zend/zend_builtin_functions.stub.php:183
 F	get_defined_functions	exclude_disabled:bool:true:false:false	array	0,false,false,false,false,-	false	false	Zend/zend_builtin_functions.stub.php:154
 F	get_defined_vars		array	0,false,false,false,false,-	false	false	Zend/zend_builtin_functions.stub.php:160
-F	get_error_handler		mixed	0,false,false,false,false,-	false	false	Zend/zend_builtin_functions.stub.php:123
-F	get_exception_handler		mixed	0,false,false,false,false,-	false	false	Zend/zend_builtin_functions.stub.php:130
+F	get_error_handler		null|unknowncallable	0,false,false,false,false,-	false	false	Zend/zend_builtin_functions.stub.php:123
+F	get_exception_handler		null|unknowncallable	0,false,false,false,false,-	false	false	Zend/zend_builtin_functions.stub.php:130
 F	get_extension_funcs	extension:string:false:false:false	bool|array	0,false,false,false,false,-	false	false	Zend/zend_builtin_functions.stub.php:199
 F	get_headers	url:string:false:false:false,associative:bool:true:false:false,context:mixed:true:false:false	bool|array	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:3725
 F	get_html_translation_table	table:int:true:false:false,flags:int:true:false:false,encoding:string:true:false:false	array	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:2260
@@ -5105,7 +5105,7 @@ F	hash_update	context:@HashContext:false:false:false,data:string:false:false:fal
 F	hash_update_file	context:@HashContext:false:false:false,filename:string:false:false:false,stream_context:mixed:true:false:false	bool	0,false,false,false,false,-	false	false	ext/hash/hash.stub.php:38
 F	hash_update_stream	context:@HashContext:false:false:false,stream:mixed:false:false:false,length:int:true:false:false	int	0,false,false,false,false,-	false	false	ext/hash/hash.stub.php:35
 F	header	header:string:false:false:false,replace:bool:true:false:false,response_code:int:true:false:false	void	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:2222
-F	header_register_callback	callback:mixed:false:false:false	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1494
+F	header_register_callback	callback:unknowncallable:false:false:false	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1494
 F	header_remove	name:null|string:true:false:false	void	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:2224
 F	headers_list		array	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:2242
 F	headers_sent	filename:mixed:true:false:true,line:mixed:true:false:true	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:2236
@@ -5375,7 +5375,7 @@ F	is_subclass_of	object_or_class:mixed:false:false:false,class:string:false:fals
 F	is_uploaded_file	filename:string:false:false:false	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:2047
 F	is_writable	filename:string:false:false:false	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:2897
 F	is_writeable	filename:string:false:false:false	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:2900
-F	iterator_apply	iterator:@Traversable:false:false:false,callback:mixed:false:false:false,args:null|array:true:false:false	int	0,false,false,false,false,-	false	false	ext/spl/php_spl.stub.php:49
+F	iterator_apply	iterator:@Traversable:false:false:false,callback:unknowncallable:false:false:false,args:null|array:true:false:false	int	0,false,false,false,false,-	false	false	ext/spl/php_spl.stub.php:49
 F	iterator_count	iterator:array:false:false:false	int	0,false,false,false,false,-	false	false	ext/spl/php_spl.stub.php:51
 F	iterator_to_array	iterator:array:false:false:false,preserve_keys:bool:true:false:false	array	0,false,false,false,false,-	false	false	ext/spl/php_spl.stub.php:53
 F	jddayofweek	julian_day:int:false:false:false,mode:int:true:false:false	string|int	0,false,false,false,false,-	false	false	ext/calendar/calendar.stub.php:139
@@ -5456,7 +5456,7 @@ F	ldap_rename_ext	ldap:@LDAP\Connection:false:false:false,dn:string:false:false:
 F	ldap_sasl_bind	ldap:@LDAP\Connection:false:false:false,dn:null|string:true:false:false,password:null|string:true:false:false,mech:null|string:true:false:false,realm:null|string:true:false:false,authc_id:null|string:true:false:false,authz_id:null|string:true:false:false,props:null|string:true:false:false	bool	0,false,false,false,false,-	false	false	ext/ldap/ldap.stub.php:650
 F	ldap_search	ldap:mixed:false:false:false,base:string|array:false:false:false,filter:string|array:false:false:false,attributes:array:true:false:false,attributes_only:int:true:false:false,sizelimit:int:true:false:false,timelimit:int:true:false:false,deref:int:true:false:false,controls:null|array:true:false:false	bool|array|@LDAP\Result	0,false,false,false,false,-	false	false	ext/ldap/ldap.stub.php:660
 F	ldap_set_option	ldap:null|@LDAP\Connection:false:false:false,option:int:false:false:false,value:mixed:false:false:false	bool	0,false,false,false,false,-	false	false	ext/ldap/ldap.stub.php:751
-F	ldap_set_rebind_proc	ldap:@LDAP\Connection:false:false:false,callback:mixed:false:false:false	bool	0,false,false,false,false,-	false	false	ext/ldap/ldap.stub.php:777
+F	ldap_set_rebind_proc	ldap:@LDAP\Connection:false:false:false,callback:null|unknowncallable:false:false:false	bool	0,false,false,false,false,-	false	false	ext/ldap/ldap.stub.php:777
 F	ldap_start_tls	ldap:@LDAP\Connection:false:false:false	bool	0,false,false,false,false,-	false	false	ext/ldap/ldap.stub.php:781
 F	ldap_t61_to_8859	value:string:false:false:false	bool|string	0,false,false,false,false,-	false	false	ext/ldap/ldap.stub.php:787
 F	ldap_unbind	ldap:@LDAP\Connection:false:false:false	bool	0,false,false,false,false,-	false	false	ext/ldap/ldap.stub.php:640
@@ -5464,9 +5464,9 @@ F	levenshtein	string1:string:false:false:false,string2:string:false:false:false,
 F	libxml_clear_errors		void	0,false,false,false,false,-	false	false	ext/libxml/libxml.stub.php:180
 F	libxml_disable_entity_loader	disable:bool:true:false:false	bool	0,false,false,false,false,-	false	false	ext/libxml/libxml.stub.php:182
 F	libxml_get_errors		array	0,false,false,false,false,-	false	false	ext/libxml/libxml.stub.php:178
-F	libxml_get_external_entity_loader		mixed	0,false,false,false,false,-	false	false	ext/libxml/libxml.stub.php:187
+F	libxml_get_external_entity_loader		null|unknowncallable	0,false,false,false,false,-	false	false	ext/libxml/libxml.stub.php:187
 F	libxml_get_last_error		bool|@LibXMLError	0,false,false,false,false,-	false	false	ext/libxml/libxml.stub.php:175
-F	libxml_set_external_entity_loader	resolver_function:mixed:false:false:false	bool	0,false,false,false,false,-	false	false	ext/libxml/libxml.stub.php:185
+F	libxml_set_external_entity_loader	resolver_function:null|unknowncallable:false:false:false	bool	0,false,false,false,false,-	false	false	ext/libxml/libxml.stub.php:185
 F	libxml_set_streams_context	context:mixed:false:false:false	void	0,false,false,false,false,-	false	false	ext/libxml/libxml.stub.php:171
 F	libxml_use_internal_errors	use_errors:null|bool:true:false:false	bool	0,false,false,false,false,-	false	false	ext/libxml/libxml.stub.php:173
 F	link	target:string:false:false:false,link:string:false:false:false	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:3091
@@ -5518,7 +5518,7 @@ F	mb_encoding_aliases	encoding:string:false:false:false	array	0,false,false,fals
 F	mb_ereg	pattern:string:false:false:false,string:string:false:false:false,matches:mixed:true:false:true	bool	0,false,false,false,false,-	false	false	ext/mbstring/mbstring.stub.php:203
 F	mb_ereg_match	pattern:string:false:false:false,string:string:false:false:false,options:null|string:true:false:false	bool	0,false,false,false,false,-	false	false	ext/mbstring/mbstring.stub.php:223
 F	mb_ereg_replace	pattern:string:false:false:false,replacement:string:false:false:false,string:string:false:false:false,options:null|string:true:false:false	null|bool|string	0,false,false,false,false,-	false	false	ext/mbstring/mbstring.stub.php:209
-F	mb_ereg_replace_callback	pattern:string:false:false:false,callback:mixed:false:false:false,string:string:false:false:false,options:null|string:true:false:false	null|bool|string	0,false,false,false,false,-	false	false	ext/mbstring/mbstring.stub.php:215
+F	mb_ereg_replace_callback	pattern:string:false:false:false,callback:unknowncallable:false:false:false,string:string:false:false:false,options:null|string:true:false:false	null|bool|string	0,false,false,false,false,-	false	false	ext/mbstring/mbstring.stub.php:215
 F	mb_ereg_search	pattern:null|string:true:false:false,options:null|string:true:false:false	bool	0,false,false,false,false,-	false	false	ext/mbstring/mbstring.stub.php:225
 F	mb_ereg_search_getpos		int	0,false,false,false,false,-	false	false	ext/mbstring/mbstring.stub.php:247
 F	mb_ereg_search_getregs		bool|array	0,false,false,false,false,-	false	false	ext/mbstring/mbstring.stub.php:245
@@ -6113,7 +6113,7 @@ F	preg_match	pattern:string:false:false:false,subject:string:false:false:false,m
 F	preg_match_all	pattern:string:false:false:false,subject:string:false:false:false,matches:mixed:true:false:true,flags:int:true:false:false,offset:int:true:false:false	bool|int	0,false,false,false,false,-	false	false	ext/pcre/php_pcre.stub.php:108
 F	preg_quote	str:string:false:false:false,delimiter:null|string:true:false:false	string	0,false,false,false,false,-	false	false	ext/pcre/php_pcre.stub.php:139
 F	preg_replace	pattern:array|string:false:false:false,replacement:array|string:false:false:false,subject:array|string:false:false:false,limit:int:true:false:false,count:mixed:true:false:true	null|array|string	0,false,false,false,false,-	false	false	ext/pcre/php_pcre.stub.php:115
-F	preg_replace_callback	pattern:array|string:false:false:false,callback:mixed:false:false:false,subject:array|string:false:false:false,limit:int:true:false:false,count:mixed:true:false:true,flags:int:true:false:false	null|array|string	0,false,false,false,false,-	false	false	ext/pcre/php_pcre.stub.php:127
+F	preg_replace_callback	pattern:array|string:false:false:false,callback:unknowncallable:false:false:false,subject:array|string:false:false:false,limit:int:true:false:false,count:mixed:true:false:true,flags:int:true:false:false	null|array|string	0,false,false,false,false,-	false	false	ext/pcre/php_pcre.stub.php:127
 F	preg_replace_callback_array	pattern:array:false:false:false,subject:array|string:false:false:false,limit:int:true:false:false,count:mixed:true:false:true,flags:int:true:false:false	null|array|string	0,false,false,false,false,-	false	false	ext/pcre/php_pcre.stub.php:130
 F	preg_split	pattern:string:false:false:false,subject:string:false:false:false,limit:int:true:false:false,flags:int:true:false:false	bool|array	0,false,false,false,false,-	false	false	ext/pcre/php_pcre.stub.php:136
 F	prev	array:object|array:false:false:true	mixed	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1584
@@ -6141,11 +6141,11 @@ F	readfile	filename:string:false:false:false,use_include_path:bool:true:false:fa
 F	readgzfile	filename:string:false:false:false,use_include_path:bool:true:false:false	bool|int	0,false,false,false,false,-	false	false	ext/zlib/zlib.stub.php:180
 F	readline	prompt:null|string:true:false:false	bool|string	0,false,false,false,false,-	false	false	ext/readline/readline.stub.php:11
 F	readline_add_history	prompt:string:false:false:false	bool	0,false,false,false,false,-	false	false	ext/readline/readline.stub.php:16
-F	readline_callback_handler_install	prompt:string:false:false:false,callback:mixed:false:false:false	bool	0,false,false,false,false,-	false	false	ext/readline/readline.stub.php:36
+F	readline_callback_handler_install	prompt:string:false:false:false,callback:unknowncallable:false:false:false	bool	0,false,false,false,false,-	false	false	ext/readline/readline.stub.php:36
 F	readline_callback_handler_remove		bool	0,false,false,false,false,-	false	false	ext/readline/readline.stub.php:40
 F	readline_callback_read_char		void	0,false,false,false,false,-	false	false	ext/readline/readline.stub.php:38
 F	readline_clear_history		bool	0,false,false,false,false,-	false	false	ext/readline/readline.stub.php:18
-F	readline_completion_function	callback:mixed:false:false:false	bool	0,false,false,false,false,-	false	false	ext/readline/readline.stub.php:32
+F	readline_completion_function	callback:unknowncallable:false:false:false	bool	0,false,false,false,false,-	false	false	ext/readline/readline.stub.php:32
 F	readline_info	var_name:null|string:true:false:false,value:mixed:true:false:false	mixed	0,false,false,false,false,-	false	false	ext/readline/readline.stub.php:14
 F	readline_list_history		array	0,false,false,false,false,-	false	false	ext/readline/readline.stub.php:25
 F	readline_on_new_line		void	0,false,false,false,false,-	false	false	ext/readline/readline.stub.php:45
@@ -6156,8 +6156,8 @@ F	readlink	path:string:false:false:false	bool|string	0,false,false,false,false,-
 F	realpath	path:string:false:false:false	bool|string	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:2865
 F	realpath_cache_get		array	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:2953
 F	realpath_cache_size		int	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:2955
-F	register_shutdown_function	callback:mixed:false:false:false,args:mixed:false:true:false	void	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1980
-F	register_tick_function	callback:mixed:false:false:false,args:mixed:false:true:false	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:2043
+F	register_shutdown_function	callback:unknowncallable:false:false:false,args:mixed:false:true:false	void	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1980
+F	register_tick_function	callback:unknowncallable:false:false:false,args:mixed:false:true:false	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:2043
 F	rename	from:string:false:false:false,to:string:false:false:false,context:mixed:true:false:false	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:2821
 F	request_parse_body	options:null|array:true:false:false	array	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:3006
 F	reset	array:object|array:false:false:true	mixed	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1588
@@ -6180,7 +6180,7 @@ F	sapi_windows_cp_get	kind:string:true:false:false	int	0,false,false,false,false
 F	sapi_windows_cp_is_utf8		bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:3806
 F	sapi_windows_cp_set	codepage:int:false:false:false	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:3800
 F	sapi_windows_generate_ctrl_event	event:int:false:false:false,pid:int:true:false:false	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:3810
-F	sapi_windows_set_ctrl_handler	handler:mixed:false:false:false,add:bool:true:false:false	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:3808
+F	sapi_windows_set_ctrl_handler	handler:null|unknowncallable:false:false:false,add:bool:true:false:false	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:3808
 F	sapi_windows_vt100_support	stream:mixed:false:false:false,enable:null|bool:true:false:false	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:3552
 F	scandir	directory:string:false:false:false,sorting_order:int:true:false:false,context:mixed:true:false:false	bool|array	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:2673
 F	sem_acquire	semaphore:@SysvSemaphore:false:false:false,non_blocking:bool:true:false:false	bool	0,false,false,false,false,-	false	false	ext/sysvsem/sysvsem.stub.php:15
@@ -6206,13 +6206,13 @@ F	session_register_shutdown		void	0,false,false,false,false,-	false	false	ext/se
 F	session_reset		bool	0,false,false,false,false,-	false	false	ext/session/session.stub.php:58
 F	session_save_path	path:null|string:true:false:false	bool|string	0,false,false,false,false,-	false	false	ext/session/session.stub.php:28
 F	session_set_cookie_params	lifetime_or_options:int|array:false:false:false,path:null|string:true:false:false,domain:null|string:true:false:false,secure:null|bool:true:false:false,httponly:null|bool:true:false:false	bool	0,false,false,false,false,-	false	false	ext/session/session.stub.php:88
-F	session_set_save_handler	open:mixed:false:false:false,close:mixed:true:false:false,read:mixed:true:false:false,write:mixed:true:false:false,destroy:mixed:true:false:false,gc:mixed:true:false:false,create_sid:mixed:true:false:false,validate_sid:mixed:true:false:false,update_timestamp:mixed:true:false:false	bool	0,false,false,false,false,-	false	false	ext/session/session.stub.php:71
+F	session_set_save_handler	open:mixed:false:false:false,close:mixed:true:false:false,read:unknowncallable:true:false:false,write:unknowncallable:true:false:false,destroy:unknowncallable:true:false:false,gc:unknowncallable:true:false:false,create_sid:null|unknowncallable:true:false:false,validate_sid:null|unknowncallable:true:false:false,update_timestamp:null|unknowncallable:true:false:false	bool	0,false,false,false,false,-	false	false	ext/session/session.stub.php:71
 F	session_start	options:array:true:false:false	bool	0,false,false,false,false,-	false	false	ext/session/session.stub.php:90
 F	session_status		int	0,false,false,false,false,-	false	false	ext/session/session.stub.php:60
 F	session_unset		bool	0,false,false,false,false,-	false	false	ext/session/session.stub.php:44
 F	session_write_close		bool	0,false,false,false,false,-	false	false	ext/session/session.stub.php:54
-F	set_error_handler	callback:mixed:false:false:false,error_levels:int:true:false:false	mixed	0,false,false,false,false,-	false	false	Zend/zend_builtin_functions.stub.php:119
-F	set_exception_handler	callback:mixed:false:false:false	mixed	0,false,false,false,false,-	false	false	Zend/zend_builtin_functions.stub.php:126
+F	set_error_handler	callback:null|unknowncallable:false:false:false,error_levels:int:true:false:false	mixed	0,false,false,false,false,-	false	false	Zend/zend_builtin_functions.stub.php:119
+F	set_exception_handler	callback:null|unknowncallable:false:false:false	mixed	0,false,false,false,false,-	false	false	Zend/zend_builtin_functions.stub.php:126
 F	set_file_buffer	stream:mixed:false:false:false,size:int:false:false:false	int	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:3496
 F	set_include_path	include_path:string:false:false:false	bool|string	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:2012
 F	set_time_limit	seconds:int:false:false:false	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1490
@@ -6429,8 +6429,8 @@ F	spl_autoload	class:string:false:false:false,file_extensions:null|string:true:f
 F	spl_autoload_call	class:string:false:false:false	void	0,false,false,false,false,-	false	false	ext/spl/php_spl.stub.php:28
 F	spl_autoload_extensions	file_extensions:null|string:true:false:false	string	0,false,false,false,false,-	false	false	ext/spl/php_spl.stub.php:30
 F	spl_autoload_functions		array	0,false,false,false,false,-	false	false	ext/spl/php_spl.stub.php:32
-F	spl_autoload_register	callback:mixed:true:false:false,throw:bool:true:false:false,prepend:bool:true:false:false	bool	0,false,false,false,false,-	false	false	ext/spl/php_spl.stub.php:34
-F	spl_autoload_unregister	callback:mixed:false:false:false	bool	0,false,false,false,false,-	false	false	ext/spl/php_spl.stub.php:36
+F	spl_autoload_register	callback:null|unknowncallable:true:false:false,throw:bool:true:false:false,prepend:bool:true:false:false	bool	0,false,false,false,false,-	false	false	ext/spl/php_spl.stub.php:34
+F	spl_autoload_unregister	callback:unknowncallable:false:false:false	bool	0,false,false,false,false,-	false	false	ext/spl/php_spl.stub.php:36
 F	spl_classes		array	0,false,false,false,false,-	false	false	ext/spl/php_spl.stub.php:42
 F	spl_object_hash	object:object:false:false:false	string	0,false,false,false,false,-	false	false	ext/spl/php_spl.stub.php:45
 F	spl_object_id	object:object:false:false:false	int	0,false,false,false,false,-	false	false	ext/spl/php_spl.stub.php:47
@@ -6595,23 +6595,23 @@ F	transliterator_list_ids		bool|array	0,false,false,false,false,-	false	false	ex
 F	transliterator_transliterate	transliterator:string|@Transliterator:false:false:false,string:string:false:false:false,start:int:true:false:false,end:int:true:false:false	bool|string	0,false,false,false,false,-	false	false	ext/intl/php_intl.stub.php:637
 F	trigger_error	message:string:false:false:false,error_level:int:true:false:false	bool	0,false,false,false,false,-	false	false	Zend/zend_builtin_functions.stub.php:113
 F	trim	string:string:false:false:false,characters:string:true:false:false	string	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:2307
-F	uasort	array:array:false:false:true,callback:mixed:false:false:false	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1578
+F	uasort	array:array:false:false:true,callback:unknowncallable:false:false:false	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1578
 F	ucfirst	string:string:false:false:false	string	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:2461
 F	ucwords	string:string:false:false:false,separators:string:true:false:false	string	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:2470
-F	uksort	array:array:false:false:true,callback:mixed:false:false:false	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1580
+F	uksort	array:array:false:false:true,callback:unknowncallable:false:false:false	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1580
 F	umask	mask:null|int:true:false:false	int	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:2743
 F	uniqid	prefix:string:true:false:false,more_entropy:bool:true:false:false	string	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:3684
 F	unixtojd	timestamp:null|int:true:false:false	bool|int	0,false,false,false,false,-	false	false	ext/calendar/calendar.stub.php:157
 F	unlink	filename:string:false:false:false,context:mixed:true:false:false	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:2849
 F	unpack	format:string:false:false:false,string:string:false:false:false,offset:int:true:false:false	bool|array	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:3296
-F	unregister_tick_function	callback:mixed:false:false:false	void	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:2045
+F	unregister_tick_function	callback:unknowncallable:false:false:false	void	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:2045
 F	unserialize	data:string:false:false:false,options:array:true:false:false	mixed	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:3784
 F	urldecode	string:string:false:false:false	string	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:3706
 F	urlencode	string:string:false:false:false	string	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:3700
 F	use_soap_error_handler	enable:bool:true:false:false	bool	0,false,false,false,false,-	false	false	ext/soap/soap.stub.php:448
 F	user_error	message:string:false:false:false,error_level:int:true:false:false	bool	0,false,false,false,false,-	false	false	Zend/zend_builtin_functions.stub.php:116
 F	usleep	microseconds:int:false:false:false	void	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1944
-F	usort	array:array:false:false:true,callback:mixed:false:false:false	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1576
+F	usort	array:array:false:false:true,callback:unknowncallable:false:false:false	bool	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:1576
 F	utf8_decode	string:string:false:false:false	string	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:2630
 F	utf8_encode	string:string:false:false:false	string	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:2623
 F	var_dump	value:mixed:false:false:false,values:mixed:false:true:false	void	0,false,false,false,false,-	false	false	ext/standard/basic_functions.stub.php:3771
@@ -6659,16 +6659,16 @@ F	xml_parser_create_ns	encoding:null|string:true:false:false,separator:string:tr
 F	xml_parser_free	parser:@XMLParser:false:false:false	bool	0,false,false,false,false,-	false	false	ext/xml/xml.stub.php:192
 F	xml_parser_get_option	parser:@XMLParser:false:false:false,option:int:false:false:false	bool|int|string	0,false,false,false,false,-	false	false	ext/xml/xml.stub.php:199
 F	xml_parser_set_option	parser:@XMLParser:false:false:false,option:int:false:false:false,value:mixed:false:false:false	bool	0,false,false,false,false,-	false	false	ext/xml/xml.stub.php:196
-F	xml_set_character_data_handler	parser:@XMLParser:false:false:false,handler:mixed:false:false:false	bool	0,false,false,false,false,-	false	false	ext/xml/xml.stub.php:157
-F	xml_set_default_handler	parser:@XMLParser:false:false:false,handler:mixed:false:false:false	bool	0,false,false,false,false,-	false	false	ext/xml/xml.stub.php:161
-F	xml_set_element_handler	parser:@XMLParser:false:false:false,start_handler:mixed:false:false:false,end_handler:mixed:false:false:false	bool	0,false,false,false,false,-	false	false	ext/xml/xml.stub.php:155
-F	xml_set_end_namespace_decl_handler	parser:@XMLParser:false:false:false,handler:mixed:false:false:false	bool	0,false,false,false,false,-	false	false	ext/xml/xml.stub.php:171
-F	xml_set_external_entity_ref_handler	parser:@XMLParser:false:false:false,handler:mixed:false:false:false	bool	0,false,false,false,false,-	false	false	ext/xml/xml.stub.php:167
-F	xml_set_notation_decl_handler	parser:@XMLParser:false:false:false,handler:mixed:false:false:false	bool	0,false,false,false,false,-	false	false	ext/xml/xml.stub.php:165
+F	xml_set_character_data_handler	parser:@XMLParser:false:false:false,handler:null|string|unknowncallable:false:false:false	bool	0,false,false,false,false,-	false	false	ext/xml/xml.stub.php:157
+F	xml_set_default_handler	parser:@XMLParser:false:false:false,handler:null|string|unknowncallable:false:false:false	bool	0,false,false,false,false,-	false	false	ext/xml/xml.stub.php:161
+F	xml_set_element_handler	parser:@XMLParser:false:false:false,start_handler:null|string|unknowncallable:false:false:false,end_handler:null|string|unknowncallable:false:false:false	bool	0,false,false,false,false,-	false	false	ext/xml/xml.stub.php:155
+F	xml_set_end_namespace_decl_handler	parser:@XMLParser:false:false:false,handler:null|string|unknowncallable:false:false:false	bool	0,false,false,false,false,-	false	false	ext/xml/xml.stub.php:171
+F	xml_set_external_entity_ref_handler	parser:@XMLParser:false:false:false,handler:null|string|unknowncallable:false:false:false	bool	0,false,false,false,false,-	false	false	ext/xml/xml.stub.php:167
+F	xml_set_notation_decl_handler	parser:@XMLParser:false:false:false,handler:null|string|unknowncallable:false:false:false	bool	0,false,false,false,false,-	false	false	ext/xml/xml.stub.php:165
 F	xml_set_object	parser:@XMLParser:false:false:false,object:object:false:false:false	bool	0,false,false,false,false,-	false	false	ext/xml/xml.stub.php:152
-F	xml_set_processing_instruction_handler	parser:@XMLParser:false:false:false,handler:mixed:false:false:false	bool	0,false,false,false,false,-	false	false	ext/xml/xml.stub.php:159
-F	xml_set_start_namespace_decl_handler	parser:@XMLParser:false:false:false,handler:mixed:false:false:false	bool	0,false,false,false,false,-	false	false	ext/xml/xml.stub.php:169
-F	xml_set_unparsed_entity_decl_handler	parser:@XMLParser:false:false:false,handler:mixed:false:false:false	bool	0,false,false,false,false,-	false	false	ext/xml/xml.stub.php:163
+F	xml_set_processing_instruction_handler	parser:@XMLParser:false:false:false,handler:null|string|unknowncallable:false:false:false	bool	0,false,false,false,false,-	false	false	ext/xml/xml.stub.php:159
+F	xml_set_start_namespace_decl_handler	parser:@XMLParser:false:false:false,handler:null|string|unknowncallable:false:false:false	bool	0,false,false,false,false,-	false	false	ext/xml/xml.stub.php:169
+F	xml_set_unparsed_entity_decl_handler	parser:@XMLParser:false:false:false,handler:null|string|unknowncallable:false:false:false	bool	0,false,false,false,false,-	false	false	ext/xml/xml.stub.php:163
 F	xmlwriter_end_attribute	writer:@XMLWriter:false:false:false	bool	0,false,false,false,false,-	false	false	ext/xmlwriter/php_xmlwriter.stub.php:19
 F	xmlwriter_end_cdata	writer:@XMLWriter:false:false:false	bool	0,false,false,false,false,-	false	false	ext/xmlwriter/php_xmlwriter.stub.php:47
 F	xmlwriter_end_comment	writer:@XMLWriter:false:false:false	bool	0,false,false,false,false,-	false	false	ext/xmlwriter/php_xmlwriter.stub.php:15

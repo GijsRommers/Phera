@@ -28,6 +28,7 @@ pub fn decode_type(text: &str) -> ValueType {
         "object" => ValueType::Object,
         "void" => ValueType::Void,
         "never" => ValueType::Never,
+        "unknowncallable" => ValueType::UnknownCallable,
         _ => ValueType::Mixed,
     }
 }

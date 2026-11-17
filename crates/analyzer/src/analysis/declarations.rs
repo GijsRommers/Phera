@@ -40,6 +40,9 @@ impl Analyzer<'_> {
     }
 
     pub fn function(&mut self, function: &FunctionDeclaration, span: Span) {
+        if !self.checked_declarations.insert(span.start) {
+            return;
+        }
         let previous = self.context.clone();
         let exceptions = std::mem::take(&mut self.exception_scopes);
         let controls = std::mem::take(&mut self.controls);
@@ -66,6 +69,9 @@ impl Analyzer<'_> {
     }
 
     pub fn class_declaration(&mut self, class: &ClassDeclaration) {
+        if !self.checked_declarations.insert(class.span.start) {
+            return;
+        }
         let previous = self.context.clone();
         let exceptions = std::mem::take(&mut self.exception_scopes);
         let controls = std::mem::take(&mut self.controls);
@@ -165,6 +171,10 @@ impl Analyzer<'_> {
     }
 
     pub fn check_return_path(&mut self, flow: Flow, body: &[Statement], span: Span) {
+        if self.context.returns == ValueType::Void {
+            self.void_returns(body);
+            return;
+        }
         if self.context.incomplete
             || flow != Flow::Next
             || !self.context.declared_return
@@ -192,5 +202,16 @@ impl Analyzer<'_> {
         }
         let span = body.first().map_or(span, |statement| statement.span);
         self.report(Finding::MissingReturn(self.context.function.clone()), span);
+    }
+    fn void_returns(&mut self, body: &[Statement]) {
+        let mut pending = vec![body];
+        while let Some(block) = pending.pop() {
+            for statement in block {
+                if matches!(statement.kind, StatementKind::Return(Some(_))) {
+                    self.report(Finding::VoidReturn, statement.span);
+                }
+                pending.extend(crate::collect::child_blocks(statement));
+            }
+        }
     }
 }

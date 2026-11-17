@@ -9,7 +9,10 @@ impl Analyzer<'_> {
             StatementKind::Global(variables) => {
                 for variable in variables {
                     match variable {
-                        Variable::Named(name) => scope.define(name, ValueType::Mixed),
+                        Variable::Named(name) => {
+                            scope.define(name, ValueType::Mixed);
+                            scope.external_references.insert(name.clone());
+                        }
                         Variable::Dynamic(e) => {
                             self.expression(e, scope, false);
                             scope.unknown_writes();
@@ -49,11 +52,8 @@ impl Analyzer<'_> {
         };
         if let Some(name) = name {
             scope.variables.remove(name);
-            scope.aliases.remove(name);
+            scope.detach(name);
             scope.values.remove(name);
-            for aliases in scope.aliases.values_mut() {
-                aliases.remove(name);
-            }
         }
     }
 }

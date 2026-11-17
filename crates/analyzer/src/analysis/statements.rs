@@ -60,8 +60,7 @@ impl Analyzer<'_> {
                 otherwise,
             } => return self.if_statement(condition, then, otherwise.as_deref(), scope),
             StatementKind::Switch { subject, cases } => {
-                self.expression(subject, scope, false);
-                return self.switch(cases, scope);
+                return self.switch(subject, cases, scope);
             }
             StatementKind::Try {
                 body,
@@ -92,8 +91,18 @@ impl Analyzer<'_> {
                 self.context.names = previous;
                 return flow;
             }
-            StatementKind::Function(function) => self.function(function, statement.span),
-            StatementKind::Class(class) => self.class_declaration(class),
+            StatementKind::Function(function) => {
+                let previous = self.context.known.clone();
+                self.context.known.extend(scope.known.iter().cloned());
+                self.function(function, statement.span);
+                self.context.known = previous;
+            }
+            StatementKind::Class(class) => {
+                let previous = self.context.known.clone();
+                self.context.known.extend(scope.known.iter().cloned());
+                self.class_declaration(class);
+                self.context.known = previous;
+            }
             _ => {}
         }
         Flow::Next
@@ -128,7 +137,9 @@ impl Analyzer<'_> {
         scope: &mut Scope,
     ) -> Flow {
         let truth = self.condition_truth(condition, scope);
-        self.expression(condition, scope, false);
+        if self.expression(condition, scope, false) == ValueType::Never {
+            return Flow::Terminal;
+        }
         if let Some(truth) = truth {
             return if truth {
                 self.block(then, scope)
@@ -160,35 +171,5 @@ impl Analyzer<'_> {
         } else {
             Flow::Continue
         }
-    }
-
-    fn switch(&mut self, cases: &[SwitchCase], scope: &mut Scope) -> Flow {
-        use super::control::{ControlFrame, ControlKind};
-        let before = scope.clone();
-        let mut paths = Vec::new();
-        self.controls.push(ControlFrame::new(ControlKind::Switch));
-        if !cases.iter().any(|c| c.condition.is_none()) {
-            paths.push(before.clone());
-        }
-        for (start, case) in cases.iter().enumerate() {
-            let mut branch = before.clone();
-            if let Some(condition) = &case.condition {
-                self.expression(condition, &mut branch, false);
-            }
-            let mut flow = Flow::Next;
-            for case in &cases[start..] {
-                flow = self.block(&case.body, &mut branch);
-                if flow != Flow::Next {
-                    break;
-                }
-            }
-            if flow == Flow::Next {
-                paths.push(branch);
-            }
-        }
-        if let Some(frame) = self.controls.pop() {
-            paths.extend(frame.breaks);
-        }
-        Self::finish_paths(paths, scope)
     }
 }

@@ -25,6 +25,7 @@ pub struct Scope {
     pub variables: BTreeMap<String, VariableInfo>,
     pub dynamic: bool,
     pub aliases: BTreeMap<String, BTreeSet<String>>,
+    pub external_references: BTreeSet<String>,
 }
 
 impl Scope {
@@ -87,12 +88,43 @@ impl Scope {
         })
     }
 
+    pub fn detach(&mut self, name: &str) {
+        self.aliases.remove(name);
+        self.external_references.remove(name);
+        for aliases in self.aliases.values_mut() {
+            aliases.remove(name);
+        }
+    }
+
     pub fn reference(&mut self, left: &str, right: &str) {
-        let mut names = BTreeSet::from([left.into(), right.into()]);
-        names.extend(self.aliases.get(left).into_iter().flatten().cloned());
-        names.extend(self.aliases.get(right).into_iter().flatten().cloned());
+        if left == right {
+            return;
+        }
+        self.detach(left);
+        let mut names = self.aliases.get(right).cloned().unwrap_or_default();
+        names.extend([left.into(), right.into()]);
+        if names
+            .iter()
+            .any(|name| self.external_references.contains(name))
+        {
+            self.external_references.extend(names.iter().cloned());
+        }
         for name in &names {
             self.aliases.insert(name.clone(), names.clone());
+        }
+    }
+
+    pub fn forget_reference_types(&mut self) {
+        let names: Vec<_> = self.external_references.iter().cloned().collect();
+        for name in names {
+            let definition = self.get(&name).definition;
+            self.define(&name, ValueType::Mixed);
+            if let Some(variable) = self.variables.get_mut(&name) {
+                variable.definition = definition;
+            }
+        }
+        if self.dynamic {
+            self.unknown_writes();
         }
     }
 
@@ -106,6 +138,10 @@ impl Scope {
             .flat_map(|p| p.variables.keys().cloned())
             .collect();
         result.dynamic = paths.iter().any(|p| p.dynamic);
+        result.external_references = paths
+            .iter()
+            .flat_map(|p| p.external_references.iter().cloned())
+            .collect();
         result
             .values
             .retain(|key, value| paths.iter().all(|p| p.values.get(key) == Some(value)));
@@ -144,4 +180,14 @@ pub enum Symbol {
     Class(String),
     Function(String),
     Constant(String),
+}
+
+impl Symbol {
+    pub fn constant_name(name: &str) -> String {
+        let name = name.trim_start_matches('\\');
+        name.split_once("::").map_or_else(
+            || name.to_string(),
+            |(class, constant)| format!("{}::{constant}", class.to_ascii_lowercase()),
+        )
+    }
 }

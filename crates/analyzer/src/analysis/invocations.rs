@@ -20,6 +20,9 @@ impl Analyzer<'_> {
                 ..
             } => {
                 let ty = self.expression(target, scope, quiet);
+                if ty == ValueType::Never {
+                    return ty;
+                }
                 self.method_call(
                     &ty,
                     name,
@@ -35,15 +38,11 @@ impl Analyzer<'_> {
                 arguments,
             } => {
                 let class_name = self.class_expression(class, scope);
-                let forwarding = self.context.object
-                    && self.context.this_class.as_ref().is_none_or(|object| {
-                        class_name.as_ref().is_some_and(|class| {
-                            self.index
-                                .ancestry(object)
-                                .iter()
-                                .any(|ancestor| ancestor.name.eq_ignore_ascii_case(class))
-                        })
-                    });
+                if class_name.is_never() {
+                    return ValueType::Never;
+                }
+                let class_name = class_name.name();
+                let forwarding = self.forwards_object(class_name.as_deref());
                 let ty = class_name.map_or(ValueType::Mixed, ValueType::Class);
                 self.method_call(
                     &ty,
@@ -66,5 +65,17 @@ impl Analyzer<'_> {
             }
             _ => ValueType::Mixed,
         }
+    }
+
+    fn forwards_object(&self, class_name: Option<&str>) -> bool {
+        self.context.object
+            && self.context.this_class.as_ref().is_none_or(|object| {
+                class_name.is_some_and(|class| {
+                    self.index
+                        .ancestry(object)
+                        .iter()
+                        .any(|ancestor| ancestor.name.eq_ignore_ascii_case(class))
+                })
+            })
     }
 }

@@ -27,8 +27,10 @@ impl Analyzer<'_> {
                 PropertyAccess::Instance,
             )
         } else {
-            if let MemberName::Expression(e) = name {
-                self.expression(e, scope, false);
+            if let MemberName::Expression(e) = name
+                && self.expression(e, scope, false) == ValueType::Never
+            {
+                return ValueType::Never;
             }
             ValueType::Mixed
         }

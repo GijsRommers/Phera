@@ -13,6 +13,9 @@ impl Analyzer<'_> {
         match &expression.kind {
             ExpressionKind::Property { target, name, .. } => {
                 let ty = self.expression(target, scope, quiet);
+                if ty == ValueType::Never {
+                    return ty;
+                }
                 self.property(
                     &ty,
                     name,
@@ -42,6 +45,10 @@ impl Analyzer<'_> {
         let late_static = matches!(&class.kind, ExpressionKind::Name(name)
                     if name.text.eq_ignore_ascii_case("static"));
         let class = self.class_expression(class, scope);
+        if class.is_never() {
+            return ValueType::Never;
+        }
+        let class = class.name();
         if let Variable::Named(name) = name
             && let Some(class) = class
         {
@@ -58,8 +65,10 @@ impl Analyzer<'_> {
                 PropertyAccess::Static,
             );
         }
-        if let Variable::Dynamic(name) = name {
-            self.expression(name, scope, false);
+        if let Variable::Dynamic(name) = name
+            && self.expression(name, scope, false) == ValueType::Never
+        {
+            return ValueType::Never;
         }
         ValueType::Mixed
     }
@@ -73,8 +82,14 @@ impl Analyzer<'_> {
         let late_static = matches!(&class.kind, ExpressionKind::Name(name)
                     if name.text.eq_ignore_ascii_case("static"));
         let class = self.class_expression(class, scope);
-        if let MemberName::Expression(name) = name {
-            self.expression(name, scope, false);
+        if class.is_never() {
+            return ValueType::Never;
+        }
+        let class = class.name();
+        if let MemberName::Expression(name) = name
+            && self.expression(name, scope, false) == ValueType::Never
+        {
+            return ValueType::Never;
         }
         if let (Some(class), MemberName::Identifier(name)) = (class, name)
             && !name.name.eq_ignore_ascii_case("class")
@@ -85,6 +100,12 @@ impl Analyzer<'_> {
                     .index
                     .class(&class)
                     .is_some_and(|c| c.modifiers.is_abstract))
+            && !scope
+                .known
+                .contains(&Symbol::Constant(Symbol::constant_name(&format!(
+                    "{class}::{}",
+                    name.name
+                ))))
             && !self.index.constant(&class, &name.name)
         {
             self.report(

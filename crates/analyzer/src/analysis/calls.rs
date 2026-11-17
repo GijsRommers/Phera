@@ -23,6 +23,9 @@ impl Analyzer<'_> {
             self.named_call(name, scope)
         } else {
             let ty = self.expression(callee, scope, false);
+            if ty == ValueType::Never {
+                return ty;
+            }
             ResolvedCall {
                 signature: if let ValueType::Callable(signature) = ty {
                     Some(*signature)
@@ -34,7 +37,7 @@ impl Analyzer<'_> {
                 kind: CallKind::Callable,
             }
         };
-        self.arguments(
+        let evaluation = self.arguments(
             arguments,
             resolved.signature.as_ref(),
             &resolved.label,
@@ -42,6 +45,9 @@ impl Analyzer<'_> {
             callee.span,
             resolved.kind,
         );
+        if evaluation == Evaluation::Never {
+            return ValueType::Never;
+        }
         if !matches!(arguments, Arguments::FirstClassCallable) {
             self.apply_global_effects(resolved.signature.as_ref(), scope);
         }
@@ -67,9 +73,12 @@ impl Analyzer<'_> {
         });
         if found.is_none()
             && !candidates.iter().any(|name| {
-                scope
+                self.context
                     .known
                     .contains(&Symbol::Function(name.to_ascii_lowercase()))
+                    || scope
+                        .known
+                        .contains(&Symbol::Function(name.to_ascii_lowercase()))
             })
         {
             self.report(Finding::UnknownFunction(candidates[0].clone()), name.span);
@@ -99,11 +108,18 @@ impl Analyzer<'_> {
         access: Access,
     ) -> ValueType {
         let (ValueType::Class(class), MemberName::Identifier(method)) = (ty, name) else {
-            if let MemberName::Expression(e) = name {
-                self.expression(e, scope, false);
+            if let MemberName::Expression(e) = name
+                && self.expression(e, scope, false) == ValueType::Never
+            {
+                return ValueType::Never;
             }
-            self.arguments(arguments, None, "method", scope, span, CallKind::Direct);
-            return ValueType::Mixed;
+            return if self.arguments(arguments, None, "method", scope, span, CallKind::Direct)
+                == Evaluation::Never
+            {
+                ValueType::Never
+            } else {
+                ValueType::Mixed
+            };
         };
         let signature = self.index.method(class, &method.name).cloned();
         self.validate_method(class, &method.name, signature.as_ref(), span, access);
@@ -118,7 +134,7 @@ impl Analyzer<'_> {
         };
         let binding = self.pending_binding.take();
         self.prepare_binding(class, &method.name, arguments, scope);
-        self.arguments(
+        let evaluation = self.arguments(
             arguments,
             parameters,
             &format!("{class}::{}()", method.name),
@@ -130,6 +146,9 @@ impl Analyzer<'_> {
             self.apply_global_effects(signature.as_ref(), scope);
         }
         self.pending_binding = binding;
+        if evaluation == Evaluation::Never {
+            return ValueType::Never;
+        }
         if matches!(arguments, Arguments::FirstClassCallable) {
             signature.map_or(ValueType::Mixed, |s| ValueType::Callable(Box::new(s)))
         } else {
@@ -181,7 +200,7 @@ impl Analyzer<'_> {
             if let NewTarget::Anonymous(class) = target {
                 let name = crate::collect::anonymous_name(&self.file.path, class.span.start);
                 let signature = self.index.method(&name, "__construct").cloned();
-                self.arguments(
+                let evaluation = self.arguments(
                     arguments,
                     signature.as_ref(),
                     "anonymous class",
@@ -189,12 +208,19 @@ impl Analyzer<'_> {
                     class.span,
                     CallKind::Direct,
                 );
+                if evaluation == Evaluation::Never {
+                    return ValueType::Never;
+                }
                 self.class_declaration(class);
                 return ValueType::Class(name);
             }
             return ValueType::Mixed;
         };
         let class = self.class_expression(expression, scope);
+        if class.is_never() {
+            return ValueType::Never;
+        }
+        let class = class.name();
         let signature = class
             .as_ref()
             .and_then(|c| self.index.method(c, "__construct"))
@@ -212,7 +238,7 @@ impl Analyzer<'_> {
             };
             self.report(finding, expression.span);
         }
-        self.arguments(
+        let evaluation = self.arguments(
             arguments,
             signature.as_ref(),
             &format!("new {}", class.as_deref().unwrap_or("class")),
@@ -220,6 +246,9 @@ impl Analyzer<'_> {
             expression.span,
             CallKind::Direct,
         );
+        if evaluation == Evaluation::Never {
+            return ValueType::Never;
+        }
         self.apply_global_effects(signature.as_ref(), scope);
         class.map_or(ValueType::Mixed, ValueType::Class)
     }

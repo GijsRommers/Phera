@@ -101,7 +101,13 @@ fn declaration_end(file: &ParsedFile, start: usize) -> usize {
     let mut pending = vec![file.program.statements.as_slice()];
     while let Some(statements) = pending.pop() {
         for statement in statements {
-            if statement.span.start == start {
+            let attributes: &[phera_ast::Attribute] = match &statement.kind {
+                phera_ast::StatementKind::Function(function) => &function.attributes,
+                phera_ast::StatementKind::Class(class) => &class.attributes,
+                phera_ast::StatementKind::Const { attributes, .. } => attributes,
+                _ => &[],
+            };
+            if begins_at(file, start, statement.span.start, attributes) {
                 return file.lines.line(statement.span.end);
             }
             pending.extend(crate::collect::child_blocks(statement));
@@ -110,7 +116,14 @@ fn declaration_end(file: &ParsedFile, start: usize) -> usize {
             }
             if let phera_ast::StatementKind::Class(class) = &statement.kind {
                 for member in &class.members {
-                    if member.span.start == start {
+                    let attributes: &[phera_ast::Attribute] = match &member.kind {
+                        phera_ast::ClassMemberKind::Method(method) => &method.attributes,
+                        phera_ast::ClassMemberKind::Property { attributes, .. }
+                        | phera_ast::ClassMemberKind::Constant { attributes, .. }
+                        | phera_ast::ClassMemberKind::EnumCase { attributes, .. } => attributes,
+                        _ => &[],
+                    };
+                    if begins_at(file, start, member.span.start, attributes) {
                         return file.lines.line(member.span.end);
                     }
                 }
@@ -133,4 +146,18 @@ fn psalm_matches(id: &str, identifier: &str) -> bool {
                 | "UndefinedThisPropertyAssignment"
         ) && identifier == "staticProperty.notFound")
         || (id == "AbstractInstantiation" && identifier == "new.interface")
+}
+
+fn begins_at(
+    file: &ParsedFile,
+    start: usize,
+    declaration: usize,
+    attributes: &[phera_ast::Attribute],
+) -> bool {
+    start == declaration
+        || attributes.first().is_some_and(|attribute| {
+            file.source
+                .get(start..attribute.span.start)
+                .is_some_and(|prefix| prefix.trim_start().starts_with("#["))
+        })
 }

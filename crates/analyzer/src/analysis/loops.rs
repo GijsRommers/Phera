@@ -9,7 +9,9 @@ impl Analyzer<'_> {
         match &statement.kind {
             StatementKind::While { condition, body } => {
                 let truth = self.condition_truth(condition, scope);
-                self.expression(condition, scope, false);
+                if self.expression(condition, scope, false) == ValueType::Never {
+                    return Flow::Terminal;
+                }
                 if truth == Some(false) {
                     return Flow::Next;
                 }
@@ -25,7 +27,9 @@ impl Analyzer<'_> {
                 body,
             } => {
                 for e in init.iter().chain(condition) {
-                    self.expression(e, scope, false);
+                    if self.expression(e, scope, false) == ValueType::Never {
+                        return Flow::Terminal;
+                    }
                 }
                 let entered = condition
                     .last()
@@ -60,12 +64,21 @@ impl Analyzer<'_> {
         body: &[Statement],
         scope: &mut Scope,
     ) -> Flow {
-        self.expression(subject, scope, false);
-        let before = scope.clone();
-        if let Some(key) = key {
-            self.write(key, ValueType::Mixed, scope);
+        if self.expression(subject, scope, false) == ValueType::Never {
+            return Flow::Terminal;
         }
-        self.write(value, ValueType::Mixed, scope);
+        let before = scope.clone();
+        let nonempty = matches!(&subject.kind, ExpressionKind::Array(items)
+            if items.iter().any(|item| !item.spread));
+        let key_flow = key.map_or(Evaluation::Completes, |key| {
+            self.write(key, ValueType::Mixed, scope)
+        });
+        if key_flow == Evaluation::Never
+            || self.write(value, ValueType::Mixed, scope) == Evaluation::Never
+        {
+            *scope = before;
+            return if nonempty { Flow::Terminal } else { Flow::Next };
+        }
         let (flow, frame) = self.control_body(body, scope);
         let mut paths = frame.breaks;
         paths.extend(frame.continues);
@@ -97,10 +110,10 @@ impl Analyzer<'_> {
         let mut paths = frame.breaks;
         if !advancing.is_empty() {
             let mut next = Scope::join(&advancing);
-            for e in step {
-                self.expression(e, &mut next, false);
-            }
-            if !infinite {
+            let completed = step
+                .iter()
+                .all(|e| self.expression(e, &mut next, false) != ValueType::Never);
+            if completed && !infinite {
                 paths.push(next);
             }
         }
@@ -130,10 +143,8 @@ impl Analyzer<'_> {
         let mut paths = frame.breaks;
         if !advancing.is_empty() {
             let mut next = Scope::join(&advancing);
-            if post_condition {
-                self.expression(condition, &mut next, false);
-            }
-            if !always_true(condition) {
+            let completed = self.expression(condition, &mut next, false) != ValueType::Never;
+            if completed && !always_true(condition) {
                 paths.push(next);
             }
         }

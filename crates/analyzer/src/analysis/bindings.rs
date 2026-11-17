@@ -5,62 +5,6 @@ use super::*;
 use crate::index::{Location, Signature};
 
 impl Analyzer<'_> {
-    pub fn write(&mut self, target: &Expression, ty: ValueType, scope: &mut Scope) {
-        if self.context.scope_kind == ScopeKind::Global
-            && let Some(name) = crate::global_effects::variable_name(target)
-        {
-            scope.define(name, ValueType::Mixed);
-        }
-        let mut pending = vec![(target, ty)];
-        while let Some((target, ty)) = pending.pop() {
-            match &target.kind {
-                ExpressionKind::Variable(Variable::Named(name)) => scope.define(name, ty.clone()),
-                ExpressionKind::Variable(Variable::Dynamic(e)) => {
-                    self.expression(e, scope, false);
-                    scope.unknown_writes();
-                }
-                ExpressionKind::List(items) => {
-                    for item in items.iter().flatten() {
-                        if let Some(key) = &item.key {
-                            self.expression(key, scope, false);
-                        }
-                        pending.push((&item.value, ValueType::Mixed));
-                    }
-                }
-                ExpressionKind::Array(items) => {
-                    pending.extend(items.iter().map(|i| (&i.value, ValueType::Mixed)))
-                }
-                ExpressionKind::Index { target, index } => {
-                    if let Some(index) = index {
-                        self.expression(index, scope, false);
-                    }
-                    let array_type =
-                        if let ExpressionKind::Variable(Variable::Named(name)) = &target.kind {
-                            let old = scope.get(name);
-                            if old.definition == Definition::Absent {
-                                ValueType::Array
-                            } else {
-                                old.ty
-                            }
-                        } else {
-                            ValueType::Mixed
-                        };
-                    pending.push((target, array_type));
-                }
-                ExpressionKind::Property { target, name, .. } => {
-                    let ty = self.expression(target, scope, false);
-                    self.property(&ty, name, scope, target.span, false, Access::object(target));
-                }
-                ExpressionKind::StaticProperty { .. } => {
-                    self.expression(target, scope, false);
-                }
-                _ => {
-                    self.expression(target, scope, true);
-                }
-            }
-        }
-    }
-
     pub fn ensure_reference(&mut self, expression: &Expression, scope: &mut Scope) {
         if let ExpressionKind::Variable(Variable::Named(name)) = &expression.kind {
             if scope.get(name).definition != Definition::Definite {
@@ -77,7 +21,14 @@ impl Analyzer<'_> {
             if let Some(default) = &parameter.default {
                 self.expression(default, scope, false);
             }
-            let ty = ValueType::declared(parameter.ty.as_ref(), &self.context.names);
+            let ty = if parameter.variadic {
+                ValueType::Array
+            } else {
+                ValueType::parameter(parameter, &self.context.names)
+            };
+            if parameter.by_reference {
+                scope.external_references.insert(parameter.name.clone());
+            }
             let ty = self
                 .context
                 .class
@@ -97,12 +48,24 @@ impl Analyzer<'_> {
             } else {
                 self.read(&capture.name, outer, capture.span, false);
             }
-            inner.define(&capture.name, outer.get(&capture.name).ty);
+            if capture.by_reference {
+                outer.external_references.insert(capture.name.clone());
+                inner.external_references.insert(capture.name.clone());
+            }
+            inner.define(
+                &capture.name,
+                if capture.by_reference {
+                    ValueType::Mixed
+                } else {
+                    outer.get(&capture.name).ty
+                },
+            );
         }
         let previous = self.context.clone();
         let exceptions = std::mem::take(&mut self.exception_scopes);
         let controls = std::mem::take(&mut self.controls);
         let returns = std::mem::take(&mut self.return_scopes);
+        self.context.known.extend(outer.known.iter().cloned());
         self.context.scope_kind = ScopeKind::Function;
         self.context.incomplete = false;
         self.context.object = previous.object && !closure.is_static;
@@ -141,6 +104,7 @@ impl Analyzer<'_> {
         let controls = std::mem::take(&mut self.controls);
         let returns = std::mem::take(&mut self.return_scopes);
         let mut inner = outer.clone();
+        self.context.known.extend(outer.known.iter().cloned());
         self.context.scope_kind = ScopeKind::Function;
         self.context.incomplete = false;
         self.context.object = previous.object && !arrow.is_static;

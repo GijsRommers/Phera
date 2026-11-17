@@ -14,7 +14,12 @@ impl Analyzer<'_> {
             ExpressionKind::Assign { target, value } => {
                 let constant = crate::constants::value(value, scope);
                 let ty = self.expression(value, scope, false);
-                self.write(target, ty.clone(), scope);
+                if ty == ValueType::Never {
+                    return ty;
+                }
+                if self.write(target, ty.clone(), scope) == Evaluation::Never {
+                    return ValueType::Never;
+                }
                 if let ExpressionKind::Variable(Variable::Named(name)) = &target.kind
                     && let Some(value) = constant
                 {
@@ -23,34 +28,70 @@ impl Analyzer<'_> {
                 ty
             }
             ExpressionKind::AssignReference { target, value } => {
-                self.ensure_reference(value, scope);
-                let ty = self.expression(value, scope, true);
-                self.write(target, ty.clone(), scope);
-                if let (
-                    ExpressionKind::Variable(Variable::Named(left)),
-                    ExpressionKind::Variable(Variable::Named(right)),
-                ) = (&target.kind, &value.kind)
-                {
-                    scope.reference(left, right);
-                }
-                ty
+                self.reference_assignment(target, value, scope)
             }
             ExpressionKind::CompoundAssign {
                 target,
                 value,
                 operator,
             } => {
-                self.expression(target, scope, *operator == BinaryOperator::NullCoalesce);
+                if *operator == BinaryOperator::NullCoalesce {
+                    return self.coalesce_assignment(target, value, scope);
+                }
+                if self.expression(target, scope, false) == ValueType::Never {
+                    return ValueType::Never;
+                }
                 let ty = self.expression(value, scope, false);
-                self.write(target, ty.clone(), scope);
+                if ty == ValueType::Never {
+                    return ty;
+                }
+                if self.write(target, ty.clone(), scope) == Evaluation::Never {
+                    return ValueType::Never;
+                }
                 ty
             }
             ExpressionKind::IncDec { target, .. } => {
-                self.expression(target, scope, quiet);
-                self.write(target, ValueType::Mixed, scope);
+                if self.expression(target, scope, quiet) == ValueType::Never {
+                    return ValueType::Never;
+                }
+                if self.write(target, ValueType::Mixed, scope) == Evaluation::Never {
+                    return ValueType::Never;
+                }
                 ValueType::Mixed
             }
             _ => ValueType::Mixed,
         }
+    }
+
+    fn reference_assignment(
+        &mut self,
+        target: &Expression,
+        value: &Expression,
+        scope: &mut Scope,
+    ) -> ValueType {
+        self.ensure_reference(value, scope);
+        let ty = self.expression(value, scope, true);
+        if let (
+            ExpressionKind::Variable(Variable::Named(left)),
+            ExpressionKind::Variable(Variable::Named(right)),
+        ) = (&target.kind, &value.kind)
+            && left != right
+        {
+            scope.detach(left);
+        }
+        if ty == ValueType::Never {
+            return ty;
+        }
+        if self.write(target, ty.clone(), scope) == Evaluation::Never {
+            return ValueType::Never;
+        }
+        if let (
+            ExpressionKind::Variable(Variable::Named(left)),
+            ExpressionKind::Variable(Variable::Named(right)),
+        ) = (&target.kind, &value.kind)
+        {
+            scope.reference(left, right);
+        }
+        ty
     }
 }

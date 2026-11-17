@@ -1,42 +1,8 @@
 //! Exercise public checker adoption behavior: configs, exact baselines and file exclusions.
 //! Each test owns its scratch directory; no test runs the PHP files it checks.
 
-use std::path::PathBuf;
-use std::process::{Command, Output};
-use std::sync::atomic::{AtomicUsize, Ordering};
-
-static NEXT: AtomicUsize = AtomicUsize::new(0);
-
-struct Project(PathBuf);
-impl Project {
-    fn new() -> Self {
-        let path = std::env::temp_dir().join(format!(
-            "phera-check-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(&path).unwrap();
-        Self(path)
-    }
-    fn write(&self, file: &str, text: &str) {
-        let path = self.0.join(file);
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, text).unwrap();
-    }
-    fn run(&self, args: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_phera"))
-            .current_dir(&self.0)
-            .arg("check")
-            .args(args)
-            .output()
-            .unwrap()
-    }
-}
-impl Drop for Project {
-    fn drop(&mut self) {
-        std::fs::remove_dir_all(&self.0).unwrap();
-    }
-}
+mod check_support;
+use check_support::Project;
 
 #[test]
 fn usage_errors_exit_two() {
@@ -56,7 +22,11 @@ fn usage_errors_exit_two() {
 #[test]
 fn configuration_paths_exclusions_and_vendor_are_respected() {
     let project = Project::new();
-    project.write("phera.toml", "[app]\nname = 'demo'\n[check]\nlevel = 0\npaths = [\n'src',\n]\nexclude = ['src/skip/*']\n");
+    project.write(
+        "phera.toml",
+        "[app]\nname = 'demo'\n[check]\nlevel = 0\npaths = [\n'src',\n]\n\
+         exclude = ['src/skip/*']\n",
+    );
     project.write("src/ok.php", "<?php strlen('x');");
     project.write("src/skip/bad.php", "<?php missing();");
     project.write("src/vendor/bad.php", "<?php missing();");
@@ -99,8 +69,17 @@ fn baseline_ignores_exact_entries_and_preserves_new_errors() {
 #[test]
 fn namespace_imports_and_inherited_trait_methods_cross_files() {
     let project = Project::new();
-    project.write("a.php", "<?php namespace A; trait T { function run($a) {} }\nclass Base { use T; }\nconst VALUE = 1; function go($a) {}");
-    project.write("b.php", "<?php namespace B; use A\\Base as ParentClass;\nuse function A\\go as g; use const A\\VALUE as V;\nclass C extends ParentClass { function f() { $this->run(V); } } g(V);");
+    project.write(
+        "a.php",
+        "<?php namespace A; trait T { function run($a) {} }\n\
+         class Base { use T; }\nconst VALUE = 1; function go($a) {}",
+    );
+    project.write(
+        "b.php",
+        "<?php namespace B; use A\\Base as ParentClass;\n\
+         use function A\\go as g; use const A\\VALUE as V;\n\
+         class C extends ParentClass { function f() { $this->run(V); } } g(V);",
+    );
     assert!(project.run(&["."]).status.success());
 }
 
@@ -133,6 +112,12 @@ fn deep_chains_are_bounded_without_crashing() {
 #[test]
 fn overlapping_psalm_issue_aliases_suppress_their_rules() {
     let project = Project::new();
-    project.write("aliases.php", "<?php\n/** @psalm-suppress UndefinedGlobalVariable */\necho $x;\n/** @psalm-suppress UnimplementedAbstractMethod */\nclass C implements Countable {}\n/** @psalm-suppress UndefinedThisPropertyFetch */\nclass A { function f() { echo $this->missing; } }\n");
+    project.write(
+        "aliases.php",
+        "<?php\n/** @psalm-suppress UndefinedGlobalVariable */\necho $x;\n\
+         /** @psalm-suppress UnimplementedAbstractMethod */\nclass C implements Countable {}\n\
+         /** @psalm-suppress UndefinedThisPropertyFetch */\n\
+         class A { function f() { echo $this->missing; } }\n",
+    );
     assert!(project.run(&["aliases.php"]).status.success());
 }
