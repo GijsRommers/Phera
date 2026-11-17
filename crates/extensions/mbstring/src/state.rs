@@ -96,14 +96,35 @@ impl Language {
         }
     }
 
-    /// The charset of mail headers in this language.
-    pub fn mail_charset(self) -> &'static str {
-        match self {
-            Self::Japanese => "ISO-2022-JP",
-            Self::English | Self::German => "ISO-8859-1",
-            Self::Russian => "KOI8-R",
-            Self::Korean => "ISO-2022-KR",
-            _ => "UTF-8",
+    /// What `mb_send_mail` would use in this language: the charset, and the
+    /// transfer encodings of the headers and the body.
+    pub fn mail(self) -> Mail {
+        let (charset, header_encoding, body_encoding) = match self {
+            Self::Neutral | Self::Universal => ("UTF-8", "BASE64", "BASE64"),
+            Self::Japanese => ("ISO-2022-JP", "BASE64", "7bit"),
+            Self::English => ("ISO-8859-1", "Quoted-Printable", "8bit"),
+            Self::German => ("ISO-8859-15", "Quoted-Printable", "8bit"),
+            Self::Russian => ("KOI8-R", "Quoted-Printable", "8bit"),
+            Self::Korean => ("ISO-2022-KR", "BASE64", "7bit"),
+            Self::Armenian => ("ArmSCII-8", "Quoted-Printable", "8bit"),
+            Self::Turkish => ("ISO-8859-9", "Quoted-Printable", "8bit"),
+            Self::Ukrainian => ("KOI8-U", "Quoted-Printable", "8bit"),
+            Self::SimplifiedChinese => ("HZ", "BASE64", "7bit"),
+            Self::TraditionalChinese => ("BIG-5", "BASE64", "8bit"),
+        };
+        Mail {
+            charset,
+            header_encoding,
+            body_encoding,
         }
     }
+}
+
+/// PHP's mail defaults for a language. Phera has no ISO-2022-KR, ArmSCII-8
+/// or HZ, so `mb_encode_mimeheader` cannot use the charset of Korean,
+/// Armenian or Simplified Chinese.
+pub struct Mail {
+    pub charset: &'static str,
+    pub header_encoding: &'static str,
+    pub body_encoding: &'static str,
 }

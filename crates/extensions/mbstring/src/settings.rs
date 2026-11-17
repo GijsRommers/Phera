@@ -209,6 +209,7 @@ fn mb_get_info(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
             .iter()
             .map(|encoding| Value::from(encoding.name())),
     );
+    let mail = settings.language.mail();
     let mut all = PhpArray::new();
     for (key, value) in [
         ("internal_encoding", Value::from(settings.internal.name())),
@@ -220,12 +221,9 @@ fn mb_get_info(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
             "http_output_conv_mimetypes",
             Value::from("^(text/|application/xhtml\\+xml)"),
         ),
-        (
-            "mail_charset",
-            Value::from(settings.language.mail_charset()),
-        ),
-        ("mail_header_encoding", Value::from("BASE64")),
-        ("mail_body_encoding", Value::from("BASE64")),
+        ("mail_charset", Value::from(mail.charset)),
+        ("mail_header_encoding", Value::from(mail.header_encoding)),
+        ("mail_body_encoding", Value::from(mail.body_encoding)),
         ("illegal_chars", Value::Int(0)),
         ("encoding_translation", Value::from("Off")),
         ("language", Value::from(settings.language.name())),

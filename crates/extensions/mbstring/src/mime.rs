@@ -126,12 +126,15 @@ const MB_ENCODE_MIMEHEADER: &[Param] = &[
 /// the rest is encoded and folded into lines.
 fn mb_encode_mimeheader(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     let settings = ctx.state().get_or_default::<Settings>().clone();
-    let charset = args::string(a, 1).map_or_else(
-        || settings.language.mail_charset().into(),
-        |name| name.to_string_lossy(),
-    );
+    // Without a charset or a scheme, the language's mail defaults decide.
+    let mail = settings.language.mail();
+    let charset =
+        args::string(a, 1).map_or_else(|| mail.charset.into(), |name| name.to_string_lossy());
     let target = encoding::resolve(&charset, "mb_encode_mimeheader", 2, "charset")?;
-    let scheme = Scheme::parse(args::bytes(a, 2));
+    // "Quoted-Printable" is Q, "BASE64" is B.
+    let scheme = Scheme::parse(
+        args::string(a, 2).map_or(mail.header_encoding.as_bytes(), |scheme| scheme.as_bytes()),
+    );
     let newline = args::string(a, 3).map_or_else(
         || b"\r\n".to_vec(),
         |newline| newline.to_string_lossy().into_bytes(),

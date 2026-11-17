@@ -227,3 +227,36 @@ fn settings_matrix() {
     }
     m.compare("mbstring-settings");
 }
+
+/// `mb_language()` decides the mail defaults that `mb_get_info()` reports
+/// and the charset `mb_encode_mimeheader` uses when given none.
+#[test]
+fn mail_settings_follow_the_language() {
+    let mut m = Matrix::new();
+    for language in [
+        "neutral",
+        "uni",
+        "Japanese",
+        "en",
+        "German",
+        "Russian",
+        "Korean",
+        "Armenian",
+        "Turkish",
+        "ua",
+        "Simplified Chinese",
+        "zh-tw",
+    ] {
+        m.case("mb_language", vec![Value::from(language)]);
+        m.case("mb_language", vec![]);
+        for key in ["mail_charset", "mail_header_encoding", "mail_body_encoding"] {
+            m.case("mb_get_info", vec![Value::from(key)]);
+        }
+        // Without a charset, the language's mail charset is used. Phera
+        // lacks those of Korean, Armenian and Simplified Chinese.
+        if !["Korean", "Armenian", "Simplified Chinese"].contains(&language) {
+            m.case("mb_encode_mimeheader", vec![Value::from("Café")]);
+        }
+    }
+    m.compare("mbstring-mail-settings");
+}
