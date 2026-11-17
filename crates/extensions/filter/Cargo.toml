@@ -1,0 +1,12 @@
+[package]
+name = "phera-ext-filter"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+phera-extension-api.workspace = true
+
+[lints]
+workspace = true

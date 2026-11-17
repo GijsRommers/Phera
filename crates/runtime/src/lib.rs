@@ -51,6 +51,7 @@ impl Runtime {
         registry.load(&phera_ext_core::Core);
         registry.load(&phera_ext_standard::Standard);
         registry.load(&phera_ext_ctype::Ctype);
+        registry.load(&phera_ext_filter::Filter);
         registry.load(&phera_ext_json::Json);
         registry.load(&phera_ext_pcre::Pcre);
         registry.load(&phera_ext_pdo::Pdo);

@@ -952,6 +952,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "phera-ext-filter"
+version = "0.1.0"
+dependencies = [
+ "phera-extension-api",
+]
+
+[[package]]
 name = "phera-ext-http"
 version = "0.1.0"
 dependencies = [
@@ -1036,6 +1043,7 @@ dependencies = [
  "phera-compiler",
  "phera-ext-core",
  "phera-ext-ctype",
+ "phera-ext-filter",
  "phera-ext-http",
  "phera-ext-json",
  "phera-ext-pcre",

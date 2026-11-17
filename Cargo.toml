@@ -44,6 +44,7 @@ phera-phpt = { path = "crates/phpt" }
 phera-extension-api = { path = "crates/extension-api" }
 phera-ext-core = { path = "crates/extensions/core" }
 phera-ext-ctype = { path = "crates/extensions/ctype" }
+phera-ext-filter = { path = "crates/extensions/filter" }
 phera-ext-http = { path = "crates/extensions/http" }
 phera-ext-json = { path = "crates/extensions/json" }
 phera-ext-pcre = { path = "crates/extensions/pcre" }
