@@ -115,7 +115,10 @@ def send(data, read_timeout):
 
 def alive():
     try:
-        return status_of(send(build_request("GET", "/hello.php", [("Host", "x")]), 5)[0] or b"")[0] == 200
+        code, _ = send(
+            build_request("GET", "/hello.php", [("Host", "x"), ("Connection", "close")]), 5
+        )
+        return code == 200
     except Exception:
         return False
 
