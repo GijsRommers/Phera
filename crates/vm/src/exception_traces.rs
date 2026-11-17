@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use phera_value::{ArrayKey, PhpArray, Value};
 
-use crate::{Vm, calls::frame::Frame};
+use crate::{Vm, calls::frame::FrameView};
 
 impl Vm {
     /// Frame entries point at the caller's call instruction and omit the main frame.
@@ -29,21 +29,23 @@ impl Vm {
             let _ = trace.push(Value::Array(Rc::new(entry)));
         }
         for ((_, caller), (callee_index, callee)) in self
-            .call_stack
-            .iter()
+            .frames()
             .enumerate()
             .rev()
             .skip(1)
-            .zip(self.call_stack.iter().enumerate().rev())
+            .zip(self.frames().enumerate().rev())
         {
             let mut entry = PhpArray::new();
-            entry.insert(ArrayKey::str("file"), Value::from(caller.unit.file.clone()));
+            entry.insert(
+                ArrayKey::str("file"),
+                Value::from(caller.unit().file.clone()),
+            );
             entry.insert(ArrayKey::str("line"), Value::Int(caller.line() as i64));
-            if callee.function_id.is_none()
+            if callee.function_id().is_none()
                 && let Some(phera_bytecode::Instruction::Include { kind, .. }) = caller
                     .function()
                     .instructions
-                    .get(caller.ip.saturating_sub(1))
+                    .get(caller.ip().saturating_sub(1))
             {
                 let name = match kind {
                     phera_bytecode::IncludeKind::Include => "include",
@@ -66,18 +68,14 @@ impl Vm {
             };
             entry.insert(ArrayKey::str("function"), Value::from(name));
             let class = if closure {
-                callee
-                    .method
-                    .as_ref()
-                    .map(|context| context.scope.name.as_str())
+                callee.method().map(|context| context.scope.name.as_str())
             } else {
                 function.split_once("::").map(|(class, _)| class)
             };
             if let Some(class) = class {
                 entry.insert(ArrayKey::str("class"), Value::from(class));
                 let kind = if callee
-                    .method
-                    .as_ref()
+                    .method()
                     .is_some_and(|context| context.receiver.is_some())
                 {
                     "->"
@@ -112,8 +110,8 @@ impl Vm {
                 let _ = trace.push(Value::Array(Rc::new(entry)));
             }
         }
-        if let Some(frame) = self.call_stack.iter().next()
-            && frame.function_id.is_some()
+        if let Some(frame) = self.frames().next()
+            && frame.function_id().is_some()
         {
             let mut entry = PhpArray::new();
             entry.insert(
@@ -128,14 +126,14 @@ impl Vm {
 }
 
 /// PHP snapshots live, coerced parameters and flattens a variadic argument array.
-fn trace_arguments(vm: &Vm, frame: &Frame) -> Value {
+fn trace_arguments(vm: &Vm, frame: FrameView<'_>) -> Value {
     let mut arguments = PhpArray::new();
     for (index, parameter) in frame
         .function()
         .parameters
         .iter()
         .enumerate()
-        .take(frame.supplied_arguments)
+        .take(frame.supplied_arguments())
     {
         let Some(Some(value)) = frame.slots(&vm.registers).get(index) else {
             continue;
@@ -148,7 +146,7 @@ fn trace_arguments(vm: &Vm, frame: &Frame) -> Value {
                             let _ = arguments.push(value.deref().clone());
                         }
                         key => {
-                            arguments.insert(key.clone(), value.deref().clone());
+                            arguments.insert(key, value.deref().clone());
                         }
                     }
                 }
@@ -165,7 +163,7 @@ fn trace_arguments(vm: &Vm, frame: &Frame) -> Value {
     {
         for value in vm
             .registers
-            .window(frame.base + frame.count, frame.extra_arguments)
+            .window(frame.base() + frame.count(), frame.extras.arguments.extra)
         {
             let value = value.as_ref().unwrap_or(&Value::Null);
             let _ = arguments.push(value.deref().clone());

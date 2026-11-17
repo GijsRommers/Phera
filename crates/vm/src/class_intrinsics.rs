@@ -76,7 +76,7 @@ impl Vm {
                 if arguments.is_empty() {
                     return self
                         .current()
-                        .and_then(|frame| frame.method.as_ref())
+                        .and_then(|frame| frame.method())
                         .map(|context| Value::from(context.scope.name.clone()))
                         .ok_or_else(|| {
                             NativeError::error(
@@ -93,7 +93,7 @@ impl Vm {
                 let class = class.or_else(|| {
                     if arguments.is_empty() {
                         self.current()
-                            .and_then(|frame| frame.method.as_ref())
+                            .and_then(|frame| frame.method())
                             .map(|context| context.scope.clone())
                     } else {
                         None
@@ -106,7 +106,7 @@ impl Vm {
             }
             Function::GetCalledClass => self
                 .current()
-                .and_then(|frame| frame.method.as_ref())
+                .and_then(|frame| frame.method())
                 .map(|context| Value::from(context.called.name.clone()))
                 .ok_or_else(|| {
                     NativeError::error("get_called_class() must be called from within a class")
@@ -258,7 +258,7 @@ impl Vm {
             ancestor = class.parent.clone();
         }
         let declaration = match &method.body {
-            crate::classes::MethodBody::User(reference) => reference.index,
+            crate::classes::MethodBody::User(reference) => reference.index(),
             crate::classes::MethodBody::Closure(operation) => {
                 crate::closure_methods::ClosureMethod::entries()
                     .iter()

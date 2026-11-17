@@ -79,7 +79,13 @@ impl Site {
         if !file.starts_with(&self.document_root) || !file.is_file() {
             return fallback();
         }
-        if file.extension().is_some_and(|extension| extension == "php") {
+        // `.PHP` and `.Php` run as scripts too, as in PHP's own server. Serving
+        // them as files would hand out their source, with whatever passwords
+        // it contains.
+        let is_script = file
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("php"));
+        if is_script {
             return Resolved::Script(file);
         }
         match std::fs::read(&file) {

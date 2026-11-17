@@ -41,7 +41,16 @@ pub fn execute_named<'a>(
             let values = match ordered {
                 Ok(bindings) => Ok(bindings
                     .into_iter()
-                    .map(|b| b.read(context))
+                    .map(|binding| {
+                        if statement.connection.name == crate::dsn::DriverName::Postgres
+                            && !matches!(statement.prepared, Prepared::Emulated)
+                            && statement.sql.parameters.is_empty()
+                        {
+                            Ok(parameters::BoundValue::Null)
+                        } else {
+                            binding.read(context)
+                        }
+                    })
                     .collect::<Result<Vec<_>, _>>()?),
                 Err(error) => Err(error),
             };

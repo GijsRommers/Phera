@@ -19,7 +19,7 @@ pub(crate) fn grep(context: &mut dyn Context, arguments: &[Value]) -> NativeResu
             let mut scanner = Scanner::new(&compiled, subject.as_bytes(), 0);
             match scanner.next() {
                 Ok(found) if found.is_some() != invert => {
-                    result.insert(key.clone(), value.clone());
+                    result.insert(key, value.clone());
                 }
                 Ok(_) => {}
                 Err(error) => {

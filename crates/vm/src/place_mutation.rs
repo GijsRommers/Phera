@@ -26,15 +26,8 @@ impl Vm {
         let mut steps = place.steps()?;
         if matches!(steps.next(), Some(Step::Append))
             && steps.next().is_none()
-            && let Some(Value::Array(array)) = self
-                .call_stack
-                .current_mut()
-                .and_then(|frame| {
-                    frame
-                        .slots_mut(&mut self.registers)
-                        .get_mut(register.index())
-                })
-                .and_then(Option::as_mut)
+            && let Some(Value::Array(array)) =
+                self.current_slot_mut(register).and_then(Option::as_mut)
         {
             Rc::make_mut(array).push(value)?;
             return Ok(());
@@ -43,6 +36,10 @@ impl Vm {
             && place.steps()?.next().is_none()
         {
             self.validate_static_mutation(class, name, &mut value)?;
+            if binding == Binding::ByReference {
+                self.bind_static_property_reference(class, name, value)?;
+                return Ok(());
+            }
         }
         // Mirrors property_keys and validation: index-only paths cannot cross an
         // object property boundary, so retain the original array-only key path.
@@ -58,15 +55,18 @@ impl Vm {
             keys
         };
         let mut root = self
-            .call_stack
-            .current_mut()
-            .and_then(|frame| {
-                frame
-                    .slots_mut(&mut self.registers)
-                    .get_mut(register.0 as usize)
-            })
+            .current_slot_mut(register)
             .and_then(Option::take)
             .unwrap_or_default();
+        if binding == Binding::ByValue {
+            match self.check_path_reference_assignment(&root, &keys, value) {
+                Ok(converted) => value = converted,
+                Err(error) => {
+                    self.set(register, root);
+                    return Err(error);
+                }
+            }
+        }
         let previous_reference = if keys.iter().next().is_none() && binding == Binding::ByReference
         {
             match &root {
@@ -83,6 +83,7 @@ impl Vm {
             value,
             binding.into(),
             &mut diagnostics.buffer,
+            &diagnostics.vm.property_references,
         );
         drop(diagnostics);
         if let Err(error) = result {
@@ -129,6 +130,11 @@ impl Vm {
             };
         }
         if matches!(raw, Value::Reference(_)) {
+            if let PathBase::StaticProperty { class, name, .. } = place.base()?
+                && place.steps()?.next().is_none()
+            {
+                self.track_static_property_reference(class, name)?;
+            }
             return Ok(raw);
         }
         let reference = Value::Reference(Rc::new(RefCell::new(value)));
@@ -167,13 +173,7 @@ impl Vm {
         let keys = self.property_keys(place, root_value.clone())?;
         self.validate_property_mutation(root_value, &keys, &mut Value::Null, Mutation::Unset)?;
         let mut root = self
-            .call_stack
-            .current_mut()
-            .and_then(|frame| {
-                frame
-                    .slots_mut(&mut self.registers)
-                    .get_mut(register.0 as usize)
-            })
+            .current_slot_mut(register)
             .and_then(Option::take)
             .unwrap_or_default();
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
@@ -183,6 +183,7 @@ impl Vm {
             Value::Null,
             Mutation::Unset,
             &mut diagnostics.buffer,
+            &diagnostics.vm.property_references,
         );
         drop(diagnostics);
         if let Err(error) = result {

@@ -1,18 +1,16 @@
 //! Request-local call stack state kept separate from register execution.
 
 use crate::calls::frame::Frame;
+use crate::calls::frame_extras::FrameExtras;
 
-/// Stable allocations make a push/pop move one pointer instead of copying every frame buffer.
-struct FrameOwner {
-    frame: Box<Frame>,
-}
-
-/// Owns the request state for call stack.
+/// The running PHP functions of a request, innermost last, and the calls
+/// whose arguments are being evaluated.
 pub(crate) struct CallStack {
-    /// Request-owned frames.
-    frames: Vec<FrameOwner>,
-    /// Request-owned recycled frames.
-    recycled_frames: Vec<FrameOwner>,
+    frames: Vec<Frame>,
+    /// Optional per-frame state, indexed by frame depth.
+    extras: Vec<FrameExtras>,
+    /// What `extras` returns for a frame that stores nothing there.
+    empty: FrameExtras,
     /// Argument evaluation and native callbacks share this request-wide preparation stack.
     pub(crate) preparing: Vec<crate::calls::call_state::PendingCall>,
     /// Native callbacks have an independent bound because they await Rust futures.
@@ -27,7 +25,8 @@ impl CallStack {
     pub(crate) fn new() -> Self {
         Self {
             frames: vec![],
-            recycled_frames: vec![],
+            extras: vec![],
+            empty: FrameExtras::new(),
             callback_depth: 0,
             argument_names: Vec::new(),
             native_arguments: Vec::new(),
@@ -37,59 +36,103 @@ impl CallStack {
     /// The last activation owns the currently executing instruction.
     #[inline]
     pub(crate) fn current(&self) -> Option<&Frame> {
-        self.frames.last().map(|owner| owner.frame.as_ref())
+        self.frames.last()
     }
 
     /// Only the active activation may change its instruction pointer.
     #[inline]
     pub(crate) fn current_mut(&mut self) -> Option<&mut Frame> {
-        self.frames.last_mut().map(|owner| owner.frame.as_mut())
+        self.frames.last_mut()
     }
 
-    /// Global aliases can refer to the retained top-level activation.
-    pub(crate) fn main_mut(&mut self) -> Option<&mut Frame> {
-        self.frames.first_mut().map(|owner| owner.frame.as_mut())
+    /// The frame that called the running one.
+    #[inline]
+    pub(crate) fn caller(&self) -> Option<&Frame> {
+        self.frames
+            .len()
+            .checked_sub(2)
+            .map(|depth| &self.frames[depth])
+    }
+
+    /// Whether a call is being prepared with its window at or above `base`.
+    #[inline]
+    pub(crate) fn has_calls_from(&self, base: usize) -> bool {
+        self.preparing
+            .last()
+            .is_some_and(|call| call.window.base >= base)
+    }
+
+    /// The frame at `depth` (0 is the script's top-level code).
+    pub(crate) fn at(&self, depth: usize) -> Option<&Frame> {
+        self.frames.get(depth)
     }
 
     /// Callback boundaries and the PHP frame limit use heap depth.
+    #[inline]
     pub(crate) fn depth(&self) -> usize {
         self.frames.len()
     }
 
-    /// Commit an activation without consuming Rust stack.
-    pub(crate) fn push(&mut self, frame: impl Into<Box<Frame>>) {
-        self.frames.push(FrameOwner {
-            frame: frame.into(),
-        });
+    /// Enter a function. Its side-table entry is empty, because the frame
+    /// that last used this depth emptied it when it left.
+    #[inline]
+    pub(crate) fn push(&mut self, frame: Frame) {
+        self.frames.push(frame);
     }
 
-    /// Detach one activation before releasing its register window.
-    pub(crate) fn pop(&mut self) -> Option<Box<Frame>> {
-        self.frames.pop().map(|owner| owner.frame)
+    /// Leave a function, releasing what its side-table entry held.
+    #[inline]
+    pub(crate) fn pop(&mut self) -> Option<Frame> {
+        let frame = self.frames.pop()?;
+        if frame.has_extras() {
+            self.extras[self.frames.len()].clear();
+        }
+        Some(frame)
     }
 
     /// Exit discards preparations and all active activations.
     pub(crate) fn clear(&mut self) {
         self.preparing.clear();
-        self.frames.clear();
+        while self.pop().is_some() {}
     }
 
-    /// Trace capture walks activations without copying their values.
-    pub(crate) fn iter(&self) -> impl DoubleEndedIterator<Item = &Frame> + ExactSizeIterator {
-        self.frames.iter().map(|owner| owner.frame.as_ref())
+    /// Drop the prepared calls whose windows start at or above `base`: a
+    /// frame left while its arguments were being evaluated.
+    pub(crate) fn abandon_calls_from(&mut self, base: usize) {
+        while self.has_calls_from(base) {
+            self.preparing.pop();
+        }
     }
 
-    /// Recycle allocations without retaining a second active PHP frame.
-    pub(crate) fn recycle(&mut self, mut frame: Box<Frame>) {
-        frame.closure = None;
-        frame.method = None;
-        frame.iterators.clear();
-        self.recycled_frames.push(FrameOwner { frame });
+    /// The frames from the outermost to the innermost.
+    pub(crate) fn frames(&self) -> &[Frame] {
+        &self.frames
     }
 
-    /// Reuse storage only after its PHP owners have been released.
-    pub(crate) fn take_recycled(&mut self) -> Option<Box<Frame>> {
-        self.recycled_frames.pop().map(|owner| owner.frame)
+    /// The side-table entry of the frame at `depth`.
+    pub(crate) fn extras(&self, depth: usize) -> &FrameExtras {
+        match self.frames.get(depth) {
+            Some(frame) if frame.has_extras() => &self.extras[depth],
+            _ => &self.empty,
+        }
+    }
+
+    /// The side-table entry of the frame at `depth`, for writing. The frame
+    /// is marked so that the entry is emptied when it leaves.
+    pub(crate) fn extras_mut(&mut self, depth: usize) -> &mut FrameExtras {
+        while self.extras.len() <= depth {
+            self.extras.push(FrameExtras::new());
+        }
+        if let Some(frame) = self.frames.get_mut(depth) {
+            frame.mark_extras();
+        }
+        &mut self.extras[depth]
+    }
+
+    /// The innermost frame's side-table entry, for writing.
+    pub(crate) fn current_extras_mut(&mut self) -> &mut FrameExtras {
+        let depth = self.frames.len().saturating_sub(1);
+        self.extras_mut(depth)
     }
 
     /// Every Send must have a resolved target and reserved window.
@@ -149,16 +192,22 @@ impl CallStack {
 
 #[cfg(test)]
 impl CallStack {
-    /// Stress tests check that recycled frames own buffers, but no live PHP values.
+    /// Stress tests ensure inactive depths retain no closure owners.
     pub(crate) fn retained_exception_values(&self) -> usize {
-        self.recycled_frames
+        self.extras
             .iter()
-            .map(|owner| usize::from(owner.frame.closure.is_some()))
+            .map(|extra| usize::from(extra.closure.is_some()))
             .sum()
     }
 
-    /// A million sequential calls need no more recycled frames than a single call.
+    /// A million sequential calls need no more side-table entries than a single call.
     pub(crate) fn recycled_count(&self) -> usize {
-        self.recycled_frames.len()
+        self.extras.len().saturating_sub(self.frames.len())
+    }
+
+    /// How many frames the stack has held at once: the frame vector never
+    /// shrinks, so deep recursion shows here after it has returned.
+    pub(crate) fn frame_capacity(&self) -> usize {
+        self.frames.capacity()
     }
 }

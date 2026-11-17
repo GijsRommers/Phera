@@ -64,6 +64,7 @@ impl Vm {
         let property = class
             .static_properties
             .iter()
+            .rev()
             .find(|property| property.name == name)
             .ok_or_else(|| internal_error!("static property"))?;
         if let Some(declaration_type) = &property.ty {
@@ -110,7 +111,7 @@ impl Vm {
                             }
                             let scope = self
                                 .current()
-                                .and_then(|frame| frame.method.as_ref())
+                                .and_then(|frame| frame.method())
                                 .map(|context| &context.scope);
                             if crate::property_storage::read(object, key).is_some()
                                 || steps.peek().is_some()
@@ -171,6 +172,11 @@ impl Vm {
                             );
                         }
                     }
+                    if mutation == Mutation::Bind && steps.peek().is_none() {
+                        crate::reference_holders::ReferenceHolders::check_object_storage(
+                            object, key,
+                        )?;
+                    }
                     current = crate::property_storage::read(object, key)
                         .unwrap_or_default()
                         .deref()
@@ -199,7 +205,7 @@ impl Vm {
         }
         let scope = self
             .current()
-            .and_then(|frame| frame.method.as_ref())
+            .and_then(|frame| frame.method())
             .map(|context| context.scope.name.as_str());
         if class.defaults.iter().any(|property| {
             property.name == name
