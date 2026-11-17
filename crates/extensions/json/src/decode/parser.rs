@@ -12,6 +12,7 @@
 use super::scanner::{Container, Scanner, Token};
 use crate::{error::Error, flags::DecodeFlags};
 use phera_extension_api::{ArrayKey, PhpArray, Value};
+
 /// Turns the members of a JSON object into a PHP object. The parser does
 /// not know how objects are made: the caller passes this in.
 pub(super) type ObjectFactory<'a> = &'a mut dyn FnMut(PhpArray) -> Value;
@@ -38,6 +39,7 @@ struct Frame {
     key: Option<ArrayKey>,
     values: PhpArray,
 }
+
 /// Parses a whole document. `factory` makes the objects, unless
 /// `flags.associative` asks for arrays.
 pub(super) fn parse(
@@ -96,6 +98,7 @@ pub(super) fn parse(
         }
     }
 }
+
 /// Adds a finished value to the open container, or makes it the document.
 fn accept(
     frames: &mut [Frame],

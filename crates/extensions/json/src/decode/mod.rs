@@ -14,6 +14,7 @@ use crate::{
     flags::{DecodeFlags, INVALID_UTF8_IGNORE},
 };
 use phera_extension_api::{Context, NativeError, NativeResult, PhpArray, Value, args};
+
 /// `$associative`, when given, overrides `JSON_OBJECT_AS_ARRAY`.
 pub(crate) fn json_decode(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let bytes = args::bytes(arguments, 0);
@@ -49,6 +50,7 @@ pub(crate) fn json_decode(context: &mut dyn Context, arguments: &[Value]) -> Nat
         Err(error) => error::finish(context, error, flags.throw_on_error, Value::Null),
     }
 }
+
 /// Like decoding, but builds nothing. Of the flags only
 /// `JSON_INVALID_UTF8_IGNORE` is allowed, and an object key starting with
 /// NUL is valid here.
@@ -73,6 +75,7 @@ pub(crate) fn json_validate(context: &mut dyn Context, arguments: &[Value]) -> N
     let error = result.as_ref().err().copied().unwrap_or_default();
     error::finish(context, error, false, Value::Bool(result.is_ok()))
 }
+
 /// `$depth` must be from 1 to `i32::MAX`, PHP's C int.
 fn depth(depth: i64, function: &str, argument: usize) -> Result<usize, NativeError> {
     let reason = if depth <= 0 {

@@ -9,6 +9,7 @@
 use crate::error::Error;
 use crate::flags::{DecodeFlags, InvalidUtf8};
 use phera_extension_api::Value;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Container {
     Array,
@@ -45,11 +46,13 @@ impl<'a> Scanner<'a> {
     fn peek(&self) -> Option<u8> {
         self.bytes.get(self.pos).copied()
     }
+
     fn take(&mut self) -> Option<u8> {
         let byte = self.peek()?;
         self.pos += 1;
         Some(byte)
     }
+
     /// Outside strings PHP accepts only the four JSON whitespace characters.
     pub fn next(&mut self) -> Result<Token, Error> {
         while matches!(self.peek(), Some(b' ' | b'\t' | b'\r' | b'\n')) {
@@ -91,6 +94,7 @@ impl<'a> Scanner<'a> {
             _ => return Err(Error::Syntax),
         })
     }
+
     fn literal(&mut self, suffix: &[u8]) -> Result<(), Error> {
         for &expected in suffix {
             if self.take() != Some(expected) {
@@ -99,6 +103,7 @@ impl<'a> Scanner<'a> {
         }
         Ok(())
     }
+
     /// Reads one UTF-8 character, or, when the bytes are not one, skips one
     /// byte and fails, as PHP's scanner does.
     fn utf8(&mut self) -> Result<&'a [u8], Error> {
@@ -121,6 +126,7 @@ impl<'a> Scanner<'a> {
         self.pos += 1;
         Err(Error::Utf8)
     }
+
     /// The bytes of a string, after its opening quote, with escapes decoded.
     fn string(&mut self) -> Result<Vec<u8>, Error> {
         let mut output = Vec::new();
@@ -147,6 +153,7 @@ impl<'a> Scanner<'a> {
             }
         }
     }
+
     fn escape(&mut self, output: &mut Vec<u8>) -> Result<(), Error> {
         let byte = match self.take() {
             Some(b'"') => b'"',
@@ -168,6 +175,7 @@ impl<'a> Scanner<'a> {
         output.push(byte);
         Ok(())
     }
+
     fn hex(&mut self) -> Result<u32, Error> {
         let mut number = 0;
         for _ in 0..4 {
@@ -178,6 +186,7 @@ impl<'a> Scanner<'a> {
         }
         Ok(number)
     }
+
     /// The character of a `\u` escape, reading the second half of a
     /// surrogate pair too. A malformed escape is a syntax error, half a
     /// pair a UTF-16 error.
@@ -197,6 +206,7 @@ impl<'a> Scanner<'a> {
         };
         char::from_u32(scalar).ok_or(Error::Utf16)
     }
+
     /// An integer too large for an int is a float, or with
     /// `JSON_BIGINT_AS_STRING` a string of its digits.
     fn number(&mut self) -> Result<Value, Error> {
@@ -243,6 +253,7 @@ impl<'a> Scanner<'a> {
             .map(Value::Float)
             .map_err(|_| Error::Syntax)
     }
+
     fn digits(&mut self) {
         while self.peek().is_some_and(|byte| byte.is_ascii_digit()) {
             self.pos += 1;

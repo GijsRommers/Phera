@@ -1,6 +1,14 @@
-//! PHP JSON encoding, parsing and request-local errors.
-//! JsonSerializable dispatch awaits VM method-call integration.
-//! Non-associative decoding awaits a VM-owned stdClass factory.
+//! PHP's JSON extension: `json_encode`, `json_decode`, `json_validate` and
+//! the last-error functions.
+//!
+//! ```php
+//! json_encode(['a' => 1.0, 'b' => 'é']);  // {"a":1,"b":"\u00e9"}
+//! json_decode('{"a":1}', true);           // ['a' => 1]
+//! json_last_error_msg();                  // "No error"
+//! ```
+//!
+//! Not done yet: `JsonSerializable`, which needs method calls from native
+//! code, and enums, which Phera does not have.
 
 mod decode;
 mod encode;
@@ -11,7 +19,6 @@ mod string;
 use error::Error;
 use phera_extension_api::{Extension, FunctionEntry, Param, ParamType, Registry};
 
-/// Registers PHP JSON functions and their stable option/error constants.
 pub struct Json;
 
 impl Extension for Json {
@@ -39,6 +46,7 @@ impl Extension for Json {
             Param::new("depth", ParamType::Int).optional(),
             Param::new("flags", ParamType::Int).optional(),
         ];
+
         const VALIDATE: &[Param] = &[
             Param::new("json", ParamType::String),
             Param::new("depth", ParamType::Int).optional(),
