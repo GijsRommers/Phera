@@ -628,3 +628,39 @@ The measure stays the same: the same script, the same output as PHP 8.5.
 Items 1 to 5 change the engine and wait for the call redesign of section 10
 to land, so that they are built on the new call path and not twice. Item 6
 is independent of the engine and runs beside it.
+
+### 11.4 Extensions: what ships in the binary
+
+In PHP, an extension is a C module that has to be compiled for your PHP
+version and enabled in an ini file, which is why "is mbstring installed?" is
+a real question on every server. In Phera, the extensions people actually
+use are part of the binary: one download, nothing to install or enable.
+
+- **Every extension is a crate** under `crates/extensions/`, with the same
+  shape: it registers functions, constants and classes through the extension
+  API and knows nothing about the VM. The runtime loads all of them.
+- **Each stands on the best Rust crate for its job** rather than on the C
+  library PHP wraps, so the build needs no system packages: PCRE2 (bundled
+  source) for `preg`, `tokio-postgres` and `mysql_async` for PDO,
+  `encoding_rs` and the Unicode crates for mbstring, the RustCrypto crates for
+  hashing. A C dependency is accepted only where nothing else gives
+  PHP-exact results.
+- **Anything that waits is asynchronous**: database queries, HTTP calls,
+  file and network I/O, password hashing. That is the property a C extension
+  cannot offer and the reason to write these again.
+- **Cargo features** let an embedder leave extensions out; the default build
+  has them all.
+- **`extension_loaded()`, `get_loaded_extensions()` and `function_exists()`
+  tell the truth**, so code that probes for an extension works.
+
+The list, in the order of work. Shipped: core, standard (strings, arrays,
+math, time), ctype, json, pcre, pdo with pdo_pgsql and pdo_mysql. In
+progress: mbstring and iconv, date, hash, random. Next: files and streams,
+output buffering, serialization, URL and filter functions, session, curl
+(an asynchronous HTTP client behind PHP's curl API), openssl and sodium, zlib,
+SPL, tokenizer, fileinfo, bcmath and gmp, intl, the XML family (dom,
+simplexml, xmlreader, xmlwriter), gd, zip, sqlite, redis.
+
+Third-party extensions written in C cannot be loaded, since there is no
+Zend API to load them against. An extension someone needs is ported as a
+crate against the extension API.
