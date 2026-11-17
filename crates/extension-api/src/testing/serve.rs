@@ -12,7 +12,7 @@
 //! assert!(responses.iter().all(|response| response.starts_with("HTTP/1.1 200")));
 //! ```
 
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
 use std::net::TcpStream;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -68,23 +68,38 @@ impl Server {
     }
 
     fn get(&self, path: &str) -> String {
-        let mut stream = TcpStream::connect(&self.address).expect("connect to phera serve");
+        // macOS queues at most 128 connections a server has not accepted
+        // yet (`kern.ipc.somaxconn`), and resets the rest of a burst. A
+        // request reset before any of its response arrived is sent again.
+        for _ in 0..RESETS_RETRIED {
+            match self.try_get(path) {
+                Err(error) if error.kind() == ErrorKind::ConnectionReset => continue,
+                response => return response.expect("send the request and read its response"),
+            }
+        }
+        panic!("{path}: the connection was reset {RESETS_RETRIED} times");
+    }
+
+    fn try_get(&self, path: &str) -> std::io::Result<String> {
+        let mut stream = TcpStream::connect(&self.address)?;
         // A server that hangs fails the test instead of stalling it.
-        stream
-            .set_read_timeout(Some(Duration::from_secs(30)))
-            .expect("set a read timeout");
+        stream.set_read_timeout(Some(Duration::from_secs(30)))?;
         write!(
             stream,
             "GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
-        )
-        .expect("send the request");
+        )?;
         let mut response = String::new();
-        stream
-            .read_to_string(&mut response)
-            .expect("read the response");
-        response
+        match stream.read_to_string(&mut response) {
+            Err(error) if !response.is_empty() => {
+                panic!("{path}: the response broke off: {error}\n{response}")
+            }
+            result => result.map(|_| response),
+        }
     }
 }
+
+/// How often one request is sent again after its connection was reset.
+const RESETS_RETRIED: usize = 3;
 
 impl Drop for Server {
     fn drop(&mut self) {
