@@ -171,7 +171,7 @@ impl Vm {
                 .context
                 .as_ref()
                 .is_some_and(|context| context.receiver.is_some())
-            && closure_uses_this(state)
+            && closure_uses_this(&self.code, state)
         {
             return Some("Cannot unbind $this of closure using $this".into());
         }
@@ -180,11 +180,11 @@ impl Vm {
 }
 
 /// The compiled receiver operations also cover `$this` used through property paths.
-fn closure_uses_this(state: &ClosureState) -> bool {
-    let CallTarget::User { unit, index } = &state.callee.target else {
+fn closure_uses_this(code: &crate::code_table::CodeTable, state: &ClosureState) -> bool {
+    let CallTarget::User(function) = state.callee.target else {
         return false;
     };
-    let function = &unit.functions[*index];
+    let function = code.function(function);
     function.instructions.iter().any(|instruction| {
         matches!(
             instruction,

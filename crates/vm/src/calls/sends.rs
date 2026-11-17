@@ -120,16 +120,12 @@ impl crate::calls::call_state::Callee {
         })
     }
 
-    /// User functions and methods expose identical signature and register metadata.
-    pub(crate) fn user_function(
-        &self,
-    ) -> Option<(&std::sync::Arc<phera_bytecode::CompiledUnit>, usize)> {
+    /// The PHP function a call enters, for functions and PHP methods.
+    pub(crate) fn user_function(&self) -> Option<crate::code_table::FunctionIndex> {
         match &self.target {
-            CallTarget::User { unit, index } => Some((unit, *index)),
-            CallTarget::Method { method, .. } => match &method.body {
-                crate::classes::MethodBody::User(function) => {
-                    Some((&function.unit, function.index))
-                }
+            CallTarget::User(function) => Some(*function),
+            CallTarget::Method { method, .. } => match method.body {
+                crate::classes::MethodBody::User(function) => Some(function),
                 _ => None,
             },
             _ => None,

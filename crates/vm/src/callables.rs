@@ -90,7 +90,7 @@ impl Vm {
                 .classes
                 .get(&method.declaring)
                 .ok_or_else(|| internal_error!("invokable scope"))?;
-            let resolved = crate::classes::method_cache::ResolvedMethod { method, scope };
+            let resolved = crate::classes::method_lookup::ResolvedMethod { method, scope };
             self.prepare_resolved_method(
                 class,
                 Some(object.clone()),

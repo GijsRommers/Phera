@@ -44,13 +44,8 @@ impl Vm {
     /// Await cold operations while the synchronous loop owns ordinary calls and scalar work.
     pub(crate) async fn interpret_frames(&mut self, stop: usize) -> NativeResult {
         let mut work = 0;
-        let mut unit = self
-            .current()
-            .ok_or_else(|| internal_error!("missing frame"))?
-            .unit
-            .clone();
         loop {
-            match self.run_batch(&mut unit, stop, &mut work)? {
+            match self.run_batch(stop, &mut work)? {
                 BatchExit::Returned(value) => return Ok(value),
                 BatchExit::Yield => tokio::task::yield_now().await,
                 BatchExit::Handlers => self.drain_error_handlers().await?,
@@ -60,7 +55,7 @@ impl Vm {
                 }
                 BatchExit::Instruction(instruction) => {
                     if let DispatchResult::Returned(value) =
-                        self.dispatch(instruction, stop, &mut work).await?
+                        self.dispatch(instruction, stop).await?
                     {
                         return Ok(value);
                     }
@@ -75,17 +70,20 @@ impl Vm {
     /// Backward branches consume the same fairness budget as calls.
     pub(crate) fn backward(&self, target: Target) -> bool {
         self.current()
-            .is_some_and(|frame| target.index() < frame.ip)
+            .is_some_and(|frame| target.index() < frame.ip())
     }
 
     /// Reject a target outside the current function as an internal PHP error.
     pub(crate) fn jump(&mut self, target: Target) -> Result<(), NativeError> {
-        if let Some(frame) = self.call_stack.current_mut()
-            && target.index() < frame.function().instructions.len()
-        {
-            frame.ip = target.index();
-            return Ok(());
+        let length = self
+            .current()
+            .map_or(0, |frame| frame.function().instructions.len());
+        match self.call_stack.current_mut() {
+            Some(frame) if target.index() < length => {
+                frame.set_ip(target.index());
+                Ok(())
+            }
+            _ => Err(internal_error!("invalid jump")),
         }
-        Err(internal_error!("invalid jump"))
     }
 }
