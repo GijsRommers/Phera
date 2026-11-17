@@ -136,11 +136,11 @@ impl Machine<'_> {
                 },
             },
         };
-        let Ok(size) = crate::calls::pending::window_registers(self.code, &callee) else {
-            return Step::Slow;
-        };
-        crate::calls::pending::push_prepared(self.stack, self.registers, callee, size);
-        Step::Done(ip)
+        match crate::calls::pending::prepare_general(self.code, self.stack, self.registers, callee)
+        {
+            Ok(()) => Step::Done(ip),
+            Err(_) => Step::Slow,
+        }
     }
 
     /// Whether the running frame may call the method without the general

@@ -1,41 +1,35 @@
 //! Native callbacks retain only explicitly supplied reference cells; other values warn.
 
 use crate::Vm;
+use crate::calls::call_view::CallView;
 
 impl Vm {
     /// Direct sends have writable paths; native callers supply only already evaluated values.
     pub(crate) fn warn_callback_references(&mut self) {
-        let count = self
-            .call_stack
-            .preparing
-            .last()
-            .map_or(0, |call| call.window.supplied);
-        for index in 0..count {
-            let warning = self.call_stack.preparing.last().and_then(|call| {
-                let parameter = call.callee.parameters.get(index).or_else(|| {
-                    call.callee
-                        .parameters
-                        .last()
-                        .filter(|parameter| parameter.variadic)
-                })?;
-                let value = self
-                    .registers
-                    .window(call.window.slot(index), 1)
-                    .first()?
-                    .as_ref()?;
-                if !parameter.by_reference || value.is_reference() {
-                    return None;
-                }
-                Some(format!(
+        let Ok(view) = CallView::top(&self.code, &self.call_stack) else {
+            return;
+        };
+        let (parameters, slots) = (view.parameters(), view.slots());
+        let mut warnings = Vec::new();
+        for index in 0..view.call.sent as usize {
+            let Some(parameter) = parameters.receiving(index) else {
+                continue;
+            };
+            let value = self.registers.window(slots.slot(index), 1).first();
+            let Some(Some(value)) = value else {
+                continue;
+            };
+            if parameters.by_reference(parameter) && !value.is_reference() {
+                warnings.push(format!(
                     "{}(): Argument #{} (${}) must be passed by reference, value given",
-                    call.callee.name,
+                    view.name(),
                     index + 1,
-                    parameter.name,
-                ))
-            });
-            if let Some(warning) = warning {
-                self.diagnostic("Warning", warning);
+                    parameters.name(parameter),
+                ));
             }
+        }
+        for warning in warnings {
+            self.diagnostic("Warning", warning);
         }
     }
 }

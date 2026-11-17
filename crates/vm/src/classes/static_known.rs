@@ -1,7 +1,7 @@
 //! Compiler-known static calls avoid materializing class and method PHP strings.
 
 use super::Invocation;
-use crate::{Vm, calls::call_state::CallTarget};
+use crate::Vm;
 use phera_bytecode::{ClassBinding, SymbolId};
 use phera_extension_api::NativeError;
 
@@ -59,13 +59,7 @@ impl Vm {
         if binding == ClassBinding::Forward
             && let Some(context) = context
         {
-            let pending = self.call_stack.pending_mut()?;
-            if let CallTarget::Method {
-                context: target, ..
-            } = &mut pending.callee.target
-            {
-                target.called = context.called;
-            }
+            self.forward_callback_class(context.called)?;
         }
         Ok(())
     }

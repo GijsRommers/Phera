@@ -10,7 +10,9 @@ use phera_bytecode::CompiledUnit;
 /// Bytecode literals never mutate, and VM-local ownership prevents cross-request reuse.
 pub(crate) struct UnitCache {
     pub(crate) names: Vec<phera_value::PhpString>,
-    pub(crate) symbols: RefCell<Vec<Option<crate::calls::call_state::Callee>>>,
+    /// What each function symbol of the file was linked to, once its first call
+    /// resolved it.
+    pub(crate) symbols: RefCell<Vec<Option<crate::calls::pending::LinkedFunction>>>,
     pub(crate) constants: Vec<phera_value::Value>,
     pub(crate) class_names: Vec<phera_value::Value>,
     pub(crate) classes: Vec<RefCell<Option<Rc<crate::classes::Class>>>>,

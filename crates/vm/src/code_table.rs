@@ -68,6 +68,9 @@ pub(crate) struct FunctionFacts {
     pub(crate) required: u16,
     /// One bit per parameter with a declared type (the first 64).
     typed: u64,
+    /// One bit per parameter that takes a reference or is variadic (the
+    /// first 64): a `Send` to it is not a plain copy.
+    special: u64,
     /// The declared built-in types of each parameter, for the one-bit check.
     pub(crate) parameter_masks: Box<[TypeMask]>,
     /// The declared return type's built-in types, when there is a return type.
@@ -91,6 +94,12 @@ impl FunctionFacts {
         index < 64 && self.typed & (1 << index) != 0
     }
 
+    /// Whether parameter `index` is declared and takes a copy of its
+    /// argument: it is neither by reference nor variadic.
+    pub(crate) fn takes_value(&self, index: usize) -> bool {
+        index < self.parameters as usize && index < 64 && self.special & (1 << index) == 0
+    }
+
     fn new(
         place: (UnitIndex, FunctionIndex, Option<u32>),
         body: &Function,
@@ -103,13 +112,16 @@ impl FunctionFacts {
             .iter()
             .map(|parameter| parameter.ty.map_or(TypeMask::MIXED, mask_of))
             .collect();
-        let typed = body
-            .parameters
-            .iter()
-            .take(64)
-            .enumerate()
-            .filter(|(_, parameter)| parameter.ty.is_some())
-            .fold(0u64, |bits, (index, _)| bits | 1 << index);
+        let bits = |test: fn(&phera_bytecode::Parameter) -> bool| {
+            body.parameters
+                .iter()
+                .take(64)
+                .enumerate()
+                .filter(|(_, parameter)| test(parameter))
+                .fold(0u64, |bits, (index, _)| bits | 1 << index)
+        };
+        let typed = bits(|parameter| parameter.ty.is_some());
+        let special = bits(|parameter| parameter.by_reference || parameter.variadic);
         let general = body.parameters.len() > 64
             || body.argument_layout == phera_bytecode::ArgumentLayout::Variadic;
         Self {
@@ -124,6 +136,7 @@ impl FunctionFacts {
                 .rposition(|parameter| !parameter.has_default && !parameter.variadic)
                 .map_or(0, |index| index as u16 + 1),
             typed,
+            special,
             parameter_masks: masks,
             return_mask: body.return_type.map(mask_of),
             shape: if general {

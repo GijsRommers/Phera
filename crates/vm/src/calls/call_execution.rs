@@ -13,9 +13,11 @@ use phera_extension_api::NativeError;
 use phera_value::Object;
 
 use crate::Vm;
-use crate::calls::call_state::{CallTarget, PendingCall};
+use crate::calls::call_state::CallTarget;
+use crate::calls::call_view::CallView;
 use crate::calls::execution_loop::BatchExit;
 use crate::calls::frame::Frame;
+use crate::calls::prepared_call::{CallDetails, PreparedCall, PreparedCallee};
 use crate::classes::{MethodBody, MethodContext};
 use crate::code_table::FunctionIndex;
 
@@ -33,15 +35,16 @@ impl Vm {
         &mut self,
         destination: Option<Reg>,
     ) -> Result<bool, NativeError> {
-        let call = self.call_stack.pending()?;
-        if call.callee.user_function().is_none()
-            && !matches!(call.callee.target, CallTarget::Closure(_))
-        {
+        let view = CallView::top(&self.code, &self.call_stack)?;
+        let closure = view
+            .callee()
+            .is_some_and(|callee| matches!(callee.target, CallTarget::Closure(_)));
+        if view.function().is_none() && !closure {
             return Ok(false);
         }
         self.check_frame_limit()?;
-        let call = self.call_stack.take_pending()?;
-        self.enter_window(call, destination)?;
+        let (call, details) = self.call_stack.pop_call()?;
+        self.enter_call(call, details, destination)?;
         Ok(true)
     }
 
@@ -65,39 +68,52 @@ impl Vm {
             .code
             .declared_facts(first, declared.index())
             .ok_or_else(|| internal_error!("direct call target"))?;
-        self.prepare_call(self.function_callee(function))?;
+        self.prepare_php_call(function);
         for index in 0..count as usize {
             let value = self.registers.take(from + index);
             self.store_sent_value(index, value)?;
         }
         *work += 1;
         self.check_frame_limit()?;
-        let call = self.call_stack.take_pending()?;
-        self.enter_window(call, Some(destination))?;
+        let (call, details) = self.call_stack.pop_call()?;
+        self.enter_call(call, details, Some(destination))?;
         Ok(None)
     }
 
     /// Bind the arguments, then push the frame. The frame is pushed even when
     /// binding fails, so that the error's trace shows the call.
-    fn enter_window(
+    fn enter_call(
         &mut self,
-        call: PendingCall,
+        call: PreparedCall,
+        details: Option<CallDetails>,
         destination: Option<Reg>,
     ) -> Result<(), NativeError> {
-        let PendingCall {
+        let slots = CallView::new(&self.code, call, details.as_ref()).slots();
+        let CallDetails {
             callee,
-            mut window,
             owner,
-        } = call;
-        let origin = callee.argument_binding.origin(self.argument_origin);
-        let entry = self.entry_for_target(callee.target, owner, window.base)?;
-        let arguments = self.save_window_arguments(entry.function, &window);
-        let result = self.with_argument_origin(origin, |vm| vm.bind_window(&entry, &window));
-        if window.extra_named.capacity() > 0 {
-            window.extra_named.clear();
-            self.call_stack.argument_names.push(window.extra_named);
-        }
-        let frame = Frame::new(entry.function, window.base, destination);
+            extra_named,
+            ..
+        } = details.unwrap_or_default();
+        let origin = callee.as_ref().map_or(self.argument_origin, |callee| {
+            callee.argument_binding.origin(self.argument_origin)
+        });
+        let entry = match (call.callee, callee) {
+            (PreparedCallee::Php(function), _) => Entry {
+                function,
+                method: None,
+                closure: owner,
+            },
+            (PreparedCallee::General, Some(callee)) => {
+                self.entry_for_target(callee.target, owner, call.base())?
+            }
+            (PreparedCallee::General, None) => return Err(internal_error!("call target")),
+        };
+        let arguments = self.save_window_arguments(entry.function, &call, slots);
+        let result = self.with_argument_origin(origin, |vm| {
+            vm.bind_window(&entry, &call, slots, &extra_named)
+        });
+        let frame = Frame::new(entry.function, call.base(), destination);
         self.push_frame(entry, frame);
         if let Some(arguments) = arguments {
             self.call_stack.current_extras_mut().arguments = arguments;

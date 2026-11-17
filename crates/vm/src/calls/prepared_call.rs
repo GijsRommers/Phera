@@ -1,0 +1,201 @@
+//! A call whose arguments are being evaluated: a few numbers on a stack.
+//!
+//! ```php
+//! $total = add($x, scale($y, 2));
+//! ```
+//!
+//! `add` is prepared first. Its record says which function it calls and
+//! where that function's window of registers starts. While the arguments are
+//! evaluated, `scale` is prepared above it, receives `$y` and `2`, runs and
+//! returns; its result is sent to `add`, and then `add` runs. A record is a
+//! few numbers copied onto and off a `Vec` that keeps its capacity, so
+//! preparing a call allocates nothing and touches no reference count.
+//!
+//! What only some calls need is kept in a [`CallDetails`] entry beside the
+//! record: the full description of a callee that is not plain PHP code (a
+//! native function, an intrinsic, a method), and the state of named
+//! arguments. Everything else, such as a parameter's name for a named
+//! argument, is read from the callee's bytecode when it is needed.
+
+use std::rc::Rc;
+
+use phera_bytecode::{CompiledUnit, Function, Type};
+use phera_value::{Object, PhpString};
+
+use crate::calls::call_state::{Callee, ParameterSpec};
+use crate::code_table::FunctionIndex;
+
+/// One call being prepared.
+#[derive(Clone, Copy)]
+pub(crate) struct PreparedCall {
+    pub(crate) callee: PreparedCallee,
+    /// Where the callee's first parameter goes in the register stack.
+    base: u32,
+    /// One past the highest argument position filled so far.
+    pub(crate) sent: u32,
+    /// What `func_num_args()` will report: named arguments that a variadic
+    /// parameter collects do not count.
+    pub(crate) counted: u32,
+    pub(crate) flags: CallFlags,
+}
+
+/// What a prepared call will run.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PreparedCallee {
+    /// A function written in PHP, entered with nothing but its arguments.
+    Php(FunctionIndex),
+    /// Anything else; its [`Callee`] is in the call's details.
+    General,
+}
+
+/// Small facts about a prepared call, one bit each.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct CallFlags(u8);
+
+impl CallFlags {
+    /// An argument did not pass its type's quick test; it is checked (and
+    /// perhaps converted) when the call starts, after every argument is in.
+    pub(crate) const DEFERRED_CHECKS: Self = Self(1);
+    /// A named argument was sent, so a positional one is now an error.
+    pub(crate) const NAMED: Self = Self(1 << 1);
+    /// The call has an entry on the details stack.
+    pub(crate) const DETAILS: Self = Self(1 << 2);
+
+    pub(crate) fn contains(self, flag: Self) -> bool {
+        self.0 & flag.0 != 0
+    }
+
+    pub(crate) fn insert(&mut self, flag: Self) {
+        self.0 |= flag.0;
+    }
+}
+
+impl PreparedCall {
+    /// A call to `callee` whose first parameter goes to register `base`.
+    pub(crate) fn new(callee: PreparedCallee, base: usize) -> Self {
+        Self {
+            callee,
+            base: base as u32,
+            sent: 0,
+            counted: 0,
+            flags: CallFlags::default(),
+        }
+    }
+
+    /// Where the callee's first parameter goes in the register stack.
+    #[inline]
+    pub(crate) fn base(&self) -> usize {
+        self.base as usize
+    }
+
+    /// The register stack moved up by one below this call's window (a
+    /// variable was created by name in the frame that prepares it).
+    pub(crate) fn shift_up(&mut self) {
+        self.base += 1;
+    }
+
+    /// Whether every argument arrived by position and passed its quick test,
+    /// so that entering the callee is only pushing a frame.
+    #[inline]
+    pub(crate) fn is_plain(&self) -> bool {
+        !self.flags.contains(CallFlags::DEFERRED_CHECKS) && !self.flags.contains(CallFlags::NAMED)
+    }
+
+    /// Record that the argument at position `index` was filled; `counted`
+    /// is false for a named argument that a variadic parameter collects.
+    #[inline]
+    pub(crate) fn mark_sent(&mut self, index: usize, counted: bool) {
+        let next = index as u32 + 1;
+        self.sent = self.sent.max(next);
+        if counted {
+            self.counted = self.counted.max(next);
+        }
+    }
+}
+
+/// What only some prepared calls need, kept beside the record.
+#[derive(Default)]
+pub(crate) struct CallDetails {
+    /// The callee, when it is not plain PHP code.
+    pub(crate) callee: Option<Callee>,
+    /// A closure object that must stay alive while the call runs.
+    pub(crate) owner: Option<Rc<Object>>,
+    /// The parameter name the next `Send` is for.
+    pub(crate) named: Option<PhpString>,
+    /// Named arguments that the variadic parameter collects, by position.
+    pub(crate) extra_named: Vec<(usize, PhpString)>,
+}
+
+/// The parameters of a prepared call's callee, read from its bytecode or
+/// from its description.
+#[derive(Clone, Copy)]
+pub(crate) enum Parameters<'a> {
+    Php {
+        function: &'a Function,
+        unit: &'a CompiledUnit,
+    },
+    Listed(&'a [ParameterSpec]),
+}
+
+impl<'a> Parameters<'a> {
+    /// How many parameters are declared.
+    pub(crate) fn len(self) -> usize {
+        match self {
+            Self::Php { function, .. } => function.parameters.len(),
+            Self::Listed(parameters) => parameters.len(),
+        }
+    }
+
+    pub(crate) fn name(self, index: usize) -> &'a str {
+        match self {
+            Self::Php { function, unit } => &unit.names[function.parameters[index].name.index()],
+            Self::Listed(parameters) => &parameters[index].name,
+        }
+    }
+
+    pub(crate) fn by_reference(self, index: usize) -> bool {
+        match self {
+            Self::Php { function, .. } => function.parameters[index].by_reference,
+            Self::Listed(parameters) => parameters[index].by_reference,
+        }
+    }
+
+    pub(crate) fn is_variadic(self, index: usize) -> bool {
+        match self {
+            Self::Php { function, .. } => function.parameters[index].variadic,
+            Self::Listed(parameters) => parameters[index].variadic,
+        }
+    }
+
+    /// The declared type of parameter `index`.
+    pub(crate) fn ty(self, index: usize) -> Option<&'a Type> {
+        match self {
+            Self::Php { function, unit } => function.parameters[index]
+                .ty
+                .map(|ty| &unit.types[ty.index()]),
+            Self::Listed(parameters) => parameters[index].ty.as_ref(),
+        }
+    }
+
+    /// The parameter that receives argument `index`: its own, or for a
+    /// surplus argument the variadic one, if there is one.
+    pub(crate) fn receiving(self, index: usize) -> Option<usize> {
+        if index < self.len() {
+            return Some(index);
+        }
+        let last = self.len().checked_sub(1)?;
+        self.is_variadic(last).then_some(last)
+    }
+
+    /// The position of the variadic parameter, if there is one.
+    pub(crate) fn variadic(self) -> Option<usize> {
+        (0..self.len()).find(|&index| self.is_variadic(index))
+    }
+
+    /// The position of the parameter called `name`, not counting the
+    /// variadic one.
+    pub(crate) fn position_of(self, name: &[u8]) -> Option<usize> {
+        (0..self.len())
+            .find(|&index| !self.is_variadic(index) && self.name(index).as_bytes() == name)
+    }
+}

@@ -51,8 +51,10 @@ impl Vm {
 
     /// Parent-qualified callback lookup changes visibility scope but retains late static binding.
     pub(crate) fn forward_callback_class(&mut self, class: Rc<Class>) -> Result<(), NativeError> {
-        let pending = self.call_stack.pending_mut()?;
-        if let CallTarget::Method { context, .. } = &mut pending.callee.target {
+        let details = self.call_stack.top_details_mut()?;
+        if let Some(CallTarget::Method { context, .. }) =
+            details.callee.as_mut().map(|callee| &mut callee.target)
+        {
             context.called = class;
         }
         Ok(())

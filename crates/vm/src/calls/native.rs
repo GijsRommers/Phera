@@ -1,7 +1,8 @@
 //! Native handlers keep the extension API while receiving window arguments.
 
 use crate::Vm;
-use crate::calls::call_state::{CallTarget, PendingCall};
+use crate::calls::call_state::CallTarget;
+use crate::calls::call_view::CallView;
 use crate::classes::MethodBody;
 use phera_extension_api::{NativeError, NativeFn, NativeResult};
 use phera_value::Value;
@@ -87,20 +88,24 @@ impl Vm {
 impl Vm {
     /// The extension API owns Vec arguments; only this boundary materializes one.
     pub(crate) async fn finish_native_window(&mut self) -> Result<Value, NativeError> {
-        let mut call = self.call_stack.take_pending()?;
-        if let CallTarget::Constructed(object) = &call.callee.target {
-            self.registers.truncate(call.window.base);
+        let slots = CallView::top(&self.code, &self.call_stack)?.slots();
+        let (call, details) = self.call_stack.pop_call()?;
+        let details = details.unwrap_or_default();
+        let callee = details
+            .callee
+            .ok_or_else(|| internal_error!("native target"))?;
+        if let CallTarget::Constructed(object) = &callee.target {
+            self.registers.truncate(slots.base);
             return Ok(Value::Object(object.clone()));
         }
         let mut arguments = self.call_stack.native_arguments();
-        arguments.reserve(call.window.supplied);
-        for index in 0..call.window.supplied {
-            let slot = call.window.slot(index);
-            let value = self.registers.window_mut(slot, 1)[0].take();
+        arguments.reserve(call.sent as usize);
+        for index in 0..call.sent as usize {
+            let value = self.registers.window_mut(slots.slot(index), 1)[0].take();
             let value = if index == 1
                 && value.is_none()
                 && matches!(
-                    call.callee.target,
+                    callee.target,
                     CallTarget::Intrinsic(crate::intrinsics::Intrinsic::IsCallable)
                 ) {
                 Value::Bool(false)
@@ -109,24 +114,20 @@ impl Vm {
             };
             arguments.push(value);
         }
-        self.registers.truncate(call.window.base);
-        let origin = call.callee.argument_binding.origin(self.argument_origin);
-        let result = match &call.callee.target {
+        self.registers.truncate(slots.base);
+        let origin = callee.argument_binding.origin(self.argument_origin);
+        let named = &details.extra_named;
+        match &callee.target {
             CallTarget::Native(entry) => self.native_entry_origin(*entry, arguments, origin).await,
             CallTarget::Intrinsic(intrinsic) => {
                 Box::pin(self.intrinsic_origin(*intrinsic, arguments, origin)).await
             }
             CallTarget::Method { method, context } => {
-                self.native_method_window(method, context, arguments, &call, origin)
+                self.native_method_window(method, context, arguments, named, origin)
                     .await
             }
             _ => Err(internal_error!("native target")),
-        };
-        if call.window.extra_named.capacity() > 0 {
-            call.window.extra_named.clear();
-            self.call_stack.argument_names.push(call.window.extra_named);
         }
-        result
     }
 
     /// Native methods preserve constructor results and Closure wrapper argument naming.
@@ -135,7 +136,7 @@ impl Vm {
         method: &crate::classes::Method,
         context: &crate::classes::MethodContext,
         mut arguments: Vec<Value>,
-        call: &PendingCall,
+        named: &[(usize, phera_value::PhpString)],
         origin: crate::calls::callback_binding::ArgumentOrigin,
     ) -> Result<Value, NativeError> {
         let result = match &method.body {
@@ -144,7 +145,7 @@ impl Vm {
                     *operation,
                     context.receiver.clone(),
                     arguments,
-                    &call.window,
+                    named,
                     origin,
                 )
                 .await
@@ -191,15 +192,11 @@ impl Vm {
         operation: crate::closure_methods::ClosureMethod,
         receiver: Option<std::rc::Rc<phera_value::Object>>,
         arguments: Vec<Value>,
-        window: &crate::calls::call_state::CallWindow,
+        named: &[(usize, phera_value::PhpString)],
         origin: crate::calls::callback_binding::ArgumentOrigin,
     ) -> phera_extension_api::LocalFuture<'_, NativeResult> {
-        let names = window
-            .extra_named
-            .iter()
-            .map(|(_, name)| name.clone())
-            .collect();
-        let start = window.extra_named.first().map_or(0, |(index, _)| *index);
+        let names = named.iter().map(|(_, name)| name.clone()).collect();
+        let start = named.first().map_or(0, |(index, _)| *index);
         Box::pin(self.closure_method_named(operation, receiver, arguments, start, names, origin))
     }
 }
