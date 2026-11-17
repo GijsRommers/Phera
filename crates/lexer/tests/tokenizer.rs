@@ -115,3 +115,19 @@ fn short_open_tags_follow_the_scanner_setting() {
     assert_eq!(open.kind, OpenTag);
     assert_eq!(open.span.end, 8);
 }
+
+#[test]
+fn attribute_prefix_is_a_comment_while_scanning_a_property_name() {
+    check(
+        b"<?php $x->#[comment]\n class;",
+        &[
+            (OpenTag, b"<?php "),
+            (Variable, b"$x"),
+            (Arrow, b"->"),
+            (Comment, b"#[comment]"),
+            (Whitespace, b"\n "),
+            (Identifier, b"class"),
+            (Semicolon, b";"),
+        ],
+    );
+}

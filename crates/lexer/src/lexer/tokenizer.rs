@@ -44,7 +44,11 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    pub(super) fn trivia_at(&self, start: usize) -> Option<(TokenKind, usize, bool)> {
+    pub(super) fn trivia_at(
+        &self,
+        start: usize,
+        looking_for_property: bool,
+    ) -> Option<(TokenKind, usize, bool)> {
         let rest = &self.source[start..];
         let (kind, length, complete) = match rest {
             [first, ..] if is_whitespace(char::from(*first)) => {
@@ -54,7 +58,7 @@ impl<'src> Lexer<'src> {
                     .count();
                 (TokenKind::Whitespace, length, true)
             }
-            [b'/', b'/', ..] | [b'#', ..] if !rest.starts_with(b"#[") => {
+            [b'/', b'/', ..] | [b'#', ..] if looking_for_property || !rest.starts_with(b"#[") => {
                 let length = rest
                     .iter()
                     .enumerate()
@@ -117,7 +121,9 @@ impl<'src> Lexer<'src> {
     }
 
     pub(super) fn ampersand_kind(&self) -> TokenKind {
-        let after = self.trivia_end(self.position).unwrap_or(self.position);
+        let after = self
+            .trivia_end(self.position, false)
+            .unwrap_or(self.position);
         let rest = &self.source[after..];
         if rest.starts_with(b"$") || rest.starts_with(b"...") {
             TokenKind::AmpersandBeforeVariable

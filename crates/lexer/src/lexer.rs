@@ -304,14 +304,15 @@ impl<'src> Lexer<'src> {
     }
 
     fn lex_php(&mut self) -> Result<Token, LexError> {
+        let property = matches!(self.previous, TokenKind::Arrow | TokenKind::NullsafeArrow);
         if self.tokenizer {
             let start = self.position;
-            if let Some((kind, end, _)) = self.trivia_at(start) {
+            if let Some((kind, end, _)) = self.trivia_at(start, property) {
                 self.position = end;
                 return Ok(self.token(kind, start));
             }
         } else {
-            self.position = self.trivia_end(self.position)?;
+            self.position = self.trivia_end(self.position, property)?;
         }
 
         let start = self.position;
@@ -321,9 +322,7 @@ impl<'src> Lexer<'src> {
         };
         let next = self.peek_next();
 
-        let property =
-            self.tokenizer && matches!(self.previous, TokenKind::Arrow | TokenKind::NullsafeArrow);
-        let kind = if property && is_name_start(c) {
+        let kind = if self.tokenizer && property && is_name_start(c) {
             self.eat_name();
             TokenKind::Identifier
         } else if self.starts_with("?>") {
@@ -454,7 +453,9 @@ impl<'src> Lexer<'src> {
             // `enum` is only a keyword when it starts a declaration, so that
             // `enum` stays usable as a class or function name.
             b"enum" => {
-                let after = self.trivia_end(self.position).unwrap_or(self.position);
+                let after = self
+                    .trivia_end(self.position, false)
+                    .unwrap_or(self.position);
                 let following = self.name_at(after).to_ascii_lowercase();
 
                 let declares = !following.is_empty()
@@ -469,7 +470,7 @@ impl<'src> Lexer<'src> {
             }
             // `yield from` is one token, even across whitespace and comments.
             b"yield" => {
-                if let Ok(after) = self.trivia_end(self.position)
+                if let Ok(after) = self.trivia_end(self.position, false)
                     && self.name_at(after).eq_ignore_ascii_case(b"from")
                 {
                     self.position = after + "from".len();
@@ -1012,9 +1013,9 @@ impl<'src> Lexer<'src> {
     // --- Whitespace and comments -----------------------------------------------
 
     /// Where the whitespace and comments starting at `from` end.
-    fn trivia_end(&self, from: usize) -> Result<usize, LexError> {
+    fn trivia_end(&self, from: usize, looking_for_property: bool) -> Result<usize, LexError> {
         let mut position = from;
-        while let Some((_, end, complete)) = self.trivia_at(position) {
+        while let Some((_, end, complete)) = self.trivia_at(position, looking_for_property) {
             if !complete {
                 return Err(LexError {
                     kind: LexErrorKind::UnterminatedComment,

@@ -993,3 +993,12 @@ fn carriage_return_ends_line_comments_and_close_tags() {
         ]
     );
 }
+
+#[test]
+fn comments_between_the_object_operator_and_the_property() {
+    let actual: Vec<_> = tokens("$object->#[comment]\n property")
+        .into_iter()
+        .map(|token| token.kind)
+        .collect();
+    assert_eq!(actual, [Variable, Arrow, Identifier, Eof]);
+}
