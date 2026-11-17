@@ -54,7 +54,7 @@ pub fn reverse(arguments: &[Value]) -> NativeResult {
         return Ok("UTC".into());
     }
     let offset = args::int(arguments, 1).unwrap_or(-1);
-    let dst = args::int(arguments, 2).unwrap_or(-1);
+    let dst = args::int(arguments, 2).unwrap_or(-1) as i32;
     let mut matches = entries(ABBR).filter(|r| word.eq_ignore_ascii_case(r.0.as_bytes()));
     let entry = if let Some(first) = matches.next() {
         Some(if offset == -1 || offset == first.2 {
@@ -64,7 +64,7 @@ pub fn reverse(arguments: &[Value]) -> NativeResult {
         })
     } else {
         entries(include_str!("../../data/zone-fallbacks.tsv"))
-            .find(|r| r.2 == offset && i64::from(r.1) == dst)
+            .find(|r| r.2 == offset && i32::from(r.1) == dst)
     };
     Ok(entry
         .filter(|r| !r.3.is_empty())

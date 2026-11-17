@@ -2,6 +2,8 @@
 
 use phera_extension_api::{ArrayKey, Context, NativeError, NativeResult, PhpArray, Value, args};
 
+use crate::parse::token::{Special, WeekdayBehavior};
+
 use super::{
     This,
     interval::{self, Arithmetic, Interval},
@@ -70,6 +72,27 @@ fn restore(data: &PhpArray) -> Result<Interval, NativeError> {
     } else {
         Some(number("days", -1))
     };
+    if number("have_weekday_relative", 0) != 0 {
+        interval.relative.weekday = Some(number("weekday", -1));
+        interval.relative.behavior = match number("weekday_behavior", -1) {
+            2 => WeekdayBehavior::ThisWeek,
+            1.. => WeekdayBehavior::OnOrAfter,
+            _ => WeekdayBehavior::After,
+        };
+    }
+    interval.relative.month_edge = match number("first_last_day_of", -1) {
+        1 => Some(true),
+        2 => Some(false),
+        _ => None,
+    };
+    if number("have_special_relative", 0) != 0 {
+        interval.relative.special = match number("special_type", 0) {
+            1 => Special::Weekdays(number("special_amount", -1)),
+            2 => Special::FirstWeekday,
+            3 => Special::LastWeekday,
+            _ => Special::None,
+        };
+    }
     Ok(interval)
 }
 

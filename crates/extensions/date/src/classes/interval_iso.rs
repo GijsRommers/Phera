@@ -14,7 +14,12 @@ pub fn parse_iso(input: &[u8]) -> Result<IsoInterval, ()> {
     if input.is_empty() {
         return Err(());
     }
-    let input = parse::trim(input);
+    let trimmed = parse::trim(input);
+    let input = if trimmed.is_empty() {
+        &input[input.len() - 1..]
+    } else {
+        trimmed
+    };
     let mut result = IsoInterval::default();
     let mut cursor = 0;
     while let Some(&token) = input.get(cursor) {
@@ -93,10 +98,10 @@ fn duration(input: &[u8], fields: &mut [i64; 7]) -> Result<usize, ()> {
             (true, Some(b'H')) => (4, 3),
             (true, Some(b'M')) => (5, 4),
             (true, Some(b'S')) => (6, 5),
-            _ => return Err(()),
+            _ => break,
         };
         if rank < minimum_rank {
-            return Err(());
+            break;
         }
         minimum_rank = rank + 1;
         match rank {

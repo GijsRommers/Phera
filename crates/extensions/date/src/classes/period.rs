@@ -19,12 +19,13 @@ pub const EXCLUDE_START: i64 = 1;
 pub const INCLUDE_END: i64 = 2;
 const MAX_RECURRENCES: i64 = i32::MAX as i64 - 8;
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Period {
     pub start: Option<Instant>,
     pub current: Option<Instant>,
     pub end: Option<Instant>,
-    pub interval: Interval,
+    pub interval: Option<Interval>,
+    pub initialized: bool,
     pub recurrences: i64,
     pub include_start: bool,
     pub include_end: bool,
@@ -52,6 +53,7 @@ impl Period {
                 format!("{} (including options)", reason()),
             ));
         }
+        self.initialized = true;
         Ok(self)
     }
 
@@ -70,7 +72,8 @@ impl Period {
             start: Some(start),
             current: None,
             end,
-            interval,
+            interval: Some(interval),
+            initialized: false,
             recurrences: count,
             include_start: true,
             include_end: false,
@@ -116,7 +119,9 @@ impl Period {
     }
 
     fn make_interval(&self, context: &mut dyn Context) -> NativeResult {
-        let mut interval = self.interval.clone();
+        let Some(mut interval) = self.interval.clone() else {
+            return Ok(Value::Null);
+        };
         interval.arithmetic = Arithmetic::Civil;
         interval.source = None;
         interval.make(context)
@@ -129,7 +134,8 @@ pub fn construct(context: &mut dyn Context, this: This<'_>, arguments: &[Value])
     let invalid = || {
         NativeError::type_error(concat!(
             "DatePeriod::__construct() accepts (DateTimeInterface, DateInterval, int [, int]), ",
-            "or (DateTimeInterface, DateInterval, DateTime [, int]), or (string [, int]) as arguments"
+            "or (DateTimeInterface, DateInterval, DateTime [, int]), ",
+            "or (string [, int]) as arguments"
         ))
     };
     let start = args::object(arguments, 0).filter(|start| start.class.is_instance_of(INTERFACE));
@@ -240,7 +246,12 @@ pub fn end(context: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResu
 }
 
 pub fn interval(context: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
-    Period::read(receiver(this)?)?.make_interval(context)
+    let object = receiver(this)?;
+    let period = Period::read(object)?;
+    if period.interval.is_none() {
+        return Err(super::uninitialized(object, CLASS));
+    }
+    period.make_interval(context)
 }
 
 pub fn recurrences(_: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {

@@ -4,12 +4,18 @@
 use super::{instant::Instant, interval_arithmetic::apply_relative, period::Period};
 
 fn dates(period: &Period) -> impl Iterator<Item = Instant> + '_ {
+    let relative = period
+        .interval
+        .as_ref()
+        .expect("initialized period")
+        .relative
+        .clone();
     let mut index = 0;
     let mut current = period.start.clone();
     if !period.include_start
         && let Some(current) = &mut current
     {
-        apply_relative(current, period.interval.relative.clone());
+        apply_relative(current, relative.clone());
     }
     std::iter::from_fn(move || {
         let date = current.as_mut()?;
@@ -22,7 +28,7 @@ fn dates(period: &Period) -> impl Iterator<Item = Instant> + '_ {
         };
         if include {
             let next = date.clone();
-            apply_relative(date, period.interval.relative.clone());
+            apply_relative(date, relative.clone());
             index += 1;
             Some(next)
         } else {

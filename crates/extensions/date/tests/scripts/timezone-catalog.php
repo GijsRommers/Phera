@@ -20,3 +20,4 @@ foreach (['GMT','UTC','z','BST','est','eSt','XYZ','', 'AEDT'] as $abbr) {
         }
     }
 }
+echo json_encode(timezone_name_from_abbr("", 3600, 4294967296)), "\n";

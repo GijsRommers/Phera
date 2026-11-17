@@ -148,6 +148,9 @@ fn iso_interval_factory_matches_php() {
         "R9999999999",
         "P1D\0P2D",
         "P1D\x0bP2D",
+        "\x0b",
+        "P1D20240101T000000Z",
+        "P1DT2SP2D",
     ]
     .into_iter()
     .map(str::to_owned)
