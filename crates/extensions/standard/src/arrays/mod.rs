@@ -8,7 +8,6 @@ use phera_extension_api::{ArrayKey, NativeError, PhpArray, Registry, Value, args
 
 mod build;
 mod callback;
-mod callback_set_merge;
 mod callback_sets;
 mod callback_sort;
 mod combine;

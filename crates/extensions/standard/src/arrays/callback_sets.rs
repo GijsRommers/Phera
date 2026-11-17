@@ -16,8 +16,13 @@ use phera_extension_api::{
 };
 
 use super::callback::{BoolResult, UserComparison};
-use super::ordering::SortFlags;
 
+mod comparison;
+mod merge;
+
+use comparison::SetComparison;
+
+/// A key and its value, as the sorted copies of the arrays hold them.
 pub(super) type Entry = (ArrayKey, Value);
 
 pub(super) const FUNCTIONS: &[FunctionEntry] = &[
@@ -325,77 +330,6 @@ fn array_intersect_uassoc(
     Box::pin(run(context, arguments, variant))
 }
 
-pub(super) struct SetComparison<'a> {
-    pub comparison: UserComparison<'a>,
-    pub data: Option<&'a Value>,
-    pub keys: Option<&'a Value>,
-    pub key_only: bool,
-}
-
-impl SetComparison<'_> {
-    pub async fn order(
-        &mut self,
-        context: &mut dyn Context,
-        left: &Entry,
-        right: &Entry,
-    ) -> Result<Ordering, NativeError> {
-        if let Some(callback) = self.keys {
-            self.comparison
-                .compare(
-                    context,
-                    callback,
-                    Value::from(left.0.clone()),
-                    Value::from(right.0.clone()),
-                    BoolResult::AskAgain,
-                )
-                .await
-        } else {
-            self.data(context, left, right, BoolResult::AskAgain).await
-        }
-    }
-
-    /// php_array_intersect leaves its global callback set to the data callback
-    /// after a successful associative value comparison. Later key scans in the
-    /// same outer iteration therefore use that callback on keys too.
-    pub async fn continuing_order(
-        &mut self,
-        context: &mut dyn Context,
-        left: &Entry,
-        right: &Entry,
-        data_compares_keys: bool,
-    ) -> Result<Ordering, NativeError> {
-        if data_compares_keys && let Some(callback) = self.data {
-            return self
-                .comparison
-                .compare(
-                    context,
-                    callback,
-                    Value::from(left.0.clone()),
-                    Value::from(right.0.clone()),
-                    BoolResult::AskAgain,
-                )
-                .await;
-        }
-        self.order(context, left, right).await
-    }
-
-    pub async fn data(
-        &mut self,
-        context: &mut dyn Context,
-        left: &Entry,
-        right: &Entry,
-        bools: BoolResult,
-    ) -> Result<Ordering, NativeError> {
-        if let Some(callback) = self.data {
-            self.comparison
-                .compare(context, callback, left.1.clone(), right.1.clone(), bools)
-                .await
-        } else {
-            SortFlags::STRING.compare(context, &left.1, &right.1)
-        }
-    }
-}
-
 async fn run(context: &mut dyn Context, arguments: Vec<Value>, variant: Variant) -> NativeResult {
     let name = variant.function;
     let user_data = variant.values == Values::Callback;
@@ -457,8 +391,7 @@ async fn run(context: &mut dyn Context, arguments: Vec<Value>, variant: Variant)
     if exact_keys {
         exact(context, &arrays, &mut comparison, intersection).await
     } else {
-        super::callback_set_merge::run(context, &arrays[0], &sorted, &mut comparison, intersection)
-            .await
+        merge::run(context, &arrays[0], &sorted, &mut comparison, intersection).await
     }
 }
 

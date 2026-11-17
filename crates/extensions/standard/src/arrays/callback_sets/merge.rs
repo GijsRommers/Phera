@@ -1,13 +1,16 @@
-//! Sorted set traversal: `array_uintersect([2, 2, 1], [2], 'strcmp')` keeps both 2s.
+//! Walking the sorted arrays side by side, as php_array_diff and
+//! php_array_intersect do: `array_uintersect([2, 2, 1], [2], "strcmp")` keeps
+//! both 2s.
 
 use std::cmp::Ordering;
 
 use phera_extension_api::{Context, NativeResult, PhpArray, Value};
 
-use super::callback::BoolResult;
-use super::callback_sets::{Entry, SetComparison};
+use super::Entry;
+use super::comparison::SetComparison;
+use crate::arrays::callback::BoolResult;
 
-pub(super) async fn run(
+pub(in crate::arrays) async fn run(
     context: &mut dyn Context,
     first: &PhpArray,
     sorted: &[Vec<Entry>],
