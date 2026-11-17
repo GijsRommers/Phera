@@ -136,13 +136,18 @@ async fn run(context: &mut dyn Context, arguments: Vec<Value>, recursive: bool) 
     }
     let callback = args::value(&arguments, 1);
     super::callback::validate(name, 2, true, callback, false)?;
-    let mut active = HashSet::from([Rc::as_ptr(&target)]);
+    // PHP protects an array when walking into it as an element. A root
+    // that contains itself is therefore visited once more before the error.
+    let mut active = HashSet::new();
     let mut frames = vec![Frame::new(target)?];
     while let Some(frame) = frames.last_mut() {
         let Some(key) = frame.keys.next() else {
             frame.ensure_container()?;
-            active.remove(&Rc::as_ptr(&frame.target));
+            let finished = Rc::as_ptr(&frame.target);
             frames.pop();
+            if !frames.is_empty() {
+                active.remove(&finished);
+            }
             continue;
         };
         let Some(element) = frame.element(&key)? else {

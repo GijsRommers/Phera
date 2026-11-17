@@ -1,4 +1,9 @@
 //! By-reference stack, queue, and splice operations with copy-on-write arrays.
+//!
+//! ```php
+//! $a = [1]; $a[] = &$a;
+//! array_pop($a); // [1], because the removed reference follows the modified array
+//! ```
 
 use std::rc::Rc;
 
@@ -81,18 +86,18 @@ fn array_push(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
 
 /// Popping resets the internal cursor and returns the dereferenced removed value.
 fn array_pop(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    mutate(arguments, |array| {
-        let result = array.pop().unwrap_or(Value::Null);
+    let removed = mutate(arguments, |array| {
+        let removed = array.pop().unwrap_or(Value::Null);
         array.reset();
-        Ok(result.deref().clone())
-    })
+        Ok(removed)
+    })?;
+    Ok(removed.try_deref()?.clone())
 }
 
 /// Shifting renumbers integer keys and returns null for an empty array.
 fn array_shift(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    mutate(arguments, |array| {
-        Ok(array.shift().unwrap_or(Value::Null).deref().clone())
-    })
+    let removed = mutate(arguments, |array| Ok(array.shift().unwrap_or(Value::Null)))?;
+    Ok(removed.try_deref()?.clone())
 }
 
 /// Prepended values get new positions while existing string keys retain their identity.

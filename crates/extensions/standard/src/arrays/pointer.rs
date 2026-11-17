@@ -1,4 +1,9 @@
 //! Internal array cursors move independently of key numbering.
+//!
+//! ```php
+//! $a = [1]; $a[] = &$a;
+//! end($a) === $a; // true
+//! ```
 
 use phera_extension_api::{
     Context, FunctionEntry, NativeResult, Param, ParamType, PhpArray, Registry, Value, args,
@@ -21,9 +26,10 @@ pub(crate) fn register(registry: &mut Registry) {
 }
 
 fn current(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(args::array(arguments, 0)
-        .and_then(|array| array.current())
-        .map_or(Value::Bool(false), |value| value.deref().clone()))
+    match args::array(arguments, 0).and_then(|array| array.current()) {
+        Some(value) => Ok(value.try_deref()?.clone()),
+        None => Ok(Value::Bool(false)),
+    }
 }
 
 fn key(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
@@ -34,20 +40,19 @@ fn key(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
 
 /// Copy-on-write also isolates the cursor; a borrowed caller cell is a PHP Error.
 fn move_pointer(arguments: &[Value], operation: fn(&mut PhpArray)) -> NativeResult {
-    super::stack::mutate_with_errors(
+    let pointed = super::stack::mutate_with_errors(
         arguments,
         |array| {
             operation(array);
-            Ok(array
-                .current()
-                .map_or(Value::Bool(false), |value| value.deref().clone()))
+            Ok(array.current().cloned().unwrap_or(Value::Bool(false)))
         },
         [
             "Array argument must be passed by reference",
             "Cannot modify borrowed reference",
             "Expected prepared array argument",
         ],
-    )
+    )?;
+    Ok(pointed.try_deref()?.clone())
 }
 
 fn next(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
