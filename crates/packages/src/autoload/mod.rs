@@ -2,7 +2,9 @@
 //!
 //! Root mappings override dependencies; dependency files run before root files.
 
+mod discovery;
 mod emit;
+mod expressions;
 mod order;
 mod parse;
 mod platform;

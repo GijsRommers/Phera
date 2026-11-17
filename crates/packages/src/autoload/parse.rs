@@ -65,7 +65,7 @@ mod tests {
             } interface Contract {} trait Helper {} enum State {}";
         let program = super::source(source).unwrap();
         let mut names = Vec::new();
-        super::super::scan::declarations(&program.statements, "", &mut names);
+        super::super::discovery::statements(&program.statements, "", &mut names);
         assert_eq!(
             names,
             [

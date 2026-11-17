@@ -3,7 +3,6 @@
 //! `namespace App; enum Status {}` adds `App\Status` to the optimized class map.
 
 use anyhow::{Context, Result};
-use phera_ast::{Statement, StatementKind};
 use rayon::prelude::*;
 use regex::Regex;
 use sha2::{Digest, Sha256};
@@ -36,6 +35,7 @@ impl Source {
 }
 
 pub(super) fn patterns(base: &Path, exclusions: &[String]) -> Result<Vec<Regex>> {
+    let base = base.canonicalize().unwrap_or_else(|_| base.to_path_buf());
     exclusions
         .iter()
         .map(|pattern| {
@@ -100,7 +100,12 @@ pub(super) fn classes(
                 let key = format!(
                     "{:x}.json",
                     Sha256::digest(
-                        [env!("CARGO_PKG_VERSION").as_bytes(), text.as_bytes()].concat()
+                        [
+                            b"class-map-v2".as_slice(),
+                            env!("CARGO_PKG_VERSION").as_bytes(),
+                            text.as_bytes()
+                        ]
+                        .concat()
                     )
                 );
                 let cache_file = cache.join(key);
@@ -113,7 +118,7 @@ pub(super) fn classes(
                     let program = super::parse::source(&text)
                         .map_err(|error| anyhow::anyhow!("{}: {error}", path.display()))?;
                     let mut names = Vec::new();
-                    declarations(&program.statements, "", &mut names);
+                    super::discovery::statements(&program.statements, "", &mut names);
                     let mut record = tempfile::NamedTempFile::new_in(cache)?;
                     record.write_all(&serde_json::to_vec(&names)?)?;
                     record.persist(&cache_file)?;
@@ -155,65 +160,4 @@ fn compliant(name: &str, path: &Path, source: &Source) -> bool {
         }
     };
     source.directory.join(format!("{relative}.php")) == path
-}
-
-pub(super) fn declarations(statements: &[Statement], namespace: &str, names: &mut Vec<String>) {
-    for statement in statements {
-        match &statement.kind {
-            StatementKind::Namespace {
-                name, statements, ..
-            } => {
-                declarations(
-                    statements,
-                    name.as_ref().map_or("", |name| &name.text),
-                    names,
-                );
-            }
-            StatementKind::Class(class) => {
-                if let Some(name) = &class.name {
-                    names.push(if namespace.is_empty() {
-                        name.name.clone()
-                    } else {
-                        format!("{namespace}\\{}", name.name)
-                    });
-                }
-            }
-            StatementKind::Block(body)
-            | StatementKind::While { body, .. }
-            | StatementKind::DoWhile { body, .. }
-            | StatementKind::For { body, .. }
-            | StatementKind::Foreach { body, .. } => declarations(body, namespace, names),
-            StatementKind::If {
-                then, otherwise, ..
-            } => {
-                declarations(then, namespace, names);
-                if let Some(body) = otherwise {
-                    declarations(body, namespace, names);
-                }
-            }
-            StatementKind::Try {
-                body,
-                catches,
-                finally,
-            } => {
-                declarations(body, namespace, names);
-                for catch in catches {
-                    declarations(&catch.body, namespace, names);
-                }
-                if let Some(body) = finally {
-                    declarations(body, namespace, names);
-                }
-            }
-            StatementKind::Switch { cases, .. } => {
-                for case in cases {
-                    declarations(&case.body, namespace, names);
-                }
-            }
-            StatementKind::Declare {
-                body: Some(body), ..
-            } => declarations(body, namespace, names),
-            StatementKind::Function(function) => declarations(&function.body, namespace, names),
-            _ => {}
-        }
-    }
 }
