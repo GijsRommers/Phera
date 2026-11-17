@@ -100,14 +100,20 @@ pub(crate) fn retag(tokens: &mut [SourceToken<'_>]) {
             _ => {}
         }
         before_previous = previous;
-        previous = kind;
+        previous = if is_name { Identifier } else { kind };
     }
 }
 
 fn is_keyword(token: &SourceToken<'_>) -> bool {
-    if matches!(token.kind, TokenKind::Identifier) {
-        return false;
-    }
-    let word = String::from_utf8_lossy(token.text);
-    token.kind == TokenKind::Enum || phera_lexer::keyword(&word.to_ascii_lowercase()).is_some()
+    // Zend's semi_reserved production covers keywords and magic constants,
+    // apart from yield-from, halt-compiler and asymmetric visibility.
+    (Id::Include as i64..=Id::NsC as i64).contains(&token.id)
+        && !matches!(
+            token.kind,
+            TokenKind::YieldFrom
+                | TokenKind::HaltCompiler
+                | TokenKind::PublicSet
+                | TokenKind::ProtectedSet
+                | TokenKind::PrivateSet
+        )
 }

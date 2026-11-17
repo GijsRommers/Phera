@@ -161,3 +161,61 @@ fn list<const N: usize>(values: [Value; N]) -> Value {
     }
     Value::from(array)
 }
+
+#[test]
+fn parse_errors_use_the_parsed_source_location() {
+    use phera_extension_api::testing::call;
+
+    let matrix = Matrix::new();
+    let examples: &[&[u8]] = &[
+        b"<?php\r\n\r\necho ;",
+        b"<?php\n/* unfinished",
+        b"<?php\n<<<END\n\t text\n \tEND;",
+        b"<?php\nif (false) { __halt_compiler(); }",
+        b"<?php echo \"unterminated\n",
+    ];
+    let mut script = String::from("<?php\n");
+    script.push_str(oracle::PHP_PREAMBLE);
+    let mut actual = Vec::new();
+    let mut labels = Vec::new();
+    for (index, source) in examples.iter().enumerate() {
+        let value = Value::from(*source);
+        let mut context = TestContext::default();
+        let error = call(
+            &matrix.registry,
+            &mut context,
+            "token_get_all",
+            vec![value.clone(), Value::Int(1)],
+        )
+        .unwrap_err();
+        let (class, message, code, properties) = error.into_exception_parts().unwrap();
+        let file = properties.get(&ArrayKey::str("file")).unwrap().clone();
+        let line = properties.get(&ArrayKey::str("line")).unwrap().clone();
+        let result = Ok(list([
+            Value::from(class),
+            Value::from(message),
+            code,
+            file,
+            line,
+        ]));
+        let source = oracle::php_literal(&value);
+        script.push_str(&format!(
+            "run('{index}', function () {{
+                try {{ token_get_all({source}, TOKEN_PARSE); }}
+                catch (Throwable $e) {{
+                    return [get_class($e), $e->getMessage(), $e->getCode(),
+                            $e->getFile(), $e->getLine()];
+                }}
+            }});\n"
+        ));
+        labels.push(format!("token_get_all({source}, TOKEN_PARSE)"));
+        actual.push(oracle::encode_case(
+            &index.to_string(),
+            &result,
+            &context.output,
+            &context.diagnostics,
+        ));
+    }
+    let php = oracle::run_php("tokenizer-locations", &script).expect("PHP 8.5 required");
+    oracle::compare("tokenizer parse locations", &labels, &php, &actual);
+}

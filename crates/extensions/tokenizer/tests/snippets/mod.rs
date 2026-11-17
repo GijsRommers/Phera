@@ -155,6 +155,8 @@ pub const SNIPPETS: &[&[u8]] = &[
     b"<?php __halt_compiler(123);raw",
     b"<?php __halt_compiler?>x<?php y;?>z",
     b"<?php $x->__halt_compiler(); echo 1;",
+    b"<?php $x->#[property comment]\n class;",
+    b"<?php $x?->#[property comment]\r\n class;",
     b"<?php $x?->__halt_compiler(); echo 1;",
     b"<?php if (false) { __halt_compiler(); }",
     b"<?php __halt_compiler /* comment */ (); ?>",
@@ -196,4 +198,9 @@ pub const SNIPPETS: &[&[u8]] = &[
     b"<?php function readonly() {} readonly();",
     b"<?php f(if: 1);",
     b"<?php enum X { case DEFAULT; }",
+    b"<?php class C { use A { namespace as bar; } }",
+    b"<?php class C { use A { as as try; } }",
+    b"<?php exit(1, 2); die(...);",
+    b"<?php class C { function exit() {} } C::exit();",
+    b"<?php \\exit(1);",
 ];

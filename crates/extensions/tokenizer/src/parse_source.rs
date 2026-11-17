@@ -34,6 +34,10 @@ impl ParserInput {
             let top = modes.last().copied();
             match token.kind {
                 OpenTag if token.text == b"<?" => source.push_str("<?php "),
+                // PHP parses parenthesized exit/die with the regular call grammar.
+                Exit if next_kind(&tokens[index + 1..]) == Some(LeftParen) => {
+                    source.push_str("__phera_tokenizer_exit");
+                }
                 HaltCompiler => {
                     halt = true;
                     append(&mut source, token.text);
@@ -114,6 +118,13 @@ impl ParserInput {
 
 fn append(source: &mut String, bytes: &[u8]) {
     source.push_str(&String::from_utf8_lossy(bytes));
+}
+
+fn next_kind(tokens: &[SourceToken<'_>]) -> Option<TokenKind> {
+    tokens
+        .iter()
+        .find(|token| !crate::token::ignorable(token.id))
+        .map(|token| token.kind)
 }
 
 fn is_halt_end(tokens: &[SourceToken<'_>]) -> bool {

@@ -37,10 +37,7 @@ pub(crate) fn translate(
         )
     } else if error.message.starts_with("invalid ") && error.message.contains("indentation") {
         if current.is_some_and(|token| token.kind == TokenKind::OpenTag) {
-            line = tokens
-                .iter()
-                .find(|token| token.kind == TokenKind::EndHeredoc)
-                .map_or(line, |token| token.line);
+            line = invalid_label_line(tokens).unwrap_or(line);
         }
         error.message.replacen("invalid ", "Invalid ", 1)
     } else if error.message == "unterminated comment" {
@@ -53,6 +50,29 @@ pub(crate) fn translate(
         syntax_error(&error, error_at, tokens)
     };
     exception("ParseError", message, line)
+}
+
+fn invalid_label_line(tokens: &[SourceToken<'_>]) -> Option<i64> {
+    let mut starts = Vec::new();
+    for token in tokens {
+        match token.kind {
+            TokenKind::StartHeredoc => starts.push(token.line),
+            TokenKind::EndHeredoc => {
+                let start = starts.pop()?;
+                let indent: Vec<_> = token
+                    .text
+                    .iter()
+                    .copied()
+                    .take_while(|byte| matches!(byte, b' ' | b'\t'))
+                    .collect();
+                if indent.contains(&b' ') && indent.contains(&b'\t') {
+                    return Some(start + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn literal_error(
