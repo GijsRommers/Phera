@@ -7,6 +7,7 @@ use phera_extension_api::{Registry, Value};
 #[test]
 fn request_timezone_and_invalid_identifiers() {
     let mut registry = Registry::new();
+    registry.load(&phera_ext_core::Core);
     registry.load(&Date);
     let mut context = TestContext::default();
     let mut script = format!("<?php\n{}", oracle::PHP_PREAMBLE);

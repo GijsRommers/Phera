@@ -79,14 +79,11 @@ impl Location {
 
     pub fn transitions(&self) -> impl DoubleEndedIterator<Item = (i64, usize)> + '_ {
         self.times
-            .chunks_exact(8)
+            .as_chunks::<8>()
+            .0
+            .iter()
             .zip(self.indices)
-            .map(|(bytes, index)| {
-                (
-                    i64::from_be_bytes(bytes.try_into().expect("transition")),
-                    usize::from(*index),
-                )
-            })
+            .map(|(bytes, index)| (i64::from_be_bytes(*bytes), usize::from(*index)))
     }
 
     pub fn offset(&self, index: usize) -> Offset {

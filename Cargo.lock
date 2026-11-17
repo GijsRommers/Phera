@@ -962,6 +962,7 @@ name = "phera-ext-date"
 version = "0.1.0"
 dependencies = [
  "jiff-tzdb",
+ "phera-ext-core",
  "phera-extension-api",
  "phera-phpt",
  "tz-rs",

@@ -15,4 +15,5 @@ tzdb_data.workspace = true
 workspace = true
 
 [dev-dependencies]
+phera-ext-core.workspace = true
 phera-phpt.workspace = true

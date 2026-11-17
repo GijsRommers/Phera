@@ -14,6 +14,7 @@ pub struct Matrix {
 impl Matrix {
     pub fn new() -> Self {
         let mut registry = Registry::new();
+        registry.load(&phera_ext_core::Core);
         registry.load(&Date);
         Self {
             context: TestContext::default(),
