@@ -61,15 +61,10 @@ impl FrameFlags {
     /// Native code called this function: its result goes back to Rust, not
     /// to a register.
     const CALLBACK: u16 = 1 << 1;
-    /// The frame runs a method: `$this` (or nothing, for a static method) is
-    /// in the register below its first.
-    const METHOD: u16 = 1 << 2;
-    /// The frame runs a constructor, which is a method whose call evaluates
-    /// to `$this`.
-    const CONSTRUCTOR: u16 = 1 << 3;
-    /// The frame runs a closure: the closure object is two registers below
-    /// its first, its bound `$this` (or nothing) one below.
-    const CLOSURE: u16 = 1 << 4;
+    /// Bits 2 and 3 hold the frame's [`CallKind`], which says what its
+    /// window keeps below the first register.
+    const KIND_SHIFT: u16 = 2;
+    const KIND_MASK: u16 = 0b11 << Self::KIND_SHIFT;
     /// The top eight bits hold how many arguments the call passed, when it
     /// passed fewer than the function's parameters (at most 64, see
     /// `FunctionShape::Plain`), so that a call with defaults needs no
@@ -77,13 +72,9 @@ impl FrameFlags {
     const PASSED_SHIFT: u16 = 8;
     const PASSED_UNKNOWN: u16 = 0xff;
 
+    #[inline]
     fn of_kind(kind: CallKind) -> u16 {
-        match kind {
-            CallKind::Function => 0,
-            CallKind::Method => Self::METHOD,
-            CallKind::Constructor => Self::METHOD | Self::CONSTRUCTOR,
-            CallKind::Closure => Self::CLOSURE,
-        }
+        (kind as u16) << Self::KIND_SHIFT
     }
 }
 
@@ -91,6 +82,7 @@ const _: () = assert!(std::mem::size_of::<Frame>() == 16);
 
 impl Frame {
     /// A frame about to run `function` from its first instruction.
+    #[inline]
     pub(crate) fn new(function: FunctionIndex, base: usize, destination: Option<Reg>) -> Self {
         Self::of_kind(function, CallKind::Function, base, destination)
     }
@@ -143,15 +135,11 @@ impl Frame {
     /// What kind of code the frame runs.
     #[inline]
     pub(crate) fn kind(&self) -> CallKind {
-        let flags = self.flags.0;
-        if flags & FrameFlags::CONSTRUCTOR != 0 {
-            CallKind::Constructor
-        } else if flags & FrameFlags::METHOD != 0 {
-            CallKind::Method
-        } else if flags & FrameFlags::CLOSURE != 0 {
-            CallKind::Closure
-        } else {
-            CallKind::Function
+        match (self.flags.0 & FrameFlags::KIND_MASK) >> FrameFlags::KIND_SHIFT {
+            0 => CallKind::Function,
+            1 => CallKind::Method,
+            2 => CallKind::Constructor,
+            _ => CallKind::Closure,
         }
     }
 

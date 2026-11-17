@@ -228,6 +228,17 @@ impl CallStack {
         }
     }
 
+    /// Finish preparing the innermost call when the caller does not need
+    /// its details (the interpreter loop enters only calls without any).
+    #[inline]
+    pub(crate) fn pop_plain(&mut self) -> Option<PreparedCall> {
+        let call = self.preparing.pop()?;
+        if call.flags.contains(CallFlags::DETAILS) {
+            self.details.pop();
+        }
+        Some(call)
+    }
+
     /// Abandon the prepared calls above the first `depth`.
     pub(crate) fn truncate_calls(&mut self, depth: usize) {
         while self.preparing.len() > depth {

@@ -64,11 +64,11 @@ pub(crate) enum PreparedCallee {
 /// ```
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum CallKind {
-    Function,
-    Method,
+    Function = 0,
+    Method = 1,
     /// A constructor called by `new`: the call evaluates to `$this`.
-    Constructor,
-    Closure,
+    Constructor = 2,
+    Closure = 3,
 }
 
 impl CallKind {

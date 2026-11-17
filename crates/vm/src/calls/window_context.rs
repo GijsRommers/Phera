@@ -73,15 +73,29 @@ impl<'a> WindowContext<'a> {
     /// The called class (`static::`): the class of `$this`, else the class a
     /// static method was called on, else the class scope.
     pub(crate) fn called(&self) -> Option<Rc<Class>> {
-        if let Some(this) = self.this() {
+        if let Some(this) = self.this()
+            && this.class.as_any().downcast_ref::<Class>().is_none()
+        {
             return self.classes.for_object(this);
         }
+        Some(self.classes.class(self.called_index()?).clone())
+    }
+
+    /// The number of the called class.
+    pub(crate) fn called_index(&self) -> Option<ClassIndex> {
+        if let Some(this) = self.this() {
+            return this
+                .class
+                .as_any()
+                .downcast_ref::<Class>()
+                .map(|class| class.index);
+        }
         if let Some(called) = self.called {
-            return Some(self.classes.class(called).clone());
+            return Some(called);
         }
         match self.kind {
-            CallKind::Closure => closure_context(self.closure()?, |context| context.called.clone()),
-            _ => self.scope().cloned(),
+            CallKind::Closure => closure_context(self.closure()?, |context| context.called.index),
+            _ => self.scope_index(),
         }
     }
 

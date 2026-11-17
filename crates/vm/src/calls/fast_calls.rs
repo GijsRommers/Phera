@@ -87,10 +87,12 @@ impl Machine<'_> {
             return Step::Slow;
         };
         let depth = self.stack.depth();
-        if (frame.has_extras() && !self.stack.extras(depth - 1).holds_only_called_class())
-            || self.stack.depth() <= self.stop + 1
-            || self.code.local(frame.function).is_none()
-            || self.stack.has_calls_from(frame.start())
+        let kind = frame.kind();
+        let start = frame.base() - kind.prefix();
+        if depth <= self.stop + 1
+            || facts.local.is_none()
+            || (frame.has_extras() && !self.stack.extras(depth - 1).holds_only_called_class())
+            || self.stack.has_calls_from(start)
         {
             return Step::Slow;
         }
@@ -120,13 +122,13 @@ impl Machine<'_> {
         {
             return Step::Slow;
         }
-        let value = match (frame.kind(), source) {
+        let value = match (kind, source) {
             (CallKind::Constructor, _) => self.registers.take(frame.base() - 1),
             (_, Some(source)) => self.registers.take(frame.base() + source.index()),
             (_, None) => Value::Null,
         };
         self.stack.pop();
-        self.registers.truncate(frame.start());
+        self.registers.truncate(start);
         self.registers
             .put(caller.base() + destination.index(), value);
         Step::Switched(Position {
@@ -221,8 +223,7 @@ impl Machine<'_> {
         };
         let facts = self.code.facts(function);
         let sent = call.sent as usize;
-        if !call.is_plain()
-            || call.flags.contains(CallFlags::INVOKE)
+        if call.flags != CallFlags::default()
             || sent < facts.required as usize
             || sent > facts.parameters as usize
             || facts.shape != FunctionShape::Plain
@@ -230,7 +231,7 @@ impl Machine<'_> {
         {
             return Step::Slow;
         }
-        let Ok((call, _)) = self.stack.pop_call() else {
+        let Some(call) = self.stack.pop_plain() else {
             return Step::Slow;
         };
         self.publish(position.ip);
@@ -251,7 +252,7 @@ impl Machine<'_> {
     /// `Call` after `new` of a class without a constructor: the object is the
     /// result, and the arguments, already evaluated, are dropped.
     fn finish_construction(&mut self, position: Position, destination: Reg) -> Step {
-        let Ok((call, _)) = self.stack.pop_call() else {
+        let Some(call) = self.stack.pop_plain() else {
             return Step::Slow;
         };
         let object = self.registers.take(call.base() - 1);
