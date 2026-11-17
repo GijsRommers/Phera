@@ -1,6 +1,16 @@
 //! `hash('tiger192,4', 'abc')` adds a fourth Tiger pass and truncates afterward.
 //! Ported from php-src/ext/hash/hash_tiger.c (BSD-3-Clause, see LICENSE-PHP).
-use super::TIGER_TABLES;
+mod table_0;
+mod table_1;
+mod table_2;
+mod table_3;
+
+const TABLES: [&[u64; 256]; 4] = [
+    &table_0::TABLE,
+    &table_1::TABLE,
+    &table_2::TABLE,
+    &table_3::TABLE,
+];
 
 pub fn hash(input: &[u8], bits: usize, passes: usize) -> Vec<u8> {
     let mut data = input.to_vec();
@@ -38,7 +48,7 @@ pub fn hash(input: &[u8], bits: usize, passes: usize) -> Vec<u8> {
 }
 
 fn pass(state: &mut [u64; 3], words: &[u64; 8], multiplier: u64, start: usize) {
-    let [t1, t2, t3, t4] = TIGER_TABLES;
+    let [t1, t2, t3, t4] = TABLES;
     for (i, word) in words.iter().enumerate() {
         let a = (start + i) % 3;
         let b = (a + 1) % 3;

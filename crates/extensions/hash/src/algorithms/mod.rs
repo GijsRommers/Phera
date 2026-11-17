@@ -2,55 +2,9 @@
 use digest::{Digest, DynDigest};
 mod checksums;
 mod haval;
-mod haval_constants;
-mod haval_fold;
 mod murmur;
 mod snefru;
 mod tiger;
-mod tiger_table_0;
-mod tiger_table_1;
-mod tiger_table_2;
-mod tiger_table_3;
-const TIGER_TABLES: [&[u64; 256]; 4] = [
-    &tiger_table_0::TABLE,
-    &tiger_table_1::TABLE,
-    &tiger_table_2::TABLE,
-    &tiger_table_3::TABLE,
-];
-mod snefru_table_0;
-mod snefru_table_1;
-mod snefru_table_10;
-mod snefru_table_11;
-mod snefru_table_12;
-mod snefru_table_13;
-mod snefru_table_14;
-mod snefru_table_15;
-mod snefru_table_2;
-mod snefru_table_3;
-mod snefru_table_4;
-mod snefru_table_5;
-mod snefru_table_6;
-mod snefru_table_7;
-mod snefru_table_8;
-mod snefru_table_9;
-const SNEFRU_TABLES: [&[u32; 256]; 16] = [
-    &snefru_table_0::TABLE,
-    &snefru_table_1::TABLE,
-    &snefru_table_2::TABLE,
-    &snefru_table_3::TABLE,
-    &snefru_table_4::TABLE,
-    &snefru_table_5::TABLE,
-    &snefru_table_6::TABLE,
-    &snefru_table_7::TABLE,
-    &snefru_table_8::TABLE,
-    &snefru_table_9::TABLE,
-    &snefru_table_10::TABLE,
-    &snefru_table_11::TABLE,
-    &snefru_table_12::TABLE,
-    &snefru_table_13::TABLE,
-    &snefru_table_14::TABLE,
-    &snefru_table_15::TABLE,
-];
 pub const NAMES: &[&str] = &[
     "md2",
     "md4",

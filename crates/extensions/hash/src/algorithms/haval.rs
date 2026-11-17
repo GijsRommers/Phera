@@ -1,6 +1,9 @@
 //! `hash('haval128,3', '')`: HAVAL's pass count and output size alter its rounds.
 //! Ported from php-src/ext/hash/hash_haval.c (BSD-3-Clause, see LICENSE-PHP).
-use super::{haval_constants::*, haval_fold};
+mod constants;
+mod fold;
+
+use constants::{D0, I2, I3, I4, I5, K2, K3, K4, K5};
 
 pub fn hash(input: &[u8], bits: usize, passes: usize) -> Vec<u8> {
     let mut data = input.to_vec();
@@ -15,7 +18,7 @@ pub fn hash(input: &[u8], bits: usize, passes: usize) -> Vec<u8> {
     for block in data.as_chunks::<128>().0 {
         compress(&mut state, block, passes);
     }
-    haval_fold::fold(&mut state, bits);
+    fold::fold(&mut state, bits);
     state
         .into_iter()
         .flat_map(u32::to_le_bytes)
