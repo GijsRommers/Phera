@@ -1,4 +1,4 @@
-//! Reading the command line. Written by hand: the grammar is four lines.
+//! Parse commands and startup options, preserving everything after a script name as PHP argv.
 
 use phera_dotenv::FileSelection;
 use std::net::SocketAddr;

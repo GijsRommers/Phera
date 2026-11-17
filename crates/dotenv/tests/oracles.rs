@@ -10,7 +10,9 @@ type Pairs = Option<BTreeMap<Vec<u8>, Vec<u8>>>;
 
 fn bytes(hex: &str) -> Vec<u8> {
     hex.as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
         .collect()
 }
@@ -85,6 +87,7 @@ fn expected(id: &str, input: &[u8], vlucas: &Pairs, symfony: &Pairs) -> Pairs {
     if (id.starts_with("expansion/") && id != "expansion/3")
         || matches!(id, "comment/2" | "bytes/0" | "quoted/0" | "escapes/4")
         || id.starts_with("command/")
+        || id.starts_with("escaped-dollar/")
         || id.ends_with("/windows.env")
         || id.ends_with("/specialchars.env")
     {

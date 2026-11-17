@@ -48,6 +48,8 @@ function snippets(string $vendor): iterable {
             'A=${EXTERNAL:=other}', 'A=${X:-two words}'],
         'escapes' => ['A="a\"b"', 'A="a\\\\b"', 'A="\\$EXTERNAL"', 'A="\\t\\r\\v\\f"',
             'A="\\q"', 'A="\\n"', "A='\\\\'", "A='\$EXTERNAL'"],
+        'escaped-dollar' => ['A=\$EXTERNAL', 'A=\${EXTERNAL}', 'A=\$(date)',
+            'A=\\\\$EXTERNAL', 'A=\\\\\\$EXTERNAL'],
         'command' => ['X=$(date)', 'X="$(echo 1)"', "X='\$(date)'"],
     ];
     foreach ($manual as $class => $cases) {

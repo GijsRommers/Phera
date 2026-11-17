@@ -200,6 +200,22 @@ impl<'a> Parser<'a> {
             match byte {
                 0 => return Err(self.error("a value without a NUL byte")),
                 b'$' if quote != Some(b'\'') => self.expand(&mut out)?,
+                b'\\' if quote.is_none() => {
+                    let start = self.pos;
+                    while self.peek() == Some(b'\\') {
+                        self.pos += 1;
+                    }
+                    let count = self.pos - start;
+                    if self.peek() == Some(b'$') {
+                        out.extend_from_slice(&self.bytes[start..start + count / 2]);
+                        if count % 2 == 1 {
+                            out.push(b'$');
+                            self.pos += 1;
+                        }
+                    } else {
+                        out.extend_from_slice(&self.bytes[start..self.pos]);
+                    }
+                }
                 b'\\' if quote == Some(b'"') => {
                     self.pos += 1;
                     let escaped = match self.peek() {

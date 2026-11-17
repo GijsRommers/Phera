@@ -1,6 +1,10 @@
 //! `phera serve` from the outside: start the real binary, talk HTTP to it
 //! over a socket, and check what comes back.
 
+mod scenarios {
+    mod environment;
+}
+
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::path::PathBuf;
@@ -20,6 +24,16 @@ impl Served {
     }
 
     fn start_with_workers(name: &str, workers: usize, files: &[(&str, &str)]) -> Served {
+        Self::start_in(name, workers, files, ".", &[])
+    }
+
+    fn start_in(
+        name: &str,
+        workers: usize,
+        files: &[(&str, &str)],
+        directory: &str,
+        flags: &[&str],
+    ) -> Served {
         let root = std::env::temp_dir().join(format!("phera-serve-{name}-{}", std::process::id()));
         for (path, contents) in files {
             let file = root.join(path);
@@ -30,7 +44,9 @@ impl Served {
         let mut process = Command::new(env!("CARGO_BIN_EXE_phera"))
             .args(["serve", "--listen", "127.0.0.1:0", "--workers"])
             .arg(workers.to_string())
-            .arg(&root)
+            .current_dir(&root)
+            .args(flags)
+            .arg(root.join(directory))
             .stdout(Stdio::piped())
             .spawn()
             .expect("start phera serve");
@@ -282,27 +298,4 @@ fn hostile_requests_do_not_get_source_wrong_framing_or_a_filled_post() {
         served.request("POST", "/form.php", form, "a=1&b=2"),
         (200, "2 POST".to_string())
     );
-}
-
-#[test]
-fn environment_snapshot_and_putenv_are_isolated_on_one_worker() {
-    let served = Served::start_with_workers(
-        "env",
-        1,
-        &[
-            (".env", "PHERA_TEST_COLOR=green"),
-            (
-                "put.php",
-                "<?php putenv('PHERA_TEST_COLOR=red'); echo getenv('PHERA_TEST_COLOR');",
-            ),
-            (
-                "get.php",
-                "<?php echo getenv('PHERA_TEST_COLOR'), $_ENV['PHERA_TEST_COLOR'], \
-         $_SERVER['PHERA_TEST_COLOR'];",
-            ),
-        ],
-    );
-    assert_eq!(served.get("/put.php"), (200, "red".into()));
-    std::fs::write(served.root.join(".env"), "PHERA_TEST_COLOR=blue").unwrap();
-    assert_eq!(served.get("/get.php"), (200, "greengreengreen".into()));
 }

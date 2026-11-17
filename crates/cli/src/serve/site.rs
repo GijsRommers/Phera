@@ -54,6 +54,14 @@ impl Site {
 
     pub(crate) fn exclude_files(&mut self, paths: Vec<PathBuf>) {
         self.excluded = paths;
+        if self
+            .front_controller
+            .as_ref()
+            .and_then(|p| p.canonicalize().ok())
+            .is_some_and(|p| self.excluded.contains(&p))
+        {
+            self.front_controller = None;
+        }
     }
 
     pub(crate) fn document_root(&self) -> &Path {
