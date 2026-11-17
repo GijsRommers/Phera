@@ -11,5 +11,8 @@ license.workspace = true
 # slower on the short keys PHP arrays have.
 foldhash.workspace = true
 
+[dev-dependencies]
+phera-extension-api.workspace = true
+
 [lints]
 workspace = true

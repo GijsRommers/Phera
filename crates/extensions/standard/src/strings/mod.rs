@@ -108,11 +108,12 @@ fn find_bytes(haystack: &[u8], needle: &[u8], sensitivity: CaseSensitivity) -> O
         .position(|candidate| sensitivity.matches(candidate, needle))
 }
 
-/// Match the oracle's fixed byte alphabet for word and phonetic boundaries without
-/// consulting process locale; case-insensitive comparisons remain ASCII-only.
+/// Match PHP's startup LC_CTYPE alphabet for word and phonetic boundaries.
+/// Darwin classifies these Latin-1 bytes as letters; glibc's UTF-8 locale does not.
 pub(super) fn alphabetic(byte: u8) -> bool {
     byte.is_ascii_alphabetic()
-        || matches!(byte, 170 | 181 | 186 | 192..=214 | 216..=246 | 248..=255)
+        || cfg!(target_vendor = "apple")
+            && matches!(byte, 170 | 181 | 186 | 192..=214 | 216..=246 | 248..=255)
 }
 
 /// List-producing string functions assign consecutive integer keys in insertion order.

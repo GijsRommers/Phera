@@ -2,11 +2,15 @@
 
 use std::process::Command;
 
-pub const PHP: &str = "/opt/homebrew/bin/php";
-pub const SCRATCH: &str = concat!(
-    "/private/tmp/claude-501/-Users-gijsr--t3-worktrees-phera-t3-f1d03fb9/",
-    "8823bb04-57b9-49e9-a9e2-fe9f0dede31c/scratchpad/pdo"
-);
+pub fn php() -> std::path::PathBuf {
+    phera_extension_api::testing::oracle::find_php().expect("PHP 8.5 oracle required")
+}
+
+pub fn scratch() -> std::path::PathBuf {
+    let directory = std::env::temp_dir().join("phera-pdo-tests");
+    std::fs::create_dir_all(&directory).expect("create PDO test artifacts directory");
+    directory
+}
 
 pub fn dsn(driver: &str) -> String {
     let port = match driver {
@@ -18,13 +22,17 @@ pub fn dsn(driver: &str) -> String {
 }
 
 pub fn databases_available() -> bool {
+    if phera_extension_api::testing::oracle::find_php().is_none() {
+        eprintln!("SKIP: PDO test databases or PHP 8.5 are unavailable");
+        return false;
+    }
     let mut available = true;
     for driver in ["pgsql", "mysql"] {
         let script = format!(
             "try {{new PDO('{}','phera','phera');}} catch (Throwable $e) {{exit(1);}}",
             dsn(driver)
         );
-        let result = Command::new(PHP).args(["-r", &script]).output();
+        let result = Command::new(php()).args(["-r", &script]).output();
         if !result.is_ok_and(|output| output.status.success()) {
             available = false;
         }
