@@ -1,0 +1,99 @@
+//! Round-trip every representable scalar through every advertised character encoding.
+use phera_ext_mbstring::Mbstring;
+use phera_extension_api::testing::{TestContext, call, oracle};
+use phera_extension_api::{Extension, Registry, Value};
+#[test]
+fn every_representable_scalar() {
+    let mut registry = Registry::new();
+    Mbstring.register(&mut registry);
+    let mut ctx = TestContext::default();
+    let mut comparisons = 0;
+    let mut mismatches = 0;
+    let mut examples = Vec::new();
+    for line in include_str!("../data/encodings.txt").lines().take(44) {
+        let name = line.split('|').next().unwrap();
+        let script = format!(
+            r#"<?php
+for ($cp = 0; $cp <= 0x10FFFF; $cp++) {{
+    if ('{name}' === 'ISO-2022-JP') {{
+        mb_substitute_character('none');
+        $u = mb_chr($cp, 'UTF-8');
+        $s = $u === false ? false : mb_convert_encoding($u, '{name}', 'UTF-8');
+        if ($s === '') $s = false;
+    }} else {{ $s = mb_chr($cp, '{name}'); }}
+    if ($s !== false) echo $cp, '|', bin2hex($s), '|',
+        bin2hex(mb_convert_encoding($s, 'UTF-8', '{name}')), "\n";
+}}
+"#
+        );
+        let lines = oracle::run_php(&format!("mbstring-roundtrip-{name}"), &script).unwrap();
+        let count = lines.len();
+        for line in lines {
+            let mut fields = line.split('|');
+            let cp: i64 = fields.next().unwrap().parse().unwrap();
+            let expected = fields.next().unwrap();
+            let back = fields.next().unwrap();
+            let encoded = if name == "ISO-2022-JP" {
+                call(
+                    &registry,
+                    &mut ctx,
+                    "mb_substitute_character",
+                    vec![Value::from("none")],
+                )
+                .unwrap();
+                let utf8 = char::from_u32(cp as u32).unwrap().to_string();
+                call(
+                    &registry,
+                    &mut ctx,
+                    "mb_convert_encoding",
+                    vec![Value::from(utf8), Value::from(name), Value::from("UTF-8")],
+                )
+            } else {
+                call(
+                    &registry,
+                    &mut ctx,
+                    "mb_substitute_character",
+                    vec![Value::Int(63)],
+                )
+                .unwrap();
+                call(
+                    &registry,
+                    &mut ctx,
+                    "mb_chr",
+                    vec![Value::Int(cp), Value::from(name)],
+                )
+            };
+            let decoded = encoded.as_ref().ok().and_then(|v| {
+                call(
+                    &registry,
+                    &mut ctx,
+                    "mb_convert_encoding",
+                    vec![v.clone(), Value::from("UTF-8"), Value::from(name)],
+                )
+                .ok()
+            });
+            comparisons += 2;
+            let actual = encoded
+                .as_ref()
+                .map(oracle::encode)
+                .unwrap_or_else(|e| format!("{e:?}"));
+            let decoded = decoded.as_ref().map(oracle::encode).unwrap_or_default();
+            if actual != format!("S:{expected}") || decoded != format!("S:{back}") {
+                mismatches += 1;
+                if examples.len() < 30 {
+                    examples.push(format!(
+                        "{name} U+{cp:04X}: PHP {expected}/{back}, Rust {actual}/{decoded}"
+                    ));
+                }
+            }
+        }
+        println!("{name}: {count} representable scalars");
+    }
+    assert_eq!(
+        mismatches,
+        0,
+        "{comparisons} calls, {mismatches} mismatched round trips\n{}",
+        examples.join("\n")
+    );
+    println!("Encoding round trips: {comparisons} calls, zero mismatches");
+}
