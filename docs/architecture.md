@@ -628,3 +628,138 @@ The measure stays the same: the same script, the same output as PHP 8.5.
 Items 1 to 5 change the engine and wait for the call redesign of section 10
 to land, so that they are built on the new call path and not twice. Item 6
 is independent of the engine and runs beside it.
+
+### 11.4 Extensions: what ships in the binary
+
+In PHP, an extension is a C module that has to be compiled for your PHP
+version and enabled in an ini file, which is why "is mbstring installed?" is
+a real question on every server. In Phera, the extensions people actually
+use are part of the binary: one download, nothing to install or enable.
+
+- **Every extension is a crate** under `crates/extensions/`, with the same
+  shape: it registers functions, constants and classes through the extension
+  API and knows nothing about the VM. The runtime loads all of them.
+- **Each stands on the best Rust crate for its job** rather than on the C
+  library PHP wraps, so the build needs no system packages: PCRE2 (bundled
+  source) for `preg`, `tokio-postgres` and `mysql_async` for PDO,
+  `encoding_rs` and the Unicode crates for mbstring, the RustCrypto crates for
+  hashing. A C dependency is accepted only where nothing else gives
+  PHP-exact results.
+- **Anything that waits is asynchronous**: database queries, HTTP calls,
+  file and network I/O, password hashing. That is the property a C extension
+  cannot offer and the reason to write these again.
+- **Cargo features** let an embedder leave extensions out; the default build
+  has them all.
+- **`extension_loaded()`, `get_loaded_extensions()` and `function_exists()`
+  tell the truth**, so code that probes for an extension works.
+
+The list, in the order of work. Shipped: core, standard (strings, arrays,
+math, time), ctype, json, pcre, pdo with pdo_pgsql and pdo_mysql. In
+progress: mbstring and iconv, date, hash, random. Next: files and streams,
+output buffering, serialization, URL and filter functions, session, curl
+(an asynchronous HTTP client behind PHP's curl API), openssl and sodium, zlib,
+SPL, tokenizer, fileinfo, bcmath and gmp, intl, the XML family (dom,
+simplexml, xmlreader, xmlwriter), gd, zip, sqlite, redis.
+
+Third-party extensions written in C cannot be loaded, since there is no
+Zend API to load them against. An extension someone needs is ported as a
+crate against the extension API.
+
+### 11.5 `phera install`: packages, as fast as the JavaScript and Python tools made it
+
+Composer is written in PHP, resolves dependencies on one core, downloads
+with limited parallelism and unpacks every package into every project. pnpm,
+Bun and uv showed what the same job looks like when it is done natively:
+resolve in parallel, download everything at once, keep one copy of each
+package version on the machine and link it into projects. `phera install`
+applies that playbook to PHP packages, and stays compatible with Composer so
+that a project can use either tool.
+
+- **Same files.** It reads `composer.json`, reads and writes `composer.lock`
+  in Composer's format, and installs into `vendor/` with a Composer-compatible
+  `vendor/autoload.php`, so the project still runs under plain PHP and
+  Composer can take over at any time. No new manifest format.
+- **Same registry.** Packagist's metadata API and the dist archives it points
+  to; also `repositories` entries of type `composer`, `vcs`, `path` and
+  `artifact`, and private registries with `auth.json`.
+- **Same answers.** Composer's version constraints (`^`, `~`, ranges,
+  stability flags, branch aliases), `replace`, `provide`, `conflict`,
+  `minimum-stability`, `prefer-stable`, and platform requirements (`php`,
+  `ext-*`), which are checked against what Phera really has. The resolver is
+  PubGrub (the algorithm uv uses), which is fast and explains a conflict in
+  plain sentences.
+- **A global store.** Every package version is downloaded and unpacked once
+  per machine into a content-addressed store and placed into `vendor/` with
+  copy-on-write clones or hard links, so a second project with the same
+  dependency costs no download and almost no disk.
+- **Parallel everywhere.** Metadata is fetched concurrently while the resolver
+  runs, archives are downloaded and unpacked concurrently, the autoloader's
+  class map is built by scanning files on all cores with Phera's own parser.
+- **Installing from a lock file needs no resolution** and, when the store is
+  warm, no network: it is linking files.
+- **Commands**: `phera install`, `phera update`, `phera add`, `phera remove`,
+  `phera why`, `phera outdated`, `phera audit` (security advisories from
+  Packagist), `phera dump-autoload`, and `phera x vendor/bin-tool` to run a
+  package's binary.
+- **What does not carry over**: Composer plugins (they are PHP code that
+  hooks into Composer's internals). The few that matter are handled natively
+  (the installers for framework-specific paths); `scripts` in `composer.json`
+  do run, through Phera.
+- **Verification**: differential, against Composer itself. For a set of real
+  projects' `composer.json` files: installing from their lock file must
+  produce the same `vendor/` tree (same files, same autoloader behaviour),
+  and resolving from scratch must produce the same versions, or a documented
+  reason for each difference. Timings are measured cold and warm against
+  Composer.
+
+The runtime side: when a script runs under Phera, autoloading reads the same
+metadata natively instead of executing the generated PHP autoloader, which
+needs namespaces and autoloading in the engine (11.3, item 3).
+
+## 12. What to take from Hack and HHVM, and what not
+
+Facebook's HHVM ran PHP much faster, then became the runtime of a different
+language, Hack. Both halves of that story are useful.
+
+**Worth taking, as implementation ideas:**
+
+- **Whole-program mode.** HHVM's "repo authoritative" mode compiles the whole
+  application once, at deploy time, and then refuses anything that would
+  change it (`eval`, includes computed at run time). With the whole program
+  known, every function, class and constant is resolved before the first
+  request, class layouts are final, and calls and property accesses compile
+  to indexes. Phera's link step (10.5) is the lazy version of this; a
+  `phera build` that produces one resolved image for production is the
+  eager one, and fits section 5 (start requests from a loaded image).
+- **Types that drive the compiler.** HHVM infers types across the whole
+  program and emits specialised bytecode. Phera will have the same
+  information from `phera check` (11.1), in the same binary, on the same
+  AST: where the checker proves that `$i` is an int and `$this->items` a
+  list, the compiler can emit the integer and list instructions directly.
+  No other PHP runtime has its checker and its compiler in one place.
+- **Lists and maps as different things.** Hack split PHP's array into `vec`,
+  `dict` and `keyset`. Phera does this inside the runtime (a list stores no
+  keys, 10.6) and the checker can tell the programmer which one a variable
+  is, without changing the language.
+- **A checker that is a service.** Hack's checker separates collecting
+  declarations from checking bodies, checks files in parallel, and keeps
+  running to re-check only what an edit touched. That is the right shape for
+  `phera check` and for editor integration.
+- **Awaiting several things at once.** Hack has `async`/`await`. Phera's
+  model is simpler for existing code (PHP stays synchronous and the runtime
+  suspends it), but Hack shows the missing piece: running several waits
+  concurrently inside one request (two queries, three HTTP calls). That
+  deserves a small native API later.
+
+**Not to take:**
+
+- **Forking the language.** Hack removed references, variable variables,
+  dynamic properties and more, and gained its speed and its type system
+  partly from that. It also lost the PHP ecosystem: frameworks and packages
+  stopped running, and HHVM dropped PHP support in 2019. Phera's whole
+  premise is that existing PHP runs unchanged. Dynamic features stay, and
+  cost only the code that uses them (a function that uses `extract` gets a
+  slower frame; the others do not).
+- **A JIT first.** HHVM's JIT is years of work by a large team. Section 10
+  shows that an interpreter with the right data layout gets within a small
+  factor of PHP's speed; the JIT question comes after that.
