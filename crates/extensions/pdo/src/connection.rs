@@ -68,12 +68,12 @@ pub fn construct<'a>(
         let password = args::string(&arguments, 2)
             .map(|s| s.to_string_lossy())
             .unwrap_or_else(|| dsn.get("password", "").to_owned());
-        let policy = Policy::parse(context, args::array(&arguments, 3).map(Rc::as_ref))?;
+        let policy = Policy::from_options(args::array(&arguments, 3).map(Rc::as_ref));
         let mut attributes = Attributes::new(dsn.driver);
         if let Some(options) = args::array(&arguments, 3) {
             for (key, value) in options.iter() {
                 if let ArrayKey::Int(attribute) = key
-                    && !pool::is_pool_attribute(attribute)
+                    && attribute != pool::PHERA_ATTR_POOL
                 {
                     attributes.set(context, attribute, value)?;
                 }

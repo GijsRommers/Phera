@@ -1,4 +1,5 @@
-//! Live tests use only the task's Redis container, own database and unique keys.
+//! Live tests against the dedicated Redis container (port 16399), each with
+//! its own pool, keys and persistent id.
 use super::*;
 use std::time::Duration;
 
@@ -20,37 +21,25 @@ async fn id(lease: &Lease) -> i64 {
     }
 }
 
-async fn isolated(size: usize) -> Arc<Bucket<Socket>> {
-    runtime()
-        .await
-        .unwrap()
-        .spawn(async move {
-            Bucket::new(phera_io_pool::Options {
-                size,
-                ..Default::default()
-            })
-        })
-        .await
-        .unwrap()
+/// A pool of its own with `size` sockets, on the process's I/O runtime.
+fn isolated(size: usize) -> Pool<Endpoint, Socket> {
+    Pool::with_options(
+        &RUNTIME,
+        Options {
+            size,
+            ..POOL.options().unwrap()
+        },
+    )
 }
 
-async fn lease(bucket: &Arc<Bucket<Socket>>) -> Lease {
-    let bucket = bucket.clone();
-    runtime()
-        .await
-        .unwrap()
-        .spawn(async move {
-            let permit = bucket.capacity.clone().acquire_owned().await.unwrap();
-            borrow(bucket, permit, endpoint()).await.unwrap()
-        })
-        .await
-        .unwrap()
+async fn lease(pool: &Pool<Endpoint, Socket>) -> Lease {
+    acquire_from(pool, endpoint()).await.unwrap()
 }
 
 #[tokio::test]
 async fn reuse_and_cleanup_after_multi_watch_database_and_client_name() {
-    let bucket = isolated(1).await;
-    let first = lease(&bucket).await;
+    let pool = isolated(1);
+    let first = lease(&pool).await;
     let original = id(&first).await;
     let watched = format!("phera:pool:watch:{}", std::process::id());
     for args in [
@@ -64,7 +53,7 @@ async fn reuse_and_cleanup_after_multi_watch_database_and_client_name() {
         first.query(command, 2.0).await.unwrap();
     }
     drop(first);
-    let second = lease(&bucket).await;
+    let second = lease(&pool).await;
     assert_eq!(id(&second).await, original);
     let mut name = redis::cmd("CLIENT");
     name.arg("GETNAME");
@@ -83,28 +72,26 @@ async fn reuse_and_cleanup_after_multi_watch_database_and_client_name() {
 
 #[tokio::test]
 async fn limit_and_killed_connection_replacement() {
-    let bucket = isolated(1).await;
-    let first = lease(&bucket).await;
+    let pool = isolated(1);
+    let first = lease(&pool).await;
     let original = id(&first).await;
     assert!(
-        timeout(
-            Duration::from_millis(30),
-            bucket.capacity.clone().acquire_owned()
-        )
-        .await
-        .is_err()
+        timeout(Duration::from_millis(30), lease(&pool))
+            .await
+            .is_err(),
+        "a second borrower waits while the only socket is lent"
     );
     let killer = acquire(endpoint()).await.unwrap();
     let mut kill = redis::cmd("CLIENT");
     kill.arg("KILL").arg("ID").arg(original);
     killer.query(kill, 2.0).await.unwrap();
     drop(first);
-    let second = lease(&bucket).await;
+    let second = lease(&pool).await;
     assert_ne!(id(&second).await, original);
     second.retire().await.unwrap();
     let retired = id(&second).await;
     drop(second);
-    assert_ne!(id(&lease(&bucket).await).await, retired);
+    assert_ne!(id(&lease(&pool).await).await, retired);
 }
 
 #[test]
@@ -134,49 +121,34 @@ fn connection_survives_its_opening_worker() {
 
 #[tokio::test]
 async fn subscribed_socket_is_cleaned_before_reuse() {
-    let bucket = isolated(1).await;
-    let owner = bucket.clone();
-    let first = runtime()
-        .await
-        .unwrap()
-        .spawn(async move {
-            let permit = owner.capacity.clone().acquire_owned().await.unwrap();
-            let client = endpoint().client().unwrap();
-            let info = client.get_connection_info().clone();
-            let settings = info
-                .redis_settings()
-                .clone()
-                .set_protocol(redis::ProtocolVersion::RESP3);
-            let (sender, _receiver) = tokio::sync::mpsc::unbounded_channel();
-            let connection = redis::Client::open(info.set_redis_settings(settings))
-                .unwrap()
-                .get_multiplexed_async_connection_with_config(
-                    &redis::AsyncConnectionConfig::new()
-                        .set_push_sender(sender)
-                        .set_response_timeout(None),
-                )
-                .await
-                .unwrap();
-            Lease(Arc::new(Shared {
-                socket: Mutex::new(Some(Socket {
-                    connection,
-                    reusable: true,
-                })),
-                owner: Some(ReturnTo {
-                    bucket: owner,
-                    permit,
-                    born: Instant::now(),
-                }),
-                runtime: tokio::runtime::Handle::current(),
-            }))
+    let pool = isolated(1);
+    // A socket that receives pushes, as a subscription would use.
+    let subscriber = async {
+        let client = endpoint().client()?;
+        let info = client.get_connection_info().clone();
+        let settings = info
+            .redis_settings()
+            .clone()
+            .set_protocol(redis::ProtocolVersion::RESP3);
+        let (sender, _receiver) = tokio::sync::mpsc::unbounded_channel();
+        let connection = redis::Client::open(info.set_redis_settings(settings))?
+            .get_multiplexed_async_connection_with_config(
+                &redis::AsyncConnectionConfig::new()
+                    .set_push_sender(sender)
+                    .set_response_timeout(None),
+            )
+            .await?;
+        Ok(Socket {
+            connection,
+            reusable: true,
         })
-        .await
-        .unwrap();
+    };
+    let first = Lease(pool.acquire(endpoint(), subscriber).await.unwrap());
     let mut subscribe = redis::cmd("SUBSCRIBE");
     subscribe.arg(format!("phera:pool:subscribe:{}", std::process::id()));
     first.query(subscribe, 2.0).await.unwrap();
     drop(first);
-    let second = lease(&bucket).await;
+    let second = lease(&pool).await;
     let mut info = redis::cmd("CLIENT");
     info.arg("INFO");
     let Value::BulkString(info) = second.query(info, 2.0).await.unwrap() else {

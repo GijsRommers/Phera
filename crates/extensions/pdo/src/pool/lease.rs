@@ -1,33 +1,63 @@
-//! Each submitted operation retains the lease, even if the PHP request is cancelled.
-
-use std::future::Future;
-use std::pin::Pin;
+//! What a PDO object can do with its borrowed connection. Each method sends
+//! owned data to the I/O runtime and converts the driver's answer back into
+//! PHP values here, on the worker.
 
 use phera_extension_api::PhpArray;
+use phera_io_pool::Operation;
 
-use super::{Lease, runtime};
 use crate::drivers::{Column, Driver, Prepared, Rows, connection_error};
 use crate::errors::DbError;
 use crate::metadata::Metadata;
 use crate::parameters::BoundValue;
 use crate::placeholders::Sql;
 
-type Operation<'a, T> = Pin<Box<dyn Future<Output = Result<T, DbError>> + Send + 'a>>;
+pub struct Lease {
+    connection: phera_io_pool::Lease<Driver>,
+    /// `PDO::ATTR_SERVER_VERSION`, read once at connect time.
+    version: String,
+    /// The transaction state the server reported after the last operation,
+    /// for drivers that report it with every reply (MySQL).
+    observed_transaction: Option<bool>,
+}
 
 impl Lease {
+    pub(super) fn new(connection: phera_io_pool::Lease<Driver>) -> Self {
+        let (version, observed_transaction) = connection
+            .try_inspect(|driver| {
+                (
+                    driver.version().to_owned(),
+                    driver.observed_transaction_state(),
+                )
+            })
+            .expect("no operation uses a lease that was just lent");
+        Self {
+            connection,
+            version,
+            observed_transaction,
+        }
+    }
+
+    pub fn version(&self) -> &str {
+        &self.version
+    }
+
+    /// Runs one driver operation on the I/O runtime, and remembers the
+    /// transaction state the server reported with it.
     async fn run<T, F>(&mut self, operation: F) -> Result<T, DbError>
     where
         T: Send + 'static,
-        F: for<'a> FnOnce(&'a mut Driver) -> Operation<'a, T> + Send + 'static,
+        F: for<'a> FnOnce(&'a mut Driver) -> Operation<'a, Result<T, DbError>> + Send + 'static,
     {
-        let lease = self.shared.clone();
-        let (result, observed) = runtime::run(async move {
-            let mut guard = lease.driver.lock().await;
-            let driver = guard.as_mut().expect("a live lease owns its driver");
-            let result = operation(driver).await;
-            Ok((result, driver.observed_transaction_state()))
-        })
-        .await?;
+        let (result, observed) = self
+            .connection
+            .run(|driver| {
+                Box::pin(async move {
+                    let result = operation(driver).await;
+                    (result, driver.observed_transaction_state())
+                })
+            })
+            .await
+            .map_err(connection_error)?;
         self.observed_transaction = observed;
         result
     }

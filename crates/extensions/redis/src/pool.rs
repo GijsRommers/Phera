@@ -1,200 +1,143 @@
-//! `$r->connect(...)` exclusively borrows a socket owned by the process I/O runtime.
-//! Dropping a cancelled request retains its lease until the outstanding command finishes.
+//! Every `Redis` object borrows a socket from a process-wide pool:
+//!
+//! ```php
+//! $redis = new Redis();
+//! $redis->connect('127.0.0.1', 6379); // borrows a pooled socket
+//! $redis->select(3);
+//! unset($redis);                      // RESET in the background, then idle
+//! ```
+//!
+//! `connect` and `pconnect` both borrow; a persistent id is part of the pool
+//! key, so it keeps its own sockets. How the pool works, and how a command
+//! travels to the I/O threads and back, is described in the `phera-io-pool`
+//! crate. The limits are environment settings, read once:
+//! `PHERA_REDIS_POOL_SIZE` (512), `PHERA_REDIS_POOL_IDLE_SECONDS` (60),
+//! `PHERA_REDIS_POOL_LIFETIME_SECONDS` (1800), `PHERA_REDIS_POOL_WAIT_SECONDS`
+//! (30) and `PHERA_REDIS_IO_THREADS` (2).
 
-mod settings;
 mod socket;
 
-use phera_io_pool::Bucket;
+pub use socket::Endpoint;
+
+use std::future::Future;
+use std::time::Duration;
+
+use phera_io_pool::{AcquireError, IoRuntime, Options, Pool};
 use redis::aio::ConnectionLike;
 use redis::{Cmd, RedisError, RedisResult, Value};
-pub use socket::Endpoint;
 use socket::Socket;
-use std::collections::HashMap;
-use std::sync::{Arc, OnceLock};
-use tokio::sync::{Mutex, OwnedSemaphorePermit, oneshot};
-use tokio::time::{Instant, timeout};
+use tokio::runtime::Handle;
+use tokio::time::timeout;
 
-static RUNTIME: phera_io_pool::IoRuntime = phera_io_pool::IoRuntime::new();
-static POOLS: OnceLock<Mutex<HashMap<Endpoint, Arc<Bucket<Socket>>>>> = OnceLock::new();
+static RUNTIME: IoRuntime = IoRuntime::new("phera-redis-io");
 
-pub async fn runtime() -> RedisResult<tokio::runtime::Handle> {
-    RUNTIME
-        .handle(settings::application()?.io_threads, "phera-redis-io")
-        .await
-        .map_err(error)
+static POOL: Pool<Endpoint, Socket> = Pool::new(
+    &RUNTIME,
+    "PHERA_REDIS",
+    Options {
+        size: 512,
+        idle: Duration::from_secs(60),
+        lifetime: Duration::from_secs(1800),
+        wait: Duration::from_secs(30),
+        io_threads: 2,
+    },
+);
+
+/// The I/O runtime, for the subscription sockets that never enter the pool.
+pub async fn runtime() -> RedisResult<Handle> {
+    POOL.runtime().await.map_err(error)
 }
 
+/// A failure that is not the server's, in the form the rest of the crate
+/// reports: `RedisException` with this message.
 pub fn error(message: impl ToString) -> RedisError {
     std::io::Error::other(message.to_string()).into()
 }
 
-struct ReturnTo {
-    bucket: Arc<Bucket<Socket>>,
-    permit: OwnedSemaphorePermit,
-    born: Instant,
-}
-
-struct Shared {
-    socket: Mutex<Option<Socket>>,
-    owner: Option<ReturnTo>,
-    runtime: tokio::runtime::Handle,
-}
-
-impl Drop for Shared {
-    fn drop(&mut self) {
-        if let Some(socket) = self.socket.get_mut().take() {
-            let owner = self.owner.take();
-            self.runtime.spawn(async move {
-                if let Some(owner) = owner {
-                    owner.bucket.recycle(socket, owner.born, owner.permit).await;
-                }
-            });
-        }
-    }
-}
-
+/// A borrowed socket. The `Redis` object, and a transaction or pipeline in
+/// progress on it, share one lease.
 #[derive(Clone)]
-pub struct Lease(Arc<Shared>);
+pub struct Lease(phera_io_pool::Lease<Socket>);
 
 impl Lease {
+    /// Sends one command and waits for its reply, for at most `read_timeout`
+    /// seconds.
     pub async fn query(&self, command: Cmd, read_timeout: f64) -> RedisResult<Value> {
-        let shared = self.0.clone();
         self.0
-            .runtime
-            .spawn(async move {
-                let mut guard = shared.socket.lock().await;
-                let socket = guard.as_mut().expect("live lease");
-                let future = socket.connection.req_packed_command(&command);
-                let result = if read_timeout > 0.0 {
-                    timeout(std::time::Duration::from_secs_f64(read_timeout), future)
-                        .await
-                        .map_err(error)
-                        .and_then(|result| result)
-                } else {
-                    future.await
-                };
-                if result.as_ref().is_err_and(|e: &RedisError| e.is_io_error()) {
-                    socket.reusable = false;
-                }
-                result
+            .run(move |socket| {
+                Box::pin(async move {
+                    let reply =
+                        within(read_timeout, socket.connection.req_packed_command(&command)).await;
+                    socket.retire_on_io_error(reply)
+                })
             })
             .await
             .map_err(error)?
     }
 
+    /// Sends the commands of a pipeline together and waits for all replies.
     pub async fn pipeline(&self, commands: Vec<Cmd>, read_timeout: f64) -> RedisResult<Vec<Value>> {
         if commands.is_empty() {
             return Ok(Vec::new());
         }
-        let shared = self.0.clone();
         self.0
-            .runtime
-            .spawn(async move {
-                let mut guard = shared.socket.lock().await;
-                let socket = guard.as_mut().expect("live lease");
-                let mut pipeline = redis::pipe();
-                for command in commands {
-                    pipeline.add_command(command);
-                }
-                let count = pipeline.len();
-                let future = socket.connection.req_packed_commands(&pipeline, 0, count);
-                let result = if read_timeout > 0.0 {
-                    timeout(std::time::Duration::from_secs_f64(read_timeout), future)
-                        .await
-                        .map_err(error)
-                        .and_then(|r| r)
-                } else {
-                    future.await
-                };
-                if result.as_ref().is_err_and(|e| e.is_io_error()) {
-                    socket.reusable = false;
-                }
-                result
+            .run(move |socket| {
+                Box::pin(async move {
+                    let mut pipeline = redis::pipe();
+                    for command in commands {
+                        pipeline.add_command(command);
+                    }
+                    let count = pipeline.len();
+                    let replies = within(
+                        read_timeout,
+                        socket.connection.req_packed_commands(&pipeline, 0, count),
+                    )
+                    .await;
+                    socket.retire_on_io_error(replies)
+                })
             })
             .await
             .map_err(error)?
     }
 
+    /// Keeps the socket out of the pool once it is returned: after
+    /// `rawCommand('SUBSCRIBE', ...)` or `MONITOR` it is no longer a plain
+    /// request socket.
     pub async fn retire(&self) -> RedisResult<()> {
-        let shared = self.0.clone();
         self.0
-            .runtime
-            .spawn(async move {
-                shared
-                    .socket
-                    .lock()
-                    .await
-                    .as_mut()
-                    .expect("live lease")
-                    .reusable = false;
-            })
+            .run(|socket| Box::pin(async move { socket.reusable = false }))
             .await
             .map_err(error)
     }
 }
 
-pub async fn acquire(endpoint: Endpoint) -> RedisResult<Lease> {
-    let options = settings::application()?;
-    let handle = runtime().await?;
-    let (mut sender, receiver) = oneshot::channel();
-    handle.spawn(async move {
-        let bucket = POOLS
-            .get_or_init(Mutex::default)
-            .lock()
+/// phpredis's read timeout: at most `seconds` for a reply; 0 waits for ever.
+async fn within<T>(seconds: f64, reply: impl Future<Output = RedisResult<T>>) -> RedisResult<T> {
+    if seconds > 0.0 {
+        timeout(Duration::from_secs_f64(seconds), reply)
             .await
-            .entry(endpoint.clone())
-            .or_insert_with(|| Bucket::new(options))
-            .clone();
-        let permit = tokio::select! {
-            _ = sender.closed() => return,
-            permit = bucket.capacity.clone().acquire_owned() => permit,
-        };
-        let result = match permit {
-            Ok(permit) => borrow(bucket, permit, endpoint).await,
-            Err(e) => Err(error(e)),
-        };
-        let _ = sender.send(result);
-    });
-    timeout(options.wait, receiver)
-        .await
-        .map_err(|_| error(format!("Redis pool exhausted (limit {})", options.size)))?
-        .map_err(error)?
+            .map_err(error)?
+    } else {
+        reply.await
+    }
 }
 
-async fn borrow(
-    bucket: Arc<Bucket<Socket>>,
-    permit: OwnedSemaphorePermit,
-    endpoint: Endpoint,
-) -> RedisResult<Lease> {
-    let mut selected = None;
-    while let Some(mut idle) = bucket.take_idle().await {
-        if !bucket.expired(&idle)
-            && matches!(
-                timeout(
-                    std::time::Duration::from_secs(5),
-                    redis::cmd("PING").query_async::<Value>(&mut idle.driver.connection)
-                )
-                .await,
-                Ok(Ok(Value::SimpleString(_)))
-            )
-        {
-            selected = Some((idle.driver, idle.born));
-            break;
-        }
-    }
-    let (socket, born) = match selected {
-        Some(connection) => connection,
-        None => (Socket::connect(endpoint).await?, Instant::now()),
-    };
-    Ok(Lease(Arc::new(Shared {
-        socket: Mutex::new(Some(socket)),
-        owner: Some(ReturnTo {
-            bucket,
-            permit,
-            born,
-        }),
-        runtime: tokio::runtime::Handle::current(),
-    })))
+pub async fn acquire(endpoint: Endpoint) -> RedisResult<Lease> {
+    acquire_from(&POOL, endpoint).await
+}
+
+async fn acquire_from(pool: &Pool<Endpoint, Socket>, endpoint: Endpoint) -> RedisResult<Lease> {
+    let connect = Socket::connect(endpoint.clone());
+    pool.acquire(endpoint, connect)
+        .await
+        .map(Lease)
+        .map_err(|failure| match failure {
+            AcquireError::Settings(message) | AcquireError::Runtime(message) => error(message),
+            AcquireError::Exhausted { limit } => {
+                error(format!("Redis pool exhausted (limit {limit})"))
+            }
+            AcquireError::Connect(failure) => failure,
+        })
 }
 
 #[cfg(test)]

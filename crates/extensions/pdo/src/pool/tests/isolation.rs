@@ -1,7 +1,5 @@
 //! Reset must remove each previous borrower's server-side state.
 
-use std::time::Instant;
-
 use phera_extension_api::Value;
 
 use super::{rows, scalar};
@@ -97,23 +95,19 @@ pub async fn clean(driver: &mut Lease, name: &str) {
     assert_eq!(rows(driver, "SELECT 1").await.values[0][0], Value::Int(1));
 }
 
-pub async fn reset_cost(driver: &mut Lease, name: &str) {
-    let started = Instant::now();
+/// A clean connection survives being reset many times in a row.
+pub async fn reset_repeatedly(driver: &mut Lease) {
     for _ in 0..100 {
         driver.reset().await.unwrap();
     }
-    eprintln!(
-        "{name}: 100 clean resets: {:?}; mean {:?}",
-        started.elapsed(),
-        started.elapsed() / 100
-    );
+    assert_eq!(rows(driver, "SELECT 1").await.values[0][0], Value::Int(1));
 }
 
 /// Private tokio-postgres type-info statements cannot survive DISCARD ALL.
 pub async fn custom_types_retire_client() {
-    let pool = super::TestPool::new("pgsql", super::options(1)).await;
+    let pool = super::TestPool::new("pgsql", super::options(1));
     let mut first = pool.connect().await;
-    let original = super::id(&mut first).await;
+    let original = super::id(&mut first, "pgsql").await;
     first
         .direct("CREATE TEMP TABLE pool_custom_init(id INT)")
         .await
@@ -128,7 +122,7 @@ pub async fn custom_types_retire_client() {
     );
     drop(first);
     let mut second = pool.connect().await;
-    assert_ne!(super::id(&mut second).await, original);
+    assert_ne!(super::id(&mut second, "pgsql").await, original);
     second
         .direct("CREATE TEMP TABLE pool_custom_init(id INT)")
         .await

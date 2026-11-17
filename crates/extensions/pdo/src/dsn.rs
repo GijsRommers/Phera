@@ -66,13 +66,18 @@ impl Dsn {
         self.fields.get(key).map_or(default, String::as_str)
     }
 
+    pub fn default_port(&self) -> u16 {
+        match self.driver {
+            DriverName::Postgres => 5432,
+            DriverName::Mysql => 3306,
+        }
+    }
+
     pub fn port(&self) -> Result<u16, NativeError> {
-        let default = match self.driver {
-            DriverName::Postgres => "5432",
-            DriverName::Mysql => "3306",
+        let Some(port) = self.fields.get("port") else {
+            return Ok(self.default_port());
         };
-        self.get("port", default)
-            .parse()
+        port.parse()
             .map_err(|_| crate::errors::exception("Invalid port in data source name", None, 0))
     }
 }

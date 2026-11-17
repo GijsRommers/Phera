@@ -1,6 +1,8 @@
-//! Redis RESET clears MULTI, WATCH, selected database, client name and subscriptions.
+//! The pooled socket: where it connects, and what the pool may do with it.
 use redis::aio::MultiplexedConnection;
-use redis::{Client, ConnectionAddr, IntoConnectionInfo, RedisResult, Value};
+use std::time::Duration;
+
+use redis::{Client, ConnectionAddr, IntoConnectionInfo, RedisError, RedisResult, Value};
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct Endpoint {
@@ -42,8 +44,14 @@ impl Endpoint {
 
 pub struct Socket {
     pub connection: MultiplexedConnection,
+    /// Cleared after an I/O error, or by `Lease::retire`; the pool then
+    /// closes the socket instead of lending it again.
     pub reusable: bool,
 }
+
+/// A failed handshake is tried this many more times, after a short pause.
+const HANDSHAKE_RETRIES: u32 = 2;
+const HANDSHAKE_PAUSE: Duration = Duration::from_millis(2);
 
 impl Socket {
     pub async fn connect(endpoint: Endpoint) -> RedisResult<Self> {
@@ -51,10 +59,11 @@ impl Socket {
             .set_response_timeout(None)
             .set_connection_timeout(
                 (endpoint.timeout_micros > 0)
-                    .then(|| std::time::Duration::from_micros(endpoint.timeout_micros)),
+                    .then(|| Duration::from_micros(endpoint.timeout_micros)),
             );
         let client = endpoint.client()?;
-        for attempt in 0..3 {
+        let mut retries = 0;
+        loop {
             match client
                 .get_multiplexed_async_connection_with_config(&config)
                 .await
@@ -65,29 +74,51 @@ impl Socket {
                         reusable: true,
                     });
                 }
-                Err(error) if error.is_io_error() && attempt < 2 => {
-                    // Only retry establishing a socket, before any PHP command is sent.
-                    tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+                // Only the handshake is retried: no PHP command was sent yet.
+                Err(error) if error.is_io_error() && retries < HANDSHAKE_RETRIES => {
+                    retries += 1;
+                    tokio::time::sleep(HANDSHAKE_PAUSE).await;
                 }
                 Err(error) => return Err(error),
             }
         }
-        unreachable!("last handshake attempt returns")
+    }
+
+    /// After an I/O error the socket may be half way through a reply, so it
+    /// must not be lent again.
+    pub fn retire_on_io_error<T>(&mut self, result: RedisResult<T>) -> RedisResult<T> {
+        if result.as_ref().is_err_and(RedisError::is_io_error) {
+            self.reusable = false;
+        }
+        result
     }
 }
 
 impl phera_io_pool::Connection for Socket {
-    type Error = redis::RedisError;
+    type Error = RedisError;
+
+    /// A PING before an idle socket is lent again, however briefly it idled.
+    async fn check(&mut self, _idle: Duration) -> bool {
+        matches!(
+            redis::cmd("PING")
+                .query_async::<Value>(&mut self.connection)
+                .await,
+            Ok(Value::SimpleString(_))
+        )
+    }
+
     fn reusable(&self) -> bool {
         self.reusable
     }
+
+    /// RESET leaves MULTI, ends WATCH and subscriptions, logs out, selects
+    /// database 0 and clears the client name.
     async fn reset(&mut self) -> RedisResult<()> {
         redis::cmd("RESET")
             .query_async::<Value>(&mut self.connection)
             .await?;
         Ok(())
     }
-    async fn close(self) {
-        drop(self);
-    }
+
+    async fn close(self) {}
 }
