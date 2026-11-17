@@ -30,8 +30,11 @@ pub(crate) const MAX_STRING_BYTES: usize = 2 * 1024 * 1024 * 1024;
 
 pub(crate) fn register(registry: &mut Registry) {
     let modules = [
+        base64::FUNCTIONS,
         case::FUNCTIONS,
         compare::FUNCTIONS,
+        encode::FUNCTIONS,
+        escaping::FUNCTIONS,
         padding::FUNCTIONS,
         replace::FUNCTIONS,
         search::FUNCTIONS,
@@ -39,18 +42,15 @@ pub(crate) fn register(registry: &mut Registry) {
         substitute::FUNCTIONS,
         substring::FUNCTIONS,
         trim::FUNCTIONS,
+        url::FUNCTIONS,
     ];
     for entry in modules.into_iter().flatten() {
         registry.function(*entry);
     }
     number_format::register(registry);
     format::register(registry);
-    url::register(registry);
-    encode::register(registry);
-    escaping::register(registry);
     html::register(registry);
     text::register(registry);
-    base64::register(registry);
     tags::register(registry);
     similarity::register(registry);
     metaphone::register(registry);

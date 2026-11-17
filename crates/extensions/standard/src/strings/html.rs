@@ -51,7 +51,7 @@ fn numeric(entity: &[u8]) -> Option<u32> {
     }
     let mut value = 0u32;
     for &byte in tail {
-        let digit = super::url::unhex(byte)? as u32;
+        let digit = u32::from(super::url::hex_digit(byte)?);
         if digit >= radix {
             return None;
         }
