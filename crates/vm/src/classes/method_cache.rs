@@ -17,14 +17,12 @@ pub(crate) struct MethodEntry {
     invocation: Invocation,
     method: Rc<Method>,
     scope: Rc<Class>,
-    result_plan: Option<Rc<super::method_results::MethodResult>>,
 }
 
 /// Scope and method metadata can be shared while every call binds its own receiver.
 pub(crate) struct ResolvedMethod {
     pub(crate) method: Rc<Method>,
     pub(crate) scope: Rc<Class>,
-    pub(crate) result_plan: Option<Rc<super::method_results::MethodResult>>,
 }
 
 impl Vm {
@@ -61,7 +59,6 @@ impl Vm {
             return Ok(Some(ResolvedMethod {
                 method: entry.method.clone(),
                 scope: entry.scope.clone(),
-                result_plan: entry.result_plan.clone(),
             }));
         }
         let lower = lookup
@@ -83,7 +80,6 @@ impl Vm {
             .classes
             .get(&method.declaring)
             .ok_or_else(|| internal_error!("method scope"))?;
-        let result_plan = super::method_results::result_plan(class, &scope, &method);
         if let Some(slot) = self.current().and_then(|frame| frame.site_cache()) {
             *slot.borrow_mut() = crate::unit_caches::CachedSite::Method(Box::new(MethodEntry {
                 class: class.clone(),
@@ -92,14 +88,9 @@ impl Vm {
                 invocation,
                 method: method.clone(),
                 scope: scope.clone(),
-                result_plan: result_plan.clone(),
             }));
         }
-        Ok(Some(ResolvedMethod {
-            method,
-            scope,
-            result_plan,
-        }))
+        Ok(Some(ResolvedMethod { method, scope }))
     }
 }
 

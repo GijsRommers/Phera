@@ -92,7 +92,6 @@ pub(crate) enum MethodBody {
 /// Receiver, lexical scope and called class differ under inheritance and static dispatch.
 #[derive(Clone)]
 pub(crate) struct MethodContext {
-    pub(crate) result_plan: Option<Rc<super::method_results::MethodResult>>,
     pub(crate) receiver: Option<Rc<Object>>,
     pub(crate) scope: Rc<Class>,
     pub(crate) called: Rc<Class>,

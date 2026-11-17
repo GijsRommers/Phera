@@ -95,7 +95,6 @@ impl Vm {
             called: scope.clone(),
             scope,
             receiver: None,
-            result_plan: None,
             invocation: Invocation::Method,
         });
         let callee = Rc::new(Callee {

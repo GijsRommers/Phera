@@ -44,7 +44,6 @@ impl Vm {
         let effective_scope =
             scope.or_else(|| receiver.as_ref().and_then(|_| self.classes.get("Closure")));
         state.context = effective_scope.map(|scope| MethodContext {
-            result_plan: None,
             called: receiver_class.unwrap_or_else(|| scope.clone()),
             scope,
             receiver,

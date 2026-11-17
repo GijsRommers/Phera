@@ -7,7 +7,6 @@ mod inheritance_checks;
 pub(crate) mod instantiation;
 mod linking;
 pub(crate) mod method_cache;
-mod method_results;
 mod methods;
 mod native;
 mod signatures;
@@ -19,5 +18,3 @@ pub(crate) use class::{
     Class, ConstantState, Invocation, LinkedConstant, Method, MethodBody, MethodContext,
 };
 pub(crate) use class_table::ClassTable;
-
-pub(crate) use methods::MethodPreparation;

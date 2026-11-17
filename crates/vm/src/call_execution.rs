@@ -174,7 +174,7 @@ impl Vm {
         method: &Method,
         context: &MethodContext,
         destination: Reg,
-        mut arguments: CallArguments,
+        arguments: CallArguments,
         owner: Option<Rc<Object>>,
         origin: crate::callback_binding::ArgumentOrigin,
     ) -> Result<(), NativeError> {
@@ -193,10 +193,6 @@ impl Vm {
                 origin,
             ))
             .await?;
-            self.set(destination, value);
-        } else if let Some(value) = self.leaf_method_result(context) {
-            arguments.values.clear();
-            self.call_stack.recycle_arguments(arguments.values);
             self.set(destination, value);
         } else {
             self.invoke_method(

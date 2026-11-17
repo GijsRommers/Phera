@@ -10,20 +10,13 @@ use super::{Class, Invocation, Method, MethodBody, MethodContext};
 use crate::Vm;
 use crate::call_state::{CallTarget, Callee};
 
-/// A no-argument leaf may consume the following Call while preparing the method.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum MethodPreparation {
-    Pending,
-    Complete,
-}
-
 impl Vm {
     /// Receiver errors precede argument evaluation, matching ordinary PHP calls.
     pub(crate) fn init_method_call(
         &mut self,
         receiver: Reg,
         method: NameId,
-    ) -> Result<MethodPreparation, NativeError> {
+    ) -> Result<(), NativeError> {
         let unit = self
             .current()
             .ok_or_else(|| internal_error!("method frame"))?
@@ -46,37 +39,11 @@ impl Vm {
             .ok_or_else(|| internal_error!("receiver class"))?;
         let resolved = self.cached_method(&class, name, Invocation::Method)?;
         if let Some(resolved) = resolved {
-            let destination = resolved.result_plan.as_ref().and_then(|_| {
-                self.current()
-                    .and_then(|frame| frame.function().instructions.get(frame.ip))
-                    .and_then(|instruction| {
-                        if let phera_bytecode::Instruction::Call { dst } = instruction {
-                            Some(*dst)
-                        } else {
-                            None
-                        }
-                    })
-            });
-            // Mirrors InitMethodCall + argumentless Call + the cached leaf body.
-            // There are no intervening sends, and failed value/type/depth guards
-            // retain the original preparation and heap-frame execution below.
-            if !resolved.method.is_abstract
-                && let Some(destination) = destination
-                && let Some(plan) = &resolved.result_plan
-                && let Some(value) = self.evaluate_method_result(plan, Some(&object))
-            {
-                self.set(destination, value);
-                if let Some(frame) = self.call_stack.current_mut() {
-                    frame.ip += 1;
-                }
-                self.executed_instructions += 1;
-                return Ok(MethodPreparation::Complete);
-            }
             self.prepare_resolved_method(class, Some(object), resolved, Invocation::Method)?;
         } else {
             self.prepare_method(class, Some(object), name, Invocation::Method)?;
         }
-        Ok(MethodPreparation::Pending)
+        Ok(())
     }
 
     /// Snapshot a bound target so nested calls during argument sends cannot replace the receiver.
@@ -108,12 +75,7 @@ impl Vm {
             return self.prepare_call(callee);
         }
         let resolved = self.cached_method(&class, name, invocation)?;
-        let Some(super::method_cache::ResolvedMethod {
-            method,
-            scope,
-            result_plan,
-        }) = resolved
-        else {
+        let Some(super::method_cache::ResolvedMethod { method, scope }) = resolved else {
             if invocation == Invocation::Constructor {
                 let callee = self.call_stack.bound_callee(Callee {
                     argument_binding: crate::callback_binding::ArgumentBinding::Caller,
@@ -133,11 +95,7 @@ impl Vm {
         self.prepare_resolved_method(
             class,
             receiver,
-            super::method_cache::ResolvedMethod {
-                method,
-                scope,
-                result_plan,
-            },
+            super::method_cache::ResolvedMethod { method, scope },
             invocation,
         )
     }
@@ -150,11 +108,7 @@ impl Vm {
         resolved: super::method_cache::ResolvedMethod,
         invocation: Invocation,
     ) -> Result<(), NativeError> {
-        let super::method_cache::ResolvedMethod {
-            method,
-            scope,
-            result_plan,
-        } = resolved;
+        let super::method_cache::ResolvedMethod { method, scope } = resolved;
         if method.is_abstract {
             return Err(NativeError::error(format!(
                 "Cannot call abstract method {}::{}()",
@@ -171,7 +125,6 @@ impl Vm {
         let call_name = signature.name.clone();
         let parameters = signature.parameters.clone();
         let context = MethodContext {
-            result_plan,
             receiver: if method.is_static { None } else { receiver },
             scope,
             called: class,

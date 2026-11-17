@@ -115,7 +115,6 @@ impl Vm {
     /// A static closure keeps private class access while deliberately omitting the receiver.
     fn closure_context(&self, binding: ClosureBinding) -> Option<MethodContext> {
         let mut context = self.current()?.method.as_deref()?.clone();
-        context.result_plan = None;
         context.invocation = crate::classes::Invocation::Method;
         if binding == ClosureBinding::Static {
             context.receiver = None;

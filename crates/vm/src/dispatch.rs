@@ -81,19 +81,9 @@ impl Vm {
                 class,
                 method,
                 binding,
-            } => {
-                if self.prepare_known_static_call(class, method, binding)?
-                    == crate::classes::MethodPreparation::Complete
-                {
-                    *work += 1;
-                }
-            }
+            } => self.prepare_known_static_call(class, method, binding)?,
             Instruction::InitMethodCall { receiver, method } => {
-                if self.init_method_call(receiver, method)?
-                    == crate::classes::MethodPreparation::Complete
-                {
-                    *work += 1;
-                }
+                self.init_method_call(receiver, method)?
             }
             Instruction::FetchClassConstant { dst, class, name } => {
                 let class = self.class_target(class)?;
