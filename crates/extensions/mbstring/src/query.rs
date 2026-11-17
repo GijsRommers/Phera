@@ -1,10 +1,44 @@
-//! Parse form fields: `mb_parse_str('a[]=1&a[]=2', $result)` creates an array.
-use phera_extension_api::{ArrayKey, Context, NativeResult, PhpArray, Value, args};
+//! Parsing a query string into an array, as `parse_str` does, with each
+//! value checked against the internal encoding:
+//!
+//! ```php
+//! mb_parse_str('a[]=1&a[]=2&b.c=%C3%A9', $result);
+//! // $result === ['a' => ['1', '2'], 'b_c' => 'é']
+//! ```
+
 use std::rc::Rc;
-pub fn parse(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
+
+use phera_extension_api::{
+    ArrayKey, Context, FunctionEntry, NativeResult, Param, ParamType, PhpArray, Registry, Value,
+    args,
+};
+
+use crate::codec::{decode, encode, hex_byte};
+use crate::state::Settings;
+
+pub fn register(registry: &mut Registry) {
+    registry.function(FunctionEntry::sync(
+        "mb_parse_str",
+        MB_PARSE_STR,
+        mb_parse_str,
+    ));
+}
+
+/// PHP's default `max_input_vars`.
+const MAX_INPUT_VARS: usize = 1000;
+
+const MB_PARSE_STR: &[Param] = &[
+    Param::new("string", ParamType::String),
+    Param::new("result", ParamType::Mixed).nullable().by_ref(),
+];
+
+/// `mb_parse_str(string $string, array &$result): bool`
+fn mb_parse_str(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
+    let settings = ctx.state().get_or_default::<Settings>().clone();
+    let input = args::bytes(a, 0);
     let mut result = PhpArray::new();
-    for (i, pair) in args::bytes(a, 0).split(|b| *b == b'&').enumerate() {
-        if i >= 1000 {
+    for (index, pair) in input.split(|&byte| byte == b'&').enumerate() {
+        if index >= MAX_INPUT_VARS {
             ctx.warning(
                 "mb_parse_str(): Input variables exceeded 1000. \
                 To increase the limit change max_input_vars in php.ini."
@@ -12,58 +46,74 @@ pub fn parse(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
             );
             break;
         }
-        let position = pair.iter().position(|b| *b == b'=').unwrap_or(pair.len());
-        let key = decode(&pair[..position]);
-        let key = key.split(|b| *b == 0).next().unwrap_or_default();
-        let value = decode(pair.get(position + 1..).unwrap_or_default());
-        let state = ctx
-            .state()
-            .get_or_default::<crate::state::Settings>()
-            .clone();
-        let value = crate::codec::encode(
-            &crate::codec::decode(&value, state.internal),
-            state.internal,
-            &state.substitute,
-        );
-        let bracket = key.iter().position(|b| *b == b'[').unwrap_or(key.len());
-        let base: Vec<u8> = key[..bracket]
+        let equals = pair
             .iter()
-            .map(|b| if matches!(b, b' ' | b'.') { b'_' } else { *b })
-            .collect();
-        if base.is_empty() {
+            .position(|&byte| byte == b'=')
+            .unwrap_or(pair.len());
+        let key = url_decode(&pair[..equals]);
+        // A NUL ends the name, as in C.
+        let key = key.split(|&byte| byte == 0).next().unwrap_or_default();
+        let value = url_decode(pair.get(equals + 1..).unwrap_or_default());
+        // Invalid sequences in the value become the substitute character.
+        let value = encode(
+            &decode(&value, settings.internal),
+            settings.internal,
+            &settings.substitute,
+        );
+        let Some(path) = key_path(key) else {
             continue;
-        }
-        let mut path = vec![Some(ArrayKey::str(base))];
-        let mut rest = &key[bracket..];
-        while rest.first() == Some(&b'[') {
-            let Some(close) = rest.iter().position(|b| *b == b']') else {
-                break;
-            };
-            path.push(if close == 1 {
-                None
-            } else {
-                Some(ArrayKey::str(&rest[1..close]))
-            });
-            rest = &rest[close + 1..];
-        }
+        };
         insert(&mut result, path, Value::from(value));
     }
     if let Some(reference) = args::reference(a, 1) {
         *reference.borrow_mut() = Value::from(result);
     }
-    Ok(Value::Bool(!args::bytes(a, 0).is_empty()))
+    Ok(Value::Bool(!input.is_empty()))
 }
+
+/// `a[b][]` as the keys `a`, `b` and an append; `None` for an empty name.
+/// In the name before the first bracket, PHP replaces spaces and dots with
+/// underscores.
+fn key_path(key: &[u8]) -> Option<Vec<Option<ArrayKey>>> {
+    let bracket = key
+        .iter()
+        .position(|&byte| byte == b'[')
+        .unwrap_or(key.len());
+    let base: Vec<u8> = key[..bracket]
+        .iter()
+        .map(|&byte| {
+            if matches!(byte, b' ' | b'.') {
+                b'_'
+            } else {
+                byte
+            }
+        })
+        .collect();
+    if base.is_empty() {
+        return None;
+    }
+    let mut path = vec![Some(ArrayKey::str(base))];
+    let mut rest = &key[bracket..];
+    while rest.first() == Some(&b'[') {
+        let Some(close) = rest.iter().position(|&byte| byte == b']') else {
+            break;
+        };
+        path.push((close > 1).then(|| ArrayKey::str(&rest[1..close])));
+        rest = &rest[close + 1..];
+    }
+    Some(path)
+}
+
+/// Stores `value` under the path of keys, `None` meaning `[]`. The arrays
+/// along the path are taken out, changed and put back in, without
+/// recursion.
 fn insert(root: &mut PhpArray, path: Vec<Option<ArrayKey>>, value: Value) {
     let mut parents = Vec::new();
     let mut current = std::mem::take(root);
     let last = path.len() - 1;
-    for (i, key) in path.into_iter().enumerate() {
-        if i == last {
-            if let Some(key) = key {
-                current.insert(key, value.clone());
-            } else {
-                let _ = current.push(value.clone());
-            }
+    for (index, key) in path.into_iter().enumerate() {
+        if index == last {
+            store(&mut current, key, value);
             break;
         }
         let next = key.as_ref().and_then(|key| current.get(key)).cloned();
@@ -74,30 +124,44 @@ fn insert(root: &mut PhpArray, path: Vec<Option<ArrayKey>>, value: Value) {
         };
     }
     while let Some((mut parent, key)) = parents.pop() {
-        let value = Value::Array(Rc::new(current));
-        if let Some(key) = key {
-            parent.insert(key, value);
-        } else {
-            let _ = parent.push(value);
-        }
+        store(&mut parent, key, Value::Array(Rc::new(current)));
         current = parent;
     }
     *root = current;
 }
-pub fn decode(bytes: &[u8]) -> Vec<u8> {
-    let mut out = Vec::new();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            let digits = std::str::from_utf8(&bytes[i + 1..i + 3]).ok();
-            if let Some(n) = digits.and_then(|s| u8::from_str_radix(s, 16).ok()) {
-                out.push(n);
-                i += 3;
-                continue;
-            }
+
+fn store(array: &mut PhpArray, key: Option<ArrayKey>, value: Value) {
+    match key {
+        Some(key) => {
+            array.insert(key, value);
         }
-        out.push(if bytes[i] == b'+' { b' ' } else { bytes[i] });
-        i += 1;
+        // Appending fails after the key PHP_INT_MAX
+        // (`a[9223372036854775807]=1&a[]=2`); PHP drops the value silently too.
+        None => {
+            let _ = array.push(value);
+        }
     }
-    out
+}
+
+/// `%XX` escapes and `+` for a space.
+fn url_decode(bytes: &[u8]) -> Vec<u8> {
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%'
+            && index + 2 < bytes.len()
+            && let Some(byte) = hex_byte(&bytes[index + 1..index + 3])
+        {
+            decoded.push(byte);
+            index += 3;
+            continue;
+        }
+        decoded.push(if bytes[index] == b'+' {
+            b' '
+        } else {
+            bytes[index]
+        });
+        index += 1;
+    }
+    decoded
 }

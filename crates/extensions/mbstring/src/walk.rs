@@ -1,41 +1,69 @@
-//! Walk arrays without Rust recursion, including references: `mb_check_encoding([$value])`.
-use phera_extension_api::{ArrayKey, Value};
-use std::{collections::HashSet, rc::Rc};
+//! Collecting the strings inside nested arrays, as `mb_check_encoding` and
+//! `mb_convert_variables` need them:
+//!
+//! ```php
+//! mb_check_encoding(['ok', ["\xFF"]]);  // false: the nested string is invalid
+//! $a = [1]; $a[] = &$a;
+//! mb_convert_variables('UTF-8', 'ASCII', $a);  // Warning: Cannot handle recursive references
+//! ```
+//!
+//! The walk keeps its own stack instead of recursing, so the depth of PHP
+//! data cannot overflow Rust's stack.
+
+use std::collections::HashSet;
+use std::rc::Rc;
+
+use phera_extension_api::{ArrayKey, PhpString, Value};
+
+#[derive(Default)]
+pub struct Strings {
+    pub values: Vec<PhpString>,
+    /// String keys of arrays, which `mb_check_encoding` checks as well.
+    pub keys: Vec<PhpString>,
+}
+
+/// An array or reference contains itself.
+pub struct Recursive;
+
 enum Step {
     Visit(Value),
+    /// Done with the array or reference of this address, which may then
+    /// appear again elsewhere.
     Leave(usize),
 }
-pub fn strings(value: Value, keys: bool) -> Result<Vec<Vec<u8>>, ()> {
+
+pub fn strings(value: Value) -> Result<Strings, Recursive> {
     let mut pending = vec![Step::Visit(value)];
-    let mut active = HashSet::new();
-    let mut strings = Vec::new();
+    // The containers being walked, by address, to notice a cycle.
+    let mut open = HashSet::new();
+    let mut strings = Strings::default();
     while let Some(step) = pending.pop() {
         let value = match step {
-            Step::Leave(id) => {
-                active.remove(&id);
+            Step::Leave(address) => {
+                open.remove(&address);
                 continue;
             }
             Step::Visit(value) => value,
         };
         match value {
-            Value::String(s) => strings.push(s.as_bytes().to_vec()),
+            Value::String(string) => strings.values.push(string),
             Value::Reference(cell) => {
-                let id = Rc::as_ptr(&cell) as usize;
-                if !active.insert(id) {
-                    return Err(());
+                let address = Rc::as_ptr(&cell) as usize;
+                if !open.insert(address) {
+                    return Err(Recursive);
                 }
-                pending.push(Step::Leave(id));
+                pending.push(Step::Leave(address));
                 pending.push(Step::Visit(cell.borrow().clone()));
             }
             Value::Array(array) => {
-                let id = Rc::as_ptr(&array) as usize;
-                if !active.insert(id) {
-                    return Err(());
+                let address = Rc::as_ptr(&array) as usize;
+                if !open.insert(address) {
+                    return Err(Recursive);
                 }
-                pending.push(Step::Leave(id));
+                pending.push(Step::Leave(address));
                 for (key, value) in array.iter() {
-                    if keys && let ArrayKey::String(key) = key {
-                        strings.push(key.as_bytes().to_vec());
+                    if let ArrayKey::String(key) = key {
+                        strings.keys.push(key.clone());
                     }
                     pending.push(Step::Visit(value.clone()));
                 }

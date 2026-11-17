@@ -56,7 +56,7 @@ fn word(bytes: &[u8]) -> Option<Word<'_>> {
     let close = tail[2..].windows(2).position(|w| w == b"?=")? + 2;
     Some(Word {
         charset: charset.split('*').next()?,
-        bytes: mime::decoded(&tail[2..close], mime::transfer(tail))?,
+        bytes: mime::Scheme::parse(tail).decode(&tail[2..close])?,
         length: 2 + end + 1 + close + 2,
     })
 }

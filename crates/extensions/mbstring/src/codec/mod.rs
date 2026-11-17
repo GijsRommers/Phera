@@ -17,6 +17,8 @@ mod iso2022;
 mod transfer;
 mod unicode;
 
+pub use transfer::hex_byte;
+
 use crate::encoding::{Encoding, Family, read_u32};
 
 /// The code point that stands for an invalid byte sequence.

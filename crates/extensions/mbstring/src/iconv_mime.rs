@@ -5,15 +5,15 @@ pub fn encode(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     let options = args::array(a, 2);
     let get = |key: &str| options.and_then(|a| a.get(&ArrayKey::str(key)));
     let input = get("input-charset")
-        .map(crate::encoding_name)
+        .map(crate::string_of)
         .unwrap_or_else(|| iconv::encoding(ctx, &[], 0));
     let output = get("output-charset")
-        .map(crate::encoding_name)
+        .map(crate::string_of)
         .unwrap_or_else(|| input.clone());
     let method = get("scheme")
-        .map(crate::encoding_name)
+        .map(crate::string_of)
         .unwrap_or_else(|| "B".into());
-    let method = mime::transfer(method.as_bytes());
+    let method = mime::Scheme::parse(method.as_bytes());
     let line_length = get("line-length")
         .and_then(|v| {
             if let Value::Int(n) = v {
@@ -25,7 +25,7 @@ pub fn encode(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
         .unwrap_or(76)
         .max(0) as usize;
     let newline = get("line-break-chars")
-        .map(crate::encoding_name)
+        .map(crate::string_of)
         .unwrap_or_else(|| "\r\n".into());
     let Some(converted) =
         iconv::convert_bytes(ctx, args::bytes(a, 1), &input, &output, "iconv_mime_encode")
@@ -45,18 +45,18 @@ pub fn encode(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
         let mut next = chunk.clone();
         next.push(byte);
         if !chunk.is_empty()
-            && (mime::encoded(&next, method).len() > budget
-                || matches!(method, mime::Transfer::Base64)
+            && (method.encode(&next).len() > budget
+                || matches!(method, mime::Scheme::Base64)
                     && next.len() > (budget / 4 * 3).saturating_sub(4))
         {
-            result.extend_from_slice(mime::word(&chunk, &output, method).as_bytes());
+            result.extend_from_slice(method.word(&chunk, &output).as_bytes());
             result.extend_from_slice(newline.as_bytes());
             result.push(b' ');
             chunk.clear();
         }
         chunk.push(byte);
     }
-    result.extend_from_slice(mime::word(&chunk, &output, method).as_bytes());
+    result.extend_from_slice(method.word(&chunk, &output).as_bytes());
     Ok(Value::from(result))
 }
 pub fn decode(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
