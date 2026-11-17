@@ -10,6 +10,8 @@
 //! The token stream for strings matches `token_get_all()` exactly, so that
 //! the comparison harness in `crates/phpt` can check every file in php-src.
 
+mod tokenizer;
+
 use phera_source::Span;
 
 use crate::{LexError, LexErrorKind, Token, TokenKind};
@@ -94,10 +96,16 @@ enum Mode {
     Php,
     /// Inside an interpolated `"..."` string.
     DoubleQuotes,
+    Backquotes,
+    Varname,
     /// Inside a heredoc body; `label` is where its label sits in the source.
-    Heredoc { label: Span },
+    Heredoc {
+        label: Span,
+    },
     /// Inside a nowdoc body: like a heredoc, but nothing is interpolated.
-    Nowdoc { label: Span },
+    Nowdoc {
+        label: Span,
+    },
     /// Just after `$name[` inside a string: lexing the offset up to `]`.
     VarOffset,
     /// Just after `$name` followed by `->name` inside a string.
@@ -117,6 +125,7 @@ pub struct Lexer<'src> {
     /// The kind of the previous token in PHP code, to tell `__halt_compiler`
     /// apart from `$obj->__halt_compiler`.
     previous: TokenKind,
+    tokenizer: bool,
 }
 
 impl<'src> Lexer<'src> {
@@ -129,6 +138,7 @@ impl<'src> Lexer<'src> {
             modes: vec![Mode::Html],
             halt_countdown: None,
             previous: TokenKind::Eof,
+            tokenizer: false,
         }
     }
 
@@ -145,7 +155,9 @@ impl<'src> Lexer<'src> {
         match self.mode() {
             Mode::Html => Ok(self.lex_html()),
             Mode::Php => self.lex_php_counting_halt(),
-            Mode::DoubleQuotes => self.lex_double_quotes(),
+            Mode::DoubleQuotes => self.lex_encapsed('"', TokenKind::DoubleQuote),
+            Mode::Backquotes => self.lex_encapsed('`', TokenKind::Backquote),
+            Mode::Varname => self.lex_varname(),
             Mode::Heredoc { label } => self.lex_heredoc_body(label, true),
             Mode::Nowdoc { label } => self.lex_heredoc_body(label, false),
             Mode::VarOffset => self.lex_var_offset(),
@@ -218,7 +230,16 @@ impl<'src> Lexer<'src> {
                 && after[..3].eq_ignore_ascii_case(b"php")
                 && after.get(3).is_none_or(|b| b" \t\r\n".contains(b))
             {
-                return Some((tag, TokenKind::OpenTag, 5));
+                let whitespace = if self.tokenizer {
+                    match after.get(3..) {
+                        Some([b'\r', b'\n', ..]) => 2,
+                        Some([_, ..]) => 1,
+                        _ => 0,
+                    }
+                } else {
+                    0
+                };
+                return Some((tag, TokenKind::OpenTag, 5 + whitespace));
             }
 
             from = tag + 2;
@@ -245,13 +266,19 @@ impl<'src> Lexer<'src> {
     /// like `token_get_all()` does.
     fn lex_php_counting_halt(&mut self) -> Result<Token, LexError> {
         let token = self.lex_php()?;
+        if matches!(
+            token.kind,
+            TokenKind::Whitespace | TokenKind::Comment | TokenKind::DocComment
+        ) {
+            return Ok(token);
+        }
         let member_name = matches!(self.previous, TokenKind::Arrow | TokenKind::NullsafeArrow);
         self.previous = token.kind;
 
         if token.kind == TokenKind::HaltCompiler && !member_name {
             self.halt_countdown = Some(3);
         } else if let Some(remaining) = &mut self.halt_countdown
-            && token.kind != TokenKind::Eof
+            && !matches!(token.kind, TokenKind::Eof | TokenKind::OpenTag)
         {
             *remaining -= 1;
 
@@ -265,7 +292,15 @@ impl<'src> Lexer<'src> {
     }
 
     fn lex_php(&mut self) -> Result<Token, LexError> {
-        self.skip_whitespace_and_comments()?;
+        if self.tokenizer {
+            let start = self.position;
+            if let Some((kind, end, _)) = self.trivia_at(start) {
+                self.position = end;
+                return Ok(self.token(kind, start));
+            }
+        } else {
+            self.position = self.trivia_end(self.position)?;
+        }
 
         let start = self.position;
 
@@ -274,7 +309,12 @@ impl<'src> Lexer<'src> {
         };
         let next = self.peek_next();
 
-        let kind = if self.starts_with("?>") {
+        let property =
+            self.tokenizer && matches!(self.previous, TokenKind::Arrow | TokenKind::NullsafeArrow);
+        let kind = if property && is_name_start(c) {
+            self.eat_name();
+            TokenKind::Identifier
+        } else if self.starts_with("?>") {
             self.lex_close_tag()
         } else if c == '$' && next.is_some_and(is_name_start) {
             self.advance();
@@ -317,18 +357,29 @@ impl<'src> Lexer<'src> {
             TokenKind::RightBrace
         } else if c == '`' {
             self.advance();
-            return self.unsupported(start, "backtick shell execution");
+            if !self.tokenizer {
+                return self.unsupported(start, "backtick shell execution");
+            }
+            self.begin(Mode::Backquotes);
+            TokenKind::Backquote
         } else if let Some(&(operator, kind)) =
             OPERATORS.iter().find(|(op, _)| self.starts_with(op))
         {
             self.position += operator.len();
-            kind
+            if self.tokenizer && kind == TokenKind::Ampersand {
+                self.ampersand_kind()
+            } else {
+                kind
+            }
         } else {
             self.advance();
-            return Err(LexError {
-                kind: LexErrorKind::UnexpectedCharacter(c),
-                span: Span::new(start, self.position),
-            });
+            if !self.tokenizer {
+                return Err(LexError {
+                    kind: LexErrorKind::UnexpectedCharacter(c),
+                    span: Span::new(start, self.position),
+                });
+            }
+            TokenKind::BadCharacter
         };
 
         Ok(self.token(kind, start))
@@ -337,6 +388,9 @@ impl<'src> Lexer<'src> {
     /// The end of the file in PHP code, which is an error inside the `{$...}`
     /// of a string that was never closed.
     fn eof_in_php(&self, start: usize) -> Result<Token, LexError> {
+        if self.tokenizer {
+            return Ok(self.token(TokenKind::Eof, start));
+        }
         let unterminated = self.modes.iter().rev().find_map(|mode| match mode {
             Mode::DoubleQuotes => Some(LexErrorKind::UnterminatedString),
             Mode::Heredoc { .. } | Mode::Nowdoc { .. } => Some(LexErrorKind::UnterminatedHeredoc),
@@ -472,6 +526,7 @@ impl<'src> Lexer<'src> {
         let kind = match word.to_ascii_lowercase().as_slice() {
             b"int" | b"integer" => TokenKind::IntCast,
             b"float" | b"double" => TokenKind::FloatCast,
+            b"real" if self.tokenizer => TokenKind::FloatCast,
             b"string" | b"binary" => TokenKind::StringCast,
             b"array" => TokenKind::ArrayCast,
             b"object" => TokenKind::ObjectCast,
@@ -492,12 +547,13 @@ impl<'src> Lexer<'src> {
     /// Lexes integers in decimal, hex (`0x`), octal (`0o`) and binary (`0b`),
     /// and floats like `1.5`, `.5`, `1.` and `1e3`. Digits may be separated by `_`.
     fn lex_number(&mut self) -> TokenKind {
+        let start = self.position;
         if self.eat_prefixed_integer() {
-            return TokenKind::Integer;
+            return self.integer_kind(start);
         }
 
         self.eat_digits(10);
-        let mut kind = TokenKind::Integer;
+        let mut kind = self.integer_kind(start);
 
         if self.peek() == Some('.') {
             self.advance();
@@ -584,6 +640,14 @@ impl<'src> Lexer<'src> {
             self.advance();
         }
 
+        if self.tokenizer {
+            if quote == '"' {
+                self.position = body;
+                self.begin(Mode::DoubleQuotes);
+                return Ok(TokenKind::DoubleQuote);
+            }
+            return Ok(TokenKind::StringPart);
+        }
         Err(LexError {
             kind: LexErrorKind::UnterminatedString,
             span: Span::new(start, self.position),
@@ -601,13 +665,13 @@ impl<'src> Lexer<'src> {
 
     /// Lexes inside an interpolated `"..."` string: literal parts, interpolated
     /// variables, and the closing quote.
-    fn lex_double_quotes(&mut self) -> Result<Token, LexError> {
+    fn lex_encapsed(&mut self, delimiter: char, kind: TokenKind) -> Result<Token, LexError> {
         let start = self.position;
 
-        if self.peek() == Some('"') {
+        if self.peek() == Some(delimiter) {
             self.advance();
             self.begin(Mode::Php);
-            return Ok(self.token(TokenKind::DoubleQuote, start));
+            return Ok(self.token(kind, start));
         }
 
         if let Some(token) = self.lex_interpolation()? {
@@ -616,13 +680,21 @@ impl<'src> Lexer<'src> {
 
         loop {
             match self.peek() {
+                None if self.tokenizer => {
+                    let kind = if self.position == start {
+                        TokenKind::Eof
+                    } else {
+                        TokenKind::StringPart
+                    };
+                    return Ok(self.token(kind, start));
+                }
                 None => {
                     return Err(LexError {
                         kind: LexErrorKind::UnterminatedString,
                         span: Span::new(start, self.position),
                     });
                 }
-                Some('"') => break,
+                Some(c) if c == delimiter => break,
                 Some('\\') => {
                     self.advance();
                     self.advance();
@@ -655,6 +727,10 @@ impl<'src> Lexer<'src> {
 
         if self.starts_with("${") {
             self.position += 2;
+            if self.tokenizer {
+                self.push(Mode::Varname);
+                return Ok(Some(self.token(TokenKind::DollarCurlyOpen, start)));
+            }
             return self.unsupported(
                 start,
                 "`${...}` string interpolation (deprecated in PHP 8.2)",
@@ -688,6 +764,9 @@ impl<'src> Lexer<'src> {
         let start = self.position;
 
         let Some(c) = self.peek() else {
+            if self.tokenizer {
+                return Ok(self.token(TokenKind::Eof, start));
+            }
             return Err(LexError {
                 kind: LexErrorKind::UnterminatedString,
                 span: Span::new(start, start),
@@ -721,8 +800,20 @@ impl<'src> Lexer<'src> {
             }
             _ if is_name_start(c) => {
                 self.eat_name();
-                let name = self.source[start..self.position].to_ascii_lowercase();
-                name_kind(&name)
+                if self.tokenizer {
+                    TokenKind::Identifier
+                } else {
+                    let name = self.source[start..self.position].to_ascii_lowercase();
+                    name_kind(&name)
+                }
+            }
+            ' ' | '\t' | '\r' | '\n' | '\\' | '\'' | '#' if self.tokenizer => {
+                self.pop();
+                TokenKind::StringPart
+            }
+            _ if self.tokenizer => {
+                self.advance();
+                superfluous_offset_kind(c)
             }
             _ => {
                 self.advance();
@@ -750,8 +841,12 @@ impl<'src> Lexer<'src> {
         } else {
             self.eat_name();
             self.pop();
-            let name = self.source[start..self.position].to_ascii_lowercase();
-            name_kind(&name)
+            if self.tokenizer {
+                TokenKind::Identifier
+            } else {
+                let name = self.source[start..self.position].to_ascii_lowercase();
+                name_kind(&name)
+            }
         };
 
         self.token(kind, start)
@@ -827,6 +922,14 @@ impl<'src> Lexer<'src> {
 
         loop {
             match self.peek() {
+                None if self.tokenizer => {
+                    let kind = if self.position == start {
+                        TokenKind::Eof
+                    } else {
+                        TokenKind::StringPart
+                    };
+                    return Ok(self.token(kind, start));
+                }
                 None => {
                     return Err(LexError {
                         kind: LexErrorKind::UnterminatedHeredoc,
@@ -896,50 +999,19 @@ impl<'src> Lexer<'src> {
 
     // --- Whitespace and comments -----------------------------------------------
 
-    fn skip_whitespace_and_comments(&mut self) -> Result<(), LexError> {
-        self.position = self.trivia_end(self.position)?;
-        Ok(())
-    }
-
     /// Where the whitespace and comments starting at `from` end.
     fn trivia_end(&self, from: usize) -> Result<usize, LexError> {
-        let source = self.source;
         let mut position = from;
-
-        loop {
-            let rest = &source[position..];
-
-            if rest
-                .first()
-                .is_some_and(|&byte| is_whitespace(char::from(byte)))
-            {
-                position += 1;
-            } else if rest.starts_with(b"//")
-                || (rest.starts_with(b"#") && !rest.starts_with(b"#["))
-            {
-                // Line comments end at a newline or a `?>` tag.
-                let end = rest
-                    .iter()
-                    .copied()
-                    .map(char::from)
-                    .enumerate()
-                    .find(|&(i, c)| matches!(c, '\n' | '\r') || rest[i..].starts_with(b"?>"))
-                    .map_or(rest.len(), |(i, _)| i);
-                position += end;
-            } else if let Some(comment) = rest.strip_prefix(b"/*") {
-                match find_bytes(comment, b"*/") {
-                    Some(index) => position += 2 + index + 2,
-                    None => {
-                        return Err(LexError {
-                            kind: LexErrorKind::UnterminatedComment,
-                            span: Span::new(position, source.len()),
-                        });
-                    }
-                }
-            } else {
-                return Ok(position);
+        while let Some((_, end, complete)) = self.trivia_at(position) {
+            if !complete {
+                return Err(LexError {
+                    kind: LexErrorKind::UnterminatedComment,
+                    span: Span::new(position, end),
+                });
             }
+            position = end;
         }
+        Ok(position)
     }
 
     // --- Cursor helpers ----------------------------------------------------------
@@ -1004,6 +1076,23 @@ impl<'src> Lexer<'src> {
 
     fn is_eof(&self) -> bool {
         self.position >= self.source.len()
+    }
+}
+
+fn superfluous_offset_kind(c: char) -> TokenKind {
+    match c {
+        '"' => TokenKind::DoubleQuote,
+        '`' => TokenKind::Backquote,
+        _ => OPERATORS
+            .iter()
+            .find(|(op, _)| op.len() == 1 && op.starts_with(c))
+            .map_or(TokenKind::BadCharacter, |&(_, kind)| {
+                if kind == TokenKind::Ampersand {
+                    TokenKind::OffsetAmpersand
+                } else {
+                    kind
+                }
+            }),
     }
 }
 
