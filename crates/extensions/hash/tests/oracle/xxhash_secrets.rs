@@ -1,8 +1,7 @@
 //! An invalid xxHash secret must throw even with data longer than the streaming buffer.
 //! PHP 8.5.12 currently loops in XXH3_update for these cases; keep that failure visible.
-use phera_ext_hash::Hash;
 use phera_extension_api::testing::{TestContext, call, oracle};
-use phera_extension_api::{ArrayKey, Extension, PhpArray, Registry, Value};
+use phera_extension_api::{ArrayKey, PhpArray, Value};
 use std::{
     process::{Command, Stdio},
     time::{Duration, Instant},
@@ -10,8 +9,7 @@ use std::{
 #[test]
 fn invalid_xxhash_secret_long_input() {
     let php = oracle::find_php().expect("PHP required");
-    let mut registry = Registry::new();
-    Hash.register(&mut registry);
+    let registry = crate::support::registry();
     let mut failures = Vec::new();
     for algo in ["xxh3", "xxh128"] {
         for size in [0, 1, 135] {
