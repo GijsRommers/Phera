@@ -22,7 +22,8 @@ impl DriverName {
     }
 }
 
-#[derive(Clone, Debug)]
+/// No `Debug`: the fields may hold a `password=`.
+#[derive(Clone)]
 pub struct Dsn {
     pub driver: DriverName,
     pub fields: BTreeMap<String, String>,
