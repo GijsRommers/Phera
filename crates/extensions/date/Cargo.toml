@@ -13,3 +13,6 @@ tzdb_data.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+phera-phpt.workspace = true
