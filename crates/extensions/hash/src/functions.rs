@@ -87,15 +87,16 @@ pub fn equals(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     )))
 }
 pub fn md5(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    standalone("md5", arguments)
+    use digest::Digest;
+    Ok(output(
+        md5::Md5::digest(args::bytes(arguments, 0)).to_vec(),
+        args::bool(arguments, 1).unwrap_or(false),
+    ))
 }
 pub fn sha1(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    standalone("sha1", arguments)
-}
-fn standalone(name: &str, arguments: &[Value]) -> NativeResult {
-    let algorithm = Algorithm::find(name.as_bytes()).expect("known algorithm");
+    use digest::Digest;
     Ok(output(
-        algorithm.digest(args::bytes(arguments, 0)),
+        sha1::Sha1::digest(args::bytes(arguments, 0)).to_vec(),
         args::bool(arguments, 1).unwrap_or(false),
     ))
 }

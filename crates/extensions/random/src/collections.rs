@@ -46,7 +46,27 @@ pub fn keys(
         })
         .collect();
     if count == 1 {
-        let key = keys[engine.range(0, keys.len() as i64 - 1)? as usize].clone();
+        // PHP samples live bucket positions when at least half its buckets are occupied.
+        // Positional iteration preserves holes left by unset(), unlike a dense values vector.
+        let mut used = 0;
+        let mut position = array.first_position();
+        while let Some(index) = position {
+            used = index + 1;
+            position = array.next_position(index);
+        }
+        let key = if array.len() < used - (used >> 1) {
+            keys[engine.range(0, keys.len() as i64 - 1)? as usize].clone()
+        } else {
+            loop {
+                let index = engine.range(0, used as i64 - 1)? as usize;
+                if let Some((key, _)) = array.entry_at(index) {
+                    break match key {
+                        ArrayKey::Int(key) => Value::Int(*key),
+                        ArrayKey::String(key) => Value::String(key.clone()),
+                    };
+                }
+            }
+        };
         return if always_array { list([key]) } else { Ok(key) };
     }
     let invert = count as usize > keys.len() / 2;

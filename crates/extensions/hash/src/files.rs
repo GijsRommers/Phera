@@ -152,6 +152,19 @@ pub fn update_file(
 ) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
         let object = incremental::object(&arguments, "hash_update_file")?;
+        if let Some(value) = arguments.get(2)
+            && !matches!(value, Value::Null | Value::Resource(_))
+        {
+            let given = match value {
+                Value::Bool(true) => "true".into(),
+                Value::Bool(false) => "false".into(),
+                value => value.type_name(),
+            };
+            return Err(NativeError::type_error(format!(
+                "hash_update_file(): Argument #3 ($stream_context) must be of type \
+                 resource or null, {given} given"
+            )));
+        }
         let mut state = {
             let native = object.native.borrow();
             native

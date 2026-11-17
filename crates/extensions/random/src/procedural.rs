@@ -45,11 +45,14 @@ fn draw(context: &mut dyn Context, arguments: &[Value], name: &str, swap: bool) 
     if arguments.is_empty() {
         return Ok(Value::Int((generator(context)?.generate()?.0 >> 1) as i64));
     }
-    if arguments.len() == 1 {
-        return Err(NativeError::argument_count_error(format!(
-            "{name}() expects exactly 2 arguments, 1 given"
-        )));
-    }
+    // PHP permits either zero or exactly two arguments. Its count check precedes coercion.
+    const RANGE: &[phera_extension_api::Param] = &[
+        phera_extension_api::Param::new("min", phera_extension_api::ParamType::Int),
+        phera_extension_api::Param::new("max", phera_extension_api::ParamType::Int),
+    ];
+    let mut prepared = arguments.to_vec();
+    phera_extension_api::prepare_call(name, RANGE, &mut prepared, context)?;
+    let arguments = &prepared;
     let mut min = args::int(arguments, 0).unwrap_or_default();
     let mut max = args::int(arguments, 1).unwrap_or_default();
     if min > max {

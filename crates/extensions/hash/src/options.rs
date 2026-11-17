@@ -46,7 +46,8 @@ pub fn apply(
     }
     if xx3 && let Some(secret) = secret {
         if !matches!(&*secret, Value::String(_)) {
-            context.deprecated(format!("{function}(): Passing a secret of a type other than string is deprecated because it implicitly converts to a string, potentially hiding bugs"));
+            context.deprecated(format!("{function}(): Passing a secret of a type other than string is deprecated because it \
+            implicitly converts to a string, potentially hiding bugs"));
         }
         let secret = to_php_string(&secret, context.diagnostics())?;
         let mut bytes = secret.as_bytes().to_vec();

@@ -122,6 +122,20 @@ pub struct Algorithm {
 }
 impl Algorithm {
     pub fn find(name: &[u8]) -> Option<Self> {
+        let common = match name {
+            b"md5" => Some("md5"),
+            b"sha1" => Some("sha1"),
+            b"sha256" => Some("sha256"),
+            b"xxh3" => Some("xxh3"),
+            _ => None,
+        };
+        if let Some(name) = common {
+            return Some(Self {
+                name,
+                seed: 0,
+                secret: None,
+            });
+        }
         NAMES
             .iter()
             .find(|candidate| candidate.as_bytes().eq_ignore_ascii_case(name))
@@ -153,6 +167,13 @@ impl Algorithm {
         })
     }
     pub fn digest(&self, data: &[u8]) -> Vec<u8> {
+        // Avoid heap-allocating a dynamic context for the common one-shot digests.
+        match self.name {
+            "md5" => return md5::Md5::digest(data).to_vec(),
+            "sha1" => return sha1::Sha1::digest(data).to_vec(),
+            "sha256" => return sha2::Sha256::digest(data).to_vec(),
+            _ => {}
+        }
         if let Some(mut digest) = self.crypto() {
             digest.update(data);
             return digest.finalize().to_vec();

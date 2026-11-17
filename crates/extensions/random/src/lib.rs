@@ -42,16 +42,16 @@ const FUNCTIONS: &[FunctionEntry] = &[
     FunctionEntry::sync(
         "mt_rand",
         &[
-            Param::new("min", ParamType::Int).optional(),
-            Param::new("max", ParamType::Int).optional(),
+            Param::new("min", ParamType::Mixed).optional(),
+            Param::new("max", ParamType::Mixed).variadic(),
         ],
         procedural::mt_rand,
     ),
     FunctionEntry::sync(
         "rand",
         &[
-            Param::new("min", ParamType::Int).optional(),
-            Param::new("max", ParamType::Int).optional(),
+            Param::new("min", ParamType::Mixed).optional(),
+            Param::new("max", ParamType::Mixed).variadic(),
         ],
         procedural::rand,
     ),

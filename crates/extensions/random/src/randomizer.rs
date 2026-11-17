@@ -27,7 +27,8 @@ pub fn construct(
     };
     if !engine.class.name().starts_with("Random\\Engine\\") {
         return Err(NativeError::type_error(format!(
-            "Random\\Randomizer::__construct(): Argument #1 ($engine) must be of type ?Random\\Engine, {} given",
+            "Random\\Randomizer::__construct(): Argument #1 ($engine) must be of type \
+            ?Random\\Engine, {} given",
             engine.class.name()
         )));
     }
@@ -69,7 +70,8 @@ pub fn get_int(
     let max = args::int(arguments, 1).unwrap_or_default();
     if min > max {
         return Err(NativeError::value_error(
-            "Random\\Randomizer::getInt(): Argument #2 ($max) must be greater than or equal to argument #1 ($min)",
+            "Random\\Randomizer::getInt(): Argument #2 ($max) must be greater than or equal to \
+            argument #1 ($min)",
         ));
     }
     with_engine(this, |engine| Ok(Value::Int(engine.integer(min, max)?)))
@@ -95,7 +97,8 @@ pub fn get_float(
     }
     if arguments.len() > 2 {
         return Err(NativeError::type_error(format!(
-            "Random\\Randomizer::getFloat(): Argument #3 ($boundary) must be of type Random\\IntervalBoundary, {} given",
+            "Random\\Randomizer::getFloat(): Argument #3 ($boundary) must be of type \
+            Random\\IntervalBoundary, {} given",
             arguments[2].type_name()
         )));
     }

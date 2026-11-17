@@ -39,7 +39,8 @@ pub fn mt(
         }
         _ => {
             return Err(NativeError::value_error(
-                "Random\\Engine\\Mt19937::__construct(): Argument #2 ($mode) must be either MT_RAND_MT19937 or MT_RAND_PHP",
+                "Random\\Engine\\Mt19937::__construct(): Argument #2 ($mode) must be either \
+            MT_RAND_MT19937 or MT_RAND_PHP",
             ));
         }
     };
@@ -56,7 +57,8 @@ pub fn pcg(_: &mut dyn Context, this: Option<&Rc<Object>>, arguments: &[Value]) 
             let bytes = seed.as_bytes();
             if bytes.len() != 16 {
                 return Err(NativeError::value_error(
-                    "Random\\Engine\\PcgOneseq128XslRr64::__construct(): Argument #1 ($seed) must be a 16 byte (128 bit) string",
+                    "Random\\Engine\\PcgOneseq128XslRr64::__construct(): Argument #1 ($seed) must be a \
+            16 byte (128 bit) string",
                 ));
             }
             ((u64::from_le_bytes(bytes[..8].try_into().expect("eight bytes")) as u128) << 64)
@@ -83,12 +85,14 @@ pub fn xoshiro(
             };
             if bytes.len() != 32 {
                 return Err(NativeError::value_error(
-                    "Random\\Engine\\Xoshiro256StarStar::__construct(): Argument #1 ($seed) must be a 32 byte (256 bit) string",
+                    "Random\\Engine\\Xoshiro256StarStar::__construct(): Argument #1 ($seed) must be a 32 \
+            byte (256 bit) string",
                 ));
             }
             if bytes.iter().all(|&b| b == 0) {
                 return Err(NativeError::value_error(
-                    "Random\\Engine\\Xoshiro256StarStar::__construct(): Argument #1 ($seed) must not consist entirely of NUL bytes",
+                    "Random\\Engine\\Xoshiro256StarStar::__construct(): Argument #1 ($seed) must not \
+            consist entirely of NUL bytes",
                 ));
             }
             let mut state = [0; 4];
@@ -112,7 +116,8 @@ pub fn jump(_: &mut dyn Context, this: Option<&Rc<Object>>, arguments: &[Value])
             let advance = args::int(arguments, 0).unwrap_or_default();
             if advance < 0 {
                 return Err(NativeError::value_error(
-                    "Random\\Engine\\PcgOneseq128XslRr64::jump(): Argument #1 ($advance) must be greater than or equal to 0",
+                    "Random\\Engine\\PcgOneseq128XslRr64::jump(): Argument #1 ($advance) must be greater \
+            than or equal to 0",
                 ));
             }
             engine.jump(advance as u64);

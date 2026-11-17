@@ -20,7 +20,8 @@ fn every_algorithm_and_length() {
             let data: Vec<u8> = (0..length).map(|i| (i * 31 + 17) as u8).collect();
             for binary in [false, true] {
                 let name_text = oracle::php_literal(name);
-                script.push_str(&format!("run('hash',fn()=>hash({name_text}, substr(str_repeat(implode('',array_map(fn($i)=>chr(($i*31+17)&255),range(0,255))),{}),0,{length}),{}));\n",length.div_ceil(256).max(1),if binary {"true"} else {"false"}));
+                script.push_str(&format!("run('hash',fn()=>hash({name_text}, \
+            substr(str_repeat(implode('',array_map(fn($i)=>chr(($i*31+17)&255),range(0,255))),{}),0,{length}),{}));\n",length.div_ceil(256).max(1),if binary {"true"} else {"false"}));
                 let result = call(
                     &registry,
                     &mut context,

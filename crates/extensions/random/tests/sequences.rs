@@ -66,7 +66,8 @@ fn million_draws_per_engine_and_range() {
                     .collect::<Vec<_>>()
                     .join(",")
             );
-            script.push_str(&format!("$r=new Random\\Randomizer(new Random\\Engine\\{class}(42{}));$h=hash_init('sha256');$edges=[];for($i=0;$i<1000000;$i++){{$v={expression};hash_update($h,pack('q',$v));if($i<100||$i>=999900)$edges[]=$v;}}echo hash_final($h),'|',implode(',',$edges),\"\\n\";\n",if engine=="legacy" {",1"} else {""}));
+            script.push_str(&format!("$r=new Random\\Randomizer(new \
+            Random\\Engine\\{class}(42{}));$h=hash_init('sha256');$edges=[];for($i=0;$i<1000000;$i++){{$v={expression};hash_update($h,pack('q',$v));if($i<100||$i>=999900)$edges[]=$v;}}echo hash_final($h),'|',implode(',',$edges),\"\\n\";\n",if engine=="legacy" {",1"} else {""}));
             let mut checksum = Sha256::new();
             let mut edges = vec![];
             for index in 0..1_000_000 {

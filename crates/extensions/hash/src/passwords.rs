@@ -21,7 +21,11 @@ pub fn hash(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_,
         let password = args::bytes(&arguments, 0).to_vec();
         options.validate(algorithm, &password)?;
         if args::array(&arguments, 2).is_some_and(|a| a.contains_key(&ArrayKey::str("salt"))) {
-            context.warning("password_hash(): The \"salt\" option has been ignored, since providing a custom salt is no longer supported".into());
+            context.warning(
+                "password_hash(): The \"salt\" option has been ignored, since providing a custom \
+            salt is no longer supported"
+                    .into(),
+            );
         }
         // Only owned Rust bytes and options cross the Send boundary; no PHP Rc values do.
         let result =
