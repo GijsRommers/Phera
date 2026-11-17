@@ -24,6 +24,7 @@ fn lookup_name(array: &PhpArray) -> &'static str {
     }
 }
 
+/// A list needs no table until a key breaks positional lookup, even after unset.
 #[test]
 fn a_list_needs_no_index_however_long() {
     let mut list = PhpArray::new();
@@ -58,6 +59,7 @@ fn a_list_needs_no_index_however_long() {
     assert_eq!(list.last(), Some((k(2), &vi(-1))));
 }
 
+/// The measured scan threshold must switch to a table without losing any key.
 #[test]
 fn small_maps_are_scanned_and_large_ones_hashed() {
     let mut map = PhpArray::new();
@@ -107,4 +109,35 @@ fn mutable_slots_can_introduce_deep_ownership() {
     let mut list = PhpArray::from_iter([(k(0), Value::Null)]);
     *list.entry_at_mut(0).unwrap().1 = Value::Array(Rc::new(holder));
     drop(list);
+}
+
+/// Shift renumbers integer maps into lists, including maps with deleted string keys.
+#[test]
+fn shift_demotes_maps_without_changing_live_order() {
+    for entries in [
+        vec![(k(9), vi(1)), (k(-5), vi(2)), (k(8), vi(3))],
+        vec![(ks("name"), vi(1)), (k(5), vi(2)), (k(1), vi(3))],
+    ] {
+        let mut array = PhpArray::from_iter(entries);
+        assert!(matches!(array.storage, Storage::Map(_)));
+        assert_eq!(array.shift(), Some(vi(1)));
+        assert!(matches!(array.storage, Storage::List(_)));
+        assert_eq!(
+            array.iter().collect::<Vec<_>>(),
+            vec![(k(0), &vi(2)), (k(1), &vi(3))]
+        );
+        assert_eq!(array.push(vi(4)).unwrap(), k(2));
+    }
+}
+
+/// A trailing unset must not reuse a foreach position (php-src gh13178_5).
+#[test]
+fn deleting_the_last_slot_keeps_its_position_until_append() {
+    let mut array = PhpArray::from_iter([(k(0), vi(0)), (k(1), vi(1)), (k(2), vi(2))]);
+    array.remove(&k(2));
+    assert_eq!(array.storage.len(), 3);
+    assert_eq!(array.push(vi(3)).unwrap(), k(3));
+    assert!(array.entry_at(2).is_none());
+    assert_eq!(array.entry_at(3), Some((k(3), &vi(3))));
+    assert_eq!(array.next_position(1), Some(3));
 }

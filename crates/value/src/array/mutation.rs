@@ -19,6 +19,7 @@ impl PhpArray {
     }
 
     /// Negative keys participate too, as in PHP 8.3 and later.
+    #[inline]
     fn note_int_key(&mut self, key: i64) {
         if self.next_free.is_none_or(|next| key >= next) {
             self.next_free = Some(key.saturating_add(1));
@@ -26,6 +27,7 @@ impl PhpArray {
     }
 
     /// A list can extend only at its physical end: reusing a hole changes order.
+    #[inline]
     fn push_entry(&mut self, key: ArrayKey, value: Value) {
         if let Storage::List(values) = &mut self.storage
             && key == ArrayKey::Int(values.len() as i64)
@@ -41,6 +43,7 @@ impl PhpArray {
     }
 
     /// Append at PHP's next-free integer key, rejecting the saturated MAX state.
+    #[inline]
     pub fn push(&mut self, value: Value) -> Result<ArrayKey, OpError> {
         let key = self.next_free.unwrap_or(0);
         if self.next_free == Some(i64::MAX) {
@@ -48,7 +51,7 @@ impl PhpArray {
                 "Cannot add element to the array as the next element is already occupied",
             ));
         }
-        self.note_int_key(key);
+        self.next_free = Some(key + 1);
         self.push_entry(ArrayKey::Int(key), value);
         Ok(ArrayKey::Int(key))
     }
@@ -58,6 +61,8 @@ impl PhpArray {
         let position = self.find_pos(key)?;
         if let Storage::Map(map) = &mut self.storage {
             map.remove_index(key);
+            // A hole has no key. Release strings immediately, including on reinsertion.
+            map.entries[position].key = ArrayKey::Int(0);
         }
         let value = self.storage.slot_mut(position)?.take();
         self.dead += 1;

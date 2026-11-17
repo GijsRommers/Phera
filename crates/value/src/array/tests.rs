@@ -15,6 +15,7 @@ fn vi(i: i64) -> Value {
     Value::Int(i)
 }
 
+/// Compaction may close holes but must preserve the relative order and keys of survivors.
 #[test]
 fn order_preserved_after_removals_and_compaction() {
     let mut a = PhpArray::new();
@@ -66,6 +67,7 @@ fn order_preserved_after_removals_and_compaction() {
     assert_eq!(vals, vec![0, 2, 4, 6, 8, 10]);
 }
 
+/// Unset keeps the historical next-free key even after the array becomes empty.
 #[test]
 fn next_free_rules() {
     // Removals do not rewind the next-free index...
@@ -80,6 +82,7 @@ fn next_free_rules() {
     assert_eq!(a.get(&k(6)), Some(&vi(9)));
 }
 
+/// Negative, normalized and extreme integer keys all affect PHP append semantics.
 #[test]
 fn next_free_exact_php_rules() {
     // [5=>'x', 2=>'y'] push -> 6
@@ -127,6 +130,7 @@ fn next_free_exact_php_rules() {
     assert_eq!(a.push(vi(1)).unwrap(), k(5));
 }
 
+/// Saturation must fail instead of wrapping an append key into negative space.
 #[test]
 fn push_overflow_is_an_error() {
     let mut a = PhpArray::with_capacity(2);
@@ -138,6 +142,7 @@ fn push_overflow_is_an_error() {
     );
 }
 
+/// Only shift renumbers surviving integers; pop preserves every remaining key.
 #[test]
 fn shift_and_pop_reindexing() {
     // [10'a', 'x''b', 5'c'] shift -> x'b', 0'c'
@@ -167,6 +172,7 @@ fn shift_and_pop_reindexing() {
     assert_eq!(got, vec![k(10), ks("x")]);
 }
 
+/// Live iteration positions must survive removal of a preceding entry.
 #[test]
 fn positional_iteration_under_modification() {
     let mut a = PhpArray::from_iter([(k(0), vi(10)), (k(1), vi(20)), (k(2), vi(30))]);
@@ -186,6 +192,7 @@ fn positional_iteration_under_modification() {
     assert_eq!(a.last(), Some((k(2), &vi(30))));
 }
 
+/// PHP current/next/prev/reset operate independently of insertion and foreach.
 #[test]
 fn internal_pointer() {
     let mut a = PhpArray::from_iter([(ks("a"), vi(1)), (ks("b"), vi(2)), (ks("c"), vi(3))]);
@@ -208,6 +215,7 @@ fn internal_pointer() {
     assert_eq!(a.current(), Some(&vi(1)));
 }
 
+/// Mutation through Rc::make_mut must preserve the contents of other array owners.
 #[test]
 fn copy_on_write_arrays() {
     use crate::value::Value;
@@ -227,6 +235,7 @@ fn copy_on_write_arrays() {
     assert_eq!((**r).len(), 1);
 }
 
+/// Sequential keys define PHP lists even when the underlying shape can represent maps.
 #[test]
 fn is_list() {
     let mut a = PhpArray::from_iter([(k(0), vi(1)), (k(1), vi(2))]);
@@ -239,6 +248,7 @@ fn is_list() {
     assert!(!a.is_list());
 }
 
+/// Mutable iteration must expose the original slots without altering their keys.
 #[test]
 fn mut_iterate_and_defaults() {
     let mut a = PhpArray::from_iter([(k(0), vi(1)), (k(1), vi(2))]);

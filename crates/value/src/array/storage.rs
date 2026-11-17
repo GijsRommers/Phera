@@ -36,6 +36,7 @@ pub(super) struct OrderedMap {
 }
 
 impl Storage {
+    #[inline]
     pub fn len(&self) -> usize {
         match self {
             Self::List(values) => values.len(),
@@ -43,6 +44,7 @@ impl Storage {
         }
     }
 
+    #[inline]
     pub fn value(&self, position: usize) -> Option<&Value> {
         match self {
             Self::List(values) => values.get(position)?.as_ref(),
@@ -50,6 +52,7 @@ impl Storage {
         }
     }
 
+    #[inline]
     pub fn slot_mut(&mut self, position: usize) -> Option<&mut Option<Value>> {
         match self {
             Self::List(values) => values.get_mut(position),

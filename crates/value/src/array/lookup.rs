@@ -7,6 +7,7 @@ use std::hash::BuildHasher;
 
 impl PhpArray {
     /// Lists compute the position; maps compare against their single stored key.
+    #[inline]
     pub(super) fn find_pos(&self, key: &ArrayKey) -> Option<usize> {
         match &self.storage {
             Storage::List(values) => match key {
@@ -29,10 +30,19 @@ impl PhpArray {
         }
     }
 
+    /// A direct list read needs just one bounds check and never materializes a key.
+    #[inline]
     pub fn get(&self, key: &ArrayKey) -> Option<&Value> {
-        self.storage.value(self.find_pos(key)?)
+        match (&self.storage, key) {
+            (Storage::List(values), ArrayKey::Int(index)) => {
+                values.get(usize::try_from(*index).ok()?)?.as_ref()
+            }
+            (Storage::List(_), ArrayKey::String(_)) => None,
+            (Storage::Map(_), _) => self.storage.value(self.find_pos(key)?),
+        }
     }
 
+    #[inline]
     pub fn get_mut(&mut self, key: &ArrayKey) -> Option<&mut Value> {
         let position = self.find_pos(key)?;
         self.storage.slot_mut(position)?.as_mut()

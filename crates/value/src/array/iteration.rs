@@ -64,14 +64,17 @@ impl PhpArray {
         )
     }
 
+    #[inline(always)]
     pub fn first(&self) -> Option<(ArrayKey, &Value)> {
         self.entry_at(self.first_position()?)
     }
+    #[inline(always)]
     pub fn last(&self) -> Option<(ArrayKey, &Value)> {
         self.entry_at(self.last_position()?)
     }
 
     /// Positional iteration skips holes without changing the caller's stored position.
+    #[inline(always)]
     pub fn first_position(&self) -> Option<usize> {
         match &self.storage {
             Storage::List(values) => values.iter().position(Option::is_some),
@@ -79,6 +82,7 @@ impl PhpArray {
         }
     }
 
+    #[inline(always)]
     pub(super) fn last_position(&self) -> Option<usize> {
         match &self.storage {
             Storage::List(values) => values.iter().rposition(Option::is_some),
@@ -87,8 +91,13 @@ impl PhpArray {
     }
 
     /// Bounds-check the saved position: mutation may have compacted the array meanwhile.
+    #[inline(always)]
     pub fn next_position(&self, pos: usize) -> Option<usize> {
         let start = pos.checked_add(1)?;
+        // Dense arrays need no per-slot tag scan; most foreach loops stay dense.
+        if self.dead == 0 {
+            return (start < self.storage.len()).then_some(start);
+        }
         let offset = match &self.storage {
             Storage::List(values) => values.get(start..)?.iter().position(Option::is_some),
             Storage::Map(map) => map
@@ -100,6 +109,8 @@ impl PhpArray {
         Some(start + offset)
     }
 
+    /// Return an owned key so a list never needs a backing key allocation.
+    #[inline(always)]
     pub fn entry_at(&self, pos: usize) -> Option<(ArrayKey, &Value)> {
         match &self.storage {
             Storage::List(values) => Some((ArrayKey::Int(pos as i64), values.get(pos)?.as_ref()?)),
@@ -110,6 +121,8 @@ impl PhpArray {
         }
     }
 
+    /// Borrow the slot alone; the returned key cannot change the stored key.
+    #[inline(always)]
     pub fn entry_at_mut(&mut self, pos: usize) -> Option<(ArrayKey, &mut Value)> {
         match &mut self.storage {
             Storage::List(values) => {

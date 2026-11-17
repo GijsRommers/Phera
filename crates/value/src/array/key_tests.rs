@@ -13,6 +13,7 @@ fn ks(s: &str) -> ArrayKey {
     ArrayKey::from_value(&Value::String(PhpString::from(s))).unwrap()
 }
 
+/// Canonical numeric strings share integer keys; other strings and illegal types do not.
 #[test]
 fn key_normalisation() {
     let t = |s: &str| ArrayKey::from_value(&Value::String(PhpString::from(s))).unwrap();
@@ -71,6 +72,7 @@ impl ClassHandle for DummyClass {
     }
 }
 
+/// Null normalizes to the empty string while retaining PHP 8.5 diagnostics.
 #[test]
 fn null_key_deprecation() {
     let mut d = CollectDiagnostics::default();
