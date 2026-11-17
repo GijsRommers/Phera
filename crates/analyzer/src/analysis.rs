@@ -18,6 +18,7 @@ mod assignments;
 mod atoms;
 mod binding_statements;
 mod bindings;
+mod callable_signatures;
 mod calls;
 mod closure_binding;
 mod coalesce_assignment;

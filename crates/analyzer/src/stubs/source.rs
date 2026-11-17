@@ -1,5 +1,6 @@
 //! Read a pinned PHP Git tree without changing its checkout: `php-8.5.12:Zend/...`.
 //! This avoids silently using tomorrow's PHP signatures from a master checkout.
+//! The selected tree supplies PHP declarations such as `class DateTime { ... }`.
 
 use std::path::Path;
 use std::process::Command;

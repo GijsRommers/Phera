@@ -1,5 +1,6 @@
 //! Call expression routing: function, object, static and constructor syntax differ.
 //! Uncertain facts become mixed rather than producing a guessed diagnostic.
+//! For example, `C::run()` and `$object->run()` use different static-call rules.
 
 use super::*;
 

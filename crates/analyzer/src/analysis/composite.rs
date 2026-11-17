@@ -1,5 +1,6 @@
 //! Remaining expression effects: closures capture scopes and throw terminates a path.
 //! Uncertain facts become mixed rather than producing a guessed diagnostic.
+//! For example, `[throw new Exception, $missing]` never reads the second item.
 
 use super::*;
 

@@ -16,14 +16,16 @@ fn native_inventory() -> String {
         if (PHP_MAJOR_VERSION !== 8 || PHP_MINOR_VERSION !== 5) { exit(2); }
         foreach (get_defined_functions()['internal'] as $name) {
             $f = new ReflectionFunction($name);
-            echo "F\t$name\t", implode(',', array_map(fn($p) => $p->name, $f->getParameters())), "\n";
+            $parameters = array_map(fn($p) => $p->name, $f->getParameters());
+            echo "F\t$name\t", implode(',', $parameters), "\n";
         }
         foreach (array_merge(get_declared_classes(), get_declared_interfaces(), get_declared_traits())
                  as $name) {
             echo "C\t$name\n";
             foreach ((new ReflectionClass($name))->getMethods() as $method) {
                 echo "M\t$name::", $method->name, "\t",
-                     implode(',', array_map(fn($p) => $p->name, $method->getParameters())), "\n";
+                     implode(',', array_map(fn($p) => $p->name,
+                         $method->getParameters())), "\n";
             }
         }
         foreach (array_keys(get_defined_constants()) as $name) { echo "K\t$name\n"; }

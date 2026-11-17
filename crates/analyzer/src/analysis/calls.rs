@@ -27,11 +27,7 @@ impl Analyzer<'_> {
                 return ty;
             }
             ResolvedCall {
-                signature: if let ValueType::Callable(signature) = ty {
-                    Some(*signature)
-                } else {
-                    None
-                },
+                signature: self.callable_signature(ty),
                 label: "callable".into(),
                 intrinsic: None,
                 kind: CallKind::Callable,
@@ -110,6 +106,11 @@ impl Analyzer<'_> {
         span: Span,
         access: Access,
     ) -> ValueType {
+        if let (ValueType::Callable(signature), MemberName::Identifier(method)) = (ty, name)
+            && method.name.eq_ignore_ascii_case("__invoke")
+        {
+            return self.invoke_closure(signature, arguments, scope, span);
+        }
         let (ValueType::Class(class), MemberName::Identifier(method)) = (ty, name) else {
             if let MemberName::Expression(e) = name
                 && self.expression(e, scope, false) == ValueType::Never
@@ -258,7 +259,11 @@ impl Analyzer<'_> {
 }
 
 impl Analyzer<'_> {
-    fn apply_global_effects(&self, signature: Option<&crate::index::Signature>, scope: &mut Scope) {
+    pub fn apply_global_effects(
+        &self,
+        signature: Option<&crate::index::Signature>,
+        scope: &mut Scope,
+    ) {
         if self.context.scope_kind == ScopeKind::Global
             && signature
                 .is_none_or(|s| s.global_effects == crate::global_effects::GlobalEffects::Unknown)

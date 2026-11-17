@@ -1,5 +1,5 @@
 //! Known classes must declare accessed properties.
-//! Identifier: `staticProperty.notFound`; level 0. PHP example: `$this->missing;`.
+//! Identifier: `staticProperty.notFound`; level 0. PHP example: `A::$missing;`.
 
 use super::{Finding, Rule};
 

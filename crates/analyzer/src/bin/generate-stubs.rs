@@ -1,5 +1,6 @@
 //! `generate-stubs /path/to/php-src [git-ref]` reads PHP 8.5 without changing its checkout.
 //! By default the data matches the PHP 8.5.12 release used by the oracle.
+//! PHP signatures such as `strlen(string $string): int` become committed records.
 
 fn main() -> Result<(), String> {
     let mut arguments = std::env::args().skip(1);

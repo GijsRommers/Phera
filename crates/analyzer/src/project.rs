@@ -1,5 +1,6 @@
 //! File discovery and parallel parsing: checking `src/` skips its `vendor/` tree.
 //! Each worker owns a parser-sized stack; results are sorted after joining.
+//! PHP files such as `src/a.php` containing `new Missing` become parsed inputs.
 
 use crate::diagnostic::Diagnostic;
 use phera_ast::Program;

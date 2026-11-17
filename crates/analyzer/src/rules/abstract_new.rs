@@ -1,5 +1,5 @@
 //! Abstract classes and interfaces cannot be instantiated.
-//! Identifier: `new.abstract`; level 0. PHP example: `new Iterator;`.
+//! Identifier: `new.abstract`; level 0. PHP example: `abstract class A {} new A;`.
 
 use super::{Finding, Rule};
 

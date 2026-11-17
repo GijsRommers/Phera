@@ -1,5 +1,5 @@
 //! Referenced constants must exist.
-//! Identifier: `constant.notFound`; level 0. PHP example: `A::MISSING;`.
+//! Identifier: `constant.notFound`; level 0. PHP example: `echo MISSING;`.
 
 use super::{Finding, Rule};
 

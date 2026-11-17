@@ -1,5 +1,6 @@
 //! Checker settings: `[check] level = 1` and `paths = ["src"]` in `phera.toml`.
 //! Only the documented check table is interpreted; other tables are left alone.
+//! For example, `new Missing` is checked at the configured level for these paths.
 
 use crate::diagnostic::Format;
 

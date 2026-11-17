@@ -1,4 +1,5 @@
 //! Primitive table fields: `@DateTime|null` encodes a nullable class type.
+//! This represents PHP declarations such as `function f(?DateTime $date) {}`.
 
 use crate::{index::Location, types::ValueType};
 use phera_ast::{Modifiers, Visibility};
