@@ -62,7 +62,7 @@ impl Model {
 
 /// Exercise actual hole positions as well as normalized and extreme keys after every step.
 #[test]
-fn million_operations_agree_with_a_plain_list_of_pairs() {
+fn every_lookup_agrees_with_a_plain_list_of_pairs() {
     let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
     let mut random = |bound: u64| {
         seed = seed
@@ -74,6 +74,8 @@ fn million_operations_agree_with_a_plain_list_of_pairs() {
     let mut model = Model::default();
     let mut transitions = [[0; 2]; 2];
     let mut list_holes = 0;
+    let mut hashed_visits = 0;
+    let mut demotions = 0;
     for step in 0..1_000_000 {
         let before = usize::from(matches!(array.storage, Storage::Map(_)));
         let key = match random(8) {
@@ -87,7 +89,8 @@ fn million_operations_agree_with_a_plain_list_of_pairs() {
             .unwrap(),
             _ => ArrayKey::Int(random(24) as i64 - 4),
         };
-        match random(16) {
+        let operation = random(16);
+        match operation {
             0..=3 => {
                 array.insert(key.clone(), Value::Int(step));
                 model.insert(key, Value::Int(step));
@@ -147,6 +150,12 @@ fn million_operations_agree_with_a_plain_list_of_pairs() {
         }
         let after = usize::from(matches!(array.storage, Storage::Map(_)));
         transitions[before][after] += 1;
+        if before == 1 && after == 0 && operation != 15 {
+            demotions += 1;
+        }
+        if matches!(&array.storage, Storage::Map(map) if map.positions.is_some()) {
+            hashed_visits += 1;
+        }
         if after == 0 && array.dead > 0 {
             list_holes += 1;
         }
@@ -167,4 +176,6 @@ fn million_operations_agree_with_a_plain_list_of_pairs() {
     }
     assert!(transitions.into_iter().flatten().all(|count| count > 100));
     assert!(list_holes > 100);
+    assert!(hashed_visits > 100);
+    assert!(demotions > 100);
 }
