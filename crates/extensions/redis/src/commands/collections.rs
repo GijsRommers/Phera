@@ -28,10 +28,15 @@ pub async fn build(
             b.key(&a[0]);
             b.args(&a[1..]);
         }
-        "hget" => {
+        "hget" | "hgetwithmeta" => {
+            b.command = redis::cmd("HGET");
             b.key(&a[0]);
             b.arg(&a[1]);
-            b.shape = Shape::Value;
+            b.shape = if name == "hgetwithmeta" {
+                Shape::Metadata
+            } else {
+                Shape::Value
+            };
         }
         "hmget" => {
             b.key(&a[0]);
@@ -134,7 +139,7 @@ pub async fn build(
             b.key(&a[0]);
             b.shape = Shape::Value;
             if let Some(count) = a.get(1)
-                && number(Some(count), 0.0) != 0.0
+                && (name.starts_with('s') || number(Some(count), 0.0) != 0.0)
             {
                 b.arg(count);
                 b.shape = Shape::Values;
@@ -219,7 +224,9 @@ pub async fn build(
         }
         "smismember" => {
             b.key(&a[0]);
-            b.args(&a[1..]);
+            for value in &a[1..] {
+                b.value(c, value).await?;
+            }
         }
         "sdiff" | "sinter" | "sunion" => {
             b.keys(a);

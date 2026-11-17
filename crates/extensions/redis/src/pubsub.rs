@@ -1,5 +1,5 @@
 //! Subscription sockets are dedicated and never returned to a pool.
-//! `$r->subscribe(["news"], function ($r, $channel, $message) { $r->unsubscribe(); });`
+//! `$r->subscribe(["news"], function ($r, $channel, $message) { $r->unsubscribe(["news"]); });`
 use crate::connection::{Session, exception, string};
 use phera_extension_api::{Context, NativeResult, Object, PhpArray, Value};
 use redis::{PushKind, Value as Reply};
@@ -44,6 +44,7 @@ pub async fn subscribe(
         _ => (),
     }
     info = info.set_redis_settings(settings);
+    let prefix = s.options.borrow().prefix.clone();
     let channels: Vec<Vec<u8>> = crate::commands::array(a.first())
         .map(|values| {
             values
@@ -52,9 +53,13 @@ pub async fn subscribe(
                     Value::String(s) => s.as_bytes().to_vec(),
                     _ => string(v).into_bytes(),
                 })
+                .map(|channel| [prefix.as_slice(), channel.as_slice()].concat())
                 .collect()
         })
         .unwrap_or_default();
+    if channels.is_empty() {
+        return Ok(Value::Bool(false));
+    }
     let (sender, mut messages) = tokio::sync::mpsc::unbounded_channel();
     let handle = crate::pool::runtime()
         .await
@@ -123,13 +128,25 @@ pub async fn unsubscribe(name: &str, s: &Session, a: &[Value]) -> NativeResult {
             return Ok(Value::Bool(false));
         };
         let supplied: Vec<Vec<u8>> = crate::commands::array(a.first())
-            .map(|values| values.iter().map(|(_, v)| string(v).into_bytes()).collect())
+            .map(|values| {
+                values
+                    .iter()
+                    .map(|(_, v)| {
+                        let mut channel = s.options.borrow().prefix.clone();
+                        if let Value::String(s) = v {
+                            channel.extend_from_slice(s.as_bytes());
+                        } else {
+                            channel.extend_from_slice(string(v).as_bytes());
+                        }
+                        channel
+                    })
+                    .collect()
+            })
             .unwrap_or_default();
-        let channels = if supplied.is_empty() {
-            sub.channels.iter().cloned().collect()
-        } else {
-            supplied
-        };
+        if supplied.is_empty() {
+            return Ok(Value::Bool(false));
+        }
+        let channels = supplied;
         for channel in &channels {
             sub.channels.remove(channel);
         }

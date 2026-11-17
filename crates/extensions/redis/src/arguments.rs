@@ -66,6 +66,11 @@ pub fn prepare(
             return Ok(MethodPreparation::Return(Value::Bool(false)));
         }
         "xclaim" => params[5].optional = true,
+        "smismember" => {
+            for param in params.iter_mut().skip(1) {
+                param.ty = ParamType::Mixed;
+            }
+        }
         "sdiffstore" | "sunionstore" => params[1].optional = true,
         "sort" | "sort_ro" => params[1].nullable = false,
         "command" | "slaveof" | "replicaof"

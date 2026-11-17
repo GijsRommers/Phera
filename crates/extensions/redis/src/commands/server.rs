@@ -37,6 +37,11 @@ pub fn build(name: &str, a: &[Value], b: &mut Builder<'_>) -> Result<bool, Nativ
         }
         "script" | "function" | "client" | "command" | "pubsub" | "slowlog" | "acl" => {
             b.args(a);
+            if name == "function"
+                && matches!(string(&a[0]).to_uppercase().as_str(), "LIST" | "STATS")
+            {
+                b.shape = Shape::Zipped;
+            }
             if name == "client"
                 && a.first()
                     .is_some_and(|v| string(v).eq_ignore_ascii_case("GETNAME"))

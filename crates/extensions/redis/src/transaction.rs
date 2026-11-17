@@ -5,15 +5,10 @@ use crate::options::Options;
 use phera_extension_api::{Context, NativeResult, Object, PhpArray, Value};
 use std::rc::Rc;
 
-pub enum Effect {
-    Database(i64),
-    Auth(Value),
-}
-
 pub struct Batch {
     pub transaction: bool,
     pub commands: Vec<(Plan, Options)>,
-    pub effects: Vec<(usize, Effect)>,
+    pub databases: Vec<(usize, i64)>,
 }
 
 pub async fn control(
@@ -43,7 +38,7 @@ pub async fn control(
             *s.batch.borrow_mut() = Some(Batch {
                 transaction: mode == 1,
                 commands: Vec::new(),
-                effects: Vec::new(),
+                databases: Vec::new(),
             });
             Ok(Value::Object(object.clone()))
         }
@@ -65,8 +60,14 @@ pub async fn control(
             };
             let mut result = PhpArray::new();
             let replies = if batch.transaction {
-                let reply = s.query(redis::cmd("EXEC")).await?;
-                if matches!(reply, redis::Value::Nil) {
+                let timeout = s.options.borrow().read_timeout;
+                let reply = s
+                    .connected()?
+                    .query(redis::cmd("EXEC"), timeout)
+                    .await
+                    .map_err(|e| exception(e.to_string()))?;
+                // phpredis keeps the original queue error when EXEC aborts.
+                if matches!(reply, redis::Value::Nil | redis::Value::ServerError(_)) {
                     return Ok(Value::Bool(false));
                 }
                 crate::reply::items(reply)
@@ -82,7 +83,7 @@ pub async fn control(
                     .await
                     .map_err(|e| exception(e.to_string()))?
             };
-            let mut effects = batch.effects.into_iter().peekable();
+            let mut effects = batch.databases.into_iter().peekable();
             for (index, ((plan, options), reply)) in
                 batch.commands.into_iter().zip(replies).enumerate()
             {
@@ -94,12 +95,9 @@ pub async fn control(
                     ));
                 }
                 while effects.peek().is_some_and(|(i, _)| *i == index) {
-                    let (_, effect) = effects.next().expect("peeked effect");
+                    let (_, db) = effects.next().expect("peeked database");
                     if matches!(reply, redis::Value::Okay) {
-                        match effect {
-                            Effect::Database(db) => s.database.set(db),
-                            Effect::Auth(auth) => *s.auth.borrow_mut() = auth,
-                        }
+                        s.database.set(db);
                     }
                 }
                 result.push(crate::reply::convert(c, &options, &plan.shape, reply).await?)?;
@@ -114,27 +112,32 @@ pub async fn queue(
     s: &Session,
     plan: Plan,
     options: Options,
-) -> Result<(), phera_extension_api::NativeError> {
+) -> Result<bool, phera_extension_api::NativeError> {
     let transaction = s.batch.borrow().as_ref().is_some_and(|b| b.transaction);
-    if transaction {
-        s.query(plan.command.clone()).await?;
+    if transaction
+        && matches!(
+            s.query(plan.command.clone()).await?,
+            redis::Value::ServerError(_)
+        )
+    {
+        return Ok(false);
     }
     if let Some(batch) = s.batch.borrow_mut().as_mut() {
         batch.commands.push((plan, options));
     }
-    Ok(())
+    Ok(true)
 }
 
 pub async fn queue_state(
     name: &str,
     s: &Session,
     value: &Value,
-) -> Result<(), phera_extension_api::NativeError> {
+) -> Result<bool, phera_extension_api::NativeError> {
     let mut command = redis::cmd(&name.to_uppercase());
     let effect = if name == "select" {
         let db = number(Some(value), 0.0) as i64;
         command.arg(db);
-        Effect::Database(db)
+        Some(db)
     } else {
         match value {
             Value::Array(a) => {
@@ -146,10 +149,10 @@ pub async fn queue_state(
                 command.arg(crate::connection::string(value));
             }
         }
-        Effect::Auth(value.clone())
+        None
     };
     let options = s.options.borrow().clone();
-    queue(
+    let queued = queue(
         s,
         Plan {
             command,
@@ -158,8 +161,11 @@ pub async fn queue_state(
         options,
     )
     .await?;
-    if let Some(batch) = s.batch.borrow_mut().as_mut() {
-        batch.effects.push((batch.commands.len() - 1, effect));
+    if queued
+        && let Some(db) = effect
+        && let Some(batch) = s.batch.borrow_mut().as_mut()
+    {
+        batch.databases.push((batch.commands.len() - 1, db));
     }
-    Ok(())
+    Ok(queued)
 }

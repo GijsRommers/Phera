@@ -4,9 +4,18 @@ enum Task {
     Visit(Reply),
     List(usize),
     Map(usize),
+    Zip(usize),
 }
 
 pub fn convert(reply: Reply, options: &Options) -> NativeResult {
+    convert_inner(reply, options, false)
+}
+
+pub fn zipped(reply: Reply, options: &Options) -> NativeResult {
+    convert_inner(reply, options, true)
+}
+
+fn convert_inner(reply: Reply, options: &Options, zip: bool) -> NativeResult {
     let mut tasks = vec![Task::Visit(reply)];
     let mut results = Vec::new();
     while let Some(task) = tasks.pop() {
@@ -31,7 +40,11 @@ pub fn convert(reply: Reply, options: &Options) -> NativeResult {
                 Reply::ServerError(_) => results.push(Value::Bool(false)),
                 Reply::Attribute { data, .. } => tasks.push(Task::Visit(*data)),
                 Reply::Array(items) | Reply::Set(items) | Reply::Push { data: items, .. } => {
-                    tasks.push(Task::List(items.len()));
+                    tasks.push(if zip {
+                        Task::Zip(items.len())
+                    } else {
+                        Task::List(items.len())
+                    });
                     tasks.extend(items.into_iter().rev().map(Task::Visit));
                 }
                 Reply::Map(items) => {
@@ -43,10 +56,21 @@ pub fn convert(reply: Reply, options: &Options) -> NativeResult {
                 }
                 _ => return Err(crate::connection::exception("Unsupported RESP value")),
             },
-            Task::List(count) | Task::Map(count) => {
+            Task::List(count) | Task::Map(count) | Task::Zip(count) => {
                 let values = results.split_off(results.len() - count);
                 let mut array = PhpArray::new();
-                if matches!(task, Task::Map(_)) {
+                if matches!(task, Task::Zip(_)) {
+                    let mut values = values.into_iter();
+                    while let Some(k) = values.next() {
+                        if matches!(k, Value::String(_))
+                            && let Some(v) = values.next()
+                        {
+                            array.insert(ArrayKey::from_value(&k)?, v);
+                        } else {
+                            array.push(k)?;
+                        }
+                    }
+                } else if matches!(task, Task::Map(_)) {
                     let mut values = values.into_iter();
                     while let (Some(k), Some(v)) = (values.next(), values.next()) {
                         array.insert(ArrayKey::from_value(&k)?, v);

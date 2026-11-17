@@ -5,6 +5,7 @@ foreach ([null,['EX'=>60],['PX'=>60000],['EXAT'=>4102444800],['PXAT'=>4102444800
     $r->del($p.'h');
     check(fn()=>$r->hsetex($p.'h',['a'=>"v\0",'b'=>'w'],$options));
     check(fn()=>$r->hsetex($p.'h',['a'=>'second'],$options));
-    check(fn()=>$r->hGetAll($p.'h'));
+    // Hash-field expiry can change Redis's unordered hash-table iteration order.
+    check(function()use($r,$p){$fields=$r->hGetAll($p.'h');ksort($fields);return $fields;});
 }
 finish();

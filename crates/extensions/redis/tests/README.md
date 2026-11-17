@@ -11,7 +11,8 @@ docker run -d --name phera-test-redis -p 127.0.0.1:16399:6379 redis:8.4.0 redis-
 
 Do not use FLUSHALL. Scripts select database 14 and receive a unique key prefix
 from the test runner. They delete only their own prefixed keys. The HTTP test uses
-database 13 and its own key per request. ACL tests create and remove their own user.
+database 13 and its own key per request. The FLUSHDB script exclusively uses database 12.
+ACL tests create and remove their own user.
 
 ```sh
 cargo build --release -p phera-cli
@@ -37,3 +38,9 @@ pop comparisons launch a second real-PHP publisher process. The concurrency test
 500 simultaneous HTTP requests, each doing a 300 ms BLPOP on its own key, with one
 Phera worker and a 512-connection pool. It requires all responses to succeed and total
 time below two seconds.
+
+`tests/oracle-limitations/json-array-score-key.php` is a separate manual upstream
+reproducer: phpredis 6.3.0 exits 255 while printing an array-valued JSON score-map key.
+It is not included in the passing-script count. Test 189 retains JSON arrays in other
+collection shapes and tests WITHSCORES with valid string keys. Test 177 sorts the
+complete HGETALL map because field expiry changes Redis hash iteration order.

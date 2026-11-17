@@ -47,4 +47,5 @@ RedisCluster, RedisSentinel and RedisArray are deliberately not registered.
 
 See [tests/README.md](tests/README.md) for reproducible validation and
 [METHODS.md](METHODS.md) for the reflection-derived status of all 287 methods.
-The crate remains a work in progress until the full requested compatibility gate passes.
+See [REPORT.md](REPORT.md) for evidence and remaining gaps. The crate remains a work in
+progress until the full requested compatibility gate passes.

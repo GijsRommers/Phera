@@ -9,12 +9,19 @@ pub async fn build(
     b: &mut Builder<'_>,
 ) -> Result<bool, NativeError> {
     match name {
-        "get" | "getdel" | "getex" => {
+        "get" | "getdel" | "getex" | "getwithmeta" => {
+            if name == "getwithmeta" {
+                b.command = redis::cmd("GET");
+            }
             b.key(&a[0]);
             if name == "getex" {
                 flags(b, a.get(1));
             }
-            b.shape = Shape::Value;
+            b.shape = if name == "getwithmeta" {
+                Shape::Metadata
+            } else {
+                Shape::Value
+            };
         }
         "set" => {
             b.key(&a[0]);

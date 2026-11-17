@@ -52,10 +52,11 @@ async fn reuse_and_cleanup_after_multi_watch_database_and_client_name() {
     let bucket = isolated(1).await;
     let first = lease(&bucket).await;
     let original = id(&first).await;
+    let watched = format!("phera:pool:watch:{}", std::process::id());
     for args in [
         vec!["SELECT", "14"],
         vec!["CLIENT", "SETNAME", "dirty"],
-        vec!["WATCH", "phera-pool-watch"],
+        vec!["WATCH", &watched],
         vec!["MULTI"],
     ] {
         let mut command = redis::cmd(args[0]);

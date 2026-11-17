@@ -5,6 +5,12 @@ use std::process::{Command, Stdio};
 
 #[test]
 fn callbacks_and_unsubscribe_match_php() {
+    for prefix in ["", "prefix:"] {
+        compare_subscriptions(prefix);
+    }
+}
+
+fn compare_subscriptions(prefix: &str) {
     let Ok(binary) = std::env::var("PHERA_BIN") else {
         return;
     };
@@ -27,6 +33,7 @@ fn callbacks_and_unsubscribe_match_php() {
         let source = format!(
             r#"<?php
 $r=new Redis();$r->connect('127.0.0.1',16399);
+$r->setOption(Redis::OPT_PREFIX,'{prefix}');
 var_dump($r->{mode}(['{channel}'],function({callback}) {{
 var_dump($channel,$message);var_dump($r->{unsubscribe}(['{channel}']));
 }}));
@@ -43,7 +50,7 @@ var_dump($channel,$message);var_dump($r->{unsubscribe}(['{channel}']));
             };
             let publisher = format!(
                 r#"$r=new Redis();$r->connect('127.0.0.1',16399);
-usleep(500000);for($i=0;$i<30;$i++){{$r->rawCommand('{publish}','{channel}',"hello\0redis");
+usleep(500000);for($i=0;$i<30;$i++){{$r->rawCommand('{publish}','{prefix}{channel}',"hello\0redis");
 usleep(50000);}}"#
             );
             let mut child = Command::new(&php)

@@ -83,6 +83,9 @@ impl Lease {
     }
 
     pub async fn pipeline(&self, commands: Vec<Cmd>, read_timeout: f64) -> RedisResult<Vec<Value>> {
+        if commands.is_empty() {
+            return Ok(Vec::new());
+        }
         let shared = self.0.clone();
         self.0
             .runtime

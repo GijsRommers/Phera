@@ -113,14 +113,27 @@ pub fn dispatch<'a>(
             }
             "_compress" | "_uncompress" => return Ok(a[0].clone()),
             "auth" | "select" => {
+                let value = if name == "auth" {
+                    let Some(value) = crate::auth::credentials(context, &a[0], "auth")? else {
+                        return Ok(Value::Bool(false));
+                    };
+                    value
+                } else {
+                    a[0].clone()
+                };
                 if session.batch.borrow().is_some() {
-                    crate::transaction::queue_state(name, &session, &a[0]).await?;
+                    if !crate::transaction::queue_state(name, &session, &value).await? {
+                        return Ok(Value::Bool(false));
+                    }
+                    if name == "auth" {
+                        *session.auth.borrow_mut() = value;
+                    }
                     return Ok(Value::Object(object));
                 }
                 return if name == "auth" {
-                    crate::connection::auth(&session, &a[0]).await
+                    crate::connection::auth(&session, &value).await
                 } else {
-                    crate::connection::select(&session, &a[0]).await
+                    crate::connection::select(&session, &value).await
                 };
             }
             "multi" | "pipeline" | "exec" | "discard" => {
@@ -158,8 +171,13 @@ pub fn dispatch<'a>(
         }
         let plan = crate::commands::build(name, context, a, &options).await?;
         if session.batch.borrow().is_some() {
-            crate::transaction::queue(&session, plan, options).await?;
-            return Ok(Value::Object(object));
+            return Ok(
+                if crate::transaction::queue(&session, plan, options).await? {
+                    Value::Object(object)
+                } else {
+                    Value::Bool(false)
+                },
+            );
         }
         let previous_error = session.error.borrow().clone();
         let reply = session.query(plan.command).await?;

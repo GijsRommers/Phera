@@ -62,7 +62,8 @@ pub fn construct(c: &mut dyn Context, s: &Session, args: &[Value]) -> NativeResu
                     if !matches!(value, Value::Array(_) | Value::String(_)) {
                         return Err(invalid("auth credentials"));
                     }
-                    *s.auth.borrow_mut() = value.clone();
+                    *s.auth.borrow_mut() = crate::auth::credentials(c, value, "__construct")?
+                        .ok_or_else(|| invalid("auth credentials"))?;
                 }
                 "maxretries" => {
                     if !matches!(value,Value::Int(n) if *n >= 0) {

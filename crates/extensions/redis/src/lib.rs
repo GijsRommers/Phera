@@ -1,5 +1,6 @@
 //! Async phpredis: `$r = new Redis(); $r->connect("localhost"); $r->get("key");`.
 mod arguments;
+mod auth;
 mod commands;
 mod connection;
 mod constructor;

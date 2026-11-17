@@ -195,11 +195,13 @@ pub async fn auth(session: &Session, value: &Value) -> NativeResult {
             command.arg(string(value));
         }
     }
-    let reply = session.query(command).await?;
+    // phpredis remembers the attempted credentials even when AUTH is rejected.
+    let result = session.query(command).await;
+    *session.auth.borrow_mut() = value.clone();
+    let reply = result?;
     if !matches!(reply, redis::Value::Okay) {
         return Ok(Value::Bool(false));
     }
-    *session.auth.borrow_mut() = value.clone();
     Ok(Value::Bool(true))
 }
 

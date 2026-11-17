@@ -10,6 +10,7 @@ pub enum Shape {
     Raw,
     Literal,
     Value,
+    Metadata,
     Values,
     Bool,
     Float,
@@ -17,6 +18,7 @@ pub enum Shape {
     Type,
     Pairs,
     RawPairs,
+    Zipped,
     Scores,
     Info,
     StreamInfo,
@@ -35,6 +37,22 @@ pub async fn convert(
     shape: &Shape,
     reply: Reply,
 ) -> NativeResult {
+    if matches!(reply, Reply::Nil) && matches!(shape, Shape::Values) {
+        return Ok(Value::from(PhpArray::new()));
+    }
+    if matches!(shape, Shape::Metadata) {
+        let length = match &reply {
+            Reply::BulkString(bytes) => bytes.len() as i64,
+            Reply::Nil => -1,
+            _ => 0,
+        };
+        let mut metadata = PhpArray::new();
+        metadata.insert(ArrayKey::str("length"), Value::Int(length));
+        let mut result = PhpArray::new();
+        result.push(value(context, options, reply).await?)?;
+        result.push(Value::from(metadata))?;
+        return Ok(Value::from(result));
+    }
     if matches!(reply, Reply::Nil) && matches!(shape, Shape::Pop { .. } | Shape::Streams) {
         return Ok(if options.null_multibulk {
             Value::Null
@@ -50,6 +68,7 @@ pub async fn convert(
     }
     match shape {
         Shape::Literal => raw::convert(reply, options),
+        Shape::Zipped => raw::zipped(reply, options),
         Shape::Raw => raw::convert(
             reply,
             &Options {
@@ -62,6 +81,7 @@ pub async fn convert(
                 || matches!(reply, Reply::Okay | Reply::Boolean(true)),
         )),
         Shape::Value => value(context, options, reply).await,
+        Shape::Metadata => unreachable!("metadata replies handled before nil and errors"),
         Shape::Float => float(reply),
         Shape::Type => Ok(Value::Int(match bytes(reply).as_slice() {
             b"string" => 1,
@@ -226,7 +246,12 @@ async fn pairs(
         } else {
             raw::convert(v, o)?
         };
-        result.insert(key(bytes(k))?, v);
+        let key = if scores {
+            ArrayKey::from_value(&value(c, o, k).await?)?
+        } else {
+            key(bytes(k))?
+        };
+        result.insert(key, v);
     }
     Ok(Value::from(result))
 }
