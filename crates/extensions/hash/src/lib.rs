@@ -81,8 +81,8 @@ const FUNCTIONS: &[FunctionEntry] = &[
     FunctionEntry::sync(
         "hash_equals",
         &[
-            Param::new("known_string", ParamType::String),
-            Param::new("user_string", ParamType::String),
+            Param::new("known_string", ParamType::Mixed),
+            Param::new("user_string", ParamType::Mixed),
         ],
         functions::equals,
     ),

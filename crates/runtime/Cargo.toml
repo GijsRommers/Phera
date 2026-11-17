@@ -16,6 +16,7 @@ phera-ext-http.workspace = true
 phera-ext-json.workspace = true
 phera-ext-pcre.workspace = true
 phera-ext-pdo.workspace = true
+phera-ext-random.workspace = true
 phera-ext-standard.workspace = true
 phera-value.workspace = true
 phera-vm.workspace = true

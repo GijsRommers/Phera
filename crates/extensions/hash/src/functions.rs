@@ -67,6 +67,21 @@ fn list(crypto: bool) -> NativeResult {
     Ok(Value::from(list))
 }
 pub fn equals(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    for (i, name) in ["known_string", "user_string"].iter().enumerate() {
+        let value = arguments[i].deref();
+        if !matches!(&*value, Value::String(_)) {
+            let given = match &*value {
+                Value::Bool(true) => "true".into(),
+                Value::Bool(false) => "false".into(),
+                value => value.type_name(),
+            };
+            return Err(NativeError::type_error(format!(
+                "hash_equals(): Argument #{} (${name}) must be of type string, {given} given",
+                i + 1
+            )));
+        }
+    }
+
     Ok(Value::Bool(bool::from(
         args::bytes(arguments, 0).ct_eq(args::bytes(arguments, 1)),
     )))
@@ -137,7 +152,7 @@ pub fn hkdf(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let key = args::bytes(arguments, 1);
     if key.is_empty() {
         return Err(NativeError::value_error(
-            "hash_hkdf(): Argument #2 ($key) cannot be empty",
+            "hash_hkdf(): Argument #2 ($key) must not be empty",
         ));
     }
     let length = args::int(arguments, 2).unwrap_or_default();

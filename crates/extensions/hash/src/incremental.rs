@@ -12,11 +12,25 @@ pub struct State {
 }
 impl State {
     pub fn new(algorithm: Algorithm, key: Option<Vec<u8>>) -> Self {
-        let digest = if key.is_none() {
-            algorithm.crypto()
-        } else {
-            None
-        };
+        let mut digest = algorithm.crypto();
+        let key = key.map(|key| {
+            let size = algorithm.block_size().expect("validated HMAC");
+            let key = if key.len() > size {
+                algorithm.digest(&key)
+            } else {
+                key
+            };
+            let mut inner = vec![0x36; size];
+            let mut outer = vec![0x5c; size];
+            for (i, byte) in key.iter().enumerate() {
+                inner[i] ^= byte;
+                outer[i] ^= byte;
+            }
+            if let Some(digest) = &mut digest {
+                digest.update(&inner);
+            }
+            outer
+        });
         Self {
             algorithm,
             digest,
@@ -24,6 +38,7 @@ impl State {
             key,
         }
     }
+
     pub fn update(&mut self, data: &[u8]) {
         if let Some(digest) = &mut self.digest {
             digest.update(data);
@@ -32,12 +47,20 @@ impl State {
         }
     }
     pub fn finish(self) -> Vec<u8> {
-        if let Some(digest) = self.digest {
+        let inner = if let Some(digest) = self.digest {
             digest.finalize().to_vec()
-        } else if let Some(key) = self.key {
-            functions::hmac(&self.algorithm, &self.buffered, &key)
+        } else if let Some(outer) = &self.key {
+            let mut inner: Vec<u8> = outer.iter().map(|byte| byte ^ 0x6a).collect();
+            inner.extend_from_slice(&self.buffered);
+            self.algorithm.digest(&inner)
         } else {
             self.algorithm.digest(&self.buffered)
+        };
+        if let Some(mut outer) = self.key {
+            outer.extend_from_slice(&inner);
+            self.algorithm.digest(&outer)
+        } else {
+            inner
         }
     }
 }

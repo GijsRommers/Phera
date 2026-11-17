@@ -1232,6 +1232,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "phera-ext-random"
+version = "0.1.0"
+dependencies = [
+ "getrandom 0.3.4",
+ "hex",
+ "phera-ext-core",
+ "phera-extension-api",
+ "sha2 0.10.9",
+ "tokio",
+]
+
+[[package]]
 name = "phera-ext-standard"
 version = "0.1.0"
 dependencies = [
@@ -1285,6 +1297,7 @@ dependencies = [
  "phera-ext-json",
  "phera-ext-pcre",
  "phera-ext-pdo",
+ "phera-ext-random",
  "phera-ext-standard",
  "phera-extension-api",
  "phera-value",

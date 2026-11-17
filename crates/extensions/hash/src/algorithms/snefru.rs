@@ -7,8 +7,8 @@ pub fn hash(input: &[u8]) -> Vec<u8> {
     for block in input.chunks(32) {
         let mut padded = [0; 32];
         padded[..block.len()].copy_from_slice(block);
-        for (word, bytes) in state[8..].iter_mut().zip(padded.chunks_exact(4)) {
-            *word = u32::from_be_bytes(bytes.try_into().expect("four bytes"));
+        for (word, bytes) in state[8..].iter_mut().zip(padded.as_chunks::<4>().0) {
+            *word = u32::from_be_bytes(*bytes);
         }
         compress(&mut state);
         state[8..].fill(0);

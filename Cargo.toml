@@ -49,6 +49,7 @@ phera-ext-http = { path = "crates/extensions/http" }
 phera-ext-json = { path = "crates/extensions/json" }
 phera-ext-pcre = { path = "crates/extensions/pcre" }
 phera-ext-pdo = { path = "crates/extensions/pdo" }
+phera-ext-random = { path = "crates/extensions/random" }
 phera-ext-standard = { path = "crates/extensions/standard" }
 digest = "0.10"
 md2 = "0.10"

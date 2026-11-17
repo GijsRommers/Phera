@@ -16,12 +16,18 @@ async fn read(
     state: &mut State,
 ) -> Result<bool, NativeError> {
     if filename.contains(&0) {
+        // PHP 8.5.12's hash_file diagnostic names the algorithm parameter here.
+        let (argument, parameter) = if function == "hash_file" {
+            (1, "algo")
+        } else {
+            (argument, "filename")
+        };
         return Err(NativeError::value_error(format!(
-            "{function}(): Argument #{argument} ($filename) must not contain any null bytes"
+            "{function}(): Argument #{argument} (${parameter}) must not contain any null bytes"
         )));
     }
     if filename.is_empty() {
-        return Err(NativeError::value_error("Path cannot be empty"));
+        return Err(NativeError::value_error("Path must not be empty"));
     }
     #[cfg(unix)]
     let path = {

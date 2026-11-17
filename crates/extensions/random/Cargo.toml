@@ -1,0 +1,19 @@
+[package]
+name = "phera-ext-random"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+phera-extension-api.workspace = true
+getrandom.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+phera-ext-core.workspace = true
+sha2.workspace = true
+hex.workspace = true
+
+[lints]
+workspace = true

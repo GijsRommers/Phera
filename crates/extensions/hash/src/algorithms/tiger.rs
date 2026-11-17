@@ -10,10 +10,10 @@ pub fn hash(input: &[u8], bits: usize, passes: usize) -> Vec<u8> {
     }
     data.extend_from_slice(&(input.len() as u64 * 8).to_le_bytes());
     let mut state = [0x0123456789abcdef, 0xfedcba9876543210, 0xf096a5b4c3b2e187];
-    for block in data.chunks_exact(64) {
+    for block in data.as_chunks::<64>().0 {
         let mut words = [0u64; 8];
-        for (word, bytes) in words.iter_mut().zip(block.chunks_exact(8)) {
-            *word = u64::from_le_bytes(bytes.try_into().expect("eight bytes"));
+        for (word, bytes) in words.iter_mut().zip(block.as_chunks::<8>().0) {
+            *word = u64::from_le_bytes(*bytes);
         }
         let mut work = state;
         pass(&mut work, &words, 5, 0);

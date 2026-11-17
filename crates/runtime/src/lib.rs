@@ -56,6 +56,7 @@ impl Runtime {
         registry.load(&phera_ext_pdo::Pdo);
         registry.load(&phera_ext_http::Http);
         registry.load(&phera_ext_hash::Hash);
+        registry.load(&phera_ext_random::Random);
         Runtime {
             registry: Arc::new(registry),
             cache: CodeCache::default(),

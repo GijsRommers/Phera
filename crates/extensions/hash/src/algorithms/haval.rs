@@ -12,7 +12,7 @@ pub fn hash(input: &[u8], bits: usize, passes: usize) -> Vec<u8> {
     data.push((bits >> 2) as u8);
     data.extend_from_slice(&(input.len() as u64 * 8).to_le_bytes());
     let mut state = D0;
-    for block in data.chunks_exact(128) {
+    for block in data.as_chunks::<128>().0 {
         compress(&mut state, block, passes);
     }
     haval_fold::fold(&mut state, bits);
@@ -78,8 +78,8 @@ fn compress(state: &mut [u32; 8], block: &[u8], passes: usize) {
         ],
     };
     let mut words = [0u32; 32];
-    for (word, bytes) in words.iter_mut().zip(block.chunks_exact(4)) {
-        *word = u32::from_le_bytes(bytes.try_into().expect("four bytes"));
+    for (word, bytes) in words.iter_mut().zip(block.as_chunks::<4>().0) {
+        *word = u32::from_le_bytes(*bytes);
     }
     let indices = [&I2, &I3, &I4, &I5];
     let constants = [&K2, &K3, &K4, &K5];
