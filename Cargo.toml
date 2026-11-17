@@ -63,7 +63,6 @@ whirlpool = "0.10"
 gost94 = "0.10"
 xxhash-rust = { version = "0.8", features = ["xxh32", "xxh64", "xxh3"] }
 subtle = "2.6"
-hex = "0.4"
 bcrypt = "0.17"
 argon2 = "0.5"
 pwhash = "1"
