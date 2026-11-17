@@ -128,15 +128,7 @@ fn listed_encodings_exist_in_php_with_the_same_names() {
         panic!("mb_list_encodings returns an array");
     };
     let names: Vec<Value> = listed.iter().map(|(_, name)| name.clone()).collect();
-    let phera_list = oracle::php_literal(&Value::from(listed.as_ref().clone()));
-    matrix.case_as(
-        &format!(
-            "array_values(array_filter(mb_list_encodings(), \
-             fn($e) => in_array($e, {phera_list}, true)))"
-        ),
-        "mb_list_encodings",
-        vec![],
-    );
+    matrix.case("mb_list_encodings", vec![]);
     for name in &names {
         matrix.case("mb_encoding_aliases", vec![name.clone()]);
         matrix.case("mb_preferred_mime_name", vec![name.clone()]);
