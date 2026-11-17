@@ -4,6 +4,7 @@ use std::cmp::Ordering;
 
 use phera_extension_api::{Context, NativeResult, PhpArray, Value};
 
+use super::callback::BoolResult;
 use super::callback_sets::{Entry, SetComparison};
 
 pub(super) async fn run(
@@ -61,7 +62,11 @@ async fn difference(
                     break;
                 }
                 if let Some(candidate) = other.get(position) {
-                    if comparison.data(context, entry, candidate, true).await? == Ordering::Equal {
+                    if comparison
+                        .data(context, entry, candidate, BoolResult::AskAgain)
+                        .await?
+                        == Ordering::Equal
+                    {
                         break;
                     }
                     order = Ordering::Less;
@@ -121,7 +126,11 @@ async fn intersect(
                 return Ok(Value::from(result));
             };
             if order == Ordering::Equal && comparison.keys.is_some() && !comparison.key_only {
-                if comparison.data(context, entry, candidate, true).await? != Ordering::Equal {
+                if comparison
+                    .data(context, entry, candidate, BoolResult::AskAgain)
+                    .await?
+                    != Ordering::Equal
+                {
                     order = Ordering::Greater;
                     data_compares_keys = false;
                 } else {
