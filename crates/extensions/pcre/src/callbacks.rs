@@ -103,7 +103,11 @@ pub(crate) fn replace(
     arguments: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
-        callable::validate(args::value(&arguments, 1), false)?;
+        if let Some(reason) = callable::invalid_reason(args::value(&arguments, 1)) {
+            return Err(NativeError::type_error(format!(
+                "preg_replace_callback(): Argument #2 ($callback) must be a valid callback, {reason}"
+            )));
+        }
         let mut operation = Operation {
             name: "preg_replace_callback",
             patterns: replace::values(args::value(&arguments, 0)),
@@ -136,7 +140,12 @@ pub(crate) fn replace_array(
                          must contain only string patterns as keys",
                     ));
                 };
-                callable::validate(callback, true)?;
+                if callable::invalid_reason(callback).is_some() {
+                    return Err(NativeError::type_error(
+                        "preg_replace_callback_array(): Argument #1 ($pattern) \
+                         must contain only valid callbacks",
+                    ));
+                }
                 let mut operation = Operation {
                     name: "preg_replace_callback_array",
                     patterns: vec![Value::String(pattern.clone())],
