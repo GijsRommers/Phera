@@ -23,6 +23,7 @@ pub(crate) fn write(project: &Project, lock: &Lock, options: &Options) -> Result
     let dev_names: Vec<_> = lock
         .packages_dev
         .iter()
+        .filter(|_| !options.no_dev)
         .map(|package| package.name.as_str())
         .collect();
     let installed: Vec<Value> = packages
@@ -38,7 +39,15 @@ pub(crate) fn write(project: &Project, lock: &Lock, options: &Options) -> Result
             value["install-path"] = if package.kind() == "metapackage" {
                 Value::Null
             } else {
-                format!("../{}", package.name).into()
+                {
+                    let relative = php::relative(&directory, &vendor.join(&package.name));
+                    if relative.starts_with('.') {
+                        relative
+                    } else {
+                        format!("./{relative}")
+                    }
+                }
+                .into()
             };
             Ok(value)
         })
@@ -49,9 +58,7 @@ pub(crate) fn write(project: &Project, lock: &Lock, options: &Options) -> Result
         directory.join("installed.json"),
         serde_json::to_string_pretty(&record)? + "\n",
     )?;
-    let root_version = project.data["version"]
-        .as_str()
-        .unwrap_or("1.0.0+no-version-set");
+    let root_version = project.root_version();
     let root = json!({
         "name": project.name(), "pretty_version": root_version,
         "version": "1.0.0.0", "reference": null, "type": "project",
@@ -66,7 +73,7 @@ pub(crate) fn write(project: &Project, lock: &Lock, options: &Options) -> Result
         'version' => '1.0.0.0', 'aliases' => array(), 'reference' => null, \
         'type' => 'project', 'install_path' => $baseDir, 'dev_requirement' => false),\n",
         php::quote(project.name()),
-        php::quote(root_version)
+        php::quote(&root_version)
     ));
     let mut versions = serde_json::Map::<String, Value>::new();
     for package in &packages {

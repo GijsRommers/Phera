@@ -16,6 +16,7 @@ pub struct Options {
     pub optimize: bool,
     pub verbose: bool,
     pub no_scripts: bool,
+    pub no_install: bool,
     pub prefer_lowest: bool,
     pub ignore_platform: bool,
     pub cache_dir: Option<PathBuf>,
@@ -59,6 +60,14 @@ impl Project {
 
     pub fn config_bool(&self, key: &str) -> bool {
         self.data["config"][key].as_bool().unwrap_or(false)
+    }
+
+    pub fn root_version(&self) -> String {
+        self.data["version"]
+            .as_str()
+            .map(str::to_owned)
+            .or_else(|| std::env::var("COMPOSER_ROOT_VERSION").ok())
+            .unwrap_or_else(|| "1.0.0".into())
     }
 
     pub fn name(&self) -> &str {

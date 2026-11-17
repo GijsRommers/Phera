@@ -46,6 +46,8 @@ impl Constraint {
             bail!("Invalid comma separator in constraint.");
         }
         let split = text.replace("||", "|");
+        let operators = Regex::new(r"(>=|<=|!=|<>|==|[=<>~^])\s+")?;
+        let split = operators.replace_all(&split, "$1");
         let mut groups = Vec::new();
         for group in split.split('|') {
             if group.trim().is_empty() {
@@ -277,7 +279,10 @@ fn lower(text: &str) -> Result<String> {
 }
 
 fn has_stability(text: &str) -> bool {
-    text.chars()
+    text.split('+')
+        .next()
+        .unwrap_or(text)
+        .chars()
         .any(|character| character.is_ascii_alphabetic() && character != 'v')
 }
 

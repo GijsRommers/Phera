@@ -51,7 +51,7 @@ impl<'a> Provider<'a> {
         data.insert("require".into(), requirements);
         let root = Package {
             name: project.name().into(),
-            version: project.data["version"].as_str().unwrap_or("1.0.0").into(),
+            version: project.root_version(),
             data,
         };
         let names = names(root.field("require"));
@@ -69,6 +69,16 @@ impl<'a> Provider<'a> {
     fn catalog(&self, name: &str) -> Result<Vec<Candidate>> {
         if let Some(catalog) = self.catalogs.borrow().get(name) {
             return Ok(catalog.clone());
+        }
+        if name == self.root.name {
+            let catalog = vec![Candidate {
+                package: self.root.clone(),
+                offered: Some(self.root.version.clone()),
+            }];
+            self.catalogs
+                .borrow_mut()
+                .insert(name.into(), catalog.clone());
+            return Ok(catalog);
         }
         let mut candidates = self
             .registry
@@ -256,6 +266,9 @@ impl DependencyProvider for Provider<'_> {
     ) -> std::result::Result<Option<u32>, SolveError> {
         if name == "@root" {
             return Ok(Some(1));
+        }
+        if range.contains(&0) {
+            return Ok(Some(0));
         }
         let count = self.catalog(name)?.len() as u32;
         Ok((0..=count).rev().find(|version| range.contains(version)))

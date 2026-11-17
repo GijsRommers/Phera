@@ -6,8 +6,10 @@ use anyhow::{Context, Result};
 use phera_ast::{Statement, StatementKind};
 use rayon::prelude::*;
 use regex::Regex;
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 pub(super) struct Source {
@@ -44,7 +46,12 @@ impl Source {
     }
 }
 
-pub(super) fn classes(sources: &[Source], vendor: &Path) -> Result<BTreeMap<String, PathBuf>> {
+pub(super) fn classes(
+    sources: &[Source],
+    vendor: &Path,
+    cache: &Path,
+) -> Result<BTreeMap<String, PathBuf>> {
+    fs::create_dir_all(cache)?;
     let mut files = Vec::new();
     for source in sources {
         for path in glob::glob(&source.directory.to_string_lossy())? {
@@ -84,10 +91,28 @@ pub(super) fn classes(sources: &[Source], vendor: &Path) -> Result<BTreeMap<Stri
             .map(|(path, source)| -> Result<_> {
                 let text = fs::read_to_string(path)
                     .with_context(|| format!("Cannot read PHP file {}.", path.display()))?;
-                let program = phera_parser::parse_on_current_stack(&text)
-                    .map_err(|error| anyhow::anyhow!("{}: {error}", path.display()))?;
-                let mut names = Vec::new();
-                declarations(&program.statements, "", &mut names);
+                let key = format!(
+                    "{:x}.json",
+                    Sha256::digest(
+                        [env!("CARGO_PKG_VERSION").as_bytes(), text.as_bytes()].concat()
+                    )
+                );
+                let cache_file = cache.join(key);
+                let cached: Option<Vec<String>> = fs::read(&cache_file)
+                    .ok()
+                    .and_then(|bytes| serde_json::from_slice(&bytes).ok());
+                let names = if let Some(names) = cached {
+                    names
+                } else {
+                    let program = phera_parser::parse_on_current_stack(&text)
+                        .map_err(|error| anyhow::anyhow!("{}: {error}", path.display()))?;
+                    let mut names = Vec::new();
+                    declarations(&program.statements, "", &mut names);
+                    let mut record = tempfile::NamedTempFile::new_in(cache)?;
+                    record.write_all(&serde_json::to_vec(&names)?)?;
+                    record.persist(&cache_file)?;
+                    names
+                };
                 Ok(names
                     .into_iter()
                     .filter(|name| compliant(name, path, source))

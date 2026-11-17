@@ -80,7 +80,8 @@ pub(crate) fn generate(project: &Project, packages: &[Package], options: &Option
             }
         }
     }
-    maps.classes = scan::classes(&scans, &vendor)?;
+    let store = crate::store::Store::open(options.cache_dir.as_deref())?;
+    maps.classes = scan::classes(&scans, &vendor, &store.directory.join("autoload"))?;
     maps.classes.insert(
         "Composer\\InstalledVersions".into(),
         vendor.join("composer/InstalledVersions.php"),

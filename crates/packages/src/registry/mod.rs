@@ -63,6 +63,20 @@ impl Registry {
             }
             let canonical = configuration["canonical"].as_bool().unwrap_or(true);
             match configuration["type"].as_str() {
+                Some("package") => {
+                    let entries = match &configuration["package"] {
+                        Value::Array(items) => items.clone(),
+                        value => vec![value.clone()],
+                    };
+                    let packages = entries
+                        .into_iter()
+                        .map(serde_json::from_value)
+                        .collect::<std::result::Result<Vec<Package>, _>>()?;
+                    repositories.push(Repository::Local {
+                        packages,
+                        canonical,
+                    });
+                }
                 Some("path" | "artifact") => repositories.push(Repository::Local {
                     packages: local::packages(project, configuration, &store, &network)?,
                     canonical,
@@ -124,6 +138,12 @@ impl Registry {
     }
 
     pub(crate) fn packages(&self, name: &str) -> Result<Vec<Package>> {
+        Package {
+            name: name.into(),
+            version: "1.0.0".into(),
+            data: Default::default(),
+        }
+        .validate()?;
         if let Some(known) = self
             .known
             .lock()
@@ -162,7 +182,9 @@ impl Registry {
                             .par_iter()
                             .map(|name| {
                                 let endpoint = template.replace("%package%", name);
-                                let url = reqwest::Url::parse(base)?.join(&endpoint)?.to_string();
+                                let url = reqwest::Url::parse(&format!("{base}/"))?
+                                    .join(&endpoint)?
+                                    .to_string();
                                 cache::fetch(&self.store, &self.network, &url, self.offline)
                             })
                             .collect::<Result<_>>()?;

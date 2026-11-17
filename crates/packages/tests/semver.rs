@@ -53,3 +53,20 @@ fn upstream_invalid_constraints() {
     }
     assert!(accepted.is_empty(), "incorrectly accepted: {accepted:?}");
 }
+
+#[test]
+fn upstream_satisfies_cases() {
+    let fixture: Value = serde_json::from_str(include_str!("fixtures/semver.json")).unwrap();
+    for case in fixture["satisfies"].as_array().unwrap() {
+        let expected = case[0].as_bool().unwrap();
+        let version = case[1].as_str().unwrap();
+        let text = case[2].as_str().unwrap();
+        assert_eq!(
+            Constraint::parse(text)
+                .unwrap()
+                .matches(&Version::parse(version).unwrap()),
+            expected,
+            "{version} / {text}"
+        );
+    }
+}
