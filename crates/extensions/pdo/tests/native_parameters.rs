@@ -124,7 +124,7 @@ async fn bindings_quoting_and_grouping_match_php() {
                 php_literal(&value)
             ));
         }
-        let expected = Command::new(support::PHP)
+        let expected = Command::new(support::php())
             .args(["-r", &php])
             .output()
             .unwrap();
@@ -136,8 +136,7 @@ async fn bindings_quoting_and_grouping_match_php() {
         let expected = String::from_utf8(expected.stdout).unwrap();
         let actual = format!("{}\n", actual.join("\n"));
         std::fs::write(
-            std::path::Path::new(support::SCRATCH)
-                .join(format!("native-parameters-{driver}.php.out")),
+            support::scratch().join(format!("native-parameters-{driver}.php.out")),
             &expected,
         )
         .unwrap();

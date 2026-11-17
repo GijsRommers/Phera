@@ -11,6 +11,7 @@ phera-ast.workspace = true
 phera-source.workspace = true
 
 [dev-dependencies]
+phera-extension-api.workspace = true
 phera-phpt.workspace = true
 
 [[test]]

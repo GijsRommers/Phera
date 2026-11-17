@@ -194,7 +194,8 @@ pub fn php_literal(value: &Value) -> String {
     }
 }
 
-fn find_php() -> Option<PathBuf> {
+/// Resolves the shared oracle binary: `PHERA_PHP`, Homebrew, then `PATH`.
+pub fn find_php() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("PHERA_PHP").map(PathBuf::from)
         && path.exists()
     {

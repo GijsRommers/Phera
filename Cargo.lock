@@ -995,6 +995,7 @@ name = "phera-parser"
 version = "0.1.0"
 dependencies = [
  "phera-ast",
+ "phera-extension-api",
  "phera-lexer",
  "phera-phpt",
  "phera-source",
@@ -1004,6 +1005,7 @@ dependencies = [
 name = "phera-phpt"
 version = "0.1.0"
 dependencies = [
+ "phera-extension-api",
  "phera-lexer",
 ]
 
@@ -1045,6 +1047,9 @@ version = "0.1.0"
 [[package]]
 name = "phera-value"
 version = "0.1.0"
+dependencies = [
+ "phera-extension-api",
+]
 
 [[package]]
 name = "phera-vm"

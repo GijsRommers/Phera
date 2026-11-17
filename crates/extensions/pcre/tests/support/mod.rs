@@ -102,7 +102,7 @@ function inspect($m) { return enc($m); }
     pub fn compare(self, name: &str) {
         // Feed stdin on a separate writer so large scripts/output cannot fill both pipes.
         // No temporary artifacts outside the task's assigned scratch directory.
-        let mut child = Command::new("/opt/homebrew/bin/php")
+        let mut child = Command::new(oracle::find_php().expect("PHP 8.5 oracle required"))
             .args(["-n", "-d", "memory_limit=1G", "-d", "error_reporting=-1"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
