@@ -1,6 +1,10 @@
-//! Byte string operations, with shared allocation and substring search helpers.
+//! String functions. PHP strings are bytes, not characters: every function
+//! here works on bytes, and none of them looks at the locale.
+//!
+//! The helpers below are what several modules share: the size limit every
+//! growing string checks, and substring search.
 
-use phera_extension_api::{NativeError, PhpString, Registry, Value};
+use phera_extension_api::{NativeError, Registry};
 
 mod base64;
 mod case;
@@ -24,6 +28,8 @@ mod text;
 mod trim;
 mod url;
 
+/// The longest string a function here builds before failing as PHP fails
+/// for a string past its memory limit.
 pub(crate) const MAX_STRING_BYTES: usize = 2 * 1024 * 1024 * 1024;
 
 pub(crate) fn register(registry: &mut Registry) {
@@ -36,6 +42,7 @@ pub(crate) fn register(registry: &mut Registry) {
         format::FUNCTIONS,
         html::FUNCTIONS,
         metaphone::FUNCTIONS,
+        number_format::FUNCTIONS,
         padding::FUNCTIONS,
         replace::FUNCTIONS,
         search::FUNCTIONS,
@@ -51,11 +58,6 @@ pub(crate) fn register(registry: &mut Registry) {
     for entry in modules.into_iter().flatten() {
         registry.function(*entry);
     }
-    number_format::register(registry);
-}
-
-pub(super) fn bytes(value: impl Into<Vec<u8>>) -> Value {
-    Value::String(PhpString::from(value.into()))
 }
 
 /// PHP's error for a string that would pass [`MAX_STRING_BYTES`].

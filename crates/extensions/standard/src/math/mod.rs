@@ -11,7 +11,9 @@ pub(crate) mod rounding;
 mod trig;
 
 pub(crate) fn register(registry: &mut Registry) {
-    rounding::register(registry);
+    for entry in rounding::FUNCTIONS {
+        registry.function(*entry);
+    }
     base::register(registry);
     aggregate::register(registry);
     basic::register(registry);
