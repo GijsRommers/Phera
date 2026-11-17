@@ -43,19 +43,25 @@ for ($cp = 0; $cp <= 0x10FFFF; $cp++) {{
         );
         let lines = oracle::run_php(&format!("mbstring-roundtrip-{name}"), &script).unwrap();
         let count = lines.len();
+        // As the PHP script does: ISO-2022-JP leaves out what it cannot hold.
+        let substitute = if name == "ISO-2022-JP" {
+            Value::from("none")
+        } else {
+            Value::Int(63)
+        };
+        call(
+            &registry,
+            &mut ctx,
+            "mb_substitute_character",
+            vec![substitute],
+        )
+        .unwrap();
         for line in lines {
             let mut fields = line.split('|');
             let cp: i64 = fields.next().unwrap().parse().unwrap();
             let expected = fields.next().unwrap();
             let back = fields.next().unwrap();
             let encoded = if name == "ISO-2022-JP" {
-                call(
-                    &registry,
-                    &mut ctx,
-                    "mb_substitute_character",
-                    vec![Value::from("none")],
-                )
-                .unwrap();
                 let utf8 = char::from_u32(cp as u32).unwrap().to_string();
                 call(
                     &registry,
@@ -64,13 +70,6 @@ for ($cp = 0; $cp <= 0x10FFFF; $cp++) {{
                     vec![Value::from(utf8), Value::from(name), Value::from("UTF-8")],
                 )
             } else {
-                call(
-                    &registry,
-                    &mut ctx,
-                    "mb_substitute_character",
-                    vec![Value::Int(63)],
-                )
-                .unwrap();
                 call(
                     &registry,
                     &mut ctx,
