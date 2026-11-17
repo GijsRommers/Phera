@@ -93,7 +93,7 @@ impl Operation<'_> {
             for (key, value) in subjects.iter() {
                 let result = self.subject(context, value).await?;
                 if !result.is_null() {
-                    output.insert(key.clone(), result);
+                    output.insert(key, result);
                 }
             }
             Ok(Value::from(output))

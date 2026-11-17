@@ -24,7 +24,7 @@ pub(crate) fn read_at(object: &Object, key: &ArrayKey, slot: Option<usize>) -> O
             .update(|properties| {
                 properties
                     .entry_at(position)
-                    .filter(|(stored, _)| *stored == key)
+                    .filter(|(stored, _)| *stored == *key)
                     .map(|(_, value)| value.clone())
             })
             .flatten()
@@ -41,7 +41,7 @@ pub(crate) fn take(object: &Object, key: &ArrayKey) -> Value {
         .update(|properties| {
             if let Some(position) = position
                 && let Some((stored, value)) = properties.entry_at_mut(position)
-                && stored == key
+                && stored == *key
             {
                 return std::mem::take(value);
             }
@@ -64,7 +64,7 @@ pub(crate) fn write_at(object: &Object, key: ArrayKey, slot: Option<usize>, valu
     object.update(|properties| {
         if let Some(position) = slot
             && let Some((stored, target)) = properties.entry_at_mut(position)
-            && *stored == key
+            && stored == key
         {
             *target = value;
             return;
@@ -86,7 +86,7 @@ pub(crate) fn append_at(
             let position = slot.filter(|position| {
                 properties
                     .entry_at(*position)
-                    .is_some_and(|(stored, _)| stored == key)
+                    .is_some_and(|(stored, _)| stored == *key)
             });
             let target = if let Some(position) = position {
                 properties.entry_at_mut(position).map(|(_, value)| value)

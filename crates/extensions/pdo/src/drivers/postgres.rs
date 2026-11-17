@@ -180,6 +180,10 @@ impl Postgres {
                 } else {
                     sql.render(|i| literals[i].clone())
                 };
+                // Emulation sends SQL directly; PostgreSQL diagnoses unbound $n tokens.
+                if sql.has_dollar_parameters {
+                    return self.direct(&rendered).await;
+                }
                 self.prepare_query(&rendered).await?
             }
             _ => return Err(connection_error("Mismatched database driver")),

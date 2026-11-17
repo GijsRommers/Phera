@@ -45,7 +45,7 @@ async fn run(context: &mut dyn Context, arguments: Vec<Value>, name: &str) -> Na
     if let Some(array) = args::array(&arguments, 0) {
         for (key, value) in array.iter() {
             let result = context
-                .call(callback, vec![value.clone(), super::key_value(key)])
+                .call(callback, vec![value.clone(), super::key_value(&key)])
                 .await?;
             let matches = cast_to_bool(&result, context.diagnostics());
             if name == "array_all" {
@@ -55,7 +55,7 @@ async fn run(context: &mut dyn Context, arguments: Vec<Value>, name: &str) -> Na
             } else if matches {
                 return Ok(match name {
                     "array_find" => value.deref().clone(),
-                    "array_find_key" => super::key_value(key),
+                    "array_find_key" => super::key_value(&key),
                     _ => Value::Bool(true),
                 });
             }

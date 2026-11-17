@@ -98,7 +98,7 @@ pub fn execute_bindings(params: &Value) -> Result<HashMap<String, Binding>, Nati
     if let Value::Array(array) = &*params.deref() {
         for (param, value) in array.iter() {
             let name = match param {
-                ArrayKey::Int(position) => key(&Value::Int(*position), None)?,
+                ArrayKey::Int(position) => key(&Value::Int(position), None)?,
                 ArrayKey::String(name) => name.to_string_lossy().trim_start_matches(':').to_owned(),
             };
             bindings.insert(

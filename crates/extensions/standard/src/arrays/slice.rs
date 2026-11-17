@@ -68,7 +68,7 @@ fn array_slice(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         for (key, value) in array.iter().skip(start).take(end - start) {
             insert(
                 &mut result,
-                key,
+                &key,
                 value,
                 super::Keys::from_preserve(args::bool(arguments, 3).unwrap_or(false)),
             )?;
@@ -84,7 +84,7 @@ fn array_reverse(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         for (key, value) in array.iter().collect::<Vec<_>>().into_iter().rev() {
             insert(
                 &mut result,
-                key,
+                &key,
                 value,
                 super::Keys::from_preserve(args::bool(arguments, 1).unwrap_or(false)),
             )?;
