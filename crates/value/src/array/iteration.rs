@@ -1,80 +1,87 @@
-//! Owned keys let lists compute their keys without allocating backing storage.
-//! Positional accessors inline so value-only callers can discard the computed key.
+//! Walking an array in order: `foreach ($a as $k => $v)`.
+//!
+//! Keys come back owned. A list stores no keys, so its keys are made from
+//! positions; a map's keys are cloned, which for a string key is a
+//! reference count, not a copy of the bytes.
+//!
+//! A `foreach` in the VM walks by position (`first_position`,
+//! `next_position`, `entry_at`) rather than holding an iterator, because the
+//! loop body may change the array it walks.
 
-use super::storage::Storage;
+use super::storage::{Entry, Storage};
 use super::{ArrayKey, PhpArray};
 use crate::value::Value;
 
-impl PhpArray {
-    /// Compute list keys, cloning only the reference-counted keys of maps.
-    pub fn iter(&self) -> impl Iterator<Item = (ArrayKey, &Value)> {
-        let (list, map) = match &self.storage {
-            Storage::List(values) => (Some(values), None),
-            Storage::Map(map) => (None, Some(&map.entries)),
-        };
-        list.into_iter()
-            .flatten()
-            .enumerate()
-            .filter_map(|(position, value)| {
-                value
-                    .as_ref()
-                    .map(|value| (ArrayKey::Int(position as i64), value))
-            })
-            .chain(
-                map.into_iter().flatten().filter_map(|entry| {
-                    entry.value.as_ref().map(|value| (entry.key.clone(), value))
-                }),
-            )
+impl Storage {
+    /// The slots of both shapes as two slices, one of them empty. Chaining
+    /// an iterator over each gives one iterator type for either shape.
+    fn parts(&self) -> (&[Option<Value>], &[Entry]) {
+        match self {
+            Self::List(values) => (values, &[]),
+            Self::Map(map) => (&[], &map.entries),
+        }
     }
 
-    /// Mutating a value never changes its key or physical position.
+    fn parts_mut(&mut self) -> (&mut [Option<Value>], &mut [Entry]) {
+        match self {
+            Self::List(values) => (values, &mut []),
+            Self::Map(map) => (&mut [], &mut map.entries),
+        }
+    }
+}
+
+impl PhpArray {
+    pub fn iter(&self) -> impl Iterator<Item = (ArrayKey, &Value)> {
+        let (list, entries) = self.storage.parts();
+        let list = list.iter().enumerate().filter_map(|(position, value)| {
+            value
+                .as_ref()
+                .map(|value| (ArrayKey::Int(position as i64), value))
+        });
+        let map = entries
+            .iter()
+            .filter_map(|entry| entry.value.as_ref().map(|value| (entry.key.clone(), value)));
+        list.chain(map)
+    }
+
+    /// Values can change in place; keys and positions cannot.
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (ArrayKey, &mut Value)> {
-        let (list, map) = match &mut self.storage {
-            Storage::List(values) => (Some(values), None),
-            Storage::Map(map) => (None, Some(&mut map.entries)),
-        };
-        list.into_iter()
-            .flatten()
-            .enumerate()
-            .filter_map(|(position, value)| {
-                value
-                    .as_mut()
-                    .map(|value| (ArrayKey::Int(position as i64), value))
-            })
-            .chain(
-                map.into_iter().flatten().filter_map(|entry| {
-                    entry.value.as_mut().map(|value| (entry.key.clone(), value))
-                }),
-            )
+        let (list, entries) = self.storage.parts_mut();
+        let list = list.iter_mut().enumerate().filter_map(|(position, value)| {
+            value
+                .as_mut()
+                .map(|value| (ArrayKey::Int(position as i64), value))
+        });
+        let map = entries
+            .iter_mut()
+            .filter_map(|entry| entry.value.as_mut().map(|value| (entry.key.clone(), value)));
+        list.chain(map)
     }
 
     pub fn keys(&self) -> impl Iterator<Item = ArrayKey> {
         self.iter().map(|(key, _)| key)
     }
 
-    /// Value-only walks avoid even incrementing string-key reference counts.
+    /// Cheaper than `iter` when the keys are not needed: no key is made or
+    /// cloned.
     pub fn values(&self) -> impl Iterator<Item = &Value> {
-        let (list, map) = match &self.storage {
-            Storage::List(values) => (Some(values), None),
-            Storage::Map(map) => (None, Some(&map.entries)),
-        };
-        list.into_iter().flatten().filter_map(Option::as_ref).chain(
-            map.into_iter()
-                .flatten()
-                .filter_map(|entry| entry.value.as_ref()),
-        )
+        let (list, entries) = self.storage.parts();
+        list.iter()
+            .flatten()
+            .chain(entries.iter().filter_map(|entry| entry.value.as_ref()))
     }
 
     #[inline(always)]
     pub fn first(&self) -> Option<(ArrayKey, &Value)> {
         self.entry_at(self.first_position()?)
     }
+
     #[inline(always)]
     pub fn last(&self) -> Option<(ArrayKey, &Value)> {
         self.entry_at(self.last_position()?)
     }
 
-    /// Positional iteration skips holes without changing the caller's stored position.
+    /// Position of the first live slot.
     #[inline(always)]
     pub fn first_position(&self) -> Option<usize> {
         match &self.storage {
@@ -83,6 +90,7 @@ impl PhpArray {
         }
     }
 
+    /// Position of the last live slot.
     #[inline(always)]
     pub(super) fn last_position(&self) -> Option<usize> {
         match &self.storage {
@@ -91,11 +99,13 @@ impl PhpArray {
         }
     }
 
-    /// Bounds-check the saved position: mutation may have compacted the array meanwhile.
+    /// Position of the first live slot after `pos`. `pos` may be stale: the
+    /// array may have been compacted since, so it is not trusted to be in
+    /// range.
     #[inline(always)]
     pub fn next_position(&self, pos: usize) -> Option<usize> {
         let start = pos.checked_add(1)?;
-        // Dense arrays need no per-slot tag scan; most foreach loops stay dense.
+        // Without holes the next slot is live; most arrays have none.
         if self.dead == 0 {
             return (start < self.storage.len()).then_some(start);
         }
@@ -110,7 +120,7 @@ impl PhpArray {
         Some(start + offset)
     }
 
-    /// Return an owned key so a list never needs a backing key allocation.
+    /// The key and value at `pos`, or `None` for a hole or past the end.
     #[inline(always)]
     pub fn entry_at(&self, pos: usize) -> Option<(ArrayKey, &Value)> {
         match &self.storage {
@@ -122,7 +132,8 @@ impl PhpArray {
         }
     }
 
-    /// Borrow the slot alone; the returned key cannot change the stored key.
+    /// Like [`PhpArray::entry_at`], with the value writable. The key is a
+    /// copy, so the stored key cannot change.
     #[inline(always)]
     pub fn entry_at_mut(&mut self, pos: usize) -> Option<(ArrayKey, &mut Value)> {
         match &mut self.storage {
