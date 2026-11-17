@@ -4,7 +4,8 @@
 //! [10, 20, 30]           List: [Some(10), Some(20), Some(30)]
 //!                             keys 0, 1, 2 are computed, never stored
 //! ['name' => 10, 7 => 20] Map:  [('name', Some(10)), (7, Some(20))]
-//!                             index: hash(key) -> entry position (u32)
+//!                             small map: scan entries directly
+//!                             above 8 entries: hash(key) -> position (u32)
 //! ```
 //!
 //! A string or out-of-order integer key turns a list into a map. Unset leaves
