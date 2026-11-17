@@ -19,7 +19,6 @@ whirlpool.workspace = true
 gost94.workspace = true
 xxhash-rust.workspace = true
 subtle.workspace = true
-hex.workspace = true
 bcrypt.workspace = true
 argon2.workspace = true
 pwhash.workspace = true

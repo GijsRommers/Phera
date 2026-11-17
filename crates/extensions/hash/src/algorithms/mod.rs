@@ -140,18 +140,17 @@ pub const ALGORITHMS: [(&str, Algorithm); 60] = [
     ("haval256,5", Haval(256, 5)),
 ];
 
-/// A name as one number, for a fast lookup: the name in lowercase, padded
-/// with zeros, and its length in the last byte. `None` for a name too long
-/// to be an algorithm's.
+/// A name as one number, for a fast lookup: the name's bytes in lowercase,
+/// then its length in the lowest byte, so that no two names share a key.
+/// `None` for a name too long to be an algorithm's.
 fn key(name: &[u8]) -> Option<u128> {
     if name.len() > 15 {
         return None;
     }
-    let mut bytes = [0; 16];
-    bytes[..name.len()].copy_from_slice(name);
-    bytes.make_ascii_lowercase();
-    bytes[15] = name.len() as u8;
-    Some(u128::from_be_bytes(bytes))
+    let bytes = name.iter().fold(0u128, |key, byte| {
+        key << 8 | u128::from(byte.to_ascii_lowercase())
+    });
+    Some(bytes << 8 | name.len() as u128)
 }
 
 impl Algorithm {

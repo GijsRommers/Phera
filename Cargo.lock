@@ -1179,7 +1179,6 @@ dependencies = [
  "digest 0.10.7",
  "getrandom 0.3.4",
  "gost94",
- "hex",
  "md-5 0.10.6",
  "md2",
  "md4",

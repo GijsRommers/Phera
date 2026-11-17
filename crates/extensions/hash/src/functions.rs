@@ -6,12 +6,26 @@ use crate::{
 use phera_extension_api::{Context, NativeError, NativeResult, PhpArray, Value, args};
 use subtle::ConstantTimeEq;
 
-pub fn output(bytes: Vec<u8>, binary: bool) -> Value {
+/// A digest as PHP returns it: the raw bytes, or lowercase hexadecimal.
+pub fn output(digest: Vec<u8>, binary: bool) -> Value {
     if binary {
-        Value::from(bytes)
+        Value::from(digest)
     } else {
-        Value::from(hex::encode(bytes))
+        Value::from(hex(&digest))
     }
+}
+
+/// Lowercase hexadecimal, two digits per byte.
+fn hex(bytes: &[u8]) -> Vec<u8> {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut text = vec![0; bytes.len() * 2];
+    for (pair, byte) in text.as_chunks_mut::<2>().0.iter_mut().zip(bytes) {
+        *pair = [
+            DIGITS[usize::from(byte >> 4)],
+            DIGITS[usize::from(byte & 0x0f)],
+        ];
+    }
+    text
 }
 pub fn hash(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let algorithm = options::algorithm(args::bytes(arguments, 0), "hash")?;
@@ -147,7 +161,9 @@ pub fn pbkdf2(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     if binary {
         Ok(Value::from(output))
     } else {
-        Ok(Value::from(hex::encode(output)[..length].to_string()))
+        let mut text = hex(&output);
+        text.truncate(length);
+        Ok(Value::from(text))
     }
 }
 pub fn hkdf(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
