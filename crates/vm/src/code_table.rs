@@ -71,6 +71,8 @@ pub(crate) struct FunctionFacts {
     /// One bit per parameter that takes a reference or is variadic (the
     /// first 64): a `Send` to it is not a plain copy.
     special: u64,
+    /// One bit per parameter that takes a reference (the first 64).
+    by_reference: u64,
     /// The declared built-in types of each parameter, for the one-bit check.
     pub(crate) parameter_masks: Box<[TypeMask]>,
     /// The declared return type's built-in types, when there is a return type.
@@ -95,6 +97,11 @@ impl FunctionFacts {
     /// Whether parameter `index` has a declared type.
     pub(crate) fn is_typed(&self, index: usize) -> bool {
         index < 64 && self.typed & (1 << index) != 0
+    }
+
+    /// Whether parameter `index` is declared, by reference and not variadic.
+    pub(crate) fn takes_reference(&self, index: usize) -> bool {
+        index < self.parameters as usize && index < 64 && self.by_reference & (1 << index) != 0
     }
 
     /// Whether parameter `index` is declared and takes a copy of its
@@ -125,6 +132,7 @@ impl FunctionFacts {
         };
         let typed = bits(|parameter| parameter.ty.is_some());
         let special = bits(|parameter| parameter.by_reference || parameter.variadic);
+        let by_reference = bits(|parameter| parameter.by_reference && !parameter.variadic);
         let general = body.parameters.len() > 64
             || body.argument_layout == phera_bytecode::ArgumentLayout::Variadic;
         Self {
@@ -140,6 +148,7 @@ impl FunctionFacts {
                 .map_or(0, |index| index as u16 + 1),
             typed,
             special,
+            by_reference,
             parameter_masks: masks,
             return_mask: body.return_type.map(mask_of),
             shape: if general {

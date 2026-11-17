@@ -24,6 +24,7 @@ pub(crate) mod callback_binding;
 pub(crate) mod callback_execution;
 pub(crate) mod callback_references;
 pub(crate) mod execution_loop;
+mod fast_arguments;
 mod fast_calls;
 mod fast_methods;
 mod fast_objects;

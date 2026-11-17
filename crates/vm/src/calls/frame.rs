@@ -72,6 +72,12 @@ impl FrameFlags {
     /// The frame runs a closure: the closure object is two registers below
     /// its first, its bound `$this` (or nothing) one below.
     const CLOSURE: u16 = 1 << 4;
+    /// The top eight bits hold how many arguments the call passed, when it
+    /// passed fewer than the function's parameters (at most 64, see
+    /// `FunctionShape::Plain`), so that a call with defaults needs no
+    /// side-table entry. All ones means "one per parameter".
+    const PASSED_SHIFT: u16 = 8;
+    const PASSED_UNKNOWN: u16 = 0xff;
 
     fn of_kind(kind: CallKind) -> u16 {
         match kind {
@@ -99,7 +105,8 @@ impl Frame {
         base: usize,
         destination: Option<Reg>,
     ) -> Self {
-        let mut flags = FrameFlags(FrameFlags::of_kind(kind));
+        let passed = FrameFlags::PASSED_UNKNOWN << FrameFlags::PASSED_SHIFT;
+        let mut flags = FrameFlags(FrameFlags::of_kind(kind) | passed);
         if destination.is_none() {
             flags.0 |= FrameFlags::CALLBACK;
         }
@@ -116,6 +123,23 @@ impl Frame {
     #[inline]
     pub(crate) fn base(&self) -> usize {
         self.base as usize
+    }
+
+    /// The same frame, recording that its call passed only `passed`
+    /// arguments (fewer than 64).
+    #[inline]
+    pub(crate) fn with_passed(mut self, passed: usize) -> Self {
+        let mask = FrameFlags::PASSED_UNKNOWN << FrameFlags::PASSED_SHIFT;
+        self.flags.0 = (self.flags.0 & !mask) | ((passed as u16) << FrameFlags::PASSED_SHIFT);
+        self
+    }
+
+    /// How many arguments the call passed, when it recorded that in the
+    /// frame (fewer than the parameters, through the quick entry).
+    #[inline]
+    pub(crate) fn passed(&self) -> Option<usize> {
+        let passed = self.flags.0 >> FrameFlags::PASSED_SHIFT;
+        (passed != FrameFlags::PASSED_UNKNOWN).then_some(passed as usize)
     }
 
     /// What kind of code the frame runs.
@@ -310,6 +334,7 @@ impl<'a> FrameView<'a> {
         self.extras
             .arguments
             .supplied
+            .or(self.frame.passed())
             .unwrap_or(self.function().parameters.len())
     }
 
@@ -318,6 +343,7 @@ impl<'a> FrameView<'a> {
         self.extras
             .arguments
             .count
+            .or(self.frame.passed())
             .unwrap_or(self.function().parameters.len())
     }
 

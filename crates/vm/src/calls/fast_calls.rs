@@ -63,13 +63,12 @@ impl Machine<'_> {
             self.registers.move_slot(from + index, base + index);
         }
         self.publish(caller.ip);
-        let frame = Frame::new(function, base, Some(destination));
-        self.stack.push(frame);
+        let mut frame = Frame::new(function, base, Some(destination));
         if count < facts.parameters as usize {
-            let arguments = &mut self.stack.current_extras_mut().arguments;
-            arguments.supplied = Some(count);
-            arguments.count = Some(count);
+            frame = frame.with_passed(count);
         }
+        self.stack.push(frame);
+
         self.spend_work();
         Step::Switched(Position { frame, ip: 0 })
     }
@@ -238,15 +237,13 @@ impl Machine<'_> {
             return Step::Slow;
         };
         self.publish(position.ip);
-        let frame = Frame::of_kind(function, call.kind, call.base(), Some(destination));
+        let mut frame = Frame::of_kind(function, call.kind, call.base(), Some(destination));
+        if sent < facts.parameters as usize {
+            frame = frame.with_passed(sent);
+        }
         self.stack.push(frame);
-        if call.called.is_some() || sent < facts.parameters as usize {
-            let extras = self.stack.current_extras_mut();
-            extras.called = call.called;
-            if sent < facts.parameters as usize {
-                extras.arguments.supplied = Some(sent);
-                extras.arguments.count = Some(call.counted as usize);
-            }
+        if call.called.is_some() {
+            self.stack.current_extras_mut().called = call.called;
         }
         self.spend_work();
         Step::Switched(Position { frame, ip: 0 })

@@ -233,9 +233,16 @@ impl Machine<'_> {
                 method,
                 binding,
             } => self.prepare_static(position, (class, method), binding),
-            Instruction::SendValue { src } | Instruction::SendLocal { local: src } => {
-                self.send(position, src)
+            Instruction::SendValue { src } => self.send(position, src),
+            Instruction::SendLocal { local } => match self.send(position, local) {
+                Step::Slow => self.send_reference(position, local),
+                done => done,
+            },
+            Instruction::ReceiveDefault { param, passed } => {
+                self.receive_default(position, param, passed)
             }
+            Instruction::LoadConst { dst, constant } => self.load_constant(position, dst, constant),
+            Instruction::CheckType { local, ty } => self.check_type(position, local, ty),
             Instruction::Call { dst } => self.enter_prepared(position, dst),
             Instruction::New { class } => self.new_object(position, class),
             Instruction::InitDynamicCall { callee } => self.prepare_closure(position, callee),
