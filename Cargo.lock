@@ -983,6 +983,7 @@ dependencies = [
  "chrono",
  "mysql_async",
  "phera-extension-api",
+ "phera-io-pool",
  "tokio",
  "tokio-postgres",
 ]
@@ -1000,6 +1001,13 @@ name = "phera-extension-api"
 version = "0.1.0"
 dependencies = [
  "phera-value",
+]
+
+[[package]]
+name = "phera-io-pool"
+version = "0.1.0"
+dependencies = [
+ "tokio",
 ]
 
 [[package]]
