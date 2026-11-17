@@ -129,7 +129,7 @@ impl Encoder {
             Value::Array(array) => {
                 let entries = array
                     .iter()
-                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .map(|(key, value)| (key, value.clone()))
                     .collect();
                 self.container(
                     Rc::as_ptr(&array) as usize,
@@ -148,7 +148,7 @@ impl Encoder {
                         }
                         _ => true,
                     })
-                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .map(|(key, value)| (key, value.clone()))
                     .collect();
                 self.container(Rc::as_ptr(&object) as usize, entries, true, level);
             }

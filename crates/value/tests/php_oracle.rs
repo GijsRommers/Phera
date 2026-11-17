@@ -59,7 +59,7 @@ fn enc_value(v: &Value) -> String {
         Value::Array(a) => {
             let mut s = String::from("A(");
             for (k, val) in a.iter() {
-                s.push_str(&enc_key(k));
+                s.push_str(&enc_key(&k));
                 s.push('>');
                 s.push_str(&enc_value(val));
                 s.push(';');
@@ -71,7 +71,7 @@ fn enc_value(v: &Value) -> String {
             let props = o.to_array();
             let mut s = format!("O:{}(", o.class.name());
             for (k, val) in props.iter() {
-                s.push_str(&enc_key(k));
+                s.push_str(&enc_key(&k));
                 s.push('>');
                 s.push_str(&enc_value(val));
                 s.push(';');

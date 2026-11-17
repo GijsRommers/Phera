@@ -29,7 +29,7 @@ fn current(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
 fn key(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(args::array(arguments, 0)
         .and_then(|array| array.key())
-        .map_or(Value::Null, key_value))
+        .map_or(Value::Null, |key| key_value(&key)))
 }
 
 /// Copy-on-write also isolates the cursor; a borrowed caller cell is a PHP Error.

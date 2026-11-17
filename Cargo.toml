@@ -63,6 +63,7 @@ tokio = { version = "1", features = [
     "rt", "rt-multi-thread", "net", "time", "sync", "signal", "macros",
 ] }
 foldhash = "0.2"
+hashbrown = { version = "0.17", default-features = false }
 mimalloc = { version = "0.1", default-features = false }
 # PHP's own regex engine. Pinned because the bundled PCRE2 source version
 # (10.46) decides compile error texts.

@@ -13,6 +13,8 @@ pub struct Sql {
     pub source: String,
     pub parameters: Vec<Parameter>,
     spans: Vec<(usize, usize)>,
+    /// Native PostgreSQL tokens are not PDO placeholders and must not be rewritten.
+    pub has_dollar_parameters: bool,
 }
 
 impl Sql {
@@ -21,6 +23,7 @@ impl Sql {
         let mut parameters = Vec::new();
         let mut spans = Vec::new();
         let mut index = 0;
+        let mut has_dollar_parameters = false;
         while index < bytes.len() {
             let start = index;
             match bytes[index] {
@@ -28,7 +31,15 @@ impl Sql {
                 b'-' if bytes.get(index + 1) == Some(&b'-') => index = line(bytes, index),
                 b'#' => index = line(bytes, index),
                 b'/' if bytes.get(index + 1) == Some(&b'*') => index = comment(bytes, index),
-                b'$' => index = dollar(bytes, index).unwrap_or(index + 1),
+                b'$' => {
+                    if let Some(end) = dollar(bytes, index) {
+                        index = end;
+                    } else {
+                        has_dollar_parameters |=
+                            bytes.get(index + 1).is_some_and(u8::is_ascii_digit);
+                        index += 1;
+                    }
+                }
                 b':' if bytes.get(index + 1) == Some(&b':') => index += 2,
                 b':' if bytes.get(index + 1).is_some_and(|b| name_start(*b)) => {
                     index += 2;
@@ -60,6 +71,7 @@ impl Sql {
             source,
             parameters,
             spans,
+            has_dollar_parameters,
         })
     }
 

@@ -24,7 +24,7 @@ fn enc(v: &Value) -> String {
                 .map(|(k, v)| format!(
                     "{}>{};",
                     enc(&match k {
-                        ArrayKey::Int(i) => Value::Int(*i),
+                        ArrayKey::Int(i) => Value::Int(i),
                         ArrayKey::String(s) => Value::String(s.clone()),
                     }),
                     enc(v)
@@ -66,7 +66,7 @@ fn php(v: &Value) -> String {
                 .map(|(k, v)| format!(
                     "{}=>{}",
                     php(&match k {
-                        ArrayKey::Int(i) => Value::Int(*i),
+                        ArrayKey::Int(i) => Value::Int(i),
                         ArrayKey::String(s) => Value::String(s.clone()),
                     }),
                     php(v)

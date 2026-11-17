@@ -12,6 +12,16 @@ pub fn ordered<'a>(
     bindings: &'a HashMap<String, Binding>,
     driver: DriverName,
 ) -> Result<Vec<&'a Binding>, DbError> {
+    // With no PDO tokens, PHP accepts numeric bindings but sends SQL NULLs.
+    // Native $n tokens are left for PostgreSQL and do not create a PDO parameter map.
+    if driver == DriverName::Postgres && sql.parameters.is_empty() {
+        for key in bindings.keys() {
+            if key.parse::<usize>().is_err() {
+                return Err(DbError::parameter(&format!(":{key}")));
+            }
+        }
+        return Ok(bindings.values().collect());
+    }
     let named = sql
         .parameters
         .iter()
