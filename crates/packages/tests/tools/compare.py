@@ -206,8 +206,10 @@ for fixture in fixtures:
         rows.append(row)
         print(json.dumps(row), flush=True)
 (WORK / 'results.json').write_text(json.dumps(rows, indent=2) + '\n')
-if any(row.get('error') or row.get('phera_install') or row.get('phera_update')
+commands = ['composer_install', 'phera_install', 'composer_update', 'phera_update']
+required = ['installed_identical', 'autoload_identical', 'composer_accepts_lock',
+            'composer_installs_phera_lock']
+if any(row.get('error') or any(row.get(key, 1) != 0 for key in commands)
        or row.get('package_differences') or row.get('resolution_differences')
-       or row.get('composer_installs_phera_lock') is False
-       or row.get('installed_identical') is False or row.get('autoload_identical') is False for row in rows):
+       or not all(row.get(key, False) for key in required) for row in rows):
     raise SystemExit(1)
