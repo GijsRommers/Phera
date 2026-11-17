@@ -196,6 +196,7 @@ Real PHP is the oracle at every layer.
 | 5 | **Web.** `phera serve` runs scripts with superglobals and `header()`. Then uploads, cookies, sessions, autoloading. | Started |
 | 6 | **Frameworks.** Reflection, sessions, PDO. Boot a bare Symfony kernel, then a Laravel hello world. | |
 | 7 | **Snapshot and fork.** Phase 2 of request isolation. | |
+| 8 | **Built-in tools.** `phera check` (a type checker) and `phera test` (a PHPUnit-compatible runner). Section 11. | Planned |
 
 ## 9. Objects, exceptions, closures, generators
 
@@ -545,3 +546,85 @@ at load plus fixed-size register windows can recover safely.
 to 1.4 times PHP, tight integer loops at 1.2 to 1.5, arrays and short
 strings at or near PHP. Beyond that only a JIT helps, and only for numeric
 loops.
+
+## 11. Tools built into the runtime
+
+Two tools that PHP projects today get from separate packages written in PHP
+are planned as part of the `phera` binary, sharing its lexer, parser and AST.
+One front end means the tools and the runtime cannot disagree about what a
+file means, and native code makes them fast enough to run on every save.
+
+### 11.1 `phera check`: a type checker
+
+What PHPStan and Psalm do: find errors without running the code.
+
+- **Pipeline.** Find the files; parse them in parallel (the parser is pure,
+  so this scales with cores); collect every declaration (classes,
+  interfaces, traits, enums, functions, constants, with their signatures)
+  into one index for the project; then analyse each function body: track the
+  type of every variable through the control flow, infer the type of every
+  expression, and let rules report what cannot be right.
+- **Types.** A small lattice: the scalar types, literal values, `null`,
+  unions, class names with their ancestry, `list<T>` and `array<K, V>`,
+  array shapes, `callable` signatures, `mixed`, `never`. Declared native
+  types are facts; everything else is inferred.
+- **Knowledge of PHP itself** comes from php-src's own `.stub.php` files,
+  parsed by Phera's parser at build time into a compact table. So the checker
+  knows every built-in function and class of PHP, not only those the runtime
+  implements so far.
+- **Levels**, as in PHPStan, so a project can adopt it gradually. Level 0:
+  unknown classes, functions, methods on `$this`, constants; wrong argument
+  counts; variables that are certainly undefined. Then: possibly undefined
+  variables; methods and properties on any expression whose type is known;
+  return and property types; dead code and comparisons that are always true
+  or false; argument types; and from there PHPDoc types (`@param`,
+  `@return`, `@var`, generics, shapes).
+- **Output**: a readable report, JSON, and annotations for CI; a baseline
+  file to adopt it on an existing code base; `@phpstan-ignore` and
+  `@psalm-suppress` comments are honoured so existing code needs no edits.
+- **How it is verified**: differentially. A corpus of small PHP files, each
+  with one deliberate error or none, is run through PHPStan at the matching
+  level and through `phera check`; both must flag the same lines. Then real
+  open-source projects, comparing the reports.
+- **Not in the first versions**: a plugin interface, and full parity with
+  PHPStan's generics inference.
+
+### 11.2 `phera test`: a test runner
+
+Existing PHPUnit tests should run unchanged.
+
+- **Compatible surface**: `PHPUnit\Framework\TestCase` with `setUp`,
+  `tearDown` and their class-level forms; the assertions; `expectException`
+  and friends; data providers; tests found by the `test` prefix and by
+  attributes; `phpunit.xml` for suites and bootstrap; PHPUnit's exit codes,
+  a familiar progress display, and JUnit XML for CI.
+- **Native**: the assertions are native methods; discovery and scheduling
+  belong to the runtime. Every test class runs in its own fresh VM as a
+  task, so tests are isolated from each other without extra processes and
+  run in parallel on all cores by default.
+- **Needs first**: namespaces with `use`, autoloading (Composer's PSR-4 and
+  class map), attributes, traits. So it follows those engine features.
+- **Later**: mock objects (`createMock`), which need classes generated at
+  run time.
+- **How it is verified**: the same test suites under real PHPUnit and under
+  `phera test` must give the same result per test.
+
+### 11.3 Order of feature work towards "it all matches"
+
+The measure stays the same: the same script, the same output as PHP 8.5.
+
+1. Magic methods (`__toString`, `__get`, `__set`, `__isset`, `__unset`,
+   `__call`, `__callStatic`, `__clone`, `__destruct`), and the engine's
+   interfaces (`Stringable`, `Countable`, `ArrayAccess`, `Iterator`,
+   `IteratorAggregate`, `Traversable`, `JsonSerializable`).
+2. Traits, enums, readonly classes, first-class enum functions.
+3. Namespaces end to end, autoloading, `include` paths, Composer.
+4. Attributes and reflection, as far as frameworks and PHPUnit use them.
+5. Generators.
+6. The standard library in breadth: date and time, mbstring, files and
+   streams, output buffering, hashing, serialization, SPL.
+7. Sessions, cookies, uploads for the web side.
+
+Items 1 to 5 change the engine and wait for the call redesign of section 10
+to land, so that they are built on the new call path and not twice. Item 6
+is independent of the engine and runs beside it.
