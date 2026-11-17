@@ -75,6 +75,8 @@ fn php_filter_matrix() {
                 FORCE_ARRAY,
                 REQUIRE_SCALAR,
                 NULL_ON_FAILURE,
+                THROW,
+                THROW | REQUIRE_ARRAY,
             ]
             .into_iter()
             .chain(extra_flags.iter().copied())

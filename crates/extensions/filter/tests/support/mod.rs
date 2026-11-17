@@ -80,8 +80,20 @@ impl Matrix {
         let mut script = String::from("<?php\n");
         script.push_str(prelude);
         script.push_str(HARNESS.strip_prefix("<?php").expect("PHP harness"));
-        for (index, expression) in self.labels.iter().enumerate() {
-            writeln!(script, "compare_case({index}, fn() => {expression});").unwrap();
+        // Keep each generated function below the compiler's register limit.
+        const BATCH_SIZE: usize = 1000;
+        for (batch, expressions) in self.labels.chunks(BATCH_SIZE).enumerate() {
+            writeln!(script, "function filter_batch_{batch}() {{").unwrap();
+            for (offset, expression) in expressions.iter().enumerate() {
+                let index = batch * BATCH_SIZE + offset;
+                writeln!(script, "compare_case({index}, fn() => {expression});").unwrap();
+            }
+            writeln!(
+                script,
+                "}}
+filter_batch_{batch}();"
+            )
+            .unwrap();
         }
         script
     }
