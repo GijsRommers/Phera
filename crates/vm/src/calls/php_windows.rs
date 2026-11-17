@@ -54,6 +54,19 @@ pub(crate) fn push_php_call(
     stack.push_call(call, None);
 }
 
+/// Prepare the call that `new` of a class without a constructor makes: its
+/// arguments are evaluated and dropped, and it gives the object.
+pub(crate) fn push_constructed(
+    (stack, registers): (&mut CallStack, &mut Registers),
+    object: Rc<Object>,
+) {
+    let start = registers.len();
+    registers.grow_to(start + 2);
+    registers.put(start, Value::Object(object));
+    let call = PreparedCall::of_kind(PreparedCallee::Constructed, CallKind::Constructor, start);
+    stack.push_call(call, None);
+}
+
 /// Prepare a call to a closure over a PHP function: the object and its
 /// bound `$this` below the parameters, the captured values after them.
 /// Returns `false`, having done nothing, for a closure over native code.

@@ -49,6 +49,9 @@ pub(crate) struct PreparedCall {
 pub(crate) enum PreparedCallee {
     /// A function written in PHP, entered with nothing but its arguments.
     Php(FunctionIndex),
+    /// `new` of a class without a constructor: the arguments are evaluated
+    /// and dropped, and the call gives the new object, kept below them.
+    Constructed,
     /// Anything else; its [`Callee`] is in the call's details.
     General,
 }

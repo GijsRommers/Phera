@@ -347,7 +347,6 @@ impl Vm {
                 identity: identity.clone(),
                 declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
                 ancestors: super::class::ancestor_names(&parent, &interfaces),
-                empty_constructor: super::class::empty_constructor(name),
                 name_value: phera_value::Value::from(name.as_str()),
                 name: name.clone(),
                 parent,

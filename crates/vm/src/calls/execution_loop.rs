@@ -62,7 +62,7 @@ enum LoopExit {
 /// The parts of the VM the loop borrows, and its counters.
 pub(super) struct Machine<'a> {
     pub(super) code: &'a CodeTable,
-    pub(super) classes: &'a ClassTable,
+    pub(super) classes: &'a mut ClassTable,
     pub(super) stack: &'a mut CallStack,
     pub(super) registers: &'a mut Registers,
     /// Loop rounds and calls since the last hand-over.
@@ -92,7 +92,7 @@ impl Vm {
         loop {
             let mut machine = Machine {
                 code: &self.code,
-                classes: &self.classes,
+                classes: &mut self.classes,
                 stack: &mut self.call_stack,
                 registers: &mut self.registers,
                 work: *work,
@@ -237,6 +237,11 @@ impl Machine<'_> {
                 self.send(position, src)
             }
             Instruction::Call { dst } => self.enter_prepared(position, dst),
+            Instruction::New { class } => self.new_object(position, class),
+            Instruction::InitDynamicCall { callee } => self.prepare_closure(position, callee),
+            Instruction::FetchThis { dst } | Instruction::ThisOrNull { dst } => {
+                self.fetch_this(position, dst)
+            }
             Instruction::Return { src } => self.leave_plain(Some(src)),
             Instruction::ReturnNull => self.leave_plain(None),
             _ => Step::Slow,

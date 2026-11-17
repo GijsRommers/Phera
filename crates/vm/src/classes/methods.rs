@@ -76,10 +76,9 @@ impl Vm {
         let resolved = self.find_method(&class, name, invocation)?;
         let Some(super::method_lookup::ResolvedMethod { method, scope }) = resolved else {
             if invocation == Invocation::Constructor {
-                return self.prepare_constructed_object(
-                    &class,
-                    receiver.ok_or_else(|| internal_error!("constructor receiver"))?,
-                );
+                let object = receiver.ok_or_else(|| internal_error!("constructor receiver"))?;
+                self.prepare_constructed_object(object);
+                return Ok(());
             }
             return Err(NativeError::error(format!(
                 "Call to undefined method {}::{name}()",
@@ -173,17 +172,8 @@ impl Vm {
 
 impl Vm {
     /// A missing constructor still consumes arguments and returns its allocated receiver.
-    pub(crate) fn prepare_constructed_object(
-        &mut self,
-        class: &Class,
-        object: Rc<Object>,
-    ) -> Result<(), NativeError> {
-        let callee = Callee {
-            argument_binding: crate::calls::callback_binding::ArgumentBinding::Caller,
-            name: class.empty_constructor.name.clone(),
-            parameters: class.empty_constructor.parameters.clone(),
-            target: CallTarget::Constructed(object),
-        };
-        self.prepare_call(callee)
+    pub(crate) fn prepare_constructed_object(&mut self, object: Rc<Object>) {
+        let parts = (&mut self.call_stack, &mut self.registers);
+        crate::calls::php_windows::push_constructed(parts, object);
     }
 }

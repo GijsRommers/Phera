@@ -3,6 +3,7 @@
 use crate::Vm;
 use crate::calls::call_state::CallTarget;
 use crate::calls::call_view::CallView;
+use crate::calls::prepared_call::PreparedCallee;
 use crate::classes::MethodBody;
 use phera_extension_api::{NativeError, NativeFn, NativeResult};
 use phera_value::Value;
@@ -90,14 +91,15 @@ impl Vm {
     pub(crate) async fn finish_native_window(&mut self) -> Result<Value, NativeError> {
         let slots = CallView::top(&self.code, &self.call_stack)?.slots();
         let (call, details) = self.call_stack.pop_call()?;
+        if call.callee == PreparedCallee::Constructed {
+            let object = self.registers.take(call.base() - 1);
+            self.registers.truncate(call.start());
+            return Ok(object);
+        }
         let details = details.unwrap_or_default();
         let callee = details
             .callee
             .ok_or_else(|| internal_error!("native target"))?;
-        if let CallTarget::Constructed(object) = &callee.target {
-            self.registers.truncate(slots.base);
-            return Ok(Value::Object(object.clone()));
-        }
         let mut arguments = self.call_stack.native_arguments();
         arguments.reserve(call.sent as usize);
         for index in 0..call.sent as usize {

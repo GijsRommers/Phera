@@ -42,8 +42,6 @@ pub(crate) struct Class {
     pub(crate) defaults: Vec<PropertyDefault>,
     /// Literal defaults are materialized once at linking; objects clone this COW table.
     pub(crate) property_template: Option<phera_value::PhpArray>,
-    /// An absent constructor still has a shared signature for argument diagnostics.
-    pub(crate) empty_constructor: MethodSignature,
     pub(crate) static_properties: Vec<PropertyDefault>,
     pub(crate) constants: HashMap<String, Rc<LinkedConstant>>,
 }
@@ -232,14 +230,6 @@ pub(crate) fn ancestor_names(
         names.extend(class.ancestors.iter().cloned());
     }
     names
-}
-
-/// Missing constructors have no parameters; their diagnostic name is linked once.
-pub(crate) fn empty_constructor(name: &str) -> MethodSignature {
-    MethodSignature {
-        name: format!("{name}::__construct").into(),
-        parameters: Rc::from([]),
-    }
 }
 
 impl Class {

@@ -41,8 +41,6 @@ pub(crate) enum CallTarget {
         method: Rc<crate::classes::Method>,
         context: crate::classes::MethodContext,
     },
-    /// A class without a constructor still consumes sends and returns the allocated handle.
-    Constructed(Rc<phera_value::Object>),
     Closure(Rc<phera_value::Object>),
     /// A declared PHP function.
     User(crate::code_table::FunctionIndex),

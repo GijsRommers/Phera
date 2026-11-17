@@ -159,6 +159,7 @@ impl Machine<'_> {
                     && self.accepts_argument(function, index, &value)
             }
             PreparedCallee::General => self.general_accepts(index, &value),
+            PreparedCallee::Constructed => false,
         };
         if !accepted {
             return Step::Slow;
@@ -217,15 +218,10 @@ impl Machine<'_> {
         let Some(call) = self.stack.last_call().copied() else {
             return Step::Slow;
         };
-        let PreparedCallee::Php(function) = call.callee else {
-            let callee = self
-                .stack
-                .top_details()
-                .and_then(|details| details.callee.as_ref());
-            return match callee.map(|callee| &callee.target) {
-                Some(CallTarget::Constructed(_)) => self.finish_construction(position, destination),
-                _ => Step::Slow,
-            };
+        let function = match call.callee {
+            PreparedCallee::Php(function) => function,
+            PreparedCallee::Constructed => return self.finish_construction(position, destination),
+            PreparedCallee::General => return Step::Slow,
         };
         let facts = self.code.facts(function);
         let sent = call.sent as usize;
@@ -261,17 +257,13 @@ impl Machine<'_> {
     /// `Call` after `new` of a class without a constructor: the object is the
     /// result, and the arguments, already evaluated, are dropped.
     fn finish_construction(&mut self, position: Position, destination: Reg) -> Step {
-        let Ok((call, details)) = self.stack.pop_call() else {
+        let Ok((call, _)) = self.stack.pop_call() else {
             return Step::Slow;
         };
+        let object = self.registers.take(call.base() - 1);
         self.registers.truncate(call.start());
-        let target = details
-            .and_then(|details| details.callee)
-            .map(|callee| callee.target);
-        if let Some(CallTarget::Constructed(object)) = target {
-            let slot = position.frame.base() + destination.index();
-            self.registers.put(slot, Value::Object(object));
-        }
+        self.registers
+            .put(position.frame.base() + destination.index(), object);
         Step::Done(position.ip)
     }
 }

@@ -146,7 +146,8 @@ impl Vm {
             self.initialize_throwable(&object, crate::exceptions::TraceOrigin::Construction);
         }
         let Some(constructor) = class.constructor.clone() else {
-            return self.prepare_constructed_object(&class, object);
+            self.prepare_constructed_object(object);
+            return Ok(());
         };
         if constructor.visibility == phera_bytecode::Visibility::Public
             && let Some(scope) = super::method_lookup::declaring_class(&class, &constructor)
