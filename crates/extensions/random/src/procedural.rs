@@ -111,6 +111,8 @@ fn bounds(
     ];
     match arguments {
         [] => Ok(None),
+        // Already ints, which is the usual case: nothing to check or convert.
+        [Value::Int(min), Value::Int(max)] => Ok(Some((*min, *max))),
         _ => {
             let mut prepared = arguments.to_vec();
             prepare_call(function, BOUNDS, &mut prepared, context)?;
