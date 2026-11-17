@@ -8,13 +8,6 @@ use phera_value::{Value, to_bool};
 
 use crate::operators::fast_binary;
 
-/// Argument introspection requires assignments to update the saved argument view.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ArgumentTracking {
-    Observed,
-    Unobserved,
-}
-
 /// A fast instruction either completes or delegates PHP coercion to the slow handler.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ScalarStep {
@@ -41,7 +34,6 @@ pub(crate) fn scalar_step(
     instruction: Instruction,
     slots: &mut [Option<Value>],
     ip: &mut usize,
-    tracking: ArgumentTracking,
 ) -> ScalarStep {
     let write = match instruction {
         Instruction::Nop => return ScalarStep::Complete,
@@ -59,7 +51,7 @@ pub(crate) fn scalar_step(
             dst: destination,
             src: source,
         } => {
-            // Mirrors execute_cast for an already boolean operand. Undefined
+            // Already boolean operands need no conversion. Undefined
             // values and diagnostic-producing casts retain the full handler.
             let Some(Some(Value::Bool(value))) = slots.get(source.index()) else {
                 return ScalarStep::Fallback;
@@ -98,7 +90,7 @@ pub(crate) fn scalar_step(
             let Some(Some(left)) = slots.get(left.index()) else {
                 return ScalarStep::Fallback;
             };
-            // Mirrors fast_binary's integer comparisons followed by to_bool,
+            // Integer comparisons produce a branch condition directly,
             // without constructing and dropping an intermediate PHP value.
             if let Value::Int(left) = left
                 && let Some(condition) = integer_condition(operator, *left, right as i64)
@@ -147,7 +139,7 @@ pub(crate) fn scalar_step(
             };
             ScalarWrite::new(destination, value)
         }
-        Instruction::Assign { local, src: source } if tracking == ArgumentTracking::Unobserved => {
+        Instruction::Assign { local, src: source } => {
             if matches!(slots.get(local.index()), Some(Some(Value::Reference(_)))) {
                 return ScalarStep::Fallback;
             }
@@ -226,7 +218,7 @@ pub(crate) fn scalar_step(
     let Some(slot) = slots.get_mut(write.destination.index()) else {
         return ScalarStep::Fallback;
     };
-    // Mirrors replacing Some(Int) with Some(Int), avoiding heap-value drop
+    // Replacing one integer payload avoids heap-value drop
     // dispatch and rewriting the enum tag on the scalar loop's common path.
     match (slot, write.value) {
         (Some(Value::Int(target)), Value::Int(value)) => *target = value,
@@ -251,7 +243,7 @@ fn integer_condition(operator: phera_bytecode::BinaryOp, left: i64, right: i64) 
     })
 }
 
-/// Mirrors fetch_path for an existing integer key in an unaliased array root.
+/// Existing integer keys need no conversion or diagnostic work.
 /// Keep this out of scalar_step's arithmetic dispatch; every failed guard uses
 /// the normal PHP offset/reference/diagnostic handler.
 #[inline]

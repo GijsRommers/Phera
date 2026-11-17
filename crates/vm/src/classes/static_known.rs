@@ -1,13 +1,12 @@
 //! Compiler-known static calls avoid materializing class and method PHP strings.
 
 use super::{Invocation, static_sites::StaticNames};
-use crate::{Vm, call_state::CallTarget};
+use crate::{Vm, calls::call_state::CallTarget};
 use phera_bytecode::{ClassBinding, SymbolId};
 use phera_extension_api::NativeError;
-use std::rc::Rc;
 
 impl Vm {
-    /// Mirrors the dynamic static call protocol with compiler-resolved symbols.
+    /// Compiler-resolved symbols avoid repeating name conversion during static preparation.
     pub(crate) fn prepare_known_static_call(
         &mut self,
         class: SymbolId,
@@ -47,7 +46,7 @@ impl Vm {
             .ok_or_else(|| NativeError::error(format!("Class \"{name}\" not found")))?;
         let context = self
             .current()
-            .and_then(|frame| frame.method.as_deref())
+            .and_then(|frame| frame.method.as_ref())
             .cloned();
         let receiver = context
             .as_ref()
@@ -74,14 +73,10 @@ impl Vm {
         if binding == ClassBinding::Forward
             && let Some(context) = context
         {
-            let pending = self
-                .call_stack
-                .current_mut()
-                .and_then(|frame| frame.calls.last_mut())
-                .ok_or_else(|| internal_error!("static forwarding"))?;
+            let pending = self.call_stack.pending_mut()?;
             if let CallTarget::Method {
                 context: target, ..
-            } = &mut Rc::make_mut(&mut pending.callee).target
+            } = &mut pending.callee.target
             {
                 target.called = context.called;
             }

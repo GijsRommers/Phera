@@ -6,7 +6,7 @@ use phera_bytecode::{CompiledUnit, Reg};
 use phera_extension_api::{LocalFuture, Registry, RequestState};
 use phera_value::{PhpArray, Value};
 
-use crate::frame::Frame;
+use crate::calls::frame::Frame;
 use crate::path::AccessPath;
 
 /// Compiler invariant failures are PHP errors. Keep literal construction here:
@@ -18,22 +18,13 @@ macro_rules! internal_error {
 }
 
 mod access_mode;
-mod argument_errors;
 mod array_map;
 mod array_slots;
 mod arrays;
-mod call_execution;
-mod call_instructions;
-mod call_stack;
-mod call_state;
 mod callable_classes;
 mod callable_introspection;
 mod callables;
-mod callback_arguments;
-mod callback_binding;
 mod callback_errors;
-mod callback_execution;
-mod callback_references;
 mod calls;
 mod class_constants;
 mod class_intrinsics;
@@ -71,8 +62,6 @@ mod exceptions;
 mod extract;
 mod fast;
 mod finally;
-mod frame;
-mod frame_lifecycle;
 mod function_table;
 mod global_instructions;
 mod global_paths;
@@ -83,6 +72,7 @@ mod include_state;
 mod includes;
 mod initializers;
 mod inline_stack;
+mod instructions;
 mod integer_arithmetic;
 mod interpreter;
 mod intrinsic_calls;
@@ -92,26 +82,22 @@ mod iterator_instructions;
 mod iterators;
 mod locals;
 mod native_diagnostics;
+mod object_instructions;
 mod object_iteration;
 mod operators;
 mod ops;
 mod output;
-mod parameter_binding;
 mod path;
 mod path_instructions;
 mod path_update;
-mod pending;
 mod place_mutation;
 mod places;
-mod positional_arguments;
 mod properties;
 mod property_mutation;
 mod property_sites;
 mod property_storage;
 mod property_targets;
 mod references;
-mod registers;
-mod returns;
 mod scalar_batches;
 mod scope_intrinsics;
 mod static_variables;
@@ -121,7 +107,7 @@ mod typed_references;
 mod types;
 mod unit_caches;
 mod unpacking;
-mod variadic_names;
+mod value_instructions;
 
 /// Resolves PHP includes through the embedding runtime code cache.
 pub trait CodeLoader: Send + Sync {
@@ -150,7 +136,7 @@ pub struct Vm {
     closure_captures: Vec<closures::PendingCapture>,
     /// Pure defaults retain lexical class scope while running outside a method frame.
     initializer_scope: Option<String>,
-    argument_origin: callback_binding::ArgumentOrigin,
+    argument_origin: calls::callback_binding::ArgumentOrigin,
     prelinked_classes: std::collections::HashSet<(usize, usize)>,
     function_table: function_table::FunctionTable,
     unit_caches: unit_caches::UnitCaches,
@@ -159,7 +145,7 @@ pub struct Vm {
     diagnostic_reporter: diagnostic_reporter::DiagnosticReporter,
     diagnostic_location: Option<diagnostics::SourceLocation>,
     include_state: include_state::IncludeState,
-    call_stack: call_stack::CallStack,
+    call_stack: calls::call_stack::CallStack,
     /// Only entered finally subroutines allocate continuation storage.
     finally_stack: Vec<finally::SavedFinally>,
     /// Number of dispatched instructions, for reproducible benchmark reports.
@@ -168,7 +154,7 @@ pub struct Vm {
     /// All PHP output emitted during this request.
     pub output: Vec<u8>,
     output_writer: output::Output,
-    registers: registers::Registers,
+    registers: calls::registers::Registers,
     constants: constant_table::ConstantTable,
     /// PHP call depth limit, independent of the native Rust stack.
     pub frame_limit: usize,
@@ -190,7 +176,7 @@ impl Vm {
             classes: classes::ClassTable::native(&registry),
             closure_captures: Vec::new(),
             initializer_scope: None,
-            argument_origin: callback_binding::ArgumentOrigin::Php,
+            argument_origin: calls::callback_binding::ArgumentOrigin::Php,
             prelinked_classes: std::collections::HashSet::new(),
             function_table: function_table::FunctionTable::new(),
             unit_caches: unit_caches::UnitCaches::new(),
@@ -199,13 +185,13 @@ impl Vm {
             diagnostic_reporter: diagnostic_reporter::DiagnosticReporter::new(),
             diagnostic_location: None,
             include_state: include_state::IncludeState::new(),
-            call_stack: call_stack::CallStack::new(),
+            call_stack: calls::call_stack::CallStack::new(),
             finally_stack: Vec::new(),
             executed_instructions: 0,
             registry,
             output: vec![],
             output_writer: output::Output::new(),
-            registers: registers::Registers::new(),
+            registers: calls::registers::Registers::new(),
             constants: constant_table::ConstantTable::new(constants),
             frame_limit: DEFAULT_FRAME_LIMIT,
             status: 0,
@@ -265,9 +251,9 @@ impl Vm {
             }
         }
         self.include_state.record(unit.file.clone());
-        let cache = self.code_cache(&unit);
+        let cache = self.unit_caches.symbols(&unit);
         let class_unit = unit.clone();
-        let mut frame = Frame::new(cache, &mut self.registers, unit, None, None);
+        let mut frame = Frame::new(cache, &mut self.registers, unit, None, None, 0);
         for (name, value) in self.globals.iter() {
             if let Some(i) = frame
                 .function()

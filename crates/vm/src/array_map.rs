@@ -30,24 +30,20 @@ impl Vm {
         let mut result = PhpArray::new();
         for _ in 0..length {
             let mut key = None;
-            let values = iterators
-                .iter_mut()
-                .map(|iterator| {
-                    iterator
-                        .next()
-                        .map(|(next, value)| {
-                            key = Some(next.clone());
-                            value.deref().clone()
-                        })
-                        .unwrap_or_default()
-                })
-                .collect();
+            let mut values = iterators.iter_mut().map(|iterator| {
+                iterator
+                    .next()
+                    .map(|(next, value)| {
+                        key = Some(next.clone());
+                        value.deref().clone()
+                    })
+                    .unwrap_or_default()
+            });
             let value = if let Some(callee) = &callee {
                 self.invoke_resolved_callable(callee.clone(), values)
                     .await?
             } else if arrays.len() == 1 {
-                let values: Vec<Value> = values;
-                values.into_iter().next().unwrap_or_default()
+                values.next().unwrap_or_default()
             } else {
                 let mut tuple = PhpArray::new();
                 for value in values {

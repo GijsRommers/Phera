@@ -71,12 +71,7 @@ impl Vm {
             return Ok(Some(*register));
         }
         if creation == Creation::Create {
-            let register = Reg(u16::try_from(frame.count)
-                .map_err(|_| NativeError::error("Phera register limit exceeded"))?);
-            self.registers.push_undefined();
-            frame.count += 1;
-            frame.dynamic.insert(name, register);
-            Ok(Some(register))
+            self.named_slot(&name).map(Some)
         } else {
             if missing == Missing::Warn && self.diagnostic_reporter.is_visible() {
                 self.warn(format!("Undefined variable ${name}"))
@@ -132,7 +127,8 @@ impl Vm {
                 })
             {
                 return Err(NativeError::error(format!(
-                    "Typed static property {class_name}::${name} must not be accessed before initialization"
+                    "Typed static property {class_name}::${name} must not be accessed before \
+                     initialization"
                 )));
             }
         }

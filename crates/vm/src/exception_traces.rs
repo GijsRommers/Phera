@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use phera_value::{ArrayKey, PhpArray, Value};
 
-use crate::{Vm, frame::Frame};
+use crate::{Vm, calls::frame::Frame};
 
 impl Vm {
     /// Frame entries point at the caller's call instruction and omit the main frame.
@@ -163,11 +163,11 @@ fn trace_arguments(vm: &Vm, frame: &Frame) -> Value {
         .iter()
         .any(|parameter| parameter.variadic)
     {
-        for value in frame
-            .arguments
-            .iter()
-            .skip(frame.function().parameters.len())
+        for value in vm
+            .registers
+            .window(frame.base + frame.count, frame.extra_arguments)
         {
+            let value = value.as_ref().unwrap_or(&Value::Null);
             let _ = arguments.push(value.deref().clone());
         }
     }

@@ -7,7 +7,7 @@ use phera_extension_api::NativeError;
 use phera_value::{Object, Value};
 
 use crate::Vm;
-use crate::call_state::{CallTarget, Callee};
+use crate::calls::call_state::{CallTarget, Callee};
 use crate::classes::{Class, Invocation, MethodContext};
 use crate::closures::{ClosureOrigin, ClosureState};
 
@@ -54,7 +54,7 @@ impl Vm {
             if let Some(bound) = &state.context {
                 context = bound.clone();
             }
-            state.callee = Rc::new(Callee {
+            state.callee = Callee {
                 argument_binding: state.callee.argument_binding,
                 name: state.callee.name.clone(),
                 parameters: state.callee.parameters.clone(),
@@ -62,7 +62,7 @@ impl Vm {
                     method: method.clone(),
                     context,
                 },
-            });
+            };
         }
         Ok(Some(state))
     }
@@ -181,10 +181,10 @@ impl Vm {
 
 /// The compiled receiver operations also cover `$this` used through property paths.
 fn closure_uses_this(state: &ClosureState) -> bool {
-    let CallTarget::User(reference) = &state.callee.target else {
+    let CallTarget::User { unit, index } = &state.callee.target else {
         return false;
     };
-    let function = &reference.unit.functions[reference.index];
+    let function = &unit.functions[*index];
     function.instructions.iter().any(|instruction| {
         matches!(
             instruction,

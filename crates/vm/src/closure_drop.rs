@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use phera_value::Value;
 
-use crate::call_state::CallTarget;
+use crate::calls::call_state::CallTarget;
 use crate::closures::ClosureState;
 
 impl Drop for ClosureState {
@@ -51,8 +51,7 @@ fn drain_state(state: &mut ClosureState, pending: &mut Vec<Value>) {
     {
         pending.push(Value::Object(receiver));
     }
-    if let Some(callee) = Rc::get_mut(&mut state.callee)
-        && let CallTarget::Method { context, .. } = &mut callee.target
+    if let CallTarget::Method { context, .. } = &mut state.callee.target
         && let Some(receiver) = context.receiver.take()
     {
         pending.push(Value::Object(receiver));

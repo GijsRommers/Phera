@@ -29,7 +29,7 @@ pub(crate) struct DiagnosticEvent {
 #[derive(Clone)]
 pub(crate) struct ExceptionHandler {
     pub(crate) callable: Value,
-    pub(crate) callee: std::rc::Rc<crate::call_state::Callee>,
+    pub(crate) callee: crate::calls::call_state::Callee,
 }
 
 /// All handler stacks and masks are request-local and retain PHP callable values.
@@ -81,7 +81,7 @@ impl Vm {
         &mut self,
         function: HandlerFunction,
         mut arguments: Vec<Value>,
-        origin: crate::callback_binding::ArgumentOrigin,
+        origin: crate::calls::callback_binding::ArgumentOrigin,
     ) -> NativeResult {
         let signature = function.signature();
         let tracking = self.error_handlers.error.is_some() && !self.error_handlers.active;

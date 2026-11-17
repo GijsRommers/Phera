@@ -61,7 +61,7 @@ impl Vm {
         let context = self
             .current()
             .and_then(|frame| frame.method.as_ref())
-            .map(|context| (**context).clone());
+            .cloned();
         let receiver = context
             .as_ref()
             .and_then(|context| context.receiver.clone())
@@ -74,14 +74,10 @@ impl Vm {
         if binding == ClassBinding::Forward
             && let Some(context) = context
         {
-            let pending = self
-                .call_stack
-                .current_mut()
-                .and_then(|frame| frame.calls.last_mut())
-                .ok_or_else(|| internal_error!("static call"))?;
-            if let crate::call_state::CallTarget::Method {
+            let pending = self.call_stack.pending_mut()?;
+            if let crate::calls::call_state::CallTarget::Method {
                 context: target, ..
-            } = &mut std::rc::Rc::make_mut(&mut pending.callee).target
+            } = &mut pending.callee.target
             {
                 target.called = context.called.clone();
             }

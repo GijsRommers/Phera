@@ -2,7 +2,7 @@
 
 use std::{any::Any, collections::HashMap, rc::Rc};
 
-use crate::call_state::ParameterSpec;
+use crate::calls::call_state::ParameterSpec;
 use phera_bytecode::{ClassKind, Visibility};
 use phera_extension_api::MethodEntry;
 use phera_value::{ArrayKey, ClassHandle, Object, Value};
@@ -174,7 +174,7 @@ pub(crate) fn literal_initializer(reference: &crate::function_table::FunctionRef
         },
         Instruction::LoadConst { dst, constant } => LiteralLoad {
             destination: dst,
-            value: crate::frame::value(reference.unit.constants.get(constant.index())?),
+            value: crate::calls::frame::value(reference.unit.constants.get(constant.index())?),
         },
         _ => return None,
     };
@@ -198,7 +198,7 @@ pub(crate) fn property_template(defaults: &[PropertyDefault]) -> Option<phera_va
 /// Argument routing metadata is independent of the receiver and shared by calls.
 pub(crate) struct MethodSignature {
     pub(crate) name: Rc<str>,
-    pub(crate) parameters: Rc<[crate::call_state::ParameterSpec]>,
+    pub(crate) parameters: Rc<[crate::calls::call_state::ParameterSpec]>,
 }
 
 /// Linked parents/interfaces already carry their transitive ancestry. The set is
@@ -250,30 +250,16 @@ impl Method {
                 MethodBody::User(reference) => reference.unit.functions[reference.index]
                     .parameters
                     .iter()
-                    .map(|parameter| ParameterSpec {
-                        name: reference.unit.names[parameter.name.index()].clone(),
-                        by_reference: parameter.by_reference,
-                        variadic: parameter.variadic,
-                    })
+                    .map(|parameter| ParameterSpec::user(&reference.unit, parameter))
                     .collect(),
                 MethodBody::Closure(operation) => operation
                     .parameters()
                     .iter()
-                    .map(|parameter| ParameterSpec {
-                        name: parameter.name.into(),
-                        by_reference: parameter.by_ref,
-                        variadic: parameter.variadic,
-                    })
+                    .map(ParameterSpec::native)
                     .collect(),
-                MethodBody::Native(entry) => entry
-                    .params
-                    .iter()
-                    .map(|parameter| ParameterSpec {
-                        name: parameter.name.into(),
-                        by_reference: parameter.by_ref,
-                        variadic: parameter.variadic,
-                    })
-                    .collect(),
+                MethodBody::Native(entry) => {
+                    entry.params.iter().map(ParameterSpec::native).collect()
+                }
             };
             MethodSignature {
                 name: format!("{}::{}", method.declaring, method.name).into(),

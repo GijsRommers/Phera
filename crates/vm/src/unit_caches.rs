@@ -10,16 +10,17 @@ use crate::SymbolCache;
 /// Keyed by constant/symbol index in a retained unit; populated at first unit use.
 /// Bytecode literals never mutate, and VM-local ownership prevents cross-request reuse.
 pub(crate) struct UnitCache {
-    pub(crate) symbols: RefCell<Vec<Option<Rc<crate::call_state::Callee>>>>,
+    pub(crate) names: Vec<phera_value::PhpString>,
+    pub(crate) symbols: RefCell<Vec<Option<crate::calls::call_state::Callee>>>,
     pub(crate) constants: Vec<phera_value::Value>,
     pub(crate) class_names: Vec<phera_value::Value>,
     pub(crate) classes: Vec<RefCell<Option<Rc<crate::classes::Class>>>>,
     /// Keyed by immutable unit TypeId and made at first unit use; spelling cannot
-    /// change, so scope classification needs no invalidation. Relative types still resolve per call.
+    /// change, so scope classification needs no invalidation. Relative types resolve per call.
     pub(crate) type_scopes: Vec<crate::types::DeclarationScope>,
     /// Keyed by immutable function index, made at first unit use. The count is
-    /// present only for untyped, nonvariadic signatures; bytecode cannot change.
-    pub(crate) plain_parameters: Vec<Option<usize>>,
+    /// records the last required slot; bytecode cannot change.
+    pub(crate) required_parameters: Vec<usize>,
     pub(crate) class_types: Vec<RefCell<Option<ClassTypeEntry>>>,
     main_sites: Vec<RefCell<CachedSite>>,
     function_sites: Vec<Vec<RefCell<CachedSite>>>,
@@ -88,23 +89,30 @@ impl UnitCaches {
             .or_insert_with(|| UnitSymbols {
                 unit: unit.clone(),
                 symbols: Rc::new(UnitCache {
+                    names: unit.names.iter().map(|name| name.as_str().into()).collect(),
                     symbols: RefCell::new(vec![None; unit.symbols.len()]),
-                    constants: unit.constants.iter().map(crate::frame::value).collect(),
+                    constants: unit
+                        .constants
+                        .iter()
+                        .map(crate::calls::frame::value)
+                        .collect(),
                     classes: unit.symbols.iter().map(|_| RefCell::new(None)).collect(),
                     type_scopes: unit
                         .types
                         .iter()
                         .map(crate::types::declaration_scope)
                         .collect(),
-                    plain_parameters: unit
+                    required_parameters: unit
                         .functions
                         .iter()
                         .map(|function| {
                             function
                                 .parameters
                                 .iter()
-                                .all(|parameter| parameter.ty.is_none() && !parameter.variadic)
-                                .then_some(function.parameters.len())
+                                .rposition(|parameter| {
+                                    !parameter.has_default && !parameter.variadic
+                                })
+                                .map_or(0, |index| index + 1)
                         })
                         .collect(),
                     class_types: unit.types.iter().map(|_| RefCell::new(None)).collect(),

@@ -5,8 +5,8 @@ use std::rc::Rc;
 use phera_extension_api::NativeError;
 
 use crate::Vm;
-use crate::call_state::CallTarget;
 use crate::callables::CallableUse;
+use crate::calls::call_state::CallTarget;
 use crate::classes::{Class, Invocation};
 
 impl Vm {
@@ -30,7 +30,7 @@ impl Vm {
         );
         let context = self
             .current()
-            .and_then(|frame| frame.method.as_deref())
+            .and_then(|frame| frame.method.as_ref())
             .cloned()
             .ok_or_else(|| {
                 NativeError::error(format!(
@@ -51,12 +51,8 @@ impl Vm {
 
     /// Parent-qualified callback lookup changes visibility scope but retains late static binding.
     pub(crate) fn forward_callback_class(&mut self, class: Rc<Class>) -> Result<(), NativeError> {
-        let pending = self
-            .call_stack
-            .current_mut()
-            .and_then(|frame| frame.calls.last_mut())
-            .ok_or_else(|| internal_error!("callback forwarding"))?;
-        if let CallTarget::Method { context, .. } = &mut Rc::make_mut(&mut pending.callee).target {
+        let pending = self.call_stack.pending_mut()?;
+        if let CallTarget::Method { context, .. } = &mut pending.callee.target {
             context.called = class;
         }
         Ok(())

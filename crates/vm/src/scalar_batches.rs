@@ -1,6 +1,6 @@
 //! Keep straight procedural scalar loops independent of the cold async dispatcher.
 
-use crate::fast::{ArgumentTracking, ScalarStep, scalar_step};
+use crate::fast::{ScalarStep, scalar_step};
 use phera_bytecode::Instruction;
 use phera_value::Value;
 
@@ -9,7 +9,7 @@ use phera_value::Value;
 pub(crate) const YIELD_AFTER_STEPS: usize = 4096;
 
 /// A batch stops before a PHP handler, at a cooperative yield, or at invalid code.
-pub(crate) enum BatchExit {
+pub(crate) enum ScalarExit {
     Instruction(Instruction),
     Yield,
     Invalid,
@@ -20,11 +20,10 @@ pub(crate) struct ScalarBatch {
     pub(crate) ip: usize,
     pub(crate) executed: u64,
     pub(crate) work: usize,
-    pub(crate) exit: BatchExit,
+    pub(crate) exit: ScalarExit,
 }
 
-/// Mirrors the interpreter's scalar loop. Only already-supported scalar steps
-/// execute here; no PHP call or fallible PHP coercion runs on the Rust stack.
+/// Pure scalar steps run on a borrowed window until observable VM work is needed.
 /// Keeping the counter local also avoids a VM-field write per scalar operation.
 #[inline(never)]
 pub(crate) fn run(
@@ -32,7 +31,6 @@ pub(crate) fn run(
     slots: &mut [Option<Value>],
     mut ip: usize,
     mut work: usize,
-    tracking: ArgumentTracking,
 ) -> ScalarBatch {
     let mut executed = 0;
     loop {
@@ -41,15 +39,15 @@ pub(crate) fn run(
                 ip,
                 executed,
                 work,
-                exit: BatchExit::Invalid,
+                exit: ScalarExit::Invalid,
             };
         };
         let previous_ip = ip;
         ip += 1;
         executed += 1;
-        // The index arm mirrors the general interpreter's verified integer
+        // The index arm handles an already verified integer
         // lookup, keeping adjacent scalar work in the same borrowed window.
-        if scalar_step(instruction, slots, &mut ip, tracking) == ScalarStep::Fallback
+        if scalar_step(instruction, slots, &mut ip) == ScalarStep::Fallback
             && !matches!(instruction, Instruction::FetchIndex { dst, base, index, .. }
                 if crate::fast::array_index_step(dst, base, index, slots) == ScalarStep::Complete)
         {
@@ -57,7 +55,7 @@ pub(crate) fn run(
                 ip,
                 executed,
                 work,
-                exit: BatchExit::Instruction(instruction),
+                exit: ScalarExit::Instruction(instruction),
             };
         }
         // Only backward edges contribute to the fairness budget. Comparing IPs
@@ -69,7 +67,7 @@ pub(crate) fn run(
                     ip,
                     executed,
                     work: 0,
-                    exit: BatchExit::Yield,
+                    exit: ScalarExit::Yield,
                 };
             }
         }

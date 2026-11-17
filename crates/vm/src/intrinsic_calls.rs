@@ -5,26 +5,9 @@ use std::rc::Rc;
 use phera_extension_api::{NativeError, NativeResult};
 use phera_value::{Value, to_php_string};
 
-use crate::{Vm, callback_binding::ArgumentOrigin, intrinsics::Intrinsic};
+use crate::{Vm, calls::callback_binding::ArgumentOrigin, intrinsics::Intrinsic};
 
 impl Vm {
-    /// Named arguments may skip syntax_only; a missing default differs from explicit null.
-    pub(crate) fn intrinsic_arguments(
-        intrinsic: Intrinsic,
-        mut arguments: Vec<Option<Value>>,
-    ) -> Vec<Value> {
-        if matches!(intrinsic, Intrinsic::IsCallable)
-            && let Some(value) = arguments.get_mut(1)
-            && value.is_none()
-        {
-            *value = Some(Value::Bool(false));
-        }
-        arguments
-            .into_iter()
-            .map(Option::unwrap_or_default)
-            .collect()
-    }
-
     /// Callback entry preserves weak scalar binding without changing the PHP body mode.
     pub(crate) async fn intrinsic_origin(
         &mut self,
@@ -84,7 +67,8 @@ impl Vm {
                     Value::String(class) => (class.to_string_lossy(), false),
                     _ => {
                         return Err(NativeError::type_error(
-                            "property_exists(): Argument #1 ($object_or_class) must be of type object|string",
+                            "property_exists(): Argument #1 ($object_or_class) must be of \
+                             type object|string",
                         ));
                     }
                 };
@@ -107,7 +91,6 @@ impl Vm {
                 .vm
                 .with_argument_origin(origin, |vm| vm.callable_introspection(arguments)),
             Intrinsic::CallUserFunc => {
-                let rest = arguments.iter().skip(1).cloned().collect();
                 let callee = diagnostics
                     .vm
                     .resolve_callable(&argument)
@@ -123,7 +106,7 @@ impl Vm {
                     })?;
                 return diagnostics
                     .vm
-                    .invoke_callable_origin(callee, rest, origin)
+                    .invoke_callable_origin(callee, arguments.into_iter().skip(1), origin)
                     .await;
             }
             Intrinsic::CallUserFuncArray => {
@@ -165,15 +148,18 @@ impl Vm {
                     &to_php_string(&argument, &mut diagnostics.buffer)?.to_string_lossy(),
                 )))
             }
-            Intrinsic::FuncNumArgs => diagnostics
-                .vm
-                .argument_intrinsic(crate::argument_errors::ArgumentFunction::Count, arguments),
-            Intrinsic::FuncGetArgs => diagnostics
-                .vm
-                .argument_intrinsic(crate::argument_errors::ArgumentFunction::All, arguments),
-            Intrinsic::FuncGetArg => diagnostics
-                .vm
-                .argument_intrinsic(crate::argument_errors::ArgumentFunction::One, arguments),
+            Intrinsic::FuncNumArgs => diagnostics.vm.argument_intrinsic(
+                crate::calls::argument_errors::ArgumentFunction::Count,
+                arguments,
+            ),
+            Intrinsic::FuncGetArgs => diagnostics.vm.argument_intrinsic(
+                crate::calls::argument_errors::ArgumentFunction::All,
+                arguments,
+            ),
+            Intrinsic::FuncGetArg => diagnostics.vm.argument_intrinsic(
+                crate::calls::argument_errors::ArgumentFunction::One,
+                arguments,
+            ),
             Intrinsic::ErrorReporting => diagnostics.vm.error_reporting_intrinsic(arguments),
             Intrinsic::IniSet | Intrinsic::IniGet => {
                 diagnostics.vm.exception_ini_setting(intrinsic, &arguments)

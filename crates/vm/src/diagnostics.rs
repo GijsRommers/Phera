@@ -144,7 +144,7 @@ mod tests {
         vm.intrinsic_origin(
             Intrinsic::FunctionExists,
             vec![Value::from("unknown")],
-            crate::callback_binding::ArgumentOrigin::Php,
+            crate::calls::callback_binding::ArgumentOrigin::Php,
         )
         .await
         .unwrap();

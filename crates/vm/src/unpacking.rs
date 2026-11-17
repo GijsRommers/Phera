@@ -1,6 +1,6 @@
 //! Array unpacking routes string keys by name and preserves writable element cells.
 
-use crate::{Vm, call_state::ArgumentOrder};
+use crate::{Vm, calls::call_state::ArgumentOrder};
 use phera_bytecode::Reg;
 use phera_extension_api::NativeError;
 use phera_value::{ArrayKey, Value};
@@ -24,19 +24,18 @@ impl Vm {
         let mut array = match &*source.deref() {
             Value::Array(array) => array.clone(),
             _ => {
-                return Err(NativeError::type_error(
-                    "Only arrays and Traversables can be unpacked",
-                ));
+                return Err(NativeError::type_error(format!(
+                    "Only arrays and Traversables can be unpacked, {} given",
+                    source.type_name()
+                )));
             }
         };
-        let entries: Vec<_> = array
-            .iter()
-            .map(|(key, value)| UnpackedEntry {
+        let snapshot = array.clone();
+        for (key, value) in snapshot.iter() {
+            let entry = UnpackedEntry {
                 key: key.clone(),
                 value: value.clone(),
-            })
-            .collect();
-        for entry in entries {
+            };
             let value = self.unpack_entry(&entry)?;
             if value.is_reference() {
                 Rc::make_mut(&mut array).insert(entry.key, value);
@@ -52,15 +51,11 @@ impl Vm {
 
     /// PHP binds integer keys positionally and rejects them after any string key.
     fn unpack_entry(&mut self, entry: &UnpackedEntry) -> Result<Value, NativeError> {
-        let call = self
-            .call_stack
-            .current_mut()
-            .and_then(|frame| frame.calls.last_mut())
-            .ok_or_else(|| internal_error!("unpack without call"))?;
-        call.named = match &entry.key {
-            ArrayKey::String(name) => Some(name.to_string_lossy()),
+        let call = self.call_stack.pending_mut()?;
+        call.window.named = match &entry.key {
+            ArrayKey::String(name) => Some(name.clone()),
             ArrayKey::Int(_) => {
-                if call.order() == ArgumentOrder::Named {
+                if call.window.order == ArgumentOrder::Named {
                     return Err(NativeError::error(
                         "Cannot use positional argument after named argument during unpacking",
                     ));
@@ -71,14 +66,7 @@ impl Vm {
         let index = call.argument_index()?;
         let by_reference = call
             .callee
-            .parameters
-            .get(index)
-            .or_else(|| {
-                call.callee
-                    .parameters
-                    .last()
-                    .filter(|parameter| parameter.variadic)
-            })
+            .parameter(index)
             .is_some_and(|parameter| parameter.by_reference);
         let value = if by_reference {
             if entry.value.is_reference() {
@@ -89,7 +77,7 @@ impl Vm {
         } else {
             entry.value.deref().clone()
         };
-        call.store_argument(index, call.named.clone(), value.clone())?;
+        self.store_sent_value(index, value.clone())?;
         Ok(value)
     }
 }

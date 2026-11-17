@@ -3,12 +3,12 @@
 use std::rc::Rc;
 
 use phera_bytecode::{NameId, Reg, Visibility};
-use phera_extension_api::{NativeError, NativeMethod, NativeResult};
+use phera_extension_api::NativeError;
 use phera_value::{Object, Value};
 
-use super::{Class, Invocation, Method, MethodBody, MethodContext};
+use super::{Class, Invocation, Method, MethodContext};
 use crate::Vm;
-use crate::call_state::{CallTarget, Callee};
+use crate::calls::call_state::{CallTarget, Callee};
 
 impl Vm {
     /// Receiver errors precede argument evaluation, matching ordinary PHP calls.
@@ -68,24 +68,18 @@ impl Vm {
                 _ => crate::callables::CallableUse::Callback,
             };
             let callee = self.resolve_callable_for(&Value::Object(receiver), usage)?;
-            let mut callee = (*callee).clone();
+            let mut callee = callee;
             callee.name = "Closure::__invoke".into();
-            callee.argument_binding = crate::callback_binding::ArgumentBinding::Internal;
-            let callee = self.call_stack.bound_callee(callee);
+            callee.argument_binding = crate::calls::callback_binding::ArgumentBinding::Internal;
             return self.prepare_call(callee);
         }
         let resolved = self.cached_method(&class, name, invocation)?;
         let Some(super::method_cache::ResolvedMethod { method, scope }) = resolved else {
             if invocation == Invocation::Constructor {
-                let callee = self.call_stack.bound_callee(Callee {
-                    argument_binding: crate::callback_binding::ArgumentBinding::Caller,
-                    name: class.empty_constructor.name.clone(),
-                    parameters: class.empty_constructor.parameters.clone(),
-                    target: CallTarget::Constructed(
-                        receiver.ok_or_else(|| internal_error!("constructor receiver"))?,
-                    ),
-                });
-                return self.prepare_call(callee);
+                return self.prepare_constructed_object(
+                    &class,
+                    receiver.ok_or_else(|| internal_error!("constructor receiver"))?,
+                );
             }
             return Err(NativeError::error(format!(
                 "Call to undefined method {}::{name}()",
@@ -130,12 +124,12 @@ impl Vm {
             called: class,
             invocation,
         };
-        let callee = self.call_stack.bound_callee(Callee {
-            argument_binding: crate::callback_binding::ArgumentBinding::Caller,
+        let callee = Callee {
+            argument_binding: crate::calls::callback_binding::ArgumentBinding::Caller,
             name: call_name,
             parameters,
             target: CallTarget::Method { method, context },
-        });
+        };
         self.prepare_call(callee)
     }
 
@@ -177,116 +171,21 @@ impl Vm {
             method.declaring, method.name
         )))
     }
-
-    /// User methods suspend the caller; native methods complete in the same dispatch step.
-    pub(crate) async fn invoke_method(
-        &mut self,
-        method: &Method,
-        context: MethodContext,
-        destination: Reg,
-        arguments: Vec<Option<Value>>,
-        origin: crate::callback_binding::ArgumentOrigin,
-    ) -> Result<(), NativeError> {
-        match &method.body {
-            MethodBody::Closure(operation) => {
-                let arguments = arguments
-                    .into_iter()
-                    .map(Option::unwrap_or_default)
-                    .collect();
-                let value = Box::pin(self.closure_method_named(
-                    *operation,
-                    context.receiver,
-                    arguments,
-                    0,
-                    Vec::new(),
-                    origin,
-                ))
-                .await?;
-                self.set(destination, value);
-            }
-            MethodBody::User(reference) => {
-                let pushed = self.with_argument_origin(origin, |vm| {
-                    vm.push_prepared(
-                        &reference.unit,
-                        reference.index,
-                        Some(destination),
-                        arguments,
-                    )
-                });
-                if let Err(error) = pushed {
-                    if self.current().is_some_and(|frame| {
-                        frame.ip == 0
-                            && frame.function_id == Some(reference.index)
-                            && std::sync::Arc::ptr_eq(&frame.unit, &reference.unit)
-                    }) {
-                        let context = self.call_stack.method_context(context);
-                        if let Some(frame) = self.call_stack.current_mut() {
-                            frame.method = Some(context);
-                        }
-                    }
-                    return Err(error);
-                }
-                let context = self.call_stack.method_context(context);
-                if let Some(frame) = self.call_stack.current_mut() {
-                    frame.method = Some(context);
-                }
-            }
-            MethodBody::Native(entry) => {
-                let mut arguments: Vec<Value> = arguments
-                    .into_iter()
-                    .map(Option::unwrap_or_default)
-                    .collect();
-                self.with_argument_origin(origin, |vm| {
-                    vm.prepare_native_method_arguments(method, entry.params, &mut arguments)
-                })?;
-                let result: NativeResult = match entry.handler {
-                    NativeMethod::Sync(handler) => {
-                        handler(self, context.receiver.as_ref(), &arguments)
-                    }
-                    NativeMethod::Async(handler) => {
-                        handler(self, context.receiver.clone(), arguments).await
-                    }
-                    NativeMethod::Abstract => {
-                        Err(NativeError::error("Cannot call abstract method"))
-                    }
-                };
-                let result = result?;
-                let result = if matches!(method.declaring.as_str(), "Exception" | "Error") {
-                    context
-                        .receiver
-                        .as_ref()
-                        .and_then(|object| self.throwable_method_result(&method.name, object))
-                        .unwrap_or(result)
-                } else {
-                    result
-                };
-                self.set(
-                    destination,
-                    if context.invocation == Invocation::Constructor {
-                        context.receiver.map(Value::Object).unwrap_or_default()
-                    } else {
-                        result
-                    },
-                );
-            }
-        }
-        Ok(())
-    }
 }
 
 impl Vm {
-    /// Mirrors prepare_method's missing-constructor branch using linked presence metadata.
+    /// A missing constructor still consumes arguments and returns its allocated receiver.
     pub(crate) fn prepare_constructed_object(
         &mut self,
         class: &Class,
         object: Rc<Object>,
     ) -> Result<(), NativeError> {
-        let callee = self.call_stack.bound_callee(Callee {
-            argument_binding: crate::callback_binding::ArgumentBinding::Caller,
+        let callee = Callee {
+            argument_binding: crate::calls::callback_binding::ArgumentBinding::Caller,
             name: class.empty_constructor.name.clone(),
             parameters: class.empty_constructor.parameters.clone(),
             target: CallTarget::Constructed(object),
-        });
+        };
         self.prepare_call(callee)
     }
 }

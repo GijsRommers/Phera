@@ -1,6 +1,6 @@
 //! Every evaluated callback uses one resolver before argument binding or native dispatch.
 
-use crate::{Vm, call_state::Callee, classes::Invocation};
+use crate::{Vm, calls::call_state::Callee, classes::Invocation};
 use phera_extension_api::NativeError;
 use phera_value::{ArrayKey, Value};
 use std::rc::Rc;
@@ -15,24 +15,30 @@ pub(crate) enum CallableUse {
 
 impl Vm {
     /// Strings name functions or static methods; arrays bind an object or name a class.
-    pub(crate) fn resolve_callable(&mut self, value: &Value) -> Result<Rc<Callee>, NativeError> {
+    pub(crate) fn resolve_callable(&mut self, value: &Value) -> Result<Callee, NativeError> {
         self.resolve_callable_for(value, CallableUse::Callback)
     }
 
+    /// Calling syntax selects the visibility and legacy callback rules before argument evaluation.
     pub(crate) fn resolve_callable_for(
         &mut self,
         value: &Value,
         usage: CallableUse,
-    ) -> Result<Rc<Callee>, NativeError> {
+    ) -> Result<Callee, NativeError> {
         match &*value.deref() {
             Value::Object(object) => self.resolve_callable_object(object, usage),
             Value::String(name) => {
-                let name = name.to_string_lossy();
-                if let Some((class, method)) = name.split_once("::") {
+                if let Some(callee) = self.function_table.resolved(name) {
+                    return Ok(callee);
+                }
+                let written = String::from_utf8_lossy(name.as_bytes());
+                if let Some((class, method)) = written.split_once("::") {
                     self.prepare_callable_class(class, method, usage)?;
                     self.take_resolved_callable()
                 } else {
-                    self.resolve_callee(name)
+                    let callee = self.resolve_callee(&written)?;
+                    self.function_table.cache_resolution(name, &callee);
+                    Ok(callee)
                 }
             }
             Value::Array(array) => self.resolve_callable_array(array, usage),
@@ -48,7 +54,7 @@ impl Vm {
         &mut self,
         object: &Rc<phera_value::Object>,
         usage: CallableUse,
-    ) -> Result<Rc<Callee>, NativeError> {
+    ) -> Result<Callee, NativeError> {
         if object.class.name() == "Closure" {
             let native = object.native.borrow();
             let state = native
@@ -56,19 +62,22 @@ impl Vm {
                 .and_then(|state| state.downcast_ref::<crate::closures::ClosureState>())
                 .ok_or_else(|| internal_error!("closure callable"))?;
             let bound_function = state.context.is_some()
-                && matches!(state.callee.target, crate::call_state::CallTarget::User(_));
+                && matches!(
+                    state.callee.target,
+                    crate::calls::call_state::CallTarget::User { .. }
+                );
             if state.origin == crate::closures::ClosureOrigin::Callable
                 && usage != CallableUse::FirstClass
                 && !bound_function
             {
                 return Ok(state.callee.clone());
             }
-            Ok(self.call_stack.bound_callee(Callee {
-                argument_binding: crate::callback_binding::ArgumentBinding::Caller,
+            Ok(Callee {
+                argument_binding: crate::calls::callback_binding::ArgumentBinding::Caller,
                 name: state.callee.name.clone(),
                 parameters: state.callee.parameters.clone(),
-                target: crate::call_state::CallTarget::Closure(object.clone()),
-            }))
+                target: crate::calls::call_state::CallTarget::Closure(object.clone()),
+            })
         } else {
             let class = self
                 .classes
@@ -97,7 +106,7 @@ impl Vm {
         &mut self,
         array: &phera_value::PhpArray,
         usage: CallableUse,
-    ) -> Result<Rc<Callee>, NativeError> {
+    ) -> Result<Callee, NativeError> {
         if array.len() != 2 {
             return Err(NativeError::error(
                 "Array callback must have exactly two elements",
@@ -114,10 +123,14 @@ impl Vm {
                 "Second array member is not a valid method",
             ));
         };
-        let method = method.to_string_lossy();
+        let method = String::from_utf8_lossy(method.as_bytes());
         match &*target.deref() {
             Value::String(class) => {
-                self.prepare_callable_class(&class.to_string_lossy(), &method, usage)?;
+                self.prepare_callable_class(
+                    &String::from_utf8_lossy(class.as_bytes()),
+                    &method,
+                    usage,
+                )?;
             }
             Value::Object(object) => {
                 let class = self
@@ -136,12 +149,10 @@ impl Vm {
     }
 
     /// Method preparation snapshots its scope in the existing pending-call representation.
-    pub(crate) fn take_resolved_callable(&mut self) -> Result<Rc<Callee>, NativeError> {
-        self.call_stack
-            .current_mut()
-            .and_then(|frame| frame.calls.pop())
-            .map(|call| call.callee)
-            .ok_or_else(|| internal_error!("resolved callable"))
+    pub(crate) fn take_resolved_callable(&mut self) -> Result<Callee, NativeError> {
+        let call = self.call_stack.take_pending()?;
+        self.registers.truncate(call.window.base);
+        Ok(call.callee)
     }
 }
 

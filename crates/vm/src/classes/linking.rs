@@ -127,7 +127,8 @@ impl Vm {
                 .is_none_or(|parent| !parent.is_a("Throwable"))
         {
             return Err(NativeError::error(format!(
-                "Class {name} cannot implement interface Throwable, extend Exception or Error instead"
+                "Class {name} cannot implement interface Throwable, extend Exception or \
+                 Error instead"
             )));
         }
         let mut methods = parent
@@ -194,7 +195,8 @@ impl Vm {
             {
                 let declaring = constants[&constant_name].declaring.clone();
                 return Err(NativeError::error(format!(
-                    "{name}::{constant_name} cannot override final constant {declaring}::{constant_name}"
+                    "{name}::{constant_name} cannot override final constant \
+                     {declaring}::{constant_name}"
                 )));
             }
             constants.insert(
@@ -225,7 +227,7 @@ impl Vm {
             };
             let value = match property.default {
                 Some(phera_bytecode::Initializer::Literal(index)) => {
-                    crate::frame::value(&unit.constants[index.index()])
+                    crate::calls::frame::value(&unit.constants[index.index()])
                 }
                 _ => phera_value::Value::Null,
             };

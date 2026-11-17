@@ -1,6 +1,6 @@
 //! Iterator state uses compiler-assigned dense slots rather than hashing IDs.
 
-use crate::frame::IteratorState;
+use crate::calls::frame::IteratorState;
 
 /// Each function allocates precisely the iterator count declared in bytecode.
 pub(crate) struct Iterators {
@@ -8,6 +8,7 @@ pub(crate) struct Iterators {
 }
 
 impl Iterators {
+    /// Foreach slots grow only when the activation needs more iterator storage.
     pub(crate) fn new(count: u16) -> Self {
         Self {
             slots: std::iter::repeat_with(|| None)
@@ -16,10 +17,15 @@ impl Iterators {
         }
     }
 
-    /// Recycled frames retain their backing allocation, but never live iterators.
+    /// Recycled activations retain capacity across different function signatures.
     pub(crate) fn resize(&mut self, count: u16) {
-        self.slots.clear();
+        self.clear();
         self.slots.resize_with(count as usize, || None);
+    }
+
+    /// Return releases every iterator owner without freeing its backing storage.
+    pub(crate) fn clear(&mut self) {
+        self.slots.fill_with(|| None);
     }
 
     /// A whole-subject assignment restarts live iterators sharing that reference cell.
@@ -48,18 +54,18 @@ impl Iterators {
         }
     }
 
+    /// A compiler-assigned slot replaces any traversal already stored there.
     pub(crate) fn insert(&mut self, index: u16, state: IteratorState) {
         if let Some(slot) = self.slots.get_mut(index as usize) {
             *slot = Some(state)
         }
     }
 
+    /// Ending foreach transfers its remaining owners out of the activation.
     pub(crate) fn remove(&mut self, index: &u16) -> Option<IteratorState> {
         self.slots.get_mut(*index as usize)?.take()
     }
-}
 
-impl Iterators {
     /// Borrow a snapshot cursor in place instead of moving the whole state per element.
     pub(crate) fn get_mut(&mut self, index: u16) -> Option<&mut IteratorState> {
         self.slots.get_mut(index as usize)?.as_mut()

@@ -6,7 +6,7 @@ use phera_bytecode::{CompiledUnit, Reg};
 use phera_extension_api::NativeError;
 use phera_value::Value;
 
-use crate::{Vm, frame::Frame};
+use crate::{Vm, calls::frame::Frame};
 
 /// A callee register and its shared caller reference cell.
 pub(crate) struct ScopeBinding {
@@ -121,7 +121,7 @@ impl Vm {
 }
 
 /// Snapshot raw bindings before releasing the included frame, preserving reference identity.
-fn scope_entries(frame: &Frame, registers: &crate::registers::Registers) -> Vec<ScopeEntry> {
+fn scope_entries(frame: &Frame, registers: &crate::calls::registers::Registers) -> Vec<ScopeEntry> {
     frame
         .function()
         .locals

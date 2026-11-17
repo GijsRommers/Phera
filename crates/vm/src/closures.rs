@@ -9,9 +9,8 @@ use phera_extension_api::NativeError;
 use phera_value::{Object, Value};
 
 use crate::Vm;
-use crate::call_state::{CallTarget, Callee, ParameterSpec};
+use crate::calls::call_state::{CallTarget, Callee, ParameterSpec};
 use crate::classes::MethodContext;
-use crate::function_table::FunctionRef;
 
 /// A pending capture belongs to a frame, so throwing from its warning handler releases it.
 pub(crate) struct PendingCapture {
@@ -29,7 +28,7 @@ pub(crate) enum ClosureOrigin {
 /// Each object owns its static cells independently of other evaluations of the same expression.
 pub(crate) struct ClosureState {
     pub(crate) origin: ClosureOrigin,
-    pub(crate) callee: Rc<Callee>,
+    pub(crate) callee: Callee,
     pub(crate) captures: Vec<Option<Value>>,
     pub(crate) context: Option<MethodContext>,
     pub(crate) binding: ClosureBinding,
@@ -114,7 +113,7 @@ impl Vm {
 
     /// A static closure keeps private class access while deliberately omitting the receiver.
     fn closure_context(&self, binding: ClosureBinding) -> Option<MethodContext> {
-        let mut context = self.current()?.method.as_deref()?.clone();
+        let mut context = self.current()?.method.as_ref()?.clone();
         context.invocation = crate::classes::Invocation::Method;
         if binding == ClosureBinding::Static {
             context.receiver = None;
@@ -122,6 +121,7 @@ impl Vm {
         Some(context)
     }
 
+    /// Native payload ownership gives each closure independent captures and static cells.
     pub(crate) fn allocate_closure(
         &mut self,
         state: ClosureState,
@@ -133,41 +133,6 @@ impl Vm {
         let object = self.classes.allocate(class);
         *object.native.borrow_mut() = Some(Box::new(state));
         Ok(object)
-    }
-
-    /// The activation owns the closure until return, even when its caller overwrites the variable.
-    pub(crate) fn push_closure(
-        &mut self,
-        object: Rc<Object>,
-        destination: Option<Reg>,
-        arguments: Vec<Option<Value>>,
-    ) -> Result<(), NativeError> {
-        let native = object.native.borrow();
-        let state = native
-            .as_ref()
-            .and_then(|state| state.downcast_ref::<ClosureState>())
-            .ok_or_else(|| internal_error!("closure state"))?;
-        let CallTarget::User(function) = &state.callee.target else {
-            return Err(internal_error!("closure target"));
-        };
-        self.check_frame_limit()?;
-        let mut frame = self.make_frame(&function.unit, Some(function.index), destination);
-        frame.method = state
-            .context
-            .clone()
-            .map(|context| self.call_stack.method_context(context));
-        frame.closure = Some(object.clone());
-        let offset = frame.function().parameters.len();
-        for (index, value) in state.captures.iter().enumerate() {
-            if let Some(value) = value {
-                frame.set(
-                    &mut self.registers,
-                    Reg((offset + index) as u16),
-                    value.clone(),
-                );
-            }
-        }
-        self.push_frame_arguments(frame, arguments)
     }
 }
 
@@ -215,7 +180,7 @@ impl Vm {
 fn closure_callee(
     unit: std::sync::Arc<phera_bytecode::CompiledUnit>,
     function: FunctionId,
-) -> Result<Rc<Callee>, NativeError> {
+) -> Result<Callee, NativeError> {
     let body = unit
         .functions
         .get(function.index())
@@ -223,19 +188,15 @@ fn closure_callee(
     let parameters: Vec<ParameterSpec> = body
         .parameters
         .iter()
-        .map(|parameter| ParameterSpec {
-            name: unit.names[parameter.name.index()].clone(),
-            by_reference: parameter.by_reference,
-            variadic: parameter.variadic,
-        })
+        .map(|parameter| ParameterSpec::user(&unit, parameter))
         .collect();
-    Ok(Rc::new(Callee {
-        argument_binding: crate::callback_binding::ArgumentBinding::Caller,
+    Ok(Callee {
+        argument_binding: crate::calls::callback_binding::ArgumentBinding::Caller,
         name: body.name.as_str().into(),
         parameters: parameters.into(),
-        target: CallTarget::User(FunctionRef {
+        target: CallTarget::User {
             unit,
             index: function.index(),
-        }),
-    }))
+        },
+    })
 }

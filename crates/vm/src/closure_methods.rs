@@ -68,8 +68,8 @@ impl Vm {
         receiver: Option<Rc<Object>>,
         mut arguments: Vec<Value>,
         named_start: usize,
-        named_keys: Vec<String>,
-        origin: crate::callback_binding::ArgumentOrigin,
+        named_keys: Vec<phera_value::PhpString>,
+        origin: crate::calls::callback_binding::ArgumentOrigin,
     ) -> NativeResult {
         let name = operation.name();
         self.with_argument_origin(origin, |vm| {
@@ -116,7 +116,7 @@ impl Vm {
         mut state: ClosureState,
         arguments: Vec<Value>,
         named_start: usize,
-        named_keys: Vec<String>,
+        named_keys: Vec<phera_value::PhpString>,
     ) -> NativeResult {
         state.statics = {
             let native = object.native.borrow();
@@ -134,7 +134,7 @@ impl Vm {
                 .checked_sub(named_start)
                 .and_then(|index| named_keys.get(index));
             if let Some(name) = name {
-                values.insert(phera_value::ArrayKey::str(name.as_bytes()), value);
+                values.insert(phera_value::ArrayKey::String(name.clone()), value);
             } else {
                 values.push(value)?;
             }
@@ -203,15 +203,16 @@ impl Vm {
         self.closure_from_callee(callee).map(Value::Object)
     }
 
+    /// First-class callables retain validated access after their creating scope returns.
     pub(crate) fn closure_from_callee(
         &mut self,
-        callee: Rc<crate::call_state::Callee>,
+        callee: crate::calls::call_state::Callee,
     ) -> Result<Rc<Object>, NativeError> {
-        if let crate::call_state::CallTarget::Closure(object) = &callee.target {
+        if let crate::calls::call_state::CallTarget::Closure(object) = &callee.target {
             return Ok(object.clone());
         }
         let (context, binding) = match &callee.target {
-            crate::call_state::CallTarget::Method { context, method } => (
+            crate::calls::call_state::CallTarget::Method { context, method } => (
                 Some(context.clone()),
                 if method.is_static {
                     phera_bytecode::ClosureBinding::Static

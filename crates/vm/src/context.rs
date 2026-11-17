@@ -77,7 +77,7 @@ impl Context for Vm {
     }
 
     fn strict_types(&self) -> bool {
-        self.argument_origin == crate::callback_binding::ArgumentOrigin::Php
+        self.argument_origin == crate::calls::callback_binding::ArgumentOrigin::Php
             && self.current().is_some_and(|f| f.function().strict_types)
     }
 
@@ -87,79 +87,24 @@ impl Context for Vm {
         callable: &'a Value,
         arguments: Vec<Value>,
     ) -> LocalFuture<'a, NativeResult> {
-        Box::pin(async move {
-            let callee = self.resolve_callable(callable)?;
-            self.invoke_resolved_callable(callee, arguments).await
-        })
+        match self.resolve_callable(callable) {
+            Ok(callee) => self.invoke_resolved_callable(callee, arguments),
+            Err(error) => Box::pin(std::future::ready(Err(error))),
+        }
     }
 }
 
 impl Vm {
-    /// Saved handler targets remain callable after every original PHP frame is gone.
+    /// Native values are consumed directly into the same slots as PHP Send instructions.
     pub(crate) fn invoke_resolved_callable(
         &mut self,
-        callee: std::rc::Rc<crate::call_state::Callee>,
-        arguments: Vec<Value>,
+        callee: crate::calls::call_state::Callee,
+        arguments: impl IntoIterator<Item = Value>,
     ) -> LocalFuture<'_, NativeResult> {
-        self.invoke_prepared_callable(callee, arguments.into_iter().map(Some).collect())
-    }
-
-    pub(crate) fn invoke_prepared_callable(
-        &mut self,
-        callee: std::rc::Rc<crate::call_state::Callee>,
-        arguments: Vec<Option<Value>>,
-    ) -> LocalFuture<'_, NativeResult> {
-        self.invoke_named_callable(callee, arguments, 0, Vec::new())
-    }
-
-    pub(crate) fn invoke_named_callable(
-        &mut self,
-        callee: std::rc::Rc<crate::call_state::Callee>,
-        arguments: Vec<Option<Value>>,
-        named_start: usize,
-        named_keys: Vec<String>,
-    ) -> LocalFuture<'_, NativeResult> {
-        self.invoke_named_callable_origin(
+        self.invoke_callable_origin(
             callee,
             arguments,
-            named_start,
-            named_keys,
-            crate::callback_binding::ArgumentOrigin::Callback,
+            crate::calls::callback_binding::ArgumentOrigin::Callback,
         )
-    }
-
-    pub(crate) fn invoke_callable_origin(
-        &mut self,
-        callee: std::rc::Rc<crate::call_state::Callee>,
-        arguments: Vec<Value>,
-        origin: crate::callback_binding::ArgumentOrigin,
-    ) -> LocalFuture<'_, NativeResult> {
-        self.invoke_named_callable_origin(
-            callee,
-            arguments.into_iter().map(Some).collect(),
-            0,
-            Vec::new(),
-            origin,
-        )
-    }
-
-    pub(crate) fn invoke_named_callable_origin(
-        &mut self,
-        callee: std::rc::Rc<crate::call_state::Callee>,
-        arguments: Vec<Option<Value>>,
-        named_start: usize,
-        named_keys: Vec<String>,
-        origin: crate::callback_binding::ArgumentOrigin,
-    ) -> LocalFuture<'_, NativeResult> {
-        let origin = callee.argument_binding.origin(origin);
-        Box::pin(async move {
-            self.call_stack.enter_callback()?;
-            let result = self
-                .execute_callback(callee, arguments, named_start, named_keys, origin)
-                .await;
-            let result = result.map_err(|error| self.materialize_error(error));
-            self.call_stack.leave_callback();
-            result
-        })
     }
 }

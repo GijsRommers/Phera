@@ -1,6 +1,6 @@
 //! Render uncaught PHP errors from heap frames, including failed parameter binding.
 
-use crate::{Vm, frame::Frame};
+use crate::{Vm, calls::frame::Frame};
 use phera_value::Value;
 
 /// Native calls have no bytecode frame, so capture only their cold error path.
@@ -62,7 +62,7 @@ fn frame_arguments(vm: &Vm, frame: &Frame) -> String {
 }
 
 impl Vm {
-    /// A parameter binding failure points at the declaration while keeping the caller as frame zero.
+    /// Binding failures point at the declaration and keep the caller as trace frame zero.
     pub(crate) fn error_trace(
         &mut self,
         class: &str,

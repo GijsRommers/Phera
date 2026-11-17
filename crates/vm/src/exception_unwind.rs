@@ -87,10 +87,18 @@ impl Vm {
             .catch
             .or(handler.finally)
             .map_or(0, |target| target.index());
+        if let Some(frame) = self.current() {
+            self.call_stack.preparing.truncate(frame.call_start);
+        }
         if let Some(frame) = self.call_stack.current_mut() {
             self.closure_captures
                 .retain(|capture| capture.base < frame.base);
-            frame.calls.clear();
+            let end = frame
+                .saved_arguments
+                .map_or(frame.base + frame.count + frame.extra_arguments, |base| {
+                    base + frame.argument_count
+                });
+            self.registers.truncate(end);
             for register in &handler.cleanup {
                 if let Some(slot) = frame
                     .slots_mut(&mut self.registers)
@@ -144,8 +152,7 @@ impl Vm {
             self.closure_captures
                 .retain(|capture| capture.base < frame.base);
             self.registers.truncate(frame.base);
-            frame.arguments.clear();
-            frame.calls.clear();
+            self.call_stack.preparing.truncate(frame.call_start);
             frame.iterators.resize(0);
             self.call_stack.recycle(frame);
         }

@@ -109,10 +109,10 @@ enum Implementation {
     Internal,
 }
 
-fn implementation(target: &crate::call_state::CallTarget) -> Option<Implementation> {
-    use crate::call_state::CallTarget;
+fn implementation(target: &crate::calls::call_state::CallTarget) -> Option<Implementation> {
+    use crate::calls::call_state::CallTarget;
     match target {
-        CallTarget::User(_) => Some(Implementation::Php),
+        CallTarget::User { .. } => Some(Implementation::Php),
         CallTarget::Native(_) | CallTarget::Intrinsic(_) => Some(Implementation::Internal),
         CallTarget::Method { method, .. } => match method.body {
             crate::classes::MethodBody::User(_) => Some(Implementation::Php),
@@ -120,6 +120,6 @@ fn implementation(target: &crate::call_state::CallTarget) -> Option<Implementati
                 Some(Implementation::Internal)
             }
         },
-        CallTarget::Vacant | CallTarget::Constructed(_) | CallTarget::Closure(_) => None,
+        CallTarget::Constructed(_) | CallTarget::Closure(_) => None,
     }
 }

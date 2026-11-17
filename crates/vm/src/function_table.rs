@@ -1,6 +1,6 @@
 //! Request-local function table state kept separate from register execution.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{cell::RefCell, collections::HashMap, sync::Arc};
 
 use phera_bytecode::CompiledUnit;
 
@@ -8,12 +8,15 @@ use phera_bytecode::CompiledUnit;
 pub(crate) struct FunctionTable {
     /// Request-owned functions.
     functions: HashMap<String, FunctionRef>,
+    /// Raw callable names retain resolved signatures until the declaration table changes.
+    resolved: RefCell<HashMap<phera_value::PhpString, crate::calls::call_state::Callee>>,
 }
 
 impl FunctionTable {
     pub(crate) fn new() -> Self {
         Self {
             functions: HashMap::new(),
+            resolved: RefCell::new(HashMap::new()),
         }
     }
 }
@@ -37,6 +40,28 @@ impl FunctionTable {
 
     /// Redeclaration checks stay at the caller because main and include differ.
     pub(crate) fn insert(&mut self, lowercase_name: String, function: FunctionRef) {
+        self.resolved.get_mut().clear();
         self.functions.insert(lowercase_name, function);
+    }
+}
+
+impl FunctionTable {
+    /// Byte identity includes casing and namespace prefixes; resolution handles those on a miss.
+    pub(crate) fn resolved(
+        &self,
+        name: &phera_value::PhpString,
+    ) -> Option<crate::calls::call_state::Callee> {
+        self.resolved.borrow().get(name).cloned()
+    }
+
+    /// Insertion invalidates this request-local cache, so later declarations cannot be hidden.
+    pub(crate) fn cache_resolution(
+        &self,
+        name: &phera_value::PhpString,
+        callee: &crate::calls::call_state::Callee,
+    ) {
+        self.resolved
+            .borrow_mut()
+            .insert(name.clone(), callee.clone());
     }
 }

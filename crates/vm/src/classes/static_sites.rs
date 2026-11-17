@@ -3,7 +3,7 @@
 use super::Class;
 use crate::{
     Vm,
-    call_state::{CallTarget, Callee},
+    calls::call_state::{CallTarget, Callee},
 };
 use phera_bytecode::{ClassBinding, Reg};
 use phera_extension_api::NativeError;
@@ -33,12 +33,12 @@ pub(crate) struct StaticEntry {
     names: StaticNames,
     scope: Option<Rc<Class>>,
     called: Option<Rc<Class>>,
-    callee: Rc<Callee>,
+    callee: Callee,
     receiver_class: Option<Rc<dyn ClassHandle>>,
 }
 
 impl Vm {
-    /// Mirrors dynamic static-style preparation, retaining conversion diagnostics on misses.
+    /// Dynamic static targets retain conversion diagnostics when a guarded site misses.
     pub(crate) fn prepare_static_site(
         &mut self,
         class: Reg,
@@ -98,7 +98,7 @@ impl Vm {
     }
 
     /// Known symbols need only identity guards; their spelling is fixed by the instruction.
-    pub(crate) fn known_static_callee(&self, context: &StaticContext) -> Option<Rc<Callee>> {
+    pub(crate) fn known_static_callee(&self, context: &StaticContext) -> Option<Callee> {
         self.current()
             .and_then(|frame| frame.site_cache())
             .and_then(|slot| {
@@ -117,23 +117,24 @@ impl Vm {
         names: StaticNames,
     ) -> Result<(), NativeError> {
         let callee = self
-            .current()
-            .and_then(|frame| frame.calls.last())
-            .map(|call| call.callee.clone())
+            .call_stack
+            .preparing
+            .last()
+            .map(|call| &call.callee)
             .ok_or_else(|| internal_error!("static prepared call"))?;
         if let CallTarget::Method { method, context } = &callee.target {
             let receiver_class = context.receiver.as_ref().map(|object| object.class.clone());
             let mut context = context.clone();
             context.receiver = None;
-            let unbound = Rc::new(Callee {
-                argument_binding: crate::callback_binding::ArgumentBinding::Caller,
+            let unbound = Callee {
+                argument_binding: crate::calls::callback_binding::ArgumentBinding::Caller,
                 name: callee.name.clone(),
                 parameters: callee.parameters.clone(),
                 target: CallTarget::Method {
                     method: method.clone(),
                     context,
                 },
-            });
+            };
             if let Some(slot) = self.current().and_then(|frame| frame.site_cache()) {
                 *slot.borrow_mut() =
                     crate::unit_caches::CachedSite::Static(Box::new(StaticEntry {
@@ -148,27 +149,16 @@ impl Vm {
         Ok(())
     }
 
-    /// Mirrors fresh binding: instance targets get this receiver, static targets share metadata.
+    /// Cached visibility and scope stay valid; only this call's receiver changes.
     pub(crate) fn bind_static_site(
         &mut self,
-        callee: Rc<Callee>,
+        mut callee: Callee,
         receiver: Option<Rc<Object>>,
     ) -> Result<(), NativeError> {
-        if let CallTarget::Method { method, context } = &callee.target
+        if let CallTarget::Method { method, context } = &mut callee.target
             && !method.is_static
         {
-            let mut context = context.clone();
             context.receiver = receiver;
-            let bound = self.call_stack.bound_callee(Callee {
-                argument_binding: crate::callback_binding::ArgumentBinding::Caller,
-                name: callee.name.clone(),
-                parameters: callee.parameters.clone(),
-                target: CallTarget::Method {
-                    method: method.clone(),
-                    context,
-                },
-            });
-            return self.prepare_call(bound);
         }
         self.prepare_call(callee)
     }

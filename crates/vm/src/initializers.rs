@@ -28,12 +28,8 @@ impl Vm {
         let mut diagnostics = phera_value::CollectDiagnostics::default();
         while let Some(instruction) = function.instructions.get(position).copied() {
             position += 1;
-            if crate::fast::scalar_step(
-                instruction,
-                &mut slots,
-                &mut position,
-                crate::fast::ArgumentTracking::Unobserved,
-            ) == crate::fast::ScalarStep::Complete
+            if crate::fast::scalar_step(instruction, &mut slots, &mut position)
+                == crate::fast::ScalarStep::Complete
             {
                 continue;
             }
@@ -50,7 +46,7 @@ impl Vm {
             let (destination, value) = match instruction {
                 Instruction::LoadConst { dst, constant } => (
                     dst,
-                    crate::frame::value(&reference.unit.constants[constant.index()]),
+                    crate::calls::frame::value(&reference.unit.constants[constant.index()]),
                 ),
                 Instruction::FetchClassName { dst, class } => {
                     let name = &reference.unit.symbols[class.index()].written;

@@ -6,7 +6,7 @@ use phera_bytecode::{IncludeKind, Reg};
 use phera_extension_api::NativeError;
 use phera_value::{Value, to_php_string};
 
-use crate::{Vm, frame::Frame, include_scope::ScopeBinding};
+use crate::{Vm, calls::frame::Frame, include_scope::ScopeBinding};
 
 impl Vm {
     /// Execute included top-level code with references to the caller scope.
@@ -48,8 +48,17 @@ impl Vm {
         destination: Reg,
     ) -> Result<(), NativeError> {
         let bindings = self.include_bindings(&unit)?;
-        let cache = self.code_cache(&unit);
-        let mut frame = Frame::new(cache, &mut self.registers, unit, None, Some(destination));
+        let cache = self.unit_caches.symbols(&unit);
+        let base = self.registers.len();
+        let mut frame = Frame::new(
+            cache,
+            &mut self.registers,
+            unit,
+            None,
+            Some(destination),
+            base,
+        );
+        frame.call_start = self.call_stack.preparing.len();
         for ScopeBinding {
             register,
             name,
@@ -167,7 +176,8 @@ impl Vm {
                         .get(previous.index)
                         .map_or(1, |function| function.definition_line);
                     let text = format!(
-                        "\nFatal error: Cannot redeclare function {}() (previously declared in {}:{previous_line}) in {} on line {}\n",
+                        "\nFatal error: Cannot redeclare function {}() (previously declared \
+                         in {}:{previous_line}) in {} on line {}\n",
                         function.name, previous.unit.file, unit.file, function.definition_line,
                     );
                     self.out(text.as_bytes());

@@ -37,21 +37,26 @@ impl Compiler<'_> {
     ) -> Result<(), CompileError> {
         for parameter in parameters {
             if parameter.modifiers.visibility.is_some() {
-                // Compiled exactly like a hand-written `$this->name = $name;`,
-                // so promotion gets the same cached property write.
                 let scratch = self.allocate_register()?;
                 let source = self.local(&parameter.name)?;
-                self.emit(
-                    Instruction::Write {
-                        place: Place {
-                            base: scratch,
-                            scope: crate::ir::PlaceScope::This,
-                            path: vec![crate::ir::PathStep::Property(parameter.name.clone())],
+                let place = Place {
+                    base: scratch,
+                    scope: crate::ir::PlaceScope::This,
+                    path: vec![crate::ir::PathStep::Property(parameter.name.clone())],
+                };
+                let instruction = if parameter.by_reference {
+                    Instruction::Bind {
+                        place,
+                        source: Place {
+                            base: source,
+                            scope: crate::ir::PlaceScope::Local,
+                            path: vec![],
                         },
-                        source,
-                    },
-                    line,
-                );
+                    }
+                } else {
+                    Instruction::Write { place, source }
+                };
+                self.emit(instruction, line);
             }
         }
         Ok(())

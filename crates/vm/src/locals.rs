@@ -31,11 +31,6 @@ impl Vm {
     /// Implements PHP Assign semantics outside the dispatch loop.
     pub(crate) fn execute_assign(&mut self, local: Reg, source: Reg) -> Result<(), NativeError> {
         let value = self.get(source);
-        if let Some(frame) = self.call_stack.current_mut()
-            && let Some(argument) = frame.arguments.get_mut(local.index())
-        {
-            *argument = value.clone();
-        }
         self.restart_subject_iterators(local);
         self.assign_local(local, value)?;
         Ok(())

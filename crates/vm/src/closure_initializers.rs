@@ -7,7 +7,7 @@ use phera_extension_api::NativeError;
 use phera_value::Value;
 
 use crate::Vm;
-use crate::call_state::{CallTarget, Callee, ParameterSpec};
+use crate::calls::call_state::{CallTarget, Callee, ParameterSpec};
 use crate::classes::{Invocation, MethodContext};
 use crate::closures::{ClosureOrigin, ClosureState};
 use crate::function_table::FunctionRef;
@@ -26,13 +26,13 @@ impl Vm {
         instruction: Instruction,
         reference: &FunctionRef,
         scope: &str,
-        prepared: &mut Option<Rc<Callee>>,
+        prepared: &mut Option<Callee>,
         slots: &[Option<Value>],
     ) -> Result<InitializerCallable, NativeError> {
         match instruction {
             Instruction::InitCall { function } => {
                 let symbol = &reference.unit.symbols[function.index()];
-                *prepared = Some(self.resolve_callee(symbol.written.clone())?);
+                *prepared = Some(self.resolve_callee(&symbol.written)?);
                 Ok(InitializerCallable::Prepared)
             }
             Instruction::InitDynamicCall { callee } => {
@@ -85,11 +85,7 @@ impl Vm {
         let parameters = body
             .parameters
             .iter()
-            .map(|parameter| ParameterSpec {
-                name: reference.unit.names[parameter.name.index()].clone(),
-                by_reference: parameter.by_reference,
-                variadic: parameter.variadic,
-            })
+            .map(|parameter| ParameterSpec::user(&reference.unit, parameter))
             .collect();
         let context = self.classes.get(scope).map(|scope| MethodContext {
             called: scope.clone(),
@@ -97,15 +93,15 @@ impl Vm {
             receiver: None,
             invocation: Invocation::Method,
         });
-        let callee = Rc::new(Callee {
-            argument_binding: crate::callback_binding::ArgumentBinding::Caller,
+        let callee = Callee {
+            argument_binding: crate::calls::callback_binding::ArgumentBinding::Caller,
             name: body.name.as_str().into(),
             parameters,
-            target: CallTarget::User(FunctionRef {
+            target: CallTarget::User {
                 unit: reference.unit.clone(),
                 index,
-            }),
-        });
+            },
+        };
         let state = ClosureState {
             origin: ClosureOrigin::Lexical,
             callee,

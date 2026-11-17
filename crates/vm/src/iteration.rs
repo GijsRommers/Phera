@@ -4,7 +4,7 @@ use phera_bytecode::{IterId, Reg, Target};
 use phera_extension_api::NativeError;
 use phera_value::{ArrayKey, Value};
 
-use crate::{AccessPath, Vm, frame};
+use crate::{AccessPath, Vm, calls::frame};
 
 impl Vm {
     /// By-value foreach retains an array snapshot, so later writes separate by COW.
@@ -221,14 +221,14 @@ impl Vm {
     }
 }
 
-/// Mirrors next_snapshot for by-value, unkeyed iteration, retaining the current
+/// By-value, unkeyed iteration retains the current
 /// register window and local IP. Live reference iteration uses iter_next instead.
 pub(crate) fn snapshot_step(
     iterator: IterId,
     destination: Reg,
     end: Target,
     frame: Option<&mut frame::Frame>,
-    registers: &mut crate::registers::Registers,
+    registers: &mut crate::calls::registers::Registers,
     ip: &mut usize,
 ) -> bool {
     let Some(frame) = frame else { return false };

@@ -1,6 +1,6 @@
 //! Reference foreach over objects follows live property positions and shares each property's cell.
 
-use crate::{Vm, frame::IteratorState};
+use crate::{Vm, calls::frame::IteratorState};
 use phera_bytecode::{Reg, Target};
 use phera_extension_api::NativeError;
 use phera_value::{Object, Value};
