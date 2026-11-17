@@ -1,6 +1,7 @@
-//! Registration of PHP arithmetic, rounding, radix, and array aggregation functions.
+//! Number functions: rounding, conversions between bases, `min` and
+//! `max`, `array_sum`, and the C library's float functions.
 
-use phera_extension_api::Registry;
+use phera_extension_api::{Registry, Value, args};
 
 mod aggregate;
 mod base;
@@ -11,13 +12,21 @@ pub(crate) mod rounding;
 mod trig;
 
 pub(crate) fn register(registry: &mut Registry) {
-    for entry in rounding::FUNCTIONS {
+    let modules = [
+        aggregate::FUNCTIONS,
+        base::FUNCTIONS,
+        basic::FUNCTIONS,
+        minmax::FUNCTIONS,
+        misc::FUNCTIONS,
+        rounding::FUNCTIONS,
+        trig::FUNCTIONS,
+    ];
+    for entry in modules.into_iter().flatten() {
         registry.function(*entry);
     }
-    base::register(registry);
-    aggregate::register(registry);
-    basic::register(registry);
-    minmax::register(registry);
-    misc::register(registry);
-    trig::register(registry);
+}
+
+/// `function` of a function's one float argument, as a PHP float.
+fn of_float(arguments: &[Value], function: impl Fn(f64) -> f64) -> Value {
+    Value::Float(function(args::float(arguments, 0).unwrap_or_default()))
 }

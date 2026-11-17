@@ -1,89 +1,151 @@
-//! Radix conversion retains integer precision until PHP's signed limit is exceeded.
+//! Numbers in other bases: `dechex`, `hexdec`, `base_convert` and their
+//! relatives, and `fpow`.
 
 use phera_extension_api::{
-    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Registry, Value, args,
+    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Value, args,
 };
 
-const INTEGER_PARAMS: &[Param] = &[Param::new("num", ParamType::Int)];
-
-const STRING_PARAMS: &[Param] = &[Param::new("string", ParamType::String)];
-
-const CONVERT_PARAMS: &[Param] = &[
-    Param::new("num", ParamType::String),
-    Param::new("from_base", ParamType::Int),
-    Param::new("to_base", ParamType::Int),
+pub(super) const FUNCTIONS: &[FunctionEntry] = &[
+    DECHEX,
+    DECBIN,
+    DECOCT,
+    HEXDEC,
+    BINDEC,
+    OCTDEC,
+    BASE_CONVERT,
+    FPOW,
 ];
 
-const POWER_PARAMS: &[Param] = &[
-    Param::new("num", ParamType::Float),
-    Param::new("exponent", ParamType::Float),
-];
+const DIGITS: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
 
-const DIGITS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+/// The size of the buffer PHP converts a float into, which caps the
+/// digits. No double needs that many: 2^1024 has 1025 binary digits.
+const ZEND_DOUBLE_MAX_LENGTH: usize = 1080;
 
-pub(crate) fn register(registry: &mut Registry) {
-    registry.function(FunctionEntry::sync("dechex", INTEGER_PARAMS, dechex));
-    registry.function(FunctionEntry::sync("decbin", INTEGER_PARAMS, decbin));
-    registry.function(FunctionEntry::sync("decoct", INTEGER_PARAMS, decoct));
-    registry.function(FunctionEntry::sync("hexdec", STRING_PARAMS, hexdec));
-    registry.function(FunctionEntry::sync("bindec", STRING_PARAMS, bindec));
-    registry.function(FunctionEntry::sync("octdec", STRING_PARAMS, octdec));
-    registry.function(FunctionEntry::sync(
-        "base_convert",
-        CONVERT_PARAMS,
-        base_convert,
-    ));
-    registry.function(FunctionEntry::sync("fpow", POWER_PARAMS, fpow));
+/// `dechex(int $num): string`
+///
+/// ```php
+/// dechex(255); // "ff"
+/// dechex(-1);  // "ffffffffffffffff": a negative int is read as unsigned
+/// ```
+const DECHEX: FunctionEntry =
+    FunctionEntry::sync("dechex", &[Param::new("num", ParamType::Int)], dechex);
+
+fn dechex(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let number = args::int(arguments, 0).unwrap_or_default();
+    Ok(Value::from(integer_digits(number as u64, 16)))
 }
 
-fn dechex(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(Value::from(integer_digits(
-        args::int(arguments, 0).unwrap_or_default() as u64,
-        16,
-    )))
+/// `decbin(int $num): string`
+///
+/// ```php
+/// decbin(5); // "101"
+/// ```
+const DECBIN: FunctionEntry =
+    FunctionEntry::sync("decbin", &[Param::new("num", ParamType::Int)], decbin);
+
+fn decbin(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let number = args::int(arguments, 0).unwrap_or_default();
+    Ok(Value::from(integer_digits(number as u64, 2)))
 }
 
-fn decbin(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(Value::from(integer_digits(
-        args::int(arguments, 0).unwrap_or_default() as u64,
-        2,
-    )))
+/// `decoct(int $num): string`
+///
+/// ```php
+/// decoct(8); // "10"
+/// ```
+const DECOCT: FunctionEntry =
+    FunctionEntry::sync("decoct", &[Param::new("num", ParamType::Int)], decoct);
+
+fn decoct(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let number = args::int(arguments, 0).unwrap_or_default();
+    Ok(Value::from(integer_digits(number as u64, 8)))
 }
 
-fn decoct(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(Value::from(integer_digits(
-        args::int(arguments, 0).unwrap_or_default() as u64,
-        8,
-    )))
-}
+/// `hexdec(string $hex_string): int|float`, a float once the number passes
+/// `PHP_INT_MAX`.
+///
+/// ```php
+/// hexdec("ff");  // 255
+/// hexdec("0xff"); // 255
+/// hexdec("fg");  // 15, with a deprecation for the "g"
+/// ```
+const HEXDEC: FunctionEntry =
+    FunctionEntry::sync("hexdec", &[Param::new("string", ParamType::String)], hexdec);
 
 fn hexdec(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(parse(context, args::bytes(arguments, 0), 16))
 }
 
+/// `bindec(string $binary_string): int|float`, a float once the number passes
+/// `PHP_INT_MAX`.
+///
+/// ```php
+/// bindec("101"); // 5
+/// ```
+const BINDEC: FunctionEntry =
+    FunctionEntry::sync("bindec", &[Param::new("string", ParamType::String)], bindec);
+
 fn bindec(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(parse(context, args::bytes(arguments, 0), 2))
 }
+
+/// `octdec(string $octal_string): int|float`, a float once the number passes
+/// `PHP_INT_MAX`.
+///
+/// ```php
+/// octdec("777"); // 511
+/// ```
+const OCTDEC: FunctionEntry =
+    FunctionEntry::sync("octdec", &[Param::new("string", ParamType::String)], octdec);
 
 fn octdec(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(parse(context, args::bytes(arguments, 0), 8))
 }
 
-fn fpow(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(Value::Float(
-        args::float(arguments, 0)
-            .unwrap_or_default()
-            .powf(args::float(arguments, 1).unwrap_or_default()),
-    ))
+/// `base_convert(string $num, int $from_base, int $to_base): string`
+///
+/// Past `PHP_INT_MAX` PHP goes on in floats, and so loses digits.
+///
+/// ```php
+/// base_convert("ff", 16, 2); // "11111111"
+/// ```
+const BASE_CONVERT: FunctionEntry = FunctionEntry::sync(
+    "base_convert",
+    &[
+        Param::new("num", ParamType::String),
+        Param::new("from_base", ParamType::Int),
+        Param::new("to_base", ParamType::Int),
+    ],
+    base_convert,
+);
+
+/// `fpow(float $num, float $exponent): float`, new in PHP 8.4: IEEE power,
+/// where `pow()` may return an int.
+///
+/// ```php
+/// fpow(2, 3); // 8.0
+/// ```
+const FPOW: FunctionEntry = FunctionEntry::sync(
+    "fpow",
+    &[
+        Param::new("num", ParamType::Float),
+        Param::new("exponent", ParamType::Float),
+    ],
+    fpow,
+);
+
+fn fpow(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let base = args::float(arguments, 0).unwrap_or_default();
+    let exponent = args::float(arguments, 1).unwrap_or_default();
+    Ok(Value::Float(base.powf(exponent)))
 }
 
 /// Signed inputs are reinterpreted as unsigned for the dec* functions.
 fn integer_digits(mut number: u64, base: u64) -> String {
     let mut result = Vec::new();
     loop {
-        if let Some(digit) = DIGITS.get((number % base) as usize) {
-            result.push(*digit);
-        }
+        result.push(DIGITS[(number % base) as usize]);
         number /= base;
         if number == 0 {
             break;
@@ -138,11 +200,9 @@ fn base_convert(context: &mut dyn Context, arguments: &[Value]) -> NativeResult 
             }
             let mut result = Vec::new();
             loop {
-                if let Some(digit) = DIGITS.get((number % to as f64) as usize) {
-                    result.push(*digit);
-                }
+                result.push(DIGITS[(number % to as f64) as usize]);
                 number /= to as f64;
-                if number < 1.0 || result.len() == 1080 {
+                if number < 1.0 || result.len() == ZEND_DOUBLE_MAX_LENGTH {
                     break;
                 }
             }
@@ -162,13 +222,13 @@ fn strip_prefix(string: &[u8], base: i64) -> &[u8] {
         .first()
         .is_some_and(|byte| byte.is_ascii_whitespace() || *byte == 11)
     {
-        string = string.get(1..).unwrap_or_default();
+        string = &string[1..];
     }
     while string
         .last()
         .is_some_and(|byte| byte.is_ascii_whitespace() || *byte == 11)
     {
-        string = string.get(..string.len() - 1).unwrap_or_default();
+        string = &string[..string.len() - 1];
     }
     let prefix = match base {
         16 => b'x',
@@ -181,7 +241,7 @@ fn strip_prefix(string: &[u8], base: i64) -> &[u8] {
             .get(1)
             .is_some_and(|byte| byte.to_ascii_lowercase() == prefix)
     {
-        string = string.get(2..).unwrap_or_default();
+        string = &string[2..];
     }
     string
 }

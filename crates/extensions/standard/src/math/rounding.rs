@@ -13,7 +13,7 @@ use crate::constants::{
     PHP_ROUND_HALF_DOWN, PHP_ROUND_HALF_EVEN, PHP_ROUND_HALF_ODD, PHP_ROUND_HALF_UP,
 };
 
-pub(crate) const FUNCTIONS: &[FunctionEntry] = &[ROUND];
+pub(super) const FUNCTIONS: &[FunctionEntry] = &[ROUND];
 
 /// The cases of PHP 8.4's `RoundingMode` enum. The first four also have a
 /// `PHP_ROUND_*` constant; an enum case arrives as its integer 5 to 8.
