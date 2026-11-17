@@ -48,6 +48,16 @@ pub fn build(name: &str, a: &[Value], b: &mut Builder<'_>) -> Result<bool, Nativ
             {
                 b.shape = Shape::Raw;
             }
+            // `pubsub('numsub', $channels)` answers channel => subscribers.
+            if name == "pubsub"
+                && a.first().is_some_and(|v| {
+                    let subcommand = string(v);
+                    subcommand.eq_ignore_ascii_case("NUMSUB")
+                        || subcommand.eq_ignore_ascii_case("SHARDNUMSUB")
+                })
+            {
+                b.shape = Shape::RawPairs;
+            }
         }
         "info" => {
             b.args(a);
