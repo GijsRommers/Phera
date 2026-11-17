@@ -999,7 +999,11 @@ dependencies = [
 name = "phera-ext-tokenizer"
 version = "0.1.0"
 dependencies = [
+ "phera-ext-core",
  "phera-extension-api",
+ "phera-lexer",
+ "phera-parser",
+ "phera-phpt",
 ]
 
 [[package]]

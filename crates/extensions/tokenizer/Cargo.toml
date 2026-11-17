@@ -7,6 +7,12 @@ license.workspace = true
 
 [dependencies]
 phera-extension-api.workspace = true
+phera-lexer.workspace = true
+phera-parser.workspace = true
+
+[dev-dependencies]
+phera-ext-core.workspace = true
+phera-phpt.workspace = true
 
 [lints]
 workspace = true
