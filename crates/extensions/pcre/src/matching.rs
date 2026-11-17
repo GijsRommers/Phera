@@ -1,22 +1,63 @@
-//! `preg_match_all('/a/', 'aba', $m)` returns 2 and fills pattern-ordered matches.
+//! `preg_match` and `preg_match_all`.
+//!
+//! ```php
+//! preg_match('/(\d+)/', 'ab 12 cd 34', $m);       // 1, $m = ['12', '12']
+//! preg_match_all('/\d+/', 'ab 12 cd 34', $m);     // 2, $m = [['12', '34']]
+//! preg_match('/\d+/', 'ab 12 cd 34', $m, 0, -2);  // 1, $m = ['34']
+//! ```
 
 use crate::errors::Error;
+use crate::flags::{CaptureFlags, Order};
 use crate::scan::Scanner;
-use crate::{cache, errors, flags, matches};
+use crate::{cache, errors, matches};
 use phera_extension_api::{Context, NativeError, NativeResult, PhpArray, Value, args};
 
 pub(crate) fn single(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    run(context, arguments, false)
+    run(context, arguments, Function::Match)
 }
+
 pub(crate) fn all(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    run(context, arguments, true)
+    run(context, arguments, Function::MatchAll)
 }
-fn run(context: &mut dyn Context, arguments: &[Value], global: bool) -> NativeResult {
-    let name = if global {
-        "preg_match_all"
-    } else {
-        "preg_match"
-    };
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Function {
+    Match,
+    MatchAll,
+}
+
+impl Function {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Match => "preg_match",
+            Self::MatchAll => "preg_match_all",
+        }
+    }
+
+    /// The shape of `$matches` that the low byte of `$flags` asks for.
+    fn order(self, flags: i64) -> Result<Order, NativeError> {
+        match (self, flags & 0xff) {
+            (Self::Match, 0) => Ok(Order::Single),
+            (Self::MatchAll, 0 | 1) => Ok(Order::Pattern),
+            (Self::MatchAll, 2) => Ok(Order::Set),
+            _ => Err(NativeError::value_error(format!(
+                "{}(): Argument #4 ($flags) must be a PREG_* constant",
+                self.name()
+            ))),
+        }
+    }
+
+    /// How many matches to look for.
+    fn limit(self) -> usize {
+        match self {
+            Self::Match => 1,
+            Self::MatchAll => usize::MAX,
+        }
+    }
+}
+
+fn run(context: &mut dyn Context, arguments: &[Value], function: Function) -> NativeResult {
+    let name = function.name();
     let Some(compiled) = cache::get(context, name, args::bytes(arguments, 0)) else {
         return Ok(Value::Bool(false));
     };
@@ -28,9 +69,11 @@ fn run(context: &mut dyn Context, arguments: &[Value], global: bool) -> NativeRe
         )));
     }
     matches::assign(arguments, 2, Value::from(PhpArray::new()));
-    let (order, flags) = flags::match_flags(name, args::int(arguments, 3).unwrap_or(0), global)?;
+    let flags = args::int(arguments, 3).unwrap_or(0);
+    let order = function.order(flags)?;
+    let capture_flags = CaptureFlags::parse(flags);
     let subject = args::bytes(arguments, 1);
-    let offset = args::int(arguments, 4).unwrap_or(0);
+    // A negative offset counts from the end, and stops at the start.
     let position = if offset < 0 {
         subject.len().saturating_sub(offset.unsigned_abs() as usize)
     } else {
@@ -40,37 +83,29 @@ fn run(context: &mut dyn Context, arguments: &[Value], global: bool) -> NativeRe
         errors::set(context, Error::Internal);
         return Ok(Value::Bool(false));
     }
+    errors::set(context, Error::None);
+    let names = compiled.regex.capture_names();
     let mut scanner = Scanner::new(&compiled, subject, position);
     let mut rows = Vec::new();
-    errors::set(context, Error::None);
-    loop {
-        match scanner.next() {
-            Ok(Some(captures)) => rows.push(captures),
-            Ok(None) => break,
+    for found in scanner.by_ref().take(function.limit()) {
+        match found {
+            Ok(captures) => rows.push(captures),
             Err(error) => {
                 errors::set(context, error);
-                matches::assign(
-                    arguments,
-                    2,
-                    matches::table(subject, &rows, compiled.regex.capture_names(), flags, order),
-                );
+                let table = matches::table(subject, &rows, names, capture_flags, order);
+                matches::assign(arguments, 2, table);
                 return Ok(Value::Bool(false));
             }
-        }
-        if !global {
-            if arguments.len() < 3
-                && let Err(error) = scanner.check_empty_retry()
-            {
-                errors::set(context, error);
-                return Ok(Value::Bool(false));
-            }
-            break;
         }
     }
-    matches::assign(
-        arguments,
-        2,
-        matches::table(subject, &rows, compiled.regex.capture_names(), flags, order),
-    );
+    if function == Function::Match
+        && arguments.len() < 3
+        && let Err(error) = scanner.check_empty_retry()
+    {
+        errors::set(context, error);
+        return Ok(Value::Bool(false));
+    }
+    let table = matches::table(subject, &rows, names, capture_flags, order);
+    matches::assign(arguments, 2, table);
     Ok(Value::Int(rows.len() as i64))
 }

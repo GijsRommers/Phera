@@ -2,8 +2,9 @@
 
 use crate::errors::Error;
 use crate::flags::CaptureFlags;
+use crate::replace::{self, Splice};
 use crate::scan::Scanner;
-use crate::{cache, callable, errors, matches, replace};
+use crate::{cache, callable, errors, matches};
 use phera_extension_api::value::to_php_string;
 use phera_extension_api::{
     ArrayKey, Context, LocalFuture, NativeError, NativeResult, PhpArray, Value, args,
@@ -13,7 +14,7 @@ struct Operation<'a> {
     name: &'static str,
     patterns: Vec<Value>,
     callback: &'a Value,
-    limit: i64,
+    limit: usize,
     flags: CaptureFlags,
     count: usize,
     exception: Option<NativeError>,
@@ -41,20 +42,15 @@ impl Operation<'_> {
                 return Ok(Value::Null);
             };
             errors::set(context, Error::None);
-            let mut scanner = Scanner::new(&compiled, &subject, 0);
-            let mut output = Vec::new();
-            let mut previous_end = 0;
-            let mut replaced = 0;
-            while self.limit < 0 || replaced < self.limit {
-                let captures = match scanner.next() {
-                    Ok(Some(captures)) => captures,
-                    Ok(None) => break,
+            let mut splice = Splice::new(&subject);
+            for found in Scanner::new(&compiled, &subject, 0).take(self.limit) {
+                let captures = match found {
+                    Ok(captures) => captures,
                     Err(error) => {
                         errors::set(context, error);
                         return Ok(Value::Null);
                     }
                 };
-                let (start, end) = captures[0].expect("whole match");
                 let parameters = matches::row(
                     &subject,
                     &captures,
@@ -62,8 +58,9 @@ impl Operation<'_> {
                     self.flags,
                 );
                 self.count += 1;
-                // PHP still scans subsequent array subjects while an exception is pending,
-                // but never invokes their callbacks. Keep the original unwind untouched.
+                // With an exception pending (from a callback on an earlier
+                // subject of the array), PHP still matches but calls no
+                // callback, and the subject becomes null.
                 if self.exception.is_some() {
                     errors::set(context, Error::Internal);
                     return Ok(Value::Null);
@@ -77,15 +74,11 @@ impl Operation<'_> {
                     }
                 };
                 let replacement = to_php_string(&replacement, context.diagnostics())?;
-                output.extend_from_slice(&subject[previous_end..start]);
-                output.extend_from_slice(replacement.as_bytes());
-                previous_end = end;
-                replaced += 1;
+                splice
+                    .replace(&captures)
+                    .extend_from_slice(replacement.as_bytes());
             }
-            output.extend_from_slice(&subject[previous_end..]);
-            // The scanner borrows `subject` until it gives its match data back.
-            drop(scanner);
-            subject = output;
+            subject = splice.finish();
         }
         Ok(Value::from(subject))
     }
@@ -115,7 +108,7 @@ pub(crate) fn replace(
             name: "preg_replace_callback",
             patterns: replace::values(args::value(&arguments, 0)),
             callback: args::value(&arguments, 1),
-            limit: args::int(&arguments, 3).unwrap_or(-1),
+            limit: replace::match_limit(args::int(&arguments, 3).unwrap_or(-1)),
             flags: CaptureFlags::parse(args::int(&arguments, 5).unwrap_or(0)),
             count: 0,
             exception: None,
@@ -148,7 +141,7 @@ pub(crate) fn replace_array(
                     name: "preg_replace_callback_array",
                     patterns: vec![Value::String(pattern.clone())],
                     callback,
-                    limit: args::int(&arguments, 2).unwrap_or(-1),
+                    limit: replace::match_limit(args::int(&arguments, 2).unwrap_or(-1)),
                     flags: CaptureFlags::parse(args::int(&arguments, 4).unwrap_or(0)),
                     count: 0,
                     exception: None,

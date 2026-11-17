@@ -1,4 +1,9 @@
-//! `preg_grep('/a/', ['x' => 'cat', 'dog'])` preserves matching keys and values.
+//! `preg_grep`: the entries whose value matches, with their keys.
+//!
+//! ```php
+//! preg_grep('/a/', ['x' => 'cat', 'dog']);                    // ['x' => 'cat']
+//! preg_grep('/a/', ['x' => 'cat', 'dog'], PREG_GREP_INVERT);  // [0 => 'dog']
+//! ```
 
 use crate::errors::Error;
 use crate::scan::Scanner;
@@ -16,15 +21,15 @@ pub(crate) fn grep(context: &mut dyn Context, arguments: &[Value]) -> NativeResu
     if let Some(array) = args::array(arguments, 1) {
         for (key, value) in array.iter() {
             let subject = to_php_string(value, context.diagnostics())?;
-            let mut scanner = Scanner::new(&compiled, subject.as_bytes(), 0);
-            match scanner.next() {
-                Ok(found) if found.is_some() != invert => {
-                    result.insert(key, value.clone());
-                }
-                Ok(_) => {}
-                Err(error) => {
+            match Scanner::new(&compiled, subject.as_bytes(), 0).next() {
+                Some(Err(error)) => {
                     errors::set(context, error);
                     break;
+                }
+                found => {
+                    if found.is_some() != invert {
+                        result.insert(key, value.clone());
+                    }
                 }
             }
         }

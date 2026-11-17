@@ -16,37 +16,39 @@ pub(crate) fn split(context: &mut dyn Context, arguments: &[Value]) -> NativeRes
         offsets: flags.offsets,
         unmatched_null: false,
     };
-    let mut remaining = args::int(arguments, 2).unwrap_or(-1);
-    if remaining == 0 {
-        remaining = -1;
-    }
+    // The number of pieces, the last being the rest of the subject; -1 and
+    // 0 mean no limit.
+    let mut pieces_left = match args::int(arguments, 2).unwrap_or(-1) {
+        -1 | 0 => None,
+        limit => Some(limit),
+    };
     let mut scanner = Scanner::new(&compiled, subject, 0);
     let mut pieces = Vec::new();
     let mut previous_end = 0;
     errors::set(context, Error::None);
-    while remaining == -1 || remaining > 1 {
+    while pieces_left.is_none_or(|left| left > 1) {
         let captures = match scanner.next() {
-            Ok(Some(captures)) => captures,
-            Ok(None) => break,
-            Err(error) => {
+            Some(Ok(captures)) => captures,
+            None => break,
+            Some(Err(error)) => {
                 errors::set(context, error);
                 return Ok(Value::Bool(false));
             }
         };
-        let (start, end) = captures[0].expect("whole match");
+        let (start, end) = captures[0].expect("group 0 is the whole match");
         if !flags.no_empty || start != previous_end {
             pieces.push(matches::captured(
                 subject,
                 Some((previous_end, start)),
                 capture_flags,
             ));
-            if remaining != -1 {
-                remaining -= 1;
+            if let Some(left) = &mut pieces_left {
+                *left -= 1;
             }
         }
         if flags.delimiters {
-            let count = captures.iter().rposition(Option::is_some).unwrap_or(0) + 1;
-            for span in captures.iter().take(count).skip(1) {
+            let groups = captures.iter().rposition(Option::is_some).unwrap_or(0) + 1;
+            for span in captures.iter().take(groups).skip(1) {
                 if !flags.no_empty || span.is_some_and(|(start, end)| start != end) {
                     pieces.push(matches::captured(subject, *span, capture_flags));
                 }
