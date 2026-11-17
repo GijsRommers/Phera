@@ -87,6 +87,7 @@ jobs:
           extensions: json, pcre, ctype, pdo, pdo_pgsql, mysqlnd, pdo_mysql, mbstring, tokenizer, redis-phpredis/phpredis@6.3.0
           coverage: none
         env:
+          REDIS_PATH: .
           REDIS_CONFIGURE_OPTS: >-
             --enable-redis --disable-redis-igbinary --disable-redis-msgpack
             --disable-redis-lzf --disable-redis-zstd --disable-redis-lz4
@@ -150,6 +151,7 @@ jobs:
           extensions: json, pcre, ctype, pdo, pdo_pgsql, mysqlnd, pdo_mysql, mbstring, tokenizer, redis-phpredis/phpredis@6.3.0
           coverage: none
         env:
+          REDIS_PATH: .
           REDIS_CONFIGURE_OPTS: >-
             --enable-redis --disable-redis-igbinary --disable-redis-msgpack
             --disable-redis-lzf --disable-redis-zstd --disable-redis-lz4
