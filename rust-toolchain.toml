@@ -1,0 +1,5 @@
+# Match the compiler used for development; edition 2024 and let-chains need modern Rust.
+[toolchain]
+channel = "1.99.1"
+profile = "minimal"
+components = ["rustfmt", "clippy"]

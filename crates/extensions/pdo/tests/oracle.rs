@@ -21,11 +21,11 @@ fn php_scripts_match_phera() {
         .filter(|path| path.extension().is_some_and(|extension| extension == "php"))
         .collect();
     scripts.sort();
-    let output_dir = Path::new(support::SCRATCH).join("oracle");
+    let output_dir = support::scratch().join("oracle");
     std::fs::create_dir_all(&output_dir).unwrap();
     let mut failures = Vec::new();
     for script in &scripts {
-        let php = Command::new(support::PHP)
+        let php = Command::new(support::php())
             .args(["-d", "display_errors=1", "-d", "log_errors=0"])
             .arg(script)
             .output()
