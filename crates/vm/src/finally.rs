@@ -48,21 +48,28 @@ impl Vm {
         continuation: Continuation,
     ) -> Result<(), NativeError> {
         let frame = self
-            .call_stack
-            .current_mut()
+            .current()
             .ok_or_else(|| internal_error!("finally without frame"))?;
-        let end = frame.function().instructions.iter().enumerate().skip(target.index())
-            .find_map(|(index, instruction)| matches!(instruction, Instruction::FinallyReturn { state: found } if *found == state).then_some(index))
+        let end = frame
+            .function()
+            .instructions
+            .iter()
+            .enumerate()
+            .skip(target.index())
+            .find_map(|(index, instruction)| {
+                let returns = matches!(instruction,
+                    Instruction::FinallyReturn { state: found } if *found == state);
+                returns.then_some(index)
+            })
             .ok_or_else(|| internal_error!("finally without return"))?;
         self.finally_stack.push(SavedFinally {
-            frame_base: frame.base,
+            frame_base: frame.base(),
             state,
             start: target.index(),
             end,
             continuation,
         });
-        frame.ip = target.index();
-        Ok(())
+        self.jump(target)
     }
 
     /// Remove the continuation before rethrowing so it cannot chain to itself.
@@ -92,7 +99,7 @@ impl Vm {
 
     /// Slots are removed after every path, including repeated executions in a loop.
     fn take_finally(&mut self, state: Reg) -> Option<Continuation> {
-        let frame_base = self.current()?.base;
+        let frame_base = self.current()?.base();
         let index = self
             .finally_stack
             .iter()

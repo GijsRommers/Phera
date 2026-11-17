@@ -1,4 +1,13 @@
-//! ASCII character classes matching PHP with LC_CTYPE=C on Linux servers.
+//! The `ctype_*` functions: does every byte of a string belong to a class?
+//!
+//! ```php
+//! ctype_digit('123');   // true
+//! ctype_digit('');      // false: the empty string is in no class
+//! ctype_digit(53);      // true, deprecated: an int from -128 to 255 is a byte ('5')
+//! ctype_digit(256);     // true, deprecated: a larger int stands for its digits
+//! ```
+//!
+//! The classes are ASCII, as in PHP's default "C" locale.
 
 use phera_extension_api::{
     Context, Extension, FunctionEntry, NativeResult, Param, ParamType, Registry, SyncFn, Value,
@@ -14,38 +23,71 @@ impl Extension for Ctype {
     }
 
     fn register(&self, registry: &mut Registry) {
-        for (name, function) in FUNCTIONS {
-            registry.function(FunctionEntry::sync(name, CTYPE_PARAMS, *function));
+        for &(name, function) in FUNCTIONS {
+            registry.function(FunctionEntry::sync(name, CTYPE_PARAMS, function));
         }
     }
 }
 
+/// Each function with the class of bytes it accepts. A native function is
+/// not told its own name, so each entry passes it on for the deprecation.
 const FUNCTIONS: &[(&str, SyncFn)] = &[
-    ("ctype_alnum", ctype_alnum),
-    ("ctype_alpha", ctype_alpha),
-    ("ctype_cntrl", ctype_cntrl),
-    ("ctype_digit", ctype_digit),
-    ("ctype_graph", ctype_graph),
-    ("ctype_lower", ctype_lower),
-    ("ctype_print", ctype_print),
-    ("ctype_punct", ctype_punct),
-    ("ctype_space", ctype_space),
-    ("ctype_upper", ctype_upper),
-    ("ctype_xdigit", ctype_xdigit),
+    ("ctype_alnum", |c, a| {
+        check(c, a, "ctype_alnum", u8::is_ascii_alphanumeric)
+    }),
+    ("ctype_alpha", |c, a| {
+        check(c, a, "ctype_alpha", u8::is_ascii_alphabetic)
+    }),
+    ("ctype_cntrl", |c, a| {
+        check(c, a, "ctype_cntrl", u8::is_ascii_control)
+    }),
+    ("ctype_digit", |c, a| {
+        check(c, a, "ctype_digit", u8::is_ascii_digit)
+    }),
+    ("ctype_graph", |c, a| {
+        check(c, a, "ctype_graph", u8::is_ascii_graphic)
+    }),
+    ("ctype_lower", |c, a| {
+        check(c, a, "ctype_lower", u8::is_ascii_lowercase)
+    }),
+    ("ctype_print", |c, a| check(c, a, "ctype_print", is_print)),
+    ("ctype_punct", |c, a| {
+        check(c, a, "ctype_punct", u8::is_ascii_punctuation)
+    }),
+    ("ctype_space", |c, a| check(c, a, "ctype_space", is_space)),
+    ("ctype_upper", |c, a| {
+        check(c, a, "ctype_upper", u8::is_ascii_uppercase)
+    }),
+    ("ctype_xdigit", |c, a| {
+        check(c, a, "ctype_xdigit", u8::is_ascii_hexdigit)
+    }),
 ];
 
-/// Legacy integer inputs denote a byte, while non-string inputs emit a deprecation.
+/// A graphic character or the space.
+fn is_print(byte: &u8) -> bool {
+    (32..=126).contains(byte)
+}
+
+/// Space, tab, newline, carriage return, vertical tab, form feed. Unlike
+/// `u8::is_ascii_whitespace`, this includes the vertical tab.
+fn is_space(byte: &u8) -> bool {
+    matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | 0x0b | 0x0c)
+}
+
+/// Whether the argument, a string, is non-empty and all of its bytes are in
+/// the class. Anything else is deprecated: an int from -128 to 255 is
+/// checked as one byte (a negative one plus 256), a larger int as its
+/// decimal digits (with a `-` when negative), and other types are false.
 fn check(
     context: &mut dyn Context,
     arguments: &[Value],
     name: &str,
-    predicate: fn(u8) -> bool,
+    in_class: fn(&u8) -> bool,
 ) -> NativeResult {
-    let value = arguments.first().unwrap_or(&Value::Null);
-    let value = value.deref();
+    let value = arguments.first().unwrap_or(&Value::Null).deref();
     if let Value::String(string) = &*value {
         return Ok(Value::Bool(
-            !string.is_empty() && string.as_bytes().iter().all(|b| predicate(*b)),
+            !string.is_empty() && string.as_bytes().iter().all(in_class),
         ));
     }
     context.deprecated(format!(
@@ -53,33 +95,11 @@ fn check(
         value.type_name()
     ));
     let result = match &*value {
-        Value::Int(integer) if (-128..=255).contains(integer) => predicate(*integer as u8),
-        Value::Int(integer) if *integer >= 0 => predicate(b'0'),
-        Value::Int(_) => predicate(b'0') && predicate(b'-'),
+        Value::Int(integer) if (-128..=255).contains(integer) => in_class(&(*integer as u8)),
+        // Every class that holds one digit holds all ten.
+        Value::Int(integer) if *integer >= 0 => in_class(&b'0'),
+        Value::Int(_) => in_class(&b'0') && in_class(&b'-'),
         _ => false,
     };
     Ok(Value::Bool(result))
 }
-
-// Each class shares PHP's legacy integer conversion and deprecation rules.
-macro_rules! class {
-    ($function:ident,$name:literal,$predicate:expr) => {
-        fn $function(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-            check(context, arguments, $name, $predicate)
-        }
-    };
-}
-class!(ctype_alnum, "ctype_alnum", |b| b.is_ascii_alphanumeric());
-class!(ctype_alpha, "ctype_alpha", |b| b.is_ascii_alphabetic());
-class!(ctype_cntrl, "ctype_cntrl", |b| b.is_ascii_control());
-class!(ctype_digit, "ctype_digit", |b| b.is_ascii_digit());
-class!(ctype_graph, "ctype_graph", |b| b.is_ascii_graphic());
-class!(ctype_lower, "ctype_lower", |b| b.is_ascii_lowercase());
-class!(ctype_print, "ctype_print", |b| (32..=126).contains(&b));
-class!(ctype_punct, "ctype_punct", |b| b.is_ascii_punctuation());
-class!(ctype_space, "ctype_space", |b| matches!(
-    b,
-    b' ' | b'\t' | b'\n' | b'\r' | 0x0b | 0x0c
-));
-class!(ctype_upper, "ctype_upper", |b| b.is_ascii_uppercase());
-class!(ctype_xdigit, "ctype_xdigit", |b| b.is_ascii_hexdigit());

@@ -15,11 +15,7 @@ impl Vm {
 
     /// Implements PHP Clear semantics outside the dispatch loop.
     pub(crate) fn clear_local(&mut self, register: Reg) -> Result<(), NativeError> {
-        if let Some(slot) = self.call_stack.current_mut().and_then(|frame| {
-            frame
-                .slots_mut(&mut self.registers)
-                .get_mut(register.index())
-        }) {
+        if let Some(slot) = self.current_slot_mut(register) {
             let previous = slot.take();
             if let Some(phera_value::Value::Reference(reference)) = previous {
                 self.release_property_reference(reference);
@@ -44,7 +40,7 @@ impl Vm {
     ) -> Result<(), NativeError> {
         let declaration_type = self
             .current()
-            .and_then(|frame| frame.unit.types.get(declaration_type.index()))
+            .and_then(|frame| frame.unit().types.get(declaration_type.index()))
             .cloned()
             .ok_or_else(|| internal_error!("type"))?;
         let value = crate::types::coerce(

@@ -1,4 +1,4 @@
-//! PHP key normalization, shared by both storage shapes.
+//! Array keys: `$a["5"]` and `$a[5]` are the same entry, `$a["05"]` is not.
 
 use crate::error::{Diagnostics, OpError};
 use crate::string::PhpString;
@@ -82,8 +82,7 @@ fn string_to_key(string: &PhpString) -> ArrayKey {
         Some((b'-', rest)) => (rest, true),
         _ => (bytes, false),
     };
-    // A leading zero (including "-0" and "" after the sign) never converts.
-    // `length > 1` in C counts the whole key: "-0" and "00" never convert.
+    // "0" is the only key that may start with 0: not "00", "05" or "-0".
     if digits.is_empty() || (digits[0] == b'0' && bytes.len() > 1) || digits.len() > 19 {
         return not_a_key();
     }

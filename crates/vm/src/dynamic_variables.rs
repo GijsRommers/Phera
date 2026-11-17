@@ -47,6 +47,13 @@ impl DynamicVariables {
         }
     }
 
+    /// Whether no name has been recorded.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.names
+            .as_ref()
+            .is_none_or(|names| names.values.is_empty())
+    }
+
     pub(crate) fn get(&self, name: &str) -> Option<&Reg> {
         self.names.as_ref()?.values.get(name)
     }

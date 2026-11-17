@@ -67,7 +67,7 @@ impl Vm {
         }
         let frame = self
             .current()
-            .filter(|frame| frame.function_id.is_some())
+            .filter(|frame| frame.function_id().is_some())
             .ok_or_else(|| {
                 NativeError::error(match function {
                     ArgumentFunction::Count => {
@@ -82,15 +82,15 @@ impl Vm {
                 })
             })?;
         match function {
-            ArgumentFunction::Count => Ok(Value::Int(frame.argument_count as i64)),
+            ArgumentFunction::Count => Ok(Value::Int(frame.argument_count() as i64)),
             ArgumentFunction::All => {
                 let mut result = PhpArray::new();
-                for index in 0..frame.argument_count {
+                for index in 0..frame.argument_count() {
                     result.push(frame.argument(&self.registers, index))?;
                 }
                 Ok(Value::Array(Rc::new(result)))
             }
-            ArgumentFunction::One => (position < frame.argument_count as i64)
+            ArgumentFunction::One => (position < frame.argument_count() as i64)
                 .then(|| frame.argument(&self.registers, position as usize))
                 .ok_or_else(|| {
                     NativeError::value_error(
