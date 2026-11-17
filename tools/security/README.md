@@ -66,11 +66,12 @@ nice -n 15 $FUZZ funcs --phera $PHERA --out $SCRATCH/campaigns/funcs --seconds 1
 To run them detached (so they survive the tool call that started them):
 
 ```sh
-python3 detach.py <log> <pidfile> bash -c "nice -n 15 $FUZZ mutate ..."
+python3 tools/security/detach.py run.log run.pid bash -c \
+  "nice -n 15 $FUZZ mutate --phera $PHERA --corpus $SCRATCH/corpus --out $SCRATCH/run1 --seconds 7200 --jobs 2"
 ```
 
-(`detach.py` is a 15-line helper that `fork`+`setsid`s; `nohup ... &` does
-not survive in this environment.)
+(`detach.py` is a small helper that `fork`+`setsid`s the command;
+`nohup ... &` does not survive in this environment.)
 
 ## Reading the output
 
