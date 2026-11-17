@@ -21,11 +21,30 @@ fn php_scripts_match_phera() {
         .filter(|path| path.extension().is_some_and(|extension| extension == "php"))
         .collect();
     scripts.sort();
-    let output_dir = Path::new(support::SCRATCH).join("oracle");
+    let output_dir = support::scratch().join("oracle");
     std::fs::create_dir_all(&output_dir).unwrap();
     let mut failures = Vec::new();
     for script in &scripts {
-        let php = Command::new(support::PHP)
+        let numeric;
+        let script = if std::env::var_os("PHERA_PDO_NUMERIC_CONSTANTS").is_some() {
+            let directory = support::scratch().join("numeric-oracle");
+            std::fs::create_dir_all(&directory).unwrap();
+            numeric = directory.join(script.file_name().unwrap());
+            let replace = r#"$c=(new ReflectionClass(PDO::class))->getConstants();
+                echo preg_replace_callback('/PDO::([A-Z_]+)/',
+                    fn($m)=>var_export($c[$m[1]],true),file_get_contents($argv[1]));"#;
+            let converted = Command::new(support::php())
+                .args(["-r", replace])
+                .arg(script)
+                .output()
+                .unwrap();
+            assert!(converted.status.success());
+            std::fs::write(&numeric, converted.stdout).unwrap();
+            &numeric
+        } else {
+            script
+        };
+        let php = Command::new(support::php())
             .args(["-d", "display_errors=1", "-d", "log_errors=0"])
             .arg(script)
             .output()

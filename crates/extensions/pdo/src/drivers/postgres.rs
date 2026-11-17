@@ -1,13 +1,15 @@
 //! PostgreSQL prepares use `$1` on the wire: `$pdo->prepare('SELECT ?::int')`.
 
-use std::error::Error;
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::{Arc, OnceLock};
 
-use bytes::BytesMut;
-use phera_extension_api::Value;
-use tokio_postgres::types::{Format, IsNull, ToSql, Type};
+use super::postgres_protocol::TextParameter;
+pub use super::postgres_protocol::error;
+use super::postgres_stream::ObservedStream;
+use tokio_postgres::types::ToSql;
 use tokio_postgres::{Client, Config, NoTls, SimpleQueryMessage, Statement};
 
-use super::{Column, Prepared, Rows, connection_error};
+use super::{Column, Prepared, RawRows, connection_error};
 use crate::dsn::Dsn;
 use crate::errors::DbError;
 use crate::parameters::{BoundValue, literal, quote};
@@ -17,6 +19,8 @@ pub struct Postgres {
     client: Client,
     task: tokio::task::JoinHandle<()>,
     pub version: String,
+    transaction: Arc<AtomicU8>,
+    retire_client: OnceLock<()>,
 }
 
 impl Drop for Postgres {
@@ -36,7 +40,17 @@ impl Postgres {
             .user(user)
             .password(password)
             .ssl_mode(tokio_postgres::config::SslMode::Disable);
-        let (client, connection) = config.connect(NoTls).await.map_err(|error| {
+        if let Some(options) = dsn.fields.get("options") {
+            config.options(options);
+        }
+        if let Some(name) = dsn.fields.get("application_name") {
+            config.application_name(name);
+        }
+        let transaction = Arc::new(AtomicU8::new(b'I'));
+        let stream = ObservedStream::connect(dsn, transaction.clone())
+            .await
+            .map_err(connection_error)?;
+        let (client, connection) = config.connect_raw(stream, NoTls).await.map_err(|error| {
             let detail = match error.as_db_error() {
                 Some(database) => format!("{}:  {}", database.severity(), database.message()),
                 None => error.to_string(),
@@ -54,6 +68,8 @@ impl Postgres {
             client,
             task,
             version: String::new(),
+            transaction,
+            retire_client: OnceLock::new(),
         };
         let messages = driver
             .client
@@ -68,12 +84,78 @@ impl Postgres {
         Ok(driver)
     }
 
+    pub async fn transaction_state(&self) -> bool {
+        // An error may be delivered before the connection task consumes its
+        // ReadyForQuery. An empty query is valid even in a failed transaction
+        // and acts as a protocol barrier when the PHP script asks for state.
+        let _ = self.client.simple_query("").await;
+        !self.client.is_closed() && self.transaction.load(Ordering::Acquire) != b'I'
+    }
+
+    pub async fn metadata(&self, column: &Column) -> Result<(i16, Option<String>), DbError> {
+        super::postgres_metadata::get(&self.client, column).await
+    }
+
+    pub async fn close(mut self) {
+        self.task.abort();
+        let _ = (&mut self.task).await;
+    }
+
+    pub async fn reset(&self) -> Result<(), DbError> {
+        // Separate protocol messages: DISCARD ALL cannot execute in a transaction.
+        self.client
+            .batch_execute("ROLLBACK")
+            .await
+            .map_err(|e| error(e, "ROLLBACK"))?;
+        self.client
+            .batch_execute("DISCARD ALL")
+            .await
+            .map_err(|e| error(e, "DISCARD ALL"))
+    }
+
+    pub fn is_broken(&self) -> bool {
+        self.client.is_closed()
+    }
+
+    pub async fn health(&self) -> Result<(), DbError> {
+        self.client
+            .simple_query("SELECT 1")
+            .await
+            .map_err(|e| error(e, "SELECT 1"))?;
+        Ok(())
+    }
+
     pub async fn prepare(&self, sql: &Sql) -> Result<Statement, DbError> {
         let query = sql.render(|i| format!("${}", i + 1));
-        self.client
-            .prepare(&query)
+        self.prepare_query(&query).await
+    }
+
+    async fn prepare_query(&self, query: &str) -> Result<Statement, DbError> {
+        let result = self
+            .client
+            .prepare(query)
             .await
-            .map_err(|e| error(e, &query))
+            .map_err(|e| error(e, query));
+        // tokio-postgres retains private type-info prepared statements which its
+        // public clear_type_cache() cannot forget. DISCARD ALL invalidates them.
+        // Retire clients that may have populated those caches rather than lend
+        // a client with stale hidden statements to the next script.
+        let needs_fresh_client = match &result {
+            Ok(statement) => statement
+                .params()
+                .iter()
+                .chain(statement.columns().iter().map(|column| column.type_()))
+                .any(|kind| tokio_postgres::types::Type::from_oid(kind.oid()).is_none()),
+            Err(_) => true,
+        };
+        if needs_fresh_client {
+            let _ = self.retire_client.set(());
+        }
+        result
+    }
+
+    pub fn reusable(&self) -> bool {
+        self.retire_client.get().is_none()
     }
 
     pub async fn execute(
@@ -81,10 +163,10 @@ impl Postgres {
         sql: &Sql,
         prepared: &Prepared,
         values: &[BoundValue],
-    ) -> Result<Rows, DbError> {
+    ) -> Result<RawRows, DbError> {
         let statement = match prepared {
-            Prepared::Postgres(statement) => statement.clone(),
-            Prepared::PostgresDeferred => self.prepare(sql).await?,
+            Prepared::Postgres(statement, _) => statement.clone(),
+            Prepared::PostgresDeferred(_) => self.prepare(sql).await?,
             Prepared::Emulated => {
                 let mut literals = Vec::new();
                 for value in values {
@@ -93,14 +175,31 @@ impl Postgres {
                         value => literal(value, false),
                     });
                 }
-                let rendered = sql.render(|i| literals[i].clone());
-                self.client
-                    .prepare(&rendered)
-                    .await
-                    .map_err(|e| error(e, &rendered))?
+                let rendered = if values.is_empty() {
+                    sql.source.clone()
+                } else {
+                    sql.render(|i| literals[i].clone())
+                };
+                // Emulation sends SQL directly; PostgreSQL diagnoses unbound $n tokens.
+                if sql.has_dollar_parameters {
+                    return self.direct(&rendered).await;
+                }
+                self.prepare_query(&rendered).await?
             }
             _ => return Err(connection_error("Mismatched database driver")),
         };
+        if let Prepared::Postgres(_, number) | Prepared::PostgresDeferred(number) = prepared
+            && values.len() != statement.params().len()
+        {
+            return Err(super::postgres_parameters::under_bound(
+                &self.client,
+                sql,
+                &statement,
+                values,
+                *number,
+            )
+            .await);
+        }
         let parameters: Vec<TextParameter> = if matches!(prepared, Prepared::Emulated) {
             Vec::new()
         } else {
@@ -111,18 +210,15 @@ impl Postgres {
             .map(|p| p as &(dyn ToSql + Sync))
             .collect();
         let query = sql.render(|i| format!("${}", i + 1));
-        let mut result = Rows {
-            columns: statement
-                .columns()
-                .iter()
-                .map(|column| Column {
-                    name: column.name().into(),
-                })
-                .collect(),
-            ..Rows::default()
-        };
+        let columns = statement
+            .columns()
+            .iter()
+            .map(crate::metadata::postgres)
+            .collect();
+        let mut values = Vec::new();
+        let affected;
         if statement.columns().is_empty() {
-            result.affected = self
+            affected = self
                 .client
                 .execute(&statement, &references)
                 .await
@@ -133,40 +229,38 @@ impl Postgres {
                 .query(&statement, &references)
                 .await
                 .map_err(|e| error(e, &query))?;
-            result.affected = rows.len() as u64;
+            affected = rows.len() as u64;
             for row in rows {
-                let mut values = Vec::new();
-                for index in 0..row.len() {
-                    let value = row
-                        .try_get::<_, Option<super::postgres_values::Cell>>(index)
-                        .map_err(|e| error(e, &query))?;
-                    values.push(value.map_or(Value::Null, |cell| cell.0));
-                }
-                result.values.push(values);
+                let formatted = super::postgres_text::convert(&self.client, &row, &query).await?;
+                values.push((row, formatted));
             }
         }
-        Ok(result)
+        Ok(RawRows::Postgres {
+            columns,
+            rows: values,
+            affected,
+        })
     }
 
-    pub async fn direct(&self, sql: &str) -> Result<Rows, DbError> {
+    pub async fn direct(&self, sql: &str) -> Result<RawRows, DbError> {
         let messages = self
             .client
             .simple_query(sql)
             .await
             .map_err(|e| error(e, sql))?;
-        let mut result = Rows::default();
+        let mut affected = 0;
         let mut returns_rows = false;
         for message in messages {
             match message {
                 SimpleQueryMessage::RowDescription(_) => returns_rows = true,
                 SimpleQueryMessage::CommandComplete(count) => {
-                    result.affected = if returns_rows { 0 } else { count };
+                    affected = if returns_rows { 0 } else { count };
                     returns_rows = false;
                 }
                 _ => {}
             }
         }
-        Ok(result)
+        Ok(RawRows::Affected(affected))
     }
 
     pub async fn quote(&self, bytes: &[u8]) -> Result<String, DbError> {
@@ -199,93 +293,5 @@ impl Postgres {
         .map_err(|e| error(e, ""))?;
         let id: i64 = row.try_get(0).map_err(|e| error(e, ""))?;
         Ok(id.to_string())
-    }
-}
-
-#[derive(Debug)]
-struct TextParameter(Option<Vec<u8>>);
-
-impl From<&BoundValue> for TextParameter {
-    fn from(value: &BoundValue) -> Self {
-        Self(match value {
-            BoundValue::Null => None,
-            BoundValue::String(value) => Some(value.clone()),
-            BoundValue::Int(value) => Some(value.to_string().into_bytes()),
-            BoundValue::Bool(value) => Some(if *value { b"t" } else { b"f" }.to_vec()),
-        })
-    }
-}
-
-impl ToSql for TextParameter {
-    fn to_sql(
-        &self,
-        _: &Type,
-        output: &mut BytesMut,
-    ) -> Result<IsNull, Box<dyn Error + Sync + Send>> {
-        match &self.0 {
-            None => Ok(IsNull::Yes),
-            Some(bytes) => {
-                output.extend_from_slice(bytes);
-                Ok(IsNull::No)
-            }
-        }
-    }
-    fn accepts(_: &Type) -> bool {
-        true
-    }
-    fn encode_format(&self, _: &Type) -> Format {
-        Format::Text
-    }
-    fn to_sql_checked(
-        &self,
-        ty: &Type,
-        output: &mut BytesMut,
-    ) -> Result<IsNull, Box<dyn Error + Sync + Send>> {
-        self.to_sql(ty, output)
-    }
-}
-
-pub fn error(error: tokio_postgres::Error, query: &str) -> DbError {
-    let Some(database) = error.as_db_error() else {
-        if let Some(source) = error.source() {
-            let detail = source.to_string();
-            if detail.contains("not supported yet") {
-                return DbError {
-                    state: "HY000".into(),
-                    code: None,
-                    detail,
-                };
-            }
-        }
-        return connection_error(error);
-    };
-    let mut detail = format!("{}:  {}", database.severity(), database.message());
-    if let Some(tokio_postgres::error::ErrorPosition::Original(position)) = database.position() {
-        let offset = (*position as usize).saturating_sub(1);
-        let prefix: String = query.chars().take(offset).collect();
-        let line_number = prefix.bytes().filter(|b| *b == b'\n').count() + 1;
-        let column = prefix
-            .rsplit('\n')
-            .next()
-            .unwrap_or_default()
-            .chars()
-            .count();
-        let line = query.lines().nth(line_number - 1).unwrap_or_default();
-        let label = format!("LINE {line_number}: ");
-        detail.push_str(&format!(
-            "\n{label}{line}\n{}^",
-            " ".repeat(label.len() + column)
-        ));
-    }
-    if let Some(extra) = database.detail() {
-        detail.push_str(&format!("\nDETAIL:  {extra}"));
-    }
-    if let Some(hint) = database.hint() {
-        detail.push_str(&format!("\nHINT:  {hint}"));
-    }
-    DbError {
-        state: database.code().code().into(),
-        code: Some(7),
-        detail,
     }
 }

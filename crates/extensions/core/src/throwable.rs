@@ -235,6 +235,7 @@ fn get_message(
     Ok(protected(this, "message"))
 }
 
+/// PDO can store a SQLSTATE string: `$exception->getCode()` must preserve `"42P01"`.
 fn get_code(
     _context: &mut dyn Context,
     this: Option<&Rc<Object>>,

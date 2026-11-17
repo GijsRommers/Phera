@@ -59,7 +59,7 @@ fn enc_value(v: &Value) -> String {
         Value::Array(a) => {
             let mut s = String::from("A(");
             for (k, val) in a.iter() {
-                s.push_str(&enc_key(k));
+                s.push_str(&enc_key(&k));
                 s.push('>');
                 s.push_str(&enc_value(val));
                 s.push(';');
@@ -71,7 +71,7 @@ fn enc_value(v: &Value) -> String {
             let props = o.to_array();
             let mut s = format!("O:{}(", o.class.name());
             for (k, val) in props.iter() {
-                s.push_str(&enc_key(k));
+                s.push_str(&enc_key(&k));
                 s.push('>');
                 s.push_str(&enc_value(val));
                 s.push(';');
@@ -114,30 +114,8 @@ fn enc_diag(entries: &[(DiagnosticKind, String)]) -> String {
 // running PHP
 // ---------------------------------------------------------------------------
 
-fn find_php() -> Option<std::path::PathBuf> {
-    if let Ok(p) = std::env::var("PHERA_PHP") {
-        let p = std::path::PathBuf::from(p);
-        if p.exists() {
-            return Some(p);
-        }
-    }
-    let homebrew = std::path::PathBuf::from("/opt/homebrew/bin/php");
-    if homebrew.exists() {
-        return Some(homebrew);
-    }
-    if let Ok(path) = std::env::var("PATH") {
-        for dir in std::env::split_paths(&path) {
-            let p = dir.join("php");
-            if p.is_file() {
-                return Some(p);
-            }
-        }
-    }
-    None
-}
-
 fn run_php(what: &str, script: &str) -> Option<Vec<String>> {
-    let php = find_php()?;
+    let php = phera_extension_api::testing::oracle::find_php()?;
     let dir = std::env::temp_dir().join("phera-value-oracle");
     let _ = std::fs::create_dir_all(&dir);
     let file = dir.join(format!("{what}.php"));

@@ -33,7 +33,7 @@ impl Vm {
         let snapshot = array.clone();
         for (key, value) in snapshot.iter() {
             let entry = UnpackedEntry {
-                key: key.clone(),
+                key,
                 value: value.clone(),
             };
             let value = self.unpack_entry(&entry)?;

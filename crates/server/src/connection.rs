@@ -115,6 +115,14 @@ fn to_hyper_response(response: Response) -> HyperResponse<Full<Bytes>> {
             HeaderName::try_from(name.as_str()),
             HeaderValue::from_bytes(value),
         ) {
+            // The server alone says where a response ends. A handler (a PHP
+            // script calling `header('Content-Length: 5')`) could otherwise
+            // announce fewer bytes than it sends, and whatever reads the
+            // connection next would take the rest for a second response.
+            // hyper sets the right length from the body below.
+            if name == hyper::header::CONTENT_LENGTH || name == hyper::header::TRANSFER_ENCODING {
+                continue;
+            }
             builder = builder.header(name, value);
         }
     }

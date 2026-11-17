@@ -98,7 +98,7 @@ fn array_diff(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         for (key, value) in array.iter() {
             let string = phera_extension_api::value::to_php_string(value, context.diagnostics())?;
             if !excluded.contains(&string) {
-                result.insert(key.clone(), value.clone());
+                result.insert(key, value.clone());
             }
         }
     }
@@ -178,7 +178,7 @@ fn set(
                 }
             }
             if keep {
-                result.insert(key.clone(), value.clone());
+                result.insert(key, value.clone());
             }
         }
     }
@@ -202,7 +202,7 @@ fn array_unique(context: &mut dyn Context, arguments: &[Value]) -> NativeResult 
                 value,
                 context.diagnostics(),
             )?) {
-                result.insert(key.clone(), value.clone());
+                result.insert(key, value.clone());
             }
         }
         return Ok(Value::from(result));

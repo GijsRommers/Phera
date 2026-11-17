@@ -1,11 +1,10 @@
 //! MySQL uses binary prepared statements, or text queries for `ATTR_EMULATE_PREPARES`.
 
-use mysql_async::consts::ColumnType;
 use mysql_async::prelude::Queryable;
-use mysql_async::{Conn, OptsBuilder, Params, Row, Statement, Value as MysqlValue};
-use phera_extension_api::Value;
+use mysql_async::{Conn, OptsBuilder, Params, Row, Statement};
 
-use super::{Column, Prepared, Rows};
+use super::mysql_values::parameter;
+use super::{Prepared, RawRows};
 use crate::dsn::Dsn;
 use crate::errors::DbError;
 use crate::parameters::{BoundValue, literal, quote};
@@ -16,6 +15,8 @@ pub struct Mysql {
     pub version: String,
     last_insert_id: u64,
     pending_exec_rows: bool,
+    charset: Option<String>,
+    database: String,
 }
 
 impl Mysql {
@@ -63,7 +64,47 @@ impl Mysql {
             version: version.unwrap_or_default(),
             last_insert_id: 0,
             pending_exec_rows: false,
+            charset: dsn.fields.get("charset").cloned(),
+            database: dsn.get("dbname", "").to_owned(),
         })
+    }
+
+    pub async fn close(self) {
+        let _ = self.connection.disconnect().await;
+    }
+
+    pub async fn reset(&mut self) -> Result<(), DbError> {
+        if !self.connection.reset().await.map_err(error)? {
+            self.connection
+                .change_user(Default::default())
+                .await
+                .map_err(error)?;
+        }
+        // COM_RESET_CONNECTION does not restore the database selected with USE.
+        if !self.database.is_empty() {
+            let database = self.database.replace('`', "``");
+            self.connection
+                .query_drop(format!("USE `{database}`"))
+                .await
+                .map_err(error)?;
+        }
+        if let Some(charset) = &self.charset {
+            self.connection
+                .query_drop(format!("SET NAMES {charset}"))
+                .await
+                .map_err(error)?;
+        }
+        self.last_insert_id = 0;
+        self.pending_exec_rows = false;
+        Ok(())
+    }
+
+    pub fn is_broken(&self) -> bool {
+        self.connection.is_disconnected()
+    }
+
+    pub async fn health(&mut self) -> Result<(), DbError> {
+        self.connection.ping().await.map_err(error)
     }
 
     pub async fn prepare(&mut self, sql: &Sql) -> Result<Statement, DbError> {
@@ -79,7 +120,7 @@ impl Mysql {
         sql: &Sql,
         prepared: &Prepared,
         values: &[BoundValue],
-    ) -> Result<Rows, DbError> {
+    ) -> Result<RawRows, DbError> {
         self.check_pending()?;
         match prepared {
             Prepared::Mysql(statement) => {
@@ -94,8 +135,13 @@ impl Mysql {
                 let affected = result.affected_rows();
                 self.last_insert_id = result.last_insert_id().unwrap_or(0);
                 result.drop_result().await.map_err(error)?;
-                Ok(convert(columns, rows, affected))
+                Ok(RawRows::Mysql {
+                    columns,
+                    rows,
+                    affected,
+                })
             }
+            Prepared::Emulated if values.is_empty() => self.direct(&sql.source).await,
             Prepared::Emulated => {
                 let mode = self.backslash_escapes().await?;
                 let query = sql.render(|i| match &values[i] {
@@ -112,7 +158,7 @@ impl Mysql {
         }
     }
 
-    pub async fn direct(&mut self, sql: &str) -> Result<Rows, DbError> {
+    pub async fn direct(&mut self, sql: &str) -> Result<RawRows, DbError> {
         self.check_pending()?;
         let mut result = self.connection.query_iter(sql).await.map_err(error)?;
         let columns = result.columns_ref().to_vec();
@@ -120,13 +166,17 @@ impl Mysql {
         let affected = result.affected_rows();
         self.last_insert_id = result.last_insert_id().unwrap_or(0);
         result.drop_result().await.map_err(error)?;
-        Ok(convert(columns, rows, affected))
+        Ok(RawRows::Mysql {
+            columns,
+            rows,
+            affected,
+        })
     }
 
-    pub async fn exec(&mut self, sql: &str) -> Result<Rows, DbError> {
+    pub async fn exec(&mut self, sql: &str) -> Result<RawRows, DbError> {
         let rows = self.direct(sql).await?;
         // PHP exec() has no statement on which to consume a SELECT's result.
-        self.pending_exec_rows = !rows.columns.is_empty();
+        self.pending_exec_rows = rows.has_columns();
         Ok(rows)
     }
 
@@ -162,98 +212,17 @@ impl Mysql {
         Ok(quote(bytes, backslashes))
     }
 
+    pub fn transaction_state(&self) -> Option<bool> {
+        // Like mysqlnd, retain PDO's last observed status after an error packet.
+        self.connection.last_ok_packet().map(|packet| {
+            packet
+                .status_flags()
+                .contains(mysql_async::consts::StatusFlags::SERVER_STATUS_IN_TRANS)
+        })
+    }
+
     pub fn last_id(&self) -> String {
         self.last_insert_id.to_string()
-    }
-}
-
-fn parameter(value: &BoundValue) -> MysqlValue {
-    match value {
-        BoundValue::Null => MysqlValue::NULL,
-        BoundValue::Int(value) => MysqlValue::Int(*value),
-        BoundValue::Bool(value) => MysqlValue::Int(i64::from(*value)),
-        BoundValue::String(value) => MysqlValue::Bytes(value.clone()),
-    }
-}
-
-fn convert(columns: Vec<mysql_async::Column>, rows: Vec<Row>, affected: u64) -> Rows {
-    let values: Vec<Vec<Value>> = rows
-        .into_iter()
-        .map(|row| {
-            row.unwrap()
-                .into_iter()
-                .zip(&columns)
-                .map(|(value, column)| cell(value, column.column_type()))
-                .collect()
-        })
-        .collect();
-    let affected = if columns.is_empty() {
-        affected
-    } else {
-        values.len() as u64
-    };
-    Rows {
-        columns: columns
-            .iter()
-            .map(|column| Column {
-                name: column.name_str().into_owned(),
-            })
-            .collect(),
-        values,
-        affected,
-    }
-}
-
-fn cell(value: MysqlValue, kind: ColumnType) -> Value {
-    match value {
-        MysqlValue::NULL => Value::Null,
-        MysqlValue::Int(value) => Value::Int(value),
-        MysqlValue::UInt(value) => {
-            i64::try_from(value).map_or_else(|_| Value::from(value.to_string()), Value::Int)
-        }
-        MysqlValue::Float(value) => Value::Float(f64::from(value)),
-        MysqlValue::Double(value) => Value::Float(value),
-        MysqlValue::Bytes(bytes) => {
-            let text = String::from_utf8_lossy(&bytes);
-            match kind {
-                ColumnType::MYSQL_TYPE_TINY
-                | ColumnType::MYSQL_TYPE_SHORT
-                | ColumnType::MYSQL_TYPE_LONG
-                | ColumnType::MYSQL_TYPE_LONGLONG
-                | ColumnType::MYSQL_TYPE_INT24
-                | ColumnType::MYSQL_TYPE_YEAR => {
-                    if let Ok(number) = text.parse::<i64>() {
-                        return Value::Int(number);
-                    }
-                }
-                ColumnType::MYSQL_TYPE_FLOAT | ColumnType::MYSQL_TYPE_DOUBLE => {
-                    if let Ok(number) = text.parse::<f64>() {
-                        return Value::Float(number);
-                    }
-                }
-                _ => {}
-            }
-            Value::from(bytes)
-        }
-        MysqlValue::Date(year, month, day, hour, minute, second, micros) => {
-            let mut text = format!("{year:04}-{month:02}-{day:02}");
-            if kind != ColumnType::MYSQL_TYPE_DATE {
-                text.push_str(&format!(" {hour:02}:{minute:02}:{second:02}"));
-                if micros > 0 {
-                    text.push_str(&format!(".{micros:06}"));
-                }
-            }
-            Value::from(text)
-        }
-        MysqlValue::Time(negative, days, hours, minutes, seconds, micros) => {
-            let sign = if negative { "-" } else { "" };
-            let hours = u64::from(days) * 24 + u64::from(hours);
-            let mut text = format!("{sign}{hours:02}:{minutes:02}:{seconds:02}");
-            if micros > 0 {
-                text.push_str(&format!(".{micros:06}"));
-            }
-            Value::from(text)
-        }
     }
 }
 

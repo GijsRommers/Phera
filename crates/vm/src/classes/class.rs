@@ -49,6 +49,7 @@ pub(crate) struct Class {
 pub(crate) struct PropertyDefault {
     pub(crate) key: ArrayKey,
     pub(crate) value: Value,
+    pub(crate) static_storage: Option<Rc<crate::reference_holders::StaticProperty>>,
     pub(crate) name: String,
     pub(crate) declaring: String,
     pub(crate) visibility: Visibility,
@@ -134,9 +135,17 @@ pub(crate) struct LinkedConstant {
     pub(crate) declaring: String,
     pub(crate) visibility: Visibility,
     pub(crate) is_final: bool,
-    pub(crate) initializer: crate::function_table::FunctionRef,
-    pub(crate) state: std::cell::RefCell<ConstantState>,
+    pub(crate) initializer: ConstantInitializer,
     pub(crate) ty: Option<phera_bytecode::Type>,
+}
+
+/// Native values such as `PDO::FETCH_ASSOC` never need a compiled initializer or evaluation state.
+pub(crate) enum ConstantInitializer {
+    Compiled {
+        function: crate::function_table::FunctionRef,
+        state: std::cell::RefCell<ConstantState>,
+    },
+    Value(Value),
 }
 
 /// A failed evaluation restores Uninitialized so later accesses can retry.

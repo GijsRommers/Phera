@@ -54,7 +54,13 @@ impl Vm {
                 constant.declaring
             )));
         }
-        match &*constant.state.borrow() {
+        let (initializer, state) = match &constant.initializer {
+            crate::classes::class::ConstantInitializer::Value(value) => return Ok(value.clone()),
+            crate::classes::class::ConstantInitializer::Compiled { function, state } => {
+                (function, state)
+            }
+        };
+        match &*state.borrow() {
             ConstantState::Ready(value) => return Ok(value.clone()),
             ConstantState::Evaluating => {
                 return Err(NativeError::error(format!(
@@ -64,9 +70,9 @@ impl Vm {
             }
             ConstantState::Uninitialized => {}
         }
-        *constant.state.borrow_mut() = ConstantState::Evaluating;
+        *state.borrow_mut() = ConstantState::Evaluating;
         let result = self
-            .evaluate_initializer(&constant.initializer, &constant.declaring)
+            .evaluate_initializer(initializer, &constant.declaring)
             .and_then(|value| {
                 if let Some(declaration_type) = &constant.ty {
                     let actual = value.type_name();
@@ -86,7 +92,7 @@ impl Vm {
                     Ok(value)
                 }
             });
-        *constant.state.borrow_mut() = match &result {
+        *state.borrow_mut() = match &result {
             Ok(value) => ConstantState::Ready(value.clone()),
             Err(_) => ConstantState::Uninitialized,
         };

@@ -53,8 +53,13 @@ bytes = "1"
 http-body-util = "0.1"
 hyper = { version = "1", default-features = false, features = ["http1", "server"] }
 hyper-util = { version = "0.1", default-features = false, features = ["tokio", "http1", "server-graceful"] }
-socket2 = { version = "0.5", features = ["all"] }
-tokio = { version = "1", features = ["rt", "net", "time", "sync", "signal", "macros"] }
+socket2 = { version = "0.6", features = ["all"] }
+tokio = { version = "1", features = [
+    "rt", "rt-multi-thread", "net", "time", "sync", "signal", "macros",
+] }
+foldhash = "0.2"
+hashbrown = { version = "0.17", default-features = false }
+mimalloc = { version = "0.1", default-features = false }
 # PHP's own regex engine. Pinned because the bundled PCRE2 source version
 # (10.46) decides compile error texts.
 pcre2 = "=0.2.11"
@@ -63,3 +68,10 @@ pcre2-sys = "=0.2.10"
 tokio-postgres = "0.7.18"
 mysql_async = { version = "0.37.1", default-features = false, features = ["minimal-rust"] }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
+
+# Release builds are what gets measured and deployed. Whole-program
+# optimisation lets the compiler inline across crates (the value type lives in
+# one crate, the interpreter loop in another); it costs build time, not run time.
+[profile.release]
+lto = "fat"
+codegen-units = 1

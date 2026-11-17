@@ -26,7 +26,9 @@ pub(crate) fn define_superglobals(
     );
 
     let mut post = PhpArray::new();
-    if is_form(request) {
+    // PHP fills `$_POST` for the POST method only. A form body sent with PUT
+    // or GET stays in the raw request body.
+    if request.method.eq_ignore_ascii_case("POST") && is_form(request) {
         parse_pairs(&mut post, &request.body, b'&', Duplicates::Replace);
     }
 
