@@ -8,7 +8,14 @@ use phera_value::{Object, Value};
 
 use super::{Class, Invocation, Method, MethodBody, MethodContext};
 use crate::Vm;
-use crate::call_state::{CallTarget, Callee, ParameterSpec};
+use crate::call_state::{CallTarget, Callee};
+
+/// A no-argument leaf may consume the following Call while preparing the method.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MethodPreparation {
+    Pending,
+    Complete,
+}
 
 impl Vm {
     /// Receiver errors precede argument evaluation, matching ordinary PHP calls.
@@ -16,11 +23,15 @@ impl Vm {
         &mut self,
         receiver: Reg,
         method: NameId,
-    ) -> Result<(), NativeError> {
-        let name = self
+    ) -> Result<MethodPreparation, NativeError> {
+        let unit = self
             .current()
-            .and_then(|frame| frame.unit.names.get(method.index()))
-            .cloned()
+            .ok_or_else(|| internal_error!("method frame"))?
+            .unit
+            .clone();
+        let name = unit
+            .names
+            .get(method.index())
             .ok_or_else(|| internal_error!("method name"))?;
         let value = self.read_local(receiver);
         let Value::Object(object) = value else {
@@ -31,9 +42,41 @@ impl Vm {
         };
         let class = self
             .classes
-            .get(object.class.name())
+            .for_object(&object)
             .ok_or_else(|| internal_error!("receiver class"))?;
-        self.prepare_method(class, Some(object), &name, Invocation::Method)
+        let resolved = self.cached_method(&class, name, Invocation::Method)?;
+        if let Some(resolved) = resolved {
+            let destination = resolved.result_plan.as_ref().and_then(|_| {
+                self.current()
+                    .and_then(|frame| frame.function().instructions.get(frame.ip))
+                    .and_then(|instruction| {
+                        if let phera_bytecode::Instruction::Call { dst } = instruction {
+                            Some(*dst)
+                        } else {
+                            None
+                        }
+                    })
+            });
+            // Mirrors InitMethodCall + argumentless Call + the cached leaf body.
+            // There are no intervening sends, and failed value/type/depth guards
+            // retain the original preparation and heap-frame execution below.
+            if !resolved.method.is_abstract
+                && let Some(destination) = destination
+                && let Some(plan) = &resolved.result_plan
+                && let Some(value) = self.evaluate_method_result(plan, Some(&object))
+            {
+                self.set(destination, value);
+                if let Some(frame) = self.call_stack.current_mut() {
+                    frame.ip += 1;
+                }
+                self.executed_instructions += 1;
+                return Ok(MethodPreparation::Complete);
+            }
+            self.prepare_resolved_method(class, Some(object), resolved, Invocation::Method)?;
+        } else {
+            self.prepare_method(class, Some(object), name, Invocation::Method)?;
+        }
+        Ok(MethodPreparation::Pending)
     }
 
     /// Snapshot a bound target so nested calls during argument sends cannot replace the receiver.
@@ -44,31 +87,53 @@ impl Vm {
         name: &str,
         invocation: Invocation,
     ) -> Result<(), NativeError> {
-        let lexical_private = self
-            .current()
-            .and_then(|frame| frame.method.as_ref())
-            .filter(|context| invocation == Invocation::Method && class.is_a(&context.scope.name))
-            .and_then(|context| context.scope.methods.get(&name.to_ascii_lowercase()))
-            .filter(|method| method.visibility == Visibility::Private)
-            .cloned();
-        let method =
-            lexical_private.or_else(|| class.methods.get(&name.to_ascii_lowercase()).cloned());
-        let Some(method) = method else {
+        let resolved = self.cached_method(&class, name, invocation)?;
+        let Some(super::method_cache::ResolvedMethod {
+            method,
+            scope,
+            result_plan,
+        }) = resolved
+        else {
             if invocation == Invocation::Constructor {
-                return self.prepare_call(Rc::new(Callee {
-                    name: format!("{}::__construct", class.name),
-                    parameters: Vec::new(),
+                let callee = self.call_stack.bound_callee(Callee {
+                    name: class.empty_constructor.name.clone(),
+                    parameters: class.empty_constructor.parameters.clone(),
                     target: CallTarget::Constructed(
                         receiver.ok_or_else(|| internal_error!("constructor receiver"))?,
                     ),
-                }));
+                });
+                return self.prepare_call(callee);
             }
             return Err(NativeError::error(format!(
                 "Call to undefined method {}::{name}()",
                 class.name
             )));
         };
-        self.check_method_visibility(&method)?;
+        self.prepare_resolved_method(
+            class,
+            receiver,
+            super::method_cache::ResolvedMethod {
+                method,
+                scope,
+                result_plan,
+            },
+            invocation,
+        )
+    }
+
+    /// Bind a validated lookup to this call's receiver without repeating resolution.
+    pub(crate) fn prepare_resolved_method(
+        &mut self,
+        class: Rc<Class>,
+        receiver: Option<Rc<Object>>,
+        resolved: super::method_cache::ResolvedMethod,
+        invocation: Invocation,
+    ) -> Result<(), NativeError> {
+        let super::method_cache::ResolvedMethod {
+            method,
+            scope,
+            result_plan,
+        } = resolved;
         if method.is_abstract {
             return Err(NativeError::error(format!(
                 "Cannot call abstract method {}::{}()",
@@ -81,41 +146,22 @@ impl Vm {
                 method.declaring, method.name
             )));
         }
-        let scope = self
-            .classes
-            .get(&method.declaring)
-            .ok_or_else(|| internal_error!("method scope"))?;
-        let parameters = match &method.body {
-            MethodBody::User(reference) => reference.unit.functions[reference.index]
-                .parameters
-                .iter()
-                .map(|parameter| ParameterSpec {
-                    name: reference.unit.names[parameter.name.index()].clone(),
-                    by_reference: parameter.by_reference,
-                    variadic: parameter.variadic,
-                })
-                .collect(),
-            MethodBody::Native(entry) => entry
-                .params
-                .iter()
-                .map(|parameter| ParameterSpec {
-                    name: parameter.name.into(),
-                    by_reference: parameter.by_ref,
-                    variadic: parameter.variadic,
-                })
-                .collect(),
-        };
+        let signature = method.signature();
+        let call_name = signature.name.clone();
+        let parameters = signature.parameters.clone();
         let context = MethodContext {
+            result_plan,
             receiver: if method.is_static { None } else { receiver },
             scope,
             called: class,
             invocation,
         };
-        self.prepare_call(Rc::new(Callee {
-            name: format!("{}::{}", method.declaring, method.name),
+        let callee = self.call_stack.bound_callee(Callee {
+            name: call_name,
             parameters,
             target: CallTarget::Method { method, context },
-        }))
+        });
+        self.prepare_call(callee)
     }
 
     /// Visibility is checked against the lexical scope, never the receiver's class alone.
@@ -163,13 +209,14 @@ impl Vm {
         match &method.body {
             MethodBody::User(reference) => {
                 self.push_prepared(
-                    reference.unit.clone(),
+                    &reference.unit,
                     reference.index,
                     Some(destination),
                     arguments,
                 )?;
+                let context = self.call_stack.method_context(context);
                 if let Some(frame) = self.call_stack.current_mut() {
-                    frame.method = Some(Box::new(context));
+                    frame.method = Some(context);
                 }
             }
             MethodBody::Native(entry) => {
@@ -206,5 +253,21 @@ impl Vm {
             }
         }
         Ok(())
+    }
+}
+
+impl Vm {
+    /// Mirrors prepare_method's missing-constructor branch using linked presence metadata.
+    pub(crate) fn prepare_constructed_object(
+        &mut self,
+        class: &Class,
+        object: Rc<Object>,
+    ) -> Result<(), NativeError> {
+        let callee = self.call_stack.bound_callee(Callee {
+            name: class.empty_constructor.name.clone(),
+            parameters: class.empty_constructor.parameters.clone(),
+            target: CallTarget::Constructed(object),
+        });
+        self.prepare_call(callee)
     }
 }

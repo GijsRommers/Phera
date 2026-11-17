@@ -27,7 +27,7 @@ impl Vm {
             .classes
             .get(name)
             .ok_or_else(|| NativeError::error(format!("Class \"{name}\" not found")))?;
-        let temporary = phera_value::Object::new(0, class.clone());
+        let temporary = self.classes.allocate(class.clone());
         let mut result = phera_value::PhpArray::new();
         for property in class.defaults.iter().chain(&class.static_properties) {
             if !property.initialized || self.property_key(&temporary, &property.name).is_err() {
@@ -234,9 +234,10 @@ impl Vm {
         object: &phera_value::Object,
         name: &str,
     ) -> Result<ArrayKey, NativeError> {
-        let class = self
-            .classes
-            .get(object.class.name())
+        let class = object
+            .class
+            .as_any()
+            .downcast_ref::<crate::classes::Class>()
             .ok_or_else(|| internal_error!("property class"))?;
         let scope = self
             .current()

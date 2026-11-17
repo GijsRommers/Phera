@@ -6,11 +6,11 @@ use phera_value::Value;
 
 use crate::{Vm, dispatch::DispatchResult};
 
-/// Retain return-type metadata while coercion mutably borrows the VM.
-struct ReturnDeclaration {
-    declaration_type: phera_bytecode::Type,
-    name: String,
-    checking: crate::types::TypeChecking,
+/// Retain code metadata while coercion mutably borrows the interpreter.
+struct ReturnTypeSite {
+    unit: std::sync::Arc<phera_bytecode::CompiledUnit>,
+    function: Option<usize>,
+    declaration: phera_bytecode::TypeId,
 }
 
 impl Vm {
@@ -70,36 +70,51 @@ impl Vm {
         mut value: Value,
         stop: usize,
     ) -> Result<Option<Value>, NativeError> {
-        if let Some(ReturnDeclaration {
-            declaration_type,
-            name,
-            checking,
-        }) = self.current().and_then(|frame| {
-            frame
-                .function()
-                .return_type
-                .map(|declaration_type| ReturnDeclaration {
-                    declaration_type: frame.unit.types[declaration_type.index()].clone(),
-                    name: frame.function().name.clone(),
-                    checking: frame.function().strict_types.into(),
-                })
-        }) {
+        let typed_return = self.current().and_then(|frame| {
+            let declaration = frame.function().return_type?;
+            // Mirrors the already-matching object arm of types::coerce. A plain
+            // accepted object needs neither coercion nor an owned declaration;
+            // references retain the ordinary cell-write and borrow checks below.
+            if matches!(&value, Value::Object(_))
+                && self.matches_cached_class_type(&value, declaration, &frame.unit, &frame.cache)
+            {
+                return None;
+            }
+            Some(ReturnTypeSite {
+                unit: frame.unit.clone(),
+                function: frame.function_id,
+                declaration,
+            })
+        });
+        if let Some(ReturnTypeSite {
+            unit,
+            function: function_id,
+            declaration: index,
+        }) = typed_return
+        {
+            let function = function_id
+                .and_then(|id| unit.functions.get(id))
+                .unwrap_or(&unit.main);
+            let declaration_type = &unit.types[index.index()];
             let reference = match &value {
                 Value::Reference(reference) => Some(reference.clone()),
                 _ => None,
             };
-            let checked = crate::types::coerce(value, &declaration_type, checking, self).map_err(
-                |error| match error {
+            let checked =
+                crate::types::coerce(value, declaration_type, function.strict_types.into(), self)
+                    .map_err(|error| match error {
                     NativeError::Throw { class, message } => {
                         let message = message
                             .strip_suffix(" given")
                             .map(|message| format!("{message} returned"))
                             .unwrap_or(message);
-                        NativeError::throw(class, format!("{name}(): Return value {message}"))
+                        NativeError::throw(
+                            class,
+                            format!("{}(): Return value {message}", function.name),
+                        )
                     }
                     other => other,
-                },
-            )?;
+                })?;
             value = if let Some(reference) = reference {
                 *reference
                     .try_borrow_mut()

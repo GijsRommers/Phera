@@ -44,9 +44,19 @@ impl Vm {
         {
             self.validate_static_mutation(class, name, &mut value)?;
         }
-        let root_value = self.read_root(register, Missing::Silent);
-        let keys = self.property_keys(place, root_value.clone())?;
-        self.validate_property_mutation(root_value, &keys, &mut value, binding.into())?;
+        // Mirrors property_keys and validation: index-only paths cannot cross an
+        // object property boundary, so retain the original array-only key path.
+        let keys = if place
+            .steps()?
+            .all(|step| matches!(step, Step::Index(_) | Step::Append))
+        {
+            self.keys(place)?
+        } else {
+            let root_value = self.read_root(register, Missing::Silent);
+            let keys = self.property_keys(place, root_value.clone())?;
+            self.validate_property_mutation(root_value, &keys, &mut value, binding.into())?;
+            keys
+        };
         let root = self
             .call_stack
             .current_mut()

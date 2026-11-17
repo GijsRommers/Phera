@@ -16,6 +16,12 @@ use phera_bytecode::Reg;
 /// Compiler IR with owned names and paths before table interning.
 #[derive(Debug, Clone)]
 pub enum Instruction {
+    /// Literal class/method operands need no intermediate PHP string registers.
+    KnownStaticCall {
+        class: String,
+        method: String,
+        binding: phera_bytecode::ClassBinding,
+    },
     /// Allocate an evaluated class target before sending constructor arguments.
     NewDynamic { class: Reg },
     /// Resolve a method name evaluated at runtime on an object.

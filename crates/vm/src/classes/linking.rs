@@ -112,6 +112,7 @@ impl Vm {
         for method in &declaration.methods {
             let method_name = &unit.names[method.name.index()];
             let linked = Rc::new(Method {
+                signature: std::cell::OnceCell::new(),
                 name: method_name.clone(),
                 declaring: name.clone(),
                 visibility: method.visibility,
@@ -205,7 +206,7 @@ impl Vm {
             } else {
                 value
             };
-            let linked = PropertyDefault {
+            let mut linked = PropertyDefault {
                 key: key.clone(),
                 value,
                 name: property_name.clone(),
@@ -228,6 +229,20 @@ impl Vm {
                     property.default.is_some() || property.ty.is_none(),
                 )),
             };
+            if let Some(value) = linked
+                .initializer
+                .as_ref()
+                .and_then(super::class::literal_initializer)
+            {
+                if property.is_static {
+                    if let phera_value::Value::Reference(cell) = &linked.value {
+                        *cell.borrow_mut() = value;
+                    }
+                } else {
+                    linked.value = value;
+                }
+                linked.initializer = None;
+            }
             let target = if property.is_static {
                 &mut static_properties
             } else {
@@ -246,7 +261,12 @@ impl Vm {
         self.classes.order.push(name.clone());
         self.classes.entries.insert(
             name.to_ascii_lowercase(),
-            Rc::new(Class {
+            Rc::new_cyclic(|identity| Class {
+                identity: identity.clone(),
+                declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
+                ancestors: super::class::ancestor_names(&parent, &interfaces),
+                empty_constructor: super::class::empty_constructor(name),
+                name_value: phera_value::Value::from(name.as_str()),
                 name: name.clone(),
                 parent,
                 interfaces,
@@ -255,7 +275,9 @@ impl Vm {
                 is_final: declaration.is_final,
                 is_readonly: declaration.is_readonly,
                 allows_dynamic_properties,
+                constructor: methods.get("__construct").cloned(),
                 methods,
+                property_template: super::class::property_template(&defaults),
                 defaults,
                 static_properties,
                 constants,

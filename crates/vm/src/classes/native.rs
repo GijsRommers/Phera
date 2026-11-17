@@ -14,7 +14,12 @@ impl ClassTable {
         table.order.push("stdClass".into());
         table.entries.insert(
             "stdclass".into(),
-            Rc::new(Class {
+            Rc::new_cyclic(|identity| Class {
+                identity: identity.clone(),
+                declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
+                ancestors: std::collections::HashSet::new(),
+                empty_constructor: super::class::empty_constructor("stdClass"),
+                name_value: phera_value::Value::from("stdClass"),
                 name: "stdClass".into(),
                 parent: None,
                 interfaces: Vec::new(),
@@ -24,6 +29,8 @@ impl ClassTable {
                 is_readonly: false,
                 allows_dynamic_properties: true,
                 methods: HashMap::new(),
+                constructor: None,
+                property_template: Some(phera_value::PhpArray::new()),
                 defaults: Vec::new(),
                 static_properties: Vec::new(),
                 constants: HashMap::new(),
@@ -39,6 +46,7 @@ impl ClassTable {
                 methods.insert(
                     method.name.to_ascii_lowercase(),
                     Rc::new(Method {
+                        signature: std::cell::OnceCell::new(),
                         name: method.name.into(),
                         declaring: entry.name.into(),
                         visibility: native_visibility(method.visibility),
@@ -80,16 +88,22 @@ impl ClassTable {
             if table.get(entry.name).is_none() {
                 table.order.push(entry.name.into());
             }
+            let interfaces: Vec<Rc<Class>> = entry
+                .interfaces
+                .iter()
+                .filter_map(|name| table.get(name))
+                .collect();
             table.entries.insert(
                 entry.name.to_ascii_lowercase(),
-                Rc::new(Class {
+                Rc::new_cyclic(|identity| Class {
+                    identity: identity.clone(),
+                    declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
+                    ancestors: super::class::ancestor_names(&parent, &interfaces),
+                    empty_constructor: super::class::empty_constructor(entry.name),
+                    name_value: phera_value::Value::from(entry.name),
                     name: entry.name.into(),
                     parent,
-                    interfaces: entry
-                        .interfaces
-                        .iter()
-                        .filter_map(|name| table.get(name))
-                        .collect(),
+                    interfaces,
                     kind: if entry.kind == NativeKind::Interface {
                         ClassKind::Interface
                     } else {
@@ -99,7 +113,9 @@ impl ClassTable {
                     is_final: entry.kind == NativeKind::FinalClass,
                     is_readonly: false,
                     allows_dynamic_properties: false,
+                    constructor: methods.get("__construct").cloned(),
                     methods,
+                    property_template: super::class::property_template(&defaults),
                     defaults,
                     static_properties: Vec::new(),
                     constants: HashMap::new(),

@@ -103,6 +103,20 @@ impl Compiler<'_> {
                 } else {
                     phera_bytecode::ClassBinding::Explicit
                 };
+                if matches!(class.kind, ast::ExpressionKind::Name(_))
+                    && let ast::MemberName::Identifier(name) = name
+                {
+                    let class = self.object_class_name(class, line)?;
+                    self.emit(
+                        Instruction::KnownStaticCall {
+                            class,
+                            method: name.name.clone(),
+                            binding,
+                        },
+                        line,
+                    );
+                    return self.compile_arguments(arguments, line);
+                }
                 let class = self.compile_class_target(class, line)?;
                 let method = match name {
                     ast::MemberName::Identifier(name) => self.literal(

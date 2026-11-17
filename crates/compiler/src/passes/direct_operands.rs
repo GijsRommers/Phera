@@ -73,3 +73,31 @@ pub(crate) fn specialize_appends(function: &mut Function) {
         }
     }
 }
+
+/// Preserve a compiled fallback while exposing one register-based array index to the scalar loop.
+pub(crate) fn specialize_indexes(function: &mut Function) {
+    for instruction in &mut function.instructions {
+        let Instruction::Fetch { dst, path, mode } = *instruction else {
+            continue;
+        };
+        if mode == phera_bytecode::FetchMode::Destructure {
+            continue;
+        }
+        let Some(definition) = function.paths.get(path.index()) else {
+            continue;
+        };
+        let phera_bytecode::PathBase::Register(base) = definition.base else {
+            continue;
+        };
+        let [phera_bytecode::Step::Index(index)] = definition.steps.as_slice() else {
+            continue;
+        };
+        *instruction = Instruction::FetchIndex {
+            dst,
+            base,
+            index: *index,
+            path,
+            mode,
+        };
+    }
+}

@@ -173,7 +173,19 @@ pub(crate) fn dead_after(function: &Function, index: usize, register: phera_byte
                         break;
                     }
                 }
-                _ => return false,
+                Instruction::IterNext { value, end, .. } => {
+                    pending.push(end.index());
+                    if value == register {
+                        break;
+                    }
+                }
+                _ => match crate::passes::object_liveness::effect(function, *instruction, register)
+                {
+                    crate::passes::object_liveness::RegisterEffect::Read
+                    | crate::passes::object_liveness::RegisterEffect::Unknown => return false,
+                    crate::passes::object_liveness::RegisterEffect::Write => break,
+                    crate::passes::object_liveness::RegisterEffect::Unrelated => {}
+                },
             }
         }
     }

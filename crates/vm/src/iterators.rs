@@ -58,3 +58,10 @@ impl Iterators {
         self.slots.get_mut(*index as usize)?.take()
     }
 }
+
+impl Iterators {
+    /// Borrow a snapshot cursor in place instead of moving the whole state per element.
+    pub(crate) fn get_mut(&mut self, index: u16) -> Option<&mut IteratorState> {
+        self.slots.get_mut(index as usize)?.as_mut()
+    }
+}

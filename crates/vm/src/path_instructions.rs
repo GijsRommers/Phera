@@ -24,6 +24,12 @@ impl Vm {
         mode: FetchMode,
     ) -> Result<(), NativeError> {
         let place = self.path(path)?;
+        if mode == FetchMode::Read
+            && let Some(value) = self.read_property_site(&place)?
+        {
+            self.set(destination, value);
+            return Ok(());
+        }
         if mode == FetchMode::Destructure {
             let root = self.read_place(
                 &crate::AccessPath::local(match place.base()? {
@@ -84,6 +90,10 @@ impl Vm {
         path: PathId,
     ) -> Result<(), NativeError> {
         let place = self.path(path)?;
+        if let Some(value) = self.increment_property_site(&place, mode)? {
+            self.set(destination, value);
+            return Ok(());
+        }
         let old = self.read_place(&place, crate::access_mode::Missing::Warn)?;
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let value = if matches!(mode, IncDec::PreIncrement | IncDec::PostIncrement) {
@@ -109,6 +119,9 @@ impl Vm {
     pub(crate) fn assign_path(&mut self, path: PathId, source: Reg) -> Result<(), NativeError> {
         let value = self.read_local(source);
         let place = self.path(path)?;
+        if self.assign_property_site(&place, &value)? {
+            return Ok(());
+        }
         if place.steps()?.next().is_none()
             && let phera_bytecode::PathBase::Register(register) = place.base()?
         {

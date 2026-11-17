@@ -9,12 +9,13 @@ use crate::Vm;
 impl Vm {
     /// Undefined named locals warn and read as null; assigned slots dereference aliases.
     pub(crate) fn read_local(&mut self, register: Reg) -> Value {
-        if self
+        if let Some(value) = self
             .current()
             .and_then(|frame| frame.slots(&self.registers).get(register.index()))
-            .is_some_and(Option::is_some)
+            .and_then(Option::as_ref)
+            .map(|value| value.deref().clone())
         {
-            return self.get(register);
+            return value;
         }
         if let Some(name) = self
             .current()

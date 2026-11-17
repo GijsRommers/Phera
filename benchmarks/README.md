@@ -1,0 +1,7 @@
+# PHP runtime microbenchmarks
+
+Run `cargo build --release -p phera-cli`, then `target/release/phera benchmarks/bench-objects.php` and `php -n benchmarks/bench-objects.php`. Repeat for each `bench-*.php`; stdout must match exactly.
+
+Preserve the baseline binary before changing code. Record a starting reference series, then a final series, each with nine rounds in baseline/new/PHP order. Record whole-process CPU time (user + system, using `/usr/bin/time -l` or Python `resource.getrusage`) and monotonic wall time; report both medians and use CPU time for targets. Record `uptime` and other running work without changing processes belonging to others. If any final baseline median differs from its reference by more than 5%, repeat the final series, up to three series; report all unstable series and their load averages if none settles.
+
+The additional cases exercise five million mixed method iterations, typed and array property mutation, interface-typed hierarchy calls, and construction plus loop-based merge sorting of 200,000 objects. They intentionally include compilation and process startup in timings.

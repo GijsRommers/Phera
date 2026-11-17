@@ -456,6 +456,23 @@ pub enum Instruction {
         source: Reg,
         class: Reg,
     },
+    /// Resolve literal static syntax before arguments. Both operands index immutable
+    /// symbol data; method lookup spelling is already lowercase in the symbol table.
+    /// This Copy/plain-data instruction owns no PHP values or runtime cache state.
+    InitStaticCall {
+        class: SymbolId,
+        method: SymbolId,
+        binding: ClassBinding,
+    },
+    /// Read one compiled integer-index candidate. Operands are register/table
+    /// indices only; path/mode retain the exact slow behavior on a failed guard.
+    FetchIndex {
+        dst: Reg,
+        base: Reg,
+        index: Reg,
+        path: PathId,
+        mode: FetchMode,
+    },
 }
 
 // The interpreter copies one instruction per step. Keep them register-sized;

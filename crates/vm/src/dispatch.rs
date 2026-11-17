@@ -47,8 +47,23 @@ impl Vm {
                 self.dynamic_instance_of(dst, source, class)?
             }
             Instruction::New { class } => self.new_object(class)?,
+            Instruction::InitStaticCall {
+                class,
+                method,
+                binding,
+            } => {
+                if self.prepare_known_static_call(class, method, binding)?
+                    == crate::classes::MethodPreparation::Complete
+                {
+                    *work += 1;
+                }
+            }
             Instruction::InitMethodCall { receiver, method } => {
-                self.init_method_call(receiver, method)?
+                if self.init_method_call(receiver, method)?
+                    == crate::classes::MethodPreparation::Complete
+                {
+                    *work += 1;
+                }
             }
             Instruction::FetchClassConstant { dst, class, name } => {
                 let class = self.class_target(class)?;
@@ -57,10 +72,13 @@ impl Vm {
                 self.set(dst, value);
             }
             Instruction::FetchClassName { dst, class } => {
-                let name = self.class_symbol(class)?;
-                self.set(dst, Value::from(name));
+                let name = self.class_symbol_value(class)?;
+                self.set(dst, name);
             }
             Instruction::FetchThis { dst } => self.fetch_this(dst)?,
+            Instruction::FetchIndex {
+                dst, path, mode, ..
+            } => self.fetch_path(dst, path, mode)?,
             Instruction::Clone { dst, src } => self.clone_object(dst, src)?,
             Instruction::InstanceOf { dst, src, class } => self.instance_of(dst, src, class)?,
             Instruction::LoadNull { dst: destination } => self.set(destination, Value::Null),

@@ -22,6 +22,15 @@ impl Tables {
     ) {
         use ir::Instruction as Old;
         let instruction = match source {
+            Old::KnownStaticCall {
+                class,
+                method,
+                binding,
+            } => Instruction::InitStaticCall {
+                class: self.symbol(&class, None, crate::policies::NameKind::Class),
+                method: self.symbol(&method, None, crate::policies::NameKind::Function),
+                binding,
+            },
             Old::ClassConstant {
                 destination,
                 class,

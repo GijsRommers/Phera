@@ -102,3 +102,52 @@ async fn static_style_calls_forward_receiver_and_called_class() {
     assert_eq!(interpreter.run(Arc::new(unit)).await, 0);
     assert_eq!(interpreter.output, b"9rootLeafy");
 }
+
+/// Request-local site caches must never reuse classes from a previous VM.
+#[tokio::test]
+async fn conditional_classes_are_isolated_with_shared_bytecode() {
+    let unit = Arc::new(phera_compiler::compile(
+        "<?php if (true) { class LocalClass { public int $value = 1; function read() { return $this->value; } } } $object = new LocalClass; echo $object->read(); $object->value++; echo $object->read();",
+        "conditional-cache.php",
+    ).unwrap());
+    let registry = Arc::new(Registry::new());
+    for _ in 0..3 {
+        let mut interpreter = Vm::new(registry.clone());
+        assert_eq!(interpreter.run(unit.clone()).await, 0);
+        assert_eq!(interpreter.output, b"12");
+    }
+}
+
+/// A cached accepted class must not accept another class at the same TypeId.
+#[tokio::test]
+async fn class_type_caches_guard_parameter_and_return_receiver_identity() {
+    for parameter in ["Contract $value", "$value"] {
+        let source = format!(
+            "<?php interface Contract {{}} class A implements Contract {{}} class B implements Contract {{}} class C {{}} function checked({parameter}): Contract {{return $value;}} checked(new A); checked(new B); checked(new A); echo 'checked'; checked(new C);"
+        );
+        let unit = Arc::new(phera_compiler::compile(&source, "typed-cache.php").unwrap());
+        let mut interpreter = Vm::new(Arc::new(Registry::new()));
+        assert_ne!(interpreter.run(unit).await, 0);
+        assert!(interpreter.output.starts_with(b"checked"));
+        assert!(String::from_utf8_lossy(&interpreter.output).contains("must be of type Contract"));
+    }
+}
+
+/// Leaf execution must preserve the public heap-frame limit even when no frame is allocated.
+#[tokio::test]
+async fn integer_leaf_calls_still_obey_the_frame_limit() {
+    for source in [
+        "<?php class Leaf {function get(){return 1;}} $object=new Leaf;echo $object->get();",
+        "<?php class Leaf {static function get(){return 1;}} echo Leaf::get();",
+        "<?php class Leaf {public int $number=1;function get(){return $this->number;}} $object=new Leaf;echo $object->get();",
+    ] {
+        let unit = Arc::new(phera_compiler::compile(source, "leaf-limit.php").unwrap());
+        let mut interpreter = Vm::new(Arc::new(Registry::new()));
+        interpreter.frame_limit = 1;
+        assert_ne!(interpreter.run(unit).await, 0);
+        assert!(
+            String::from_utf8_lossy(&interpreter.output)
+                .contains("Maximum call stack depth of 1 exceeded")
+        );
+    }
+}

@@ -11,22 +11,18 @@ impl Vm {
     /// rather than allocating fresh preparation buffers for every invocation.
     pub(crate) fn make_frame(
         &mut self,
-        unit: Arc<CompiledUnit>,
+        unit: &Arc<CompiledUnit>,
         function_id: Option<usize>,
         destination: Option<Reg>,
     ) -> Frame {
-        let cache = if let Some(frame) = self
-            .current()
-            .filter(|frame| Arc::ptr_eq(&frame.unit, &unit))
-        {
-            frame.cache.clone()
-        } else {
-            self.code_cache(&unit)
-        };
         if let Some(mut frame) = self.call_stack.take_recycled() {
             frame.method = None;
-            frame.unit = unit;
-            frame.cache = cache;
+            // Mirrors replacing the unit/cache owners, without atomic Arc
+            // increments when a recycled frame already owns this exact unit.
+            if !Arc::ptr_eq(&frame.unit, unit) {
+                frame.cache = self.code_cache(unit);
+                frame.unit = unit.clone();
+            }
             frame.function_id = function_id;
             frame.destination = destination;
             frame.ip = 0;
@@ -40,7 +36,14 @@ impl Vm {
             self.registers.extend_to(frame.base + frame.count);
             frame
         } else {
-            Frame::new(cache, &mut self.registers, unit, function_id, destination)
+            let cache = self.code_cache(unit);
+            Frame::new(
+                cache,
+                &mut self.registers,
+                unit.clone(),
+                function_id,
+                destination,
+            )
         }
     }
 

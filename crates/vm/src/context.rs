@@ -50,7 +50,7 @@ impl Context for Vm {
                 match &callee.target {
                     crate::call_state::CallTarget::User(function) => {
                         self.push_call(function.unit.clone(), function.index, None, arguments)?;
-                        self.interpret(stop).await
+                        self.interpret_frames(stop).await
                     }
                     crate::call_state::CallTarget::Method { method, context } => {
                         match &method.body {
@@ -64,7 +64,7 @@ impl Context for Vm {
                                 if let Some(frame) = self.call_stack.current_mut() {
                                     frame.method = Some(Box::new(context.clone()));
                                 }
-                                self.interpret(stop).await
+                                self.interpret_frames(stop).await
                             }
                             crate::classes::MethodBody::Native(entry) => {
                                 let mut arguments = arguments;

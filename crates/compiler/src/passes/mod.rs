@@ -8,3 +8,5 @@ pub(crate) mod lowering;
 pub(crate) mod lowering_tables;
 pub(crate) mod optimize;
 pub(crate) mod register_mapping;
+
+mod object_liveness;

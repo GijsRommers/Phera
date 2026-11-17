@@ -86,7 +86,7 @@ impl Vm {
     }
 
     /// Convert path keys in source order while reusing the operator diagnostic buffer.
-    fn keys(&mut self, place: &AccessPath) -> Result<InlineStack<PathKey>, NativeError> {
+    pub(crate) fn keys(&mut self, place: &AccessPath) -> Result<InlineStack<PathKey>, NativeError> {
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let mut keys = InlineStack::new();
         let result = (|| {
@@ -186,10 +186,10 @@ impl Vm {
         let slot = self
             .current()
             .and_then(|frame| frame.slots(&self.registers).get(register.0 as usize))
-            .cloned()
-            .flatten();
+            .and_then(Option::as_ref)
+            .map(|value| value.deref().clone());
         match slot {
-            Some(value) => value.deref().clone(),
+            Some(value) => value,
             None => {
                 if missing == Missing::Warn {
                     let name = self

@@ -32,7 +32,7 @@ impl Vm {
         };
         let class = self
             .classes
-            .get(object.class.name())
+            .for_object(&object)
             .ok_or_else(|| internal_error!("receiver class"))?;
         self.prepare_method(class, Some(object), &name, Invocation::Method)
     }
@@ -44,9 +44,7 @@ impl Vm {
         method: Reg,
         binding: ClassBinding,
     ) -> Result<(), NativeError> {
-        let name = self.class_target(class)?;
-        let method = self.method_name(method)?;
-        self.prepare_static_style(&name, &method, binding)
+        self.prepare_static_site(class, method, binding)
     }
 
     /// Resolve lookup scope separately from the late-bound scope saved on the pending call.
@@ -63,13 +61,13 @@ impl Vm {
         let context = self
             .current()
             .and_then(|frame| frame.method.as_ref())
-            .cloned();
+            .map(|context| (**context).clone());
         let receiver = context
             .as_ref()
             .and_then(|context| context.receiver.clone())
             .filter(|object| {
                 self.classes
-                    .get(object.class.name())
+                    .for_object(object)
                     .is_some_and(|receiver_class| receiver_class.is_a(name))
             });
         self.prepare_method(class, receiver, method, Invocation::Method)?;
@@ -104,7 +102,7 @@ impl Vm {
         let matches = match self.read_local(source) {
             Value::Object(object) => self
                 .classes
-                .get(object.class.name())
+                .for_object(&object)
                 .is_some_and(|class| class.is_a(&name)),
             _ => false,
         };

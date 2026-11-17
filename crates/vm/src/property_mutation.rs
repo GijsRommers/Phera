@@ -82,13 +82,14 @@ impl Vm {
         while let Some(key) = steps.next() {
             match (&current, key) {
                 (Value::Object(object), PathKey::Property(key)) => {
-                    let class = self
-                        .classes
-                        .get(object.class.name())
+                    let class = object
+                        .class
+                        .as_any()
+                        .downcast_ref::<crate::classes::Class>()
                         .ok_or_else(|| internal_error!("property class"))?;
                     let property = class.defaults.iter().find(|property| property.key == *key);
                     let name = crate::path_update::property_name(key);
-                    self.notice_static_instance_access(&class, &name);
+                    self.notice_static_instance_access(class, &name);
                     if let Some(property) = property {
                         if property.is_readonly
                             && !(steps.peek().is_some()

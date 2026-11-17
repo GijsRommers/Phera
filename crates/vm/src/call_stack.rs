@@ -14,6 +14,10 @@ pub(crate) struct CallStack {
     argument_buffers: Vec<Vec<Option<Value>>>,
     /// Request-owned callback depth.
     callback_depth: usize,
+    /// Bound targets reuse their Rc allocation after releasing all object receivers.
+    bound_callees: Vec<std::rc::Rc<crate::call_state::Callee>>,
+    /// One spare method context avoids an allocation on sequential method calls.
+    method_context: Option<Box<crate::classes::MethodContext>>,
 }
 
 impl CallStack {
@@ -23,6 +27,8 @@ impl CallStack {
             recycled_frames: vec![],
             argument_buffers: vec![],
             callback_depth: 0,
+            bound_callees: Vec::new(),
+            method_context: None,
         }
     }
 }
@@ -64,7 +70,10 @@ impl CallStack {
 
     /// Recycle allocations without retaining a second active PHP frame.
     pub(crate) fn recycle(&mut self, mut frame: Frame) {
-        frame.method = None;
+        if let Some(mut context) = frame.method.take() {
+            context.receiver = None;
+            self.method_context = Some(context);
+        }
         self.recycled_frames.push(frame);
     }
 
@@ -93,5 +102,52 @@ impl CallStack {
 
     pub(crate) fn leave_callback(&mut self) {
         self.callback_depth -= 1;
+    }
+}
+
+impl CallStack {
+    /// Reuse a uniquely owned bound call; symbol-cache entries never enter this pool.
+    pub(crate) fn bound_callee(
+        &mut self,
+        value: crate::call_state::Callee,
+    ) -> std::rc::Rc<crate::call_state::Callee> {
+        if let Some(mut storage) = self.bound_callees.pop()
+            && let Some(target) = std::rc::Rc::get_mut(&mut storage)
+        {
+            *target = value;
+            return storage;
+        }
+        std::rc::Rc::new(value)
+    }
+
+    /// Vacant storage retains no object; keeping a receiver here would delay id reuse.
+    pub(crate) fn recycle_bound_callee(
+        &mut self,
+        mut storage: std::rc::Rc<crate::call_state::Callee>,
+    ) {
+        use crate::call_state::CallTarget;
+        if !matches!(
+            &storage.target,
+            CallTarget::Method { .. } | CallTarget::Constructed(_)
+        ) {
+            return;
+        }
+        if let Some(target) = std::rc::Rc::get_mut(&mut storage) {
+            target.target = CallTarget::Vacant;
+            self.bound_callees.push(storage);
+        }
+    }
+
+    /// Mirrors Box::new(context), replacing the contents of a receiver-free spare.
+    pub(crate) fn method_context(
+        &mut self,
+        value: crate::classes::MethodContext,
+    ) -> Box<crate::classes::MethodContext> {
+        if let Some(mut storage) = self.method_context.take() {
+            *storage = value;
+            storage
+        } else {
+            Box::new(value)
+        }
     }
 }

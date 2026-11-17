@@ -60,6 +60,7 @@ pub(crate) fn optimize(function: &mut Function) {
     crate::passes::direct_operands::optimize(function);
     crate::passes::integer_operands::fuse_integer_branches(function);
     crate::passes::direct_operands::specialize_appends(function);
+    crate::passes::direct_operands::specialize_indexes(function);
     compact_nops(function);
 }
 

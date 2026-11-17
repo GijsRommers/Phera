@@ -8,8 +8,8 @@ use phera_value::Value;
 /// A signature and target resolved once for a symbol in this request.
 #[derive(Clone)]
 pub(crate) struct Callee {
-    pub(crate) name: String,
-    pub(crate) parameters: Vec<ParameterSpec>,
+    pub(crate) name: Rc<str>,
+    pub(crate) parameters: Rc<[ParameterSpec]>,
     pub(crate) target: CallTarget,
 }
 
@@ -24,6 +24,8 @@ pub(crate) struct ParameterSpec {
 /// User bytecode, a native entry, or an intrinsic resolved at the call site.
 #[derive(Clone)]
 pub(crate) enum CallTarget {
+    /// Recycled bound-call storage has released its receiver and cannot execute.
+    Vacant,
     /// Bound methods retain lexical and called scopes throughout argument evaluation.
     Method {
         method: Rc<crate::classes::Method>,

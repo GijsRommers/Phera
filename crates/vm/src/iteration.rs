@@ -220,3 +220,43 @@ impl Vm {
         Ok(())
     }
 }
+
+/// Mirrors next_snapshot for by-value, unkeyed iteration, retaining the current
+/// register window and local IP. Live reference iteration uses iter_next instead.
+pub(crate) fn snapshot_step(
+    iterator: IterId,
+    destination: Reg,
+    end: Target,
+    frame: Option<&mut frame::Frame>,
+    registers: &mut crate::registers::Registers,
+    ip: &mut usize,
+) -> bool {
+    let Some(frame) = frame else { return false };
+    let Some(state) = frame.iterators.get_mut(iterator.0) else {
+        return false;
+    };
+    if state.source.is_some() {
+        return false;
+    }
+    let Some(array) = &state.snapshot else {
+        return false;
+    };
+    let position = if state.started {
+        state
+            .position
+            .and_then(|position| array.next_position(position))
+    } else {
+        array.first_position()
+    };
+    state.position = position;
+    state.started = true;
+    let value = position
+        .and_then(|position| array.entry_at(position))
+        .map(|(_, value)| value.deref().clone());
+    if let Some(value) = value {
+        frame.set(registers, destination, value);
+    } else {
+        *ip = end.index();
+    }
+    true
+}

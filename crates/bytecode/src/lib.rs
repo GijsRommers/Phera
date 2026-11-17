@@ -20,6 +20,12 @@
 //!    table, already lowercased where PHP ignores case. The VM never parses or
 //!    lowercases a string to run an instruction.
 //!
+//! `InitStaticCall` follows those rules: it contains only symbol indices and a
+//! binding enum, remains Copy within the size assertion, and uses compiler-folded
+//! method lookup spelling. `FetchIndex` likewise holds only registers, an
+//! immutable fallback-path index and an access mode. Request-local resolution
+//! stays in the VM's side caches.
+//!
 //! See `docs/architecture.md`, section 4.
 
 mod class;

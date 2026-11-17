@@ -1,13 +1,29 @@
 //! Copy-only instruction dispatch over heap frames.
 
 use phera_bytecode::{Instruction, Target};
-use phera_extension_api::{NativeError, NativeResult};
+use phera_extension_api::{LocalFuture, NativeError, NativeResult};
 
 use crate::Vm;
 
 impl Vm {
+    /// One erased engine future per runtime entry keeps procedural batching code
+    /// out of the general call loop. PHP-to-PHP calls still use recycled heap
+    /// frames; this allocation occurs only at an interpreter boundary.
+    pub(crate) fn interpret(&mut self, stop: usize) -> LocalFuture<'_, NativeResult> {
+        let procedural = self
+            .current()
+            .is_some_and(|frame| frame.function_id.is_none());
+        if procedural {
+            Box::pin(self.interpret_procedural(stop))
+        } else {
+            Box::pin(self.interpret_frames(stop))
+        }
+    }
+}
+
+impl Vm {
     /// Retain code and register windows across scalar steps; periodically yield for Tokio fairness.
-    pub(crate) async fn interpret(&mut self, stop: usize) -> NativeResult {
+    pub(crate) async fn interpret_frames(&mut self, stop: usize) -> NativeResult {
         let mut work = 0usize;
         let mut running_unit = self
             .current()
@@ -56,10 +72,9 @@ impl Vm {
                             | Instruction::JumpIfNot { .. }
                     ) {
                         work += 1;
-                        // Bound CPU monopolization on a shared single-thread Tokio worker.
                         if work >= 4096 {
                             if let Some(frame) = self.call_stack.current_mut() {
-                                frame.ip = ip
+                                frame.ip = ip;
                             }
                             work = 0;
                             tokio::task::yield_now().await;
@@ -67,12 +82,69 @@ impl Vm {
                     }
                     continue;
                 }
+                if let Instruction::FetchIndex {
+                    dst,
+                    base: array,
+                    index,
+                    ..
+                } = instruction
+                    && crate::fast::array_index_step(
+                        dst,
+                        array,
+                        index,
+                        self.registers.tail_mut(base),
+                    ) == crate::fast::ScalarStep::Complete
+                {
+                    continue;
+                }
+                if let Instruction::IterNext { iter, value, end } = instruction
+                    && crate::iteration::snapshot_step(
+                        iter,
+                        value,
+                        end,
+                        self.call_stack.current_mut(),
+                        &mut self.registers,
+                        &mut ip,
+                    )
+                {
+                    continue;
+                }
                 if let Some(frame) = self.call_stack.current_mut() {
                     frame.ip = ip
                 }
-                if let crate::dispatch::DispatchResult::Returned(value) =
-                    self.dispatch(instruction, stop, &mut work).await?
-                {
+                // Mirrors the corresponding dispatcher arms, preserving the published
+                // IP and continuation handling while keeping synchronous hot operations
+                // out of the cold async dispatcher future.
+                let result = match instruction {
+                    Instruction::InitCall { function } => {
+                        self.init_call(function)?;
+                        crate::dispatch::DispatchResult::Continue
+                    }
+                    Instruction::SendValue { src } => {
+                        self.send_value(src)?;
+                        crate::dispatch::DispatchResult::Continue
+                    }
+                    Instruction::SendLocal { local } => {
+                        self.send(None, Some(crate::AccessPath::local(local)))?;
+                        crate::dispatch::DispatchResult::Continue
+                    }
+                    Instruction::Call { dst } => {
+                        self.execute_call(dst, &mut work).await?;
+                        crate::dispatch::DispatchResult::Continue
+                    }
+                    Instruction::Return { src } => self.return_register(src, stop)?,
+                    Instruction::ReturnNull => self.return_null(stop)?,
+                    Instruction::IterNext {
+                        iter: iterator,
+                        value,
+                        end,
+                    } => {
+                        self.iter_next(iterator, None, value, end)?;
+                        crate::dispatch::DispatchResult::Continue
+                    }
+                    _ => self.dispatch(instruction, stop, &mut work).await?,
+                };
+                if let crate::dispatch::DispatchResult::Returned(value) = result {
                     return Ok(value);
                 }
                 if work >= 4096 {

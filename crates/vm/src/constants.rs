@@ -3,7 +3,7 @@
 use phera_bytecode::{ConstId, NameId, Reg, SymbolId};
 use phera_extension_api::NativeError;
 
-use crate::{Vm, frame};
+use crate::Vm;
 
 impl Vm {
     /// Implements PHP LoadConst semantics outside the dispatch loop.
@@ -14,8 +14,8 @@ impl Vm {
     ) -> Result<(), NativeError> {
         let value = self
             .current()
-            .and_then(|frame| frame.unit.constants.get(constant.index()))
-            .map(frame::value)
+            .and_then(|frame| frame.cache.constants.get(constant.index()))
+            .cloned()
             .ok_or_else(|| internal_error!("constant"))?;
         self.set(destination, value);
         Ok(())

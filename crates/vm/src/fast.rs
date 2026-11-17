@@ -54,6 +54,18 @@ pub(crate) fn scalar_step(
             dst: destination,
             value,
         } => ScalarWrite::new(destination, Value::Bool(value)),
+        Instruction::Cast {
+            to: phera_bytecode::CastKind::Bool,
+            dst: destination,
+            src: source,
+        } => {
+            // Mirrors execute_cast for an already boolean operand. Undefined
+            // values and diagnostic-producing casts retain the full handler.
+            let Some(Some(Value::Bool(value))) = slots.get(source.index()) else {
+                return ScalarStep::Fallback;
+            };
+            ScalarWrite::new(destination, Value::Bool(*value))
+        }
         Instruction::Move {
             dst: destination,
             src: source,
@@ -86,6 +98,16 @@ pub(crate) fn scalar_step(
             let Some(Some(left)) = slots.get(left.index()) else {
                 return ScalarStep::Fallback;
             };
+            // Mirrors fast_binary's integer comparisons followed by to_bool,
+            // without constructing and dropping an intermediate PHP value.
+            if let Value::Int(left) = left
+                && let Some(condition) = integer_condition(operator, *left, right as i64)
+            {
+                if !condition {
+                    *ip = target.index();
+                }
+                return ScalarStep::Complete;
+            }
             let Some(value) = fast_binary(operator, left, &Value::Int(right as i64)) else {
                 return ScalarStep::Fallback;
             };
@@ -204,6 +226,54 @@ pub(crate) fn scalar_step(
     let Some(slot) = slots.get_mut(write.destination.index()) else {
         return ScalarStep::Fallback;
     };
-    *slot = Some(write.value);
+    // Mirrors replacing Some(Int) with Some(Int), avoiding heap-value drop
+    // dispatch and rewriting the enum tag on the scalar loop's common path.
+    match (slot, write.value) {
+        (Some(Value::Int(target)), Value::Int(value)) => *target = value,
+        (target, value) => *target = Some(value),
+    }
+    ScalarStep::Complete
+}
+
+/// Only integer comparisons have a direct boolean result; other operations use
+/// fast_binary so overflow, float results and PHP coercion keep their old paths.
+#[inline]
+fn integer_condition(operator: phera_bytecode::BinaryOp, left: i64, right: i64) -> Option<bool> {
+    use phera_bytecode::BinaryOp;
+    Some(match operator {
+        BinaryOp::Less => left < right,
+        BinaryOp::LessEqual => left <= right,
+        BinaryOp::Greater => left > right,
+        BinaryOp::GreaterEqual => left >= right,
+        BinaryOp::Equal | BinaryOp::Identical => left == right,
+        BinaryOp::NotEqual | BinaryOp::NotIdentical => left != right,
+        _ => return None,
+    })
+}
+
+/// Mirrors fetch_path for an existing integer key in an unaliased array root.
+/// Keep this out of scalar_step's arithmetic dispatch; every failed guard uses
+/// the normal PHP offset/reference/diagnostic handler.
+#[inline]
+pub(crate) fn array_index_step(
+    destination: Reg,
+    base: Reg,
+    index: Reg,
+    slots: &mut [Option<Value>],
+) -> ScalarStep {
+    let Some(Some(Value::Array(array))) = slots.get(base.index()) else {
+        return ScalarStep::Fallback;
+    };
+    let Some(Some(Value::Int(index))) = slots.get(index.index()) else {
+        return ScalarStep::Fallback;
+    };
+    let Some(value) = crate::array_slots::read_integer(array, *index) else {
+        return ScalarStep::Fallback;
+    };
+    let value = value.deref().clone();
+    let Some(target) = slots.get_mut(destination.index()) else {
+        return ScalarStep::Fallback;
+    };
+    *target = Some(value);
     ScalarStep::Complete
 }

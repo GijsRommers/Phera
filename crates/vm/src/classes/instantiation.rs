@@ -5,6 +5,7 @@ use phera_extension_api::NativeError;
 use phera_value::Value;
 
 use crate::Vm;
+use std::rc::Rc;
 
 impl Vm {
     /// Resolve a compiler symbol without namespace fallback, as PHP class names require.
@@ -40,10 +41,43 @@ impl Vm {
         }
     }
 
+    /// Literal class cache is keyed by unit/symbol, filled after successful lookup.
+    /// Relative keywords bypass it. Linked classes cannot be replaced in a request,
+    /// and the unit/class owners keep identities alive until request teardown.
     /// Populate defaults root-first before resolving the inherited constructor.
     pub(crate) fn new_object(&mut self, symbol: SymbolId) -> Result<(), NativeError> {
-        let name = self.class_symbol(symbol)?;
-        self.new_named_object(&name)
+        let frame = self.current().ok_or_else(|| internal_error!("new site"))?;
+        let written = &frame
+            .unit
+            .symbols
+            .get(symbol.index())
+            .ok_or_else(|| internal_error!("new symbol"))?
+            .written;
+        if matches!(written.as_str(), "self" | "parent" | "static") {
+            let name = self.class_symbol(symbol)?;
+            return self.new_named_object(&name);
+        }
+        let cached = frame
+            .cache
+            .classes
+            .get(symbol.index())
+            .and_then(|slot| slot.borrow().clone());
+        let class = if let Some(class) = cached {
+            class
+        } else {
+            let class = self
+                .classes
+                .get(written)
+                .ok_or_else(|| NativeError::error(format!("Class \"{written}\" not found")))?;
+            if let Some(slot) = self
+                .current()
+                .and_then(|frame| frame.cache.classes.get(symbol.index()))
+            {
+                *slot.borrow_mut() = Some(class.clone());
+            }
+            class
+        };
+        self.new_linked_object(class)
     }
 
     /// Computed and literal allocation share defaults, visibility and abstract checks.
@@ -52,6 +86,11 @@ impl Vm {
             .classes
             .get(name)
             .ok_or_else(|| NativeError::error(format!("Class \"{name}\" not found")))?;
+        self.new_linked_object(class)
+    }
+
+    /// Mirrors named allocation after lookup; visibility and abstract checks stay shared.
+    fn new_linked_object(&mut self, class: Rc<super::Class>) -> Result<(), NativeError> {
         if class.kind == ClassKind::Interface {
             return Err(NativeError::error(format!(
                 "Cannot instantiate interface {}",
@@ -65,15 +104,23 @@ impl Vm {
             )));
         }
         let object = self.classes.allocate(class.clone());
-        for property in &class.defaults {
-            if property.initialized {
-                let value = if let Some(initializer) = &property.initializer {
-                    self.evaluate_initializer(initializer, &property.declaring)?
-                } else {
-                    property.value.clone()
-                };
-                object.set(property.key.clone(), value);
+        // Mirrors the default loop below for classes whose defaults are all literals.
+        if let Some(template) = &class.property_template {
+            object.update(|properties| *properties = template.clone());
+        } else {
+            for property in &class.defaults {
+                if property.initialized {
+                    let value = if let Some(initializer) = &property.initializer {
+                        self.evaluate_initializer(initializer, &property.declaring)?
+                    } else {
+                        property.value.clone()
+                    };
+                    object.set(property.key.clone(), value);
+                }
             }
+        }
+        if class.constructor.is_none() {
+            return self.prepare_constructed_object(&class, object);
         }
         self.prepare_method(
             class,
@@ -130,5 +177,39 @@ impl Vm {
             .ok_or_else(|| NativeError::error("Using $this when not in object context"))?;
         self.set(destination, Value::Object(receiver));
         Ok(())
+    }
+}
+
+impl Vm {
+    /// Mirrors class_symbol's binding rules while sharing immutable PHP name strings.
+    pub(crate) fn class_symbol_value(&self, symbol: SymbolId) -> Result<Value, NativeError> {
+        let frame = self
+            .current()
+            .ok_or_else(|| internal_error!("class name frame"))?;
+        let name = &frame
+            .unit
+            .symbols
+            .get(symbol.index())
+            .ok_or_else(|| internal_error!("class name symbol"))?
+            .written;
+        let context = frame.method.as_ref();
+        let class = match name.as_str() {
+            "self" => context.map(|context| &context.scope),
+            "static" => context.map(|context| &context.called),
+            "parent" => context.and_then(|context| context.scope.parent.as_ref()),
+            _ => {
+                return frame
+                    .cache
+                    .class_names
+                    .get(symbol.index())
+                    .cloned()
+                    .ok_or_else(|| internal_error!("class name cache"));
+            }
+        };
+        if let Some(class) = class {
+            return Ok(class.name_value.clone());
+        }
+        // Preserve exact diagnostics for missing relative scopes in the resolver.
+        self.class_symbol(symbol).map(Value::from)
     }
 }

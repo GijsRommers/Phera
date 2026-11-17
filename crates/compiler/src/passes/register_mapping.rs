@@ -54,7 +54,9 @@ impl Instruction {
                 *source = map(*source);
                 *class = map(*class);
             }
-            Instruction::DeclareClass(_) | Instruction::New { .. } => {}
+            Instruction::DeclareClass(_)
+            | Instruction::New { .. }
+            | Instruction::KnownStaticCall { .. } => {}
             Instruction::ClassName { destination, .. } | Instruction::This { destination } => {
                 *destination = map(*destination)
             }

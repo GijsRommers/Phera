@@ -7,6 +7,26 @@ use phera_value::{is_numeric, to_float, to_int};
 
 use crate::Vm;
 
+/// Only declarations containing relative class keywords depend on the callee scope.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DeclarationScope {
+    Absolute,
+    Relative,
+}
+
+/// This classification mirrors argument checking's keyword scan, once per declaration.
+pub(crate) fn declaration_scope(declaration: &Type) -> DeclarationScope {
+    if declaration
+        .display
+        .split(['|', '&', '?', '(', ')'])
+        .any(|name| matches!(name, "self" | "parent" | "static"))
+    {
+        DeclarationScope::Relative
+    } else {
+        DeclarationScope::Absolute
+    }
+}
+
 /// Strict declarations reject scalar coercion except PHP's int-to-float widening.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TypeChecking {
@@ -27,7 +47,12 @@ pub(crate) fn coerce(
     checking: TypeChecking,
     vm: &mut Vm,
 ) -> NativeResult {
-    let value = value.deref().clone();
+    // Mirrors deref().clone() without a redundant retain/release for already
+    // owned values. Reference cells still produce a detached value snapshot.
+    let value = match value {
+        Value::Reference(_) => value.deref().clone(),
+        _ => value,
+    };
     let mask = declaration_type.mask;
     if mask == TypeMask::MIXED {
         return Ok(value);

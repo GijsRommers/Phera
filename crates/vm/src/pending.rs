@@ -12,9 +12,15 @@ use crate::{AccessPath, Vm};
 impl Vm {
     /// Resolve the callee before argument evaluation so reference parameters are known.
     pub(crate) fn init_call(&mut self, symbol: SymbolId) -> Result<(), NativeError> {
-        let cached = self
-            .current()
-            .and_then(|frame| frame.cache.borrow().get(symbol.index()).cloned().flatten());
+        let cached = self.current().and_then(|frame| {
+            frame
+                .cache
+                .symbols
+                .borrow()
+                .get(symbol.index())
+                .cloned()
+                .flatten()
+        });
         let callee = if let Some(cached) = cached {
             cached
         } else {
@@ -30,7 +36,7 @@ impl Vm {
             };
             let callee = self.resolve_callee(name)?;
             if let Some(frame) = self.current()
-                && let Some(slot) = frame.cache.borrow_mut().get_mut(symbol.index())
+                && let Some(slot) = frame.cache.symbols.borrow_mut().get_mut(symbol.index())
             {
                 *slot = Some(callee.clone());
             }
@@ -98,8 +104,8 @@ impl Vm {
                 )));
             };
         Ok(Rc::new(Callee {
-            name,
-            parameters,
+            name: name.into(),
+            parameters: parameters.into(),
             target,
         }))
     }
@@ -227,21 +233,32 @@ impl Vm {
             }
         }
         match &call.callee.target {
+            CallTarget::Vacant => return Err(internal_error!("vacant call")),
             CallTarget::Method { method, context } => {
-                self.invoke_method(method, context.clone(), destination, arguments)
-                    .await?;
-                self.name_variadic_arguments(named_start, named_keys)?;
+                if let Some(value) = self.leaf_method_result(context) {
+                    // Mirrors push_prepared's release of unused extra arguments
+                    // before the body can return into the caller's destination.
+                    arguments.clear();
+                    self.call_stack.recycle_arguments(arguments);
+                    self.set(destination, value);
+                } else {
+                    self.invoke_method(method, context.clone(), destination, arguments)
+                        .await?;
+                    self.name_variadic_arguments(named_start, named_keys)?;
+                }
             }
             CallTarget::Constructed(object) => self.set(destination, Value::Object(object.clone())),
             CallTarget::User(function) => {
                 let result = self.push_prepared(
-                    function.unit.clone(),
+                    &function.unit,
                     function.index,
                     Some(destination),
                     arguments,
                 );
                 self.name_variadic_arguments(named_start, named_keys)?;
                 result?;
+                // Symbol-cache callees never need the bound-call recycling path.
+                return Ok(());
             }
             CallTarget::Native(entry) => {
                 let result = self
@@ -268,6 +285,7 @@ impl Vm {
                 self.set(destination, result);
             }
         }
+        self.call_stack.recycle_bound_callee(call.callee);
         Ok(())
     }
 

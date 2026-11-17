@@ -14,7 +14,7 @@ impl Vm {
             .current_mut()
             .and_then(|frame| frame.calls.pop())
             .ok_or_else(|| internal_error!("callable"))?;
-        self.set(destination, Value::from(call.callee.name.clone()));
+        self.set(destination, Value::from(call.callee.name.as_ref()));
         Ok(())
     }
 

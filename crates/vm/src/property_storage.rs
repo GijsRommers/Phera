@@ -14,7 +14,12 @@ fn position(object: &Object, key: &ArrayKey) -> Option<usize> {
 
 /// Unset/reinsert can change a position; verify its key before using the fast slot.
 pub(crate) fn read(object: &Object, key: &ArrayKey) -> Option<Value> {
-    if let Some(position) = position(object, key)
+    read_at(object, key, position(object, key))
+}
+
+/// Mirrors read with a cached declaration position; the actual key still guards layout changes.
+pub(crate) fn read_at(object: &Object, key: &ArrayKey, slot: Option<usize>) -> Option<Value> {
+    if let Some(position) = slot
         && let Some(value) = object
             .update(|properties| {
                 properties
@@ -50,9 +55,14 @@ pub(crate) fn take(object: &Object, key: &ArrayKey) -> Value {
 
 /// Existing declared slots need no key hashing; dynamic/reinserted slots use the map.
 pub(crate) fn write(object: &Object, key: ArrayKey, value: Value) {
-    let position = position(object, &key);
+    let slot = position(object, &key);
+    write_at(object, key, slot, value);
+}
+
+/// Mirrors write using a guarded cached position, falling back after unset/reinsertion.
+pub(crate) fn write_at(object: &Object, key: ArrayKey, slot: Option<usize>, value: Value) {
     object.update(|properties| {
-        if let Some(position) = position
+        if let Some(position) = slot
             && let Some((stored, target)) = properties.entry_at_mut(position)
             && *stored == key
         {
@@ -61,4 +71,37 @@ pub(crate) fn write(object: &Object, key: ArrayKey, value: Value) {
         }
         properties.insert(key, value);
     });
+}
+
+/// Mutate a stored array in place. References and absent/nonarray slots return
+/// None so the general path retains type, promotion and alias diagnostics.
+pub(crate) fn append_at(
+    object: &Object,
+    key: &ArrayKey,
+    slot: Option<usize>,
+    value: &Value,
+) -> Option<Result<(), phera_extension_api::NativeError>> {
+    object
+        .update(|properties| {
+            let position = slot.filter(|position| {
+                properties
+                    .entry_at(*position)
+                    .is_some_and(|(stored, _)| stored == key)
+            });
+            let target = if let Some(position) = position {
+                properties.entry_at_mut(position).map(|(_, value)| value)
+            } else {
+                properties.get_mut(key)
+            };
+            let Some(Value::Array(array)) = target else {
+                return None;
+            };
+            Some(
+                std::rc::Rc::make_mut(array)
+                    .push(value.clone())
+                    .map(|_| ())
+                    .map_err(Into::into),
+            )
+        })
+        .flatten()
 }

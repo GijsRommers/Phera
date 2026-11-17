@@ -164,3 +164,10 @@ pub(crate) fn value(constant: &Constant) -> Value {
         Constant::String(value) => Value::from(value.clone()),
     }
 }
+
+impl Frame {
+    /// The unit-owned slot is keyed by this function and its published next IP.
+    pub(crate) fn site_cache(&self) -> Option<&std::cell::RefCell<crate::unit_caches::CachedSite>> {
+        self.cache.site(self.function_id, self.ip)
+    }
+}

@@ -1,6 +1,6 @@
 //! Request-local async interpreter. PHP calls push detachable heap frames.
 
-use std::{cell::RefCell, rc::Rc, sync::Arc};
+use std::{rc::Rc, sync::Arc};
 
 use phera_bytecode::{CompiledUnit, Reg};
 use phera_extension_api::{LocalFuture, Registry, RequestState};
@@ -18,6 +18,7 @@ macro_rules! internal_error {
 }
 
 mod access_mode;
+mod array_slots;
 mod arrays;
 mod call_instructions;
 mod call_stack;
@@ -63,18 +64,24 @@ mod object_iteration;
 mod operators;
 mod ops;
 mod output;
+mod parameter_binding;
 mod path;
 mod path_instructions;
 mod path_update;
 mod pending;
 mod place_mutation;
 mod places;
+mod positional_arguments;
+mod procedural;
 mod properties;
 mod property_mutation;
+mod property_sites;
 mod property_storage;
+mod property_targets;
 mod references;
 mod registers;
 mod returns;
+mod scalar_batches;
 mod scope_intrinsics;
 mod static_variables;
 mod string_offsets;
@@ -103,7 +110,7 @@ impl OutputSink for Vec<u8> {
 /// Default limit permits 200,000-deep PHP recursion without consuming Rust stack.
 pub const DEFAULT_FRAME_LIMIT: usize = 250_000;
 /// Per-symbol resolved callees shared by frames of one compiled unit.
-type SymbolCache = Rc<RefCell<Vec<Option<Rc<call_state::Callee>>>>>;
+type SymbolCache = Rc<unit_caches::UnitCache>;
 
 /// One request interpreter; PHP calls use heap frames rather than Rust recursion.
 pub struct Vm {

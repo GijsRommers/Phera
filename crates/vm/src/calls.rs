@@ -1,10 +1,10 @@
 //! Call preparation, signature handling and VM intrinsics.
 
-use std::{rc::Rc, sync::Arc};
+use std::sync::Arc;
 
 use phera_bytecode::{CompiledUnit, Reg};
 use phera_extension_api::{Context, NativeError, NativeFn, NativeResult, prepare_arguments};
-use phera_value::{PhpArray, Value};
+use phera_value::Value;
 
 use crate::{Vm, intrinsics::Intrinsic, types};
 
@@ -50,7 +50,7 @@ impl Vm {
         arguments: Vec<Value>,
     ) -> Result<(), NativeError> {
         self.push_prepared(
-            unit,
+            &unit,
             function_id,
             destination,
             arguments.into_iter().map(Some).collect(),
@@ -60,7 +60,7 @@ impl Vm {
     /// Bound PHP recursion by heap frame count, then preserve observable arguments.
     pub(crate) fn push_prepared(
         &mut self,
-        unit: Arc<CompiledUnit>,
+        unit: &Arc<CompiledUnit>,
         function_id: usize,
         destination: Option<Reg>,
         mut arguments: Vec<Option<Value>>,
@@ -91,10 +91,11 @@ impl Vm {
 
     /// Coercion of a reference updates its cell so the caller observes it.
     #[inline]
-    fn check_argument(
+    pub(crate) fn check_argument(
         &mut self,
         value: Value,
         declaration_type: Option<&phera_bytecode::Type>,
+        scope: types::DeclarationScope,
         function: &str,
         index: usize,
         parameter: &str,
@@ -102,7 +103,7 @@ impl Vm {
         let Some(declaration_type) = declaration_type else {
             return Ok(value);
         };
-        self.check_typed_argument(value, declaration_type, function, index, parameter)
+        self.check_typed_argument(value, declaration_type, scope, function, index, parameter)
     }
 
     /// Keep class-type coercion off the ordinary untyped call's parameter-binding path.
@@ -110,10 +111,19 @@ impl Vm {
         &mut self,
         value: Value,
         declaration_type: &phera_bytecode::Type,
+        scope: types::DeclarationScope,
         function: &str,
         index: usize,
         parameter: &str,
     ) -> NativeResult {
+        // Mirrors the class arm of types::coerce without cloning declarations or
+        // formatting a source location for successful non-relative class types.
+        if value.deref().is_object()
+            && scope == types::DeclarationScope::Absolute
+            && self.matches_class_type(&value, declaration_type)
+        {
+            return Ok(value);
+        }
         let crate::diagnostics::SourceLocation { file, line } = self.location();
         let mut resolved_type = declaration_type.clone();
         if let Some((scope, _)) = function.split_once("::") {
@@ -210,102 +220,5 @@ impl Vm {
             }
             NativeFn::Async(frame) => frame(self, arguments).await,
         }
-    }
-}
-
-impl Vm {
-    /// Bind supplied parameters in declaration order; default bytecode handles missing defaults.
-    fn bind_parameters(
-        &mut self,
-        frame: &mut crate::frame::Frame,
-        arguments: &mut [Option<Value>],
-        function_id: usize,
-    ) -> Result<(), NativeError> {
-        let code = frame.unit.clone();
-        let function = code
-            .functions
-            .get(function_id)
-            .ok_or_else(|| internal_error!("call function"))?;
-        let parameters = &function.parameters;
-        for (i, parameter) in parameters.iter().enumerate() {
-            if arguments.get(i).is_none_or(Option::is_none) && parameter.has_default {
-                continue;
-            }
-            let value = if parameter.variadic {
-                match self.variadic_arguments(&code, function, parameter, arguments, i) {
-                    Ok(value) => value,
-                    Err(error) => {
-                        let mut original = PhpArray::new();
-                        for argument in arguments.iter().skip(i) {
-                            original.push(argument.clone().unwrap_or_default())?;
-                        }
-                        frame.set(
-                            &mut self.registers,
-                            Reg(i as u16),
-                            Value::Array(Rc::new(original)),
-                        );
-                        return Err(error);
-                    }
-                }
-            } else {
-                let value = arguments.get_mut(i).and_then(Option::take).ok_or_else(|| {
-                    let required = parameters.iter().filter(|parameter| !parameter.has_default && !parameter.variadic).count();
-                    NativeError::argument_count_error(format!(
-                        "Too few arguments to function {}(), {} passed and at least {required} expected",
-                        function.name,arguments.len(),
-                    ))
-                })?;
-                if parameter.ty.is_none() {
-                    value
-                } else {
-                    let original = value.clone();
-                    match self.check_argument(
-                        value,
-                        parameter
-                            .ty
-                            .map(|declaration_type| &code.types[declaration_type.index()]),
-                        &function.name,
-                        i,
-                        &code.names[parameter.name.index()],
-                    ) {
-                        Ok(value) => value,
-                        Err(error) => {
-                            frame.set(&mut self.registers, Reg(i as u16), original);
-                            return Err(error);
-                        }
-                    }
-                }
-            };
-            frame.set(&mut self.registers, Reg(i as u16), value);
-        }
-        Ok(())
-    }
-}
-
-impl Vm {
-    /// A variadic parameter collects remaining values in order and checks each element.
-    fn variadic_arguments(
-        &mut self,
-        code: &CompiledUnit,
-        function: &phera_bytecode::Function,
-        parameter: &phera_bytecode::Parameter,
-        arguments: &[Option<Value>],
-        index: usize,
-    ) -> NativeResult {
-        let mut values = PhpArray::new();
-        for (offset, argument) in arguments.iter().enumerate().skip(index) {
-            let value = argument.clone().unwrap_or_default();
-            let value = self.check_argument(
-                value,
-                parameter
-                    .ty
-                    .map(|declaration_type| &code.types[declaration_type.index()]),
-                &function.name,
-                offset,
-                "",
-            )?;
-            values.push(value)?;
-        }
-        Ok(Value::Array(Rc::new(values)))
     }
 }
