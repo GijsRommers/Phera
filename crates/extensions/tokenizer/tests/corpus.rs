@@ -54,7 +54,8 @@ fn full_streams_match_php() {
         }
     }
     println!(
-        "{files} files, {} snippets, {} calls, {} Phera tokens, {mismatches} mismatches ({raw} raw)",
+        "{files} files, {} snippets, {} calls, {} Phera tokens, \
+         {mismatches} mismatches ({raw} raw)",
         SNIPPETS.len(),
         matrix.labels.len(),
         matrix.token_count
