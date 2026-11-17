@@ -594,6 +594,66 @@ indexes), `$this` kept in the side table rather than in register 0, and
 about 35 machine instructions per simple bytecode instruction. Property
 access in `objects` still leaves the loop (objects as slots, item 3).
 
+### 10.8 Item 1, calls: the second pass
+
+Done on the branch `engine/calls-2` (pull request #20):
+
+- A call being prepared is a `PreparedCall`: which callee, where its
+  window starts, how many arguments were sent and counted, its kind and a
+  few flags. A call to PHP code (function, method, constructor, closure)
+  carries nothing else; parameter names, by-reference flags, types and
+  where a surplus argument goes are read from the callee's bytecode when
+  the general path needs them. Only native callees and named arguments
+  use a side entry (`CallDetails`).
+- A call's kind says what its window holds below the first parameter:
+  `$this` for a method, the closure object and its bound `$this` for a
+  closure, whose captured values follow the parameters. Classes are
+  numbered (`ClassIndex`) and the code table records each method's
+  declaring class, so the class scope and the called class are derived:
+  scope from the method (or the closure's binding), called class from
+  `$this`, stored only for a static call whose called class is not the
+  scope. A method call touches one reference count, the receiver's.
+- In the loop: `new` (template allocation and the constructor), closure
+  calls, `$this`, by-value and by-reference sends, defaults
+  (`ReceiveDefault`, `LoadConst`, `CheckType`) and the call count of a call
+  with defaults, kept in the frame's flags.
+
+Measured on 17 November 2026 in instructions retired net of start-up
+(cycles beside, minimum of five runs, load average 9 to 14), against
+`php -n`:
+
+| script | head of `engine/calls` | now | target |
+| --- | --- | --- | --- |
+| methods | 5.65x (6.6x) | 5.12x (5.1x) | 3x |
+| hierarchy | 3.87x (4.6x) | 3.37x (3.7x) | 3x |
+| closures | 6.94x (8.8x) | 6.43x (8.0x) | 4x |
+| objects | 6.10x (9.1x) | 5.60x (8.4x) | 4.5x |
+| fib | 2.98x (3.3x) | 3.09x (3.6x) | 2.5x |
+| calls | 12.37x (16.0x) | 10.80x (14.2x) | 8x |
+
+No target is reached, and `fib` is 3.7 percent worse in instructions than
+at the head of `engine/calls` (the limit was 3). Every other script is
+within 1 percent or better.
+
+Why, from a line-level profile of `$x = $o->m()` in a loop (1,151 machine
+instructions per round against PHP's 212): about 40 percent is the
+simple-instruction loop (`scalar_step`; the compiler emits two to three
+times PHP's instructions per statement, and each costs about 46 machine
+instructions against PHP's 25 to 30), the rest is spread over preparing
+the window, the frame push and pop, emptying the callee's registers and
+the visibility checks, with no single hot spot. The code generated for the
+loop is sensitive to layout: moving rarely used steps out of line, or
+restructuring the method preparation, changed scripts that never run that
+code by 5 to 10 percent in either direction. In `objects`, property access
+(which still leaves the loop until objects are slots) is 2,918 of 6,458
+machine instructions per round; without it the script would be about
+3.9x.
+
+What remains, in order of expected gain: the destination-driven compiler
+(10.6 item 4) for fewer instructions per statement; objects as slots (item
+3) for `objects` and `calls`; native calls in the loop (item 2) for
+`closures`, whose `array_map` part calls back from native code.
+
 ## 11. Tools built into the runtime
 
 Two tools that PHP projects today get from separate packages written in PHP
