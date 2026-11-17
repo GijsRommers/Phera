@@ -14,7 +14,8 @@ use phera_extension_api::{
     args,
 };
 
-use super::{convert, encoding_argument, internal_encoding};
+use super::convert;
+use super::settings::{encoding_argument, internal_encoding};
 use crate::mime::Scheme;
 
 pub fn register(registry: &mut Registry) {
