@@ -1,0 +1,141 @@
+//! `$pdo->errorInfo()` returns `[SQLSTATE, driver_code, driver_message]`.
+
+use phera_extension_api::{Context, NativeError, NativeResult, PhpArray, Value};
+
+#[derive(Clone, Copy, Debug, Default)]
+pub enum ErrorMode {
+    Silent,
+    Warning,
+    #[default]
+    Exception,
+}
+
+#[derive(Clone, Debug)]
+pub struct DbError {
+    pub state: String,
+    pub code: Option<i64>,
+    pub detail: String,
+}
+
+impl DbError {
+    pub fn parameter(detail: &str) -> Self {
+        Self {
+            state: "HY093".into(),
+            code: None,
+            detail: detail.into(),
+        }
+    }
+
+    pub fn message(&self) -> String {
+        let description = match self.state.as_str() {
+            "00000" => "No error",
+            "HY093" => "Invalid parameter number",
+            "42P01" => "Undefined table",
+            "42703" => "Undefined column",
+            "42601" => "Syntax error",
+            "42000" => "Syntax error or access violation",
+            "23505" => "Unique violation",
+            "23000" => "Integrity constraint violation",
+            "23502" => "Not null violation",
+            "23503" => "Foreign key violation",
+            "22P02" => "Invalid text representation",
+            "22012" => "Division by zero",
+            "08006" => "Connection failure",
+            "42S02" => "Base table or view not found",
+            "42S22" => "Column not found",
+            "IM001" => "Driver does not support this function",
+            _ => "General error",
+        };
+        let mut message = format!("SQLSTATE[{}]: {description}", self.state);
+        if let Some(code) = self.code {
+            message.push_str(&format!(": {code}"));
+        }
+        if !self.detail.is_empty() {
+            let separator = if self.code.is_some() { " " } else { ": " };
+            message.push_str(separator);
+            message.push_str(&self.detail);
+        }
+        message
+    }
+
+    pub fn report(&self, context: &mut dyn Context, mode: ErrorMode, method: &str) -> NativeResult {
+        match mode {
+            ErrorMode::Silent => Ok(Value::Bool(false)),
+            ErrorMode::Warning => {
+                context.warning(format!("{method}(): {}", self.message()));
+                Ok(Value::Bool(false))
+            }
+            // The extension API cannot yet attach SQLSTATE string codes or errorInfo.
+            // Keep the real message, and document the missing exception payload in REPORT.md.
+            ErrorMode::Exception => Err(NativeError::throw("PDOException", self.message())),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub enum ErrorState {
+    #[default]
+    Unused,
+    UnusedDriver(DbError),
+    Success,
+    Failed(DbError),
+}
+
+impl ErrorState {
+    pub fn code(&self) -> Value {
+        match self {
+            Self::Unused | Self::UnusedDriver(_) => Value::Null,
+            Self::Success => Value::from("00000"),
+            Self::Failed(error) => Value::from(error.state.clone()),
+        }
+    }
+
+    pub fn info(&self) -> NativeResult {
+        let mut info = PhpArray::new();
+        info.push(match self {
+            Self::Unused | Self::UnusedDriver(_) => Value::from(""),
+            _ => self.code(),
+        })?;
+        match self {
+            Self::Failed(error) | Self::UnusedDriver(error) => {
+                info.push(error.code.map_or(Value::Null, Value::Int))?;
+                info.push(if error.detail.is_empty() {
+                    Value::Null
+                } else {
+                    Value::from(error.detail.clone())
+                })?;
+            }
+            _ => {
+                info.push(Value::Null)?;
+                info.push(Value::Null)?;
+            }
+        }
+        Ok(Value::from(info))
+    }
+}
+
+pub fn unsupported(feature: &str) -> NativeError {
+    NativeError::throw("PDOException", format!("{feature} is not supported yet"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DbError;
+
+    #[test]
+    fn formats_driver_and_parameter_errors() {
+        let error = DbError {
+            state: "42P01".into(),
+            code: Some(7),
+            detail: "ERROR:  relation \"missing\" does not exist".into(),
+        };
+        assert_eq!(
+            error.message(),
+            "SQLSTATE[42P01]: Undefined table: 7 ERROR:  relation \"missing\" does not exist"
+        );
+        assert_eq!(
+            DbError::parameter("mixed named and positional parameters").message(),
+            "SQLSTATE[HY093]: Invalid parameter number: mixed named and positional parameters"
+        );
+    }
+}
