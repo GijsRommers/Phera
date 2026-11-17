@@ -664,3 +664,54 @@ simplexml, xmlreader, xmlwriter), gd, zip, sqlite, redis.
 Third-party extensions written in C cannot be loaded, since there is no
 Zend API to load them against. An extension someone needs is ported as a
 crate against the extension API.
+
+### 11.5 `phera install`: packages, as fast as the JavaScript and Python tools made it
+
+Composer is written in PHP, resolves dependencies on one core, downloads
+with limited parallelism and unpacks every package into every project. pnpm,
+Bun and uv showed what the same job looks like when it is done natively:
+resolve in parallel, download everything at once, keep one copy of each
+package version on the machine and link it into projects. `phera install`
+applies that playbook to PHP packages, and stays compatible with Composer so
+that a project can use either tool.
+
+- **Same files.** It reads `composer.json`, reads and writes `composer.lock`
+  in Composer's format, and installs into `vendor/` with a Composer-compatible
+  `vendor/autoload.php`, so the project still runs under plain PHP and
+  Composer can take over at any time. No new manifest format.
+- **Same registry.** Packagist's metadata API and the dist archives it points
+  to; also `repositories` entries of type `composer`, `vcs`, `path` and
+  `artifact`, and private registries with `auth.json`.
+- **Same answers.** Composer's version constraints (`^`, `~`, ranges,
+  stability flags, branch aliases), `replace`, `provide`, `conflict`,
+  `minimum-stability`, `prefer-stable`, and platform requirements (`php`,
+  `ext-*`), which are checked against what Phera really has. The resolver is
+  PubGrub (the algorithm uv uses), which is fast and explains a conflict in
+  plain sentences.
+- **A global store.** Every package version is downloaded and unpacked once
+  per machine into a content-addressed store and placed into `vendor/` with
+  copy-on-write clones or hard links, so a second project with the same
+  dependency costs no download and almost no disk.
+- **Parallel everywhere.** Metadata is fetched concurrently while the resolver
+  runs, archives are downloaded and unpacked concurrently, the autoloader's
+  class map is built by scanning files on all cores with Phera's own parser.
+- **Installing from a lock file needs no resolution** and, when the store is
+  warm, no network: it is linking files.
+- **Commands**: `phera install`, `phera update`, `phera add`, `phera remove`,
+  `phera why`, `phera outdated`, `phera audit` (security advisories from
+  Packagist), `phera dump-autoload`, and `phera x vendor/bin-tool` to run a
+  package's binary.
+- **What does not carry over**: Composer plugins (they are PHP code that
+  hooks into Composer's internals). The few that matter are handled natively
+  (the installers for framework-specific paths); `scripts` in `composer.json`
+  do run, through Phera.
+- **Verification**: differential, against Composer itself. For a set of real
+  projects' `composer.json` files: installing from their lock file must
+  produce the same `vendor/` tree (same files, same autoloader behaviour),
+  and resolving from scratch must produce the same versions, or a documented
+  reason for each difference. Timings are measured cold and warm against
+  Composer.
+
+The runtime side: when a script runs under Phera, autoloading reads the same
+metadata natively instead of executing the generated PHP autoloader, which
+needs namespaces and autoloading in the engine (11.3, item 3).
