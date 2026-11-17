@@ -13,6 +13,7 @@ use std::rc::Rc;
 
 use crate::convert::{NumVal, parse_numeric};
 use crate::error::{Diagnostics, OpError};
+use crate::float_format::{NumberText, float_text_precision14};
 use crate::object::Object;
 use crate::value::Value;
 
@@ -370,7 +371,7 @@ fn long_to_string_cmp(l: i64, s: &[u8]) -> i8 {
     match p.value {
         Some(NumVal::Int(sl)) if p.exact => cmp3(l.cmp(&sl)),
         Some(NumVal::Float(sd)) if p.exact => threeway(l as f64, sd),
-        _ => cmp3(l.to_string().as_bytes().cmp(s)),
+        _ => cmp3(NumberText::integer(l).as_bytes().cmp(s)),
     }
 }
 
@@ -380,11 +381,7 @@ fn double_to_string_cmp(d: f64, s: &[u8]) -> i8 {
     match p.value {
         Some(NumVal::Int(sl)) if p.exact => threeway(d, sl as f64),
         Some(NumVal::Float(sd)) if p.exact => threeway(d, sd),
-        _ => cmp3(
-            crate::float_format::float_to_string_precision14(d)
-                .as_bytes()
-                .cmp(s),
-        ),
+        _ => cmp3(float_text_precision14(d).as_bytes().cmp(s)),
     }
 }
 
