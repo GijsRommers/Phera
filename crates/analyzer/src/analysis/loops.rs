@@ -50,8 +50,8 @@ impl Analyzer<'_> {
                 key,
                 value,
                 body,
-                ..
-            } => self.foreach_loop(subject, key.as_ref(), value, body, scope),
+                by_reference,
+            } => self.foreach_loop(subject, key.as_ref(), value, *by_reference, body, scope),
             _ => Flow::Next,
         }
     }
@@ -61,6 +61,7 @@ impl Analyzer<'_> {
         subject: &Expression,
         key: Option<&Expression>,
         value: &Expression,
+        by_reference: bool,
         body: &[Statement],
         scope: &mut Scope,
     ) -> Flow {
@@ -78,6 +79,9 @@ impl Analyzer<'_> {
         {
             *scope = before;
             return if nonempty { Flow::Terminal } else { Flow::Next };
+        }
+        if by_reference {
+            self.external_reference(value, scope);
         }
         let (flow, frame) = self.control_body(body, scope);
         let mut paths = frame.breaks;

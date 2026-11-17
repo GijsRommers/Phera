@@ -91,6 +91,8 @@ impl Analyzer<'_> {
         ) = (&target.kind, &value.kind)
         {
             scope.reference(left, right);
+        } else {
+            self.external_reference(target, scope);
         }
         ty
     }

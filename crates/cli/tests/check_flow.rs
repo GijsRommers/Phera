@@ -31,6 +31,7 @@ fn only_continuing_expression_paths_supply_variables_and_returns() {
         "class Box { private $x = 7; } $f = function () { return $this->x; };
             $g = $f->bindTo(new Box, Box::class); $g();",
         "$f = function () { if (isset($this)) { return $this; } }; $f();",
+        "function f($x = 0) {} $c = Closure::fromCallable('f'); $c(x: 1);",
         "$f = function () { return (fn() => $this)(); };
             $bound = Closure::bind($f, new stdClass); $bound();",
         "class A { function m($a) {} } class B { function m() {} }

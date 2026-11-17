@@ -48,6 +48,9 @@ impl Analyzer<'_> {
                 }
                 ExpressionKind::List(items) => {
                     for item in items.iter().rev().flatten() {
+                        if item.by_reference {
+                            self.external_reference(&item.value, scope);
+                        }
                         pending.push(Binding::Target(&item.value, ValueType::Mixed));
                         if let Some(key) = &item.key {
                             pending.push(Binding::Key(key));
@@ -56,6 +59,9 @@ impl Analyzer<'_> {
                 }
                 ExpressionKind::Array(items) => {
                     for item in items.iter().rev() {
+                        if item.by_reference {
+                            self.external_reference(&item.value, scope);
+                        }
                         pending.push(Binding::Target(&item.value, ValueType::Mixed));
                         if let Some(key) = &item.key {
                             pending.push(Binding::Key(key));

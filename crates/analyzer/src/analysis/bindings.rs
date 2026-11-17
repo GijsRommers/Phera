@@ -15,6 +15,24 @@ impl Analyzer<'_> {
         }
     }
 
+    pub fn external_reference(&self, target: &Expression, scope: &mut Scope) {
+        let mut pending = vec![target];
+        while let Some(target) = pending.pop() {
+            match &target.kind {
+                ExpressionKind::Variable(Variable::Named(name)) => {
+                    scope.external_references.insert(name.clone());
+                }
+                ExpressionKind::List(items) => {
+                    pending.extend(items.iter().flatten().map(|item| &item.value));
+                }
+                ExpressionKind::Array(items) => {
+                    pending.extend(items.iter().map(|item| &item.value));
+                }
+                _ => {}
+            }
+        }
+    }
+
     pub fn parameter_scope(&mut self, parameters: &[Parameter], scope: &mut Scope) {
         for parameter in parameters {
             self.check_type(parameter.ty.as_ref());
