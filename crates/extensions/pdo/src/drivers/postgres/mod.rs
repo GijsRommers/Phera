@@ -60,10 +60,12 @@ impl Drop for Postgres {
 
 impl Postgres {
     pub async fn connect(dsn: &Dsn, user: &str, password: &str) -> Result<Self, DbError> {
+        let host = dsn.get("host", "localhost");
+        let port = dsn.port()?;
         let mut config = Config::new();
         config
-            .host(dsn.get("host", "localhost"))
-            .port(dsn.port().map_err(|e| connection_error(format!("{e:?}")))?)
+            .host(host)
+            .port(port)
             .dbname(dsn.get("dbname", user))
             .user(user)
             .password(password)
@@ -75,7 +77,7 @@ impl Postgres {
             config.application_name(name);
         }
         let transaction = Arc::new(AtomicU8::new(IDLE));
-        let stream = ObservedStream::connect(dsn, transaction.clone())
+        let stream = ObservedStream::connect(host, port, transaction.clone())
             .await
             .map_err(connection_error)?;
         let (client, connection) = config.connect_raw(stream, NoTls).await.map_err(|error| {

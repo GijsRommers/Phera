@@ -23,11 +23,7 @@ pub struct Mysql {
 
 impl Mysql {
     pub async fn connect(dsn: &Dsn, user: &str, password: &str) -> Result<Self, DbError> {
-        let port = dsn.port().map_err(|e| DbError {
-            state: "HY000".into(),
-            code: Some(2002),
-            detail: format!("{e:?}"),
-        })?;
+        let port = dsn.port()?;
         let options = OptsBuilder::default()
             .ip_or_hostname(dsn.get("host", "localhost"))
             .tcp_port(port)

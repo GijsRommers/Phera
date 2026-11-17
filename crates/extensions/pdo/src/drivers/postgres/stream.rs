@@ -10,8 +10,6 @@ use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::{TcpStream, UnixStream};
 
-use crate::dsn::Dsn;
-
 trait Socket: AsyncRead + AsyncWrite + Send + Sync + Unpin {}
 impl Socket for TcpStream {}
 impl Socket for UnixStream {}
@@ -22,11 +20,8 @@ pub struct ObservedStream {
 }
 
 impl ObservedStream {
-    pub async fn connect(dsn: &Dsn, status: Arc<AtomicU8>) -> io::Result<Self> {
-        let port = dsn
-            .port()
-            .map_err(|error| io::Error::other(format!("{error:?}")))?;
-        let host = dsn.get("host", "localhost");
+    /// A host that starts with `/` is the directory of a Unix socket, as in libpq.
+    pub async fn connect(host: &str, port: u16, status: Arc<AtomicU8>) -> io::Result<Self> {
         let socket: Box<dyn Socket> = if host.starts_with('/') {
             Box::new(UnixStream::connect(format!("{host}/.s.PGSQL.{port}")).await?)
         } else {
