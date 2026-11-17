@@ -1,8 +1,9 @@
 //! JSON string escaping with PHP option precedence.
-use crate::{error::Error, flags::Flags};
+use crate::error::Error;
+use crate::flags::{EncodeFlags, InvalidUtf8};
 use std::fmt::Write;
 /// PHP groups malformed sequences before applying IGNORE or SUBSTITUTE.
-pub(crate) fn encode_string(bytes: &[u8], flags: Flags) -> Result<String, Error> {
+pub(crate) fn encode_string(bytes: &[u8], flags: EncodeFlags) -> Result<String, Error> {
     let mut out = String::with_capacity(bytes.len() + 2);
     out.push('"');
 
@@ -27,11 +28,14 @@ pub(crate) fn encode_string(bytes: &[u8], flags: Flags) -> Result<String, Error>
             for character in text.chars() {
                 escape_char(character, flags, &mut out);
             }
-        } else if flags.ignore {
-        } else if flags.substitute {
-            escape_char(char::REPLACEMENT_CHARACTER, flags, &mut out);
         } else {
-            return Err(Error::Utf8);
+            match flags.invalid_utf8 {
+                InvalidUtf8::Ignore => {}
+                InvalidUtf8::Substitute => {
+                    escape_char(char::REPLACEMENT_CHARACTER, flags, &mut out)
+                }
+                InvalidUtf8::Fail => return Err(Error::Utf8),
+            }
         }
         remaining = rest;
     }
@@ -41,12 +45,12 @@ pub(crate) fn encode_string(bytes: &[u8], flags: Flags) -> Result<String, Error>
 }
 
 /// Emit ASCII escapes or UTF-16 pairs with PHP's exact hex casing.
-fn escape_char(character: char, flags: Flags, out: &mut String) {
+fn escape_char(character: char, flags: EncodeFlags, out: &mut String) {
     match character {
         '"' if flags.hex_quot => out.push_str("\\u0022"),
         '"' => out.push_str("\\\""),
         '\\' => out.push_str("\\\\"),
-        '/' if !flags.slashes => out.push_str("\\/"),
+        '/' if !flags.unescaped_slashes => out.push_str("\\/"),
         '\u{8}' => out.push_str("\\b"),
         '\u{c}' => out.push_str("\\f"),
         '\n' => out.push_str("\\n"),
@@ -59,10 +63,10 @@ fn escape_char(character: char, flags: Flags, out: &mut String) {
         character if character < ' ' => {
             let _ = write!(out, "\\u{:04x}", character as u32);
         }
-        '\u{2028}' | '\u{2029}' if flags.unicode && !flags.lines => {
+        '\u{2028}' | '\u{2029}' if flags.unescaped_unicode && !flags.unescaped_line_terminators => {
             let _ = write!(out, "\\u{:04x}", character as u32);
         }
-        character if character.is_ascii() || flags.unicode => out.push(character),
+        character if character.is_ascii() || flags.unescaped_unicode => out.push(character),
         character => {
             let mut units = [0; 2];
             for unit in character.encode_utf16(&mut units) {

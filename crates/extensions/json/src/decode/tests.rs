@@ -1,6 +1,6 @@
 //! Object-mode oracle tests inject a test-owned stdClass at the private boundary.
 use super::parser::parse;
-use crate::flags::Flags;
+use crate::flags::DecodeFlags;
 use phera_extension_api::testing::oracle;
 use phera_extension_api::value::ClassHandle;
 use phera_extension_api::{Object, PhpArray, Value};
@@ -50,9 +50,9 @@ fn object_parser_matches_php() {
                 script.push_str(&format!(
                     "run('case',fn()=> [{expression},json_last_error()]);\n"
                 ));
-                let flags = Flags {
+                let flags = DecodeFlags {
                     associative,
-                    ..Flags::default()
+                    ..DecodeFlags::default()
                 };
                 let result = parse(document.as_bytes(), depth, flags, &mut factory);
                 let code = result.as_ref().err().map_or(0, |error| *error as i64);

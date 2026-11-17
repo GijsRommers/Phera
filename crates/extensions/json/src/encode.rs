@@ -1,7 +1,7 @@
 //! Iterative encoding: active identities detect cycles without rejecting shared values.
 use crate::{
     error::{self, Error},
-    flags::Flags,
+    flags::EncodeFlags,
     string::encode_string,
 };
 use phera_extension_api::value::{
@@ -21,7 +21,7 @@ enum Work {
 }
 /// An encoder owns only clones of input handles, never borrowed RefCells.
 struct Encoder {
-    flags: Flags,
+    flags: EncodeFlags,
     depth: i64,
     output: String,
     error: Error,
@@ -30,7 +30,7 @@ struct Encoder {
 }
 /// PHP accepts any encode depth; the limit is checked on container completion.
 pub(crate) fn json_encode(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let flags = Flags::new(args::int(arguments, 1).unwrap_or(0));
+    let flags = EncodeFlags::from_bits(args::int(arguments, 1).unwrap_or(0));
     let mut encoder = Encoder {
         flags,
         depth: args::int(arguments, 2).unwrap_or(512) as i32 as i64,
@@ -43,7 +43,7 @@ pub(crate) fn json_encode(context: &mut dyn Context, arguments: &[Value]) -> Nat
         )],
     };
     encoder.run();
-    let result = if encoder.error == Error::None || flags.partial {
+    let result = if encoder.error == Error::None || flags.partial_output {
         Value::from(encoder.output)
     } else {
         Value::Bool(false)
@@ -51,7 +51,7 @@ pub(crate) fn json_encode(context: &mut dyn Context, arguments: &[Value]) -> Nat
     error::finish(
         context,
         encoder.error,
-        flags.throw && !flags.partial,
+        flags.throw_on_error && !flags.partial_output,
         result,
     )
 }
@@ -77,13 +77,13 @@ impl Encoder {
                     if level as i64 > self.depth {
                         self.error = Error::Depth;
                     }
-                    if self.flags.pretty && nonempty {
+                    if self.flags.pretty_print && nonempty {
                         self.output.push_str(&self.indent(level.saturating_sub(1)));
                     }
                     self.output.push(closing);
                 }
             }
-            if self.error != Error::None && !self.flags.partial {
+            if self.error != Error::None && !self.flags.partial_output {
                 break;
             }
         }
@@ -98,7 +98,7 @@ impl Encoder {
         });
     }
     fn indent(&self, level: usize) -> String {
-        if self.flags.pretty {
+        if self.flags.pretty_print {
             format!("\n{}", "    ".repeat(level))
         } else {
             String::new()
@@ -178,7 +178,7 @@ impl Encoder {
             self.work.push(Work::Value(value, level + 1));
             if object {
                 self.work.push(Work::Text(
-                    if self.flags.pretty { ": " } else { ":" }.into(),
+                    if self.flags.pretty_print { ": " } else { ":" }.into(),
                 ));
                 let bytes = match key {
                     ArrayKey::Int(integer) => integer.to_string().into_bytes(),
@@ -199,14 +199,14 @@ impl Encoder {
             return;
         }
         let mut text = float_repr(number).replace('E', "e");
-        if self.flags.fraction && !text.contains(['.', 'e']) {
+        if self.flags.preserve_zero_fraction && !text.contains(['.', 'e']) {
             text.push_str(".0");
         }
         self.output.push_str(&text);
     }
     /// Numeric checking applies only to values, never property names.
     fn string(&mut self, bytes: &[u8]) {
-        if self.flags.numeric {
+        if self.flags.numeric_check {
             let parsed = parse_numeric(bytes);
             if parsed.exact {
                 match parsed.value {

@@ -4,21 +4,21 @@ mod parser;
 mod scanner;
 use crate::{
     error::{self, Error},
-    flags::{Flags, INVALID_UTF8_IGNORE},
+    flags::{DecodeFlags, INVALID_UTF8_IGNORE},
 };
 use phera_extension_api::{Context, NativeError, NativeResult, PhpArray, Value, args};
 /// Decode's explicit associative argument overrides JSON_OBJECT_AS_ARRAY.
 pub(crate) fn json_decode(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let bytes = args::bytes(arguments, 0);
-    let mut flags = Flags::new(args::int(arguments, 3).unwrap_or(0));
+    let mut flags = DecodeFlags::from_bits(args::int(arguments, 3).unwrap_or(0));
     if let Some(associative) = args::bool(arguments, 1) {
         flags.associative = associative;
     }
-    if !flags.throw {
+    if !flags.throw_on_error {
         *context.state().get_or_default::<Error>() = Error::None;
     }
     if bytes.is_empty() {
-        return error::finish(context, Error::Syntax, flags.throw, Value::Null);
+        return error::finish(context, Error::Syntax, flags.throw_on_error, Value::Null);
     }
     let depth = depth(args::int(arguments, 2).unwrap_or(512), "json_decode", 3)?;
     // A JSON object becomes a stdClass, which only the VM can create. A
@@ -35,8 +35,8 @@ pub(crate) fn json_decode(context: &mut dyn Context, arguments: &[Value]) -> Nat
     };
     let result = parser::parse(bytes, depth, flags, &mut make_object);
     match result {
-        Ok(value) => error::finish(context, Error::None, flags.throw, value),
-        Err(error) => error::finish(context, error, flags.throw, Value::Null),
+        Ok(value) => error::finish(context, Error::None, flags.throw_on_error, value),
+        Err(error) => error::finish(context, error, flags.throw_on_error, Value::Null),
     }
 }
 /// Validate accepts only IGNORE, and does not reject NUL-prefixed object keys.
@@ -53,7 +53,7 @@ pub(crate) fn json_validate(context: &mut dyn Context, arguments: &[Value]) -> N
     }
     *context.state().get_or_default::<Error>() = Error::None;
     let depth = depth(args::int(arguments, 1).unwrap_or(512), "json_validate", 2)?;
-    let mut flags = Flags::new(bits);
+    let mut flags = DecodeFlags::from_bits(bits);
     flags.associative = true;
     // Validation never builds objects: it parses in associative mode.
     let mut never_called = |properties: PhpArray| Value::from(properties);

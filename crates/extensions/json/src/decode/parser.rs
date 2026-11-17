@@ -1,6 +1,6 @@
 //! Explicit grammar frames avoid dependence on the native thread stack.
 use super::scanner::{Scanner, Token};
-use crate::{error::Error, flags::Flags};
+use crate::{error::Error, flags::DecodeFlags};
 use phera_extension_api::{ArrayKey, PhpArray, Value};
 /// Turns the members of a JSON object into a PHP object. The parser does
 /// not know how objects are made: the caller passes this in.
@@ -25,7 +25,7 @@ struct Frame {
 pub(super) fn parse(
     bytes: &[u8],
     depth: usize,
-    flags: Flags,
+    flags: DecodeFlags,
     factory: ObjectFactory<'_>,
 ) -> Result<Value, Error> {
     let mut scanner = Scanner {
@@ -87,7 +87,7 @@ fn accept(
     frames: &mut [Frame],
     root: &mut Option<Value>,
     value: Value,
-    flags: Flags,
+    flags: DecodeFlags,
 ) -> Result<(), Error> {
     if let Some(frame) = frames.last_mut() {
         if frame.object {
@@ -110,7 +110,7 @@ fn accept(
 
 impl Frame {
     /// Consume separators and keys before allowing the parser to read a value.
-    fn advance(&mut self, token: Token, flags: Flags) -> Result<Option<Token>, Error> {
+    fn advance(&mut self, token: Token, flags: DecodeFlags) -> Result<Option<Token>, Error> {
         match self.state {
             State::First if matches!(token, Token::Close(_)) => {}
             State::Comma => match token {

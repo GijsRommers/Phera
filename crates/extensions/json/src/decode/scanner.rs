@@ -1,5 +1,6 @@
 //! A byte scanner retaining PHP's distinct syntax, UTF-8 and UTF-16 failures.
-use crate::{error::Error, flags::Flags};
+use crate::error::Error;
+use crate::flags::{DecodeFlags, InvalidUtf8};
 use phera_extension_api::Value;
 /// Tokens separate grammar decisions from byte validation.
 #[derive(Debug)]
@@ -15,7 +16,7 @@ pub(super) enum Token {
 pub(super) struct Scanner<'a> {
     pub bytes: &'a [u8],
     pub pos: usize,
-    pub flags: Flags,
+    pub flags: DecodeFlags,
 }
 impl Scanner<'_> {
     fn peek(&self) -> Option<u8> {
@@ -111,9 +112,11 @@ impl Scanner<'_> {
                 Some(0..=31) => return Err(Error::Control),
                 Some(_) => match self.utf8() {
                     Ok(bytes) => output.extend(bytes),
-                    Err(_) if self.flags.substitute => output.extend_from_slice("�".as_bytes()),
-                    Err(_) if self.flags.ignore => {}
-                    Err(error) => return Err(error),
+                    Err(error) => match self.flags.invalid_utf8 {
+                        InvalidUtf8::Substitute => output.extend_from_slice("\u{fffd}".as_bytes()),
+                        InvalidUtf8::Ignore => {}
+                        InvalidUtf8::Fail => return Err(error),
+                    },
                 },
             }
         }
@@ -203,7 +206,7 @@ impl Scanner<'_> {
             if let Ok(number) = text.parse::<i64>() {
                 return Ok(Value::Int(number));
             }
-            if self.flags.bigint {
+            if self.flags.bigint_as_string {
                 return Ok(Value::from(text));
             }
         }
