@@ -22,9 +22,10 @@ impl Extension for Standard {
         strings::register(registry);
         math::register(registry);
         arrays::register(registry);
-        natural::register(registry);
         constants::register(registry);
-        time::register(registry);
+        for entry in natural::FUNCTIONS.iter().chain(time::FUNCTIONS) {
+            registry.function(*entry);
+        }
     }
 }
 
