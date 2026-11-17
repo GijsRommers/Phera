@@ -168,9 +168,28 @@ pub async fn build(
         "lcs" => {
             b.key(&a[0]);
             b.key(&a[1]);
-            flags(b, a.get(2));
+            lcs_options(b, a.get(2));
         }
         _ => return Ok(false),
     }
     Ok(true)
+}
+
+/// `lcs($a, $b, ['idx' => true, 'minmatchlen' => 4])`: LEN, IDX and
+/// WITHMATCHLEN are flags, sent when true, and IDX wins over LEN, as
+/// Redis refuses both; MINMATCHLEN takes its number.
+fn lcs_options(b: &mut Builder<'_>, options: Option<&Value>) {
+    let flag = |name| option(options, name).is_some_and(phera_extension_api::value::to_bool);
+    if flag("idx") {
+        b.token("IDX");
+    } else if flag("len") {
+        b.token("LEN");
+    }
+    if let Some(length) = option(options, "minmatchlen") {
+        b.token("MINMATCHLEN");
+        b.arg(length);
+    }
+    if flag("withmatchlen") {
+        b.token("WITHMATCHLEN");
+    }
 }
