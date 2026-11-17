@@ -34,7 +34,7 @@ pub const FILTERS: &[(&str, i64)] = &[
 pub fn list(_context: &mut dyn Context, _arguments: &[Value]) -> NativeResult {
     let mut result = PhpArray::new();
     for &(name, _) in FILTERS {
-        result.push(Value::from(name));
+        result.push(Value::from(name))?;
     }
     Ok(Value::from(result))
 }
