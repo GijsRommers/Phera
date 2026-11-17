@@ -9,6 +9,7 @@ use phera_extension_api::{
 use tokio::sync::Mutex;
 
 use crate::attributes::Attributes;
+use crate::constants::{PARAM_BOOL, PARAM_INT, PARAM_NULL, PARAM_STR};
 use crate::dsn::{DriverName, Dsn};
 use crate::errors::{DbError, ErrorState, unsupported};
 use crate::pool::{self, Lease, Policy};
@@ -159,7 +160,8 @@ pub fn quote<'a>(
 ) -> LocalFuture<'a, NativeResult> {
     Box::pin(async move {
         let session = session(this.as_ref())?;
-        if !matches!(args::int(&arguments, 1).unwrap_or(2), 0 | 1 | 2 | 5) {
+        let kind = args::int(&arguments, 1).unwrap_or(PARAM_STR);
+        if !matches!(kind, PARAM_NULL | PARAM_INT | PARAM_STR | PARAM_BOOL) {
             return Err(unsupported("LOB quoting"));
         }
         let bytes = args::string(&arguments, 0).map_or(&b""[..], |s| s.as_bytes());

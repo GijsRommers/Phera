@@ -1,5 +1,6 @@
 //! Grouped, unique, key-pair and ordinary fetchAll result construction.
 
+use crate::constants::FETCH_GROUP;
 use crate::fetch::{FetchMode, convert, stringify};
 use crate::statement::state;
 use phera_extension_api::value::to_php_string;
@@ -29,7 +30,7 @@ pub fn all(
     )?;
     let grouping = match configuration.flags {
         0 => Grouping::None,
-        32 => Grouping::Group,
+        FETCH_GROUP => Grouping::Group,
         _ => Grouping::Unique,
     };
     let mode = configuration.mode;

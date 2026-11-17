@@ -6,6 +6,9 @@ use phera_extension_api::{
     ArrayKey, Context, LocalFuture, NativeError, NativeResult, Object, PhpArray, Value, args,
 };
 
+use tokio_postgres::types::Type;
+
+use crate::constants::{PARAM_BOOL, PARAM_INT, PARAM_LOB, PARAM_STR};
 use crate::drivers::Column;
 use crate::statement::state;
 
@@ -64,8 +67,8 @@ pub fn mysql(column: &mysql_async::Column) -> PhpArray {
         | ColumnType::MYSQL_TYPE_LONGLONG
         | ColumnType::MYSQL_TYPE_INT24
         | ColumnType::MYSQL_TYPE_YEAR
-        | ColumnType::MYSQL_TYPE_BIT => 1,
-        _ => 2,
+        | ColumnType::MYSQL_TYPE_BIT => PARAM_INT,
+        _ => PARAM_STR,
     };
     let mut values = PhpArray::new();
     insert(&mut values, "native_type", Value::from(native));
@@ -143,11 +146,11 @@ pub fn postgres_values(column: &Column, length: i16, table: Option<String>) -> P
         insert(&mut values, "table", Value::from(table));
     }
     insert(&mut values, "native_type", Value::from(native_type.clone()));
-    let pdo_type = match *oid {
-        16 => 5,
-        20 | 21 | 23 | 26 => 1,
-        17 => 3,
-        _ => 2,
+    let pdo_type = match Type::from_oid(*oid) {
+        Some(Type::BOOL) => PARAM_BOOL,
+        Some(Type::INT8 | Type::INT2 | Type::INT4 | Type::OID) => PARAM_INT,
+        Some(Type::BYTEA) => PARAM_LOB,
+        _ => PARAM_STR,
     };
     insert(&mut values, "pdo_type", Value::Int(pdo_type));
     insert(&mut values, "name", Value::from(column.name.clone()));

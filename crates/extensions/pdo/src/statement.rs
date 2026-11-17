@@ -9,6 +9,7 @@ use phera_extension_api::{
 };
 
 use crate::connection::{Session, session};
+use crate::constants::PARAM_STR;
 use crate::drivers::{Prepared, Rows};
 use crate::errors::{DbError, ErrorState, unsupported};
 use crate::fetch::FetchMode;
@@ -207,7 +208,7 @@ fn bind(
     if let Some(error) = invalid {
         return fail(&state, context, error, method);
     }
-    let kind = ParameterType::parse(args::int(arguments, 2).unwrap_or(2))?;
+    let kind = ParameterType::parse(args::int(arguments, 2).unwrap_or(PARAM_STR))?;
     let binding = Binding {
         value: args::value(arguments, 1).clone(),
         kind,
