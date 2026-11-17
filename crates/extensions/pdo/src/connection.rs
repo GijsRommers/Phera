@@ -73,9 +73,9 @@ pub fn construct<'a>(
         if let Some(options) = args::array(&arguments, 3) {
             for (key, value) in options.iter() {
                 if let ArrayKey::Int(attribute) = key
-                    && !pool::is_pool_attribute(*attribute)
+                    && !pool::is_pool_attribute(attribute)
                 {
-                    attributes.set(context, *attribute, value)?;
+                    attributes.set(context, attribute, value)?;
                 }
             }
         }

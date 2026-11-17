@@ -34,7 +34,7 @@ impl Frame {
     fn next_entry(&mut self) -> Option<(ArrayKey, Value)> {
         let position = self.position?;
         let (key, value) = self.source.entry_at(position)?;
-        let entry = (key.clone(), value.clone());
+        let entry = (key, value.clone());
         self.position = self.source.next_position(position);
         Some(entry)
     }

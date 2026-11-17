@@ -49,14 +49,14 @@ fn filter(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, N
                     value.deref().clone()
                 } else {
                     let parameters = match mode {
-                        ARRAY_FILTER_USE_BOTH => vec![value.clone(), super::key_value(key)],
-                        ARRAY_FILTER_USE_KEY => vec![super::key_value(key)],
+                        ARRAY_FILTER_USE_BOTH => vec![value.clone(), super::key_value(&key)],
+                        ARRAY_FILTER_USE_KEY => vec![super::key_value(&key)],
                         _ => vec![value.clone()],
                     };
                     context.call(callback, parameters).await?
                 };
                 if cast_to_bool(&predicate, context.diagnostics()) {
-                    result.insert(key.clone(), value.clone());
+                    result.insert(key, value.clone());
                 }
             }
         }
