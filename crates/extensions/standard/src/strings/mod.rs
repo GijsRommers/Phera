@@ -35,12 +35,15 @@ pub(crate) fn register(registry: &mut Registry) {
         compare::FUNCTIONS,
         encode::FUNCTIONS,
         escaping::FUNCTIONS,
+        metaphone::FUNCTIONS,
         padding::FUNCTIONS,
         replace::FUNCTIONS,
         search::FUNCTIONS,
+        similarity::FUNCTIONS,
         split::FUNCTIONS,
         substitute::FUNCTIONS,
         substring::FUNCTIONS,
+        text::FUNCTIONS,
         trim::FUNCTIONS,
         url::FUNCTIONS,
     ];
@@ -50,23 +53,27 @@ pub(crate) fn register(registry: &mut Registry) {
     number_format::register(registry);
     format::register(registry);
     html::register(registry);
-    text::register(registry);
     tags::register(registry);
-    similarity::register(registry);
-    metaphone::register(registry);
 }
 
 pub(super) fn bytes(value: impl Into<Vec<u8>>) -> Value {
     Value::String(PhpString::from(value.into()))
 }
 
-/// Reserve before writing so impossible string sizes become PHP exceptions.
-pub(super) fn reserve(result: &mut Vec<u8>, additional: usize) -> Result<(), NativeError> {
-    if result.len().saturating_add(additional) > MAX_STRING_BYTES {
+/// PHP's error for a string that would pass [`MAX_STRING_BYTES`].
+pub(super) fn check_size(length: usize) -> Result<(), NativeError> {
+    if length > MAX_STRING_BYTES {
         return Err(NativeError::error(
             "String size exceeds the maximum allowed size",
         ));
     }
+    Ok(())
+}
+
+/// Makes room for `additional` more bytes, or fails as PHP does when the
+/// string would grow too large or memory runs out.
+pub(super) fn reserve(result: &mut Vec<u8>, additional: usize) -> Result<(), NativeError> {
+    check_size(result.len().saturating_add(additional))?;
     result
         .try_reserve(additional)
         .map_err(|_| NativeError::error("Could not allocate string"))
