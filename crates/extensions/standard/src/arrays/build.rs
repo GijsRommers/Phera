@@ -82,7 +82,7 @@ fn array_flip(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     if let Some(array) = args::array(arguments, 0) {
         for (key, value) in array.iter() {
             if matches!(&*value.deref(), Value::Int(_) | Value::String(_)) {
-                result.insert(ArrayKey::from_value(value)?, super::key_value(key));
+                result.insert(ArrayKey::from_value(value)?, super::key_value(&key));
             } else {
                 context.warning(
                     "array_flip(): Can only flip string and integer values, entry skipped".into(),
@@ -155,7 +155,7 @@ fn array_pad(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         }
     }
     for (key, value) in array.iter() {
-        super::slice::insert(&mut result, key, value, super::Keys::Renumber)?;
+        super::slice::insert(&mut result, &key, value, super::Keys::Renumber)?;
     }
     if length > 0 {
         for _ in 0..padding {
