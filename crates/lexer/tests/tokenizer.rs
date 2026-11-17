@@ -89,3 +89,29 @@ fn malformed_and_deprecated_source_still_has_tokens() {
         &[(OpenTag, b"<?php "), (DocComment, b"/** unterminated")],
     );
 }
+
+#[test]
+fn halt_counts_inline_html_and_preserves_the_remaining_bytes() {
+    check(
+        b"<?php __halt_compiler?>x<?php y;?>z",
+        &[
+            (OpenTag, b"<?php "),
+            (HaltCompiler, b"__halt_compiler"),
+            (CloseTag, b"?>"),
+            (InlineHtml, b"x"),
+            (OpenTag, b"<?php "),
+            (Identifier, b"y"),
+            (InlineHtml, b";?>z"),
+        ],
+    );
+}
+
+#[test]
+fn short_open_tags_follow_the_scanner_setting() {
+    let code = b"prefix<? a;";
+    let mut lexer = Lexer::for_tokenizer(code).with_short_open_tags(true);
+    assert_eq!(lexer.next_token().unwrap().span.end, 6);
+    let open = lexer.next_token().unwrap();
+    assert_eq!(open.kind, OpenTag);
+    assert_eq!(open.span.end, 8);
+}

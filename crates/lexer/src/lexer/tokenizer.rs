@@ -15,6 +15,32 @@ impl<'src> Lexer<'src> {
             halt_countdown: None,
             previous: TokenKind::Eof,
             tokenizer: true,
+            short_open_tags: false,
+        }
+    }
+
+    /// Match PHP's scanner when the process enables `short_open_tag`.
+    pub fn with_short_open_tags(mut self, enabled: bool) -> Self {
+        self.short_open_tags = enabled;
+        self
+    }
+
+    pub(super) fn count_tokenizer_halt(&mut self, token: &Token) {
+        use TokenKind::*;
+        if matches!(
+            token.kind,
+            Eof | Whitespace | Comment | DocComment | OpenTag
+        ) {
+            return;
+        }
+        if let Some(remaining) = &mut self.halt_countdown {
+            *remaining -= 1;
+            if *remaining == 0 {
+                self.halt_countdown = None;
+                self.begin(Mode::Halted);
+            }
+        } else if token.kind == HaltCompiler {
+            self.halt_countdown = Some(3);
         }
     }
 

@@ -126,6 +126,7 @@ pub struct Lexer<'src> {
     /// apart from `$obj->__halt_compiler`.
     previous: TokenKind,
     tokenizer: bool,
+    short_open_tags: bool,
 }
 
 impl<'src> Lexer<'src> {
@@ -139,6 +140,7 @@ impl<'src> Lexer<'src> {
             halt_countdown: None,
             previous: TokenKind::Eof,
             tokenizer: false,
+            short_open_tags: false,
         }
     }
 
@@ -152,7 +154,7 @@ impl<'src> Lexer<'src> {
     }
 
     pub fn next_token(&mut self) -> Result<Token, LexError> {
-        match self.mode() {
+        let token = match self.mode() {
             Mode::Html => Ok(self.lex_html()),
             Mode::Php => self.lex_php_counting_halt(),
             Mode::DoubleQuotes => self.lex_encapsed('"', TokenKind::DoubleQuote),
@@ -163,7 +165,11 @@ impl<'src> Lexer<'src> {
             Mode::VarOffset => self.lex_var_offset(),
             Mode::Property => Ok(self.lex_property()),
             Mode::Halted => Ok(self.lex_halted()),
+        }?;
+        if self.tokenizer {
+            self.count_tokenizer_halt(&token);
         }
+        Ok(token)
     }
 
     // --- Modes ---------------------------------------------------------------
@@ -242,6 +248,9 @@ impl<'src> Lexer<'src> {
                 return Some((tag, TokenKind::OpenTag, 5 + whitespace));
             }
 
+            if self.short_open_tags {
+                return Some((tag, TokenKind::OpenTag, 2));
+            }
             from = tag + 2;
         }
 
@@ -274,6 +283,9 @@ impl<'src> Lexer<'src> {
         }
         let member_name = matches!(self.previous, TokenKind::Arrow | TokenKind::NullsafeArrow);
         self.previous = token.kind;
+        if self.tokenizer {
+            return Ok(token);
+        }
 
         if token.kind == TokenKind::HaltCompiler && !member_name {
             self.halt_countdown = Some(3);
