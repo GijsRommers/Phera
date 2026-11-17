@@ -1,0 +1,40 @@
+name: Package compatibility (informational)
+
+on:
+  pull_request:
+    paths:
+      - 'crates/packages/**'
+      - 'crates/cli/**'
+      - '.github/workflows/package-compatibility.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  registry-comparisons:
+    name: Composer registry comparisons (non-blocking)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: '1.99.1'
+      - uses: Swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2
+      - uses: shivammathur/setup-php@d52fc211a0436f8839a587b3b5b8efddab4744ea # v2
+        with:
+          php-version: '8.5'
+          coverage: none
+      - name: Build Phera and fetch the current Composer oracle
+        run: |
+          cargo build --release -p phera-cli
+          curl -fsSL https://getcomposer.org/composer-stable.phar -o target/composer.phar
+      - name: Compare real registries separately from the offline gate
+        run: cargo test -p phera-packages --test network -- --nocapture
+        env:
+          PHERA_PACKAGES_NETWORK: '1'
+          PHERA_BIN: ${{ github.workspace }}/target/release/phera
+          PHERA_COMPOSER: ${{ github.workspace }}/target/composer.phar
+          PHERA_PHP: php

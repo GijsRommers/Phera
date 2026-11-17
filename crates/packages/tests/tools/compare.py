@@ -1,0 +1,151 @@
+"""Explicit network Composer differential suite.
+
+PHERA_PACKAGES_NETWORK=1 python3 compare.py /path/to/phera /path/to/composer.phar
+Results, source archives and logs are written below this checkout's target/ directory.
+"""
+import concurrent.futures
+import io
+import json
+import os
+from pathlib import Path, PurePosixPath
+import resource
+import shutil
+import subprocess
+import sys
+import time
+import urllib.request
+import zipfile
+
+TESTS = Path(__file__).resolve().parents[1]
+REPO = TESTS.parents[2]
+WORK = REPO / 'target' / 'package-comparison'
+WORK.mkdir(parents=True, exist_ok=True)
+PHERA = str(Path(sys.argv[1]).resolve())
+COMPOSER = str(Path(sys.argv[2]).resolve())
+PHP = os.environ.get('PHERA_PHP', '/opt/homebrew/bin/php')
+ENV = dict(os.environ, COMPOSER_CACHE_DIR=str(WORK / 'composer-cache'),
+           COMPOSER_HOME=str(WORK / 'composer-home'), PHERA_CACHE_DIR=str(WORK / 'phera-store'))
+
+
+def run(command, directory, env, name):
+    start = time.perf_counter()
+    before = resource.getrusage(resource.RUSAGE_CHILDREN)
+    result = subprocess.run(command, cwd=directory, env=env, capture_output=True,
+                            text=True, timeout=600)
+    after = resource.getrusage(resource.RUSAGE_CHILDREN)
+    elapsed = time.perf_counter() - start
+    cpu = after.ru_utime + after.ru_stime - before.ru_utime - before.ru_stime
+    (WORK / (directory.name + '-' + name + '.log')).write_text(result.stdout + result.stderr)
+    return result, {'wall': elapsed, 'cpu': cpu}
+
+
+def source(fixture, destination):
+    provenance = json.loads((fixture / 'provenance.json').read_text())
+    cache = WORK / (fixture.name + '.zip')
+    if not cache.exists():
+        request = urllib.request.Request(provenance['dist'], headers={'User-Agent': 'Phera-tests'})
+        with urllib.request.urlopen(request, timeout=120) as reply:
+            cache.write_bytes(reply.read())
+    archive = zipfile.ZipFile(cache)
+    for entry in archive.infolist():
+        path = PurePosixPath(entry.filename)
+        if path.is_absolute() or '..' in path.parts or '\\' in entry.filename:
+            raise RuntimeError('unsafe source archive')
+        parts = path.parts[1:]
+        if not parts or parts[0] in ['vendor', '.git']:
+            continue
+        target = destination.joinpath(*parts)
+        if entry.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(archive.read(entry))
+            target.chmod(0o644 | ((entry.external_attr >> 16) & 0o111))
+    for name in ['composer.json', 'composer.lock']:
+        shutil.copyfile(fixture / name, destination / name)
+    return provenance
+
+
+def tree(directory):
+    result = {}
+    for path in directory.rglob('*'):
+        if path.is_file():
+            result[str(path.relative_to(directory))] = (path.read_bytes(), path.stat().st_mode & 0o111)
+    return result
+
+
+def compare(fixture):
+    left, right = WORK / (fixture.name + '-composer'), WORK / (fixture.name + '-phera')
+    for directory in [left, right]:
+        if directory.exists():
+            shutil.rmtree(directory)
+        directory.mkdir()
+    provenance = source(fixture, left)
+    shutil.copytree(left, right, dirs_exist_ok=True)
+    env = dict(ENV, COMPOSER_ROOT_VERSION=provenance['root_version'])
+    flags = ['--no-scripts', '--ignore-platform-reqs', '-o']
+    oracle, composer_time = run([PHP, COMPOSER, 'install', '--no-plugins', '--no-interaction']
+                               + flags, left, env, 'install')
+    actual, phera_time = run([PHERA, 'install', '--frozen-lockfile'] + flags,
+                            right, env, 'install')
+    row = {'fixture': fixture.name, 'composer_install': oracle.returncode,
+           'phera_install': actual.returncode, 'composer_time': composer_time,
+           'phera_time': phera_time}
+    vendor = json.loads((fixture / 'composer.json').read_text()).get('config', {}).get('vendor-dir', 'vendor')
+    if not oracle.returncode and not actual.returncode:
+        a, b = tree(left / vendor), tree(right / vendor)
+        different = [path for path in sorted(a.keys() | b.keys()) if a.get(path) != b.get(path)]
+        generated = lambda path: path == 'autoload.php' or path.startswith(('composer/', 'bin/'))
+        row['package_differences'] = [path for path in different if not generated(path)]
+        row['generated_differences'] = [path for path in different if generated(path)]
+        a = json.loads((left / vendor / 'composer/installed.json').read_text())
+        b = json.loads((right / vendor / 'composer/installed.json').read_text())
+        row['installed_identical'] = a == b
+        if a != b:
+            row['installed_difference_packages'] = [x['name'] for x, y in zip(a['packages'], b['packages']) if x != y]
+        probes = []
+        for directory in [left, right]:
+            result, _ = run([PHP, '-n', str(TESTS / 'tools/probe.php'), vendor], directory, env, 'probe')
+            probes.append(json.loads(result.stdout) if not result.returncode else result.stdout + result.stderr)
+        row['autoload_identical'] = probes[0] == probes[1]
+        if probes[0] != probes[1]:
+            (WORK / (fixture.name + '-autoload.json')).write_text(json.dumps(probes, indent=2))
+    for directory in [left, right]:
+        (directory / 'composer.lock').unlink(missing_ok=True)
+    oracle, composer_update = run([PHP, COMPOSER, 'update', '--no-install', '--no-plugins',
+        '--no-scripts', '--ignore-platform-reqs', '--no-interaction', '--no-audit'], left, env, 'update')
+    actual, phera_update = run([PHERA, 'update', '--no-install', '--no-scripts',
+        '--ignore-platform-reqs'], right, env, 'update')
+    row.update(composer_update=oracle.returncode, phera_update=actual.returncode,
+               composer_update_time=composer_update, phera_update_time=phera_update)
+    if not oracle.returncode and not actual.returncode:
+        versions = lambda path: {p['name']:p['version'] for key in ['packages','packages-dev']
+                                for p in json.loads(path.read_text())[key]}
+        a, b = versions(left / 'composer.lock'), versions(right / 'composer.lock')
+        row['resolution_differences'] = {key: [a.get(key), b.get(key)] for key in sorted(a.keys() | b.keys()) if a.get(key) != b.get(key)}
+        validation, _ = run([PHP, COMPOSER, 'validate', '--no-check-publish'], right, env, 'validate')
+        row['composer_accepts_lock'] = 'not up to date' not in validation.stdout + validation.stderr
+    (WORK / (fixture.name + '-result.json')).write_text(json.dumps(row, indent=2))
+    print(json.dumps(row), flush=True)
+    return row
+
+
+if os.environ.get('PHERA_PACKAGES_NETWORK') != '1':
+    raise SystemExit('Set PHERA_PACKAGES_NETWORK=1 to opt into registry comparisons.')
+fixtures = sorted(path for path in (TESTS / 'fixtures').iterdir() if (path / 'composer.lock').exists())
+if len(sys.argv) > 3:
+    fixtures = [path for path in fixtures if path.name in sys.argv[3:]]
+rows = []
+# Timings are sequential so process CPU accounting does not combine concurrent children.
+for fixture in fixtures:
+    try:
+        rows.append(compare(fixture))
+    except Exception as error:
+        row = {'fixture': fixture.name, 'error': str(error)}
+        rows.append(row)
+        print(json.dumps(row), flush=True)
+(WORK / 'results.json').write_text(json.dumps(rows, indent=2) + '\n')
+if any(row.get('error') or row.get('phera_install') or row.get('phera_update')
+       or row.get('package_differences') or row.get('resolution_differences')
+       or row.get('installed_identical') is False or row.get('autoload_identical') is False for row in rows):
+    raise SystemExit(1)
