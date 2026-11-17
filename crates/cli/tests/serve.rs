@@ -283,3 +283,26 @@ fn hostile_requests_do_not_get_source_wrong_framing_or_a_filled_post() {
         (200, "2 POST".to_string())
     );
 }
+
+#[test]
+fn environment_snapshot_and_putenv_are_isolated_on_one_worker() {
+    let served = Served::start_with_workers(
+        "env",
+        1,
+        &[
+            (".env", "PHERA_TEST_COLOR=green"),
+            (
+                "put.php",
+                "<?php putenv('PHERA_TEST_COLOR=red'); echo getenv('PHERA_TEST_COLOR');",
+            ),
+            (
+                "get.php",
+                "<?php echo getenv('PHERA_TEST_COLOR'), $_ENV['PHERA_TEST_COLOR'], \
+         $_SERVER['PHERA_TEST_COLOR'];",
+            ),
+        ],
+    );
+    assert_eq!(served.get("/put.php"), (200, "red".into()));
+    std::fs::write(served.root.join(".env"), "PHERA_TEST_COLOR=blue").unwrap();
+    assert_eq!(served.get("/get.php"), (200, "greengreengreen".into()));
+}

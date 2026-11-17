@@ -15,6 +15,9 @@ impl Parser<'_> {
         // unwind the braces iteratively so nesting never grows the Rust stack.
         let mut indirect = 0;
         while braced && self.rest().starts_with(b"${") {
+            if indirect >= 64 {
+                return Err(self.error("at most 64 indirect names"));
+            }
             indirect += 1;
             self.pos += 2;
         }

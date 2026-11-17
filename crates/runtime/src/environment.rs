@@ -6,18 +6,19 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use phera_value::{ArrayKey, PhpArray, Value};
 
 pub(crate) fn cli_server(mut server: PhpArray, script: &Path, arguments: &[String]) -> PhpArray {
-    let filename = script.canonicalize().unwrap_or_else(|_| script.to_owned());
     let script = arguments
         .first()
         .map_or(script.as_os_str().as_encoded_bytes(), |s| s.as_bytes());
     let mut set = |name: &str, value: Value| {
         server.insert(ArrayKey::str(name), value);
     };
-    for key in ["PHP_SELF", "SCRIPT_NAME"] {
+    for key in [
+        "PHP_SELF",
+        "SCRIPT_NAME",
+        "SCRIPT_FILENAME",
+        "PATH_TRANSLATED",
+    ] {
         set(key, Value::from(script));
-    }
-    for key in ["SCRIPT_FILENAME", "PATH_TRANSLATED"] {
-        set(key, Value::from(filename.as_os_str().as_encoded_bytes()));
     }
     set("DOCUMENT_ROOT", Value::from(""));
     let now = SystemTime::now()

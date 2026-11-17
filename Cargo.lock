@@ -922,6 +922,7 @@ version = "0.1.0"
 dependencies = [
  "mimalloc",
  "phera-dotenv",
+ "phera-extension-api",
  "phera-phpt",
  "phera-runtime",
  "phera-server",
