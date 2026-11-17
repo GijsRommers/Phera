@@ -87,7 +87,7 @@ fn run(context: &mut dyn Context, arguments: &[Value], filter: bool) -> NativeRe
         for (key, value) in subjects.iter() {
             let result = apply(value)?;
             if !result.is_null() {
-                output.insert(key.clone(), result);
+                output.insert(key, result);
             }
         }
         Value::from(output)
