@@ -191,7 +191,7 @@ fn words(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
             Value::from(result)
         });
     }
-    let mask = super::trim::mask(context, args::bytes(arguments, 2), "str_word_count");
+    let mask = super::trim::character_mask(context, "str_word_count", args::bytes(arguments, 2));
     let (mut cursor, end) = word_bounds(string, &mask);
     let mut count = 0;
     while cursor < end {

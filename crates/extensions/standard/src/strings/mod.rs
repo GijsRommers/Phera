@@ -28,7 +28,7 @@ mod url;
 pub(crate) const MAX_STRING_BYTES: usize = 2 * 1024 * 1024 * 1024;
 
 pub(crate) fn register(registry: &mut Registry) {
-    let modules = [case::FUNCTIONS];
+    let modules = [case::FUNCTIONS, padding::FUNCTIONS, trim::FUNCTIONS];
     for entry in modules.into_iter().flatten() {
         registry.function(*entry);
     }
@@ -37,11 +37,9 @@ pub(crate) fn register(registry: &mut Registry) {
     url::register(registry);
     encode::register(registry);
     replace::register(registry);
-    trim::register(registry);
     split::register(registry);
     search::register(registry);
     search_more::register(registry);
-    padding::register(registry);
     escaping::register(registry);
     html::register(registry);
     text::register(registry);

@@ -73,7 +73,7 @@ fn addcslashes(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     if string.is_empty() {
         return Ok(bytes(Vec::new()));
     }
-    let mask = super::trim::mask(context, args::bytes(arguments, 1), "addcslashes");
+    let mask = super::trim::character_mask(context, "addcslashes", args::bytes(arguments, 1));
     let mut result = buffer(string.len().saturating_mul(4))?;
     for &byte in string {
         if !mask[usize::from(byte)] {
