@@ -39,6 +39,14 @@ impl Vm {
                 } else {
                     Value::Reference(Rc::new(RefCell::new(value.clone())))
                 };
+                if let Value::Reference(cell) = &reference {
+                    crate::reference_holders::ReferenceHolders::track_object(
+                        &self.property_references,
+                        object,
+                        stored_key,
+                        cell,
+                    )?;
+                }
                 object.set(stored_key.clone(), reference.clone());
                 state.position = Some(index);
                 state.started = true;
@@ -59,6 +67,7 @@ impl Vm {
             }
             position = properties.next_position(index);
         }
+        self.release_iterator_subject(state)?;
         self.jump(end)
     }
 

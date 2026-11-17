@@ -140,6 +140,7 @@ impl Vm {
         if let Some((element_key, element)) = entry {
             self.bind_iteration_entry(element_key, element, state.source.as_ref(), key, value)?;
         } else {
+            self.release_iterator_subject(&mut state)?;
             self.jump(end)?;
         }
         if let Some(frame) = self.call_stack.current_mut() {
@@ -259,4 +260,21 @@ pub(crate) fn snapshot_step(
         *ip = end.index();
     }
     true
+}
+
+impl Vm {
+    /// Exhaustion and break must release the iterator's scratch alias to its subject.
+    pub(crate) fn release_iterator_subject(
+        &mut self,
+        state: &mut frame::IteratorState,
+    ) -> Result<(), NativeError> {
+        if let Some(subject) = state
+            .source
+            .take()
+            .and_then(|source| source.local_register())
+        {
+            self.clear_local(subject)?;
+        }
+        Ok(())
+    }
 }

@@ -99,6 +99,7 @@ impl ClassTable {
                     Visibility::Public => ArrayKey::str(property.name),
                 };
                 defaults.push(PropertyDefault {
+                    static_storage: None,
                     key,
                     value: property.default.to_value(),
                     name: property.name.into(),
