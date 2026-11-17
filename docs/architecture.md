@@ -384,3 +384,65 @@ while each call still costs what it costs now.
   proposal until A and B are measured.
 - The larger gain for web applications is section 5: serving requests from
   an already loaded application instead of starting it for each request.
+
+### 10.5 Data layout: the redesign behind the remaining gap
+
+State on 17 November 2026, after step A and a rewrite of the simple-instruction
+loop, timed inside the process: plain loops 2.2 to 2.8 times PHP, arrays
+about 4 times, calls and objects 8 to 18 times.
+
+The remaining gap on calls and objects has one cause. The VM finds things
+by name at run time (a function, a method, a property, a class constant) in
+hash tables keyed by strings, and then hides the cost behind caches: one per
+call site, per property site, per static site, per unit. Each cache has a
+guard to check, an owner to clone, and a miss path that duplicates the hit
+path. The caches are the bulk of the VM's code and they are why a method call
+costs 80 ns.
+
+The rules from here on:
+
+1. **Names become numbers once.** Every identifier is interned to a small
+   integer when a unit is loaded. Nothing compares or hashes a string while
+   PHP code runs, except for names that are computed at run time
+   (`$obj->$name`, `call_user_func('f')`).
+2. **Tables are flat arrays indexed by those numbers.** Functions, classes,
+   methods, properties and constants live in `Vec`s. A reference to one of
+   them is an index (`u32`), not a pointer with a reference count.
+3. **Resolve once, at link time, to an index.** Loading a unit resolves what
+   it can: a call to a declared function becomes "function number 17".
+   What cannot be resolved until the code runs (a function declared later)
+   is resolved on first use and written into a flat per-unit table, once,
+   for good. That is linking, not caching: there is no guard and no
+   invalidation, because a declared function or class never goes away.
+4. **Objects are slots.** A class lays out its declared properties as slot
+   numbers; a subclass keeps its parent's numbers and adds its own. An object
+   is its class plus a flat array of values. `$this->x` in a method compiles
+   to "slot 3", for this class and every subclass. Only undeclared (dynamic)
+   properties live in a side table. Methods get the same treatment: a class
+   has a method table whose slot numbers are stable in subclasses, so
+   `$this->run()` is "method slot 5 of the receiver's class". A property or
+   method on an object of unknown class is found through the class's small
+   table from interned name to slot.
+5. **No caches.** When a rule above replaces a lookup, the cache that hid
+   the lookup is deleted, not kept as a fallback.
+6. **A frame is a few numbers.** Which function (an index), where its
+   registers start, where it continues, where its result goes. Whatever only
+   some frames need (dynamic variable names, `foreach` state, a bound
+   closure) lives in side tables keyed by frame, so a plain call does not
+   pay for it. No reference count is touched to make a call.
+7. **One `match` runs an instruction.** No chain of handler groups.
+8. **Hot data is small.** A value is 16 bytes. Fields that are read on every
+   instruction sit together; rarely used ones are elsewhere.
+
+What this cannot do: the tightest arithmetic loop. A test interpreter in
+plain safe Rust runs `$sum += ($i * 3) % 7` five million times in 29 ms
+with every improvement applied (the loop test moved to the bottom, 16-byte
+values, two operators fused); PHP takes 19 to 24 ms. Unchecked register
+access (`unsafe`) would bring 29 down to about 28. PHP's remaining lead there
+comes from how its C interpreter jumps between instructions, which stable
+Rust cannot express. Closing that last 1.3 to 1.5 times on pure arithmetic
+would take a JIT. On everything else there is no such limit.
+
+Order: frames and dispatch (rules 6 and 7), functions and methods by index
+(1 to 3), objects as slots (4), then the compiler work of 10.3, with rule 5
+applied at each step.
