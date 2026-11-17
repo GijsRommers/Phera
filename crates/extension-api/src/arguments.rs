@@ -138,6 +138,10 @@ fn type_text(ty: ParamType) -> &'static str {
         ParamType::Number => "int|float",
         ParamType::IntOrString => "string|int",
         ParamType::ArrayOrString => "array|string",
+        ParamType::StringOrNumber => "string|int|float",
+        ParamType::ArrayOrNumber => "array|int|float",
+        ParamType::ArrayOrFloat => "array|float",
+        ParamType::ArrayOrBool => "array|bool",
     }
 }
 
@@ -211,6 +215,27 @@ fn convert(
                 to_string(value, site, context).map(Some)
             }
             _ => to_int(value, site, context).map(Some),
+        },
+        ParamType::StringOrNumber => match value {
+            Value::String(_) | Value::Int(_) | Value::Float(_) => Some(None),
+            _ if strict => None,
+            _ => to_number(value, site, context).map(Some),
+        },
+        ParamType::ArrayOrNumber => match value {
+            Value::Array(_) | Value::Int(_) | Value::Float(_) => Some(None),
+            _ if strict => None,
+            _ => to_number(value, site, context).map(Some),
+        },
+        ParamType::ArrayOrFloat => match value {
+            Value::Array(_) | Value::Float(_) => Some(None),
+            Value::Int(i) => Some(Some(Value::Float(*i as f64))),
+            _ if strict => None,
+            _ => to_float(value, site, context).map(Some),
+        },
+        ParamType::ArrayOrBool => match value {
+            Value::Array(_) | Value::Bool(_) => Some(None),
+            _ if strict => None,
+            _ => to_bool(value, site, context).map(Some),
         },
         ParamType::ArrayOrString => match value {
             Value::Array(_) | Value::String(_) => Some(None),

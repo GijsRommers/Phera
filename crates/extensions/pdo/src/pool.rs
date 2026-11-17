@@ -25,7 +25,9 @@ mod options;
 mod runtime;
 mod state;
 
-pub use options::{Options, Policy, is_pool_attribute};
+#[cfg(test)]
+use options::Options;
+pub use options::{Policy, is_pool_attribute};
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, OnceLock};

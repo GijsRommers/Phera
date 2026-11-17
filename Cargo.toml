@@ -31,6 +31,9 @@ license = "MIT OR Apache-2.0"
 unsafe_code = "forbid"
 
 [workspace.dependencies]
+rustls-rustcrypto = "=0.1.0-pre.0"
+redis = { version = "=1.0.5", default-features = false, features = ["tokio-comp", "tokio-rustls-comp", "tls-rustls-webpki-roots"] }
+phera-ext-redis = { path = "crates/extensions/redis" }
 phera-io-pool = { path = "crates/io-pool" }
 phera-lexer = { path = "crates/lexer" }
 phera-parser = { path = "crates/parser" }
