@@ -3,7 +3,7 @@ use super::token::{DateToken, Special, TimeToken, WeekdayBehavior};
 use crate::parse_format::result::{Parsed, ParsedZone};
 use phera_extension_api::{ArrayKey, PhpArray, Value};
 
-#[derive(Default, Debug)]
+#[derive(Clone, Default, Debug)]
 pub struct State {
     pub parsed: Parsed,
     pub have_date: bool,

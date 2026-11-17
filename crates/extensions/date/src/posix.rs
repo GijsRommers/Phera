@@ -40,7 +40,7 @@ pub fn offset(rule: &TransitionRule, timestamp: i64) -> Option<&LocalTimeType> {
     None
 }
 
-fn transition(year: i64, day: &RuleDay, clock: i32, offset: i32) -> i64 {
+pub(crate) fn transition(year: i64, day: &RuleDay, clock: i32, offset: i32) -> i64 {
     let day_number = match day {
         RuleDay::Julian1WithoutLeap(day) => {
             days(year, 1, 1) + i128::from(day.get()) - 1 + i128::from(day.get() >= 60 && leap(year))

@@ -1,0 +1,598 @@
+Africa/Abidjan	1	CI	9531666	17596666	0	1	
+Africa/Accra	1	GH	9555000	17978333	8	61	
+Africa/Addis_Ababa	1	ET	9903333	21870000	496	2	
+Africa/Algiers	1	DZ	12678333	18305000	512	34	
+Africa/Asmara	1	ER	10533333	21888333	784	3	
+Africa/Asmera	0	??	0	0	808	5	
+Africa/Bamako	1	ML	10265000	17200000	848	3	
+Africa/Bangui	1	CF	9436666	19858333	872	1	
+Africa/Banjul	1	GM	10346666	16335000	880	3	
+Africa/Bissau	1	GW	10185000	16441666	904	2	
+Africa/Blantyre	1	MW	7421666	21500000	920	3	
+Africa/Brazzaville	1	CG	8573333	19528333	944	1	
+Africa/Bujumbura	1	BI	8661666	20936666	952	1	
+Africa/Cairo	1	EG	12005000	21125000	960	128	
+Africa/Casablanca	1	MA	12365000	17241666	1984	72	
+Africa/Ceuta	1	ES	12588333	17468333	2560	43	Ceuta, Melilla
+Africa/Conakry	1	GN	9951666	16628333	2904	3	
+Africa/Dakar	1	SN	10466666	16256666	2928	2	
+Africa/Dar_es_Salaam	1	TZ	8320000	21928333	2944	3	
+Africa/Djibouti	1	DJ	10160000	22315000	2968	1	
+Africa/Douala	1	CM	9405000	18970000	2976	1	
+Africa/El_Aaiun	1	EH	11715000	16680000	2984	61	
+Africa/Freetown	1	SL	9850000	16675000	3472	19	
+Africa/Gaborone	1	BW	6534999	20591666	3624	4	
+Africa/Harare	1	ZW	7216666	21105000	3656	1	
+Africa/Johannesburg	1	ZA	6375000	20800000	3664	6	
+Africa/Juba	1	SS	9485000	21161666	3712	35	
+Africa/Kampala	1	UG	9031666	21241666	3992	4	
+Africa/Khartoum	1	SD	10560000	21253333	4024	35	
+Africa/Kigali	1	RW	8805000	21006666	4304	1	
+Africa/Kinshasa	1	CD	8570000	19530000	4312	1	Dem. Rep. of Congo (west)
+Africa/Lagos	1	NG	9645000	18340000	4320	4	
+Africa/Libreville	1	GA	9038333	18945000	4352	1	
+Africa/Lome	1	TG	9613333	18121666	4360	1	
+Africa/Luanda	1	AO	8120000	19323333	4368	2	
+Africa/Lubumbashi	1	CD	7833333	20746666	4384	2	Dem. Rep. of Congo (east)
+Africa/Lusaka	1	ZM	7458333	20828333	4400	1	
+Africa/Malabo	1	GQ	9375000	18878333	4408	2	
+Africa/Maputo	1	MZ	6403333	21258333	4424	1	
+Africa/Maseru	1	LS	6053333	20750000	4432	3	
+Africa/Mbabane	1	SZ	6370000	21110000	4456	1	
+Africa/Mogadishu	1	SO	9206666	22536666	4464	3	
+Africa/Monrovia	1	LR	9630000	16921666	4488	3	
+Africa/Nairobi	1	KE	8871666	21681666	4512	5	
+Africa/Ndjamena	1	TD	10211666	19505000	4552	3	
+Africa/Niamey	1	NE	10351666	18211666	4576	3	
+Africa/Nouakchott	1	MR	10810000	16405000	4600	3	
+Africa/Ouagadougou	1	BF	10236666	17848333	4624	1	
+Africa/Porto-Novo	1	BJ	9648333	18261666	4632	2	
+Africa/Sao_Tome	1	ST	9033333	18673333	4648	4	
+Africa/Timbuktu	0	??	0	0	4680	1	
+Africa/Tripoli	1	LY	12290000	19318333	4688	32	
+Africa/Tunis	1	TN	12680000	19018333	4944	34	
+Africa/Windhoek	1	NA	6743333	19710000	5216	53	
+America/Adak	1	US	14188000	334194	5640	84	Alaska - western Aleutians
+America/Anchorage	1	US	15121805	3009972	6312	84	Alaska (most areas)
+America/Anguilla	1	AI	10820000	11693333	6984	1	
+America/Antigua	1	AG	10705000	11820000	6992	2	
+America/Araguaina	1	BR	8280000	13180000	7008	51	Tocantins
+America/Argentina/Buenos_Aires	1	AR	5540000	12155000	7416	61	Buenos Aires (BA, CF)
+America/Argentina/Catamarca	1	AR	6153333	11421666	7904	61	Catamarca (CT), Chubut (CH)
+America/Argentina/ComodRivadavia	0	??	0	0	8392	61	
+America/Argentina/Cordoba	1	AR	5860000	11581666	8880	61	Argentina (most areas: CB, CC, CN, ER, FM, MN, SE, SF)
+America/Argentina/Jujuy	1	AR	6581666	11470000	9368	59	Jujuy (JY)
+America/Argentina/La_Rioja	1	AR	6056666	11315000	9840	62	La Rioja (LR)
+America/Argentina/Mendoza	1	AR	5711666	11118333	10336	61	Mendoza (MZ)
+America/Argentina/Rio_Gallegos	1	AR	3836666	11078333	10824	61	Santa Cruz (SC)
+America/Argentina/Salta	1	AR	6521666	11458333	11312	59	Salta (SA, LP, NQ, RN)
+America/Argentina/San_Juan	1	AR	5846666	11148333	11784	62	San Juan (SJ)
+America/Argentina/San_Luis	1	AR	5668333	11365000	12280	62	San Luis (SL)
+America/Argentina/Tucuman	1	AR	6318333	11478333	12776	63	Tucuman (TM)
+America/Argentina/Ushuaia	1	AR	3520000	11170000	13280	61	Tierra del Fuego (TF)
+America/Aruba	1	AW	10250000	11003333	13768	2	
+America/Asuncion	1	PY	6473333	12233333	13784	104	
+America/Atikokan	1	CA	13875861	8837833	14616	7	EST - ON (Atikokan), NU (Coral H)
+America/Atka	0	??	0	0	14672	84	
+America/Bahia	1	BR	7701666	14148333	15344	61	Bahia
+America/Bahia_Banderas	1	MX	11080000	7475000	15832	61	Bahia de Banderas
+America/Barbados	1	BB	10310000	12038333	16320	15	
+America/Belem	1	BR	8855000	13151666	16440	29	Para (east), Amapa
+America/Belize	1	BZ	10750000	9180000	16672	98	
+America/Blanc-Sablon	1	CA	14141666	12288333	17456	6	AST - QC (Lower North Shore)
+America/Boa_Vista	1	BR	9281666	11933333	17504	33	Roraima
+America/Bogota	1	CO	9460000	10591666	17768	4	
+America/Boise	1	US	13361361	6379750	17800	90	Mountain - ID (south), OR (east)
+America/Buenos_Aires	0	??	0	0	18520	61	
+America/Cambridge_Bay	1	CA	15911388	7494722	19008	76	Mountain - NU (west)
+America/Campo_Grande	1	BR	6955000	12538333	19616	91	Mato Grosso do Sul
+America/Cancun	1	MX	11108333	9323333	20344	43	Quintana Roo
+America/Caracas	1	VE	10050000	11306666	20688	5	
+America/Catamarca	0	??	0	0	20728	61	
+America/Cayenne	1	GF	9493333	12766666	21216	2	
+America/Cayman	1	KY	10930000	9861666	21232	2	
+America/Chicago	1	US	13185000	9235000	21248	175	Central (most areas)
+America/Chihuahua	1	MX	11863333	7391666	22648	60	Chihuahua (most areas)
+America/Ciudad_Juarez	1	MX	12173333	7351666	23128	61	Chihuahua (US border - west)
+America/Coral_Harbour	0	??	0	0	23616	2	
+America/Cordoba	0	??	0	0	23632	61	
+America/Costa_Rica	1	CR	9993333	9591666	24120	10	
+America/Coyhaique	1	CL	4443333	10793333	24200	133	Aysen Region
+America/Creston	1	CA	13910000	6348333	25264	3	MST - BC (Creston)
+America/Cuiaba	1	BR	7441666	12391666	25288	89	Mato Grosso
+America/Curacao	1	CW	10218333	11100000	26000	2	
+America/Danmarkshavn	1	GL	16676666	16133333	26016	34	National Park (east coast)
+America/Dawson	1	CA	15406666	4058333	26288	93	MST - Yukon (west)
+America/Dawson_Creek	1	CA	14576666	5976666	27032	58	MST - BC (Dawson Cr, Ft St John)
+America/Denver	1	US	12973916	7501583	27496	97	Mountain (most areas)
+America/Detroit	1	US	13233138	9695416	28272	80	Eastern - MI (most areas)
+America/Dominica	1	DM	10530000	11860000	28912	1	
+America/Edmonton	1	CA	14355000	6653333	28920	128	CST - AB, BC(E), NT(E), SK(W)
+America/Eirunepe	1	BR	8333333	11013333	29944	33	Amazonas (west)
+America/El_Salvador	1	SV	10370000	9080000	30208	5	
+America/Ensenada	0	??	0	0	30248	132	
+America/Fort_Nelson	1	CA	14880000	5730000	31304	143	MST - BC (Ft Nelson)
+America/Fort_Wayne	0	??	0	0	32448	38	
+America/Fortaleza	1	BR	8628333	14150000	32752	39	Brazil (northeast: MA, PI, CE, RN, PB)
+America/Glace_Bay	1	CA	13619999	12005000	33064	79	Atlantic - NS (Cape Breton)
+America/Godthab	0	??	0	0	33696	89	
+America/Goose_Bay	1	CA	14333333	11958333	34408	152	Atlantic - Labrador (most areas)
+America/Grand_Turk	1	TC	11146666	10886666	35624	76	
+America/Grenada	1	GD	10205000	11825000	36232	1	
+America/Guadeloupe	1	GP	10623333	11846666	36240	1	
+America/Guatemala	1	GT	10463333	8948333	36248	9	
+America/Guayaquil	1	EC	8783333	10016666	36320	4	Ecuador (mainland)
+America/Guyana	1	GY	9680000	12183333	36352	4	
+America/Halifax	1	CA	13465000	11640000	36384	167	Atlantic - NS (most areas), PE
+America/Havana	1	CU	11313333	9763333	37720	106	
+America/Hermosillo	1	MX	11906666	6903333	38568	13	Sonora
+America/Indiana/Indianapolis	1	US	12976833	9384194	38672	38	Eastern - IN (most areas)
+America/Indiana/Knox	1	US	13129583	9337500	38976	93	Central - IN (Starke)
+America/Indiana/Marengo	1	US	12837555	9365527	39720	42	Eastern - IN (Crawford)
+America/Indiana/Petersburg	1	US	12849194	9272138	40056	56	Eastern - IN (Pike)
+America/Indiana/Tell_City	1	US	12795305	9323861	40504	37	Central - IN (Perry)
+America/Indiana/Vevay	1	US	12874777	9493277	40800	20	Eastern - IN (Switzerland)
+America/Indiana/Vincennes	1	US	12867722	9247138	40960	41	Eastern - IN (Da, Du, K, Mn)
+America/Indiana/Winamac	1	US	13105138	9339694	41288	46	Eastern - IN (Pulaski)
+America/Indianapolis	0	??	0	0	41656	38	
+America/Inuvik	1	CA	15834972	4628333	41960	111	CST - NT (west)
+America/Iqaluit	1	CA	15373333	11153333	42848	74	Eastern - NU (most areas)
+America/Jamaica	1	JM	10796805	10320666	43440	22	
+America/Jujuy	0	??	0	0	43616	59	
+America/Juneau	1	US	14830194	4558027	44088	83	Alaska - Juneau area
+America/Kentucky/Louisville	1	US	12825416	9424055	44752	117	Eastern - KY (Louisville area)
+America/Kentucky/Monticello	1	US	12682972	9515083	45688	87	Eastern - KY (Wayne)
+America/Knox_IN	0	??	0	0	46384	93	
+America/Kralendijk	1	BQ	10215083	11172333	47128	4	
+America/La_Paz	1	BO	7350000	11185000	47160	3	
+America/Lima	1	PE	7795000	10295000	47184	16	
+America/Los_Angeles	1	US	12405222	6175722	47312	125	Pacific
+America/Louisville	0	??	0	0	48312	117	
+America/Lower_Princes	1	SX	10805138	11695277	49248	4	
+America/Maceio	1	BR	8033333	14428333	49280	41	Alagoas, Sergipe
+America/Managua	1	NI	10215000	9371666	49608	16	
+America/Manaus	1	BR	8686666	11998333	49736	31	Amazonas (east)
+America/Marigot	1	MF	10806666	11691666	49984	4	
+America/Martinique	1	MQ	10460000	11891666	50016	4	
+America/Matamoros	1	MX	11583333	8250000	50048	32	Coahuila, Nuevo Leon, Tamaulipas (US border)
+America/Mazatlan	1	MX	11321666	7358333	50304	61	Baja California Sur, Nayarit (most areas), Sinaloa
+America/Mendoza	0	??	0	0	50792	61	
+America/Menominee	1	US	13510777	9238583	51280	82	Central - MI (Wisconsin border)
+America/Merida	1	MX	11096666	9038333	51936	57	Campeche, Yucatan
+America/Metlakatla	1	US	14512694	4842361	52392	43	Alaska - Annette Island
+America/Mexico_City	1	MX	10940000	8084999	52736	68	Central Mexico
+America/Miquelon	1	PM	13705000	12366666	53280	43	
+America/Moncton	1	CA	13610000	11521666	53624	146	Atlantic - New Brunswick
+America/Monterrey	1	MX	11566666	7968333	54792	62	Durango; Coahuila, Nuevo Leon, Tamaulipas (most areas)
+America/Montevideo	1	UY	5509083	12378750	55288	86	
+America/Montreal	0	??	0	0	55976	172	
+America/Montserrat	1	MS	10671666	11778333	57352	1	
+America/Nassau	1	BS	11508333	10265000	57360	93	
+America/New_York	1	US	13071416	10599361	58104	175	Eastern (most areas)
+America/Nipigon	0	??	0	0	59504	172	
+America/Nome	1	US	15450111	1459361	60880	84	Alaska (west)
+America/Noronha	1	BR	8615000	14758333	61552	39	Atlantic islands
+America/North_Dakota/Beulah	1	US	13726416	7822222	61864	96	Central - ND (Mercer)
+America/North_Dakota/Center	1	US	13711638	7870083	62632	89	Central - ND (Oliver)
+America/North_Dakota/New_Salem	1	US	13684500	7858916	63344	89	Central - ND (Morton rural)
+America/Nuuk	1	GL	15418333	12826666	64056	89	most of Greenland
+America/Ojinaga	1	MX	11956666	7558333	64768	61	Chihuahua (US border - east)
+America/Panama	1	PA	9896666	10046666	65256	2	
+America/Pangnirtung	0	??	0	0	65272	74	
+America/Paramaribo	1	SR	9583333	12483333	65864	4	
+America/Phoenix	1	US	12344833	6792666	65896	11	MST - AZ (except Navajo)
+America/Port-au-Prince	1	HT	10853333	10766666	65984	45	
+America/Port_of_Spain	1	TT	10065000	11848333	66344	1	
+America/Porto_Acre	0	??	0	0	66352	31	
+America/Porto_Velho	1	BR	8123333	11610000	66600	29	Rondonia
+America/Puerto_Rico	1	PR	10846833	11389388	66832	4	
+America/Punta_Arenas	1	CL	3685000	10908333	66864	117	Magallanes Region
+America/Rainy_River	0	??	0	0	67800	164	
+America/Rankin_Inlet	1	CA	15281666	8791694	69112	72	Central - NU (central)
+America/Recife	1	BR	8195000	14510000	69688	39	Pernambuco
+America/Regina	1	CA	14040000	7534999	70000	53	CST - SK (most areas)
+America/Resolute	1	CA	16469555	8517083	70424	72	Central - NU (Resolute)
+America/Rio_Branco	1	BR	8003333	11220000	71000	31	Acre
+America/Rosario	0	??	0	0	71248	61	
+America/Santa_Isabel	0	??	0	0	71736	132	
+America/Santarem	1	BR	8756666	12513333	72792	30	Para (west)
+America/Santiago	1	CL	5655000	10933333	73032	130	most of Chile
+America/Santo_Domingo	1	DO	10846666	11010000	74072	17	
+America/Sao_Paulo	1	BR	6646666	13338333	74208	91	Brazil (southeast: GO, DF, MG, ES, RJ, SP, PR, SC, RS)
+America/Scoresbysund	1	GL	16048333	15803333	74936	90	Scoresbysund/Ittoqqortoormiit
+America/Shiprock	0	??	0	0	75656	97	
+America/Sitka	1	US	14717638	4469805	76432	83	Alaska - Sitka area
+America/St_Barthelemy	1	BL	10788333	11715000	77096	4	
+America/St_Johns	1	CA	13756666	12728333	77128	187	Newfoundland, Labrador (SE)
+America/St_Kitts	1	KN	10730000	11728333	78624	1	
+America/St_Lucia	1	LC	10401666	11900000	78632	2	
+America/St_Thomas	1	VI	10835000	11506666	78648	1	
+America/St_Vincent	1	VC	10315000	11876666	78656	2	
+America/Swift_Current	1	CA	14028333	7216666	78672	23	CST - SK (midwest)
+America/Tegucigalpa	1	HN	10410000	9278333	78856	7	
+America/Thule	1	GL	16656666	11121666	78912	34	Thule/Pituffik
+America/Thunder_Bay	0	??	0	0	79184	172	
+America/Tijuana	1	MX	12253333	6298333	80560	132	Baja California
+America/Toronto	1	CA	13365000	10061666	81616	172	Eastern - ON & QC (most areas)
+America/Tortola	1	VG	10845000	11538333	82992	1	
+America/Vancouver	1	CA	13926666	5688333	83000	168	MST - BC (most areas)
+America/Virgin	0	??	0	0	84344	4	
+America/Whitehorse	1	CA	15071666	4494999	84376	93	MST - Yukon (east)
+America/Winnipeg	1	CA	13988333	8284999	85120	164	EST - Manitoba, ON (northwest)
+America/Yakutat	1	US	14954694	4027277	86432	83	Alaska - Yakutat
+America/Yellowknife	0	??	0	0	87096	128	
+Antarctica/Casey	1	AQ	2371666	29051666	88120	17	Casey
+Antarctica/Davis	1	AQ	2141666	25796666	88256	7	Davis
+Antarctica/DumontDUrville	1	AQ	2333333	32001666	88312	3	Dumont-d'Urville
+Antarctica/Macquarie	1	AU	3550000	33895000	88336	91	Macquarie Island
+Antarctica/Mawson	1	AQ	2240000	24288333	89064	2	Mawson
+Antarctica/McMurdo	1	AQ	1216666	34660000	89080	68	New Zealand time - McMurdo, South Pole
+Antarctica/Palmer	1	AQ	2520000	11590000	89624	82	Palmer
+Antarctica/Rothera	1	AQ	2243333	11186666	90280	1	Rothera
+Antarctica/South_Pole	0	??	0	0	90288	96	
+Antarctica/Syowa	1	AQ	2099388	21959000	91056	1	Syowa
+Antarctica/Troll	1	AQ	1798861	18253500	91064	1	Troll
+Antarctica/Vostok	1	AQ	1159999	28689999	91072	4	Vostok
+Arctic/Longyearbyen	1	SJ	16800000	19600000	91104	60	
+Asia/Aden	1	YE	10275000	22520000	91584	1	
+Asia/Almaty	1	KZ	13325000	25695000	91592	52	most of Kazakhstan
+Asia/Amman	1	JO	12195000	21593333	92008	87	
+Asia/Anadyr	1	RU	15475000	35748333	92704	64	MSK+09 - Bering Sea
+Asia/Aqtau	1	KZ	13451666	23026666	93216	50	Mangghystau/Mankistau
+Asia/Aqtobe	1	KZ	14028333	23716666	93616	51	Aqtobe/Aktobe
+Asia/Ashgabat	1	TM	12795000	23838333	94024	25	
+Asia/Ashkhabad	0	??	0	0	94224	25	
+Asia/Atyrau	1	KZ	13711666	23193333	94424	50	Atyrau/Atirau/Gur'yev
+Asia/Baghdad	1	IQ	12335000	22441666	94824	54	
+Asia/Bahrain	1	BH	11638333	23058333	95256	3	
+Asia/Baku	1	AZ	13038333	22985000	95280	66	
+Asia/Bangkok	1	TH	10375000	28051666	95808	2	
+Asia/Barnaul	1	RU	14336666	26375000	95824	67	MSK+04 - Altai
+Asia/Beirut	1	LB	12388333	21550000	96360	64	
+Asia/Bishkek	1	KG	13290000	25460000	96872	52	
+Asia/Brunei	1	BN	9493333	29491666	97288	2	
+Asia/Calcutta	0	??	0	0	97304	7	
+Asia/Chita	1	RU	14205000	29346666	97360	66	MSK+06 - Zabaykalsky
+Asia/Choibalsan	0	??	0	0	97888	50	
+Asia/Chongqing	0	??	0	0	98288	29	
+Asia/Chungking	0	??	0	0	98520	29	
+Asia/Colombo	1	LK	9693333	25985000	98752	8	
+Asia/Dacca	0	??	0	0	98816	7	
+Asia/Damascus	1	SY	12350000	21630000	98872	121	
+Asia/Dhaka	1	BD	11371666	27041666	99840	7	
+Asia/Dili	1	TL	8145000	30558333	99896	4	
+Asia/Dubai	1	AE	11530000	23530000	99928	1	
+Asia/Dushanbe	1	TJ	12858333	24880000	99936	24	
+Asia/Famagusta	1	CY	12511666	21395000	100128	86	Northern Cyprus
+Asia/Gaza	1	PS	12150000	21446666	100816	308	Gaza Strip
+Asia/Harbin	0	??	0	0	103280	29	
+Asia/Hebron	1	PS	12153333	21509500	103512	310	West Bank
+Asia/Ho_Chi_Minh	1	VN	10075000	28666666	105992	9	
+Asia/Hong_Kong	1	HK	11228333	29414999	106064	69	
+Asia/Hovd	1	MN	13801666	27164999	106616	50	Bayan-Olgii, Hovd, Uvs
+Asia/Irkutsk	1	RU	14226666	28433333	107016	66	MSK+05 - Irkutsk, Buryatia
+Asia/Istanbul	0	??	0	0	107544	115	
+Asia/Jakarta	1	ID	8383333	28680000	108464	8	Java, Sumatra
+Asia/Jayapura	1	ID	8746666	32070000	108528	3	New Guinea (West Papua / Irian Jaya), Malukus/Moluccas
+Asia/Jerusalem	1	IL	12178055	21522388	108552	100	
+Asia/Kabul	1	AF	12451666	24920000	109352	2	
+Asia/Kamchatka	1	RU	14301666	33865000	109368	64	MSK+09 - Kamchatka
+Asia/Karachi	1	PK	11486666	24705000	109880	11	
+Asia/Kashgar	0	??	0	0	109968	1	
+Asia/Kathmandu	1	NP	11771666	26531666	109976	2	
+Asia/Katmandu	0	??	0	0	109992	2	
+Asia/Khandyga	1	RU	15265638	31555388	110008	67	MSK+06 - Tomponsky, Ust-Maysky
+Asia/Kolkata	1	IN	11253333	26836666	110544	7	
+Asia/Krasnoyarsk	1	RU	14601666	27283333	110600	65	MSK+04 - Krasnoyarsk area
+Asia/Kuala_Lumpur	1	MY	9316666	28170000	111120	8	Malaysia (peninsula)
+Asia/Kuching	1	MY	9155000	29033333	111184	18	Sabah, Sarawak
+Asia/Kuwait	1	KW	11933333	22798333	111328	1	
+Asia/Macao	0	??	0	0	111336	71	
+Asia/Macau	1	MO	11219722	29354166	111904	71	
+Asia/Magadan	1	RU	14956666	33080000	112472	66	MSK+08 - Magadan
+Asia/Makassar	1	ID	8488333	29939999	113000	4	Borneo (east, south), Sulawesi/Celebes, Bali, Nusa Tengarra, Timor (west)
+Asia/Manila	1	PH	10458666	30096777	113032	14	
+Asia/Muscat	1	OM	11360000	23858333	113144	1	
+Asia/Nicosia	1	CY	12516666	21336666	113152	49	most of Cyprus
+Asia/Novokuznetsk	1	RU	14375000	26711666	113544	64	MSK+04 - Kemerovo
+Asia/Novosibirsk	1	RU	14503333	26291666	114056	67	MSK+04 - Novosibirsk
+Asia/Omsk	1	RU	14500000	25340000	114592	65	MSK+03 - Omsk
+Asia/Oral	1	KZ	14121666	23135000	115112	51	West Kazakhstan
+Asia/Phnom_Penh	1	KH	10155000	28491666	115520	5	
+Asia/Pontianak	1	ID	8996666	28933333	115560	8	Borneo (west, central)
+Asia/Pyongyang	1	KP	12901666	30575000	115624	5	
+Asia/Qatar	1	QA	11528333	23153333	115664	2	
+Asia/Qostanay	1	KZ	14319999	24361666	115680	52	Qostanay/Kostanay/Kustanay
+Asia/Qyzylorda	1	KZ	13480000	24546666	116096	52	Qyzylorda/Kyzylorda/Kzyl-Orda
+Asia/Rangoon	0	??	0	0	116512	4	
+Asia/Riyadh	1	SA	11463333	22671666	116544	1	
+Asia/Saigon	0	??	0	0	116552	9	
+Asia/Sakhalin	1	RU	13696666	32270000	116624	66	MSK+08 - Sakhalin Island
+Asia/Samarkand	1	UZ	12966666	24680000	117152	24	Uzbekistan (west)
+Asia/Seoul	1	KR	12755000	30696666	117344	29	
+Asia/Shanghai	1	CN	12123333	30146666	117576	29	Beijing Time
+Asia/Singapore	1	SG	9128333	28385000	117808	8	
+Asia/Srednekolymsk	1	RU	15746666	33371666	117872	65	MSK+08 - Sakha (E), N Kuril Is
+Asia/Taipei	1	TW	11505000	30150000	118392	41	
+Asia/Tashkent	1	UZ	13133333	24930000	118720	24	Uzbekistan (east)
+Asia/Tbilisi	1	GE	13171666	22481666	118912	51	
+Asia/Tehran	1	IR	12566666	23143333	119320	71	
+Asia/Tel_Aviv	0	??	0	0	119888	100	
+Asia/Thimbu	0	??	0	0	120688	2	
+Asia/Thimphu	1	BT	11746666	26964999	120704	2	
+Asia/Tokyo	1	JP	12565444	31974472	120720	9	
+Asia/Tomsk	1	RU	14650000	26496666	120792	67	MSK+04 - Tomsk
+Asia/Ujung_Pandang	0	??	0	0	121328	4	
+Asia/Ulaanbaatar	1	MN	13791666	28688333	121360	50	most of Mongolia
+Asia/Ulan_Bator	0	??	0	0	121760	50	
+Asia/Urumqi	1	CN	13380000	26758333	122160	1	Xinjiang Time
+Asia/Ust-Nera	1	RU	15456027	32322666	122168	66	MSK+07 - Oymyakonsky
+Asia/Vientiane	1	LA	10796666	28260000	122696	7	
+Asia/Vladivostok	1	RU	13316666	31193333	122752	65	MSK+07 - Amur River
+Asia/Yakutsk	1	RU	15200000	30966666	123272	65	MSK+06 - Lena River
+Asia/Yangon	1	MM	10678333	27616666	123792	4	
+Asia/Yekaterinburg	1	RU	14685000	24060000	123824	66	MSK+02 - Urals
+Asia/Yerevan	1	AM	13018333	22450000	124352	62	
+Atlantic/Azores	1	PT	12773333	15433333	124848	133	Azores
+Atlantic/Bermuda	1	BM	12228333	11523333	125912	95	
+Atlantic/Canary	1	ES	11810000	16460000	126672	35	Canary Islands
+Atlantic/Cape_Verde	1	CV	10491666	15648333	126952	4	
+Atlantic/Faeroe	0	??	0	0	126984	32	
+Atlantic/Faroe	1	FO	15201666	17323333	127240	32	
+Atlantic/Jan_Mayen	0	??	0	0	127496	60	
+Atlantic/Madeira	1	PT	12263333	16310000	127976	131	Madeira Islands
+Atlantic/Reykjavik	1	IS	15415000	15815000	129024	68	
+Atlantic/South_Georgia	1	GS	3573333	14346666	129568	1	
+Atlantic/St_Helena	1	SH	7408333	17430000	129576	2	
+Atlantic/Stanley	1	FK	3829999	12215000	129592	70	
+Australia/ACT	0	??	0	0	130152	83	
+Australia/Adelaide	1	AU	5508333	31858333	130816	84	South Australia
+Australia/Brisbane	1	AU	6253333	33303333	131488	17	Queensland (most areas)
+Australia/Broken_Hill	1	AU	5805000	32145000	131624	85	New South Wales (Yancowinna)
+Australia/Canberra	0	??	0	0	132304	83	
+Australia/Currie	0	??	0	0	132968	94	
+Australia/Darwin	1	AU	7753333	31083333	133720	10	Northern Territory
+Australia/Eucla	1	AU	5828333	30886666	133800	19	Western Australia (Eucla)
+Australia/Hobart	1	AU	4711666	32731666	133952	94	Tasmania
+Australia/LHI	0	??	0	0	134704	56	
+Australia/Lindeman	1	AU	6973333	32900000	135152	21	Queensland (Whitsunday Islands)
+Australia/Lord_Howe	1	AU	5845000	33908333	135320	56	Lord Howe Island
+Australia/Melbourne	1	AU	5218333	32496666	135768	83	Victoria
+Australia/North	0	??	0	0	136432	10	
+Australia/NSW	0	??	0	0	136512	83	
+Australia/Perth	1	AU	5805000	29585000	137176	19	Western Australia (most areas)
+Australia/Queensland	0	??	0	0	137328	17	
+Australia/South	0	??	0	0	137464	84	
+Australia/Sydney	1	AU	5613333	33121666	138136	83	New South Wales (most areas)
+Australia/Tasmania	0	??	0	0	138800	94	
+Australia/Victoria	0	??	0	0	139552	83	
+Australia/West	0	??	0	0	140216	19	
+Australia/Yancowinna	0	??	0	0	140368	85	
+Brazil/Acre	0	??	0	0	141048	31	
+Brazil/DeNoronha	0	??	0	0	141296	39	
+Brazil/East	0	??	0	0	141608	91	
+Brazil/West	0	??	0	0	142336	31	
+Canada/Atlantic	0	??	0	0	142584	167	
+Canada/Central	0	??	0	0	143920	164	
+Canada/Eastern	0	??	0	0	145232	172	
+Canada/Mountain	0	??	0	0	146608	128	
+Canada/Newfoundland	0	??	0	0	147632	187	
+Canada/Pacific	0	??	0	0	149128	168	
+Canada/Saskatchewan	0	??	0	0	150472	53	
+Canada/Yukon	0	??	0	0	150896	93	
+CET	0	??	0	0	151640	102	
+Chile/Continental	0	??	0	0	152456	130	
+Chile/EasterIsland	0	??	0	0	153496	110	
+CST6CDT	0	??	0	0	154376	87	
+Cuba	0	??	0	0	155072	106	
+EET	0	??	0	0	155920	55	
+Egypt	0	??	0	0	156360	128	
+Eire	0	??	0	0	157384	145	
+EST	0	??	0	0	158544	2	
+EST5EDT	0	??	0	0	158560	87	
+Etc/GMT	0	??	0	0	159256	0	
+Etc/GMT+0	0	??	0	0	159256	0	
+Etc/GMT+1	0	??	0	0	159256	0	
+Etc/GMT+10	0	??	0	0	159256	0	
+Etc/GMT+11	0	??	0	0	159256	0	
+Etc/GMT+12	0	??	0	0	159256	0	
+Etc/GMT+2	0	??	0	0	159256	0	
+Etc/GMT+3	0	??	0	0	159256	0	
+Etc/GMT+4	0	??	0	0	159256	0	
+Etc/GMT+5	0	??	0	0	159256	0	
+Etc/GMT+6	0	??	0	0	159256	0	
+Etc/GMT+7	0	??	0	0	159256	0	
+Etc/GMT+8	0	??	0	0	159256	0	
+Etc/GMT+9	0	??	0	0	159256	0	
+Etc/GMT-0	0	??	0	0	159256	0	
+Etc/GMT-1	0	??	0	0	159256	0	
+Etc/GMT-10	0	??	0	0	159256	0	
+Etc/GMT-11	0	??	0	0	159256	0	
+Etc/GMT-12	0	??	0	0	159256	0	
+Etc/GMT-13	0	??	0	0	159256	0	
+Etc/GMT-14	0	??	0	0	159256	0	
+Etc/GMT-2	0	??	0	0	159256	0	
+Etc/GMT-3	0	??	0	0	159256	0	
+Etc/GMT-4	0	??	0	0	159256	0	
+Etc/GMT-5	0	??	0	0	159256	0	
+Etc/GMT-6	0	??	0	0	159256	0	
+Etc/GMT-7	0	??	0	0	159256	0	
+Etc/GMT-8	0	??	0	0	159256	0	
+Etc/GMT-9	0	??	0	0	159256	0	
+Etc/GMT0	0	??	0	0	159256	0	
+Etc/Greenwich	0	??	0	0	159256	0	
+Etc/UCT	0	??	0	0	159256	0	
+Etc/Universal	0	??	0	0	159256	0	
+Etc/UTC	0	??	0	0	159256	0	
+Etc/Zulu	0	??	0	0	159256	0	
+Europe/Amsterdam	1	NL	14236666	18490000	159256	97	
+Europe/Andorra	1	AD	13250000	18151666	160032	25	
+Europe/Astrakhan	1	RU	13635000	22805000	160232	64	MSK+01 - Astrakhan
+Europe/Athens	1	GR	12796666	20371666	160744	55	
+Europe/Belfast	0	??	0	0	161184	159	
+Europe/Belgrade	1	RS	13483333	20050000	162456	36	
+Europe/Berlin	1	DE	14250000	19336666	162744	60	most of Germany
+Europe/Bratislava	1	SK	13815000	19711666	163224	61	
+Europe/Brussels	1	BE	14083333	18433333	163712	102	
+Europe/Bucharest	1	RO	13443333	20610000	164528	55	
+Europe/Budapest	1	HU	13750000	19908333	164968	68	
+Europe/Busingen	1	DE	13769999	18868333	165512	37	Busingen
+Europe/Chisinau	1	MD	13700000	20883333	165808	110	
+Europe/Copenhagen	1	DK	14566666	19258333	166688	51	
+Europe/Dublin	1	IE	14333333	17375000	167096	145	
+Europe/Gibraltar	1	GI	12613333	17465000	168256	115	
+Europe/Guernsey	1	GG	13945472	17746388	169176	158	
+Europe/Helsinki	1	FI	15016666	20496666	170440	35	
+Europe/Isle_of_Man	1	IM	14415000	17553333	170720	159	
+Europe/Istanbul	1	TR	13101666	20896666	171992	115	
+Europe/Jersey	1	JE	13918361	17789333	172912	158	
+Europe/Kaliningrad	1	RU	14471666	20050000	174176	80	MSK-01 - Kaliningrad
+Europe/Kiev	0	??	0	0	174816	39	
+Europe/Kirov	1	RU	14860000	22965000	175128	63	MSK+00 - Kirov
+Europe/Kyiv	1	UA	14043333	21051666	175632	39	most of Ukraine
+Europe/Lisbon	1	PT	12871666	17086666	175944	142	Portugal (mainland)
+Europe/Ljubljana	1	SI	13605000	19451666	177080	36	
+Europe/London	1	GB	14150833	17987472	177368	159	
+Europe/Luxembourg	1	LU	13960000	18615000	178640	100	
+Europe/Madrid	1	ES	13040000	17631666	179440	79	Spain (mainland)
+Europe/Malta	1	MT	12590000	19451666	180072	86	
+Europe/Mariehamn	1	AX	15010000	19995000	180760	35	
+Europe/Minsk	1	BY	14390000	20756666	181040	68	
+Europe/Monaco	1	MC	13369999	18738333	181584	102	
+Europe/Moscow	1	RU	14575583	21761777	182400	78	MSK+00 - Moscow area
+Europe/Nicosia	0	??	0	0	183024	49	
+Europe/Oslo	1	NO	14991666	19075000	183416	58	
+Europe/Paris	1	FR	13886666	18233333	183880	101	
+Europe/Podgorica	1	ME	13243333	19926666	184688	36	
+Europe/Prague	1	CZ	14008333	19443333	184976	61	
+Europe/Riga	1	LV	14694999	20410000	185464	53	
+Europe/Rome	1	IT	13190000	19248333	185888	87	
+Europe/Samara	1	RU	14319999	23015000	186584	64	MSK+01 - Samara, Udmurtia
+Europe/San_Marino	1	SM	13391666	19246666	187096	87	
+Europe/Sarajevo	1	BA	13386666	19841666	187792	36	
+Europe/Saratov	1	RU	14156666	22603333	188080	64	MSK+01 - Saratov
+Europe/Simferopol	1	UA	13494999	21410000	188592	75	Crimea
+Europe/Skopje	1	MK	13198333	20143333	189192	36	
+Europe/Sofia	1	BG	13268333	20331666	189480	45	
+Europe/Stockholm	1	SE	14933333	19805000	189840	37	
+Europe/Tallinn	1	EE	14941666	20475000	190136	52	
+Europe/Tirane	1	AL	13133333	19983333	190552	50	
+Europe/Tiraspol	0	??	0	0	190952	110	
+Europe/Ulyanovsk	1	RU	14433333	22840000	191832	66	MSK+01 - Ulyanovsk
+Europe/Uzhgorod	0	??	0	0	192360	39	
+Europe/Vaduz	1	LI	13715000	18951666	192672	36	
+Europe/Vatican	1	VA	13190222	19245305	192960	87	
+Europe/Vienna	1	AT	13821666	19633333	193656	56	
+Europe/Vilnius	1	LT	14468333	20531666	194104	51	
+Europe/Volgograd	1	RU	13873333	22441666	194512	65	MSK+00 - Volgograd
+Europe/Warsaw	1	PL	14225000	20100000	195032	82	
+Europe/Zagreb	1	HR	13580000	19596666	195688	36	
+Europe/Zaporozhye	0	??	0	0	195976	39	
+Europe/Zurich	1	CH	13738333	18853333	196288	37	
+Factory	0	??	0	0	196584	0	
+GB	0	??	0	0	196584	159	
+GB-Eire	0	??	0	0	197856	159	
+GMT	0	??	0	0	199128	0	
+GMT+0	0	??	0	0	199128	0	
+GMT-0	0	??	0	0	199128	0	
+GMT0	0	??	0	0	199128	0	
+Greenwich	0	??	0	0	199128	0	
+Hongkong	0	??	0	0	199128	69	
+HST	0	??	0	0	199680	7	
+Iceland	0	??	0	0	199736	1	
+Indian/Antananarivo	1	MG	7108333	22751666	199744	3	
+Indian/Chagos	1	IO	8266666	25241666	199768	2	
+Indian/Christmas	1	CX	7958333	28571666	199784	1	
+Indian/Cocos	1	CC	7783333	27691666	199792	1	
+Indian/Comoro	1	KM	7831666	22326666	199800	1	
+Indian/Kerguelen	1	TF	4064722	25021750	199808	1	
+Indian/Mahe	1	SC	8533333	23546666	199816	1	
+Indian/Maldives	1	MV	9416666	25350000	199824	2	
+Indian/Mauritius	1	MU	6983333	23750000	199840	5	
+Indian/Mayotte	1	YT	7721666	22523333	199880	1	
+Indian/Reunion	1	RE	6913333	23546666	199888	1	
+Iran	0	??	0	0	199896	71	
+Israel	0	??	0	0	200464	100	
+Jamaica	0	??	0	0	201264	22	
+Japan	0	??	0	0	201440	9	
+Kwajalein	0	??	0	0	201512	6	
+Libya	0	??	0	0	201560	32	
+MET	0	??	0	0	201816	102	
+Mexico/BajaNorte	0	??	0	0	202632	132	
+Mexico/BajaSur	0	??	0	0	203688	61	
+Mexico/General	0	??	0	0	204176	68	
+MST	0	??	0	0	204720	11	
+MST7MDT	0	??	0	0	204808	87	
+Navajo	0	??	0	0	205504	97	
+NZ	0	??	0	0	206280	96	
+NZ-CHAT	0	??	0	0	207048	69	
+Pacific/Apia	1	WS	7616666	826666	207600	26	
+Pacific/Auckland	1	NZ	5313333	35476666	207808	96	most of New Zealand
+Pacific/Bougainville	1	PG	8378333	33556666	208576	5	Bougainville
+Pacific/Chatham	1	NZ	4605000	344999	208616	69	Chatham Islands
+Pacific/Chuuk	1	FM	9741666	33178333	209168	6	Chuuk/Truk, Yap
+Pacific/Easter	1	CL	6285000	7056666	209216	110	Easter Island
+Pacific/Efate	1	VU	7233333	34841666	210096	23	
+Pacific/Enderbury	0	??	0	0	210280	3	
+Pacific/Fakaofo	1	TK	8063333	876666	210304	2	
+Pacific/Fiji	1	FJ	7186666	35841666	210320	29	
+Pacific/Funafuti	1	TV	8148333	35921666	210552	1	
+Pacific/Galapagos	1	EC	8910000	9040000	210560	4	Galapagos Islands
+Pacific/Gambier	1	PF	6686666	4505000	210592	1	Gambier Islands
+Pacific/Guadalcanal	1	SB	8046666	34020000	210600	1	
+Pacific/Guam	1	GU	10346666	32475000	210608	21	
+Pacific/Honolulu	1	US	11130694	2214166	210776	7	Hawaii
+Pacific/Johnston	0	??	0	0	210832	7	
+Pacific/Kanton	1	KI	8721666	828333	210888	3	Phoenix Islands
+Pacific/Kiritimati	1	KI	9186666	2266666	210912	3	Line Islands
+Pacific/Kosrae	1	FM	9531666	34298333	210936	9	Kosrae
+Pacific/Kwajalein	1	MH	9908333	34733333	211008	6	Kwajalein
+Pacific/Majuro	1	MH	9715000	35120000	211056	7	most of Marshall Islands
+Pacific/Marquesas	1	PF	8100000	4050000	211112	1	Marquesas Islands
+Pacific/Midway	1	UM	11821666	263333	211120	3	Midway Islands
+Pacific/Nauru	1	NR	8948333	34691666	211144	4	
+Pacific/Niue	1	NU	7098333	1008333	211176	2	
+Pacific/Norfolk	1	NF	6095000	34796666	211192	6	
+Pacific/Noumea	1	NC	6773333	34645000	211240	7	
+Pacific/Pago_Pago	1	AS	7573333	930000	211296	2	
+Pacific/Palau	1	PW	9733333	31448333	211312	2	
+Pacific/Pitcairn	1	PN	6493333	4991666	211328	2	
+Pacific/Pohnpei	1	FM	9696666	33821666	211344	7	Pohnpei/Ponape
+Pacific/Ponape	0	??	0	0	211400	1	
+Pacific/Port_Moresby	1	PG	8050000	32716666	211408	2	most of Papua New Guinea
+Pacific/Rarotonga	1	CK	6876666	2023333	211424	28	
+Pacific/Saipan	1	MP	10520000	32575000	211648	20	
+Pacific/Samoa	0	??	0	0	211808	2	
+Pacific/Tahiti	1	PF	7246666	3043333	211824	1	Society Islands
+Pacific/Tarawa	1	KI	9141666	35300000	211832	1	Gilbert Islands
+Pacific/Tongatapu	1	TO	6886666	480000	211840	10	
+Pacific/Truk	0	??	0	0	211920	2	
+Pacific/Wake	1	UM	10928333	34661666	211936	1	Wake Island
+Pacific/Wallis	1	WF	7670000	383333	211944	1	
+Pacific/Yap	0	??	0	0	211952	2	
+Poland	0	??	0	0	211968	82	
+Portugal	0	??	0	0	212624	142	
+PRC	0	??	0	0	213760	29	
+PST8PDT	0	??	0	0	213992	87	
+ROC	0	??	0	0	214688	41	
+ROK	0	??	0	0	215016	29	
+Singapore	0	??	0	0	215248	8	
+Turkey	0	??	0	0	215312	115	
+UCT	0	??	0	0	216232	0	
+Universal	0	??	0	0	216232	0	
+US/Alaska	0	??	0	0	216232	84	
+US/Aleutian	0	??	0	0	216904	84	
+US/Arizona	0	??	0	0	217576	11	
+US/Central	0	??	0	0	217664	175	
+US/East-Indiana	0	??	0	0	219064	38	
+US/Eastern	0	??	0	0	219368	175	
+US/Hawaii	0	??	0	0	220768	7	
+US/Indiana-Starke	0	??	0	0	220824	93	
+US/Michigan	0	??	0	0	221568	80	
+US/Mountain	0	??	0	0	222208	97	
+US/Pacific	0	??	0	0	222984	125	
+US/Samoa	0	??	0	0	223984	2	
+UTC	1	??	0	0	224000	0	
+W-SU	0	??	0	0	224000	78	
+WET	0	??	0	0	224624	142	
+Zulu	0	??	0	0	225760	0	

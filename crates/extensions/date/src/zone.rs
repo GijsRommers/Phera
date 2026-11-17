@@ -222,3 +222,22 @@ fn last_sunday(year: i64, month: i64) -> i128 {
     let last = Civil { day, ..last };
     last.timestamp() - i128::from(last.weekday()) * 86400
 }
+
+impl Zone {
+    pub(crate) fn alternate_rule(&self) -> Option<&tz::timezone::AlternateTime> {
+        let rules = self.modern.as_ref().map_or(self.rules, |z| z.as_ref().as_ref());
+        match rules.extra_rule()? {
+            tz::timezone::TransitionRule::Alternate(rule) => Some(rule),
+            _ => None,
+        }
+    }
+    pub(crate) fn year_transitions(&self, year: i64) -> Vec<i64> {
+        let Some(rule) = self.alternate_rule() else {return Vec::new()};
+        let mut times = vec![
+            crate::posix::transition(year,rule.dst_start(),rule.dst_start_time(),rule.std().ut_offset()),
+            crate::posix::transition(year,rule.dst_end(),rule.dst_end_time(),rule.dst().ut_offset()),
+        ];
+        times.sort_unstable();
+        times
+    }
+}
