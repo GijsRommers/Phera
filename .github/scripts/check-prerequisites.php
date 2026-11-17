@@ -8,6 +8,13 @@ foreach (['json', 'pcre', 'ctype', 'pdo_pgsql', 'pdo_mysql', 'mbstring', 'tokeni
         throw new RuntimeException('Missing PHP extension: ' . $extension);
     }
 }
+// The date oracle must use PHP's embedded data, not a distribution's zoneinfo.
+// CI supplies timezonedb-2026.5; PHP builds embedding the same version need no module.
+if (timezone_version_get() !== '2026.5') {
+    throw new RuntimeException(
+        'The date oracle requires timezonedb 2026.5; found ' . timezone_version_get()
+    );
+}
 foreach (['pgsql' => 54329, 'mysql' => 33069] as $driver => $port) {
     new PDO("$driver:host=127.0.0.1;port=$port;dbname=phera_test", 'phera', 'phera');
 }

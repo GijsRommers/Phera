@@ -50,6 +50,16 @@ fn request_timezone_and_invalid_identifiers() {
             labels.push(expression);
         }
     }
+    context.diagnostics.entries.clear();
+    script.push_str("run('case',fn()=>timezone_version_get());\n");
+    let version = call(&registry, &mut context, "timezone_version_get", vec![]);
+    expected.push(oracle::encode_case(
+        "case",
+        &version,
+        &[],
+        &context.diagnostics,
+    ));
+    labels.push("timezone_version_get()".into());
     let php = oracle::run_php("date-request-zone", &script).expect("PHP 8.5 oracle required");
     oracle::compare("request zones", &labels, &php, &expected);
     let mut next_request = TestContext::default();
