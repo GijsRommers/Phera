@@ -1,12 +1,28 @@
-//! Combining arrays preserves string keys, but merging renumbers integer keys.
+//! Combining arrays: `array_merge`, `array_replace` and their recursive
+//! forms. Merging appends integer keys and overwrites string keys;
+//! replacing overwrites both.
 
 use phera_extension_api::{
-    Context, FunctionEntry, NativeResult, Param, ParamType, PhpArray, Registry, Value, args,
+    Context, FunctionEntry, NativeResult, Param, ParamType, PhpArray, Value,
 };
 
-#[derive(Clone, Copy)]
+use super::combine_recursive::combine_pair;
+use crate::arguments::required_array;
+
+pub(super) const FUNCTIONS: &[FunctionEntry] = &[
+    ARRAY_MERGE,
+    ARRAY_REPLACE,
+    ARRAY_MERGE_RECURSIVE,
+    ARRAY_REPLACE_RECURSIVE,
+];
+
+/// What happens when two arrays have the same key.
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Collision {
+    /// `array_merge`: an integer key is appended under a new number; a
+    /// string key is overwritten (or, recursively, merged).
     Merge,
+    /// `array_replace`: any key is overwritten (or, recursively, replaced).
     Replace,
 }
 
@@ -16,79 +32,90 @@ pub(super) enum Depth {
     Recursive,
 }
 
-const ARRAY_MERGE_PARAMS: &[Param] = &[Param::new("arrays", ParamType::Array).variadic()];
-
-const ARRAY_REPLACE_PARAMS: &[Param] = &[
-    Param::new("array", ParamType::Array),
-    Param::new("replacements", ParamType::Array).variadic(),
-];
-
-pub(crate) fn register(registry: &mut Registry) {
-    registry.function(FunctionEntry::sync(
-        "array_merge",
-        ARRAY_MERGE_PARAMS,
-        array_merge,
-    ));
-    registry.function(FunctionEntry::sync(
-        "array_replace",
-        ARRAY_REPLACE_PARAMS,
-        array_replace,
-    ));
-    registry.function(FunctionEntry::sync(
-        "array_merge_recursive",
-        ARRAY_MERGE_PARAMS,
-        array_merge_recursive,
-    ));
-    registry.function(FunctionEntry::sync(
-        "array_replace_recursive",
-        ARRAY_REPLACE_PARAMS,
-        array_replace_recursive,
-    ));
-}
+/// `array_merge(array ...$arrays): array`
+///
+/// ```php
+/// array_merge([5 => "a", "x" => 1], [5 => "b", "x" => 2]); // [0 => "a", "x" => 2, 1 => "b"]
+/// ```
+const ARRAY_MERGE: FunctionEntry = FunctionEntry::sync(
+    "array_merge",
+    &[Param::new("arrays", ParamType::Array).variadic()],
+    array_merge,
+);
 
 fn array_merge(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     combine(context, arguments, Collision::Merge, Depth::Shallow)
 }
 
+/// `array_replace(array $array, array ...$replacements): array`
+///
+/// ```php
+/// array_replace([5 => "a", "x" => 1], [5 => "b"]); // [5 => "b", "x" => 1]
+/// ```
+const ARRAY_REPLACE: FunctionEntry = FunctionEntry::sync(
+    "array_replace",
+    &[
+        Param::new("array", ParamType::Array),
+        Param::new("replacements", ParamType::Array).variadic(),
+    ],
+    array_replace,
+);
+
 fn array_replace(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     combine(context, arguments, Collision::Replace, Depth::Shallow)
 }
+
+/// `array_merge_recursive(array ...$arrays): array`: values under the same
+/// string key are merged into an array.
+///
+/// ```php
+/// array_merge_recursive(["a" => 1], ["a" => 2]);     // ["a" => [1, 2]]
+/// array_merge_recursive(["a" => [1]], ["a" => [2]]); // ["a" => [1, 2]]
+/// ```
+const ARRAY_MERGE_RECURSIVE: FunctionEntry = FunctionEntry::sync(
+    "array_merge_recursive",
+    &[Param::new("arrays", ParamType::Array).variadic()],
+    array_merge_recursive,
+);
 
 fn array_merge_recursive(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     combine(context, arguments, Collision::Merge, Depth::Recursive)
 }
 
+/// `array_replace_recursive(array $array, array ...$replacements): array`:
+/// where both values are arrays, they are replaced into each other.
+///
+/// ```php
+/// array_replace_recursive(["a" => [1, 2]], ["a" => [1 => "b"]]); // ["a" => [1, "b"]]
+/// ```
+const ARRAY_REPLACE_RECURSIVE: FunctionEntry = FunctionEntry::sync(
+    "array_replace_recursive",
+    &[
+        Param::new("array", ParamType::Array),
+        Param::new("replacements", ParamType::Array).variadic(),
+    ],
+    array_replace_recursive,
+);
+
 fn array_replace_recursive(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     combine(context, arguments, Collision::Replace, Depth::Recursive)
 }
 
-/// Replacement starts with a copy, retaining even the first array's next index.
 fn combine(
     context: &mut dyn Context,
     arguments: &[Value],
     collision: Collision,
     depth: Depth,
 ) -> NativeResult {
-    let mut result = if matches!(collision, Collision::Replace) {
-        args::array(arguments, 0)
-            .map(|array| (**array).clone())
-            .unwrap_or_default()
-    } else {
-        PhpArray::new()
+    // Replacing starts from a copy of the first array, which keeps its next
+    // free integer key; merging starts empty and numbers from 0.
+    let (mut result, sources) = match collision {
+        Collision::Replace => ((**required_array(arguments, 0)).clone(), 1..arguments.len()),
+        Collision::Merge => (PhpArray::new(), 0..arguments.len()),
     };
-    for value in arguments
-        .iter()
-        .skip(usize::from(matches!(collision, Collision::Replace)))
-    {
-        if let Value::Array(array) = value {
-            result = super::combine_recursive::combine_pair(
-                context,
-                result,
-                array.clone(),
-                collision,
-                depth,
-            )?;
-        }
+    for index in sources {
+        let source = required_array(arguments, index).clone();
+        result = combine_pair(context, result, source, collision, depth)?;
     }
     Ok(Value::from(result))
 }
