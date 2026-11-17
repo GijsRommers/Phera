@@ -6,13 +6,17 @@ pub mod baseline;
 pub mod builtins;
 pub mod collect;
 pub mod config;
+mod constants;
 pub mod diagnostic;
+mod enums;
 pub mod index;
 pub mod names;
 pub mod project;
 pub mod rules;
 pub mod scope;
+pub mod stubs;
 mod suppress;
+mod traits;
 pub mod types;
 mod walk;
 
@@ -46,6 +50,7 @@ fn check_project(options: &Options) -> Result<Report, String> {
     for file in &files {
         collect::collect(&mut index, &file.path, &file.source, &file.program);
     }
+    traits::link(&mut index, &files);
     for file in &files {
         let found = analysis::Analyzer::new(&index, file, options.level).run();
         diagnostics.extend(found.into_iter().filter(|d| !suppress::suppressed(file, d)));

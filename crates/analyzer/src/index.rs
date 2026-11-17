@@ -65,6 +65,23 @@ pub struct PropertyInfo {
 }
 
 #[derive(Clone, Debug)]
+pub struct ConstantInfo {
+    pub ty: ValueType,
+    pub modifiers: Modifiers,
+    pub location: Location,
+}
+
+impl ConstantInfo {
+    pub fn untyped(location: Location) -> Self {
+        Self {
+            ty: ValueType::Mixed,
+            modifiers: Modifiers::default(),
+            location,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct ClassInfo {
     pub name: String,
     pub kind: ClassKind,
@@ -74,16 +91,17 @@ pub struct ClassInfo {
     pub traits: Vec<String>,
     pub methods: BTreeMap<String, Signature>,
     pub properties: BTreeMap<String, PropertyInfo>,
-    pub constants: BTreeMap<String, Location>,
+    pub constants: BTreeMap<String, ConstantInfo>,
     pub location: Location,
     pub open_properties: bool,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct Index {
+    pub builtin_functions: BTreeSet<String>,
     pub classes: BTreeMap<String, ClassInfo>,
     pub functions: BTreeMap<String, Signature>,
-    pub constants: BTreeMap<String, Location>,
+    pub constants: BTreeMap<String, ConstantInfo>,
 }
 
 impl Index {
@@ -110,9 +128,29 @@ impl Index {
     }
 
     pub fn method(&self, class: &str, method: &str) -> Option<&Signature> {
-        self.ancestry(class)
-            .into_iter()
-            .find_map(|c| c.methods.get(&method.to_lowercase()))
+        let mut contract = None;
+        for ancestor in self.ancestry(class) {
+            if let Some(signature) = ancestor.methods.get(&method.to_lowercase()) {
+                if matches!(ancestor.kind, ClassKind::Trait | ClassKind::Interface)
+                    && (signature.abstract_body || signature.modifiers.is_abstract)
+                {
+                    contract = Some(signature);
+                } else {
+                    return Some(signature);
+                }
+            }
+        }
+        contract
+    }
+
+    pub fn complete(&self, class: &str) -> bool {
+        self.ancestry(class).iter().all(|c| {
+            c.parents
+                .iter()
+                .chain(&c.interfaces)
+                .chain(&c.traits)
+                .all(|name| self.class(name).is_some())
+        })
     }
 
     pub fn property(&self, class: &str, property: &str) -> Option<&PropertyInfo> {

@@ -14,6 +14,7 @@ pub enum Flow {
 impl Analyzer<'_> {
     pub fn block(&mut self, statements: &[Statement], scope: &mut Scope) -> Flow {
         if self.depth >= MAX_DEPTH {
+            self.context.incomplete = true;
             scope.dynamic = true;
             return Flow::Next;
         }
@@ -54,7 +55,7 @@ impl Analyzer<'_> {
                     if self.context.returns == ValueType::Void {
                         self.report(Finding::VoidReturn, statement.span);
                     }
-                } else if !matches!(self.context.returns, ValueType::Void | ValueType::Mixed) {
+                } else if self.context.declared_return && self.context.returns != ValueType::Void {
                     self.report(
                         Finding::MissingReturn(self.context.function.clone()),
                         statement.span,
@@ -99,12 +100,29 @@ impl Analyzer<'_> {
                 for e in condition {
                     self.expression(e, scope, false);
                 }
+                if condition
+                    .last()
+                    .and_then(|e| self.condition_truth(e, scope))
+                    == Some(false)
+                {
+                    return Flow::Next;
+                }
+                let entered = condition
+                    .last()
+                    .and_then(|e| crate::constants::value(e, scope))
+                    .is_some_and(|v| v.truth())
+                    || condition.is_empty();
                 let before = scope.clone();
                 let flow = self.block(body, scope);
                 for e in step {
                     self.expression(e, scope, false);
                 }
-                *scope = Scope::join(&[before, scope.clone()]);
+                if !entered {
+                    *scope = Scope::join(&[before, scope.clone()]);
+                }
+                if entered && flow == Flow::Terminal {
+                    return Flow::Terminal;
+                }
                 if condition.is_empty() && flow != Flow::Break {
                     return Flow::Terminal;
                 }
@@ -176,7 +194,15 @@ impl Analyzer<'_> {
         otherwise: Option<&[Statement]>,
         scope: &mut Scope,
     ) -> Flow {
+        let truth = self.condition_truth(condition, scope);
         self.expression(condition, scope, false);
+        if let Some(truth) = truth {
+            return if truth {
+                self.block(then, scope)
+            } else {
+                otherwise.map_or(Flow::Next, |body| self.block(body, scope))
+            };
+        }
         let mut left = scope.clone();
         let mut right = scope.clone();
         self.refine(condition, &mut left, true);
@@ -210,6 +236,13 @@ impl Analyzer<'_> {
         scope: &mut Scope,
         at_least_once: bool,
     ) -> Flow {
+        if !at_least_once && condition.and_then(|e| self.condition_truth(e, scope)) == Some(false) {
+            return Flow::Next;
+        }
+        let entered = at_least_once
+            || condition
+                .and_then(|e| crate::constants::value(e, scope))
+                .is_some_and(|v| v.truth());
         let before = scope.clone();
         if !at_least_once && let Some(condition) = condition {
             self.refine(condition, scope, true);
@@ -221,7 +254,7 @@ impl Analyzer<'_> {
         if let Some(condition) = condition {
             self.expression(condition, scope, false);
         }
-        if !at_least_once {
+        if !entered {
             *scope = Scope::join(&[before, scope.clone()]);
         }
         if condition.is_some_and(always_true) && flow != Flow::Break {
@@ -257,69 +290,6 @@ impl Analyzer<'_> {
             Flow::Terminal
         } else {
             *scope = Scope::join(&paths);
-            Flow::Next
-        }
-    }
-
-    fn try_statement(
-        &mut self,
-        body: &[Statement],
-        catches: &[Catch],
-        finally: Option<&[Statement]>,
-        scope: &mut Scope,
-    ) -> Flow {
-        let before = scope.clone();
-        let body_flow = self.block(body, scope);
-        let caught = Scope::join(&[before, scope.clone()]);
-        let mut live = Vec::new();
-        let mut all = vec![scope.clone()];
-        if body_flow == Flow::Next {
-            live.push(scope.clone());
-        }
-        for catch in catches {
-            let mut branch = caught.clone();
-            for ty in &catch.types {
-                self.class_name(ty, true);
-            }
-            if let Some(name) = &catch.variable {
-                let ty = catch
-                    .types
-                    .first()
-                    .and_then(|t| self.class_name(t, false))
-                    .map_or(ValueType::Mixed, ValueType::Class);
-                branch.define(name, ty);
-            }
-            let flow = self.block(&catch.body, &mut branch);
-            if flow == Flow::Next {
-                live.push(branch.clone());
-            }
-            all.push(branch);
-        }
-        if let Some(finally) = finally {
-            let mut final_scope = Scope::join(&all);
-            let flow = self.block(finally, &mut final_scope);
-            if flow != Flow::Next {
-                *scope = final_scope;
-                return flow;
-            }
-            if !live.is_empty() {
-                // Apply definite writes from finally to every continuing path.
-                let joined = Scope::join(&all);
-                for (name, variable) in &final_scope.variables {
-                    if variable.definition == Definition::Definite
-                        && joined.get(name).definition != Definition::Definite
-                    {
-                        for path in &mut live {
-                            path.define(name, variable.ty.clone());
-                        }
-                    }
-                }
-            }
-        }
-        if live.is_empty() {
-            Flow::Terminal
-        } else {
-            *scope = Scope::join(&live);
             Flow::Next
         }
     }

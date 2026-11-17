@@ -1,3 +1,10 @@
-php-src commit: 95df0735ff20c5c108f225c199a21596aad88bc3
-Parsed files: 131; skipped files: 0
-Declarations: 10774; functions: 2406; classes: 424; globals: 3373
+PHP 8.5 stubs; php-src commit: 136e049ac10b032c83018e65b63b6df858943750
+Reference: php-8.5.12
+Zend/zend_builtin_functions.stub.php:11: expected an identifier, found token "clone"; rename stub-only clone declaration
+Zend/zend_builtin_functions.stub.php:13: expected an identifier, found token "exit"; rename stub-only exit declaration
+Zend/zend_builtin_functions.stub.php:16: expected an identifier, found token "die"; rename stub-only die declaration
+Parsed files: 121; skipped files: 0
+Declarations: 10072; functions: 2238; classes: 338; globals: 3345; members: 4151
+Supplemental constants: 44; class aliases: 1
+Excluded development-only ext/zend_test and ext/dl_test.
+Skipped declarations: 0. Parser changes: none.

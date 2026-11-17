@@ -31,7 +31,7 @@ impl Analyzer<'_> {
                 }
                 ExpressionKind::Property { target, name, .. } => {
                     let ty = self.expression(target, scope, false);
-                    self.property(&ty, name, scope, target.span, false);
+                    self.property(&ty, name, scope, target.span, false, Access::object(target));
                 }
                 ExpressionKind::StaticProperty { .. } => {
                     self.expression(target, scope, false);
@@ -50,46 +50,6 @@ impl Analyzer<'_> {
             }
         } else {
             self.write(expression, ValueType::Mixed, scope);
-        }
-    }
-
-    pub fn refine(&mut self, expression: &Expression, scope: &mut Scope, truth: bool) {
-        match &expression.kind {
-            ExpressionKind::Isset(items) if truth => {
-                for item in items {
-                    if let ExpressionKind::Variable(Variable::Named(name)) = &item.kind {
-                        let ty = scope.get(name).ty;
-                        scope.define(name, ty);
-                    }
-                }
-            }
-            ExpressionKind::Empty(item) if !truth => {
-                if let ExpressionKind::Variable(Variable::Named(name)) = &item.kind {
-                    let ty = scope.get(name).ty;
-                    scope.define(name, ty);
-                }
-            }
-            ExpressionKind::Unary {
-                operator: UnaryOperator::Not,
-                operand,
-            } => self.refine(operand, scope, !truth),
-            ExpressionKind::Binary {
-                operator: BinaryOperator::And,
-                left,
-                right,
-            } if truth => {
-                self.refine(left, scope, true);
-                self.refine(right, scope, true);
-            }
-            ExpressionKind::InstanceOf { value, class } if truth => {
-                if let ExpressionKind::Variable(Variable::Named(name)) = &value.kind
-                    && let ExpressionKind::Name(class) = &class.kind
-                    && let Some(class) = self.class_name(class, false)
-                {
-                    scope.define(name, ValueType::Class(class));
-                }
-            }
-            _ => {}
         }
     }
 
@@ -119,8 +79,11 @@ impl Analyzer<'_> {
             inner.define(&capture.name, outer.get(&capture.name).ty);
         }
         let previous = self.context.clone();
+        let exceptions = std::mem::take(&mut self.exception_scopes);
+        self.context.incomplete = false;
         self.context.object = previous.object && !closure.is_static;
         self.context.function = "Closure".into();
+        self.context.declared_return = closure.return_type.is_some();
         self.context.returns =
             ValueType::declared(closure.return_type.as_ref(), &self.context.names);
         self.parameter_scope(&closure.parameters, &mut inner);
@@ -137,16 +100,22 @@ impl Analyzer<'_> {
             },
         );
         self.context = previous;
+        self.exception_scopes = exceptions;
         ValueType::Callable(Box::new(signature))
     }
 
     pub fn arrow(&mut self, arrow: &ArrowFunction, outer: &mut Scope, span: Span) -> ValueType {
         let previous = self.context.clone();
+        let exceptions = std::mem::take(&mut self.exception_scopes);
         let mut inner = outer.clone();
+        self.context.incomplete = false;
         self.context.object = previous.object && !arrow.is_static;
         self.parameter_scope(&arrow.parameters, &mut inner);
         self.check_type(arrow.return_type.as_ref());
         self.expression(&arrow.body, &mut inner, false);
+        if ValueType::declared(arrow.return_type.as_ref(), &self.context.names) == ValueType::Void {
+            self.report(Finding::VoidReturn, span);
+        }
         let signature = Signature::new(
             &arrow.parameters,
             arrow.return_type.as_ref(),
@@ -157,6 +126,7 @@ impl Analyzer<'_> {
             },
         );
         self.context = previous;
+        self.exception_scopes = exceptions;
         ValueType::Callable(Box::new(signature))
     }
 }

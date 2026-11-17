@@ -3,6 +3,8 @@
 
 mod abstract_new;
 mod argument_count;
+mod interface_new;
+mod known_named_argument;
 mod magic_constant;
 mod missing_method;
 mod missing_return;
@@ -12,10 +14,12 @@ mod static_call;
 mod this_context;
 mod undefined_variable;
 mod unknown_class;
+mod unknown_class_constant;
 mod unknown_constant;
 mod unknown_function;
 mod unknown_method;
 mod unknown_property;
+mod unknown_static_property;
 mod void_return;
 
 pub enum Finding {
@@ -26,10 +30,14 @@ pub enum Finding {
     UnknownConstant(String),
     ArgumentCount(String),
     NamedArgument(String, String),
+    KnownNamedArgument(String, String),
     UndefinedVariable(String),
     PossibleVariable(String),
     ThisContext,
     AbstractNew(String),
+    InterfaceNew(String),
+    UnknownStaticProperty(String, String),
+    UnknownClassConstant(String),
     StaticCall(String, String),
     MissingMethod(String, String),
     MagicConstant(String),
@@ -53,10 +61,14 @@ pub fn all() -> Vec<&'static dyn Rule> {
         &unknown_constant::UnknownConstant,
         &argument_count::ArgumentCount,
         &named_argument::NamedArgument,
+        &known_named_argument::KnownNamedArgument,
         &undefined_variable::UndefinedVariable,
         &possible_variable::PossibleVariable,
         &this_context::ThisContext,
         &abstract_new::AbstractNew,
+        &interface_new::InterfaceNew,
+        &unknown_static_property::UnknownStaticProperty,
+        &unknown_class_constant::UnknownClassConstant,
         &static_call::StaticCall,
         &missing_method::MissingMethod,
         &magic_constant::MagicConstant,

@@ -52,7 +52,7 @@ pub fn suppressed(file: &ParsedFile, diagnostic: &Diagnostic) -> bool {
                     && identifiers
                         .split_whitespace()
                         .next()
-                        .is_some_and(|id| psalm_identifier(id) == diagnostic.identifier)
+                        .is_some_and(|id| psalm_matches(id, &diagnostic.identifier))
                 {
                     return true;
                 }
@@ -85,7 +85,7 @@ fn psalm_identifier(id: &str) -> &str {
         "InvalidReturnType" => "return.missing",
         "AbstractInstantiation" => "new.abstract",
         "InvalidStaticInvocation" => "method.staticCall",
-        "UnimplementedInterfaceMethod" => "class.missingMethod",
+        "UnimplementedInterfaceMethod" => "method.abstract",
         _ => "",
     }
 }
@@ -111,4 +111,12 @@ fn declaration_end(file: &ParsedFile, start: usize) -> usize {
         }
     }
     file.lines.line(start)
+}
+
+fn psalm_matches(id: &str, identifier: &str) -> bool {
+    psalm_identifier(id) == identifier
+        || (id == "UndefinedConstant" && identifier == "classConstant.notFound")
+        || (matches!(id, "UndefinedPropertyFetch" | "UndefinedPropertyAssignment")
+            && identifier == "staticProperty.notFound")
+        || (id == "AbstractInstantiation" && identifier == "new.interface")
 }

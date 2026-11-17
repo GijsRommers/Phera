@@ -1,5 +1,5 @@
 //! Concrete classes must implement inherited contracts.
-//! Identifier: `class.missingMethod`; level 0. PHP example: `class A implements Countable {}`.
+//! Identifier: `method.abstract`; level 0. PHP example: `class A implements Countable {}`.
 
 use super::{Finding, Rule};
 
@@ -7,7 +7,7 @@ pub struct MissingMethod;
 
 impl Rule for MissingMethod {
     fn identifier(&self) -> &'static str {
-        "class.missingMethod"
+        "method.abstract"
     }
     fn level(&self) -> u8 {
         0

@@ -16,6 +16,7 @@ pub fn collect(index: &mut Index, file: &str, source: &str, program: &Program) {
                 file: file.into(),
                 line: lines.line(offset),
             };
+            collect_expression_declarations(index, statement, &names, &location);
             match &statement.kind {
                 StatementKind::Namespace {
                     name, statements, ..
@@ -46,17 +47,17 @@ pub fn collect(index: &mut Index, file: &str, source: &str, program: &Program) {
                         location(statement.span.start),
                     );
                     signature.accepts_extra = uses_argument_introspection(&function.body);
-                    index.functions.insert(
-                        names.declaration(&function.name.name).to_lowercase(),
-                        signature,
-                    );
+                    let name = names.declaration(&function.name.name).to_lowercase();
+                    if !index.builtin_functions.contains(&name) {
+                        index.functions.insert(name, signature);
+                    }
                     pending.push((&function.body, names.clone()));
                 }
                 StatementKind::Const { items, .. } => {
                     for item in items {
                         index.constants.insert(
                             names.declaration(&item.name.name),
-                            location(item.span.start),
+                            ConstantInfo::untyped(location(item.span.start)),
                         );
                     }
                 }
@@ -137,21 +138,39 @@ pub fn class_info(
                     );
                 }
             }
-            ClassMemberKind::Constant { items, .. } => {
+            ClassMemberKind::Constant {
+                modifiers,
+                ty,
+                items,
+                ..
+            } => {
                 for c in items {
-                    info.constants
-                        .insert(c.name.name.clone(), location(c.span.start));
+                    info.constants.insert(
+                        c.name.name.clone(),
+                        ConstantInfo {
+                            ty: ValueType::declared(ty.as_ref(), names),
+                            modifiers: *modifiers,
+                            location: location(c.span.start),
+                        },
+                    );
                 }
             }
             ClassMemberKind::EnumCase { name, .. } => {
-                info.constants
-                    .insert(name.name.clone(), location(name.span.start));
+                info.constants.insert(
+                    name.name.clone(),
+                    ConstantInfo {
+                        ty: ValueType::Class(info.name.clone()),
+                        modifiers: Modifiers::default(),
+                        location: location(name.span.start),
+                    },
+                );
             }
             ClassMemberKind::TraitUse { traits, .. } => {
                 info.traits.extend(traits.iter().map(resolve));
             }
         }
     }
+    crate::enums::add_members(&mut info, class, names);
     info.open_properties = class
         .attributes
         .iter()
@@ -213,4 +232,44 @@ fn uses_argument_introspection(body: &[Statement]) -> bool {
         }
     }
     false
+}
+
+fn collect_expression_declarations(
+    index: &mut Index,
+    statement: &Statement,
+    names: &Names,
+    location: &impl Fn(usize) -> Location,
+) {
+    let mut pending = crate::walk::statement_expressions(statement);
+    while let Some(expression) = pending.pop() {
+        if let ExpressionKind::Call {
+            callee,
+            arguments: Arguments::List(arguments),
+        } = &expression.kind
+            && let ExpressionKind::Name(name) = &callee.kind
+            && name.text.eq_ignore_ascii_case("define")
+            && let Some(argument) = arguments.first()
+            && let ExpressionKind::Literal(Literal::String(name)) = &argument.value.kind
+            && let Ok(name) = std::str::from_utf8(name)
+        {
+            index.constants.insert(
+                name.trim_start_matches('\\').into(),
+                ConstantInfo::untyped(location(expression.span.start)),
+            );
+        }
+        if let ExpressionKind::New {
+            class: NewTarget::Anonymous(class),
+            ..
+        } = &expression.kind
+        {
+            let mut info = class_info(class, names, location);
+            info.name = anonymous_name(&location(class.span.start).file, class.span.start);
+            index.classes.insert(info.name.to_lowercase(), info);
+        }
+        pending.extend(crate::walk::children(expression));
+    }
+}
+
+pub fn anonymous_name(file: &str, offset: usize) -> String {
+    format!("@anonymous:{file}:{offset}")
 }

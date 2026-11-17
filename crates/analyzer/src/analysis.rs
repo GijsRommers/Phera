@@ -7,16 +7,21 @@ use crate::{
     names::Names,
     project::ParsedFile,
     rules::{self, Finding},
-    scope::{Definition, Scope},
+    scope::{Definition, Scope, Symbol},
     types::ValueType,
 };
 use phera_ast::*;
 use phera_source::Span;
 
+mod arguments;
 mod bindings;
 mod calls;
 mod declarations;
+mod exceptions;
 mod expressions;
+mod intrinsics;
+mod members;
+mod refine;
 mod statements;
 
 pub const MAX_DEPTH: usize = 256;
@@ -27,7 +32,9 @@ pub struct Context {
     pub class: Option<String>,
     pub object: bool,
     pub returns: ValueType,
+    pub declared_return: bool,
     pub function: String,
+    pub incomplete: bool,
 }
 
 pub struct Analyzer<'a> {
@@ -37,6 +44,7 @@ pub struct Analyzer<'a> {
     pub diagnostics: Vec<Diagnostic>,
     pub context: Context,
     pub depth: usize,
+    pub exception_scopes: Vec<Vec<Scope>>,
 }
 
 impl<'a> Analyzer<'a> {
@@ -47,12 +55,15 @@ impl<'a> Analyzer<'a> {
             level,
             diagnostics: Vec::new(),
             depth: 0,
+            exception_scopes: Vec::new(),
             context: Context {
                 names: Names::for_block(String::new(), &file.program.statements),
                 class: None,
                 object: false,
                 returns: ValueType::Mixed,
+                declared_return: false,
                 function: "top level".into(),
+                incomplete: false,
             },
         }
     }
@@ -96,7 +107,7 @@ impl<'a> Analyzer<'a> {
             match variable.definition {
                 Definition::Absent => self.report(Finding::UndefinedVariable(name.into()), span),
                 Definition::Possible => self.report(Finding::PossibleVariable(name.into()), span),
-                Definition::Definite => {}
+                Definition::Definite | Definition::Unknown => {}
             }
         }
         variable.ty
@@ -130,10 +141,50 @@ impl<'a> Analyzer<'a> {
         scope: &mut Scope,
     ) -> Option<String> {
         if let ExpressionKind::Name(name) = &expression.kind {
-            self.class_name(name, true)
+            let class = self.class_name(name, false);
+            if let Some(class) = &class
+                && self.index.class(class).is_none()
+                && !scope.known.contains(&Symbol::Class(class.to_lowercase()))
+            {
+                self.report(Finding::UnknownClass(class.clone()), name.span);
+            }
+            class
         } else {
             self.expression(expression, scope, false);
             None
         }
     }
+}
+
+#[derive(Clone, Copy)]
+pub enum Access {
+    Checked,
+    Inferred,
+    Static,
+    Forwarded,
+}
+
+impl Access {
+    pub fn object(target: &Expression) -> Self {
+        if matches!(&target.kind, ExpressionKind::Variable(Variable::Named(n)) if n == "this") {
+            Self::Checked
+        } else {
+            Self::Inferred
+        }
+    }
+    pub fn reports_missing(self) -> bool {
+        !matches!(self, Self::Inferred)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub enum CallKind {
+    Direct,
+    Callable,
+}
+
+#[derive(Clone, Copy)]
+pub enum PropertyAccess {
+    Instance,
+    Static,
 }

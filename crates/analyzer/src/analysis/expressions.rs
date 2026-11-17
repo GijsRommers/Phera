@@ -11,6 +11,7 @@ impl Analyzer<'_> {
         quiet: bool,
     ) -> ValueType {
         if self.depth >= MAX_DEPTH {
+            self.context.incomplete = true;
             scope.dynamic = true;
             return ValueType::Mixed;
         }
@@ -42,13 +43,19 @@ impl Analyzer<'_> {
                 ValueType::Mixed
             }
             ExpressionKind::Name(name) => {
-                self.constant_name(name);
+                self.constant_name(name, scope);
                 ValueType::Mixed
             }
             ExpressionKind::MagicConstant(_) => ValueType::String,
             ExpressionKind::Assign { target, value } => {
+                let constant = crate::constants::value(value, scope);
                 let ty = self.expression(value, scope, false);
                 self.write(target, ty.clone(), scope);
+                if let ExpressionKind::Variable(Variable::Named(name)) = &target.kind
+                    && let Some(value) = constant
+                {
+                    scope.values.insert(name.clone(), value);
+                }
                 ty
             }
             ExpressionKind::AssignReference { target, value } => {
@@ -88,7 +95,14 @@ impl Analyzer<'_> {
                 ..
             } => {
                 let ty = self.expression(target, scope, quiet);
-                self.method_call(&ty, name, arguments, scope, expression.span, false)
+                self.method_call(
+                    &ty,
+                    name,
+                    arguments,
+                    scope,
+                    expression.span,
+                    Access::object(target),
+                )
             }
             ExpressionKind::StaticCall {
                 class,
@@ -100,18 +114,42 @@ impl Analyzer<'_> {
                 let forwarding = matches!(&class.kind, ExpressionKind::Name(n)
                     if matches!(n.text.to_lowercase().as_str(), "self" | "static" | "parent"))
                     && self.context.object;
-                self.method_call(&ty, name, arguments, scope, expression.span, !forwarding)
+                self.method_call(
+                    &ty,
+                    name,
+                    arguments,
+                    scope,
+                    expression.span,
+                    if forwarding {
+                        Access::Forwarded
+                    } else {
+                        Access::Static
+                    },
+                )
             }
             ExpressionKind::Property { target, name, .. } => {
                 let ty = self.expression(target, scope, quiet);
-                self.property(&ty, name, scope, expression.span, quiet)
+                self.property(
+                    &ty,
+                    name,
+                    scope,
+                    expression.span,
+                    quiet,
+                    Access::object(target),
+                )
             }
             ExpressionKind::StaticProperty { class, name } => {
                 let class = self.class_expression(class, scope);
                 if let Variable::Named(name) = name
                     && let Some(class) = class
                 {
-                    return self.named_property(&class, name, expression.span, quiet);
+                    return self.named_property(
+                        &class,
+                        name,
+                        expression.span,
+                        quiet,
+                        PropertyAccess::Static,
+                    );
                 }
                 ValueType::Mixed
             }
@@ -120,10 +158,11 @@ impl Analyzer<'_> {
                 if let (Some(class), MemberName::Identifier(name)) = (class, name)
                     && !name.name.eq_ignore_ascii_case("class")
                     && self.index.class(&class).is_some()
+                    && self.index.complete(&class)
                     && !self.index.constant(&class, &name.name)
                 {
                     self.report(
-                        Finding::UnknownConstant(format!("{class}::{}", name.name)),
+                        Finding::UnknownClassConstant(format!("{class}::{}", name.name)),
                         name.span,
                     );
                 }
@@ -158,6 +197,7 @@ impl Analyzer<'_> {
             }
             ExpressionKind::Throw(value) => {
                 self.expression(value, scope, false);
+                self.record_exception(scope);
                 ValueType::Never
             }
             ExpressionKind::Exit(value) => {
@@ -168,6 +208,7 @@ impl Analyzer<'_> {
             }
             ExpressionKind::Include { path, .. } | ExpressionKind::Eval(path) => {
                 self.expression(path, scope, false);
+                self.record_exception(scope);
                 scope.dynamic = true;
                 ValueType::Mixed
             }
@@ -184,15 +225,15 @@ impl Analyzer<'_> {
         }
     }
 
-    fn constant_name(&mut self, name: &Name) {
+    fn constant_name(&mut self, name: &Name, scope: &Scope) {
         if matches!(name.text.to_lowercase().as_str(), "true" | "false" | "null") {
             return;
         }
         let candidates = self.context.names.resolve(name, UseKind::Constant);
-        if !candidates
-            .iter()
-            .any(|n| self.index.constants.contains_key(n))
-        {
+        if !candidates.iter().any(|n| {
+            self.index.constants.contains_key(n)
+                || scope.known.contains(&Symbol::Constant(n.clone()))
+        }) {
             if name.text.starts_with("__") && name.text.ends_with("__") {
                 self.report(Finding::MagicConstant(name.text.clone()), name.span);
             } else {
@@ -229,6 +270,12 @@ impl Analyzer<'_> {
             };
         }
         let right_ty = self.expression(right, scope, quiet);
+        if matches!(
+            operator,
+            BinaryOperator::Divide | BinaryOperator::Modulo | BinaryOperator::Power
+        ) {
+            self.record_exception(scope);
+        }
         match operator {
             BinaryOperator::Concat => ValueType::String,
             BinaryOperator::Equal

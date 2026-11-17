@@ -9,6 +9,7 @@ pub enum Definition {
     Definite,
     Possible,
     Absent,
+    Unknown,
 }
 
 #[derive(Clone, Debug)]
@@ -19,6 +20,8 @@ pub struct VariableInfo {
 
 #[derive(Clone, Debug, Default)]
 pub struct Scope {
+    pub known: BTreeSet<Symbol>,
+    pub values: BTreeMap<String, crate::constants::ConstantValue>,
     pub variables: BTreeMap<String, VariableInfo>,
     pub dynamic: bool,
     pub aliases: BTreeMap<String, BTreeSet<String>>,
@@ -26,6 +29,7 @@ pub struct Scope {
 
 impl Scope {
     pub fn define(&mut self, name: &str, ty: ValueType) {
+        self.values.remove(name);
         self.variables.insert(
             name.into(),
             VariableInfo {
@@ -35,6 +39,7 @@ impl Scope {
         );
         if let Some(aliases) = self.aliases.get(name).cloned() {
             for alias in aliases {
+                self.values.remove(&alias);
                 self.variables.insert(
                     alias,
                     VariableInfo {
@@ -94,6 +99,12 @@ impl Scope {
             .collect();
         result.dynamic = paths.iter().any(|p| p.dynamic);
         result
+            .values
+            .retain(|key, value| paths.iter().all(|p| p.values.get(key) == Some(value)));
+        result
+            .known
+            .retain(|symbol| paths.iter().all(|p| p.known.contains(symbol)));
+        result
             .aliases
             .retain(|key, value| paths.iter().all(|p| p.aliases.get(key) == Some(value)));
         for key in keys {
@@ -118,4 +129,11 @@ impl Scope {
         }
         result
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Symbol {
+    Class(String),
+    Function(String),
+    Constant(String),
 }

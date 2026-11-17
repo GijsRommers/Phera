@@ -41,9 +41,12 @@ impl Analyzer<'_> {
 
     pub fn function(&mut self, function: &FunctionDeclaration, span: Span) {
         let previous = self.context.clone();
+        let exceptions = std::mem::take(&mut self.exception_scopes);
+        self.context.incomplete = false;
         self.context.class = None;
         self.context.object = false;
         self.context.function = self.context.names.declaration(&function.name.name);
+        self.context.declared_return = function.return_type.is_some();
         self.context.returns =
             ValueType::declared(function.return_type.as_ref(), &self.context.names);
         let mut scope = Scope::default();
@@ -52,14 +55,16 @@ impl Analyzer<'_> {
         let flow = self.block(&function.body, &mut scope);
         self.check_return_path(flow, &function.body, span);
         self.context = previous;
+        self.exception_scopes = exceptions;
     }
 
     pub fn class_declaration(&mut self, class: &ClassDeclaration) {
         let previous = self.context.clone();
-        self.context.class = class
-            .name
-            .as_ref()
-            .map(|n| self.context.names.declaration(&n.name));
+        let exceptions = std::mem::take(&mut self.exception_scopes);
+        self.context.class = Some(class.name.as_ref().map_or_else(
+            || crate::collect::anonymous_name(&self.file.path, class.span.start),
+            |n| self.context.names.declaration(&n.name),
+        ));
         for name in class.extends.iter().chain(&class.implements) {
             self.class_name(name, true);
         }
@@ -69,8 +74,10 @@ impl Analyzer<'_> {
         for member in &class.members {
             match &member.kind {
                 ClassMemberKind::Method(method) => {
+                    self.context.incomplete = false;
                     self.context.object = !method.modifiers.is_static;
                     self.context.function = method.name.name.clone();
+                    self.context.declared_return = method.return_type.is_some();
                     self.context.returns =
                         ValueType::declared(method.return_type.as_ref(), &self.context.names);
                     let mut scope = Scope::default();
@@ -104,13 +111,17 @@ impl Analyzer<'_> {
             }
         }
         self.context = previous;
+        self.exception_scopes = exceptions;
     }
 
     fn required_methods(&mut self, name: &str, span: Span) {
         let Some(class) = self.index.class(name) else {
             return;
         };
-        if class.kind != ClassKind::Class || class.modifiers.is_abstract {
+        if class.kind != ClassKind::Class
+            || class.modifiers.is_abstract
+            || !self.index.complete(name)
+        {
             return;
         }
         let mut missing = std::collections::BTreeSet::new();
@@ -134,7 +145,10 @@ impl Analyzer<'_> {
     }
 
     pub fn check_return_path(&mut self, flow: Flow, body: &[Statement], span: Span) {
-        if flow != Flow::Next || matches!(self.context.returns, ValueType::Mixed | ValueType::Void)
+        if self.context.incomplete
+            || flow != Flow::Next
+            || !self.context.declared_return
+            || self.context.returns == ValueType::Void
         {
             return;
         }
