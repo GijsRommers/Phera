@@ -4,7 +4,7 @@ use mysql_async::consts::ColumnType;
 use mysql_async::{Row, Value as MysqlValue};
 use phera_extension_api::Value;
 
-use super::{Column, Rows};
+use crate::drivers::{Column, Rows};
 use crate::parameters::BoundValue;
 
 pub fn parameter(value: &BoundValue) -> MysqlValue {

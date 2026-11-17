@@ -10,7 +10,7 @@ use bytes::BytesMut;
 use tokio_postgres::types::{FromSql, IsNull, Kind, ToSql, Type};
 use tokio_postgres::{Client, Row};
 
-use super::postgres::error;
+use super::error;
 use crate::errors::DbError;
 
 type DecodeError = Box<dyn Error + Send + Sync>;

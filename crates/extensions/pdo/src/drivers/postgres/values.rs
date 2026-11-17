@@ -6,9 +6,42 @@ use chrono::{Duration, NaiveDate};
 use phera_extension_api::Value;
 use tokio_postgres::types::{FromSql, Kind, Type};
 
+use super::{Row, error};
+use crate::drivers::{Column, Rows};
+use crate::errors::DbError;
+
 type DecodeError = Box<dyn Error + Send + Sync>;
 
-pub struct Cell(pub Value);
+/// Turns PostgreSQL's rows into PHP values. A column PostgreSQL already
+/// formatted as text takes that text; every other one is decoded from the
+/// binary format.
+pub fn convert(columns: Vec<Column>, rows: Vec<Row>, affected: u64) -> Result<Rows, DbError> {
+    let mut values = Vec::with_capacity(rows.len());
+    for Row { binary, text } in rows {
+        let mut text = text.into_iter().peekable();
+        let mut cells = Vec::with_capacity(binary.len());
+        for index in 0..binary.len() {
+            // `text` is in column order, so its next entry is this column's
+            // or a later one's.
+            let value = match text.next_if(|(column, _)| *column == index) {
+                Some((_, text)) => Value::from(text),
+                None => {
+                    let cell: Option<Cell> = binary.try_get(index).map_err(|e| error(e, ""))?;
+                    cell.map_or(Value::Null, |cell| cell.0)
+                }
+            };
+            cells.push(value);
+        }
+        values.push(cells);
+    }
+    Ok(Rows {
+        columns,
+        values,
+        affected,
+    })
+}
+
+struct Cell(Value);
 
 impl<'a> FromSql<'a> for Cell {
     fn from_sql(ty: &Type, bytes: &'a [u8]) -> Result<Self, DecodeError> {

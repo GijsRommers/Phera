@@ -62,9 +62,10 @@ impl Lease {
         result
     }
 
-    pub async fn prepare(&mut self, sql: &Sql) -> Result<Prepared, DbError> {
+    /// See [`Driver::prepare`] for `number`.
+    pub async fn prepare(&mut self, sql: &Sql, number: u64) -> Result<Prepared, DbError> {
         let sql = sql.clone();
-        self.run(move |driver| Box::pin(async move { driver.prepare(&sql).await }))
+        self.run(move |driver| Box::pin(async move { driver.prepare(&sql, number).await }))
             .await
     }
 
@@ -89,9 +90,9 @@ impl Lease {
             .into_php()
     }
 
-    pub async fn direct(&mut self, sql: &str) -> Result<Rows, DbError> {
+    pub async fn run_unprepared(&mut self, sql: &str) -> Result<Rows, DbError> {
         let sql = sql.to_owned();
-        self.run(move |driver| Box::pin(async move { driver.direct(&sql).await }))
+        self.run(move |driver| Box::pin(async move { driver.run_unprepared(&sql).await }))
             .await?
             .into_php()
     }
@@ -108,18 +109,16 @@ impl Lease {
             .await
     }
 
+    /// `getColumnMeta()`. Only PostgreSQL needs to ask the server.
     pub async fn metadata(&mut self, column: &Column) -> Result<PhpArray, DbError> {
-        let owned = column.clone();
-        let result = self
-            .run(move |driver| Box::pin(async move { driver.metadata(&owned).await }))
-            .await?;
-        match (&column.metadata, result) {
-            (Metadata::Postgres { .. }, Some((length, table))) => {
-                Ok(crate::metadata::postgres_values(column, length, table))
-            }
-            (Metadata::Mysql(column), None) => Ok(crate::metadata::mysql(column)),
-            _ => Err(connection_error("Mismatched metadata driver")),
+        if let Metadata::Mysql(mysql) = &column.metadata {
+            return Ok(crate::metadata::mysql(mysql));
         }
+        let owned = column.clone();
+        let (length, table) = self
+            .run(move |driver| Box::pin(async move { driver.postgres_column(&owned).await }))
+            .await?;
+        Ok(crate::metadata::postgres_values(column, length, table))
     }
 
     pub fn observed_transaction_state(&self) -> Option<bool> {

@@ -5,7 +5,7 @@
 use tokio_postgres::types::ToSql;
 use tokio_postgres::{Client, Statement};
 
-use super::postgres_protocol::{TextParameter, error};
+use super::protocol::{TextParameter, error};
 use crate::errors::DbError;
 use crate::parameters::BoundValue;
 use crate::placeholders::Sql;
@@ -37,6 +37,8 @@ pub async fn under_bound(
             }
             failure
         }
-        Ok(_) => super::connection_error("PostgreSQL accepted an incomplete parameter list"),
+        Ok(_) => {
+            crate::drivers::connection_error("PostgreSQL accepted an incomplete parameter list")
+        }
     }
 }

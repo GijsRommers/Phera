@@ -1,11 +1,24 @@
-//! PostgreSQL prepares use `$1` on the wire: `$pdo->prepare('SELECT ?::int')`.
+//! PostgreSQL through tokio-postgres. PDO's `?` and `:name` placeholders
+//! become `$1`, `$2` on the wire:
+//!
+//! ```php
+//! $statement = $pdo->prepare('SELECT ?::int AS a, :b::text AS b');
+//! $statement->execute([1, 'b' => 'two']); // sent as SELECT $1::int AS a, $2::text AS b
+//! ```
 
+mod metadata;
+mod parameters;
+mod protocol;
+mod stream;
+mod text;
+pub mod values;
+
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::sync::{Arc, OnceLock};
 
-use super::postgres_protocol::TextParameter;
-pub use super::postgres_protocol::error;
-use super::postgres_stream::ObservedStream;
+use protocol::TextParameter;
+pub use protocol::error;
+use stream::ObservedStream;
 use tokio_postgres::types::ToSql;
 use tokio_postgres::{Client, Config, NoTls, SimpleQueryMessage, Statement};
 
@@ -15,12 +28,27 @@ use crate::errors::DbError;
 use crate::parameters::{BoundValue, literal, quote};
 use crate::placeholders::Sql;
 
+/// The status byte of PostgreSQL's last ReadyForQuery message: `I` idle,
+/// `T` in a transaction, `E` in a failed transaction.
+const IDLE: u8 = b'I';
+
+/// One row of a result: its values in PostgreSQL's binary format, and the
+/// ones PostgreSQL formatted as text for PDO, by column index.
+pub struct Row {
+    binary: tokio_postgres::Row,
+    text: Vec<(usize, String)>,
+}
+
 pub struct Postgres {
     client: Client,
+    /// Drives the socket; tokio-postgres sends and receives through it.
     task: tokio::task::JoinHandle<()>,
     pub version: String,
+    /// The latest ReadyForQuery status, kept up to date by the socket.
     transaction: Arc<AtomicU8>,
-    retire_client: OnceLock<()>,
+    /// Set once the connection may hold type information that `DISCARD ALL`
+    /// cannot clear; see `prepare_query`.
+    retire: bool,
 }
 
 impl Drop for Postgres {
@@ -46,7 +74,7 @@ impl Postgres {
         if let Some(name) = dsn.fields.get("application_name") {
             config.application_name(name);
         }
-        let transaction = Arc::new(AtomicU8::new(b'I'));
+        let transaction = Arc::new(AtomicU8::new(IDLE));
         let stream = ObservedStream::connect(dsn, transaction.clone())
             .await
             .map_err(connection_error)?;
@@ -69,7 +97,7 @@ impl Postgres {
             task,
             version: String::new(),
             transaction,
-            retire_client: OnceLock::new(),
+            retire: false,
         };
         let messages = driver
             .client
@@ -89,11 +117,11 @@ impl Postgres {
         // ReadyForQuery. An empty query is valid even in a failed transaction
         // and acts as a protocol barrier when the PHP script asks for state.
         let _ = self.client.simple_query("").await;
-        !self.client.is_closed() && self.transaction.load(Ordering::Acquire) != b'I'
+        !self.client.is_closed() && self.transaction.load(Ordering::Acquire) != IDLE
     }
 
     pub async fn metadata(&self, column: &Column) -> Result<(i16, Option<String>), DbError> {
-        super::postgres_metadata::get(&self.client, column).await
+        metadata::get(&self.client, column).await
     }
 
     pub async fn close(mut self) {
@@ -125,12 +153,12 @@ impl Postgres {
         Ok(())
     }
 
-    pub async fn prepare(&self, sql: &Sql) -> Result<Statement, DbError> {
+    pub async fn prepare(&mut self, sql: &Sql) -> Result<Statement, DbError> {
         let query = sql.render(|i| format!("${}", i + 1));
         self.prepare_query(&query).await
     }
 
-    async fn prepare_query(&self, query: &str) -> Result<Statement, DbError> {
+    async fn prepare_query(&mut self, query: &str) -> Result<Statement, DbError> {
         let result = self
             .client
             .prepare(query)
@@ -149,24 +177,24 @@ impl Postgres {
             Err(_) => true,
         };
         if needs_fresh_client {
-            let _ = self.retire_client.set(());
+            self.retire = true;
         }
         result
     }
 
     pub fn reusable(&self) -> bool {
-        self.retire_client.get().is_none()
+        !self.retire
     }
 
     pub async fn execute(
-        &self,
+        &mut self,
         sql: &Sql,
         prepared: &Prepared,
         values: &[BoundValue],
     ) -> Result<RawRows, DbError> {
         let statement = match prepared {
-            Prepared::Postgres(statement, _) => statement.clone(),
-            Prepared::PostgresDeferred(_) => self.prepare(sql).await?,
+            Prepared::Postgres { statement, .. } => statement.clone(),
+            Prepared::PostgresDeferred { .. } => self.prepare(sql).await?,
             Prepared::Emulated => {
                 let mut literals = Vec::new();
                 for value in values {
@@ -182,23 +210,18 @@ impl Postgres {
                 };
                 // Emulation sends SQL directly; PostgreSQL diagnoses unbound $n tokens.
                 if sql.has_dollar_parameters {
-                    return self.direct(&rendered).await;
+                    return self.run_unprepared(&rendered).await;
                 }
                 self.prepare_query(&rendered).await?
             }
             _ => return Err(connection_error("Mismatched database driver")),
         };
-        if let Prepared::Postgres(_, number) | Prepared::PostgresDeferred(number) = prepared
+        if let Prepared::Postgres { number, .. } | Prepared::PostgresDeferred { number } = prepared
             && values.len() != statement.params().len()
         {
-            return Err(super::postgres_parameters::under_bound(
-                &self.client,
-                sql,
-                &statement,
-                values,
-                *number,
-            )
-            .await);
+            return Err(
+                parameters::under_bound(&self.client, sql, &statement, values, *number).await,
+            );
         }
         let parameters: Vec<TextParameter> = if matches!(prepared, Prepared::Emulated) {
             Vec::new()
@@ -231,8 +254,8 @@ impl Postgres {
                 .map_err(|e| error(e, &query))?;
             affected = rows.len() as u64;
             for row in rows {
-                let formatted = super::postgres_text::convert(&self.client, &row, &query).await?;
-                values.push((row, formatted));
+                let text = text::convert(&self.client, &row, &query).await?;
+                values.push(Row { binary: row, text });
             }
         }
         Ok(RawRows::Postgres {
@@ -242,7 +265,7 @@ impl Postgres {
         })
     }
 
-    pub async fn direct(&self, sql: &str) -> Result<RawRows, DbError> {
+    pub async fn run_unprepared(&self, sql: &str) -> Result<RawRows, DbError> {
         let messages = self
             .client
             .simple_query(sql)

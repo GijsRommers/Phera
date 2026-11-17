@@ -50,7 +50,7 @@ fn run<'a>(
                 }
             }
         };
-        let result = driver.direct(sql).await;
+        let result = driver.run_unprepared(sql).await;
         match result {
             Ok(_) => {
                 session.transaction.set(next);

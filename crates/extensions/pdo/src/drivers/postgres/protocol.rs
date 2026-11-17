@@ -1,6 +1,6 @@
 //! PostgreSQL wire parameter serialization and PHP-style server error formatting.
 
-use super::connection_error;
+use crate::drivers::connection_error;
 use crate::errors::DbError;
 use crate::parameters::BoundValue;
 use bytes::BytesMut;

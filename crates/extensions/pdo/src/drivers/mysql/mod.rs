@@ -3,12 +3,14 @@
 use mysql_async::prelude::Queryable;
 use mysql_async::{Conn, OptsBuilder, Params, Row, Statement};
 
-use super::mysql_values::parameter;
+pub mod values;
+
 use super::{Prepared, RawRows};
 use crate::dsn::Dsn;
 use crate::errors::DbError;
 use crate::parameters::{BoundValue, literal, quote};
 use crate::placeholders::Sql;
+use values::parameter;
 
 pub struct Mysql {
     connection: Conn,
@@ -141,14 +143,14 @@ impl Mysql {
                     affected,
                 })
             }
-            Prepared::Emulated if values.is_empty() => self.direct(&sql.source).await,
+            Prepared::Emulated if values.is_empty() => self.run_unprepared(&sql.source).await,
             Prepared::Emulated => {
                 let mode = self.backslash_escapes().await?;
                 let query = sql.render(|i| match &values[i] {
                     BoundValue::String(bytes) => quote(bytes, mode),
                     value => literal(value, true),
                 });
-                self.direct(&query).await
+                self.run_unprepared(&query).await
             }
             _ => Err(DbError {
                 state: "HY000".into(),
@@ -158,7 +160,7 @@ impl Mysql {
         }
     }
 
-    pub async fn direct(&mut self, sql: &str) -> Result<RawRows, DbError> {
+    pub async fn run_unprepared(&mut self, sql: &str) -> Result<RawRows, DbError> {
         self.check_pending()?;
         let mut result = self.connection.query_iter(sql).await.map_err(error)?;
         let columns = result.columns_ref().to_vec();
@@ -174,7 +176,7 @@ impl Mysql {
     }
 
     pub async fn exec(&mut self, sql: &str) -> Result<RawRows, DbError> {
-        let rows = self.direct(sql).await?;
+        let rows = self.run_unprepared(sql).await?;
         // PHP exec() has no statement on which to consume a SELECT's result.
         self.pending_exec_rows = rows.has_columns();
         Ok(rows)

@@ -115,9 +115,9 @@ async fn create(
     } else if connection.name == crate::dsn::DriverName::Postgres {
         let number = connection.statement_sequence.get() + 1;
         connection.statement_sequence.set(number);
-        Prepared::PostgresDeferred(number)
+        Prepared::PostgresDeferred { number }
     } else {
-        let result = connection.driver.lock().await.prepare(&sql).await;
+        let result = connection.driver.lock().await.prepare(&sql, 0).await;
         match result {
             Ok(prepared) => prepared,
             Err(error) => return connection.fail(context, error, method),
@@ -187,7 +187,7 @@ fn bind(
         let statement = state.borrow();
         if matches!(
             statement.prepared,
-            Prepared::PostgresDeferred(_) | Prepared::Postgres(_, _)
+            Prepared::PostgresDeferred { .. } | Prepared::Postgres { .. }
         ) {
             let valid = crate::native_parameters::valid_key(&statement.sql, &key)
                 || (statement.sql.parameters.is_empty() && key.parse::<usize>().is_ok());

@@ -46,10 +46,6 @@ static POOL: Pool<Key, Driver> = Pool::new(
     },
 );
 
-/// An idle connection unused for this long is checked with a round trip
-/// before it is lent again; a younger one is trusted.
-const CHECK_AFTER: Duration = Duration::from_secs(3);
-
 /// Connections are only shared between `new PDO` calls that would get the
 /// same session: the same driver, settings and credentials. The password is
 /// part of the key and is never printed, which is why there is no `Debug`.
@@ -149,27 +145,6 @@ async fn acquire_from(
         )),
         AcquireError::Connect(error) => error,
     })
-}
-
-/// What the pool needs from a database connection; the driver does the work.
-impl phera_io_pool::Connection for Driver {
-    type Error = DbError;
-
-    async fn check(&mut self, idle: Duration) -> bool {
-        !self.is_broken() && (idle < CHECK_AFTER || self.health().await.is_ok())
-    }
-
-    fn reusable(&self) -> bool {
-        Driver::reusable(self)
-    }
-
-    async fn reset(&mut self) -> Result<(), DbError> {
-        Driver::reset(self).await
-    }
-
-    async fn close(self) {
-        Driver::close(self).await;
-    }
 }
 
 #[cfg(test)]

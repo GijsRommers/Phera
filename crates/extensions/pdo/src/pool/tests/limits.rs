@@ -40,7 +40,7 @@ pub async fn fifo_timeout_cancellation(name: &'static str) {
             // lease until the driver protocol completes, then rollback/reset runs.
             let request = async {
                 let mut connection = pool.connect().await;
-                connection.direct("BEGIN").await.unwrap();
+                connection.run_unprepared("BEGIN").await.unwrap();
                 let query = if name == "pgsql" {
                     "SELECT pg_sleep(0.08)"
                 } else {
@@ -55,7 +55,7 @@ pub async fn fifo_timeout_cancellation(name: &'static str) {
             );
             let mut next = pool.connect().await;
             assert_eq!(id(&mut next, name).await, original);
-            next.direct("CREATE TEMPORARY TABLE after_cancel(id INT)")
+            next.run_unprepared("CREATE TEMPORARY TABLE after_cancel(id INT)")
                 .await
                 .unwrap();
             eprintln!(
@@ -117,7 +117,10 @@ pub async fn expiry_and_killed(name: &'static str) {
         )
         .await;
     } else {
-        killer.direct(&format!("KILL {original}")).await.unwrap();
+        killer
+            .run_unprepared(&format!("KILL {original}"))
+            .await
+            .unwrap();
     }
     let mut replacement = pool.connect().await;
     assert_ne!(
@@ -133,7 +136,10 @@ pub async fn expiry_and_killed(name: &'static str) {
         )
         .await;
     } else {
-        killer.direct(&format!("KILL {borrowed_id}")).await.unwrap();
+        killer
+            .run_unprepared(&format!("KILL {borrowed_id}"))
+            .await
+            .unwrap();
     }
     drop(replacement);
     let mut after_reset_failure = pool.connect().await;
