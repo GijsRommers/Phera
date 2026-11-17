@@ -55,10 +55,7 @@ docker exec phera-test-mysql mysql -uroot -pphera-root \
       GRANT ALL ON phera_test.* TO 'phera_pool'@'%';"
 ```
 
-Until native class constants are linked by the VM, run the real-binary oracle with
-`PHERA_PDO_NUMERIC_CONSTANTS=1 PHERA_BIN=/path/to/phera cargo test -p phera-ext-pdo --test oracle`.
-It substitutes constants using PHP Reflection into scratch copies, preserving the
-original scripts and reporting every mismatch without expected-failure exemptions.
+`make ci-prerequisites` creates that account too, which is how CI gets it.
 
 Application settings live in the environment and are documented in [../README.md](../README.md).
 Only `PHERA_ATTR_POOL` (100000, default true) is a constructor option. The previous
