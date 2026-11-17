@@ -59,7 +59,11 @@ fn reference_outputs() {
             ],
         )
         .map(|v| pair(v, cell.borrow().clone()));
-        script.push_str(&format!("run('ref', function() {{ $v={}; $r=mb_convert_variables('ASCII','UTF-8',$v); return [$r,$v]; }});\n", oracle::php_literal(&input)));
+        script.push_str(&format!(
+            "run('ref', function() {{ $v={}; \
+             $r=mb_convert_variables('ASCII','UTF-8',$v); return [$r,$v]; }});\n",
+            oracle::php_literal(&input)
+        ));
         rust.push(oracle::encode_case(
             "ref",
             &result,

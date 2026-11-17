@@ -5,7 +5,11 @@ pub fn parse(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     let mut result = PhpArray::new();
     for (i, pair) in args::bytes(a, 0).split(|b| *b == b'&').enumerate() {
         if i >= 1000 {
-            ctx.warning("mb_parse_str(): Input variables exceeded 1000. To increase the limit change max_input_vars in php.ini.".into());
+            ctx.warning(
+                "mb_parse_str(): Input variables exceeded 1000. \
+                To increase the limit change max_input_vars in php.ini."
+                    .into(),
+            );
             break;
         }
         let position = pair.iter().position(|b| *b == b'=').unwrap_or(pair.len());

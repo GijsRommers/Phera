@@ -59,19 +59,30 @@ pub enum Setting {
     Regex,
 }
 pub fn encoding(ctx: &mut dyn Context, a: &[Value], name: &str, setting: Setting) -> NativeResult {
-    let value = args::string(a, 0).map(|s| {
-        let name_value = s.to_string_lossy();
-        if matches!(setting, Setting::Output) && (name_value.is_empty() || name_value.eq_ignore_ascii_case("pass")) {
-            return Ok(Encoding(usize::MAX));
+    let value = match args::string(a, 0) {
+        None => None,
+        Some(value) => {
+            let value = value.to_string_lossy();
+            let pass = value.is_empty() || value.eq_ignore_ascii_case("pass");
+            if matches!(setting, Setting::Output) && pass {
+                Some(Encoding(usize::MAX))
+            } else {
+                let mut encoding = encoding::resolve(&value, name, 1, "encoding")?;
+                if matches!(setting, Setting::Regex) {
+                    if encoding.0 >= 44 {
+                        return Err(NativeError::value_error(format!(
+                            "{name}(): Argument #1 ($encoding) must be a valid encoding, \
+                             \"{value}\" given"
+                        )));
+                    }
+                    if matches!(encoding.0, 18 | 19) {
+                        encoding = Encoding(17);
+                    }
+                }
+                Some(encoding)
+            }
         }
-        let mut enc = encoding::resolve(&name_value, name, 1, "encoding")?;
-        if matches!(setting, Setting::Regex) {
-            if enc.0 >= 44 { return Err(NativeError::value_error(format!(
-                "{name}(): Argument #1 ($encoding) must be a valid encoding, \"{name_value}\" given"))); }
-            if matches!(enc.0, 18 | 19) { enc = Encoding(17); }
-        }
-        Ok(enc)
-    }).transpose()?;
+    };
     let state = ctx.state().get_or_default::<Settings>();
     let slot = match setting {
         Setting::Internal => &mut state.internal,
@@ -92,7 +103,8 @@ pub fn substitute(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     if let Some(n) = args::int(a, 0) {
         if !(0..=0x10ffff).contains(&n) || (0xd800..=0xdfff).contains(&n) {
             return Err(NativeError::value_error(
-                "mb_substitute_character(): Argument #1 ($substitute_character) is not a valid codepoint",
+                "mb_substitute_character(): Argument #1 ($substitute_character) \
+                 is not a valid codepoint",
             ));
         }
         state.substitute_codepoint = n as u32;

@@ -44,7 +44,8 @@ pub fn encoding_list(
             out.push(e);
         } else if !name.is_empty() {
             return Err(NativeError::value_error(format!(
-                "{function}(): Argument #{number} (${parameter}) contains invalid encoding \"{name}\""
+                "{function}(): Argument #{number} (${parameter}) \
+                 contains invalid encoding \"{name}\""
             )));
         }
     }
@@ -153,13 +154,14 @@ pub fn convert(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
         let points: Vec<_> = args::bytes(a, 0).iter().map(|b| u32::from(*b)).collect();
         return Ok(Value::from(crate::pseudo::encode(&points, to)));
     }
-    if list.len() == 1 && matches!(list[0].0, 44 | 47) {
-        return Ok(Value::from(
-            crate::pseudo::decode(args::bytes(a, 0), list[0])
-                .into_iter()
-                .map(|cp| cp as u8)
-                .collect::<Vec<_>>(),
-        ));
+    if list.len() == 1 && matches!(list[0].0, 44 | 45 | 47) {
+        let points = crate::pseudo::decode(args::bytes(a, 0), list[0]);
+        let substitute = ctx.state().get_or_default::<Settings>().substitute.clone();
+        return Ok(Value::from(crate::encode::encode(
+            &points,
+            Encoding(1),
+            &substitute,
+        )));
     }
     transform(ctx, args::value(a, 0).clone(), to, &list)
 }

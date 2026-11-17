@@ -1,4 +1,4 @@
-//! Byte slicing preserves malformed bytes for fixed-width encodings and split/trim.
+//! Byte slicing preserves malformed input: `mb_strcut("éx", 1, 2, "UTF-8") === "é"`.
 use crate::encoding::Encoding;
 
 pub fn offsets(bytes: &[u8], encoding: Encoding) -> Vec<usize> {

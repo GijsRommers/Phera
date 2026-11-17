@@ -27,7 +27,9 @@ pub fn result(ctx: &mut dyn Context, points: &[u32], enc: encoding::Encoding) ->
 pub fn strlen(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     let enc = encoding::argument(ctx, a, 1, "mb_strlen")?;
     let bytes = args::bytes(a, 0);
-    let count = if matches!(enc.0, 2..=4 | 8..=10) {
+    let count = if enc.0 == 45 {
+        bytes.len()
+    } else if matches!(enc.0, 2..=4 | 8..=10) {
         bytes.len() / 4
     } else if matches!(enc.0, 5..=7) {
         bytes.len() / 2
@@ -162,6 +164,9 @@ pub fn lcfirst(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
 }
 fn casing(ctx: &mut dyn Context, a: &[Value], name: &str, case: Case, first: bool) -> NativeResult {
     let (p, e) = points(ctx, a, 1, name)?;
+    if e.0 == 45 && p.is_empty() && !args::bytes(a, 0).is_empty() {
+        return Ok(Value::from("begin 0644 filename\n "));
+    }
     if first && !p.is_empty() {
         let first_args = vec![
             args::value(a, 0).clone(),
@@ -257,5 +262,14 @@ pub fn chr(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
 }
 pub fn scrub(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     let (p, e) = points(ctx, a, 1, "mb_scrub")?;
+    if matches!(e.0, 44 | 47) {
+        let raw: Vec<_> = args::bytes(a, 0).iter().map(|b| u32::from(*b)).collect();
+        return result(ctx, &raw, e);
+    }
+    if e.0 == 45 {
+        return Ok(Value::from(
+            p.iter().map(|cp| *cp as u8).collect::<Vec<_>>(),
+        ));
+    }
     result(ctx, &p, e)
 }

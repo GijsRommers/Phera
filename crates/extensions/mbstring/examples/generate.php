@@ -52,7 +52,8 @@ file_put_contents("$dir/version.txt", PHP_VERSION."; Unicode 17.0\n");
 echo "Generated Unicode 17 and encoding tables from PHP ", PHP_VERSION, "\n";
 // Deprecated transfer metadata is kept after the character encodings for stable table IDs.
 file_put_contents("$dir/encodings.txt", "BASE64||BASE64\nUUENCODE||x-uuencode\n".
-    "HTML-ENTITIES|HTML,html|HTML-ENTITIES\nQuoted-Printable|qprint|Quoted-Printable\n", FILE_APPEND);
+    "HTML-ENTITIES|HTML,html|HTML-ENTITIES\n" .
+    "Quoted-Printable|qprint|Quoted-Printable\n", FILE_APPEND);
 $entities = '';
 foreach (get_html_translation_table(HTML_ENTITIES, ENT_QUOTES|ENT_HTML401, 'UTF-8') as $c => $n) {
     $entities .= mb_ord($c).' '.$n."\n";

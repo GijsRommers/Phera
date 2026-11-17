@@ -1,4 +1,4 @@
-//! PHP's GB18030 name denotes the 2000 table, including its private-use mappings.
+//! PHP uses GB18030-2000: `bin2hex(mb_chr(0xE78D, "GB18030")) === "a6d9"`.
 use crate::encoding::read_u32;
 const PATCHES: &[u8] = include_bytes!("../data/gb18030-patches.bin");
 pub fn encode(cp: u32, out: &mut Vec<u8>) -> bool {

@@ -1,7 +1,20 @@
-//! MIME, entity and iconv native signatures mirror PHP 8.5.
+//! MIME signatures match PHP: `iconv_mime_encode(field_name: "Subject", field_value: "hi")`.
 use crate::{entities, iconv, iconv_mime, info, mime, query};
 use phera_extension_api::{FunctionEntry, Param, ParamType, Registry};
 pub fn register(registry: &mut Registry) {
+    registry.function(FunctionEntry::sync(
+        "mb_convert_kana",
+        const {
+            &[
+                Param::new("string", ParamType::String),
+                Param::new("mode", ParamType::String).optional(),
+                Param::new("encoding", ParamType::String)
+                    .nullable()
+                    .optional(),
+            ]
+        },
+        crate::kana::convert,
+    ));
     registry.function(FunctionEntry::sync(
         "mb_encode_numericentity",
         const {

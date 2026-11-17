@@ -1,9 +1,6 @@
 //! Transfer encodings are deprecated: `mb_convert_encoding('abc', 'BASE64') === 'YWJj'`.
 use crate::{encoding::Encoding, state::Settings};
-use base64::{
-    Engine, alphabet,
-    engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig},
-};
+use base64::Engine;
 use phera_extension_api::Context;
 
 pub fn selected(ctx: &mut dyn Context, name: &str, enc: Encoding, function: &str) {
@@ -15,7 +12,8 @@ pub fn selected(ctx: &mut dyn Context, name: &str, enc: Encoding, function: &str
     let message = match enc.0 {
         44 => "Handling Base64 via mbstring is deprecated; use base64_encode/base64_decode instead",
         45 => {
-            "Handling Uuencode via mbstring is deprecated; use convert_uuencode/convert_uudecode instead"
+            "Handling Uuencode via mbstring is deprecated; \
+             use convert_uuencode/convert_uudecode instead"
         }
         46 => concat!(
             "Handling HTML entities via mbstring is deprecated; use htmlspecialchars, ",
@@ -31,22 +29,7 @@ pub fn selected(ctx: &mut dyn Context, name: &str, enc: Encoding, function: &str
 }
 pub fn decode(bytes: &[u8], enc: Encoding) -> Vec<u32> {
     let out = match enc.0 {
-        44 => {
-            let clean: Vec<_> = bytes
-                .iter()
-                .copied()
-                .filter(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/'))
-                .collect();
-            let engine = GeneralPurpose::new(
-                &alphabet::STANDARD,
-                GeneralPurposeConfig::new()
-                    .with_decode_padding_mode(DecodePaddingMode::Indifferent)
-                    .with_decode_allow_trailing_bits(true),
-            );
-            engine
-                .decode(&clean[..clean.len() - usize::from(clean.len() % 4 == 1)])
-                .unwrap_or_default()
-        }
+        44 => return crate::transfer::base64_decode(bytes),
         47 => {
             let mut out = Vec::new();
             let mut i = 0;
@@ -85,18 +68,11 @@ pub fn encode(points: &[u32], enc: Encoding) -> Vec<u8> {
     match enc.0 {
         44 => base64::engine::general_purpose::STANDARD
             .encode(&bytes)
-            .into_bytes(),
-        47 => {
-            let mut out = String::new();
-            for b in bytes {
-                if matches!(b, 33..=60 | 62..=126 | 9 | 32 | 10 | 13) {
-                    out.push(char::from(b));
-                } else {
-                    out.push_str(&format!("={b:02X}"));
-                }
-            }
-            out.into_bytes()
-        }
+            .as_bytes()
+            .chunks(76)
+            .collect::<Vec<_>>()
+            .join(&b"\r\n"[..]),
+        47 => crate::transfer::quoted_encode(points),
         45 => uuencode(&bytes),
         _ => {
             let mut out = String::new();
@@ -137,12 +113,18 @@ fn uuencode(bytes: &[u8]) -> Vec<u8> {
     out
 }
 fn uudecode(bytes: &[u8]) -> Vec<u8> {
+    if !bytes.starts_with(b"begin ") {
+        return Vec::new();
+    }
     let mut out = Vec::new();
     for line in bytes.split(|b| *b == b'\n').skip(1) {
         let Some(length) = line.first() else {
             continue;
         };
         let length = usize::from(length.wrapping_sub(32) & 63);
+        if length == 0 || line == b"end" {
+            break;
+        }
         let mut decoded = Vec::new();
         for group in line[1..].as_chunks::<4>().0.iter() {
             let n: Vec<_> = group.iter().map(|b| b.wrapping_sub(32) & 63).collect();

@@ -1,4 +1,4 @@
-//! Native signatures match PHP: named arguments retain their declared names.
+//! Named settings match PHP: `mb_internal_encoding(encoding: "UTF-8") === true`.
 use crate::{conversion, settings};
 use phera_extension_api::{FunctionEntry, Param, ParamType, Registry};
 pub fn register(registry: &mut Registry) {

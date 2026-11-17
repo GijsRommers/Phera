@@ -1,4 +1,4 @@
-//! ISO-2022-JP switches character sets with escapes: Japanese text uses `ESC $ B`.
+//! JIS escape modes are preserved: `mb_convert_encoding("日本語", "ISO-2022-JP")`.
 use crate::{decode::BAD, encode::Substitute, encoding::Encoding};
 #[derive(Clone, Copy)]
 enum Mode {

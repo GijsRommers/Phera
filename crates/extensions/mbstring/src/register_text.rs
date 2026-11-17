@@ -1,4 +1,4 @@
-//! Native signatures match PHP: named arguments retain their declared names.
+//! Named arguments match PHP: `mb_substr(string: "abc", start: 1) === "bc"`.
 use crate::{layout, search, text};
 use phera_extension_api::{FunctionEntry, Param, ParamType, Registry};
 pub fn register(registry: &mut Registry) {

@@ -20,7 +20,14 @@ pub fn convert_bytes(
     name: &str,
 ) -> Option<Vec<u8>> {
     let result = if to.to_ascii_uppercase().contains("//IGNORE") {
-        iconv_native::convert_lossy(bytes, from, to).map_err(Into::into)
+        let probe = iconv_native::convert(bytes, from, "UCS-4LE//IGNORE");
+        if matches!(probe, Err(iconv_native::ConvertError::InvalidInput))
+            && std::io::Error::last_os_error().raw_os_error() == Some(22)
+        {
+            probe
+        } else {
+            iconv_native::convert_lossy(bytes, from, to).map_err(Into::into)
+        }
     } else {
         iconv_native::convert(bytes, from, to)
     };
@@ -115,6 +122,14 @@ pub fn position(ctx: &mut dyn Context, a: &[Value], reverse: bool) -> NativeResu
         .iter()
         .map(|b| crate::encoding::read_u32(b))
         .collect();
+    let offset = if reverse {
+        0
+    } else {
+        args::int(a, 2).unwrap_or(0)
+    };
+    if offset < -(p.len() as i64) {
+        return Err(offset_error(name));
+    }
     let Some(bytes) = convert_bytes(ctx, args::bytes(a, 1), &e, "UCS-4LE", name) else {
         return Ok(Value::Bool(false));
     };
@@ -124,15 +139,11 @@ pub fn position(ctx: &mut dyn Context, a: &[Value], reverse: bool) -> NativeResu
         .iter()
         .map(|bytes| crate::encoding::read_u32(bytes))
         .collect();
-    let offset = if reverse {
-        0
-    } else {
-        args::int(a, 2).unwrap_or(0)
-    };
-    if offset < -(p.len() as i64) || offset > p.len() as i64 {
-        return Err(NativeError::value_error(format!(
-            "{name}(): Argument #3 ($offset) must be contained in argument #1 ($haystack)"
-        )));
+    if offset > p.len() as i64 {
+        if !p.is_empty() && convert_bytes(ctx, args::bytes(a, 0), &e, "UCS-4LE", name).is_none() {
+            return Ok(Value::Bool(false));
+        }
+        return Err(offset_error(name));
     }
     if needle.is_empty() {
         return Ok(Value::Bool(false));
@@ -188,4 +199,10 @@ pub fn set(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     ctx.state().get_or_default::<Settings>().encodings[i] =
         String::from_utf8_lossy(args::bytes(a, 1)).into_owned();
     Ok(Value::Bool(true))
+}
+
+fn offset_error(name: &str) -> NativeError {
+    NativeError::value_error(format!(
+        "{name}(): Argument #3 ($offset) must be contained in argument #1 ($haystack)"
+    ))
 }

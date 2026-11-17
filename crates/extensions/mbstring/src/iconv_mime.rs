@@ -61,17 +61,16 @@ pub fn encode(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
 }
 pub fn decode(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     let target = iconv::encoding(ctx, a, 2);
-    let points = mime::decode_words(args::bytes(a, 0));
-    let utf8 = crate::encode::encode(
-        &points,
-        crate::encoding::Encoding::UTF8,
-        &crate::encode::Substitute::default(),
-    );
-    Ok(
-        iconv::convert_bytes(ctx, &utf8, "UTF-8", &target, "iconv_mime_decode")
-            .map_or(Value::Bool(false), Value::from),
+    Ok(crate::iconv_decode::decode(
+        ctx,
+        args::bytes(a, 0),
+        &target,
+        &crate::iconv_decode::Mode::new(args::int(a, 1).unwrap_or(0)),
+        "iconv_mime_decode",
     )
+    .map_or(Value::Bool(false), Value::from))
 }
+
 pub fn headers(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     let mut lines: Vec<Vec<u8>> = Vec::new();
     for line in args::bytes(a, 0).split(|b| *b == b'\n') {
@@ -89,6 +88,16 @@ pub fn headers(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     }
     let mut result = PhpArray::new();
     for line in lines {
+        let target = iconv::encoding(ctx, a, 2);
+        let Some(_) = crate::iconv_decode::decode(
+            ctx,
+            &line,
+            &target,
+            &crate::iconv_decode::Mode::new(args::int(a, 1).unwrap_or(0)),
+            "iconv_mime_decode_headers",
+        ) else {
+            return Ok(Value::Bool(false));
+        };
         let Some(colon) = line.iter().position(|b| *b == b':') else {
             continue;
         };

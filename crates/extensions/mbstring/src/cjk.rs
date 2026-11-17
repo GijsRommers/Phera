@@ -1,4 +1,4 @@
-//! PHP's SJIS and CP932 mappings differ: tables retain the oracle's exact mappings.
+//! PHP preserves SJIS variants: `mb_convert_encoding("日本語", "CP932", "UTF-8")`.
 use crate::{
     decode::BAD,
     encoding::{Encoding, read_u32},

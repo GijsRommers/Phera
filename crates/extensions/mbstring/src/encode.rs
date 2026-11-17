@@ -55,6 +55,21 @@ fn one(point: u32, encoding: Encoding, out: &mut Vec<u8>) -> bool {
     if let Some(result) = crate::cjk::encode(point, encoding, out) {
         return result;
     }
+    if (0xd800..=0xdfff).contains(&point) && matches!(encoding.0, 2..=13) {
+        match encoding.0 {
+            2..=4 | 8..=10 => out.extend_from_slice(&if matches!(encoding.0, 4 | 10) {
+                point.to_le_bytes()
+            } else {
+                point.to_be_bytes()
+            }),
+            _ => out.extend_from_slice(&if matches!(encoding.0, 7 | 13) {
+                (point as u16).to_le_bytes()
+            } else {
+                (point as u16).to_be_bytes()
+            }),
+        }
+        return true;
+    }
     let Some(c) = char::from_u32(point) else {
         return false;
     };
