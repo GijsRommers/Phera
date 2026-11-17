@@ -1,129 +1,168 @@
-//! PHP's byte-oriented formatted output and positional argument parser.
+//! `sprintf("%05.1f|%-4s|%x", 3.14159, "ab", 255)` is `"003.1|ab  |ff"`.
+//!
+//! [`parser`] reads one `%` specifier with its flags, width and precision;
+//! [`value`] converts the argument and pads it.
+
+use std::borrow::Cow;
 
 use phera_extension_api::{
-    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Registry, Value, args,
+    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Value, args,
 };
 
-use super::{buffer, bytes};
+use super::buffer;
 
 mod parser;
 mod value;
 
+pub(super) const FUNCTIONS: &[FunctionEntry] = &[SPRINTF, PRINTF, VSPRINTF, VPRINTF];
+
+/// Where the values come from: the arguments, or one array of them.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Arguments {
-    Variadic,
+enum Values {
+    Arguments,
     Array,
 }
 
+/// What happens to the formatted string.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Destination {
     Return,
     Output,
 }
 
-const VARIADIC_PARAMS: &[Param] = &[
-    Param::new("format", ParamType::String),
-    Param::new("values", ParamType::Mixed).variadic(),
-];
-
-const ARRAY_PARAMS: &[Param] = &[
-    Param::new("format", ParamType::String),
-    Param::new("values", ParamType::Array),
-];
-
-pub(crate) fn register(registry: &mut Registry) {
-    registry.function(FunctionEntry::sync("sprintf", VARIADIC_PARAMS, sprintf));
-    registry.function(FunctionEntry::sync("printf", VARIADIC_PARAMS, printf));
-    registry.function(FunctionEntry::sync("vsprintf", ARRAY_PARAMS, vsprintf));
-    registry.function(FunctionEntry::sync("vprintf", ARRAY_PARAMS, vprintf));
-}
+/// `sprintf(string $format, mixed ...$values): string`
+///
+/// ```php
+/// sprintf("%s has %d items", "cart", 3);   // "cart has 3 items"
+/// sprintf("%05.1f", 3.14159);              // "003.1"
+/// sprintf('%2$s %1$s', "world", "hello");  // "hello world"
+/// sprintf("%d %d", 1);                     // ArgumentCountError
+/// ```
+const SPRINTF: FunctionEntry = FunctionEntry::sync(
+    "sprintf",
+    &[
+        Param::new("format", ParamType::String),
+        Param::new("values", ParamType::Mixed).variadic(),
+    ],
+    sprintf,
+);
 
 fn sprintf(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    run(
+    format(
         context,
         arguments,
         "sprintf",
-        Arguments::Variadic,
+        Values::Arguments,
         Destination::Return,
     )
 }
 
+/// `printf(string $format, mixed ...$values): int`, which writes the
+/// result and returns its length.
+const PRINTF: FunctionEntry = FunctionEntry::sync(
+    "printf",
+    &[
+        Param::new("format", ParamType::String),
+        Param::new("values", ParamType::Mixed).variadic(),
+    ],
+    printf,
+);
+
 fn printf(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    run(
+    format(
         context,
         arguments,
         "printf",
-        Arguments::Variadic,
+        Values::Arguments,
         Destination::Output,
     )
 }
 
+/// `vsprintf(string $format, array $values): string`, taking the values in
+/// array order; the keys do not matter.
+///
+/// ```php
+/// vsprintf("%s-%s", ["b" => 1, "a" => 2]); // "1-2"
+/// ```
+const VSPRINTF: FunctionEntry = FunctionEntry::sync(
+    "vsprintf",
+    &[
+        Param::new("format", ParamType::String),
+        Param::new("values", ParamType::Array),
+    ],
+    vsprintf,
+);
+
 fn vsprintf(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    run(
+    format(
         context,
         arguments,
         "vsprintf",
-        Arguments::Array,
+        Values::Array,
         Destination::Return,
     )
 }
 
+/// `vprintf(string $format, array $values): int`
+const VPRINTF: FunctionEntry = FunctionEntry::sync(
+    "vprintf",
+    &[
+        Param::new("format", ParamType::String),
+        Param::new("values", ParamType::Array),
+    ],
+    vprintf,
+);
+
 fn vprintf(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    run(
+    format(
         context,
         arguments,
         "vprintf",
-        Arguments::Array,
+        Values::Array,
         Destination::Output,
     )
 }
 
-/// The vector forms consume values in insertion order, ignoring array keys.
-fn run(
+fn format(
     context: &mut dyn Context,
     arguments: &[Value],
-    name: &str,
-    vector: Arguments,
-    output: Destination,
+    function: &str,
+    source: Values,
+    destination: Destination,
 ) -> NativeResult {
-    let values: Vec<Value> = if vector == Arguments::Array {
-        args::array(arguments, 1)
-            .map(|array| array.values().cloned().collect())
-            .unwrap_or_default()
-    } else {
-        arguments.get(1..).unwrap_or_default().to_vec()
+    let values: Cow<[Value]> = match source {
+        Values::Arguments => Cow::Borrowed(&arguments[1..]),
+        Values::Array => Cow::Owned(
+            crate::arguments::required_array(arguments, 1)
+                .values()
+                .cloned()
+                .collect(),
+        ),
     };
-    let result = render(context, args::bytes(arguments, 0), &values, name, vector)?;
-    if output == Destination::Output {
-        context.write(&result);
-        Ok(Value::Int(result.len() as i64))
-    } else {
-        Ok(bytes(result))
+    let result = render(
+        context,
+        args::bytes(arguments, 0),
+        &values,
+        function,
+        source,
+    )?;
+    match destination {
+        Destination::Return => Ok(Value::from(result)),
+        Destination::Output => {
+            context.write(&result);
+            Ok(Value::Int(result.len() as i64))
+        }
     }
 }
 
-/// Array forms report value errors; variadic forms include the format argument.
-fn missing(_name: &str, vector: Arguments, needed: usize, given: usize) -> NativeError {
-    if vector == Arguments::Array {
-        NativeError::value_error(format!(
-            "The arguments array must contain {needed} items, {given} given"
-        ))
-    } else {
-        NativeError::argument_count_error(format!(
-            "{needed} arguments are required, {given} given",
-            needed = needed + 1,
-            given = given + 1
-        ))
-    }
-}
-
-/// Rendering is buffered so printf emits nothing if a later specifier fails.
+/// The whole result is built before anything is written, so `printf`
+/// writes nothing when a later specifier fails.
 fn render(
     context: &mut dyn Context,
     format: &[u8],
     values: &[Value],
-    name: &str,
-    vector: Arguments,
+    function: &str,
+    source: Values,
 ) -> Result<Vec<u8>, NativeError> {
     let mut result = buffer(format.len())?;
     let mut parser = parser::Parser::new(format, values);
@@ -141,13 +180,28 @@ fn render(
         let Some((specifier, value)) = parser.specifier()? else {
             continue;
         };
-        let Some(text) = specifier.convert(context, value, name, &mut result)? else {
+        let Some(text) = specifier.convert(context, value, function, &mut result)? else {
             continue;
         };
         specifier.append(&mut result, text)?;
     }
     if parser.needed > 0 {
-        return Err(missing(name, vector, parser.needed, values.len()));
+        return Err(too_few_values(source, parser.needed, values.len()));
     }
     Ok(result)
+}
+
+/// PHP's error when the format refers to more values than there are. The
+/// argument forms count the format as an argument too.
+fn too_few_values(source: Values, needed: usize, given: usize) -> NativeError {
+    match source {
+        Values::Array => NativeError::value_error(format!(
+            "The arguments array must contain {needed} items, {given} given"
+        )),
+        Values::Arguments => NativeError::argument_count_error(format!(
+            "{} arguments are required, {} given",
+            needed + 1,
+            given + 1
+        )),
+    }
 }

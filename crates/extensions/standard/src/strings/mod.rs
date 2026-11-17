@@ -33,6 +33,7 @@ pub(crate) fn register(registry: &mut Registry) {
         compare::FUNCTIONS,
         encode::FUNCTIONS,
         escaping::FUNCTIONS,
+        format::FUNCTIONS,
         html::FUNCTIONS,
         metaphone::FUNCTIONS,
         padding::FUNCTIONS,
@@ -51,7 +52,6 @@ pub(crate) fn register(registry: &mut Registry) {
         registry.function(*entry);
     }
     number_format::register(registry);
-    format::register(registry);
 }
 
 pub(super) fn bytes(value: impl Into<Vec<u8>>) -> Value {
