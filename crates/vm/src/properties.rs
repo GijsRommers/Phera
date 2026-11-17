@@ -10,10 +10,10 @@ impl Vm {
     pub(crate) fn visible_properties(&self, object: &phera_value::Object) -> phera_value::PhpArray {
         let mut result = phera_value::PhpArray::new();
         for (key, value) in object.to_array().iter() {
-            let name = crate::path_update::property_name(key);
+            let name = crate::path_update::property_name(&key);
             if self
                 .property_key(object, &name)
-                .is_ok_and(|resolved| resolved == *key)
+                .is_ok_and(|resolved| resolved == key)
             {
                 result.insert(ArrayKey::str(name), value.deref().clone());
             }
