@@ -70,8 +70,11 @@ fn decoct(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
 /// hexdec("0xff"); // 255
 /// hexdec("fg");  // 15, with a deprecation for the "g"
 /// ```
-const HEXDEC: FunctionEntry =
-    FunctionEntry::sync("hexdec", &[Param::new("string", ParamType::String)], hexdec);
+const HEXDEC: FunctionEntry = FunctionEntry::sync(
+    "hexdec",
+    &[Param::new("hex_string", ParamType::String)],
+    hexdec,
+);
 
 fn hexdec(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(parse(context, args::bytes(arguments, 0), 16))
@@ -83,8 +86,11 @@ fn hexdec(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
 /// ```php
 /// bindec("101"); // 5
 /// ```
-const BINDEC: FunctionEntry =
-    FunctionEntry::sync("bindec", &[Param::new("string", ParamType::String)], bindec);
+const BINDEC: FunctionEntry = FunctionEntry::sync(
+    "bindec",
+    &[Param::new("binary_string", ParamType::String)],
+    bindec,
+);
 
 fn bindec(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(parse(context, args::bytes(arguments, 0), 2))
@@ -96,8 +102,11 @@ fn bindec(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
 /// ```php
 /// octdec("777"); // 511
 /// ```
-const OCTDEC: FunctionEntry =
-    FunctionEntry::sync("octdec", &[Param::new("string", ParamType::String)], octdec);
+const OCTDEC: FunctionEntry = FunctionEntry::sync(
+    "octdec",
+    &[Param::new("octal_string", ParamType::String)],
+    octdec,
+);
 
 fn octdec(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(parse(context, args::bytes(arguments, 0), 8))

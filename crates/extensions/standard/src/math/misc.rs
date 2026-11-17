@@ -133,13 +133,13 @@ fn fmod(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(Value::Float(dividend % divisor))
 }
 
-/// `hypot(float $num1, float $num2): float`, the length of the hypotenuse,
+/// `hypot(float $x, float $y): float`, the length of the hypotenuse,
 /// without overflow on the way.
 const HYPOT: FunctionEntry = FunctionEntry::sync(
     "hypot",
     &[
-        Param::new("num1", ParamType::Float),
-        Param::new("num2", ParamType::Float),
+        Param::new("x", ParamType::Float),
+        Param::new("y", ParamType::Float),
     ],
     hypot,
 );
