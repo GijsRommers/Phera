@@ -3,7 +3,7 @@
 //! matching Rust lines case by case.
 
 use phera_ext_hash::Hash;
-use phera_extension_api::testing::{TestContext, call, oracle};
+use phera_extension_api::testing::{TestContext, oracle};
 use phera_extension_api::{Extension, NativeFn, NativeResult, Registry, Value, prepare_arguments};
 
 pub fn registry() -> Registry {
@@ -77,9 +77,9 @@ impl Comparison {
         self.record(&format!("fn() => {expression}"), result, context);
     }
 
-    /// Calls the sync function `name` in Phera and records the same call
-    /// for PHP.
-    pub fn record_call(
+    /// Calls `name` in Phera, sync or async, and records the same call for
+    /// PHP.
+    pub async fn record_call(
         &mut self,
         registry: &Registry,
         context: &mut TestContext,
@@ -87,7 +87,7 @@ impl Comparison {
         arguments: Vec<Value>,
     ) {
         let expression = php_call(name, &arguments);
-        let result = call(registry, context, name, arguments);
+        let result = invoke(registry, context, name, arguments).await;
         self.record_expression(&expression, &result, context);
     }
 

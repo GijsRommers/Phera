@@ -24,7 +24,7 @@ mod password_info;
 mod password_options;
 mod passwords;
 
-use phera_extension_api::{Extension, Registry, Value};
+use phera_extension_api::{Extension, NativeError, Registry, Value};
 
 pub struct Hash;
 
@@ -65,4 +65,17 @@ fn given(value: &Value) -> String {
         Value::Bool(false) => "false".to_string(),
         other => other.type_name(),
     }
+}
+
+/// Runs `work` on one of Tokio's blocking threads and waits for it without
+/// holding the request's worker thread, which serves other requests
+/// meanwhile. For work that is slow on purpose: password hashing, `crypt()`
+/// and PBKDF2. `work` may only own plain data, never PHP values, whose
+/// `Rc`s must stay on their thread.
+async fn off_thread<T: Send + 'static>(
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, NativeError> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|error| NativeError::error(error.to_string()))
 }

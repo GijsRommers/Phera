@@ -65,12 +65,10 @@ async fn hashes_verify_in_both_runtimes() {
             assert_eq!(needs_rehash.unwrap(), Value::Bool(false));
 
             let mut comparison = Comparison::new();
-            comparison.record_call(
-                &registry,
-                &mut context,
-                "password_get_info",
-                vec![rust_hash],
-            );
+            let info = vec![rust_hash];
+            comparison
+                .record_call(&registry, &mut context, "password_get_info", info)
+                .await;
             comparison.compare("password-info", "password_get_info of a Phera hash");
         }
     }

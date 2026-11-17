@@ -13,14 +13,10 @@ fn options(key: &str, value: Value) -> Value {
     Value::from(options)
 }
 
-#[test]
-fn parameter_matrix() {
-    let registry = registry();
-    let mut context = TestContext::default();
-    let mut comparison = Comparison::new();
-    let mut case = |name: &str, arguments: Vec<Value>| {
-        comparison.record_call(&registry, &mut context, name, arguments);
-    };
+#[tokio::test]
+async fn parameter_matrix() {
+    let mut cases = Vec::new();
+    let mut case = |name: &'static str, arguments: Vec<Value>| cases.push((name, arguments));
     for name in ["hash_algos", "hash_hmac_algos", "password_algos"] {
         case(name, vec![]);
     }
@@ -136,6 +132,14 @@ fn parameter_matrix() {
         ] {
             case("password_needs_rehash", vec![Value::from(hash), algo]);
         }
+    }
+    let registry = registry();
+    let mut context = TestContext::default();
+    let mut comparison = Comparison::new();
+    for (name, arguments) in cases {
+        comparison
+            .record_call(&registry, &mut context, name, arguments)
+            .await;
     }
     comparison.compare("hash-parameters", "hash parameters");
 }

@@ -19,6 +19,7 @@ use phera_extension_api::{
 };
 use subtle::ConstantTimeEq;
 
+use crate::off_thread;
 use crate::password_info::identify;
 use crate::password_options::{self, Algorithm, Options};
 
@@ -60,15 +61,6 @@ const ARGON2_OUTPUT_BYTES: usize = 32;
 /// The shortest hash `crypt()` can produce, two salt characters and eleven
 /// of DES output; anything shorter cannot verify.
 const SHORTEST_CRYPT: usize = 13;
-
-/// Runs `work` on a blocking thread and waits for it without blocking.
-async fn off_thread<T: Send + 'static>(
-    work: impl FnOnce() -> T + Send + 'static,
-) -> Result<T, NativeError> {
-    tokio::task::spawn_blocking(work)
-        .await
-        .map_err(|error| NativeError::error(error.to_string()))
-}
 
 /// `password_hash(string $password, string|int|null $algo, array $options = []): string`
 const PASSWORD_HASH: FunctionEntry = FunctionEntry::asynchronous(
