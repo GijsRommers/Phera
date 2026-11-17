@@ -145,8 +145,12 @@ jobs:
       # Fail on missing prerequisites instead of silently skipping the PDO suites.
       - name: Verify PHP version, extensions and database connections
         run: make ci-prerequisites
-      - name: Build end-to-end PDO binary
+      - name: Build release CLI for PHP comparison scripts
         run: make ci-build
+      - name: Run the date class scripts through the release binary
+        run: cargo test -p phera-ext-date --test class_scripts
+        env:
+          PHERA_BIN: ${{ github.workspace }}/target/release/phera
       - name: Run the PDO tests through the release binary
         run: cargo test -p phera-ext-pdo --no-fail-fast
         env:

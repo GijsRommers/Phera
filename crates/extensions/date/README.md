@@ -1,83 +1,84 @@
-# Date extension: incomplete implementation
+# Date extension
 
-This branch implements the request timezone, calendar core, procedural formatters,
-format-directed parsing, and the general date string parser. It does **not** complete PHP's date extension.
-The PR must remain a draft until the missing functions, classes, and Linux gate pass.
-Standard's existing clock and sleep functions remain in the standard extension.
+Phera includes the PHP 8.5 date parsers, timezone database, formatters, native date
+classes, exception hierarchy and their procedural entry points. The status below
+covers the PHP surface and the remaining engine integration.
 
 ## Function and class inventory
 
-DONE means implemented and compared with PHP 8.5.12 in the local matrices below.
-It does not assert exhaustive proof or a passing Linux CI run.
-
-| Function or class | Status | Scope or missing work |
+| Function or class | Status | Coverage or remaining work |
 | --- | --- | --- |
-| `date_default_timezone_get` | DONE | Request state starts at UTC. |
-| `date_default_timezone_set` | DONE | Identifier lookup and PHP's invalid-name notice. |
-| `timezone_version_get` | DONE | Reports the pinned PHP-compatible version, 2026.5. |
-| `date` | DONE | All PHP date format letters and byte escaping. |
-| `gmdate` | DONE | UTC formatting, including PHP's GMT abbreviation. |
-| `idate` | DONE | Integer letters and invalid-format diagnostics. |
+| `date_default_timezone_get` | DONE | Request-local default starts at UTC. |
+| `date_default_timezone_set` | DONE | Identifier lookup and invalid-name notice. |
+| `timezone_version_get` | DONE | Pinned PHP-compatible database version 2026.5. |
+| `date` | DONE | Date format letters and byte escaping. |
+| `gmdate` | DONE | UTC formatting with GMT abbreviation. |
+| `idate` | DONE | Integer format letters and invalid-format diagnostics. |
 | `getdate` | DONE | Local calendar fields and timestamp. |
-| `localtime` | DONE | Numeric and associative result arrays. |
-| `checkdate` | DONE | Gregorian validation and PHP's year bounds. |
-| `mktime` | DONE | Local normalization, gaps, overlaps, and integer overflow. |
+| `localtime` | DONE | Numeric and associative output. |
+| `checkdate` | DONE | Gregorian validation and PHP year bounds. |
+| `mktime` | DONE | Local normalization, gaps, overlaps and integer overflow. |
 | `gmmktime` | DONE | UTC normalization and integer overflow. |
-| `date_parse_from_format` | DONE | Fields, modifiers, zones, warnings, and errors. |
-| `strftime` | NOT DONE | C-locale formatting and deprecation. |
-| `gmstrftime` | NOT DONE | C-locale UTC formatting and deprecation. |
-| `strtotime` | DONE | Hand-written timelib grammar, base filling, relative arithmetic, and DST resolution. |
-| `date_parse` | DONE | Absolute/relative fields, unset values, zones, and diagnostic arrays. |
-| `DateTimeInterface` | NOT DONE | Interface and format constants. |
-| `DateTime` | NOT DONE | Native state and all methods. |
-| `DateTimeImmutable` | NOT DONE | Native state and all methods. |
-| `DateTimeZone` | NOT DONE | Native class, constants, metadata, and methods. |
-| `DateInterval` | NOT DONE | ISO duration parser, properties, arithmetic, and format. |
-| `DatePeriod` | NOT DONE | Constructors and getters; iteration also needs engine work. |
-| `DateError` | NOT DONE | Exception registration. |
-| `DateObjectError` | NOT DONE | Exception registration. |
-| `DateRangeError` | NOT DONE | Exception registration. |
-| `DateException` | NOT DONE | Exception registration. |
-| `DateInvalidTimeZoneException` | NOT DONE | Exception registration and messages. |
-| `DateInvalidOperationException` | NOT DONE | Exception registration and messages. |
-| `DateMalformedStringException` | NOT DONE | Exception registration and messages. |
-| `DateMalformedIntervalStringException` | NOT DONE | Exception registration and messages. |
-| `DateMalformedPeriodStringException` | NOT DONE | Exception registration and messages. |
-| `date_create` | NOT DONE | DateTime wrapper. |
-| `date_create_immutable` | NOT DONE | DateTimeImmutable wrapper. |
-| `date_create_from_format` | NOT DONE | Construct native DateTime from parsed fields. |
-| `date_create_immutable_from_format` | NOT DONE | Construct immutable native object. |
-| `date_get_last_errors` | NOT DONE | Request-local constructor errors. |
-| `date_format` | NOT DONE | DateTimeInterface wrapper. |
-| `date_modify` | NOT DONE | DateTime wrapper. |
-| `date_add` | NOT DONE | DateTime wrapper. |
-| `date_sub` | NOT DONE | DateTime wrapper. |
-| `date_timezone_get` | NOT DONE | DateTimeInterface wrapper. |
-| `date_timezone_set` | NOT DONE | DateTime wrapper. |
-| `date_offset_get` | NOT DONE | DateTimeInterface wrapper. |
-| `date_diff` | NOT DONE | DateTimeInterface wrapper and exact DST/month-end algorithm. |
-| `date_time_set` | NOT DONE | DateTime wrapper. |
-| `date_date_set` | NOT DONE | DateTime wrapper. |
-| `date_isodate_set` | NOT DONE | DateTime wrapper. |
-| `date_timestamp_set` | NOT DONE | DateTime wrapper. |
-| `date_timestamp_get` | NOT DONE | DateTimeInterface wrapper. |
-| `timezone_open` | NOT DONE | DateTimeZone wrapper. |
-| `timezone_name_get` | NOT DONE | DateTimeZone wrapper. |
-| `timezone_name_from_abbr` | NOT DONE | Reverse abbreviation lookup. |
-| `timezone_offset_get` | NOT DONE | DateTimeZone wrapper. |
-| `timezone_transitions_get` | NOT DONE | DateTimeZone wrapper. |
-| `timezone_location_get` | NOT DONE | DateTimeZone wrapper. |
-| `timezone_identifiers_list` | NOT DONE | Identifier group and country filtering. |
-| `timezone_abbreviations_list` | NOT DONE | Complete abbreviation metadata. |
-| `date_interval_create_from_date_string` | NOT DONE | Relative interval parser. |
-| `date_interval_format` | NOT DONE | DateInterval wrapper. |
-| `date_sun_info` | NOT DONE | Deferred until all earlier work is complete. |
-| `date_sunrise` | NOT DONE | Deferred until all earlier work is complete. |
-| `date_sunset` | NOT DONE | Deferred until all earlier work is complete. |
+| `date_parse_from_format` | DONE | Fields, modifiers, zones and diagnostic arrays. |
+| `strtotime` | DONE | Timelib grammar, base filling and relative arithmetic. |
+| `date_parse` | DONE | Absolute and relative fields with parser diagnostics. |
+| `DateTimeInterface` | PARTIAL | Implemented by both classes with format constants and method declarations. The VM needs to restrict implementation by user classes and check native method types. |
+| `DateTime` | PARTIAL | Constructors, factories, mutators, getters, arithmetic and direct magic methods work. Inherited static factories and native object hooks are pending. |
+| `DateTimeImmutable` | PARTIAL | Mutators return new instances. Inherited static factories, ignored-return diagnostics and native object hooks are pending. |
+| `DateTimeZone` | PARTIAL | Constructors, groups, offsets, transition ranges, metadata, abbreviations and direct magic methods work. Native clone, comparison and property projection are pending. |
+| `DateInterval` | PARTIAL | ISO durations, relative strings, format codes, arithmetic fields and direct magic methods work. PHP virtual property coercion, debug projection, clone and comparison need engine hooks. |
+| `DatePeriod` | PARTIAL | Object constructors, ISO factory, getters, readonly writes, direct magic methods and the recurrence calculation work. Iteration, virtual property snapshots, inherited ISO factories and native object hooks are pending. |
+| `DateError` | DONE | Extends Error. |
+| `DateObjectError` | DONE | Extends DateError and reports uninitialized objects. |
+| `DateRangeError` | DONE | Extends DateError and reports timestamp and microsecond bounds. |
+| `DateException` | DONE | Extends Exception. |
+| `DateInvalidTimeZoneException` | DONE | Extends DateException and reports invalid timezone input. |
+| `DateInvalidOperationException` | DONE | Extends DateException and reports unsupported subtraction. |
+| `DateMalformedStringException` | DONE | Extends DateException and reports date string errors. |
+| `DateMalformedIntervalStringException` | DONE | Extends DateException and reports ISO and relative interval errors. |
+| `DateMalformedPeriodStringException` | DONE | Extends DateException and reports ISO period and recurrence errors. |
+| `date_create` | PARTIAL | Mutable factory with false on parse failure. A named timezone with omitted datetime needs native defaults. |
+| `date_create_immutable` | PARTIAL | Immutable factory with false on parse failure. A named timezone with omitted datetime needs native defaults. |
+| `date_create_from_format` | DONE | Mutable format-directed factory. |
+| `date_create_immutable_from_format` | DONE | Immutable format-directed factory. |
+| `date_get_last_errors` | DONE | Request-local errors and warnings. |
+| `date_format` | DONE | Shared formatter. |
+| `date_modify` | DONE | Mutable modification with a warning and false on parse failure. |
+| `date_add` | DONE | Shared interval addition. |
+| `date_sub` | DONE | Shared interval subtraction with a warning for special intervals. |
+| `date_diff` | DONE | Shared interval difference with DST and month-end corrections. |
+| `date_timezone_get` | DONE | Shared timezone snapshot. |
+| `date_timezone_set` | DONE | Mutable timezone conversion. |
+| `date_offset_get` | DONE | Offset at the instant. |
+| `date_time_set` | PARTIAL | Mutable time, including microseconds. Skipping second by name needs native defaults. |
+| `date_date_set` | DONE | Mutable civil date. |
+| `date_isodate_set` | DONE | Mutable ISO week date. |
+| `date_timestamp_set` | DONE | Mutable Unix timestamp. |
+| `date_timestamp_get` | DONE | Unix timestamp getter. |
+| `timezone_open` | DONE | Shared constructor with a warning and false on invalid input. |
+| `timezone_name_get` | DONE | Identifier, abbreviation or numeric offset name. |
+| `timezone_name_from_abbr` | PARTIAL | Ordered reverse lookup. Skipping utcOffset by name needs native defaults. |
+| `timezone_offset_get` | DONE | Timezone offset at a date's instant. |
+| `timezone_transitions_get` | PARTIAL | Historical metadata and POSIX rules. Skipping timestampBegin by name needs native defaults. |
+| `timezone_location_get` | DONE | Country, coordinates and comments. |
+| `timezone_identifiers_list` | PARTIAL | Group and country filters. Skipping timezoneGroup by name needs native defaults. |
+| `timezone_abbreviations_list` | DONE | Complete abbreviation table. |
+| `date_interval_create_from_date_string` | DONE | Shared relative parser with a warning and false on failure. |
+| `date_interval_format` | DONE | Shared interval format codes. |
+| `date_sun_info` | DONE | Solar transit, rise, set and three twilight bands. |
 
-Date class cloning, comparison, debug/JSON/serialization shapes, all factory methods,
-microseconds, mutators, arithmetic, and constants are also NOT DONE. No placeholder
-classes or functions have been registered for missing functionality.
+Native argument coercion is shared with the VM. Gaps in optional named arguments
+and arbitrary byte strings in error messages are tracked below.
+
+### Deprecated PHP 8.5 surface
+
+Omitted declarations include `strftime`, `gmstrftime`, `date_sunrise`,
+`date_sunset`, `DATE_RFC7231`, `DateTimeInterface::RFC7231` and its inherited
+constant, `SUNFUNCS_RET_TIMESTAMP`, `SUNFUNCS_RET_STRING`,
+`SUNFUNCS_RET_DOUBLE`, and the date classes' and interface's `__wakeup` methods.
+The ISO string construction path is `DatePeriod::createFromISO8601String`.
+The old string overload of the DatePeriod constructor emits a deprecation in PHP.
+The branch had no deprecated declarations before this work.
 
 ## Calendar and timezone dependencies
 
@@ -149,15 +150,15 @@ include invalid UTF-8, NUL, incomplete fields, relative unit words, and malforme
 numeric and timezone tokens. Nullable-now argument checks use literal formatting
 so elapsed wall time cannot change their output.
 
-The wall-time test calls PHP's DateTime constructor as the reference for the Rust
-calendar resolver. It does **not** mean a Phera DateTime class has been implemented.
+The procedural wall-time matrix uses PHP's DateTime constructor as the oracle for
+the Rust calendar resolver.
 The parser suite adds **578,917 comparisons** (including five timezone-setting calls).
 The generated table has **12,929 distinct strings**, each passed to `date_parse` and
 `strtotime` with all eight fixed base timestamps and all five default zones. Additional
 suites cover 19,932 ambiguous/corrupted byte strings, all 256 byte values, 10,000-byte
 inputs, repeated parts, all embedded zone names and abbreviations, long fractions,
 argument diagnostics, and integer overflow. No test requires the current clock.
-The class matrix remains absent because classes are the next task.
+See the class comparisons below for coverage of the native PHP objects.
 
 Commands observed passing locally:
 
@@ -197,7 +198,7 @@ and relative words/units. Diagnostic positions are byte positions after timelib'
 leading/trailing whitespace trimming. C's whitespace and non-finite float-to-integer
 behavior differ on macOS/ARM and Linux/x86; the adapter follows the target platform.
 The thirteen non-deprecated procedural `DATE_*` format constants are registered for
-parser/formatter round trips. No DateTime classes were added.
+parser/formatter round trips. DateTimeInterface exposes the same format strings.
 
 The optional `parser_audit` example discovers upstream tests mentioning either parser.
 It copies FILE sections, translates `date.timezone` INI settings, and uses PHP's
@@ -243,37 +244,84 @@ calls, not compiler/VM throughput. Process startup is included; compilation is n
 Wall-clock time is not used because other workloads share this machine.
 
 The existing CI installs `timezonedb-2026.5`, loads it through the `-n` oracle wrapper,
-and verifies its version. Linux checks are still running for the parser push;
-local success is not evidence of a completed hosted gate. Full local `make ci`
+and verifies its version. The parser comparison results above are from the local PHP 8.5.12 run. Full local `make ci`
 was not run because its prerequisite script provisions/connects to databases,
 excluded by this task. `make fmt-check lint safe-rust`, the entire date crate's
 oracle suite, runtime date tests, and CLI build passed locally.
 
-## Engine integration still needed
+## Class oracle comparisons
 
-These are specific future integration gaps for the classes, not blockers for the
-completed procedural parser. This PR does not modify these engine paths.
+The same PHP scripts run on the release Phera binary and PHP 8.5.12. The scripts
+use fixed instants and compare formatted dates, getters, diagnostic messages,
+object identity, magic methods and aliases. The native matrices call registered
+methods with argument coercion and compare their results separately.
 
-- `crates/value/src/ops/compare.rs` compares class names and property arrays.
-  There is no native-state comparison callback, including cross-class comparisons
-  between DateTime and DateTimeImmutable.
-- `crates/vm/src/classes/instantiation.rs::clone_object` copies ordinary property
-  arrays, not `Object::native`, and does not invoke `__clone`. Only Closure has a
-  special native-state copy path. A native clone callback or equivalent is needed.
-- `crates/vm/src/iteration.rs` iterates visible object properties. It does not
-  dispatch IteratorAggregate/Traversable, which DatePeriod iteration needs.
-- `crates/extensions/core/src/dump/mod.rs` reads the property array directly;
-  there is no native debug-property or `__debugInfo` dispatch.
-- `crates/extensions/json/src/encode.rs` reads public properties directly.
-  Native DateTime JSON fields would require property projection or a hook.
-  JsonSerializable dispatch is itself documented as awaiting VM integration.
-- No `serialize`/`unserialize` functions are registered in standard/core here;
-  date serialization methods alone would not supply end-to-end serialization.
+| Matrix | Compared cases | Mismatches |
+| --- | ---: | ---: |
+| `modify` across sixteen zones and sixteen base instants | 197,120 | 0 |
+| `add`, `sub` and `diff` around transitions, leap dates and month ends | 160,704 | 0 |
+| `createFromFormat` format, modifier and invalid byte cases | 17,550 | 0 |
+| DateInterval ISO durations and formatting | 4,734 | 0 |
+| Internal DatePeriod sequences compared with PHP `foreach` | 2,560 | 0 |
+| Solar information, including polar dates and argument errors | 3,376 | 0 |
+| **Total native cases** | **386,044** | **0** |
+| Release CLI scripts | 187 | 0 |
+| Timezone catalog check within the CLI scripts | 2,557 output rows | 0 |
 
-The API already provides request state, native class methods/constants/properties,
-`Object::native`, object construction, and typed exception throwing. Those pieces
-are sufficient to continue implementing the date classes after the parser.
+`tools/import_timezones.py` reads PHP 8.5.12's timelib data. The class catalog
+retains the ordered identifier index, country flags, location coordinates,
+explicit transition type indices, abbreviation data and POSIX rules. The
+timezone catalog script checks every identifier against PHP with the default,
+historical and future transition ranges. The date arithmetic uses the same
+calendar and parser as the procedural functions and follows timelib's distinct
+civil and elapsed-clock interval operations.
 
-The parser required no engine or extension-API changes. Merging `origin/main` into
-this branch required no date-crate compatibility fixes. The two general-parser
-functions have no known local oracle mismatches; hosted CI remains a separate gate.
+There are no new runtime dependencies. The existing `tz-rs`, `jiff-tzdb` and
+`tzdb_data` pins are described above. The dev-only `phera-ext-core` dependency
+loads the real Error and Exception parents in native test registries.
+
+```sh
+cargo build --release -p phera-cli
+PHERA_BIN="$PWD/target/release/phera" cargo test --release -p phera-ext-date
+```
+
+## PHP 8.5.12 upstream date tests
+
+The audit executed all 705 upstream FILE sections locally. The PHP 8.5.12
+harness passed 693 and skipped 12. The Phera audit matched the upstream
+EXPECT, EXPECTF or EXPECTREGEX output for 422 tests. Another 204 were blocked
+by identified engine or runtime gaps, 67 exercised excluded deprecated
+surfaces, and 12 were skipped by the reference harness. The Phera CLI has no
+INI flag, so the audit translated valid `date.timezone` settings into explicit
+calls and recorded tests that require INI or environment behavior. The
+[per-file results](tests/classes-upstream-results.tsv) give the reason for
+each difference.
+
+
+## Engine integration
+
+Fixtures in [tests/waiting](tests/waiting) are named for the required hook. To run
+one as an ordinary comparison, set `PHERA_DATE_HOOKS` to its filename stem.
+A comma-separated list selects several. The harness reports mismatches as failures.
+
+| Waiting fixture | Current runtime behavior | Proposed API |
+| --- | --- | --- |
+| `native-object-compare` | Value operators compare class and stored properties. DateTime and DateTimeImmutable need comparison by timestamp and microseconds across the two classes. | `ClassEntry::compare: Option<fn(&mut dyn Context, &Object, &Object) -> Result<NativeComparison, NativeError>>`, with default, ordered and uncomparable results. |
+| `native-object-clone` | The VM copies declared properties. Native date, zone, interval and period state is missing from the copy. | `ClassEntry::clone_native: Option<fn(&Object, &Object) -> Result<(), NativeError>>`, called with the original and new object before user clone hooks. |
+| `native-property-projection` | Dump, print, export, JSON and casts read stored properties. Date and zone fields are native state, and DateInterval debug/JSON fields depend on the kind of interval. | `ClassEntry::project_properties: Option<fn(&mut dyn Context, &Object, PropertyPurpose) -> Result<PhpArray, NativeError>>`, with the consumer identifying the PHP operation. |
+| `native-object-serialization` | Direct `__set_state`, `__serialize` and `__unserialize` calls work. General `serialize` and `unserialize` entry points and their magic-method dispatch are absent. | The serializers should use `Context::call` for magic method dispatch and `Context::create_object` for constructor-free restoration. |
+| `native-object-iterator` | `foreach` reads visible properties. Native Traversable/IteratorAggregate dispatch and `DatePeriod::getIterator` are absent. | `ClassEntry::iterator: Option<fn(&mut dyn Context, Rc<Object>, bool) -> Result<Box<dyn NativeIterator>, NativeError>>` plus `Context::create_iterator` for the Iterator object. The period cursor and PHP comparison live in `src/classes/period_dates.rs`. |
+| `native-virtual-properties` | DatePeriod enforces readonly assignment using stored snapshots. PHP returns a fresh date or interval on each property read. DateInterval consumes numeric assignments when its methods run. PHP coerces them during the write and exposes its special fields through virtual properties. | `PropertyEntry::read: Option<fn(&mut dyn Context, &Object) -> NativeResult>` and `PropertyEntry::write: Option<fn(&mut dyn Context, &Object, Value) -> NativeResult>`, including read, isset, mutation and reference access modes. |
+| `native-called-class` | Native static handlers receive no called class. Inherited DateTime and DatePeriod factories return the declaring built-in class. | `Context::called_class(&self) -> Option<&str>`, scoped to the executing native call. |
+| `native-named-defaults` | The VM fills skipped native named arguments with null. This can change a default or emit a null deprecation. | `Param::default: Option<ConstantValue>` and binding that distinguishes omitted arguments from explicit null. |
+
+Additional native metadata gaps include DateTimeInterface's user implementation
+restriction, signature variance for native methods and PHP's `#[NoDiscard]`
+diagnostics on unused immutable mutator results. `NativeError::throw` takes a
+Rust string, so parse diagnostics containing invalid UTF-8 are lossy. Phera also
+uses the generic readonly error when acquiring a reference to a DatePeriod property.
+
+Two changes outside the date crate support the public surface. The first adds
+`ParamType::Class` and `ClassHandle::is_instance_of`, using the VM's existing
+ancestry lookup. The second maps `PropertyEntry::readonly()` to the VM's existing
+readonly write checks. The call-handling directory has no date-extension edits.

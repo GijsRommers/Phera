@@ -12,12 +12,19 @@ fn class_scripts_match_php() {
         return;
     };
     let php = find_php().expect("PHP 8.5 oracle required");
-    let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/scripts");
-    let mut scripts: Vec<_> = std::fs::read_dir(directory)
-        .expect("script directory")
-        .map(|entry| entry.expect("script").path())
-        .filter(|path| path.extension().is_some_and(|extension| extension == "php"))
-        .collect();
+    let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let mut scripts: Vec<_> = if let Ok(hooks) = std::env::var("PHERA_DATE_HOOKS") {
+        hooks
+            .split(',')
+            .map(|hook| directory.join(format!("waiting/{hook}.php")))
+            .collect()
+    } else {
+        std::fs::read_dir(directory.join("scripts"))
+            .expect("script directory")
+            .map(|entry| entry.expect("script").path())
+            .filter(|path| path.extension().is_some_and(|extension| extension == "php"))
+            .collect()
+    };
     scripts.sort();
     let evidence = std::env::temp_dir().join("phera-date-class-oracle");
     std::fs::create_dir_all(&evidence).expect("oracle evidence directory");
