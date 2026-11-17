@@ -1,5 +1,5 @@
 //! Search returns character positions: `mb_strpos('éabc', 'b') === 2`.
-use crate::{decode::decode, text};
+use crate::{codec::decode, text};
 use phera_extension_api::{Context, NativeError, NativeResult, Value, args};
 #[derive(Clone, Copy)]
 pub enum Search {

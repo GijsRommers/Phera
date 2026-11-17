@@ -10,8 +10,21 @@ fn every_representable_scalar() {
     let mut comparisons = 0;
     let mut mismatches = 0;
     let mut examples = Vec::new();
-    for line in include_str!("../data/encodings.txt").lines().take(44) {
-        let name = line.split('|').next().unwrap();
+    let Ok(Value::Array(listed)) = call(&registry, &mut ctx, "mb_list_encodings", vec![]) else {
+        panic!("mb_list_encodings returns an array");
+    };
+    let transfer = ["BASE64", "UUENCODE", "HTML-ENTITIES", "Quoted-Printable"];
+    let names: Vec<String> = listed
+        .iter()
+        .filter_map(|(_, name)| match name {
+            Value::String(name) => Some(name.to_string_lossy()),
+            _ => None,
+        })
+        .filter(|name| !transfer.contains(&name.as_str()))
+        .collect();
+    assert_eq!(names.len(), 44, "character encodings");
+    for name in &names {
+        let name = name.as_str();
         let script = format!(
             r#"<?php
 for ($cp = 0; $cp <= 0x10FFFF; $cp++) {{

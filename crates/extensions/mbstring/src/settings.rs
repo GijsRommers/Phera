@@ -1,6 +1,6 @@
 //! Settings persist only within a request: `mb_internal_encoding('ASCII')` returns true.
 use crate::{
-    encode::Substitute,
+    codec::Substitute,
     encoding::{self, Encoding},
     state::Settings,
 };
@@ -14,129 +14,120 @@ pub fn list(values: impl IntoIterator<Item = Value>) -> Value {
     Value::from(array)
 }
 pub fn encodings(_: &mut dyn Context, _: &[Value]) -> NativeResult {
-    Ok(list(Encoding::all().map(|e| Value::from(e.name()))))
+    Ok(list(Encoding::ALL.iter().map(|e| Value::from(e.name()))))
 }
 pub fn aliases(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
-    let e = encoding::resolve(
+    let e = encoding::named(
+        ctx,
         &String::from_utf8_lossy(args::bytes(a, 0)),
         "mb_encoding_aliases",
         1,
         "encoding",
     )?;
-    crate::pseudo::selected(
-        ctx,
-        &String::from_utf8_lossy(args::bytes(a, 0)),
-        e,
-        "mb_encoding_aliases",
-    );
-    Ok(list(
-        e.metadata()
-            .1
-            .split(',')
-            .filter(|s| !s.is_empty())
-            .map(Value::from),
-    ))
+    Ok(list(e.aliases().iter().map(|alias| Value::from(*alias))))
 }
 pub fn mime(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
-    let e = encoding::resolve(
+    let e = encoding::named(
+        ctx,
         &String::from_utf8_lossy(args::bytes(a, 0)),
         "mb_preferred_mime_name",
         1,
         "encoding",
     )?;
-    crate::pseudo::selected(
-        ctx,
-        &String::from_utf8_lossy(args::bytes(a, 0)),
-        e,
-        "mb_preferred_mime_name",
-    );
-    Ok(Value::from(e.metadata().2))
+    Ok(Value::from(e.mime_name()))
 }
-#[derive(Clone, Copy)]
-pub enum Setting {
-    Internal,
-    Output,
-    Regex,
-}
-pub fn encoding(ctx: &mut dyn Context, a: &[Value], name: &str, setting: Setting) -> NativeResult {
-    let value = match args::string(a, 0) {
-        None => None,
-        Some(value) => {
-            let value = value.to_string_lossy();
-            let pass = value.is_empty() || value.eq_ignore_ascii_case("pass");
-            if matches!(setting, Setting::Output) && pass {
-                Some(Encoding(usize::MAX))
-            } else {
-                let mut encoding = encoding::resolve(&value, name, 1, "encoding")?;
-                if matches!(setting, Setting::Regex) {
-                    if encoding.0 >= 44 {
-                        return Err(NativeError::value_error(format!(
-                            "{name}(): Argument #1 ($encoding) must be a valid encoding, \
-                             \"{value}\" given"
-                        )));
-                    }
-                    if matches!(encoding.0, 18 | 19) {
-                        encoding = Encoding(17);
-                    }
-                }
-                Some(encoding)
-            }
-        }
+/// `mb_internal_encoding()`: the encoding of strings when a function is not
+/// given one.
+pub fn internal_encoding(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
+    let Some(name) = args::string(a, 0) else {
+        let current = ctx.state().get_or_default::<Settings>().internal;
+        return Ok(Value::from(current.name()));
     };
-    let state = ctx.state().get_or_default::<Settings>();
-    let slot = match setting {
-        Setting::Internal => &mut state.internal,
-        Setting::Output => &mut state.output,
-        Setting::Regex => &mut state.regex,
-    };
-    match value {
-        Some(e) => {
-            *slot = e;
-            Ok(Value::Bool(true))
-        }
-        None => Ok(Value::from(slot.name())),
-    }
+    let encoding = encoding::resolve(
+        &name.to_string_lossy(),
+        "mb_internal_encoding",
+        1,
+        "encoding",
+    )?;
+    ctx.state().get_or_default::<Settings>().internal = encoding;
+    Ok(Value::Bool(true))
 }
+
+/// `mb_http_output()`: what `mb_output_handler` converts to; `"pass"` (or an
+/// empty string) leaves output alone.
+pub fn http_output(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
+    let Some(name) = args::string(a, 0) else {
+        let current = ctx.state().get_or_default::<Settings>().output;
+        return Ok(Value::from(current.map_or("pass", Encoding::name)));
+    };
+    let name = name.to_string_lossy();
+    let output = if name.is_empty() || name.eq_ignore_ascii_case("pass") {
+        None
+    } else {
+        Some(encoding::resolve(&name, "mb_http_output", 1, "encoding")?)
+    };
+    ctx.state().get_or_default::<Settings>().output = output;
+    Ok(Value::Bool(true))
+}
+
+/// `mb_regex_encoding()`. Phera has no `mb_ereg*` functions, so this is only
+/// remembered. PHP's regex engine knows no transfer encodings, and treats
+/// the Microsoft variants of Shift_JIS as Shift_JIS.
+pub fn regex_encoding(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
+    let Some(name) = args::string(a, 0) else {
+        let current = ctx.state().get_or_default::<Settings>().regex;
+        return Ok(Value::from(current.name()));
+    };
+    let name = name.to_string_lossy();
+    let encoding = match encoding::resolve(&name, "mb_regex_encoding", 1, "encoding")? {
+        Encoding::Cp932 | Encoding::SjisWin => Encoding::Sjis,
+        transfer if transfer.transfer().is_some() => {
+            return Err(NativeError::value_error(format!(
+                "mb_regex_encoding(): Argument #1 ($encoding) must be a valid encoding, \"{name}\" given"
+            )));
+        }
+        other => other,
+    };
+    ctx.state().get_or_default::<Settings>().regex = encoding;
+    Ok(Value::Bool(true))
+}
+
+/// `mb_substitute_character()`: a code point, `"none"`, `"long"` or
+/// `"entity"`. The last code point set stays in use for invalid bytes under
+/// `"long"` and `"entity"`.
 pub fn substitute(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     let state = ctx.state().get_or_default::<Settings>();
-    let cp = state.substitute_codepoint;
-    if let Some(n) = args::int(a, 0) {
-        if !(0..=0x10ffff).contains(&n) || (0xd800..=0xdfff).contains(&n) {
+    if let Some(point) = args::int(a, 0) {
+        let Some(character) = u32::try_from(point).ok().and_then(char::from_u32) else {
             return Err(NativeError::value_error(
                 "mb_substitute_character(): Argument #1 ($substitute_character) \
                  is not a valid codepoint",
             ));
-        }
-        state.substitute_codepoint = n as u32;
+        };
+        state.substitute_character = character;
+        state.substitute = Substitute::Character(character);
+        return Ok(Value::Bool(true));
     }
-    let slot = &mut state.substitute;
-    let new = match args::value(a, 0) {
-        Value::Null => {
-            return Ok(match slot {
-                Substitute::Character(cp) => Value::Int(i64::from(*cp)),
-                Substitute::None => Value::from("none"),
-                Substitute::Long(_) => Value::from("long"),
-                Substitute::Entity(_) => Value::from("entity"),
-            });
+    let Some(name) = args::string(a, 0) else {
+        return Ok(match state.substitute {
+            Substitute::Character(character) => Value::Int(i64::from(u32::from(character))),
+            Substitute::None => Value::from("none"),
+            Substitute::Long(_) => Value::from("long"),
+            Substitute::Entity(_) => Value::from("entity"),
+        });
+    };
+    let stored = state.substitute_character;
+    state.substitute = match name.to_string_lossy().to_ascii_lowercase().as_str() {
+        "none" => Substitute::None,
+        "long" => Substitute::Long(stored),
+        "entity" => Substitute::Entity(stored),
+        _ => {
+            return Err(NativeError::value_error(concat!(
+                "mb_substitute_character(): Argument #1 ($substitute_character) ",
+                "must be \"none\", \"long\", \"entity\" or a valid codepoint"
+            )));
         }
-        Value::Int(cp) if (0..=0x10ffff).contains(cp) && !(0xd800..=0xdfff).contains(cp) => {
-            Some(Substitute::Character(*cp as u32))
-        }
-        Value::String(s) => match s.to_string_lossy().to_ascii_lowercase().as_str() {
-            "none" => Some(Substitute::None),
-            "long" => Some(Substitute::Long(cp)),
-            "entity" => Some(Substitute::Entity(cp)),
-            _ => None,
-        },
-        _ => None,
-    }
-    .ok_or_else(|| {
-        NativeError::value_error(concat!(
-            "mb_substitute_character(): Argument #1 ($substitute_character) ",
-            "must be \"none\", \"long\", \"entity\" or a valid codepoint"
-        ))
-    })?;
-    *slot = new;
+    };
     Ok(Value::Bool(true))
 }
 pub fn language(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {

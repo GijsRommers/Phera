@@ -1,5 +1,9 @@
 //! Trimming and padding count Unicode characters: `mb_str_pad('é', 3) === 'é  '`.
-use crate::{decode::decode, text, unicode};
+use crate::{
+    codec::{Substitute, boundaries, decode, encode},
+    encoding::{Encoding, Family},
+    text, unicode,
+};
 use phera_extension_api::{Context, NativeError, NativeResult, Value, args};
 const SPACE: &[u32] = &[
     0, 9, 10, 11, 12, 13, 32, 133, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200,
@@ -109,7 +113,7 @@ pub fn cut(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
         Some(n) if n >= 0 => n as usize,
         Some(_) => end.saturating_sub(start),
     };
-    if e.0 == 14 {
+    if e == Encoding::Utf8 {
         let mut first = start;
         while first > 0 && first < bytes.len() && bytes[first] & 0xc0 == 0x80 {
             first -= 1;
@@ -120,12 +124,12 @@ pub fn cut(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
         }
         return Ok(Value::from(&bytes[first..last]));
     }
-    if matches!(e.0, 11..=13) {
+    if let Family::Utf16(order) = e.family() {
         let first = start & !1;
         let length = length.min(bytes.len() - start) & !1;
         let mut last = first + length;
         if last >= first + 2 {
-            let unit = if e.0 == 13 {
+            let unit = if order == crate::encoding::ByteOrder::Little {
                 u16::from_le_bytes([bytes[last - 2], bytes[last - 1]])
             } else {
                 u16::from_be_bytes([bytes[last - 2], bytes[last - 1]])
@@ -136,15 +140,15 @@ pub fn cut(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
         }
         return Ok(Value::from(&bytes[first..last]));
     }
-    if e.0 != 20 {
-        let offsets = crate::boundary::offsets(bytes, e);
+    if e != Encoding::Iso2022Jp {
+        let offsets = boundaries(bytes, e);
         let aligned = offsets
             .iter()
             .copied()
             .take_while(|n| *n <= start)
             .last()
             .unwrap_or(0);
-        let length = if e.0 == 21 {
+        let length = if e == Encoding::Gb18030 {
             length.min(bytes.len() - start)
         } else {
             length
@@ -159,9 +163,9 @@ pub fn cut(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
         if limit >= bytes.len() {
             end = bytes.len();
         }
-        let size = match e.0 {
-            2..=4 | 8..=10 => 4,
-            5..=7 | 11..=13 => 2,
+        let size = match e.family() {
+            Family::Ucs4(_) => 4,
+            Family::Ucs2(_) | Family::Utf16(_) => 2,
             _ => 1,
         };
         end -= end % size;
@@ -170,7 +174,7 @@ pub fn cut(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     let mut at = 0;
     let mut selected = Vec::new();
     for cp in p {
-        let encoded = crate::encode::encode(&[cp], e, &crate::encode::Substitute::default());
+        let encoded = encode(&[cp], e, &Substitute::default());
         let next = at + encoded.len();
         if next > start && next <= end {
             selected.push(cp);

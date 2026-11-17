@@ -1,11 +1,11 @@
 //! PHP searches UTF-8 bytes after simple folding: `mb_stripos('ßa', 'a') === 1`.
 use crate::{
-    decode::{BAD, decode},
+    codec::{BAD, decode},
     encoding::Encoding,
     unicode::{self, Case},
 };
 pub fn searchable(bytes: &[u8], encoding: Encoding, fold: bool) -> Vec<u8> {
-    if encoding == Encoding::UTF8 && !fold {
+    if encoding == Encoding::Utf8 && !fold {
         return bytes.to_vec();
     }
     let mut points = decode(bytes, encoding);

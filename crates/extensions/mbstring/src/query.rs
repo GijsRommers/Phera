@@ -20,8 +20,8 @@ pub fn parse(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
             .state()
             .get_or_default::<crate::state::Settings>()
             .clone();
-        let value = crate::encode::encode(
-            &crate::decode::decode(&value, state.internal),
+        let value = crate::codec::encode(
+            &crate::codec::decode(&value, state.internal),
             state.internal,
             &state.substitute,
         );

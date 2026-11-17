@@ -1,24 +1,18 @@
 //! Multibyte text operations: `mb_strlen("é") === 1`.
-mod boundary;
-mod cjk;
+
+mod codec;
 mod conversion;
+mod encoding;
 mod entities;
-mod gb18030;
 mod iconv;
 mod iconv_decode;
 mod iconv_mime;
 mod info;
-mod iso2022;
-mod mime;
-mod pseudo;
-mod query;
-mod register_extra;
-
-mod decode;
-mod encode;
-mod encoding;
 mod kana;
 mod layout;
+mod mime;
+mod query;
+mod register_extra;
 mod register_search;
 mod register_settings;
 mod register_text;
@@ -27,9 +21,9 @@ mod search_bytes;
 mod settings;
 mod state;
 mod text;
-mod transfer;
 mod unicode;
 mod walk;
+
 use phera_extension_api::{Extension, Registry};
 
 /// PHP's request-local multibyte string extension.
@@ -47,20 +41,8 @@ impl Extension for Mbstring {
         registry.constant("ICONV_MIME_DECODE_STRICT", 1i64);
         registry.constant("ICONV_MIME_DECODE_CONTINUE_ON_ERROR", 2i64);
         register_settings::register(registry);
-        for (i, name) in [
-            "UPPER",
-            "LOWER",
-            "TITLE",
-            "FOLD",
-            "UPPER_SIMPLE",
-            "LOWER_SIMPLE",
-            "TITLE_SIMPLE",
-            "FOLD_SIMPLE",
-        ]
-        .iter()
-        .enumerate()
-        {
-            registry.constant(&format!("MB_CASE_{name}"), i as i64);
+        for case in unicode::Case::ALL {
+            registry.constant(&format!("MB_CASE_{}", case.constant_name()), case as i64);
         }
     }
 }

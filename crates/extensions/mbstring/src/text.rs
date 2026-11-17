@@ -1,8 +1,7 @@
 //! Character offsets differ from byte offsets: `mb_substr('aéz', 1, 1) === 'é'`.
 use crate::{
-    decode::decode,
-    encode::encode,
-    encoding,
+    codec::{BAD, Substitute, decode, encode},
+    encoding::{self, Encoding, Family, Transfer},
     state::Settings,
     unicode::{self, Case},
 };
@@ -13,11 +12,11 @@ pub fn points(
     a: &[Value],
     index: usize,
     name: &str,
-) -> Result<(Vec<u32>, encoding::Encoding), NativeError> {
+) -> Result<(Vec<u32>, Encoding), NativeError> {
     let enc = encoding::argument(ctx, a, index, name)?;
     Ok((decode(args::bytes(a, 0), enc), enc))
 }
-pub fn result(ctx: &mut dyn Context, points: &[u32], enc: encoding::Encoding) -> NativeResult {
+pub fn result(ctx: &mut dyn Context, points: &[u32], enc: Encoding) -> NativeResult {
     Ok(Value::from(encode(
         points,
         enc,
@@ -27,13 +26,11 @@ pub fn result(ctx: &mut dyn Context, points: &[u32], enc: encoding::Encoding) ->
 pub fn strlen(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     let enc = encoding::argument(ctx, a, 1, "mb_strlen")?;
     let bytes = args::bytes(a, 0);
-    let count = if enc.0 == 45 {
+    let count = if enc == Encoding::Uuencode {
         bytes.len()
-    } else if matches!(enc.0, 2..=4 | 8..=10) {
-        bytes.len() / 4
-    } else if matches!(enc.0, 5..=7) {
-        bytes.len() / 2
-    } else if enc == encoding::Encoding::UTF8 {
+    } else if let Some(width) = enc.fixed_width() {
+        bytes.len() / width
+    } else if enc == Encoding::Utf8 {
         std::str::from_utf8(bytes).map_or_else(|_| decode(bytes, enc).len(), |s| s.chars().count())
     } else {
         decode(bytes, enc).len()
@@ -67,7 +64,7 @@ pub fn substr(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     }
     let e = encoding::argument(ctx, a, 3, "mb_substr")?;
     let bytes = args::bytes(a, 0);
-    if e == encoding::Encoding::UTF8
+    if e == Encoding::Utf8
         && let Ok(valid) = std::str::from_utf8(bytes)
     {
         let (start, end) = bounds(
@@ -84,14 +81,7 @@ pub fn substr(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
         };
         return Ok(Value::from(&bytes[first..last]));
     }
-    let p = decode(bytes, e);
-    if crate::boundary::fixed(e) {
-        let bytes = args::bytes(a, 0);
-        let size = match e.0 {
-            2..=4 | 8..=10 => 4,
-            5..=7 => 2,
-            _ => 1,
-        };
+    if let Some(size) = e.fixed_width() {
         let characters = (bytes.len() / size) as i64;
         let requested = args::int(a, 1).unwrap_or(0);
         let start = if requested < 0 {
@@ -114,6 +104,7 @@ pub fn substr(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
         let end = first.saturating_add(length).min(bytes.len());
         return Ok(Value::from(&bytes[first..end]));
     }
+    let p = decode(bytes, e);
     let (start, end) = bounds(p.len(), args::int(a, 1).unwrap_or(0), args::int(a, 2));
     result(ctx, &p[start..end], e)
 }
@@ -126,9 +117,12 @@ pub fn split(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     }
     let (p, e) = points(ctx, a, 2, "mb_str_split")?;
     let mut out = PhpArray::new();
-    if !matches!(e.0, 11..=13 | 20 | 21) {
+    if !matches!(
+        e.family(),
+        Family::Utf16(_) | Family::Iso2022Jp | Family::Gb18030
+    ) {
         let bytes = args::bytes(a, 0);
-        let offsets = crate::boundary::offsets(bytes, e);
+        let offsets = crate::codec::boundaries(bytes, e);
         let mut i = 0;
         while i + 1 < offsets.len() {
             let next = i.saturating_add(n as usize).min(offsets.len() - 1);
@@ -164,7 +158,7 @@ pub fn lcfirst(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
 }
 fn casing(ctx: &mut dyn Context, a: &[Value], name: &str, case: Case, first: bool) -> NativeResult {
     let (p, e) = points(ctx, a, 1, name)?;
-    if e.0 == 45 && p.is_empty() && !args::bytes(a, 0).is_empty() {
+    if e == Encoding::Uuencode && p.is_empty() && !args::bytes(a, 0).is_empty() {
         return Ok(Value::from("begin 0644 filename\n "));
     }
     if first && !p.is_empty() {
@@ -197,7 +191,7 @@ fn casing(ctx: &mut dyn Context, a: &[Value], name: &str, case: Case, first: boo
 }
 
 pub fn convert_case(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
-    let mode = Case::parse(args::int(a, 1).unwrap_or(0)).ok_or_else(|| {
+    let mode = Case::from_mode(args::int(a, 1).unwrap_or(0)).ok_or_else(|| {
         NativeError::value_error(
             "mb_convert_case(): Argument #2 ($mode) must be one of the MB_CASE_* constants",
         )
@@ -207,7 +201,7 @@ pub fn convert_case(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
 }
 pub fn ord(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     let (p, e) = points(ctx, a, 1, "mb_ord")?;
-    if e.0 == 20 || e.0 >= 44 {
+    if e == Encoding::Iso2022Jp || e.transfer().is_some() {
         return Err(NativeError::value_error(format!(
             "mb_ord() does not support the \"{}\" encoding",
             e.name()
@@ -219,41 +213,25 @@ pub fn ord(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
         ));
     }
     Ok(p.first()
-        .filter(|cp| **cp != u32::MAX)
+        .filter(|cp| **cp != BAD)
         .map_or(Value::Bool(false), |cp| Value::Int(i64::from(*cp))))
 }
 pub fn chr(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     let e = encoding::argument(ctx, a, 1, "mb_chr")?;
-    if e.0 == 20 || e.0 >= 44 {
+    if e == Encoding::Iso2022Jp || e.transfer().is_some() {
         return Err(NativeError::value_error(format!(
             "mb_chr() does not support the \"{}\" encoding",
             e.name()
         )));
     }
     let cp = args::int(a, 0).unwrap_or(0);
-    if (0xd800..=0xdfff).contains(&cp) && matches!(e.0, 2..=13) {
-        let bytes = if matches!(e.0, 2..=4 | 8..=10) {
-            if matches!(e.0, 4 | 10) {
-                (cp as u32).to_le_bytes()
-            } else {
-                (cp as u32).to_be_bytes()
-            }
-            .to_vec()
-        } else {
-            if matches!(e.0, 7 | 13) {
-                (cp as u16).to_le_bytes()
-            } else {
-                (cp as u16).to_be_bytes()
-            }
-            .to_vec()
-        };
-        return Ok(Value::from(bytes));
-    }
-
-    if !(0..=0x10ffff).contains(&cp) || (0xd800..=0xdfff).contains(&cp) {
+    // Lone surrogates are not characters, but the UTF-16, UTF-32, UCS-2 and
+    // UCS-4 encoders write them as they are, as PHP does; every other
+    // encoder rejects them.
+    if !(0..=0x10ffff).contains(&cp) {
         return Ok(Value::Bool(false));
     }
-    let bytes = encode(&[cp as u32], e, &crate::encode::Substitute::None);
+    let bytes = encode(&[cp as u32], e, &Substitute::None);
     Ok(if bytes.is_empty() {
         Value::Bool(false)
     } else {
@@ -262,11 +240,14 @@ pub fn chr(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
 }
 pub fn scrub(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     let (p, e) = points(ctx, a, 1, "mb_scrub")?;
-    if matches!(e.0, 44 | 47) {
+    if matches!(
+        e.transfer(),
+        Some(Transfer::Base64 | Transfer::QuotedPrintable)
+    ) {
         let raw: Vec<_> = args::bytes(a, 0).iter().map(|b| u32::from(*b)).collect();
         return result(ctx, &raw, e);
     }
-    if e.0 == 45 {
+    if e == Encoding::Uuencode {
         return Ok(Value::from(
             p.iter().map(|cp| *cp as u8).collect::<Vec<_>>(),
         ));

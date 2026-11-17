@@ -96,7 +96,7 @@ pub fn register(registry: &mut Registry) {
                 .nullable()
                 .optional()]
         },
-        |c, a| settings::encoding(c, a, "mb_internal_encoding", settings::Setting::Internal),
+        settings::internal_encoding,
     ));
     registry.function(FunctionEntry::sync(
         "mb_http_output",
@@ -105,7 +105,7 @@ pub fn register(registry: &mut Registry) {
                 .nullable()
                 .optional()]
         },
-        |c, a| settings::encoding(c, a, "mb_http_output", settings::Setting::Output),
+        settings::http_output,
     ));
     registry.function(FunctionEntry::sync(
         "mb_regex_encoding",
@@ -114,6 +114,6 @@ pub fn register(registry: &mut Registry) {
                 .nullable()
                 .optional()]
         },
-        |c, a| settings::encoding(c, a, "mb_regex_encoding", settings::Setting::Regex),
+        settings::regex_encoding,
     ));
 }

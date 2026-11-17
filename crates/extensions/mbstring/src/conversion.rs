@@ -1,7 +1,7 @@
 //! Conversion walks PHP arrays iteratively: `mb_convert_encoding(['é'], 'ASCII')`.
 use crate::{
-    decode::{BAD, decode},
-    encoding::{self, Encoding},
+    codec::{self, BAD, decode},
+    encoding::{self, Encoding, Transfer},
     settings,
     state::Settings,
     text,
@@ -127,18 +127,13 @@ pub fn check(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
 }
 
 pub fn convert(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
-    let to = encoding::resolve(
+    let to = encoding::named(
+        ctx,
         &String::from_utf8_lossy(args::bytes(a, 1)),
         "mb_convert_encoding",
         2,
         "to_encoding",
     )?;
-    crate::pseudo::selected(
-        ctx,
-        &String::from_utf8_lossy(args::bytes(a, 1)),
-        to,
-        "mb_convert_encoding",
-    );
     let list = if args::value(a, 2).is_null() {
         vec![ctx.state().get_or_default::<Settings>().internal]
     } else {
@@ -150,16 +145,31 @@ pub fn convert(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
             "from_encoding",
         )?
     };
-    if matches!(to.0, 44 | 47) && matches!(args::value(a, 0), Value::String(_)) {
+    // Base64 and Quoted-Printable encode the bytes, whatever their encoding.
+    if matches!(
+        to.transfer(),
+        Some(Transfer::Base64 | Transfer::QuotedPrintable)
+    ) && matches!(args::value(a, 0), Value::String(_))
+    {
         let points: Vec<_> = args::bytes(a, 0).iter().map(|b| u32::from(*b)).collect();
-        return Ok(Value::from(crate::pseudo::encode(&points, to)));
-    }
-    if list.len() == 1 && matches!(list[0].0, 44 | 45 | 47) {
-        let points = crate::pseudo::decode(args::bytes(a, 0), list[0]);
-        let substitute = ctx.state().get_or_default::<Settings>().substitute.clone();
-        return Ok(Value::from(crate::encode::encode(
+        return Ok(Value::from(codec::encode(
             &points,
-            Encoding(1),
+            to,
+            &codec::Substitute::None,
+        )));
+    }
+    // Decoding Base64, uuencode or Quoted-Printable gives bytes, not text.
+    if let [from] = list[..]
+        && matches!(
+            from.transfer(),
+            Some(Transfer::Base64 | Transfer::Uuencode | Transfer::QuotedPrintable)
+        )
+    {
+        let points = decode(args::bytes(a, 0), from);
+        let substitute = ctx.state().get_or_default::<Settings>().substitute.clone();
+        return Ok(Value::from(codec::encode(
+            &points,
+            Encoding::EightBit,
             &substitute,
         )));
     }

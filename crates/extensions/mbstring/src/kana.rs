@@ -1,5 +1,5 @@
 //! Kana conversion combines voiced marks: `mb_convert_kana('ｶﾞ', 'KV') === 'ガ'`.
-use crate::{decode::decode, encoding, text};
+use crate::{codec::decode, encoding, text};
 use phera_extension_api::{Context, NativeError, NativeResult, Value, args};
 use std::{collections::HashMap, sync::OnceLock};
 const FLAGS: &[u8] = b"ARNSKHMCarnskhmcV";

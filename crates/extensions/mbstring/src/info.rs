@@ -1,5 +1,9 @@
 //! Inspect request settings: `mb_get_info('internal_encoding') === 'UTF-8'`.
-use crate::{decode::decode, encode::encode, settings, state::Settings};
+use crate::{
+    codec::{decode, encode},
+    settings,
+    state::Settings,
+};
 use phera_extension_api::{ArrayKey, Context, NativeResult, PhpArray, Value, args};
 pub fn get(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     let s = ctx.state().get_or_default::<Settings>().clone();
@@ -7,7 +11,10 @@ pub fn get(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     let mut all = PhpArray::new();
     for (key, value) in [
         ("internal_encoding", Value::from(s.internal.name())),
-        ("http_output", Value::from(s.output.name())),
+        (
+            "http_output",
+            Value::from(s.output.map_or("pass", |e| e.name())),
+        ),
         (
             "http_output_conv_mimetypes",
             Value::from("^(text/|application/xhtml\\+xml)"),
@@ -53,12 +60,12 @@ pub fn mail_charset(language: &str) -> &'static str {
 }
 pub fn output(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     let s = ctx.state().get_or_default::<Settings>().clone();
-    if s.output.0 == usize::MAX {
+    let Some(output) = s.output else {
         return Ok(args::value(a, 0).clone());
-    }
+    };
     Ok(Value::from(encode(
         &decode(args::bytes(a, 0), s.internal),
-        s.output,
+        output,
         &s.substitute,
     )))
 }

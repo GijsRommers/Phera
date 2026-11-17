@@ -1,5 +1,5 @@
 case-*.bin, properties.bin, width.bin, single-*.bin, decode-*.bin,
-encode-*.bin, gb18030-patches.bin, kana.txt, encodings.txt and entities.txt are generated observations from
+encode-*.bin, gb18030-patches.bin, kana.txt and entities.txt are generated observations from
 PHP 8.5.12. See the generator programs in examples/. PHP 8.5
 uses Unicode 17.0; these files do not use the newer tables in php-src main.
 

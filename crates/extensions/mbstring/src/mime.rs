@@ -1,7 +1,6 @@
 //! RFC 2047 headers: `mb_decode_mimeheader('=?UTF-8?B?w6k=?=') === 'é'`.
 use crate::{
-    decode::decode,
-    encode::encode,
+    codec::{decode, encode},
     encoding::{self, Encoding},
     state::Settings,
 };
@@ -87,7 +86,7 @@ pub fn encode_header(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
         .map_or(0, |i| i + 1);
     let mut output = source[..prefix].to_vec();
     let points = decode(&source[prefix..], state.internal);
-    let label = target.metadata().2;
+    let label = target.mime_name();
     let mut bytes = Vec::new();
     let mut column = prefix + args::int(a, 4).unwrap_or(0).max(0) as usize;
     if column + label.len() + 11 > 74 {
