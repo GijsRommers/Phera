@@ -8,12 +8,13 @@
 //! hash_equals($stored, $computed);         // in constant time
 //! ```
 
+use digest::Digest;
 use phera_extension_api::{
     Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, PhpArray, Value, args,
 };
 use subtle::ConstantTimeEq;
 
-use crate::algorithms::{ALGORITHMS, Algorithm};
+use crate::algorithms::ALGORITHMS;
 use crate::given;
 use crate::hmac::Hmac;
 use crate::options::{self, Options};
@@ -143,7 +144,9 @@ fn hash_equals(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(Value::Bool(equal.into()))
 }
 
-/// `md5(string $string, bool $binary = false): string`
+/// `md5(string $string, bool $binary = false): string`. It and `sha1()`
+/// name their algorithm, so they call it directly instead of through
+/// `Algorithm`'s dispatch.
 const MD5: FunctionEntry = FunctionEntry::sync(
     "md5",
     &[
@@ -154,7 +157,7 @@ const MD5: FunctionEntry = FunctionEntry::sync(
 );
 
 fn md5(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let digest = Algorithm::Md5.digest(args::bytes(arguments, 0));
+    let digest = md5::Md5::digest(args::bytes(arguments, 0)).to_vec();
     Ok(output(digest, args::bool(arguments, 1).unwrap_or(false)))
 }
 
@@ -169,6 +172,6 @@ const SHA1: FunctionEntry = FunctionEntry::sync(
 );
 
 fn sha1(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let digest = Algorithm::Sha1.digest(args::bytes(arguments, 0));
+    let digest = sha1::Sha1::digest(args::bytes(arguments, 0)).to_vec();
     Ok(output(digest, args::bool(arguments, 1).unwrap_or(false)))
 }
