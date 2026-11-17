@@ -67,3 +67,26 @@ timeouts, cancellation while waiting and during a query, idle/lifetime retiremen
 socket replacement, failed reset, and session/credential isolation. The unit test also
 prints paired query-dispatch and reset timings; use a release build without competing
 benchmarks for useful measurements.
+
+
+## SQLite (no database services needed)
+
+The `sqlite_*.php` scripts run in `sqlite_oracle.rs`; the existing server-driver
+scripts remain in `oracle.rs`. Each SQLite process receives a private temporary
+directory in `$argv[1]` and as its working directory. Neither suite substitutes
+expected output: it compares the real PHP oracle's stdout with the release CLI.
+
+```sh
+cargo build --release -p phera-cli
+PHERA_BIN="$PWD/target/release/phera" cargo test -p phera-ext-pdo \
+  --test sqlite_oracle --test sqlite_file_format --test sqlite_concurrency -- --nocapture
+PHERA_BIN="$PWD/target/release/phera" cargo test -p phera-ext-sqlite3 --test oracle -- --nocapture
+```
+
+The file-format test exchanges a database between PHP PDO and Phera SQLite3 in both
+directions. The HTTP test owns its temporary files, servers and ephemeral ports;
+it compares 200 concurrent WAL requests on two workers, then checks an overlapping
+slow and quick request on one Phera worker. It never contacts PostgreSQL or MySQL.
+
+See [SQLite implementation status](../../../sqlite/README.md) for feature coverage,
+compile options, lifecycle, callback/stream blockers and remaining differences.

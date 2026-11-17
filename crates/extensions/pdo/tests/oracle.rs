@@ -19,6 +19,13 @@ fn php_scripts_match_phera() {
         .unwrap()
         .map(|entry| entry.unwrap().path())
         .filter(|path| path.extension().is_some_and(|extension| extension == "php"))
+        .filter(|path| {
+            !path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("sqlite_")
+        })
         .collect();
     scripts.sort();
     let output_dir = support::scratch().join("oracle");
