@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  format:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: '1.99.1' # Keep in sync with rust-toolchain.toml.
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  lint:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: '1.99.1'
+          components: clippy
+      - uses: Swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2
+        with:
+          shared-key: linux
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    name: Test (Linux, PHP 8.5, PostgreSQL 17, MySQL 8.4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: phera_test
+          POSTGRES_USER: phera
+          POSTGRES_PASSWORD: phera
+        ports: ['54329:5432']
+        options: >-
+          --health-cmd "pg_isready -U phera -d phera_test"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: phera_test
+          MYSQL_USER: phera
+          MYSQL_PASSWORD: phera
+          MYSQL_ROOT_PASSWORD: phera-root
+        ports: ['33069:3306']
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -u phera -pphera --silent"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: '1.99.1'
+      - uses: Swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2
+        with:
+          shared-key: linux
+      - uses: shivammathur/setup-php@d52fc211a0436f8839a587b3b5b8efddab4744ea # v2
+        with:
+          php-version: '8.5'
+          extensions: json, pcre, ctype, pdo_pgsql, pdo_mysql, mbstring
+          coverage: none
+      - name: Export PHP oracle
+        run: echo "PHERA_PHP=$(command -v php)" >> "$GITHUB_ENV"
+      # Fail on missing prerequisites instead of silently skipping the PDO suites.
+      - name: Verify PHP version, extensions and database connections
+        run: make ci-prerequisites
+      - name: Build end-to-end PDO binary
+        run: make ci-build
+      - name: Test workspace against real PHP
+        run: cargo test --workspace
+        env:
+          PHERA_BIN: ${{ github.workspace }}/target/release/phera
+
+  safe-rust:
+    name: No unsafe Rust (including cfg-disabled code)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      # Scan tokens as a second guard beyond workspace unsafe_code = "forbid".
+      - run: python3 .github/scripts/check-unsafe.py

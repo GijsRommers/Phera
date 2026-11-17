@@ -2,7 +2,7 @@ CARGO ?= cargo
 
 .DEFAULT_GOAL := help
 
-.PHONY: help build release check test fmt fmt-check lint ci run clean phpt phpt-lexer
+.PHONY: help build release check test fmt fmt-check lint ci ci-prerequisites ci-build safe-rust run clean phpt phpt-lexer
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -29,7 +29,19 @@ fmt-check:
 lint:
 	$(CARGO) clippy --workspace --all-targets -- -D warnings
 
-ci: fmt-check lint test
+# Keep the sequence deterministic even with make -j: PDO tests need the binary.
+.NOTPARALLEL: ci
+ci: export PHERA_BIN = $(CURDIR)/target/release/phera
+ci: fmt-check lint safe-rust ci-prerequisites ci-build test
+
+safe-rust:
+	python3 .github/scripts/check-unsafe.py
+
+ci-prerequisites:
+	"$${PHERA_PHP:-php}" .github/scripts/check-prerequisites.php
+
+ci-build:
+	$(CARGO) build --release -p phera-cli
 
 run: 
 	$(CARGO) run -p phera-cli -- $(ARGS)
