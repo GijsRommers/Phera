@@ -57,7 +57,8 @@ pub fn pcg(_: &mut dyn Context, this: Option<&Rc<Object>>, arguments: &[Value]) 
             let bytes = seed.as_bytes();
             if bytes.len() != 16 {
                 return Err(NativeError::value_error(
-                    "Random\\Engine\\PcgOneseq128XslRr64::__construct(): Argument #1 ($seed) must be a \
+                    "Random\\Engine\\PcgOneseq128XslRr64::__construct(): Argument #1 \
+                ($seed) must be a \
             16 byte (128 bit) string",
                 ));
             }
@@ -85,13 +86,15 @@ pub fn xoshiro(
             };
             if bytes.len() != 32 {
                 return Err(NativeError::value_error(
-                    "Random\\Engine\\Xoshiro256StarStar::__construct(): Argument #1 ($seed) must be a 32 \
+                    "Random\\Engine\\Xoshiro256StarStar::__construct(): Argument #1 ($seed) \
+                must be a 32 \
             byte (256 bit) string",
                 ));
             }
             if bytes.iter().all(|&b| b == 0) {
                 return Err(NativeError::value_error(
-                    "Random\\Engine\\Xoshiro256StarStar::__construct(): Argument #1 ($seed) must not \
+                    "Random\\Engine\\Xoshiro256StarStar::__construct(): Argument #1 ($seed) \
+                must not \
             consist entirely of NUL bytes",
                 ));
             }
@@ -116,7 +119,8 @@ pub fn jump(_: &mut dyn Context, this: Option<&Rc<Object>>, arguments: &[Value])
             let advance = args::int(arguments, 0).unwrap_or_default();
             if advance < 0 {
                 return Err(NativeError::value_error(
-                    "Random\\Engine\\PcgOneseq128XslRr64::jump(): Argument #1 ($advance) must be greater \
+                    "Random\\Engine\\PcgOneseq128XslRr64::jump(): Argument #1 ($advance) \
+                must be greater \
             than or equal to 0",
                 ));
             }

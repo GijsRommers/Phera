@@ -35,13 +35,14 @@ pub fn keys(
     }
     if count < 1 || count as usize > array.len() {
         return Err(NativeError::value_error(format!(
-            "{name}(): Argument #2 ($num) must be between 1 and the number of elements in argument #1 ($array)"
+            "{name}(): Argument #2 ($num) must be between 1 and the number of elements in \
+                argument #1 ($array)"
         )));
     }
     let keys: Vec<Value> = array
         .iter()
         .map(|(k, _)| match k {
-            ArrayKey::Int(i) => Value::Int(*i),
+            ArrayKey::Int(i) => Value::Int(i),
             ArrayKey::String(s) => Value::String(s.clone()),
         })
         .collect();
@@ -61,7 +62,7 @@ pub fn keys(
                 let index = engine.range(0, used as i64 - 1)? as usize;
                 if let Some((key, _)) = array.entry_at(index) {
                     break match key {
-                        ArrayKey::Int(key) => Value::Int(*key),
+                        ArrayKey::Int(key) => Value::Int(key),
                         ArrayKey::String(key) => Value::String(key.clone()),
                     };
                 }

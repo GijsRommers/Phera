@@ -88,7 +88,11 @@ async fn files_and_incremental_file() {
             assert_eq!(result, Value::Bool(true));
             let result = call(&registry, &mut context, "hash_final", vec![hash]);
             context.diagnostics.entries.clear();
-            script.push_str(&format!("run('file',function(){{$h=hash_init('{algorithm}',{flags},'key');hash_update_file($h,{});return hash_final($h);}});",oracle::php_literal(&Value::from(filename.clone()))));
+            script.push_str(&format!(
+                "run('file',function(){{$h=hash_init('{algorithm}',{flags},'key');\
+                hash_update_file($h,{});return hash_final($h);}});",
+                oracle::php_literal(&Value::from(filename.clone()))
+            ));
             rust.push(oracle::encode_case(
                 "file",
                 &result,

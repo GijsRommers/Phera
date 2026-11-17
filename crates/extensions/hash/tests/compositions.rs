@@ -22,7 +22,8 @@ fn hmac_matrix() {
             for key_length in [0, 16, 32, 64, 72, 104, 128, 136, 144, 200] {
                 for binary in [false, true] {
                     let expression = format!(
-                        "hash_hmac({},str_repeat('x',{length}),str_repeat('k',{key_length}),{binary})",
+                        "hash_hmac({},str_repeat('x',{length}),\
+                        str_repeat('k',{key_length}),{binary})",
                         oracle::php_literal(&name)
                     );
                     script.push_str(&format!("run('hmac',fn()=>{expression});\n"));
@@ -91,7 +92,14 @@ fn incremental_every_split() {
                     "hash_final",
                     vec![copy, Value::Bool(binary)],
                 );
-                script.push_str(&format!("run('split',function(){{$h=hash_init({});hash_update($h,str_repeat('x',{split}));$c=hash_copy($h);hash_update($c,str_repeat('x',{}));return hash_final($c,{binary});}});\n",oracle::php_literal(&name),200-split));
+                script.push_str(&format!(
+                    "run('split',function(){{$h=hash_init({});\
+                hash_update($h,str_repeat('x',{split}));$c=hash_copy($h);\
+                hash_update($c,str_repeat('x',{}));return \
+                hash_final($c,{binary});}});\n",
+                    oracle::php_literal(&name),
+                    200 - split
+                ));
                 rust.push(oracle::encode_case(
                     "split",
                     &result,

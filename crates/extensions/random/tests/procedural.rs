@@ -83,7 +83,10 @@ fn shuffle_and_keys() {
                         "array_rand",
                         vec![Value::from(array)],
                     );
-                    script.push_str(&format!("run('case',function(){{$a={literal};unset($a[1]);return array_rand($a);}});"));
+                    script.push_str(&format!(
+                        "run('case',function(){{$a={literal};\
+                unset($a[1]);return array_rand($a);}});"
+                    ));
                     rust.push(oracle::encode_case(
                         "case",
                         &result,

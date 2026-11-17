@@ -40,14 +40,24 @@ pub fn apply(
     if let Some(seed) = seed {
         match &*seed {
             Value::Int(seed) => algorithm.seed = *seed as u64,
-            _ => context.deprecated(format!("{function}(): Passing a seed of a type other than int is deprecated because it is {}",
-                if xx3 {"ignored"} else {"the same as setting the seed to 0"})),
+            _ => context.deprecated(format!(
+                "{function}(): Passing a seed of a type other \
+                than int is deprecated because it is {}",
+                if xx3 {
+                    "ignored"
+                } else {
+                    "the same as setting the seed to 0"
+                }
+            )),
         }
     }
     if xx3 && let Some(secret) = secret {
         if !matches!(&*secret, Value::String(_)) {
-            context.deprecated(format!("{function}(): Passing a secret of a type other than string is deprecated because it \
-            implicitly converts to a string, potentially hiding bugs"));
+            context.deprecated(format!(
+                "{function}(): Passing a secret of a type other than \
+                string is deprecated because it \
+            implicitly converts to a string, potentially hiding bugs"
+            ));
         }
         let secret = to_php_string(&secret, context.diagnostics())?;
         let mut bytes = secret.as_bytes().to_vec();

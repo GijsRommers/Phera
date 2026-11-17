@@ -76,7 +76,8 @@ pub fn init(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let key = if args::int(arguments, 1).unwrap_or(0) & 1 != 0 {
         if algorithm.block_size().is_none() {
             return Err(NativeError::value_error(
-                "hash_init(): Argument #1 ($algo) must be a cryptographic hashing algorithm if HMAC is requested",
+                "hash_init(): Argument #1 ($algo) must be a cryptographic hashing algorithm \
+                if HMAC is requested",
             ));
         }
         if args::bytes(arguments, 2).is_empty() {

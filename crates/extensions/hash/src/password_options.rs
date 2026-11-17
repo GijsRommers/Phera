@@ -54,7 +54,11 @@ impl Default for Options {
     }
 }
 impl Options {
-    pub fn read(context: &mut dyn Context, arguments: &[Value]) -> Result<Self, NativeError> {
+    pub fn read(
+        context: &mut dyn Context,
+        arguments: &[Value],
+        algorithm: Algorithm,
+    ) -> Result<Self, NativeError> {
         let mut result = Self::default();
         if let Some(options) = args::array(arguments, 2) {
             for (name, slot) in [
@@ -63,6 +67,9 @@ impl Options {
                 ("time_cost", &mut result.time),
                 ("threads", &mut result.threads),
             ] {
+                if (name == "cost") != (algorithm == Algorithm::Bcrypt) {
+                    continue;
+                }
                 if let Some(value) = options.get(&ArrayKey::str(name)) {
                     *slot = value::to_int(value, context.diagnostics())?;
                 }

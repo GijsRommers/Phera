@@ -32,7 +32,9 @@ fn invalid_xxhash_secret_long_input() {
             let expected =
                 oracle::encode_case("case", &result, &context.output, &context.diagnostics);
             let script = format!(
-                "{} run('case',fn()=>hash('{algo}',str_repeat('x',1024),false,['secret'=>str_repeat('s',{size})]));",
+                "{} \
+                run('case',fn()=>hash('{algo}',str_repeat('x',1024),false,\
+                ['secret'=>str_repeat('s',{size})]));",
                 oracle::PHP_PREAMBLE
             );
             let mut child = Command::new(&php)
@@ -56,7 +58,10 @@ fn invalid_xxhash_secret_long_input() {
                 if start.elapsed() > Duration::from_secs(2) {
                     child.kill().unwrap();
                     child.wait().unwrap();
-                    failures.push(format!("{algo} secret={size}: PHP oracle timed out in XXH3_update; Phera {expected}"));
+                    failures.push(format!(
+                        "{algo} secret={size}: PHP oracle timed out in \
+                XXH3_update; Phera {expected}"
+                    ));
                     break;
                 }
                 std::thread::sleep(Duration::from_millis(10));

@@ -97,7 +97,7 @@ pub fn needs_rehash(context: &mut dyn Context, arguments: &[Value]) -> NativeRes
     if identify(hash) != Some(algorithm) {
         return Ok(Value::Bool(true));
     }
-    let requested = Options::read(context, arguments)?;
+    let requested = Options::read(context, arguments, algorithm)?;
     let old = stored(
         hash,
         Options {

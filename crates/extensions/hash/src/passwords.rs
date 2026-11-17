@@ -17,8 +17,13 @@ pub fn hash(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_,
                 "password_hash(): Argument #2 ($algo) must be a valid password hashing algorithm",
             )
         })?;
-        let options = Options::read(context, &arguments)?;
         let password = args::bytes(&arguments, 0).to_vec();
+        if algorithm == Algorithm::Bcrypt && password.contains(&0) {
+            return Err(NativeError::value_error(
+                "Bcrypt password must not contain null character",
+            ));
+        }
+        let options = Options::read(context, &arguments, algorithm)?;
         options.validate(algorithm, &password)?;
         if args::array(&arguments, 2).is_some_and(|a| a.contains_key(&ArrayKey::str("salt"))) {
             context.warning(

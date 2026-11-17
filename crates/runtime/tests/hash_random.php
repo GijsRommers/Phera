@@ -15,3 +15,12 @@ var_dump(password_verify('password', $p));
 var_dump(password_get_info($p));
 mt_srand(42);
 echo mt_rand(), ' ', rand(1, 6), "\n";
+var_dump(password_get_info(password_hash('p', PASSWORD_BCRYPT,
+    ['cost' => 4, 'threads' => new stdClass])));
+var_dump(password_get_info(password_hash('p', PASSWORD_ARGON2ID,
+    ['cost' => new stdClass, 'memory_cost' => 32, 'time_cost' => 1])));
+try {
+    password_hash("nul\0byte", PASSWORD_BCRYPT, ['cost' => new stdClass]);
+} catch (ValueError $e) {
+    echo $e->getMessage(), "\n";
+}

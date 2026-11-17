@@ -102,7 +102,11 @@ pub fn random_bytes(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(Value::from(bytes))
 }
 pub fn lcg(context: &mut dyn Context, _: &[Value]) -> NativeResult {
-    context.deprecated("Function lcg_value() is deprecated since 8.4, use \\Random\\Randomizer::getFloat() instead".into());
+    context.deprecated(
+        "Function lcg_value() is deprecated since 8.4, use \
+                \\Random\\Randomizer::getFloat() instead"
+            .into(),
+    );
     let state = context.state().get_or_default::<RequestRandom>();
     if state.lcg.is_none() {
         let seed = engines::secure_u64()?;

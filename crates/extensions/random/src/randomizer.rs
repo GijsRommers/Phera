@@ -92,7 +92,8 @@ pub fn get_float(
     }
     if max <= min {
         return Err(NativeError::value_error(
-            "Random\\Randomizer::getFloat(): Argument #2 ($max) must be greater than argument #1 ($min)",
+            "Random\\Randomizer::getFloat(): Argument #2 ($max) must be greater than \
+                argument #1 ($min)",
         ));
     }
     if arguments.len() > 2 {
@@ -139,7 +140,8 @@ pub fn from_string(
     }
     if length < 1 {
         return Err(NativeError::value_error(
-            "Random\\Randomizer::getBytesFromString(): Argument #2 ($length) must be greater than 0",
+            "Random\\Randomizer::getBytesFromString(): Argument #2 ($length) must be \
+                greater than 0",
         ));
     }
     with_engine(this, |engine| {
