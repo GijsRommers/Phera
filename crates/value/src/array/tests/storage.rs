@@ -1,18 +1,9 @@
-//! Storage transitions and the reference model.
+//! Which storage shape an array has, and when it changes.
 
-use super::storage::{SCAN_LIMIT, Storage};
-use super::{ArrayKey, PhpArray};
+use super::{k, ks, vi};
+use crate::array::PhpArray;
+use crate::array::storage::{SCAN_LIMIT, Storage};
 use crate::value::Value;
-
-fn k(i: i64) -> ArrayKey {
-    ArrayKey::Int(i)
-}
-fn ks(s: &str) -> ArrayKey {
-    ArrayKey::from_value(&Value::from(s)).unwrap()
-}
-fn vi(i: i64) -> Value {
-    Value::Int(i)
-}
 
 /// Which lookup an array uses is invisible from outside, so these tests
 /// look inside.
@@ -77,21 +68,14 @@ fn small_maps_are_scanned_and_large_ones_hashed() {
     assert_eq!(map.get(&ks("z")), None);
 }
 
-/// The packed slot must stay as small as Value; Option uses its unused discriminant.
+/// A list slot is as small as a value: `Option<Value>` uses a spare tag of `Value`.
 #[test]
 fn storage_sizes() {
-    use super::storage::Entry;
+    use crate::array::storage::Entry;
     assert_eq!(size_of::<Value>(), 16);
     assert_eq!(size_of::<Option<Value>>(), 16);
     assert_eq!(size_of::<Entry>(), 32);
     assert_eq!(size_of::<PhpArray>(), 56);
-    println!(
-        "PhpArray={} Value={} Option<Value>={} Entry={}",
-        size_of::<PhpArray>(),
-        size_of::<Value>(),
-        size_of::<Option<Value>>(),
-        size_of::<Entry>()
-    );
 }
 
 /// Mutating through either mutable API must not bypass the iterative-drop check.

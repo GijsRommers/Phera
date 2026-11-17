@@ -1,7 +1,7 @@
 //! A deliberately simple Vec-of-pairs oracle, independent of storage and lookup.
 
-use super::storage::Storage;
-use super::{ArrayKey, PhpArray};
+use crate::array::storage::Storage;
+use crate::array::{ArrayKey, PhpArray};
 use crate::value::Value;
 
 #[derive(Default)]
@@ -97,10 +97,10 @@ fn every_lookup_agrees_with_a_plain_list_of_pairs() {
             }
             4..=6 => {
                 let result = array.push(Value::Int(step));
-                if model.next == Some(i64::MAX) {
+                let expected = ArrayKey::Int(model.next.unwrap_or(0));
+                if model.pairs.iter().any(|(key, _)| *key == expected) {
                     assert!(result.is_err());
                 } else {
-                    let expected = ArrayKey::Int(model.next.unwrap_or(0));
                     assert_eq!(result.unwrap(), expected);
                     model.insert(expected, Value::Int(step));
                 }
