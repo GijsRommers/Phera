@@ -44,20 +44,13 @@ pub fn portion(ctx: &mut dyn Context, a: &[Value], name: &str, mode: Search) -> 
     else {
         return Ok(Value::Bool(false));
     };
-    let before = args::bool(a, 2).unwrap_or(false);
-    text::substr(
-        ctx,
-        &[
-            args::value(a, 0).clone(),
-            Value::Int(if before { 0 } else { index as i64 }),
-            if before {
-                Value::Int(index as i64)
-            } else {
-                Value::Null
-            },
-            Value::from(encoding.name()),
-        ],
-    )
+    let haystack = args::bytes(a, 0);
+    let portion = if args::bool(a, 2).unwrap_or(false) {
+        text::substring(ctx, haystack, 0, Some(index as i64), encoding)
+    } else {
+        text::substring(ctx, haystack, index as i64, None, encoding)
+    };
+    Ok(Value::from(portion.into_owned()))
 }
 
 pub fn count(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {

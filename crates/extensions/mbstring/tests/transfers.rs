@@ -59,3 +59,51 @@ fn transfer_matrix() {
     }
     matrix.compare("mbstring-transfer");
 }
+
+/// PHP deprecates a transfer encoding once per new name. Functions built on
+/// others (`mb_ucfirst` on `mb_substr`, `mb_str_pad` on `mb_strlen`) must not
+/// raise it again under the inner function's name, nor raise it at all when
+/// the encoding comes from `mb_internal_encoding()`.
+#[test]
+fn transfer_deprecations_come_once_from_the_called_function() {
+    let mut matrix = Matrix::new();
+    let subject = || Value::from(" YWJj=3D ");
+    for name in ["qprint", "html", "HTML", "Quoted-Printable", "BASE64"] {
+        let encoding = || Value::from(name);
+        for function in ["mb_ucfirst", "mb_lcfirst"] {
+            matrix.case(function, vec![subject(), encoding()]);
+        }
+        for function in ["mb_strstr", "mb_stristr", "mb_strrchr", "mb_strrichr"] {
+            for before in [false, true] {
+                matrix.case(
+                    function,
+                    vec![subject(), Value::from("J"), Value::Bool(before), encoding()],
+                );
+            }
+        }
+        for function in ["mb_trim", "mb_ltrim", "mb_rtrim"] {
+            matrix.case(function, vec![subject(), Value::Null, encoding()]);
+        }
+        matrix.case(
+            "mb_str_pad",
+            vec![
+                subject(),
+                Value::Int(12),
+                Value::from("-"),
+                Value::Int(2),
+                encoding(),
+            ],
+        );
+        // The same name again, which PHP does not deprecate a second time.
+        matrix.case("mb_strlen", vec![subject(), encoding()]);
+    }
+    for internal in ["BASE64", "HTML-ENTITIES", "UTF-8"] {
+        matrix.case("mb_internal_encoding", vec![Value::from(internal)]);
+        for function in ["mb_ucfirst", "mb_lcfirst", "mb_trim"] {
+            matrix.case(function, vec![subject()]);
+        }
+        matrix.case("mb_strstr", vec![subject(), Value::from("J")]);
+        matrix.case("mb_str_pad", vec![subject(), Value::Int(12)]);
+    }
+    matrix.compare("mbstring-transfer-deprecations");
+}

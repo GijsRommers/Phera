@@ -34,15 +34,14 @@ pub fn trim(ctx: &mut dyn Context, a: &[Value], name: &str, side: Trim) -> Nativ
     if start == 0 && end == p.len() {
         return Ok(args::value(a, 0).clone());
     }
-    text::substr(
+    let trimmed = text::substring(
         ctx,
-        &[
-            args::value(a, 0).clone(),
-            Value::Int(start as i64),
-            Value::Int(end.saturating_sub(start) as i64),
-            Value::from(e.name()),
-        ],
-    )
+        args::bytes(a, 0),
+        start as i64,
+        Some(end.saturating_sub(start) as i64),
+        e,
+    );
+    Ok(Value::from(trimmed.into_owned()))
 }
 
 pub fn pad(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
@@ -53,10 +52,7 @@ pub fn pad(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     }
 
     let padding = args::string(a, 2).cloned().unwrap_or_else(|| " ".into());
-    let pad_args = [Value::String(padding.clone()), Value::from(e.name())];
-    let Value::Int(pad_length) = text::strlen(ctx, &pad_args)? else {
-        unreachable!()
-    };
+    let pad_length = text::character_count(padding.as_bytes(), e);
     if pad_length == 0 {
         return Err(NativeError::value_error(
             "mb_str_pad(): Argument #3 ($pad_string) must not be empty",
@@ -83,19 +79,17 @@ pub fn pad(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
         if index == 1 {
             output.extend_from_slice(args::bytes(a, 0));
         }
-        for _ in 0..count / pad_length as usize {
+        for _ in 0..count / pad_length {
             output.extend_from_slice(padding.as_bytes());
         }
-        let tail = text::substr(
+        let tail = text::substring(
             ctx,
-            &[
-                Value::String(padding.clone()),
-                Value::Int(0),
-                Value::Int((count % pad_length as usize) as i64),
-                Value::from(e.name()),
-            ],
-        )?;
-        output.extend_from_slice(args::bytes(&[tail], 0));
+            padding.as_bytes(),
+            0,
+            Some((count % pad_length) as i64),
+            e,
+        );
+        output.extend_from_slice(&tail);
     }
     Ok(Value::from(output))
 }

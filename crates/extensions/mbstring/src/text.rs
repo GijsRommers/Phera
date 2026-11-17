@@ -5,6 +5,8 @@ use crate::{
     state::Settings,
     unicode::{self, Case},
 };
+use std::borrow::Cow;
+
 use phera_extension_api::{Context, NativeError, NativeResult, PhpArray, Value, args};
 
 pub fn points(
@@ -25,8 +27,11 @@ pub fn result(ctx: &mut dyn Context, points: &[u32], enc: Encoding) -> NativeRes
 }
 pub fn strlen(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     let enc = encoding::argument(ctx, a, 1, "mb_strlen")?;
-    let bytes = args::bytes(a, 0);
-    let count = if enc == Encoding::Uuencode {
+    Ok(Value::Int(character_count(args::bytes(a, 0), enc) as i64))
+}
+/// `mb_strlen` for an encoding already resolved.
+pub fn character_count(bytes: &[u8], enc: Encoding) -> usize {
+    if enc == Encoding::Uuencode {
         bytes.len()
     } else if let Some(width) = enc.fixed_width() {
         bytes.len() / width
@@ -34,8 +39,7 @@ pub fn strlen(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
         std::str::from_utf8(bytes).map_or_else(|_| decode(bytes, enc).len(), |s| s.chars().count())
     } else {
         decode(bytes, enc).len()
-    };
-    Ok(Value::Int(count as i64))
+    }
 }
 pub fn bounds(size: usize, start: i64, length: Option<i64>) -> (usize, usize) {
     let size = size as i64;
@@ -63,15 +67,24 @@ pub fn substr(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
         }
     }
     let e = encoding::argument(ctx, a, 3, "mb_substr")?;
-    let bytes = args::bytes(a, 0);
+    let start = args::int(a, 1).unwrap_or(0);
+    let substring = substring(ctx, args::bytes(a, 0), start, args::int(a, 2), e);
+    Ok(Value::from(substring.into_owned()))
+}
+/// `mb_substr` for an encoding already resolved. Valid UTF-8 and the
+/// fixed-width encodings are sliced without decoding, so the result can
+/// borrow from `bytes`.
+pub fn substring<'a>(
+    ctx: &mut dyn Context,
+    bytes: &'a [u8],
+    start: i64,
+    length: Option<i64>,
+    e: Encoding,
+) -> Cow<'a, [u8]> {
     if e == Encoding::Utf8
         && let Ok(valid) = std::str::from_utf8(bytes)
     {
-        let (start, end) = bounds(
-            valid.chars().count(),
-            args::int(a, 1).unwrap_or(0),
-            args::int(a, 2),
-        );
+        let (start, end) = bounds(valid.chars().count(), start, length);
         let mut indices = valid.char_indices().map(|(i, _)| i).chain([bytes.len()]);
         let first = indices.nth(start).unwrap_or(bytes.len());
         let last = if end == start {
@@ -79,18 +92,18 @@ pub fn substr(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
         } else {
             indices.nth(end - start - 1).unwrap_or(bytes.len())
         };
-        return Ok(Value::from(&bytes[first..last]));
+        return Cow::Borrowed(&bytes[first..last]);
     }
     if let Some(size) = e.fixed_width() {
         let characters = (bytes.len() / size) as i64;
-        let requested = args::int(a, 1).unwrap_or(0);
+        let requested = start;
         let start = if requested < 0 {
             characters.saturating_add(requested).max(0)
         } else {
             requested
         } as usize;
         let first = start.saturating_mul(size).min(bytes.len());
-        let length = match args::int(a, 2) {
+        let length = match length {
             None => bytes.len(),
             Some(n) if n >= 0 => (n as usize).saturating_mul(size),
             Some(n) => {
@@ -102,11 +115,12 @@ pub fn substr(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
             }
         };
         let end = first.saturating_add(length).min(bytes.len());
-        return Ok(Value::from(&bytes[first..end]));
+        return Cow::Borrowed(&bytes[first..end]);
     }
     let p = decode(bytes, e);
-    let (start, end) = bounds(p.len(), args::int(a, 1).unwrap_or(0), args::int(a, 2));
-    result(ctx, &p[start..end], e)
+    let (start, end) = bounds(p.len(), start, length);
+    let substitute = &ctx.state().get_or_default::<Settings>().substitute;
+    Cow::Owned(encode(&p[start..end], e, substitute))
 }
 pub fn split(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     let n = args::int(a, 1).unwrap_or(1);
@@ -162,29 +176,16 @@ fn casing(ctx: &mut dyn Context, a: &[Value], name: &str, case: Case, first: boo
         return Ok(Value::from("begin 0644 filename\n "));
     }
     if first && !p.is_empty() {
-        let first_args = vec![
-            args::value(a, 0).clone(),
-            Value::Int(0),
-            Value::Int(1),
-            Value::from(e.name()),
-        ];
-        let initial = substr(ctx, &first_args)?;
-        let head = decode(args::bytes(std::slice::from_ref(&initial), 0), e);
+        let bytes = args::bytes(a, 0);
+        let initial = substring(ctx, bytes, 0, Some(1), e);
+        let head = decode(&initial, e);
         let mapped = result(ctx, &unicode::convert(&head, case), e)?;
-        if initial == mapped {
+        if args::bytes(std::slice::from_ref(&mapped), 0) == &initial[..] {
             return Ok(args::value(a, 0).clone());
         }
-        let rest = substr(
-            ctx,
-            &[
-                args::value(a, 0).clone(),
-                Value::Int(1),
-                Value::Null,
-                Value::from(e.name()),
-            ],
-        )?;
+        let rest = substring(ctx, bytes, 1, None, e);
         let mut bytes = args::bytes(&[mapped], 0).to_vec();
-        bytes.extend_from_slice(args::bytes(&[rest], 0));
+        bytes.extend_from_slice(&rest);
         return Ok(Value::from(bytes));
     }
     result(ctx, &unicode::convert(&p, case), e)
