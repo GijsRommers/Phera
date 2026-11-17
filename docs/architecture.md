@@ -715,3 +715,51 @@ that a project can use either tool.
 The runtime side: when a script runs under Phera, autoloading reads the same
 metadata natively instead of executing the generated PHP autoloader, which
 needs namespaces and autoloading in the engine (11.3, item 3).
+
+## 12. What to take from Hack and HHVM, and what not
+
+Facebook's HHVM ran PHP much faster, then became the runtime of a different
+language, Hack. Both halves of that story are useful.
+
+**Worth taking, as implementation ideas:**
+
+- **Whole-program mode.** HHVM's "repo authoritative" mode compiles the whole
+  application once, at deploy time, and then refuses anything that would
+  change it (`eval`, includes computed at run time). With the whole program
+  known, every function, class and constant is resolved before the first
+  request, class layouts are final, and calls and property accesses compile
+  to indexes. Phera's link step (10.5) is the lazy version of this; a
+  `phera build` that produces one resolved image for production is the
+  eager one, and fits section 5 (start requests from a loaded image).
+- **Types that drive the compiler.** HHVM infers types across the whole
+  program and emits specialised bytecode. Phera will have the same
+  information from `phera check` (11.1), in the same binary, on the same
+  AST: where the checker proves that `$i` is an int and `$this->items` a
+  list, the compiler can emit the integer and list instructions directly.
+  No other PHP runtime has its checker and its compiler in one place.
+- **Lists and maps as different things.** Hack split PHP's array into `vec`,
+  `dict` and `keyset`. Phera does this inside the runtime (a list stores no
+  keys, 10.6) and the checker can tell the programmer which one a variable
+  is, without changing the language.
+- **A checker that is a service.** Hack's checker separates collecting
+  declarations from checking bodies, checks files in parallel, and keeps
+  running to re-check only what an edit touched. That is the right shape for
+  `phera check` and for editor integration.
+- **Awaiting several things at once.** Hack has `async`/`await`. Phera's
+  model is simpler for existing code (PHP stays synchronous and the runtime
+  suspends it), but Hack shows the missing piece: running several waits
+  concurrently inside one request (two queries, three HTTP calls). That
+  deserves a small native API later.
+
+**Not to take:**
+
+- **Forking the language.** Hack removed references, variable variables,
+  dynamic properties and more, and gained its speed and its type system
+  partly from that. It also lost the PHP ecosystem: frameworks and packages
+  stopped running, and HHVM dropped PHP support in 2019. Phera's whole
+  premise is that existing PHP runs unchanged. Dynamic features stay, and
+  cost only the code that uses them (a function that uses `extract` gets a
+  slower frame; the others do not).
+- **A JIT first.** HHVM's JIT is years of work by a large team. Section 10
+  shows that an interpreter with the right data layout gets within a small
+  factor of PHP's speed; the JIT question comes after that.

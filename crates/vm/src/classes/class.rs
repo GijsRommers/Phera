@@ -49,6 +49,7 @@ pub(crate) struct Class {
 pub(crate) struct PropertyDefault {
     pub(crate) key: ArrayKey,
     pub(crate) value: Value,
+    pub(crate) static_storage: Option<Rc<crate::reference_holders::StaticProperty>>,
     pub(crate) name: String,
     pub(crate) declaring: String,
     pub(crate) visibility: Visibility,
