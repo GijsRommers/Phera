@@ -6,9 +6,7 @@ use phera_extension_api::{
     args,
 };
 
-/// The values PHP gives the two `mode` constants of `array_filter`.
-const ARRAY_FILTER_USE_BOTH: i64 = 1;
-const ARRAY_FILTER_USE_KEY: i64 = 2;
+use crate::constants::{ARRAY_FILTER_USE_BOTH, ARRAY_FILTER_USE_KEY};
 
 pub(crate) fn register(registry: &mut Registry) {
     registry.function(FunctionEntry::asynchronous(

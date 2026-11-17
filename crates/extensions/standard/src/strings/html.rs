@@ -26,20 +26,6 @@ const DECODE_PARAMS: &[Param] = &[
 ];
 
 pub(crate) fn register(registry: &mut Registry) {
-    for (name, value) in [
-        ("ENT_QUOTES", 3),
-        ("ENT_COMPAT", 2),
-        ("ENT_NOQUOTES", 0),
-        ("ENT_HTML401", 0),
-        ("ENT_XML1", 16),
-        ("ENT_XHTML", 32),
-        ("ENT_HTML5", 48),
-        ("ENT_IGNORE", 4),
-        ("ENT_SUBSTITUTE", 8),
-        ("ENT_DISALLOWED", 128),
-    ] {
-        registry.constant(name, value as i64);
-    }
     registry.function(FunctionEntry::sync(
         "htmlspecialchars",
         ENCODE_PARAMS,
