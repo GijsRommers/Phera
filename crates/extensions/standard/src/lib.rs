@@ -4,6 +4,7 @@ use phera_extension_api::{Extension, Registry};
 
 mod arrays;
 mod constants;
+pub mod environment;
 mod math;
 mod natural;
 mod strings;
@@ -23,6 +24,7 @@ impl Extension for Standard {
         natural::register(registry);
         constants::register(registry);
         time::register(registry);
+        environment::register(registry);
     }
 }
 

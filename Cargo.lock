@@ -921,6 +921,7 @@ name = "phera-cli"
 version = "0.1.0"
 dependencies = [
  "mimalloc",
+ "phera-dotenv",
  "phera-phpt",
  "phera-runtime",
  "phera-server",
@@ -935,6 +936,13 @@ dependencies = [
  "phera-bytecode",
  "phera-parser",
  "phera-source",
+]
+
+[[package]]
+name = "phera-dotenv"
+version = "0.1.0"
+dependencies = [
+ "indexmap",
 ]
 
 [[package]]
@@ -991,6 +999,8 @@ dependencies = [
 name = "phera-ext-standard"
 version = "0.1.0"
 dependencies = [
+ "indexmap",
+ "phera-dotenv",
  "phera-extension-api",
  "tokio",
 ]
@@ -1034,6 +1044,7 @@ version = "0.1.0"
 dependencies = [
  "phera-bytecode",
  "phera-compiler",
+ "phera-dotenv",
  "phera-ext-core",
  "phera-ext-ctype",
  "phera-ext-http",
