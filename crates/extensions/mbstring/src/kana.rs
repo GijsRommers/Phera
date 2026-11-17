@@ -115,5 +115,5 @@ pub fn convert(ctx: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         }
         index += 1;
     }
-    text::result(ctx, &result, encoding)
+    Ok(Value::from(text::encode_result(ctx, &result, encoding)))
 }

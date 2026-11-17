@@ -139,7 +139,9 @@ pub fn decode_header(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
         }
     }
     let points = decode_words(&unfolded);
-    crate::text::result(ctx, &points, target)
+    Ok(Value::from(crate::text::encode_result(
+        ctx, &points, target,
+    )))
 }
 pub fn decode_words(bytes: &[u8]) -> Vec<u32> {
     let mut output = Vec::new();

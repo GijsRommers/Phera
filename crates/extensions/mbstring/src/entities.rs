@@ -23,7 +23,7 @@ pub fn numeric(ctx: &mut dyn Context, a: &[Value], decoding: bool) -> NativeResu
             _ => encoding_name(value).parse().unwrap_or(0),
         })
         .collect();
-    let (points, encoding) = text::points(ctx, a, 2, name)?;
+    let (points, encoding) = text::decode_argument(ctx, a, 2, name)?;
     let mut output = Vec::new();
     let mut i = 0;
     while i < points.len() {
@@ -61,7 +61,7 @@ pub fn numeric(ctx: &mut dyn Context, a: &[Value], decoding: bool) -> NativeResu
         }
         i += 1;
     }
-    text::result(ctx, &output, encoding)
+    Ok(Value::from(text::encode_result(ctx, &output, encoding)))
 }
 fn entity(points: &[u32], start: usize) -> Option<(u32, usize)> {
     if points.get(start..start + 2)? != [38, 35] {

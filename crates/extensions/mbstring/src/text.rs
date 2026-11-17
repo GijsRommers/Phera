@@ -1,46 +1,170 @@
-//! Character offsets differ from byte offsets: `mb_substr('aéz', 1, 1) === 'é'`.
-use crate::{
-    codec::{BAD, Substitute, decode, encode},
-    encoding::{self, Encoding, Family, Transfer},
-    state::Settings,
-    unicode::{self, Case},
-};
+//! Counting and slicing by character instead of by byte:
+//!
+//! ```php
+//! strlen('aéz');               // 4
+//! mb_strlen('aéz');            // 3
+//! mb_substr('aéz', 1, 1);      // "é"
+//! mb_str_split('aéz');         // ["a", "é", "z"]
+//! mb_ord('é');                 // 233
+//! mb_strlen("\xFF");           // 1: an invalid byte is one character
+//! ```
+
 use std::borrow::Cow;
 
-use phera_extension_api::{Context, NativeError, NativeResult, PhpArray, Value, args};
+use phera_extension_api::{
+    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, PhpArray, Registry, Value,
+    args,
+};
 
-pub fn points(
+use crate::codec::{BAD, Substitute, boundaries, decode, encode};
+use crate::encoding::{self, Encoding, Family, Transfer};
+use crate::state::Settings;
+use crate::{ENCODING, STRING, unicode};
+
+pub fn register(registry: &mut Registry) {
+    registry.function(FunctionEntry::sync("mb_strlen", MB_STRLEN, mb_strlen));
+    registry.function(FunctionEntry::sync("mb_substr", MB_SUBSTR, mb_substr));
+    registry.function(FunctionEntry::sync(
+        "mb_str_split",
+        MB_STR_SPLIT,
+        mb_str_split,
+    ));
+    registry.function(FunctionEntry::sync("mb_strwidth", MB_STRWIDTH, mb_strwidth));
+    registry.function(FunctionEntry::sync("mb_ord", MB_ORD, mb_ord));
+    registry.function(FunctionEntry::sync("mb_chr", MB_CHR, mb_chr));
+    registry.function(FunctionEntry::sync("mb_scrub", MB_SCRUB, mb_scrub));
+}
+
+/// The string argument decoded with the encoding argument at `index`.
+pub fn decode_argument(
     ctx: &mut dyn Context,
     a: &[Value],
     index: usize,
-    name: &str,
+    function: &str,
 ) -> Result<(Vec<u32>, Encoding), NativeError> {
-    let enc = encoding::argument(ctx, a, index, name)?;
-    Ok((decode(args::bytes(a, 0), enc), enc))
+    let encoding = encoding::argument(ctx, a, index, function)?;
+    Ok((decode(args::bytes(a, 0), encoding), encoding))
 }
-pub fn result(ctx: &mut dyn Context, points: &[u32], enc: Encoding) -> NativeResult {
-    Ok(Value::from(encode(
-        points,
-        enc,
-        &ctx.state().get_or_default::<Settings>().substitute,
-    )))
+
+/// `points` encoded with the request's substitute character.
+pub fn encode_result(ctx: &mut dyn Context, points: &[u32], encoding: Encoding) -> Vec<u8> {
+    let substitute = &ctx.state().get_or_default::<Settings>().substitute;
+    encode(points, encoding, substitute)
 }
-pub fn strlen(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
-    let enc = encoding::argument(ctx, a, 1, "mb_strlen")?;
-    Ok(Value::Int(character_count(args::bytes(a, 0), enc) as i64))
+
+const MB_STRLEN: &[Param] = &[STRING, ENCODING];
+
+/// `mb_strlen(string $string, ?string $encoding = null): int`
+fn mb_strlen(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
+    let encoding = encoding::argument(ctx, a, 1, "mb_strlen")?;
+    Ok(Value::Int(
+        character_count(args::bytes(a, 0), encoding) as i64
+    ))
 }
+
 /// `mb_strlen` for an encoding already resolved.
-pub fn character_count(bytes: &[u8], enc: Encoding) -> usize {
-    if enc == Encoding::Uuencode {
+pub fn character_count(bytes: &[u8], encoding: Encoding) -> usize {
+    if encoding == Encoding::Uuencode {
+        // PHP counts uuencoded bytes as they are.
         bytes.len()
-    } else if let Some(width) = enc.fixed_width() {
+    } else if let Some(width) = encoding.fixed_width() {
         bytes.len() / width
-    } else if enc == Encoding::Utf8 {
-        std::str::from_utf8(bytes).map_or_else(|_| decode(bytes, enc).len(), |s| s.chars().count())
+    } else if encoding == Encoding::Utf8
+        && let Ok(text) = std::str::from_utf8(bytes)
+    {
+        text.chars().count()
     } else {
-        decode(bytes, enc).len()
+        decode(bytes, encoding).len()
     }
 }
+
+const MB_SUBSTR: &[Param] = &[
+    STRING,
+    Param::new("start", ParamType::Int),
+    Param::new("length", ParamType::Int).nullable().optional(),
+    ENCODING,
+];
+
+/// `mb_substr(string $string, int $start, ?int $length = null, ?string $encoding = null): string`
+fn mb_substr(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
+    // PHP negates offsets, which `PHP_INT_MIN` does not survive.
+    for (index, parameter) in [(1, "start"), (2, "length")] {
+        if args::int(a, index) == Some(i64::MIN) {
+            return Err(NativeError::value_error(format!(
+                "mb_substr(): Argument #{} (${parameter}) must be between -{} and {}",
+                index + 1,
+                i64::MAX,
+                i64::MAX
+            )));
+        }
+    }
+    let encoding = encoding::argument(ctx, a, 3, "mb_substr")?;
+    let start = args::int(a, 1).unwrap_or(0);
+    let substring = substring(ctx, args::bytes(a, 0), start, args::int(a, 2), encoding);
+    Ok(Value::from(substring.into_owned()))
+}
+
+/// `mb_substr` for an encoding already resolved. Valid UTF-8 and the
+/// fixed-width encodings are sliced without decoding, so the result can
+/// borrow from `bytes`.
+pub fn substring<'a>(
+    ctx: &mut dyn Context,
+    bytes: &'a [u8],
+    start: i64,
+    length: Option<i64>,
+    encoding: Encoding,
+) -> Cow<'a, [u8]> {
+    if encoding == Encoding::Utf8
+        && let Ok(text) = std::str::from_utf8(bytes)
+    {
+        let (start, end) = bounds(text.chars().count(), start, length);
+        let mut offsets = text
+            .char_indices()
+            .map(|(offset, _)| offset)
+            .chain([bytes.len()]);
+        let first = offsets.nth(start).unwrap_or(bytes.len());
+        let last = if end == start {
+            first
+        } else {
+            offsets.nth(end - start - 1).unwrap_or(bytes.len())
+        };
+        return Cow::Borrowed(&bytes[first..last]);
+    }
+    if let Some(width) = encoding.fixed_width() {
+        return Cow::Borrowed(fixed_width_substring(bytes, width, start, length));
+    }
+    let points = decode(bytes, encoding);
+    let (start, end) = bounds(points.len(), start, length);
+    Cow::Owned(encode_result(ctx, &points[start..end], encoding))
+}
+
+/// PHP slices fixed-width encodings by bytes, and unlike [`bounds`] lets a
+/// positive start run past the end.
+fn fixed_width_substring(bytes: &[u8], width: usize, start: i64, length: Option<i64>) -> &[u8] {
+    let characters = (bytes.len() / width) as i64;
+    let start = if start < 0 {
+        characters.saturating_add(start).max(0)
+    } else {
+        start
+    } as usize;
+    let first = start.saturating_mul(width).min(bytes.len());
+    let length = match length {
+        None => bytes.len(),
+        Some(n) if n >= 0 => (n as usize).saturating_mul(width),
+        Some(n) => {
+            characters
+                .saturating_sub(start as i64)
+                .saturating_add(n)
+                .max(0) as usize
+                * width
+        }
+    };
+    let end = first.saturating_add(length).min(bytes.len());
+    &bytes[first..end]
+}
+
+/// The character range `start` and `length` select in a string of `size`
+/// characters, with PHP's negative offsets counted from the end.
 pub fn bounds(size: usize, start: i64, length: Option<i64>) -> (usize, usize) {
     let size = size as i64;
     let start = if start < 0 {
@@ -55,203 +179,121 @@ pub fn bounds(size: usize, start: i64, length: Option<i64>) -> (usize, usize) {
     };
     (start as usize, end as usize)
 }
-pub fn substr(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
-    for (index, parameter) in [(1, "start"), (2, "length")] {
-        if args::int(a, index) == Some(i64::MIN) {
-            return Err(NativeError::value_error(format!(
-                "mb_substr(): Argument #{} (${parameter}) must be between -{} and {}",
-                index + 1,
-                i64::MAX,
-                i64::MAX
-            )));
-        }
-    }
-    let e = encoding::argument(ctx, a, 3, "mb_substr")?;
-    let start = args::int(a, 1).unwrap_or(0);
-    let substring = substring(ctx, args::bytes(a, 0), start, args::int(a, 2), e);
-    Ok(Value::from(substring.into_owned()))
-}
-/// `mb_substr` for an encoding already resolved. Valid UTF-8 and the
-/// fixed-width encodings are sliced without decoding, so the result can
-/// borrow from `bytes`.
-pub fn substring<'a>(
-    ctx: &mut dyn Context,
-    bytes: &'a [u8],
-    start: i64,
-    length: Option<i64>,
-    e: Encoding,
-) -> Cow<'a, [u8]> {
-    if e == Encoding::Utf8
-        && let Ok(valid) = std::str::from_utf8(bytes)
-    {
-        let (start, end) = bounds(valid.chars().count(), start, length);
-        let mut indices = valid.char_indices().map(|(i, _)| i).chain([bytes.len()]);
-        let first = indices.nth(start).unwrap_or(bytes.len());
-        let last = if end == start {
-            first
-        } else {
-            indices.nth(end - start - 1).unwrap_or(bytes.len())
-        };
-        return Cow::Borrowed(&bytes[first..last]);
-    }
-    if let Some(size) = e.fixed_width() {
-        let characters = (bytes.len() / size) as i64;
-        let requested = start;
-        let start = if requested < 0 {
-            characters.saturating_add(requested).max(0)
-        } else {
-            requested
-        } as usize;
-        let first = start.saturating_mul(size).min(bytes.len());
-        let length = match length {
-            None => bytes.len(),
-            Some(n) if n >= 0 => (n as usize).saturating_mul(size),
-            Some(n) => {
-                characters
-                    .saturating_sub(start as i64)
-                    .saturating_add(n)
-                    .max(0) as usize
-                    * size
-            }
-        };
-        let end = first.saturating_add(length).min(bytes.len());
-        return Cow::Borrowed(&bytes[first..end]);
-    }
-    let p = decode(bytes, e);
-    let (start, end) = bounds(p.len(), start, length);
-    let substitute = &ctx.state().get_or_default::<Settings>().substitute;
-    Cow::Owned(encode(&p[start..end], e, substitute))
-}
-pub fn split(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
-    let n = args::int(a, 1).unwrap_or(1);
-    if n <= 0 {
+
+const MB_STR_SPLIT: &[Param] = &[
+    STRING,
+    Param::new("length", ParamType::Int).optional(),
+    ENCODING,
+];
+
+/// `mb_str_split(string $string, int $length = 1, ?string $encoding = null): array`
+fn mb_str_split(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
+    let length = args::int(a, 1).unwrap_or(1);
+    if length <= 0 {
         return Err(NativeError::value_error(
             "mb_str_split(): Argument #2 ($length) must be greater than 0",
         ));
     }
-    let (p, e) = points(ctx, a, 2, "mb_str_split")?;
-    let mut out = PhpArray::new();
-    if !matches!(
-        e.family(),
-        Family::Utf16(_) | Family::Iso2022Jp | Family::Gb18030
-    ) {
-        let bytes = args::bytes(a, 0);
-        let offsets = crate::codec::boundaries(bytes, e);
-        let mut i = 0;
-        while i + 1 < offsets.len() {
-            let next = i.saturating_add(n as usize).min(offsets.len() - 1);
-            out.push(Value::from(
-                &bytes[offsets[i]..offsets[next].min(bytes.len())],
-            ))?;
-            i = next;
+    let length = length as usize;
+    let encoding = encoding::argument(ctx, a, 2, "mb_str_split")?;
+    let bytes = args::bytes(a, 0);
+    let mut pieces = PhpArray::new();
+    match encoding.family() {
+        // PHP decodes these and encodes each piece again.
+        Family::Utf16(_) | Family::Iso2022Jp | Family::Gb18030 => {
+            for chunk in decode(bytes, encoding).chunks(length) {
+                pieces.push(Value::from(encode_result(ctx, chunk, encoding)))?;
+            }
         }
-    } else {
-        for chunk in p.chunks(n as usize) {
-            out.push(result(ctx, chunk, e)?)?;
+        // The others are cut at lead bytes, keeping invalid bytes as they are.
+        _ => {
+            let offsets = boundaries(bytes, encoding);
+            let last = offsets.len() - 1;
+            for index in (0..last).step_by(length) {
+                let next = index.saturating_add(length).min(last);
+                let end = offsets[next].min(bytes.len());
+                pieces.push(Value::from(&bytes[offsets[index]..end]))?;
+            }
         }
     }
-    Ok(Value::from(out))
-}
-pub fn width(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
-    let (p, _) = points(ctx, a, 1, "mb_strwidth")?;
-    Ok(Value::Int(
-        p.into_iter().map(unicode::width).sum::<usize>() as i64
-    ))
-}
-pub fn upper(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
-    casing(ctx, a, "mb_strtoupper", Case::Upper, false)
-}
-pub fn lower(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
-    casing(ctx, a, "mb_strtolower", Case::Lower, false)
-}
-pub fn ucfirst(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
-    casing(ctx, a, "mb_ucfirst", Case::Title, true)
-}
-pub fn lcfirst(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
-    casing(ctx, a, "mb_lcfirst", Case::Lower, true)
-}
-fn casing(ctx: &mut dyn Context, a: &[Value], name: &str, case: Case, first: bool) -> NativeResult {
-    let (p, e) = points(ctx, a, 1, name)?;
-    if e == Encoding::Uuencode && p.is_empty() && !args::bytes(a, 0).is_empty() {
-        return Ok(Value::from("begin 0644 filename\n "));
-    }
-    if first && !p.is_empty() {
-        let bytes = args::bytes(a, 0);
-        let initial = substring(ctx, bytes, 0, Some(1), e);
-        let head = decode(&initial, e);
-        let mapped = result(ctx, &unicode::convert(&head, case), e)?;
-        if args::bytes(std::slice::from_ref(&mapped), 0) == &initial[..] {
-            return Ok(args::value(a, 0).clone());
-        }
-        let rest = substring(ctx, bytes, 1, None, e);
-        let mut bytes = args::bytes(&[mapped], 0).to_vec();
-        bytes.extend_from_slice(&rest);
-        return Ok(Value::from(bytes));
-    }
-    result(ctx, &unicode::convert(&p, case), e)
+    Ok(Value::from(pieces))
 }
 
-pub fn convert_case(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
-    let mode = Case::from_mode(args::int(a, 1).unwrap_or(0)).ok_or_else(|| {
-        NativeError::value_error(
-            "mb_convert_case(): Argument #2 ($mode) must be one of the MB_CASE_* constants",
-        )
-    })?;
-    let (p, e) = points(ctx, a, 2, "mb_convert_case")?;
-    result(ctx, &unicode::convert(&p, mode), e)
+const MB_STRWIDTH: &[Param] = &[STRING, ENCODING];
+
+/// `mb_strwidth(string $string, ?string $encoding = null): int`: East Asian
+/// wide and full-width characters count as two.
+fn mb_strwidth(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
+    let (points, _) = decode_argument(ctx, a, 1, "mb_strwidth")?;
+    let width: usize = points.into_iter().map(unicode::width).sum();
+    Ok(Value::Int(width as i64))
 }
-pub fn ord(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
-    let (p, e) = points(ctx, a, 1, "mb_ord")?;
-    if e == Encoding::Iso2022Jp || e.transfer().is_some() {
-        return Err(NativeError::value_error(format!(
-            "mb_ord() does not support the \"{}\" encoding",
-            e.name()
-        )));
-    }
-    if p.is_empty() {
-        return Err(NativeError::value_error(
+
+const MB_ORD: &[Param] = &[STRING, ENCODING];
+
+/// `mb_ord(string $string, ?string $encoding = null): int|false`
+fn mb_ord(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
+    let (points, encoding) = decode_argument(ctx, a, 1, "mb_ord")?;
+    reject_stateful(encoding, "mb_ord")?;
+    match points.first() {
+        None => Err(NativeError::value_error(
             "mb_ord(): Argument #1 ($string) must not be empty",
-        ));
+        )),
+        Some(&BAD) => Ok(Value::Bool(false)),
+        Some(&point) => Ok(Value::Int(i64::from(point))),
     }
-    Ok(p.first()
-        .filter(|cp| **cp != BAD)
-        .map_or(Value::Bool(false), |cp| Value::Int(i64::from(*cp))))
 }
-pub fn chr(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
-    let e = encoding::argument(ctx, a, 1, "mb_chr")?;
-    if e == Encoding::Iso2022Jp || e.transfer().is_some() {
-        return Err(NativeError::value_error(format!(
-            "mb_chr() does not support the \"{}\" encoding",
-            e.name()
-        )));
-    }
-    let cp = args::int(a, 0).unwrap_or(0);
+
+const MB_CHR: &[Param] = &[Param::new("codepoint", ParamType::Int), ENCODING];
+
+/// `mb_chr(int $codepoint, ?string $encoding = null): string|false`
+fn mb_chr(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
+    let encoding = encoding::argument(ctx, a, 1, "mb_chr")?;
+    reject_stateful(encoding, "mb_chr")?;
+    let Ok(point @ 0..=0x10FFFF) = u32::try_from(args::int(a, 0).unwrap_or(0)) else {
+        return Ok(Value::Bool(false));
+    };
     // Lone surrogates are not characters, but the UTF-16, UTF-32, UCS-2 and
     // UCS-4 encoders write them as they are, as PHP does; every other
     // encoder rejects them.
-    if !(0..=0x10ffff).contains(&cp) {
-        return Ok(Value::Bool(false));
-    }
-    let bytes = encode(&[cp as u32], e, &Substitute::None);
+    let bytes = encode(&[point], encoding, &Substitute::None);
     Ok(if bytes.is_empty() {
         Value::Bool(false)
     } else {
         Value::from(bytes)
     })
 }
-pub fn scrub(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
-    let (p, e) = points(ctx, a, 1, "mb_scrub")?;
-    if matches!(
-        e.transfer(),
-        Some(Transfer::Base64 | Transfer::QuotedPrintable)
-    ) {
-        let raw: Vec<_> = args::bytes(a, 0).iter().map(|b| u32::from(*b)).collect();
-        return result(ctx, &raw, e);
+
+/// `mb_ord` and `mb_chr` work on single characters, which ISO-2022-JP and
+/// the transfer encodings do not have.
+fn reject_stateful(encoding: Encoding, function: &str) -> Result<(), NativeError> {
+    if encoding == Encoding::Iso2022Jp || encoding.transfer().is_some() {
+        return Err(NativeError::value_error(format!(
+            "{function}() does not support the \"{}\" encoding",
+            encoding.name()
+        )));
     }
-    if e == Encoding::Uuencode {
-        return Ok(Value::from(
-            p.iter().map(|cp| *cp as u8).collect::<Vec<_>>(),
-        ));
-    }
-    result(ctx, &p, e)
+    Ok(())
+}
+
+const MB_SCRUB: &[Param] = &[STRING, ENCODING];
+
+/// `mb_scrub(string $string, ?string $encoding = null): string`: invalid
+/// sequences become the substitute character.
+fn mb_scrub(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
+    let (points, encoding) = decode_argument(ctx, a, 1, "mb_scrub")?;
+    let scrubbed = match encoding.transfer() {
+        // PHP encodes the raw bytes again for these two...
+        Some(Transfer::Base64 | Transfer::QuotedPrintable) => {
+            let raw: Vec<u32> = args::bytes(a, 0)
+                .iter()
+                .map(|&byte| u32::from(byte))
+                .collect();
+            encode_result(ctx, &raw, encoding)
+        }
+        // ...and returns uuencode decoded.
+        Some(Transfer::Uuencode) => points.iter().map(|&point| point as u8).collect(),
+        _ => encode_result(ctx, &points, encoding),
+    };
+    Ok(Value::from(scrubbed))
 }

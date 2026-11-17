@@ -206,7 +206,11 @@ pub fn transform(
                     );
                     return Ok(Value::Bool(false));
                 };
-                results.push(text::result(ctx, &decode(s.as_bytes(), source), to)?);
+                results.push(Value::from(text::encode_result(
+                    ctx,
+                    &decode(s.as_bytes(), source),
+                    to,
+                )));
             }
             Work::Value(other) => results.push(other),
             Work::Array(keys) => {

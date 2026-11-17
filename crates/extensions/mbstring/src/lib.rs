@@ -1,7 +1,9 @@
 //! Multibyte text operations: `mb_strlen("é") === 1`.
 
+mod casing;
 mod codec;
 mod conversion;
+mod cut;
 mod encoding;
 mod entities;
 mod iconv;
@@ -9,22 +11,27 @@ mod iconv_decode;
 mod iconv_mime;
 mod info;
 mod kana;
-mod layout;
 mod mime;
 mod query;
 mod register_extra;
-mod register_search;
 mod register_settings;
-mod register_text;
 mod search;
-mod search_bytes;
 mod settings;
 mod state;
 mod text;
+mod trim;
 mod unicode;
 mod walk;
 
-use phera_extension_api::{Extension, Registry};
+use phera_extension_api::{Extension, Param, ParamType, Registry};
+
+/// `string $string`, the first parameter of most functions.
+const STRING: Param = Param::new("string", ParamType::String);
+/// `?string $encoding = null`, the last parameter of most functions: the
+/// internal encoding when left out.
+const ENCODING: Param = Param::new("encoding", ParamType::String)
+    .nullable()
+    .optional();
 
 /// PHP's request-local multibyte string extension.
 pub struct Mbstring;
@@ -35,8 +42,11 @@ impl Extension for Mbstring {
     }
 
     fn register(&self, registry: &mut Registry) {
-        register_text::register(registry);
-        register_search::register(registry);
+        text::register(registry);
+        casing::register(registry);
+        search::register(registry);
+        trim::register(registry);
+        cut::register(registry);
         register_extra::register(registry);
         registry.constant("ICONV_MIME_DECODE_STRICT", 1i64);
         registry.constant("ICONV_MIME_DECODE_CONTINUE_ON_ERROR", 2i64);
