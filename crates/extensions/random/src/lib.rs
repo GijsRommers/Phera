@@ -7,7 +7,17 @@ mod floats;
 mod mt19937;
 mod procedural;
 mod randomizer;
-use phera_extension_api::{Extension, FunctionEntry, Param, ParamType, Registry};
+use phera_extension_api::{Extension, FunctionEntry, Param, ParamType, Registry, Value};
+
+/// How PHP names a wrong argument in a `TypeError`: `true` and `false`
+/// rather than `bool`, otherwise the type or the class.
+fn given(value: &Value) -> String {
+    match value {
+        Value::Bool(true) => "true".to_string(),
+        Value::Bool(false) => "false".to_string(),
+        other => other.type_name(),
+    }
+}
 pub struct Random;
 impl Extension for Random {
     fn name(&self) -> &'static str {

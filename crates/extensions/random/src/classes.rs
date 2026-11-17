@@ -103,9 +103,7 @@ const CLASSES: &[ClassEntry] = &[
         methods: &[
             MethodEntry::public(
                 "__construct",
-                &[Param::new("engine", ParamType::Object)
-                    .nullable()
-                    .optional()],
+                &[Param::new("engine", ParamType::Mixed).optional()],
                 randomizer::construct,
             ),
             MethodEntry::public("nextInt", &[], randomizer::next_int),

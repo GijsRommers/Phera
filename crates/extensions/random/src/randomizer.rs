@@ -1,5 +1,5 @@
 //! `$r = new Random\Randomizer($engine)` shares the supplied engine object.
-use crate::{collections, engine_methods, engines::Engine, floats, procedural};
+use crate::{collections, engine_methods, engines::Engine, floats, given, procedural};
 use phera_extension_api::{
     ArrayKey, Context, NativeError, NativeResult, Object, PhpArray, Value, args,
 };
@@ -13,9 +13,10 @@ pub fn construct(
     this: Option<&Rc<Object>>,
     arguments: &[Value],
 ) -> NativeResult {
-    let engine = match args::object(arguments, 0) {
-        Some(engine) => engine.clone(),
-        None => {
+    // Declared `mixed`, because a parameter type cannot name an interface;
+    // this check gives PHP's message.
+    let engine = match args::value(arguments, 0) {
+        Value::Null => {
             let Value::Object(engine) =
                 context.create_object("Random\\Engine\\Secure", PhpArray::new())?
             else {
@@ -24,14 +25,17 @@ pub fn construct(
             *engine.native.borrow_mut() = Some(Box::new(Engine::Secure));
             engine
         }
+        Value::Object(engine) if engine.class.name().starts_with("Random\\Engine\\") => {
+            engine.clone()
+        }
+        other => {
+            return Err(NativeError::type_error(format!(
+                "Random\\Randomizer::__construct(): Argument #1 ($engine) must be of type \
+                 ?Random\\Engine, {} given",
+                given(other)
+            )));
+        }
     };
-    if !engine.class.name().starts_with("Random\\Engine\\") {
-        return Err(NativeError::type_error(format!(
-            "Random\\Randomizer::__construct(): Argument #1 ($engine) must be of type \
-            ?Random\\Engine, {} given",
-            engine.class.name()
-        )));
-    }
     let object = this.ok_or_else(|| NativeError::error("Missing Randomizer object"))?;
     object.set(ArrayKey::str("engine"), Value::Object(engine.clone()));
     *object.native.borrow_mut() = Some(Box::new(Randomizer { engine }));
@@ -100,7 +104,7 @@ pub fn get_float(
         return Err(NativeError::type_error(format!(
             "Random\\Randomizer::getFloat(): Argument #3 ($boundary) must be of type \
             Random\\IntervalBoundary, {} given",
-            arguments[2].type_name()
+            given(&arguments[2])
         )));
     }
     with_engine(this, |engine| {
