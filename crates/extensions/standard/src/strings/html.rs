@@ -1,253 +1,108 @@
-//! HTML special-character conversion with document-specific entity validation.
+//! `htmlspecialchars("<a href='x'>")` is `"&lt;a href=&#039;x&#039;&gt;"`,
+//! and `htmlspecialchars_decode` turns those five entities back.
+//!
+//! What the `$flags` select is parsed in [`options`]; the character
+//! encodings and how PHP steps over invalid bytes in each are in
+//! [`encoding`].
 
-use phera_extension_api::{
-    Context, FunctionEntry, NativeResult, Param, ParamType, Registry, Value, args,
-};
+use phera_extension_api::{Context, FunctionEntry, NativeResult, Param, ParamType, Value, args};
 
-use super::{buffer, bytes};
+use super::buffer;
+use super::url::hex_digit;
+use crate::constants::{ENT_HTML401, ENT_QUOTES, ENT_SUBSTITUTE};
 
+mod encoding;
+mod entities;
 mod options;
 
-pub(super) use options::Document;
-use options::{CharacterPolicy, InvalidInput, Options};
+use encoding::{Decoded, Encoding};
+use options::{Document, InvalidInput, Options};
 
-const ENCODE_PARAMS: &[Param] = &[
-    Param::new("string", ParamType::String),
-    Param::new("flags", ParamType::Int).optional(),
-    Param::new("encoding", ParamType::String)
-        .nullable()
-        .optional(),
-    Param::new("double_encode", ParamType::Bool).optional(),
-];
+pub(super) const FUNCTIONS: &[FunctionEntry] = &[HTMLSPECIALCHARS, HTMLSPECIALCHARS_DECODE];
 
-const DECODE_PARAMS: &[Param] = &[
-    Param::new("string", ParamType::String),
-    Param::new("flags", ParamType::Int).optional(),
-];
+/// The `$flags` both functions default to.
+const DEFAULT_FLAGS: i64 = ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML401;
 
-pub(crate) fn register(registry: &mut Registry) {
-    registry.function(FunctionEntry::sync(
-        "htmlspecialchars",
-        ENCODE_PARAMS,
-        encode,
-    ));
-    registry.function(FunctionEntry::sync(
-        "htmlspecialchars_decode",
-        DECODE_PARAMS,
-        decode,
-    ));
-}
+/// `htmlspecialchars(string $string, int $flags = ENT_QUOTES |
+/// ENT_SUBSTITUTE | ENT_HTML401, ?string $encoding = null, bool
+/// $double_encode = true): string`, with `&`, `<`, `>` and the quotes the
+/// flags name as entities.
+///
+/// Invalid bytes in the encoding (UTF-8 by default) are replaced by U+FFFD
+/// with `ENT_SUBSTITUTE`, dropped with `ENT_IGNORE`, and otherwise make the
+/// whole result empty. With `$double_encode` false, entities that are
+/// already there stay as they are.
+///
+/// ```php
+/// htmlspecialchars("<a href='x'>T&amp;C</a>");
+/// // "&lt;a href=&#039;x&#039;&gt;T&amp;amp;C&lt;/a&gt;"
+/// htmlspecialchars("T&amp;C", ENT_QUOTES, null, false); // "T&amp;C"
+/// htmlspecialchars("\xff", ENT_QUOTES);                 // ""
+/// ```
+const HTMLSPECIALCHARS: FunctionEntry = FunctionEntry::sync(
+    "htmlspecialchars",
+    &[
+        Param::new("string", ParamType::String),
+        Param::new("flags", ParamType::Int).optional(),
+        Param::new("encoding", ParamType::String)
+            .nullable()
+            .optional(),
+        Param::new("double_encode", ParamType::Bool).optional(),
+    ],
+    htmlspecialchars,
+);
 
-/// Numeric entities are parsed without allowing whitespace or signed values.
-fn numeric(entity: &[u8]) -> Option<u32> {
-    let tail = entity.strip_prefix(b"#")?;
-    let (radix, tail) = if tail.first().is_some_and(|byte| matches!(byte, b'x' | b'X')) {
-        (16, tail.get(1..)?)
-    } else {
-        (10, tail)
-    };
-    if tail.is_empty() {
-        return None;
-    }
-    let mut value = 0u32;
-    for &byte in tail {
-        let digit = u32::from(super::url::hex_digit(byte)?);
-        if digit >= radix {
-            return None;
-        }
-        value = value.checked_mul(radix)?.checked_add(digit)?;
-    }
-    (value <= 0x10ffff).then_some(value)
-}
-
-/// PHP's document types differ on C1 controls and Unicode noncharacters.
-pub(super) fn allowed(code: u32, document: Document) -> bool {
-    if matches!(code, 9 | 10 | 13) {
-        return true;
-    }
-    match document {
-        Document::Xml1 | Document::Xhtml => {
-            (0x20..=0xd7ff).contains(&code)
-                || (0xe000..=0x10ffff).contains(&code) && !matches!(code, 0xfffe | 0xffff)
-        }
-        Document::Html5 => {
-            code == 12
-                || (0x20..=0x7e).contains(&code)
-                || (0xa0..=0xd7ff).contains(&code)
-                || (0xe000..=0x10ffff).contains(&code)
-                    && code & 0xffff < 0xfffe
-                    && !(0xfdd0..=0xfdef).contains(&code)
-        }
-        Document::Html401 => {
-            (0x20..=0x7e).contains(&code)
-                || (0xa0..=0xd7ff).contains(&code)
-                || (0xe000..=0x10ffff).contains(&code)
-        }
-    }
-}
-
-/// Only the five special characters are decoded; ordinary HTML entities remain.
-fn special(entity: &[u8], document: Document) -> Option<u8> {
-    let value = match entity {
-        b"amp" => 38,
-        b"lt" => 60,
-        b"gt" => 62,
-        b"quot" => 34,
-        b"apos" if document != Document::Html401 => 39,
-        _ => numeric(entity)?,
-    };
-    matches!(value, 34 | 38 | 39 | 60 | 62).then_some(value as u8)
-}
-
-/// Entity decoding does not validate or reinterpret unrelated non-UTF-8 bytes.
-fn decode(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn htmlspecialchars(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let string = args::bytes(arguments, 0);
-    let options = Options::from_flags(args::int(arguments, 1).unwrap_or(11));
-    let mut result = buffer(string.len())?;
-    let mut cursor = 0;
-    while let Some(&byte) = string.get(cursor) {
-        if byte == b'&'
-            && let Some(tail) = string.get(cursor + 1..)
-            && let Some(end) = tail.iter().position(|&byte| byte == b';')
-            && let Some(entity) = tail.get(..end)
-            && let Some(decoded) = special(entity, options.document)
-            && options.quotes.includes(decoded)
-        {
-            result.push(decoded);
-            cursor += end + 2;
-            continue;
-        }
-        result.push(byte);
-        cursor += 1;
-    }
-    Ok(bytes(result))
-}
-
-/// double_encode=false preserves valid named entities for the selected document.
-fn valid_entity(entity: &[u8], options: Options) -> bool {
-    let document = options.document;
-    if let Some(code) = numeric(entity) {
-        return options.characters == CharacterPolicy::Any
-            || match document {
-                Document::Html401 => true,
-                Document::Html5 => {
-                    (allowed(code, Document::Html5) || (0xd800..=0xdfff).contains(&code))
-                        && code != 13
-                }
-                _ => allowed(code, document),
-            };
-    }
-    if document == Document::Xml1 {
-        return matches!(entity, b"amp" | b"lt" | b"gt" | b"quot" | b"apos");
-    }
-    if document == Document::Xhtml && entity == b"apos" {
-        return true;
-    }
-    let names = if document == Document::Html5 {
-        super::html_entities::HTML5
-    } else {
-        super::html_entities::HTML4
-    };
-    names
-        .as_bytes()
-        .split(|&byte| byte == b' ')
-        .any(|name| name == entity)
-}
-
-/// Invalid UTF-8 is discarded, substituted, or empties the whole result by flags.
-fn encode(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let string = args::bytes(arguments, 0);
-    let options = Options::from_flags(args::int(arguments, 1).unwrap_or(11));
+    let options = Options::from_flags(args::int(arguments, 1).unwrap_or(DEFAULT_FLAGS));
+    // An empty string returns before the encoding is looked at, so an
+    // unknown one does not warn.
     if string.is_empty() {
-        return Ok(bytes(Vec::new()));
+        return Ok(Value::from(""));
     }
-    let encoding = super::html_encoding::Encoding::resolve(context, args::bytes(arguments, 2));
-    let replacement = encoding.replacement();
+    let encoding = Encoding::resolve(context, args::bytes(arguments, 2));
+    let double_encode = args::bool(arguments, 3).unwrap_or(true);
     let mut result = buffer(string.len().saturating_mul(9))?;
     let mut cursor = 0;
-    while let Some(&byte) = string.get(cursor) {
-        if byte == b'&'
-            && !args::bool(arguments, 3).unwrap_or(true)
-            && let Some(tail) = string.get(cursor + 1..)
-            && let Some(end) = tail.iter().position(|&byte| byte == b';')
-            && let Some(entity) = tail.get(..end)
-            && valid_entity(entity, options)
+    while cursor < string.len() {
+        let rest = &string[cursor..];
+        if !double_encode
+            && let Some(entity) = entity_at(rest)
+            && is_valid_entity(entity, options)
         {
-            result.extend_from_slice(string.get(cursor..cursor + end + 2).unwrap_or_default());
-            cursor += end + 2;
+            let length = entity.len() + 2;
+            result.extend_from_slice(&rest[..length]);
+            cursor += length;
             continue;
         }
-        let (code, length, valid) = encoding.next(string.get(cursor..).unwrap_or_default());
-        if !valid {
-            if options.invalid == InvalidInput::Ignore {
-            } else if options.invalid == InvalidInput::Substitute {
-                result.extend_from_slice(replacement);
-            } else {
-                return Ok(bytes(Vec::new()));
+        match encoding.next(rest) {
+            Decoded::Invalid { length } => {
+                match options.invalid {
+                    InvalidInput::Ignore => {}
+                    InvalidInput::Substitute => result.extend_from_slice(encoding.replacement()),
+                    InvalidInput::Reject => return Ok(Value::from("")),
+                }
+                cursor += length;
             }
-        } else {
-            let escaped = escape_special(byte, options);
-            if let Some(escaped) = escaped {
-                result.extend_from_slice(escaped);
-            } else if options.characters == CharacterPolicy::DocumentOnly
-                && encoding.disallowed(code, options.document)
-            {
-                result.extend_from_slice(replacement);
-            } else {
-                result.extend_from_slice(string.get(cursor..cursor + length).unwrap_or_default());
+            Decoded::Valid { code, length } => {
+                if let Some(escaped) = escape(rest[0], options) {
+                    result.extend_from_slice(escaped);
+                } else if options.replace_disallowed && encoding.disallowed(code, options.document)
+                {
+                    result.extend_from_slice(encoding.replacement());
+                } else {
+                    result.extend_from_slice(&rest[..length]);
+                }
+                cursor += length;
             }
         }
-        cursor += length;
     }
-    Ok(bytes(result))
+    Ok(Value::from(result))
 }
 
-/// PHP consumes malformed multibyte groups together, including surrogate encodings.
-pub(super) fn utf8_char(string: &[u8]) -> (u32, usize, bool) {
-    let first = string.first().copied().unwrap_or(0);
-    if first < 128 {
-        return (u32::from(first), 1, true);
-    }
-    let (length, minimum, mask) = match first {
-        0xc2..=0xdf => (2, 0x80, 31),
-        0xe0..=0xef => (3, 0x800, 15),
-        0xf0..=0xf4 => (4, 0x10000, 7),
-        _ => (1, 0, 0),
-    };
-    if length == 1 {
-        return (0, 1, false);
-    }
-    let trail = |byte: u8| byte & 0xc0 == 0x80;
-    if string.len() < length
-        || !string
-            .iter()
-            .skip(1)
-            .take(length - 1)
-            .all(|&byte| trail(byte))
-    {
-        let mut consumed = 1;
-        while consumed < length
-            && string
-                .get(consumed)
-                .is_some_and(|&byte| !(byte < 0x80 || (0xc2..=0xf4).contains(&byte)))
-        {
-            consumed += 1;
-        }
-        return (0, consumed, false);
-    }
-    let mut code = u32::from(first & mask);
-    for &byte in string.iter().skip(1).take(length - 1) {
-        code = (code << 6) | u32::from(byte & 63);
-    }
-    (
-        code,
-        length,
-        code >= minimum && code <= 0x10ffff && !(0xd800..=0xdfff).contains(&code),
-    )
-}
-
-/// PHP spells apostrophes numerically in HTML 4.01 and by name in other documents.
-fn escape_special(byte: u8, options: Options) -> Option<&'static [u8]> {
+/// The entity a special character becomes, if it is one. HTML 4.01 has no
+/// `&apos;`, so PHP writes the apostrophe as a number there.
+fn escape(byte: u8, options: Options) -> Option<&'static [u8]> {
     match byte {
         b'&' => Some(b"&amp;"),
         b'<' => Some(b"&lt;"),
@@ -260,4 +115,109 @@ fn escape_special(byte: u8, options: Options) -> Option<&'static [u8]> {
         }),
         _ => None,
     }
+}
+
+/// `htmlspecialchars_decode(string $string, int $flags = ENT_QUOTES |
+/// ENT_SUBSTITUTE | ENT_HTML401): string`
+///
+/// Only the entities `htmlspecialchars` writes are decoded, by name or by
+/// number; `&copy;` stays as it is.
+///
+/// ```php
+/// htmlspecialchars_decode("&lt;b&gt; &#39;x&#x27; &copy;"); // "<b> 'x' &copy;"
+/// htmlspecialchars_decode("&quot;", ENT_NOQUOTES);          // "&quot;"
+/// ```
+const HTMLSPECIALCHARS_DECODE: FunctionEntry = FunctionEntry::sync(
+    "htmlspecialchars_decode",
+    &[
+        Param::new("string", ParamType::String),
+        Param::new("flags", ParamType::Int).optional(),
+    ],
+    htmlspecialchars_decode,
+);
+
+fn htmlspecialchars_decode(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let string = args::bytes(arguments, 0);
+    let options = Options::from_flags(args::int(arguments, 1).unwrap_or(DEFAULT_FLAGS));
+    let mut result = buffer(string.len())?;
+    let mut cursor = 0;
+    while cursor < string.len() {
+        let rest = &string[cursor..];
+        if let Some(entity) = entity_at(rest)
+            && let Some(decoded) = special_character(entity, options.document)
+            && options.quotes.includes(decoded)
+        {
+            result.push(decoded);
+            cursor += entity.len() + 2;
+            continue;
+        }
+        result.push(rest[0]);
+        cursor += 1;
+    }
+    Ok(Value::from(result))
+}
+
+/// The name of an entity at the start of `rest`, between `&` and `;`.
+fn entity_at(rest: &[u8]) -> Option<&[u8]> {
+    let name = rest.strip_prefix(b"&")?;
+    let end = name.iter().position(|&byte| byte == b';')?;
+    Some(&name[..end])
+}
+
+/// The code point of a numeric entity name such as `#39` or `#x27`; no
+/// sign or space is allowed.
+fn numeric_entity(name: &[u8]) -> Option<u32> {
+    let digits = name.strip_prefix(b"#")?;
+    let (radix, digits) = match digits {
+        [b'x' | b'X', rest @ ..] => (16, rest),
+        _ => (10, digits),
+    };
+    if digits.is_empty() {
+        return None;
+    }
+    let mut code = 0u32;
+    for &byte in digits {
+        let digit = u32::from(hex_digit(byte)?);
+        if digit >= radix {
+            return None;
+        }
+        code = code.checked_mul(radix)?.checked_add(digit)?;
+    }
+    (code <= 0x10_ffff).then_some(code)
+}
+
+/// The special character an entity stands for, if it is one of the five.
+fn special_character(name: &[u8], document: Document) -> Option<u8> {
+    let code = match name {
+        b"amp" => 38,
+        b"lt" => 60,
+        b"gt" => 62,
+        b"quot" => 34,
+        b"apos" if document != Document::Html401 => 39,
+        _ => numeric_entity(name)?,
+    };
+    matches!(code, 34 | 38 | 39 | 60 | 62).then_some(code as u8)
+}
+
+/// Whether `htmlspecialchars` without double encoding keeps `&name;` as it
+/// is: a named entity the document type knows, or a number it allows.
+fn is_valid_entity(name: &[u8], options: Options) -> bool {
+    let document = options.document;
+    if let Some(code) = numeric_entity(name) {
+        return !options.replace_disallowed
+            || match document {
+                Document::Html401 => true,
+                Document::Html5 => {
+                    (document.allows(code) || (0xd800..=0xdfff).contains(&code)) && code != 0x0d
+                }
+                _ => document.allows(code),
+            };
+    }
+    let names = match document {
+        Document::Xml1 => return matches!(name, b"amp" | b"lt" | b"gt" | b"quot" | b"apos"),
+        Document::Xhtml if name == b"apos" => return true,
+        Document::Html5 => entities::HTML5,
+        Document::Html401 | Document::Xhtml => entities::HTML4,
+    };
+    names.split(' ').any(|known| known.as_bytes() == name)
 }

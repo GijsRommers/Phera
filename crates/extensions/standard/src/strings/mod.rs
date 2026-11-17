@@ -10,8 +10,6 @@ mod encode;
 mod escaping;
 mod format;
 mod html;
-mod html_encoding;
-mod html_entities;
 mod metaphone;
 mod number_format;
 mod padding;
@@ -35,6 +33,7 @@ pub(crate) fn register(registry: &mut Registry) {
         compare::FUNCTIONS,
         encode::FUNCTIONS,
         escaping::FUNCTIONS,
+        html::FUNCTIONS,
         metaphone::FUNCTIONS,
         padding::FUNCTIONS,
         replace::FUNCTIONS,
@@ -53,7 +52,6 @@ pub(crate) fn register(registry: &mut Registry) {
     }
     number_format::register(registry);
     format::register(registry);
-    html::register(registry);
 }
 
 pub(super) fn bytes(value: impl Into<Vec<u8>>) -> Value {
