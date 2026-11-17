@@ -37,6 +37,15 @@ pub(super) fn packages(
                 .context("Path manifest must be an object.")?
                 .clone();
             data.insert("version".into(), version.into());
+            let mut transport = serde_json::Map::new();
+            for key in ["symlink", "relative"] {
+                if let Some(value) = repository["options"][key].as_bool() {
+                    transport.insert(key.into(), value.into());
+                }
+            }
+            if !transport.is_empty() {
+                data.insert("transport-options".into(), Value::Object(transport));
+            }
             data.insert(
                 "dist".into(),
                 json!({"type": "path",

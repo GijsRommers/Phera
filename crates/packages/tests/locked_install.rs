@@ -123,6 +123,10 @@ fn installs_relocatable_composer_autoloader_and_protects_store() {
     fs::write(root.join("vendor/acme/base/src/Thing.php"), "corrupted").unwrap();
     fs::remove_dir_all(root.join("vendor")).unwrap();
     options.offline = true;
+    let lock_path = root.join("composer.lock");
+    let mut lock: Value = serde_json::from_slice(&fs::read(&lock_path).unwrap()).unwrap();
+    lock["packages"][0]["description"] = "Metadata changed without changing the archive".into();
+    fs::write(&lock_path, lock.to_string()).unwrap();
     install(root, &options).unwrap();
     assert_eq!(php(root, probe), expected);
     let moved = root.join("moved");
@@ -178,10 +182,10 @@ fn no_dev_removes_previous_packages_and_runs_root_events_in_order() {
     fs::write(
         root.join("composer.json"),
         json!({"scripts": {
-            "pre-install-cmd": "printf pre > events.txt",
+            "pre-install-cmd": ["@putenv PHERA_SCRIPT_TEST=present", "printf pre > events.txt"],
             "pre-autoload-dump": "@write-autoload",
             "write-autoload": "printf autoload >> events.txt",
-            "post-autoload-dump": "printf post >> events.txt",
+            "post-autoload-dump": "test \"$PHERA_SCRIPT_TEST\" = present && printf post >> events.txt",
             "post-install-cmd": "printf install >> events.txt"
         }})
         .to_string(),

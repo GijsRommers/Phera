@@ -8,20 +8,26 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::process::Command;
 
-pub(crate) fn event(project: &Project, options: &Options, name: &str) -> Result<()> {
-    if options.no_scripts {
-        return Ok(());
+#[derive(Default)]
+pub(crate) struct Runner {
+    environment: BTreeMap<String, String>,
+}
+
+impl Runner {
+    pub(crate) fn event(&mut self, project: &Project, options: &Options, name: &str) -> Result<()> {
+        if options.no_scripts {
+            return Ok(());
+        }
+        self.environment
+            .entry("COMPOSER_DEV_MODE".into())
+            .or_insert_with(|| if options.no_dev { "0" } else { "1" }.into());
+        for script in strings(&project.data["scripts"][name]) {
+            run(project, options, script, &mut self.environment, 0).with_context(|| {
+                format!("Script for {name} failed. Fix it or use --no-scripts.")
+            })?;
+        }
+        Ok(())
     }
-    let mut environment = BTreeMap::new();
-    environment.insert(
-        "COMPOSER_DEV_MODE".to_owned(),
-        if options.no_dev { "0" } else { "1" }.into(),
-    );
-    for script in strings(&project.data["scripts"][name]) {
-        run(project, options, script, &mut environment, 0)
-            .with_context(|| format!("Script for {name} failed. Fix it or use --no-scripts."))?;
-    }
-    Ok(())
 }
 
 fn run(

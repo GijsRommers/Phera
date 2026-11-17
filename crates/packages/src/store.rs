@@ -48,7 +48,22 @@ impl Store {
         offline: bool,
         project: &Path,
     ) -> Result<PathBuf> {
-        let mut identity = serde_json::to_vec(package)?;
+        let dist = package.field("dist");
+        let source = package.field("source");
+        let mut identity = serde_json::to_vec(&serde_json::json!([
+            package.name,
+            crate::version::normalize(&package.version)?,
+            dist["type"].as_str().unwrap_or("zip"),
+            dist["url"].as_str(),
+            dist["reference"].as_str(),
+            dist["shasum"]
+                .as_str()
+                .filter(|sum| !sum.is_empty())
+                .map(str::to_ascii_lowercase),
+            source["type"].as_str(),
+            source["url"].as_str(),
+            source["reference"].as_str()
+        ]))?;
         let path_dist = package.field("dist")["type"] == "path";
         if path_dist {
             identity.extend_from_slice(project.as_os_str().as_encoded_bytes());
@@ -85,6 +100,11 @@ impl Store {
                 let source = crate::paths::inside(project, url)?.canonicalize()?;
                 if !source.starts_with(project) {
                     bail!("Path repositories must stay inside the project directory.");
+                }
+                if self.directory.starts_with(&source) {
+                    bail!(
+                        "Move PHERA_CACHE_DIR outside this path repository before installing it."
+                    );
                 }
                 copy_tree(&source, &extracted)?;
                 tree_digest(&extracted)?
@@ -203,9 +223,7 @@ pub(crate) fn materialise(
     let target = crate::paths::inside(stage.path(), target_dir.unwrap_or(""))?;
     fs::create_dir_all(&target)?;
     let method = copy_tree(source, &target)?;
-    if destination.exists() {
-        fs::remove_dir_all(destination)?;
-    }
+    crate::path_install::remove(destination)?;
     fs::rename(stage.path(), destination)?;
     Ok(method)
 }

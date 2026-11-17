@@ -26,10 +26,7 @@ pub(crate) fn remove_stale(
     for package in previous {
         package.validate()?;
         if !current.iter().any(|new| new.name == package.name) {
-            let destination = crate::paths::inside(&vendor, &package.name)?;
-            if destination.is_dir() {
-                fs::remove_dir_all(destination)?;
-            }
+            crate::path_install::remove(&crate::path_install::destination(&vendor, package)?)?;
         }
         for path in strings(package.field("bin")) {
             let path = crate::paths::relative(path)?;

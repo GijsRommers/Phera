@@ -81,6 +81,11 @@ pub(crate) fn write(project: &Project, options: &Options, packages: &[Package]) 
             }
         }
     }
+    let flags = if flags.is_empty() {
+        json!([])
+    } else {
+        Value::Object(flags)
+    };
     let mut value = json!({
         "_readme": ["This file locks the dependencies of your project to a known state",
             concat!("Read more about it at https://getcomposer.org/doc/",

@@ -11,6 +11,7 @@ mod content_hash;
 mod installed;
 mod lock_writer;
 mod network;
+mod path_install;
 mod paths;
 mod php;
 mod project;
@@ -33,10 +34,15 @@ pub fn install(directory: &Path, options: &Options) -> Result<()> {
     if !directory.join("composer.lock").is_file() && !options.frozen {
         return update(directory, options);
     }
-    install_locked(directory, options, false)
+    install_locked(directory, options, false, &mut scripts::Runner::default())
 }
 
-fn install_locked(directory: &Path, options: &Options, updating: bool) -> Result<()> {
+fn install_locked(
+    directory: &Path,
+    options: &Options,
+    updating: bool,
+    runner: &mut scripts::Runner,
+) -> Result<()> {
     let project = Project::read(directory)?;
     let lock = Lock::read(directory)?;
     if lock.content_hash != content_hash::compute(&project.data)? {
@@ -46,7 +52,7 @@ fn install_locked(directory: &Path, options: &Options, updating: bool) -> Result
         eprintln!("Warning: composer.lock is out of date; installing its exact versions.");
     }
     if !updating {
-        scripts::event(&project, options, "pre-install-cmd")?;
+        runner.event(&project, options, "pre-install-cmd")?;
     }
     let vendor = project.vendor_dir()?;
     fs::create_dir_all(&vendor)?;
@@ -66,9 +72,12 @@ fn install_locked(directory: &Path, options: &Options, updating: bool) -> Result
             let source = cache
                 .prepare(package, &network, options.offline, &project.directory)
                 .with_context(|| format!("Cannot install {} {}.", package.name, package.version))?;
-            let destination = paths::inside(&vendor, &package.name)?;
-            let method =
-                store::materialise(&source, &destination, package.field("target-dir").as_str())?;
+            let destination = path_install::destination(&vendor, package)?;
+            let method = if path_install::link(&project, package, &destination)? {
+                "live path repository link"
+            } else {
+                store::materialise(&source, &destination, package.field("target-dir").as_str())?
+            };
             if options.verbose {
                 eprintln!("  {} {}: {method}", package.name, package.version);
             }
@@ -78,11 +87,11 @@ fn install_locked(directory: &Path, options: &Options, updating: bool) -> Result
     cleanup::remove_stale(&project, &previous, &packages)?;
     installed::write(&project, &lock, options)?;
     binaries::write(&project, &packages)?;
-    scripts::event(&project, options, "pre-autoload-dump")?;
+    runner.event(&project, options, "pre-autoload-dump")?;
     autoload::generate(&project, &packages, options)
         .context("Could not generate autoload files; correct the reported PHP file and retry.")?;
-    scripts::event(&project, options, "post-autoload-dump")?;
-    scripts::event(
+    runner.event(&project, options, "post-autoload-dump")?;
+    runner.event(
         &project,
         options,
         if updating {
@@ -92,7 +101,7 @@ fn install_locked(directory: &Path, options: &Options, updating: bool) -> Result
         },
     )?;
     for package in &packages {
-        if package.kind() == "composer-plugin" {
+        if matches!(package.kind(), "composer-plugin" | "composer-installer") {
             eprintln!(
                 "Skipped Composer plugin {} (plugins are not executed).",
                 package.name
@@ -106,14 +115,15 @@ fn install_locked(directory: &Path, options: &Options, updating: bool) -> Result
 /// Resolve composer.json through PubGrub, write a Composer lock and install it.
 pub fn update(directory: &Path, options: &Options) -> Result<()> {
     let project = Project::read(directory)?;
-    scripts::event(&project, options, "pre-update-cmd")?;
+    let mut runner = scripts::Runner::default();
+    runner.event(&project, options, "pre-update-cmd")?;
     let registry = registry::Registry::new(&project, options)?;
     let packages = solver::solve(&project, options, &registry)?;
     lock_writer::write(&project, options, &packages)?;
     if options.no_install {
         return Ok(());
     }
-    install_locked(directory, options, true)
+    install_locked(directory, options, true, &mut runner)
 }
 
 /// Rebuild the PHP autoloader from the installed lock file.
@@ -128,7 +138,8 @@ pub fn dump_autoload(directory: &Path, options: &Options) -> Result<()> {
     {
         options.no_dev = true;
     }
-    scripts::event(&project, &options, "pre-autoload-dump")?;
+    let mut runner = scripts::Runner::default();
+    runner.event(&project, &options, "pre-autoload-dump")?;
     autoload::generate(&project, &lock.packages(options.no_dev), &options)?;
-    scripts::event(&project, &options, "post-autoload-dump")
+    runner.event(&project, &options, "post-autoload-dump")
 }

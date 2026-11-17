@@ -116,7 +116,7 @@ pub struct Package {
 
 impl Package {
     pub fn install_path(&self, vendor: &Path) -> Result<PathBuf> {
-        let base = crate::paths::inside(vendor, &self.name)?;
+        let base = crate::path_install::destination(vendor, self)?;
         match self.field("target-dir").as_str() {
             Some(target) => crate::paths::inside(&base, target),
             None => Ok(base),
