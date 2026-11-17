@@ -102,19 +102,12 @@ fn encode_one(point: u32, family: Family, output: &mut Vec<u8>) -> bool {
     match family {
         Family::Ascii if point < 0x80 => output.push(point as u8),
         Family::Bytes if point < 0x100 => output.push(point as u8),
+        // A table entry of `BAD` marks a byte without a character, so `BAD`
+        // itself must not be looked up.
+        Family::SingleByte(_) if point == BAD => return false,
         Family::SingleByte(table) => {
-            // A table entry of `BAD` marks a byte without a character, so
-            // `BAD` itself must not be looked up.
-            let found = (point != BAD)
-                .then(|| {
-                    table
-                        .as_chunks::<4>()
-                        .0
-                        .iter()
-                        .position(|entry| read_u32(entry) == point)
-                })
-                .flatten();
-            let Some(byte) = found else {
+            let entries = table.as_chunks::<4>().0;
+            let Some(byte) = entries.iter().position(|entry| read_u32(entry) == point) else {
                 return false;
             };
             output.push(byte as u8);
