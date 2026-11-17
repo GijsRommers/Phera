@@ -1,7 +1,7 @@
 //! A deliberately simple Vec-of-pairs oracle, independent of storage and lookup.
 
-use super::storage::Storage;
-use super::{ArrayKey, PhpArray};
+use crate::array::storage::Storage;
+use crate::array::{ArrayKey, PhpArray};
 use crate::value::Value;
 
 #[derive(Default)]

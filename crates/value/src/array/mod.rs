@@ -17,16 +17,10 @@
 mod drop;
 mod iteration;
 mod key;
-#[cfg(test)]
-mod key_tests;
 mod lookup;
-#[cfg(test)]
-mod model_tests;
 mod mutation;
 mod pointer;
 mod storage;
-#[cfg(test)]
-mod storage_tests;
 #[cfg(test)]
 mod tests;
 
