@@ -388,6 +388,18 @@ pub enum Instruction {
     Call {
         dst: Reg,
     },
+    /// Calls a function declared unconditionally at the top level of this
+    /// file, which therefore exists before any of the file's code runs. The
+    /// compiler has put the `count` arguments in the registers from `args`
+    /// on, in order and by value; the call moves them into the callee's
+    /// registers, so no `InitCall` or `Send` is needed. `dst` receives the
+    /// return value.
+    CallDirect {
+        function: FunctionId,
+        args: Reg,
+        count: u16,
+        dst: Reg,
+    },
     /// `f(...)`: instead of calling, puts the prepared callee into `dst` as a
     /// callable value.
     MakeCallable {

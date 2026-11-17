@@ -60,7 +60,7 @@ impl Vm {
         {
             return result;
         }
-        let context = self.current().and_then(|frame| frame.method.as_ref());
+        let context = self.current().and_then(|frame| frame.method());
         let matches = |name: &str| {
             let resolved = match name.trim_matches(['(', ')']) {
                 "self" => context.map(|context| context.scope.name.as_str()),
@@ -77,4 +77,25 @@ impl Vm {
             .into_iter()
             .any(|alternative| alternative.split('&').all(matches))
     }
+}
+
+/// Whether the unit's cache already remembers that the class of `value`
+/// satisfies the class type `declaration`, by identity of the class. Only a
+/// remembered "yes" counts: anything else is left to the general check, which
+/// also fills the cache.
+pub(crate) fn known_class_match(
+    cache: &crate::unit_caches::UnitCache,
+    declaration: phera_bytecode::TypeId,
+    value: &Value,
+) -> bool {
+    let Value::Object(object) = value else {
+        return false;
+    };
+    let index = declaration.index();
+    cache.type_scopes.get(index) == Some(&crate::types::DeclarationScope::Absolute)
+        && cache.class_types.get(index).is_some_and(|slot| {
+            slot.borrow().as_ref().is_some_and(|entry| {
+                entry.matches && std::rc::Rc::ptr_eq(&entry.class, &object.class)
+            })
+        })
 }

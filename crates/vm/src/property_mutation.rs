@@ -111,7 +111,7 @@ impl Vm {
                             }
                             let scope = self
                                 .current()
-                                .and_then(|frame| frame.method.as_ref())
+                                .and_then(|frame| frame.method())
                                 .map(|context| &context.scope);
                             if crate::property_storage::read(object, key).is_some()
                                 || steps.peek().is_some()
@@ -205,7 +205,7 @@ impl Vm {
         }
         let scope = self
             .current()
-            .and_then(|frame| frame.method.as_ref())
+            .and_then(|frame| frame.method())
             .map(|context| context.scope.name.as_str());
         if class.defaults.iter().any(|property| {
             property.name == name

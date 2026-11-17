@@ -1,6 +1,6 @@
 //! Pure default-value functions reuse scalar bytecode semantics without invoking PHP callbacks.
 
-use crate::{Vm, function_table::FunctionRef};
+use crate::{Vm, code_table::FunctionIndex};
 use phera_bytecode::{Instruction, Reg};
 use phera_extension_api::{NativeError, NativeResult};
 use phera_value::{ArrayKey, PhpArray, Value};
@@ -10,7 +10,7 @@ impl Vm {
     /// Initializers have private registers and cannot mutate the caller's locals.
     pub(crate) fn evaluate_initializer(
         &mut self,
-        reference: &FunctionRef,
+        reference: &FunctionIndex,
         scope: &str,
     ) -> NativeResult {
         let previous = self.initializer_scope.replace(scope.to_owned());
@@ -20,8 +20,15 @@ impl Vm {
     }
 
     /// Only constant-expression instructions may execute in this isolated register window.
-    fn evaluate_initializer_body(&mut self, reference: &FunctionRef, scope: &str) -> NativeResult {
-        let function = &reference.unit.functions[reference.index];
+    fn evaluate_initializer_body(
+        &mut self,
+        reference: &FunctionIndex,
+        scope: &str,
+    ) -> NativeResult {
+        // Initializers may call back into PHP code, so this one holds its own
+        // owner of the unit rather than a borrow of the code table.
+        let unit = self.code.unit(*reference).clone();
+        let function = crate::code_table::body(&unit, self.code.local(*reference));
         let mut slots = vec![None; usize::from(function.registers)];
         let mut position = 0;
         let mut prepared = None;
@@ -46,10 +53,10 @@ impl Vm {
             let (destination, value) = match instruction {
                 Instruction::LoadConst { dst, constant } => (
                     dst,
-                    crate::calls::frame::value(&reference.unit.constants[constant.index()]),
+                    crate::calls::frame::value(&unit.constants[constant.index()]),
                 ),
                 Instruction::FetchClassName { dst, class } => {
-                    let name = &reference.unit.symbols[class.index()].written;
+                    let name = &unit.symbols[class.index()].written;
                     let name = match name.as_str() {
                         "self" | "static" => scope.to_owned(),
                         "parent" => self
@@ -69,14 +76,11 @@ impl Vm {
                     };
                     (
                         dst,
-                        self.class_constant(
-                            &class.to_string_lossy(),
-                            &reference.unit.names[name.index()],
-                        )?,
+                        self.class_constant(&class.to_string_lossy(), &unit.names[name.index()])?,
                     )
                 }
                 Instruction::FetchConstant { dst, constant } => {
-                    (dst, self.constants.fetch(reference.unit.clone(), constant)?)
+                    (dst, self.constants.fetch(unit.clone(), constant)?)
                 }
                 Instruction::Binary {
                     dst,

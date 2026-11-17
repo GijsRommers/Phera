@@ -18,7 +18,7 @@ impl Vm {
                     array.insert(
                         ArrayKey::String(
                             frame
-                                .unit
+                                .unit()
                                 .names
                                 .get(name.index())
                                 .cloned()
@@ -29,7 +29,7 @@ impl Vm {
                     );
                 }
             }
-            for (name, register) in frame.dynamic.iter() {
+            for (name, register) in frame.extras.dynamic.iter() {
                 if let Some(Some(value)) = frame.slots(&self.registers).get(register.0 as usize) {
                     array.insert(ArrayKey::String(name.clone().into()), value.deref().clone());
                 }
@@ -61,13 +61,13 @@ impl Vm {
                             .iter()
                             .position(|name_id| {
                                 frame
-                                    .unit
+                                    .unit()
                                     .names
                                     .get(name_id.index())
                                     .is_some_and(|candidate| candidate == &name)
                             })
                             .map(|i| Reg(i as u16))
-                            .or_else(|| frame.dynamic.get(&name).copied())
+                            .or_else(|| frame.extras.dynamic.get(&name).copied())
                     });
                     if let Some(register) = register {
                         array.insert(ArrayKey::String(string), self.get(register));
