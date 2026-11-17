@@ -28,6 +28,45 @@ impl Context for Vm {
         self
     }
 
+    /// Native decoders construct linked objects without running PHP constructors.
+    fn create_object(&mut self, name: &str, properties: phera_value::PhpArray) -> NativeResult {
+        let class = self.classes.get(name).ok_or_else(|| {
+            phera_extension_api::NativeError::error(format!("Class \"{name}\" not found"))
+        })?;
+        if class.kind == phera_bytecode::ClassKind::Interface {
+            return Err(phera_extension_api::NativeError::error(format!(
+                "Cannot instantiate interface {}",
+                class.name
+            )));
+        }
+        if class.is_abstract {
+            return Err(phera_extension_api::NativeError::error(format!(
+                "Cannot instantiate abstract class {}",
+                class.name
+            )));
+        }
+        let object = self.classes.allocate(class.clone());
+        for property in &class.defaults {
+            if property.initialized {
+                let value = if let Some(initializer) = &property.initializer {
+                    self.evaluate_initializer(initializer, &property.declaring)?
+                } else {
+                    property.value.clone()
+                };
+                object.set(property.key.clone(), value);
+            }
+        }
+        object.update(|storage| {
+            for (key, value) in properties.iter() {
+                storage.insert(key.clone(), value.clone());
+            }
+        });
+        if class.is_throwable {
+            self.initialize_throwable(&object, crate::exceptions::TraceOrigin::Construction);
+        }
+        Ok(Value::Object(object))
+    }
+
     fn state(&mut self) -> &mut RequestState {
         &mut self.state
     }
@@ -43,14 +82,27 @@ impl Context for Vm {
         arguments: Vec<Value>,
     ) -> LocalFuture<'a, NativeResult> {
         Box::pin(async move {
+            let callee = self.resolve_callable(callable)?;
+            self.invoke_resolved_callable(callee, arguments).await
+        })
+    }
+}
+
+impl Vm {
+    /// Saved handler targets remain callable after every original PHP frame is gone.
+    pub(crate) fn invoke_resolved_callable(
+        &mut self,
+        callee: std::rc::Rc<crate::call_state::Callee>,
+        arguments: Vec<Value>,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(async move {
             self.call_stack.enter_callback()?;
             let result = async {
-                let callee = self.resolve_callable(callable)?;
                 let stop = self.call_stack.depth();
                 match &callee.target {
                     crate::call_state::CallTarget::User(function) => {
                         self.push_call(function.unit.clone(), function.index, None, arguments)?;
-                        self.interpret_frames(stop).await
+                        self.interpret(stop).await
                     }
                     crate::call_state::CallTarget::Method { method, context } => {
                         match &method.body {
@@ -64,7 +116,7 @@ impl Context for Vm {
                                 if let Some(frame) = self.call_stack.current_mut() {
                                     frame.method = Some(Box::new(context.clone()));
                                 }
-                                self.interpret_frames(stop).await
+                                self.interpret(stop).await
                             }
                             crate::classes::MethodBody::Native(entry) => {
                                 let mut arguments = arguments;
@@ -94,6 +146,7 @@ impl Context for Vm {
                 }
             }
             .await;
+            let result = result.map_err(|error| self.materialize_error(error));
             self.call_stack.leave_callback();
             result
         })

@@ -24,4 +24,4 @@ TraitA::as
 
 Done
 --XFAIL--
-Requires classes, exception handling, traits (outside this milestone).
+Requires out-of-scope traits.

@@ -6,6 +6,13 @@ use phera_value::Value;
 
 use crate::{Vm, dispatch::DispatchResult};
 
+/// Cold return variants keep handler futures out of the ordinary instruction dispatcher.
+pub(crate) enum DispatchedReturn {
+    Value(Reg),
+    Reference(Reg),
+    Checked(Reg),
+}
+
 /// Retain code metadata while coercion mutably borrows the interpreter.
 struct ReturnTypeSite {
     unit: std::sync::Arc<phera_bytecode::CompiledUnit>,
@@ -14,28 +21,6 @@ struct ReturnTypeSite {
 }
 
 impl Vm {
-    /// Reference returns carry the reference cell rather than its current value.
-    pub(crate) fn return_reference(
-        &mut self,
-        source: Reg,
-        stop: usize,
-    ) -> Result<DispatchResult, NativeError> {
-        let value = self
-            .current()
-            .and_then(|frame| frame.slots(&self.registers).get(source.index()))
-            .and_then(Option::as_ref)
-            .cloned()
-            .unwrap_or_default();
-        if !value.is_reference() {
-            self.diagnostic(
-                "Notice",
-                "Only variable references should be returned by reference".into(),
-            );
-        }
-        self.return_value(value, stop)
-            .map(DispatchResult::from_return)
-    }
-
     /// Ordinary returns dereference the source before releasing its frame.
     pub(crate) fn return_register(
         &mut self,
@@ -65,11 +50,23 @@ impl Vm {
 
 impl Vm {
     /// Check the declared result before releasing registers and recycling the callee.
+    #[inline]
     pub(crate) fn return_value(
         &mut self,
         mut value: Value,
         stop: usize,
     ) -> Result<Option<Value>, NativeError> {
+        if self
+            .current()
+            .is_some_and(|frame| frame.function().return_type.is_some())
+        {
+            value = self.check_return_value(value)?;
+        }
+        self.finish_return_value(value, stop)
+    }
+
+    /// Coercion precedes finally, allowing a surrounding catch to handle an invalid return.
+    pub(crate) fn check_return_value(&mut self, mut value: Value) -> Result<Value, NativeError> {
         let typed_return = self.current().and_then(|frame| {
             let declaration = frame.function().return_type?;
             // Mirrors the already-matching object arm of types::coerce. A plain
@@ -124,6 +121,16 @@ impl Vm {
                 checked
             };
         }
+        Ok(value)
+    }
+
+    /// A validated result is held across finally without checking aliases a second time.
+    #[inline]
+    pub(crate) fn finish_return_value(
+        &mut self,
+        mut value: Value,
+        stop: usize,
+    ) -> Result<Option<Value>, NativeError> {
         if let Some(context) = self.current().and_then(|frame| frame.method.as_ref())
             && context.invocation == crate::classes::Invocation::Constructor
         {
@@ -148,5 +155,52 @@ impl Vm {
             self.set(destination, value);
         }
         Ok(None)
+    }
+}
+
+impl Vm {
+    /// Only these cold returns allocate an erased future; ordinary PHP returns stay synchronous.
+    pub(crate) fn dispatched_return(
+        &mut self,
+        kind: DispatchedReturn,
+        stop: usize,
+    ) -> phera_extension_api::LocalFuture<'_, Result<DispatchResult, NativeError>> {
+        Box::pin(async move {
+            let source = match kind {
+                DispatchedReturn::Value(source)
+                | DispatchedReturn::Reference(source)
+                | DispatchedReturn::Checked(source) => source,
+            };
+            let value = if matches!(kind, DispatchedReturn::Value(_)) {
+                self.read_local(source)
+            } else {
+                self.current()
+                    .and_then(|frame| frame.slots(&self.registers).get(source.index()))
+                    .and_then(Option::as_ref)
+                    .cloned()
+                    .unwrap_or_default()
+            };
+            let reference_return = matches!(kind, DispatchedReturn::Reference(_))
+                || (matches!(kind, DispatchedReturn::Checked(_))
+                    && self
+                        .current()
+                        .is_some_and(|frame| frame.function().returns_reference));
+            if reference_return && !value.is_reference() {
+                self.diagnostic(
+                    "Notice",
+                    "Only variable references should be returned by reference".into(),
+                );
+            }
+            if !self.error_handlers.pending.is_empty() {
+                self.drain_return_handlers().await?;
+            }
+            if matches!(kind, DispatchedReturn::Checked(_)) {
+                self.finish_return_value(value, stop)
+                    .map(DispatchResult::from_return)
+            } else {
+                self.return_value(value, stop)
+                    .map(DispatchResult::from_return)
+            }
+        })
     }
 }

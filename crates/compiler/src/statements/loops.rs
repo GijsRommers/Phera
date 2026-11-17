@@ -103,8 +103,25 @@ impl Compiler<'_> {
                 line,
             ));
         }
-        let jump = self.emit(Instruction::Jump(Target(0)), line);
         let at = self.loops.len() - depth;
+        if self.finalies.iter().any(|scope| {
+            matches!(
+                scope.phase,
+                crate::statements::exceptions::FinallyPhase::Running
+            ) && scope.loop_depth > at
+        }) {
+            return Err(self.error("jump out of a finally block is disallowed", line));
+        }
+        self.emit_finally_exits(
+            Some(at),
+            if is_break {
+                phera_bytecode::FinallyEntry::Break
+            } else {
+                phera_bytecode::FinallyEntry::Continue
+            },
+            line,
+        );
+        let jump = self.emit(Instruction::Jump(Target(0)), line);
         if let Some(loop_state) = self.loops.get_mut(at) {
             if is_break {
                 loop_state.breaks.push(jump)
@@ -152,7 +169,13 @@ impl Compiler<'_> {
             }
         }
         let source = if let Some(expression) = expression {
-            if self.function.returns_reference && writable(expression) {
+            if !self.function.returns_reference
+                && self.finalies.is_empty()
+                && let ast::ExpressionKind::Variable(ast::Variable::Named(name)) = &expression.kind
+                && name != "this"
+            {
+                self.local(name)?
+            } else if self.function.returns_reference && writable(expression) {
                 let place = self.place(expression)?;
                 let dst = self.allocate_register()?;
                 self.emit(
@@ -169,8 +192,27 @@ impl Compiler<'_> {
         } else {
             self.literal(Constant::Null, line)?
         };
+        let source = if !self.finalies.is_empty() && !self.function.returns_reference {
+            let destination = self.allocate_register()?;
+            self.emit(
+                Instruction::Move {
+                    destination,
+                    source,
+                },
+                line,
+            );
+            destination
+        } else {
+            source
+        };
+        if !self.finalies.is_empty() {
+            self.emit(Instruction::CheckReturn { source }, line);
+        }
+        self.emit_finally_exits(None, phera_bytecode::FinallyEntry::Return, line);
         self.emit(
-            if self.function.returns_reference {
+            if !self.finalies.is_empty() {
+                Instruction::ReturnChecked { source }
+            } else if self.function.returns_reference {
                 Instruction::ReturnReference(source)
             } else {
                 Instruction::Return(source)

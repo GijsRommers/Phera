@@ -42,7 +42,7 @@ pub struct Function {
     /// this function makes.
     pub strict_types: bool,
     /// `try` blocks, innermost first. Unwinding searches this table; it is
-    /// empty until exceptions are compiled.
+    /// consulted only when an exception leaves an instruction.
     pub handlers: Vec<Handler>,
 }
 
@@ -99,7 +99,7 @@ pub enum Step {
 
 /// One `try` block: which instructions it covers and where control goes when
 /// something is thrown inside them.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Handler {
     /// First instruction covered.
     pub start: Target,
@@ -109,4 +109,8 @@ pub struct Handler {
     pub catch: Option<Target>,
     /// Where the `finally` block begins, if there is one.
     pub finally: Option<Target>,
+    /// Catch operand or finally continuation register, allocated by the compiler.
+    pub exception: Reg,
+    /// Abandoned expression temporaries; named locals survive the transfer.
+    pub cleanup: Vec<Reg>,
 }

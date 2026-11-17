@@ -16,6 +16,11 @@ use crate::passes::integer_operands::fuse_integer_operands;
 
 /// Optimize operands in place while retaining source locations and valid branch targets.
 pub(crate) fn optimize(function: &mut Function) {
+    // Exception edges carry live temporaries not described by ordinary branch operands.
+    // Preserve their layout until the optimizer models exceptional successors.
+    if !function.handlers.is_empty() {
+        return;
+    }
     let boundaries: HashSet<_> = function
         .instructions
         .iter()

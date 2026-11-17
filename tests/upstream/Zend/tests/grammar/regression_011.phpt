@@ -17,4 +17,4 @@ var_dump(new namespace\baz);
 object(foo\bar)#%d (0) {
 }
 --XFAIL--
-Requires classes, object construction (outside this milestone).
+Native class_alias is not implemented.

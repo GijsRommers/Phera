@@ -40,4 +40,4 @@ Static hi!
 Instance hi!
 Prop hi!
 --XFAIL--
-Requires classes, object construction (outside this milestone).
+The upstream expectation requires PHP 8.6 readonly-call deprecation; the PHP 8.5 oracle does not emit it.

@@ -4,6 +4,11 @@ use phera_value::{Value, float_to_string_precision14};
 
 /// PHP limits exception strings to fifteen source bytes before escaping them.
 pub(crate) fn describe(value: &Value) -> String {
+    describe_with_limit(value, 15)
+}
+
+/// Trace rendering honors the request setting while engine messages retain their own limit.
+pub(crate) fn describe_with_limit(value: &Value, limit: usize) -> String {
     match &*value.deref() {
         Value::Null => "NULL".into(),
         Value::Bool(value) => value.to_string(),
@@ -15,15 +20,15 @@ pub(crate) fn describe(value: &Value) -> String {
             }
             text
         }
-        Value::String(value) => quoted_string(value.as_bytes()),
+        Value::String(value) => quoted_string(value.as_bytes(), limit),
         value => format!("of type {}", value.type_name()),
     }
 }
 
 /// Escape bytes before adding PHP's truncation marker, preserving embedded controls.
-fn quoted_string(bytes: &[u8]) -> String {
+fn quoted_string(bytes: &[u8], limit: usize) -> String {
     let mut text = String::from("'");
-    for byte in bytes.iter().take(15) {
+    for byte in bytes.iter().take(limit) {
         match byte {
             b'\n' => text.push_str("\\n"),
             b'\r' => text.push_str("\\r"),
@@ -36,7 +41,7 @@ fn quoted_string(bytes: &[u8]) -> String {
             byte => text.push_str(&format!("\\x{byte:02X}")),
         }
     }
-    if bytes.len() > 15 {
+    if bytes.len() > limit {
         text.push_str("...");
     }
     text.push('\'');

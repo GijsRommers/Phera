@@ -13,8 +13,8 @@ function {main} (5 registers, dynamic scope)
   0006  line 1    LoadInt { dst: r3, value: 1 }
   0007  line 1    Return { src: r3 }
 
-function identity (4 registers)
+function identity (3 registers)
   r0 = $value
   0000  line 1    Return { src: r0 }
-  0001  line 1    LoadConst { dst: r2, constant: const#0 }
-  0002  line 1    Return { src: r2 }
+  0001  line 1    LoadConst { dst: r1, constant: const#0 }
+  0002  line 1    Return { src: r1 }

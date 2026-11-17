@@ -79,6 +79,16 @@ impl Compiler<'_> {
                 | ast::ExpressionKind::StaticProperty { .. }
         ) {
             let place = self.readable_place(expression)?;
+            if place
+                .path
+                .iter()
+                .any(|step| matches!(step, crate::ir::PathStep::Append))
+            {
+                return Err(self.error(
+                    "Cannot use [] for reading",
+                    self.lines.line(expression.span.start),
+                ));
+            }
             let dst = self.allocate_register()?;
             self.emit(
                 Instruction::Read {

@@ -12,7 +12,7 @@ impl Compiler<'_> {
         default: &Expression,
         line: usize,
     ) -> Result<(), CompileError> {
-        if !constant_expression(default) {
+        if !parameter_expression(default) {
             return Err(self.error("Constant expression contains invalid operations", line));
         }
         let Some(declaration) = &parameter.ty else {
@@ -89,5 +89,26 @@ pub(crate) fn constant_expression(expression: &Expression) -> bool {
             constant_expression(left) && constant_expression(right)
         }
         _ => false,
+    }
+}
+
+/// PHP permits named-class construction in parameter defaults but not property defaults.
+fn parameter_expression(expression: &Expression) -> bool {
+    match &expression.kind {
+        ExpressionKind::New {
+            class: phera_ast::NewTarget::Class(class),
+            arguments: phera_ast::Arguments::List(arguments),
+        } => {
+            matches!(class.kind, ExpressionKind::Name(_))
+                && arguments
+                    .iter()
+                    .all(|argument| !argument.spread && parameter_expression(&argument.value))
+        }
+        ExpressionKind::Array(items) => items.iter().all(|item| {
+            !item.by_reference
+                && item.key.as_ref().is_none_or(parameter_expression)
+                && parameter_expression(&item.value)
+        }),
+        _ => constant_expression(expression),
     }
 }

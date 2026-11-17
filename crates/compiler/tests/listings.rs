@@ -23,3 +23,10 @@ fn nested_listing() {
         phera_compiler::compile("<?php $grid=[];$grid[1][2]=3;", "golden.php").expect("valid PHP");
     assert_eq!(unit.to_string(), include_str!("golden/nested.txt"));
 }
+
+/// Nested exception edges remain innermost-first after IR target relocation.
+#[test]
+fn exception_handler_listing() {
+    let unit = phera_compiler::compile(r#"<?php try { try { throw new Exception("x"); } catch (Error $error) { echo "error"; } finally { echo "inner"; } } catch (Throwable $error) { echo $error->getMessage(); } finally { echo "outer"; }"#, "golden.php").unwrap();
+    assert_eq!(unit.to_string(), include_str!("golden/exceptions.txt"));
+}

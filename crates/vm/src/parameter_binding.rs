@@ -48,9 +48,11 @@ impl Vm {
             } else {
                 let value = arguments.get_mut(i).and_then(Option::take).ok_or_else(|| {
                     let required = parameters.iter().filter(|parameter| !parameter.has_default && !parameter.variadic).count();
+                    let location = self.location();
+                    let qualifier = if required == parameters.len() { "exactly" } else { "at least" };
                     NativeError::argument_count_error(format!(
-                        "Too few arguments to function {}(), {} passed and at least {required} expected",
-                        function.name,arguments.len(),
+                        "Too few arguments to function {}(), {} passed in {} on line {} and {qualifier} {required} expected",
+                        function.name, arguments.len(), location.file, location.line,
                     ))
                 })?;
                 if parameter.ty.is_none() {

@@ -3,7 +3,7 @@
 use std::rc::Rc;
 
 use phera_bytecode::{NameId, Reg, Visibility};
-use phera_extension_api::{NativeError, NativeMethod, NativeResult, prepare_call};
+use phera_extension_api::{NativeError, NativeMethod, NativeResult};
 use phera_value::{Object, Value};
 
 use super::{Class, Invocation, Method, MethodBody, MethodContext};
@@ -208,12 +208,24 @@ impl Vm {
     ) -> Result<(), NativeError> {
         match &method.body {
             MethodBody::User(reference) => {
-                self.push_prepared(
+                if let Err(error) = self.push_prepared(
                     &reference.unit,
                     reference.index,
                     Some(destination),
                     arguments,
-                )?;
+                ) {
+                    if self.current().is_some_and(|frame| {
+                        frame.ip == 0
+                            && frame.function_id == Some(reference.index)
+                            && std::sync::Arc::ptr_eq(&frame.unit, &reference.unit)
+                    }) {
+                        let context = self.call_stack.method_context(context);
+                        if let Some(frame) = self.call_stack.current_mut() {
+                            frame.method = Some(context);
+                        }
+                    }
+                    return Err(error);
+                }
                 let context = self.call_stack.method_context(context);
                 if let Some(frame) = self.call_stack.current_mut() {
                     frame.method = Some(context);
@@ -224,12 +236,7 @@ impl Vm {
                     .into_iter()
                     .map(Option::unwrap_or_default)
                     .collect();
-                prepare_call(
-                    &format!("{}::{}", method.declaring, method.name),
-                    entry.params,
-                    &mut arguments,
-                    self,
-                )?;
+                self.prepare_native_method_arguments(method, entry.params, &mut arguments)?;
                 let result: NativeResult = match entry.handler {
                     NativeMethod::Sync(handler) => {
                         handler(self, context.receiver.as_ref(), &arguments)
@@ -242,6 +249,15 @@ impl Vm {
                     }
                 };
                 let result = result?;
+                let result = if matches!(method.declaring.as_str(), "Exception" | "Error") {
+                    context
+                        .receiver
+                        .as_ref()
+                        .and_then(|object| self.throwable_method_result(&method.name, object))
+                        .unwrap_or(result)
+                } else {
+                    result
+                };
                 self.set(
                     destination,
                     if context.invocation == Invocation::Constructor {

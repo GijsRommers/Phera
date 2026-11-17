@@ -14,4 +14,4 @@ echo "Done", PHP_EOL;
 --EXPECTF--
 Parse error: syntax error, unexpected namespaced name "implements\A", expecting "{" in %s on line %d
 --XFAIL--
-Requires classes, interfaces (outside this milestone).
+Parser diagnostic wording differs for an invalid implements token.

@@ -29,6 +29,36 @@ impl Vm {
         work: &mut usize,
     ) -> Result<DispatchResult, NativeError> {
         match instruction {
+            Instruction::CheckReturn { source } => {
+                let value = self
+                    .current()
+                    .and_then(|frame| frame.slots(&self.registers).get(source.index()))
+                    .and_then(Option::as_ref)
+                    .cloned()
+                    .unwrap_or_default();
+                let value = self.check_return_value(value)?;
+                self.set(source, value);
+            }
+            Instruction::ReturnChecked { source } => {
+                return self
+                    .dispatched_return(crate::returns::DispatchedReturn::Checked(source), stop)
+                    .await;
+            }
+            Instruction::FinallyCall {
+                state,
+                target,
+                reason,
+            } => self.enter_finally(
+                state,
+                target,
+                crate::finally::Continuation::Resume {
+                    target: self.current().map_or(0, |frame| frame.ip),
+                    reason,
+                },
+            )?,
+            Instruction::FinallyReturn { state } => self.leave_finally(state)?,
+            Instruction::FinallyDiscard { state } => self.discard_finally(state),
+            Instruction::Throw { source } => return Err(self.throw_operand(source)?),
             Instruction::Nop => {}
             Instruction::DeclareClass { class } => self.declare_class(class)?,
             Instruction::NewDynamic { class } => {
@@ -192,9 +222,15 @@ impl Vm {
             Instruction::Call { dst: destination } => self.execute_call(destination, work).await?,
             Instruction::MakeCallable { dst: destination } => self.make_callable(destination)?,
             Instruction::ReturnReference { src: source } => {
-                return self.return_reference(source, stop);
+                return self
+                    .dispatched_return(crate::returns::DispatchedReturn::Reference(source), stop)
+                    .await;
             }
-            Instruction::Return { src: source } => return self.return_register(source, stop),
+            Instruction::Return { src: source } => {
+                return self
+                    .dispatched_return(crate::returns::DispatchedReturn::Value(source), stop)
+                    .await;
+            }
             Instruction::ReturnNull => return self.return_null(stop),
             Instruction::ReceiveDefault { param, passed } => self.receive_default(param, passed)?,
             Instruction::Exit { src: source } => {

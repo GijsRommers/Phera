@@ -28,5 +28,3 @@ try {
 ?>
 --EXPECT--
 int(20)
---XFAIL--
-Requires exception handling, object construction, throw (outside this milestone).

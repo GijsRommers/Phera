@@ -22,6 +22,20 @@ impl Tables {
     ) {
         use ir::Instruction as Old;
         let instruction = match source {
+            Old::CheckReturn { source } => Instruction::CheckReturn { source },
+            Old::ReturnChecked { source } => Instruction::ReturnChecked { source },
+            Old::FinallyCall {
+                state,
+                target,
+                reason,
+            } => Instruction::FinallyCall {
+                state,
+                target: Target(target.0 as u32),
+                reason,
+            },
+            Old::FinallyReturn { state } => Instruction::FinallyReturn { state },
+            Old::FinallyDiscard { state } => Instruction::FinallyDiscard { state },
+            Old::Throw { source } => Instruction::Throw { source },
             Old::KnownStaticCall {
                 class,
                 method,

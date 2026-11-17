@@ -79,7 +79,13 @@ impl Vm {
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let updated = update(root, &keys, value, binding.into(), &mut diagnostics.buffer);
         drop(diagnostics);
-        let updated = updated?;
+        let updated = match updated {
+            Ok(updated) => updated,
+            Err(failure) => {
+                self.set(register, failure.root);
+                return Err(failure.error);
+            }
+        };
         if let PathBase::GlobalNamed { name, .. } = place.base()? {
             let name = self.get(name);
             if let Value::String(name) = name {
@@ -175,7 +181,13 @@ impl Vm {
             &mut diagnostics.buffer,
         );
         drop(diagnostics);
-        let updated = updated?;
+        let updated = match updated {
+            Ok(updated) => updated,
+            Err(failure) => {
+                self.set(register, failure.root);
+                return Err(failure.error);
+            }
+        };
         self.set(register, updated);
         Ok(())
     }

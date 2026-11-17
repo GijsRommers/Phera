@@ -4,9 +4,10 @@ use crate::{Vm, frame::Frame};
 use phera_value::Value;
 
 /// Native calls have no bytecode frame, so capture only their cold error path.
+#[derive(Clone)]
 pub(crate) struct NativeTrace {
-    name: String,
-    arguments: String,
+    pub(crate) name: String,
+    pub(crate) arguments: Value,
 }
 
 impl NativeTrace {
@@ -14,11 +15,13 @@ impl NativeTrace {
     pub(crate) fn new(name: &str, arguments: &[Value]) -> Self {
         Self {
             name: name.into(),
-            arguments: arguments
-                .iter()
-                .map(argument)
-                .collect::<Vec<_>>()
-                .join(", "),
+            arguments: {
+                let mut array = phera_value::PhpArray::new();
+                for value in arguments {
+                    let _ = array.push(value.deref().clone());
+                }
+                Value::Array(std::rc::Rc::new(array))
+            },
         }
     }
 }
@@ -82,7 +85,12 @@ impl Vm {
         if let Some(native) = self.failed_native.take() {
             text.push_str(&format!(
                 "#0 {file}({line}): {}({})\n",
-                native.name, native.arguments
+                native.name,
+                match &native.arguments {
+                    Value::Array(values) =>
+                        values.values().map(argument).collect::<Vec<_>>().join(", "),
+                    _ => String::new(),
+                }
             ));
             number += 1;
         }

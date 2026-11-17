@@ -3,7 +3,7 @@
 use std::rc::Rc;
 
 use phera_extension_api::{Context, NativeError, NativeResult};
-use phera_value::{PhpArray, Value, to_php_string};
+use phera_value::{Value, to_php_string};
 
 use crate::{Vm, intrinsics::Intrinsic};
 
@@ -17,6 +17,22 @@ impl Vm {
         let argument = arguments.first().cloned().unwrap_or_default();
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         match intrinsic {
+            Intrinsic::Handler(function) => {
+                diagnostics.vm.handler_intrinsic(function, arguments).await
+            }
+            Intrinsic::Basename => {
+                let path = to_php_string(&argument, &mut diagnostics.buffer)?.to_string_lossy();
+                let name = path.trim_end_matches('/').rsplit('/').next().unwrap_or("");
+                let suffix = arguments
+                    .get(1)
+                    .map(|value| to_php_string(value, &mut diagnostics.buffer))
+                    .transpose()?;
+                let name = suffix
+                    .as_ref()
+                    .and_then(|suffix| name.strip_suffix(suffix.to_string_lossy().as_str()))
+                    .unwrap_or(name);
+                Ok(Value::from(name))
+            }
             Intrinsic::Class(function) => diagnostics.vm.class_intrinsic(function, &arguments),
             Intrinsic::GetObjectVars => {
                 let Value::Object(object) = argument else {
@@ -111,19 +127,19 @@ impl Vm {
                     &to_php_string(&argument, &mut diagnostics.buffer)?.to_string_lossy(),
                 )))
             }
-            Intrinsic::FuncNumArgs => Ok(Value::Int(
-                diagnostics
-                    .vm
-                    .current()
-                    .map_or(0, |frame| frame.arguments.len()) as i64,
-            )),
-            Intrinsic::FuncGetArgs => diagnostics.vm.observed_arguments(),
-            Intrinsic::FuncGetArg => {
-                let position = phera_value::to_int(&argument, &mut diagnostics.buffer)?;
-                diagnostics.vm.current().and_then(|frame|frame.arguments.get(position as usize)).cloned().ok_or_else(||NativeError::value_error("func_get_arg(): Argument #1 ($position) must be less than the number of the arguments passed to the currently executed function"))
+            Intrinsic::FuncNumArgs => diagnostics
+                .vm
+                .argument_intrinsic(crate::argument_errors::ArgumentFunction::Count, arguments),
+            Intrinsic::FuncGetArgs => diagnostics
+                .vm
+                .argument_intrinsic(crate::argument_errors::ArgumentFunction::All, arguments),
+            Intrinsic::FuncGetArg => diagnostics
+                .vm
+                .argument_intrinsic(crate::argument_errors::ArgumentFunction::One, arguments),
+            Intrinsic::ErrorReporting => diagnostics.vm.error_reporting_intrinsic(arguments),
+            Intrinsic::IniSet | Intrinsic::IniGet => {
+                diagnostics.vm.exception_ini_setting(intrinsic, &arguments)
             }
-            Intrinsic::ErrorReporting => Ok(Value::Int(30719)),
-            Intrinsic::IniSet | Intrinsic::IniGet => Ok(Value::from("1")),
         }
     }
 }
@@ -148,21 +164,6 @@ impl Vm {
 }
 
 impl Vm {
-    /// PHP argument introspection copies the saved view into a new ordered array.
-    fn observed_arguments(&self) -> NativeResult {
-        let array = self
-            .current()
-            .map(|frame| frame.arguments.clone())
-            .unwrap_or_default();
-        let mut result = PhpArray::new();
-        for value in array {
-            result.push(value)?;
-        }
-        Ok(Value::Array(Rc::new(result)))
-    }
-}
-
-impl Vm {
     /// Duplicate define calls warn and leave the existing request constant unchanged.
     fn define_argument(
         &mut self,
@@ -171,6 +172,12 @@ impl Vm {
         diagnostics: &mut phera_value::CollectDiagnostics,
     ) -> NativeResult {
         let name = to_php_string(&argument, diagnostics)?.to_string_lossy();
+        if name.contains("::") {
+            self.failed_native = Some(crate::error_traces::NativeTrace::new("define", &arguments));
+            return Err(NativeError::value_error(
+                "define(): Argument #1 ($constant_name) cannot be a class constant",
+            ));
+        }
         if self.constants.contains_key(&name) {
             self.warn(format!("Constant {name} already defined"));
             return Ok(Value::Bool(false));

@@ -41,6 +41,11 @@ impl Compiler<'_> {
             StatementKind::Break(name) | StatementKind::Continue(name) => {
                 self.compile_loop_jump(statement, name, line)?
             }
+            StatementKind::Try {
+                body,
+                catches,
+                finally,
+            } => self.compile_try(body, catches, finally, line)?,
             StatementKind::Return(expression) => self.compile_return(expression, line)?,
             StatementKind::Class(declaration) => self.compile_class(declaration, timing, line)?,
             StatementKind::Function(declaration) => {
@@ -91,3 +96,7 @@ pub(crate) mod declarations;
 pub(crate) mod functions;
 pub(crate) mod loops;
 pub(crate) mod switching;
+
+pub(crate) mod exceptions;
+
+pub(crate) mod class_errors;

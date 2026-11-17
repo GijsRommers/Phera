@@ -2,7 +2,7 @@
 
 use std::{cell::RefCell, rc::Rc};
 
-use phera_extension_api::{NativeError, NativeResult};
+use phera_extension_api::NativeError;
 use phera_value::{ArrayKey, Diagnostics, PhpArray, Value, to_php_string};
 
 use crate::inline_stack::InlineStack;
@@ -10,6 +10,7 @@ use crate::inline_stack::InlineStack;
 /// Parents retain each detached container while an iterative write visits its child.
 enum Parent {
     String {
+        original: phera_value::PhpString,
         bytes: Vec<u8>,
         index: usize,
     },
@@ -24,71 +25,124 @@ enum Parent {
     },
 }
 
-/// Walk and rebuild nested containers iteratively, keeping PHP references shared.
+/// A failed mutation returns its reconstructed root so a catch sees intact storage.
+pub(super) struct UpdateFailure {
+    pub(super) error: NativeError,
+    pub(super) root: Value,
+}
+
+/// Successful writes move owners, while failed writes rebuild the detached path.
 pub(super) fn update(
     mut current: Value,
     keys: &InlineStack<PathKey>,
     value: Value,
     mutation: crate::access_mode::Mutation,
     diagnostics: &mut dyn Diagnostics,
-) -> NativeResult {
+) -> Result<Value, UpdateFailure> {
     let mut parents = InlineStack::new();
+    let result = walk(
+        &mut current,
+        &mut parents,
+        keys,
+        value,
+        mutation,
+        diagnostics,
+    )
+    .and_then(|()| rebuild(&mut current, &mut parents, mutation, diagnostics));
+    match result {
+        Ok(()) => Ok(current),
+        Err(error) => {
+            restore(&mut current, &mut parents);
+            Err(UpdateFailure {
+                error,
+                root: current,
+            })
+        }
+    }
+}
+
+/// Validate each step before detaching its owner; no failure can lose the active child.
+fn walk(
+    current: &mut Value,
+    parents: &mut InlineStack<Parent>,
+    keys: &InlineStack<PathKey>,
+    value: Value,
+    mutation: crate::access_mode::Mutation,
+    diagnostics: &mut dyn Diagnostics,
+) -> Result<(), NativeError> {
     for key in keys.iter() {
-        if let Value::Reference(register) = current {
-            let value = std::mem::take(
-                &mut *register
+        if let Value::Reference(reference) = current {
+            let child = std::mem::take(
+                &mut *reference
                     .try_borrow_mut()
                     .map_err(|_| internal_error!("borrowed reference"))?,
             );
-            parents.push(Parent::Reference(register));
-            current = value;
+            parents.push(Parent::Reference(reference.clone()));
+            *current = child;
         }
-        if let PathKey::Property(key) = key {
-            let Value::Object(object) = current else {
-                return Err(NativeError::error(format!(
-                    "Attempt to assign property \"{}\" on {}",
-                    property_name(key),
-                    current.type_name()
-                )));
-            };
-            current = crate::property_storage::take(&object, key);
-            parents.push(Parent::Object {
-                object,
-                key: key.clone(),
-            });
-            continue;
+        match key {
+            PathKey::Property(key) => {
+                let Value::Object(object) = current else {
+                    return Err(NativeError::error(format!(
+                        "Attempt to assign property \"{}\" on {}",
+                        property_name(key),
+                        current.type_name()
+                    )));
+                };
+                let child = crate::property_storage::take(object, key);
+                parents.push(Parent::Object {
+                    object: object.clone(),
+                    key: key.clone(),
+                });
+                *current = child;
+            }
+            PathKey::Index(key) => {
+                if current.is_null() || matches!(current, Value::Bool(false)) {
+                    *current = Value::Array(Rc::new(PhpArray::new()));
+                }
+                if let Value::String(string) = current {
+                    let Some(parent) = prepare_string(string, key, &value, mutation, diagnostics)?
+                    else {
+                        return Ok(());
+                    };
+                    parents.push(parent);
+                    *current = Value::Null;
+                    continue;
+                }
+                let Value::Array(array) = current else {
+                    let message = if let Value::Object(object) = current {
+                        format!("Cannot use object of type {} as array", object.class.name())
+                    } else {
+                        "Cannot use a scalar value as an array".to_owned()
+                    };
+                    return Err(NativeError::error(message));
+                };
+                let key = match key {
+                    Some(key) => key.clone(),
+                    None => Rc::make_mut(array).push(Value::Null)?,
+                };
+                let child = Rc::make_mut(array)
+                    .get_mut(&key)
+                    .map(std::mem::take)
+                    .unwrap_or_default();
+                let Value::Array(array) = std::mem::take(current) else {
+                    return Err(internal_error!("detached array"));
+                };
+                parents.push(Parent::Array { array, key });
+                *current = child;
+            }
         }
-        let PathKey::Index(key) = key else {
-            return Err(internal_error!("path key"));
-        };
-        if current.is_null() || matches!(current, Value::Bool(false)) {
-            current = Value::Array(Rc::new(PhpArray::new()))
-        }
-        if let Value::String(string) = &current {
-            let Some(parent) = prepare_string(string, key, &value, mutation, diagnostics)? else {
-                return Ok(current);
-            };
-            parents.push(parent);
-            current = Value::Null;
-            continue;
-        }
-        let Value::Array(mut array) = current else {
-            return Err(NativeError::error("Cannot use a scalar value as an array"));
-        };
-        let key = if let Some(key) = key {
-            key.clone()
-        } else {
-            let array = Rc::make_mut(&mut array);
-            array.push(Value::Null)?
-        };
-        current = Rc::make_mut(&mut array)
-            .get_mut(&key)
-            .map(std::mem::take)
-            .unwrap_or_default();
-        parents.push(Parent::Array { array, key });
     }
-    current = assign_leaf(current, value, mutation)?;
-    rebuild(current, parents, mutation, diagnostics)
+    if let Value::Reference(reference) = current
+        && mutation == crate::access_mode::Mutation::Assign
+    {
+        *reference
+            .try_borrow_mut()
+            .map_err(|_| internal_error!("borrowed reference"))? = value;
+    } else {
+        *current = value;
+    }
+    Ok(())
 }
 
 /// String offset writes retain PHP's warning and allocation-limit ordering.
@@ -136,85 +190,108 @@ fn prepare_string(
     if bytes.len() <= index {
         bytes.resize(index + 1, b' ')
     }
-    Ok(Some(Parent::String { bytes, index }))
+    Ok(Some(Parent::String {
+        original: string.clone(),
+        bytes,
+        index,
+    }))
 }
 
-/// Ordinary assignment writes through an existing PHP reference; binding replaces it.
-fn assign_leaf(
-    mut current: Value,
-    value: Value,
-    mutation: crate::access_mode::Mutation,
-) -> NativeResult {
-    let rebind = mutation != crate::access_mode::Mutation::Assign;
-    if let Value::Reference(register) = current {
-        if !rebind {
-            *register
-                .try_borrow_mut()
-                .map_err(|_| internal_error!("borrowed reference"))? = value;
-            current = Value::Reference(register)
-        } else {
-            current = value
-        }
-    } else {
-        current = value
-    }
-    Ok(current)
-}
-
-/// Rebuild parents from the inside out, separating arrays only when shared.
+/// Reattach parents; fallible string conversions retain the original parent for recovery.
 fn rebuild(
-    mut current: Value,
-    mut parents: InlineStack<Parent>,
+    current: &mut Value,
+    parents: &mut InlineStack<Parent>,
     mutation: crate::access_mode::Mutation,
     diagnostics: &mut dyn Diagnostics,
-) -> NativeResult {
-    let unset = mutation == crate::access_mode::Mutation::Unset;
-    let mut remove = unset;
+) -> Result<(), NativeError> {
+    let mut remove = mutation == crate::access_mode::Mutation::Unset;
     while let Some(parent) = parents.pop() {
-        current = match parent {
-            Parent::String { mut bytes, index } => {
-                let string = to_php_string(&current, diagnostics)?;
-                let Some(byte) = string.as_bytes().first() else {
-                    return Err(NativeError::error(
-                        "Cannot assign an empty string to a string offset",
-                    ));
+        let value = match parent {
+            Parent::String {
+                original,
+                mut bytes,
+                index,
+            } => {
+                let converted = to_php_string(current, diagnostics).map_err(NativeError::from);
+                let string = match converted {
+                    Ok(string) if !string.is_empty() => string,
+                    result => {
+                        parents.push(Parent::String {
+                            original,
+                            bytes,
+                            index,
+                        });
+                        return Err(result.err().unwrap_or_else(|| {
+                            NativeError::error("Cannot assign an empty string to a string offset")
+                        }));
+                    }
                 };
                 if string.len() > 1 {
-                    diagnostics
-                        .warning("Only the first byte will be assigned to the string offset".into())
+                    diagnostics.warning(
+                        "Only the first byte will be assigned to the string offset".into(),
+                    );
                 }
-                if let Some(slot) = bytes.get_mut(index) {
+                if let (Some(slot), Some(byte)) = (bytes.get_mut(index), string.as_bytes().first())
+                {
                     *slot = *byte;
                 }
                 Value::from(bytes)
             }
-            Parent::Reference(register) => {
-                *register
+            Parent::Reference(reference) => {
+                let result = reference
                     .try_borrow_mut()
-                    .map_err(|_| internal_error!("borrowed reference"))? = current;
-                Value::Reference(register)
+                    .map(|mut slot| *slot = std::mem::take(current));
+                if result.is_err() {
+                    parents.push(Parent::Reference(reference));
+                    return Err(internal_error!("borrowed reference"));
+                }
+                Value::Reference(reference)
             }
             Parent::Object { object, key } => {
                 if remove {
                     object.remove(&key);
                     remove = false;
                 } else {
-                    crate::property_storage::write(&object, key, current);
+                    crate::property_storage::write(&object, key, std::mem::take(current));
                 }
                 Value::Object(object)
             }
             Parent::Array { mut array, key } => {
                 if remove {
                     Rc::make_mut(&mut array).remove(&key);
-                    remove = false
+                    remove = false;
                 } else {
-                    Rc::make_mut(&mut array).insert(key, current);
+                    Rc::make_mut(&mut array).insert(key, std::mem::take(current));
                 }
                 Value::Array(array)
             }
         };
+        *current = value;
     }
-    Ok(current)
+    Ok(())
+}
+
+/// Recovery invokes no PHP conversions and walks parents without Rust recursion.
+fn restore(current: &mut Value, parents: &mut InlineStack<Parent>) {
+    while let Some(parent) = parents.pop() {
+        *current = match parent {
+            Parent::String { original, .. } => Value::String(original),
+            Parent::Reference(reference) => {
+                if let Ok(mut slot) = reference.try_borrow_mut() {
+                    *slot = std::mem::take(current);
+                }
+                Value::Reference(reference)
+            }
+            Parent::Object { object, key } => {
+                crate::property_storage::write(&object, key, std::mem::take(current));
+                Value::Object(object)
+            }
+            Parent::Array { mut array, key } => {
+                Rc::make_mut(&mut array).insert(key, std::mem::take(current));
+                Value::Array(array)
+            }
+        };
+    }
 }
 
 /// Property steps must never be confused with array offsets on scalar values.

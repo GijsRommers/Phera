@@ -10,20 +10,54 @@ impl Vm {
     /// out of the general call loop. PHP-to-PHP calls still use recycled heap
     /// frames; this allocation occurs only at an interpreter boundary.
     pub(crate) fn interpret(&mut self, stop: usize) -> LocalFuture<'_, NativeResult> {
-        let procedural = self
-            .current()
-            .is_some_and(|frame| frame.function_id.is_none());
-        if procedural {
-            Box::pin(self.interpret_procedural(stop))
-        } else {
-            Box::pin(self.interpret_frames(stop))
-        }
+        Box::pin(async move {
+            loop {
+                let result = if self
+                    .current()
+                    .is_some_and(|frame| frame.function_id.is_none())
+                {
+                    if self.error_handlers.error.is_some() {
+                        self.interpret_procedural::<true>(stop).await
+                    } else {
+                        self.interpret_procedural::<false>(stop).await
+                    }
+                } else {
+                    if self.error_handlers.error.is_some() {
+                        self.interpret_frames::<true>(stop).await
+                    } else {
+                        self.interpret_frames::<false>(stop).await
+                    }
+                };
+                match result {
+                    Ok(value) => return Ok(value),
+                    Err(NativeError::Unwind(payload))
+                        if payload.0.is::<crate::error_handlers::HandlerModeChanged>() =>
+                    {
+                        continue;
+                    }
+                    Err(error) => {
+                        let error = if self.error_handlers.pending.is_empty() {
+                            error
+                        } else {
+                            match self.drain_error_handlers().await {
+                                Ok(()) => error,
+                                Err(handler_error) => handler_error,
+                            }
+                        };
+                        self.handle_exception(error, stop)?;
+                    }
+                }
+            }
+        })
     }
 }
 
 impl Vm {
     /// Retain code and register windows across scalar steps; periodically yield for Tokio fairness.
-    pub(crate) async fn interpret_frames(&mut self, stop: usize) -> NativeResult {
+    pub(crate) async fn interpret_frames<const USER_ERROR_HANDLERS: bool>(
+        &mut self,
+        stop: usize,
+    ) -> NativeResult {
         let mut work = 0usize;
         let mut running_unit = self
             .current()
@@ -132,7 +166,18 @@ impl Vm {
                         self.execute_call(dst, &mut work).await?;
                         crate::dispatch::DispatchResult::Continue
                     }
-                    Instruction::Return { src } => self.return_register(src, stop)?,
+                    Instruction::Return { src } => {
+                        if USER_ERROR_HANDLERS {
+                            let value = self.read_local(src);
+                            if USER_ERROR_HANDLERS && !self.error_handlers.pending.is_empty() {
+                                self.drain_return_handlers().await?;
+                            }
+                            self.return_value(value, stop)
+                                .map(crate::dispatch::DispatchResult::from_return)?
+                        } else {
+                            self.return_register(src, stop)?
+                        }
+                    }
                     Instruction::ReturnNull => self.return_null(stop)?,
                     Instruction::IterNext {
                         iter: iterator,
@@ -150,6 +195,9 @@ impl Vm {
                 if work >= 4096 {
                     work = 0;
                     tokio::task::yield_now().await;
+                }
+                if USER_ERROR_HANDLERS && !self.error_handlers.pending.is_empty() {
+                    self.drain_error_handlers().await?;
                 }
                 let frame = self
                     .current()

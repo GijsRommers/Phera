@@ -18,6 +18,7 @@ macro_rules! internal_error {
 }
 
 mod access_mode;
+mod argument_errors;
 mod array_slots;
 mod arrays;
 mod call_instructions;
@@ -31,23 +32,34 @@ mod class_types;
 mod classes;
 mod constant_table;
 mod constants;
+mod constructed_calls;
 mod context;
 mod control_flow;
 mod diagnostic_reporter;
 mod diagnostics;
 mod dispatch;
 mod dynamic_variables;
+mod error_handler_signatures;
+mod error_handlers;
 mod error_traces;
 mod error_values;
 mod errors;
+mod exception_rendering;
+#[cfg(test)]
+mod exception_tests;
+mod exception_traces;
+mod exception_unwind;
+mod exceptions;
 mod extract;
 mod fast;
+mod finally;
 mod frame;
 mod frame_lifecycle;
 mod function_table;
 mod global_instructions;
 mod global_paths;
 mod globals;
+mod handler_installation;
 mod include_scope;
 mod include_state;
 mod includes;
@@ -60,6 +72,7 @@ mod iteration;
 mod iterator_instructions;
 mod iterators;
 mod locals;
+mod native_diagnostics;
 mod object_iteration;
 mod operators;
 mod ops;
@@ -85,6 +98,7 @@ mod scalar_batches;
 mod scope_intrinsics;
 mod static_variables;
 mod string_offsets;
+mod trigger_errors;
 mod typed_references;
 mod types;
 mod unit_caches;
@@ -125,6 +139,8 @@ pub struct Vm {
     diagnostic_reporter: diagnostic_reporter::DiagnosticReporter,
     include_state: include_state::IncludeState,
     call_stack: call_stack::CallStack,
+    /// Only entered finally subroutines allocate continuation storage.
+    finally_stack: Vec<finally::SavedFinally>,
     /// Number of dispatched instructions, for reproducible benchmark reports.
     pub executed_instructions: u64,
     registry: Arc<Registry>,
@@ -136,6 +152,7 @@ pub struct Vm {
     /// PHP call depth limit, independent of the native Rust stack.
     pub frame_limit: usize,
     status: i32,
+    error_handlers: error_handlers::ErrorHandlers,
     failed_native: Option<error_traces::NativeTrace>,
     /// What extensions remember during this request (response headers, ...).
     state: RequestState,
@@ -159,6 +176,7 @@ impl Vm {
             diagnostic_reporter: diagnostic_reporter::DiagnosticReporter::new(),
             include_state: include_state::IncludeState::new(),
             call_stack: call_stack::CallStack::new(),
+            finally_stack: Vec::new(),
             executed_instructions: 0,
             registry,
             output: vec![],
@@ -167,6 +185,7 @@ impl Vm {
             constants: constant_table::ConstantTable::new(constants),
             frame_limit: DEFAULT_FRAME_LIMIT,
             status: 0,
+            error_handlers: error_handlers::ErrorHandlers::default(),
             failed_native: None,
             state: RequestState::default(),
         }
@@ -241,6 +260,10 @@ impl Vm {
             return self.status;
         }
         if let Err(error) = self.interpret(0).await {
+            let error = self.materialize_error(error);
+            if self.invoke_exception_handler(&error).await {
+                return self.status;
+            }
             self.unwind(error)
         }
         self.status

@@ -108,6 +108,8 @@ pub struct Function {
     pub name: String,
     pub definition_line: usize,
     pub instructions: Vec<Instruction>,
+    /// IR offsets are relocated alongside branches during bytecode emission.
+    pub handlers: Vec<phera_bytecode::Handler>,
     pub constants: Vec<Constant>,
     pub registers: usize,
     pub parameters: Vec<Parameter>,

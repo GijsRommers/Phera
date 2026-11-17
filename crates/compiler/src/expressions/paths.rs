@@ -14,6 +14,21 @@ impl Compiler<'_> {
                 self.lines.line(expression.span.start),
             ));
         }
+        match expression.kind {
+            ast::ExpressionKind::Call { .. } => {
+                return Err(self.error(
+                    "Can't use function return value in write context",
+                    self.lines.line(expression.span.start),
+                ));
+            }
+            ast::ExpressionKind::MethodCall { .. } | ast::ExpressionKind::StaticCall { .. } => {
+                return Err(self.error(
+                    "Can't use method return value in write context",
+                    self.lines.line(expression.span.start),
+                ));
+            }
+            _ => {}
+        }
         self.readable_place(expression)
     }
 

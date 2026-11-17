@@ -16,6 +16,22 @@ use phera_bytecode::Reg;
 /// Compiler IR with owned names and paths before table interning.
 #[derive(Debug, Clone)]
 pub enum Instruction {
+    /// Validate the saved return before finally may intercept its outcome.
+    CheckReturn { source: Reg },
+    /// Return a saved, already validated value or reference after finally.
+    ReturnChecked { source: Reg },
+    /// Enter a shared finally subroutine and resume at the following instruction.
+    FinallyCall {
+        state: Reg,
+        target: Target,
+        reason: phera_bytecode::FinallyEntry,
+    },
+    /// Return from a finally subroutine or resume its pending exception.
+    FinallyReturn { state: Reg },
+    /// Replace a pending continuation when control exits a finally body.
+    FinallyDiscard { state: Reg },
+    /// Raise a Throwable expression; it has no normal successor.
+    Throw { source: Reg },
     /// Literal class/method operands need no intermediate PHP string registers.
     KnownStaticCall {
         class: String,

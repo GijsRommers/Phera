@@ -240,4 +240,4 @@ __NAMESPACE__
 
 Done
 --XFAIL--
-Requires arrow functions, classes, exception handling, generators, goto, interfaces, object construction, throw, traits (outside this milestone).
+Requires out-of-scope arrow functions, generators, goto and traits.

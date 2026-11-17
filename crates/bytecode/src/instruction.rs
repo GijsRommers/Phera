@@ -16,6 +16,32 @@ use crate::{ConstId, FunctionId, IterId, NameId, PathId, Reg, StaticId, SymbolId
 ///   it never leaves `dst` half written.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Instruction {
+    /// Validate and coerce a pending return before calling finally; retain reference cells.
+    CheckReturn {
+        source: Reg,
+    },
+    /// Finish a previously validated return after finally, preserving a reference if present.
+    ReturnChecked {
+        source: Reg,
+    },
+    /// Enter the single compiled finally body, remembering this instruction's successor.
+    FinallyCall {
+        state: Reg,
+        target: Target,
+        reason: FinallyEntry,
+    },
+    /// Resume the saved normal continuation or propagate its saved exception.
+    FinallyReturn {
+        state: Reg,
+    },
+    /// A return/break/continue inside finally replaces its pending continuation.
+    FinallyDiscard {
+        state: Reg,
+    },
+    /// Raise the Throwable operand without changing its creation location or trace.
+    Throw {
+        source: Reg,
+    },
     /// Resolve a lazily initialized class constant with lexical visibility checks.
     FetchClassConstant {
         dst: Reg,
@@ -570,4 +596,17 @@ pub enum ClassBinding {
     Forward,
     /// Explicit or evaluated class names select the called class.
     Explicit,
+}
+
+/// Why a nonexceptional path enters finally; exception entry is supplied by unwinding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FinallyEntry {
+    /// Normal completion of try or catch.
+    Fallthrough,
+    /// A return value waits in a compiler temporary.
+    Return,
+    /// A loop exit waits at the continuation.
+    Break,
+    /// A loop continuation waits at the continuation.
+    Continue,
 }

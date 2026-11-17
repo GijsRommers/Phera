@@ -25,6 +25,7 @@ impl ClassTable {
                 interfaces: Vec::new(),
                 kind: ClassKind::Class,
                 is_abstract: false,
+                is_throwable: false,
                 is_final: false,
                 is_readonly: false,
                 allows_dynamic_properties: true,
@@ -93,6 +94,11 @@ impl ClassTable {
                 .iter()
                 .filter_map(|name| table.get(name))
                 .collect();
+            let is_throwable = entry.name == "Throwable"
+                || parent.as_ref().is_some_and(|parent| parent.is_throwable)
+                || interfaces
+                    .iter()
+                    .any(|interface: &Rc<Class>| interface.is_throwable);
             table.entries.insert(
                 entry.name.to_ascii_lowercase(),
                 Rc::new_cyclic(|identity| Class {
@@ -110,6 +116,7 @@ impl ClassTable {
                         ClassKind::Class
                     },
                     is_abstract: entry.kind == NativeKind::AbstractClass,
+                    is_throwable,
                     is_final: entry.kind == NativeKind::FinalClass,
                     is_readonly: false,
                     allows_dynamic_properties: false,

@@ -14,6 +14,13 @@ impl Compiler<'_> {
         line: usize,
     ) -> Result<Reg, CompileError> {
         let place = self.readable_place(expression)?;
+        if place
+            .path
+            .iter()
+            .any(|step| matches!(step, crate::ir::PathStep::Append))
+        {
+            return Err(self.error("Cannot use [] for reading", line));
+        }
         let dst = self.allocate_register()?;
         self.emit(
             Instruction::Read {
@@ -60,7 +67,12 @@ impl Compiler<'_> {
         line: usize,
     ) -> Result<Reg, CompileError> {
         let place = self.place(target)?;
-        if matches!(value.kind, ast::ExpressionKind::Call { .. }) {
+        if matches!(
+            value.kind,
+            ast::ExpressionKind::Call { .. }
+                | ast::ExpressionKind::MethodCall { .. }
+                | ast::ExpressionKind::StaticCall { .. }
+        ) {
             let src = self.compile_expression(value)?;
             self.emit(Instruction::Rebind { place, source: src }, line);
             return Ok(src);

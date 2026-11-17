@@ -21,6 +21,11 @@ impl Compiler<'_> {
             return self.literal(condition, line);
         }
         match &expression.kind {
+            ExpressionKind::Throw(operand) => {
+                let source = self.compile_expression(operand)?;
+                self.emit(crate::ir::Instruction::Throw { source }, line);
+                self.allocate_register()
+            }
             ExpressionKind::ClassConstant { .. }
             | ExpressionKind::New { .. }
             | ExpressionKind::MethodCall { .. }

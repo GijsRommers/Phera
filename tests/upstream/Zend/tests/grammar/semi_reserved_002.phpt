@@ -241,5 +241,3 @@ Obj::__DIR__
 Obj::__NAMESPACE__
 
 Done
---XFAIL--
-Requires arrow functions, classes, closures, exception handling, generators, goto, interfaces, object construction, throw, traits (outside this milestone).

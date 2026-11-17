@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use phera_bytecode::{CompiledUnit, Reg};
-use phera_extension_api::{Context, NativeError, NativeFn, NativeResult, prepare_arguments};
+use phera_extension_api::{Context, NativeError, NativeFn, NativeResult};
 use phera_value::Value;
 
 use crate::{Vm, intrinsics::Intrinsic, types};
@@ -72,7 +72,15 @@ impl Vm {
             )));
         }
         let mut frame = self.make_frame(unit, Some(function_id), destination);
-        if frame.function().observes_arguments {
+        frame.supplied_arguments = arguments.len();
+        if frame.function().observes_arguments
+            || (arguments.len() > frame.function().parameters.len()
+                && !frame
+                    .function()
+                    .parameters
+                    .last()
+                    .is_some_and(|parameter| parameter.variadic))
+        {
             frame.arguments = arguments
                 .iter()
                 .cloned()
@@ -190,9 +198,41 @@ impl Vm {
     pub(crate) async fn native_entry(
         &mut self,
         entry: phera_extension_api::FunctionEntry,
+        arguments: Vec<Value>,
+    ) -> NativeResult {
+        if self.error_handlers.error.is_some() && !self.error_handlers.active {
+            self.native_entry_traced(entry, arguments).await
+        } else {
+            self.native_entry_body(entry, arguments).await
+        }
+    }
+
+    /// Handler-only state uses an erased future so ordinary native calls retain their small frame.
+    fn native_entry_traced(
+        &mut self,
+        entry: phera_extension_api::FunctionEntry,
+        arguments: Vec<Value>,
+    ) -> phera_extension_api::LocalFuture<'_, NativeResult> {
+        Box::pin(async move {
+            let previous =
+                self.error_handlers
+                    .native_site
+                    .replace(crate::error_traces::NativeTrace::new(
+                        entry.name, &arguments,
+                    ));
+            let result = self.native_entry_body(entry, arguments).await;
+            self.error_handlers.native_site = previous;
+            result
+        })
+    }
+
+    /// Keep warning trace capture outside native execution when no handler is installed.
+    async fn native_entry_body(
+        &mut self,
+        entry: phera_extension_api::FunctionEntry,
         mut arguments: Vec<Value>,
     ) -> NativeResult {
-        if let Err(error) = prepare_arguments(&entry, &mut arguments, self) {
+        if let Err(error) = self.prepare_call_with_trace(entry.name, entry.params, &mut arguments) {
             if !matches!(
                 entry.name,
                 "strlen" | "count" | "sizeof" | "array_key_exists"

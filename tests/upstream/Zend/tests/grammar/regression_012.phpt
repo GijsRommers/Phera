@@ -11,4 +11,4 @@ class A {
 --EXPECTF--
 Parse error: syntax error, unexpected token "foreach", expecting "]" in %s on line %d
 --XFAIL--
-Requires classes (outside this milestone).
+Parser diagnostic wording differs for a reserved keyword in a constant array.

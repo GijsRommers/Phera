@@ -38,6 +38,8 @@ pub(crate) struct Frame {
     pub(crate) base: usize,
     /// Includes dynamic locals introduced after frame construction.
     pub(crate) count: usize,
+    /// PHP traces omit defaulted parameters beyond the supplied call arity.
+    pub(crate) supplied_arguments: usize,
     /// Saved argument view for PHP func_get_args and related intrinsics.
     pub(crate) arguments: Vec<Value>,
     /// Optional names for variables accessed through dynamic scope.
@@ -75,6 +77,7 @@ impl Frame {
             base,
             count: count as usize,
             arguments: vec![],
+            supplied_arguments: 0,
             dynamic,
 
             iterators,

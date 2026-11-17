@@ -30,4 +30,4 @@ TraitB::insteadof
 
 Done
 --XFAIL--
-Requires classes, traits (outside this milestone).
+Requires out-of-scope traits.

@@ -64,12 +64,13 @@ impl CallStack {
         self.frames.clear();
     }
 
-    pub(crate) fn iter(&self) -> impl DoubleEndedIterator<Item = &Frame> {
+    pub(crate) fn iter(&self) -> impl DoubleEndedIterator<Item = &Frame> + ExactSizeIterator {
         self.frames.iter()
     }
 
     /// Recycle allocations without retaining a second active PHP frame.
     pub(crate) fn recycle(&mut self, mut frame: Frame) {
+        frame.arguments.clear();
         if let Some(mut context) = frame.method.take() {
             context.receiver = None;
             self.method_context = Some(context);
@@ -149,5 +150,21 @@ impl CallStack {
         } else {
             Box::new(value)
         }
+    }
+}
+
+#[cfg(test)]
+impl CallStack {
+    /// Stress tests check that recycled frames own buffers, but no live PHP values.
+    pub(crate) fn retained_exception_values(&self) -> usize {
+        self.recycled_frames
+            .iter()
+            .map(|frame| frame.arguments.len() + frame.calls.len())
+            .sum()
+    }
+
+    /// A million sequential calls need no more recycled frames than a single call.
+    pub(crate) fn recycled_count(&self) -> usize {
+        self.recycled_frames.len()
     }
 }

@@ -72,5 +72,3 @@ test3
 "
 44
 ok
---XFAIL--
-Native set_error_handler is not delivered yet.

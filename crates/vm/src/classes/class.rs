@@ -24,6 +24,8 @@ pub(crate) struct Class {
     pub(crate) interfaces: Vec<Rc<Class>>,
     pub(crate) kind: ClassKind,
     pub(crate) is_abstract: bool,
+    /// Immutable Throwable membership avoids ancestry allocation on every ordinary new.
+    pub(crate) is_throwable: bool,
     pub(crate) is_final: bool,
     pub(crate) is_readonly: bool,
     pub(crate) allows_dynamic_properties: bool,

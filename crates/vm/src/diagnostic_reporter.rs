@@ -50,6 +50,11 @@ impl DiagnosticReporter {
     }
 
     /// Fatal errors remain visible even when raised inside @.
+    /// Cold unwind paths restore suppression from lexical instruction ranges.
+    pub(crate) fn restore_silence(&mut self, depth: usize) {
+        self.suppression = depth;
+    }
+
     pub(crate) fn end_all_silence(&mut self) {
         self.suppression = 0;
     }

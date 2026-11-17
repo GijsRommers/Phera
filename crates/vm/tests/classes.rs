@@ -17,8 +17,6 @@ async fn a_hundred_thousand_method_calls_use_heap_frames() {
 #[test]
 fn later_milestones_remain_compile_errors() {
     for source in [
-        "<?php try {} catch (Exception $error) {}",
-        "<?php throw new Exception;",
         "<?php $callback = function () {};",
         "<?php $callback = fn () => 1;",
         "<?php trait Example {}",

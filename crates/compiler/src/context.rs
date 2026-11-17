@@ -30,6 +30,8 @@ pub(super) struct Compiler<'ast> {
     pub(super) peak: usize,
     pub(super) locals: HashMap<String, Reg>,
     pub(super) loops: Vec<Loop>,
+    /// Lexical cleanup scopes decide which finally blocks a structured exit crosses.
+    pub(super) finalies: Vec<crate::statements::exceptions::FinallyScope>,
     pub(super) namespace: String,
     pub(super) imports: HashMap<(NameKind, String), String>,
 }
@@ -56,6 +58,7 @@ impl<'ast> Compiler<'ast> {
             peak: 0,
             locals: HashMap::new(),
             loops: vec![],
+            finalies: vec![],
             namespace: namespace.into(),
             imports: HashMap::new(),
         }
@@ -126,6 +129,15 @@ impl<'ast> Compiler<'ast> {
                     .copied()
                     .unwrap_or(register)
             });
+        }
+        for handler in &mut self.function.handlers {
+            handler.exception = mapping
+                .get(handler.exception.index())
+                .copied()
+                .unwrap_or(handler.exception);
+            for register in &mut handler.cleanup {
+                *register = mapping.get(register.index()).copied().unwrap_or(*register);
+            }
         }
         self.function.registers = self.peak;
         std::mem::take(&mut self.function)

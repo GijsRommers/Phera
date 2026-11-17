@@ -47,10 +47,20 @@ impl Vm {
             .ok_or_else(|| internal_error!("function"))?
             .name
             .to_ascii_lowercase();
-        if self.function_table.contains(&name) {
-            return Err(NativeError::error(format!(
-                "Cannot redeclare function {name}()"
-            )));
+        if let Some(previous) = self.function_table.get(&name) {
+            let previous_line = previous.unit.functions[previous.index].definition_line;
+            let location = self.location();
+            let message = format!(
+                "Cannot redeclare function {name}() (previously declared in {}:{previous_line})",
+                previous.unit.file
+            );
+            return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
+                crate::error_traces::DeclarationFailure {
+                    message,
+                    file: location.file,
+                    line: location.line,
+                },
+            ))));
         }
         self.function_table.insert(
             name,

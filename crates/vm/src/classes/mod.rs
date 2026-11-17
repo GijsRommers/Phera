@@ -2,6 +2,7 @@
 
 pub(crate) mod class;
 mod class_table;
+mod declaration_errors;
 mod inheritance_checks;
 pub(crate) mod instantiation;
 mod linking;

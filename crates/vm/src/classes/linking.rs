@@ -61,10 +61,23 @@ impl Vm {
 
     /// Copy inherited tables and validate structural dependencies before publishing a class.
     fn link_class(&mut self, unit: Arc<CompiledUnit>, index: ClassId) -> Result<(), NativeError> {
+        self.link_class_body(unit.clone(), index)
+            .map_err(|error| super::declaration_errors::link_failure(&unit, index, error))
+    }
+
+    /// Structural declaration failures are fatal; missing dependencies remain catchable Errors.
+    fn link_class_body(
+        &mut self,
+        unit: Arc<CompiledUnit>,
+        index: ClassId,
+    ) -> Result<(), NativeError> {
         let declaration = &unit.classes[index.index()];
         let name = &declaration.name;
-        if self.classes.get(name).is_some() {
-            return Err(NativeError::error(format!("Cannot redeclare class {name}")));
+        if let Some(existing) = self.classes.get(name) {
+            return Err(NativeError::error(format!(
+                "Cannot redeclare class {}",
+                existing.name
+            )));
         }
         let parent = declaration
             .parent
@@ -105,6 +118,18 @@ impl Vm {
                 Ok(interface)
             })
             .collect::<Result<Vec<_>, NativeError>>()?;
+        if declaration.kind != ClassKind::Interface
+            && interfaces
+                .iter()
+                .any(|interface| interface.is_a("Throwable"))
+            && parent
+                .as_ref()
+                .is_none_or(|parent| !parent.is_a("Throwable"))
+        {
+            return Err(NativeError::error(format!(
+                "Class {name} cannot implement interface Throwable, extend Exception or Error instead"
+            )));
+        }
         let mut methods = parent
             .as_ref()
             .map(|class| class.methods.clone())
@@ -155,9 +180,12 @@ impl Vm {
             .as_ref()
             .map(|class| class.constants.clone())
             .unwrap_or_default();
-        for interface in &interfaces {
-            constants.extend(interface.constants.clone());
-        }
+        super::declaration_errors::merge_interface_constants(
+            declaration,
+            &unit,
+            &interfaces,
+            &mut constants,
+        )?;
         for constant in &declaration.constants {
             let constant_name = unit.names[constant.name.index()].clone();
             if constants
@@ -243,6 +271,17 @@ impl Vm {
                 }
                 linked.initializer = None;
             }
+            let inherited = if property.is_static {
+                &static_properties
+            } else {
+                &defaults
+            };
+            super::declaration_errors::check_property_visibility(
+                name,
+                property,
+                property_name,
+                inherited,
+            )?;
             let target = if property.is_static {
                 &mut static_properties
             } else {
@@ -258,6 +297,8 @@ impl Vm {
             || parent
                 .as_ref()
                 .is_some_and(|parent| parent.allows_dynamic_properties);
+        let is_throwable = parent.as_ref().is_some_and(|parent| parent.is_throwable)
+            || interfaces.iter().any(|interface| interface.is_throwable);
         self.classes.order.push(name.clone());
         self.classes.entries.insert(
             name.to_ascii_lowercase(),
@@ -272,6 +313,7 @@ impl Vm {
                 interfaces,
                 kind: declaration.kind,
                 is_abstract: declaration.is_abstract,
+                is_throwable,
                 is_final: declaration.is_final,
                 is_readonly: declaration.is_readonly,
                 allows_dynamic_properties,

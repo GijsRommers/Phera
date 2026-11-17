@@ -119,6 +119,9 @@ impl Vm {
                 }
             }
         }
+        if class.is_throwable {
+            self.initialize_throwable(&object, crate::exceptions::TraceOrigin::Construction);
+        }
         if class.constructor.is_none() {
             return self.prepare_constructed_object(&class, object);
         }
@@ -143,6 +146,12 @@ impl Vm {
             .classes
             .get(original.class.name())
             .ok_or_else(|| internal_error!("clone class"))?;
+        if class.is_throwable {
+            return Err(NativeError::error(format!(
+                "Trying to clone an uncloneable object of class {}",
+                class.name
+            )));
+        }
         let cloned = self.classes.allocate(class);
         cloned.update(|properties| *properties = original.to_array());
         self.set(destination, Value::Object(cloned));

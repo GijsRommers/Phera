@@ -15,6 +15,13 @@ impl Compiler<'_> {
     ) -> Result<(), CompileError> {
         for expression in expressions {
             let parameter = self.place(expression)?;
+            if parameter
+                .path
+                .iter()
+                .any(|step| matches!(step, crate::ir::PathStep::Append))
+            {
+                return Err(self.error("Cannot use [] for unsetting", line));
+            }
             self.emit(Instruction::Unset(parameter), line);
         }
 

@@ -96,7 +96,15 @@ impl Vm {
             } else if let Some(intrinsic) = crate::intrinsics::Intrinsic::resolve(&name) {
                 ResolvedSignature {
                     target: CallTarget::Intrinsic(intrinsic),
-                    parameters: Vec::new(),
+                    parameters: intrinsic
+                        .parameter_names()
+                        .iter()
+                        .map(|name| ParameterSpec {
+                            name: (*name).to_owned(),
+                            by_reference: false,
+                            variadic: false,
+                        })
+                        .collect(),
                 }
             } else {
                 return Err(NativeError::error(format!(
@@ -181,8 +189,12 @@ impl Vm {
                 self.reference(&place)?
             } else {
                 return Err(NativeError::error(format!(
-                    "{name}(): Argument #{} cannot be passed by reference",
-                    index + 1
+                    "{name}(): Argument #{} (${}) could not be passed by reference",
+                    index + 1,
+                    callee
+                        .parameters
+                        .get(index)
+                        .map_or("", |parameter| parameter.name.as_str())
                 )));
             }
         } else if let Some(place) = place {
@@ -261,6 +273,7 @@ impl Vm {
                 return Ok(());
             }
             CallTarget::Native(entry) => {
+                let had_error_handler = self.error_handlers.error.is_some();
                 let result = self
                     .native_entry(
                         *entry,
@@ -271,8 +284,12 @@ impl Vm {
                     )
                     .await?;
                 self.set(destination, result);
+                if !had_error_handler && self.error_handlers.error.is_some() {
+                    return Err(crate::error_handlers::HandlerModeChanged::signal());
+                }
             }
             CallTarget::Intrinsic(intrinsic) => {
+                let had_error_handler = self.error_handlers.error.is_some();
                 let result = self
                     .intrinsic(
                         *intrinsic,
@@ -283,6 +300,16 @@ impl Vm {
                     )
                     .await?;
                 self.set(destination, result);
+                if matches!(
+                    intrinsic,
+                    crate::intrinsics::Intrinsic::Handler(
+                        crate::error_handlers::HandlerFunction::SetError
+                            | crate::error_handlers::HandlerFunction::RestoreError
+                    )
+                ) || (!had_error_handler && self.error_handlers.error.is_some())
+                {
+                    return Err(crate::error_handlers::HandlerModeChanged::signal());
+                }
             }
         }
         self.call_stack.recycle_bound_callee(call.callee);

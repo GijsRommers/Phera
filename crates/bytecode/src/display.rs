@@ -53,6 +53,9 @@ impl CompiledUnit {
         for (index, path) in function.paths.iter().enumerate() {
             writeln!(f, "  path#{index} = {:?} {:?}", path.base, path.steps)?;
         }
+        for (index, handler) in function.handlers.iter().enumerate() {
+            writeln!(f, "  handler#{index} = {handler:?}")?;
+        }
         for (index, instruction) in function.instructions.iter().enumerate() {
             let line = function.lines.get(index).copied().unwrap_or(0);
             writeln!(f, "  {index:04}  line {line:<4} {instruction:?}")?;

@@ -6,6 +6,7 @@ use phera_value::CollectDiagnostics;
 use crate::Vm;
 
 /// An owned source location survives mutable diagnostic and coercion work.
+#[derive(Clone)]
 pub(crate) struct SourceLocation {
     pub(crate) file: String,
     pub(crate) line: usize,
@@ -47,7 +48,16 @@ impl Vm {
     }
 
     pub(crate) fn diagnostic(&mut self, kind: &str, message: String) {
-        if self.diagnostic_reporter.is_visible() {
+        if self.queue_diagnostic(kind, &message) {
+            return;
+        }
+        let level = match kind {
+            "Warning" => 2,
+            "Notice" => 8,
+            "Deprecated" => 8192,
+            _ => 0,
+        };
+        if self.diagnostic_reporter.is_visible() && self.error_handlers.reporting & level != 0 {
             let SourceLocation { file, line } = self.location();
             if let Some(bytes) = self.diagnostic_reporter.report(kind, message, &file, line) {
                 self.out(&bytes);
@@ -58,6 +68,7 @@ impl Vm {
     /// Fatal traces describe heap frames; unwinding never relies on a Rust panic.
     pub(crate) fn unwind(&mut self, error: NativeError) {
         self.diagnostic_reporter.end_all_silence();
+        let error = self.materialize_error(error);
         match error {
             NativeError::Throw { class, message, .. } => {
                 let SourceLocation { file, line } = self.location();
@@ -66,7 +77,11 @@ impl Vm {
                 self.status = 255;
             }
             NativeError::Unwind(state) => {
-                if let Ok(failure) = state
+                if state.0.is::<crate::exceptions::Thrown>() {
+                    if let Ok(thrown) = state.0.downcast::<crate::exceptions::Thrown>() {
+                        self.report_throwable(&thrown.object);
+                    }
+                } else if let Ok(failure) = state
                     .0
                     .downcast::<crate::error_traces::DeclarationFailure>()
                 {
@@ -82,6 +97,7 @@ impl Vm {
             }
         }
         self.call_stack.clear();
+        self.finally_stack.clear();
     }
 }
 
@@ -122,7 +138,9 @@ mod tests {
         let mut vm = Vm::new(Arc::new(Registry::new()));
         let value = Value::Array(Rc::new(PhpArray::new()));
         to_php_string(&value, vm.diagnostic_reporter.operator()).unwrap();
-        vm.intrinsic(Intrinsic::FuncNumArgs, vec![]).await.unwrap();
+        vm.intrinsic(Intrinsic::FunctionExists, vec![Value::from("unknown")])
+            .await
+            .unwrap();
         assert!(String::from_utf8_lossy(&vm.output).contains("Array to string conversion"));
         assert!(!vm.diagnostic_reporter.has_pending());
     }

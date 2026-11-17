@@ -44,7 +44,7 @@ pub use ids::{
     ClassId, ConstId, FunctionId, IterId, NameId, PathId, Reg, StaticId, SymbolId, Target, TypeId,
 };
 pub use instruction::{
-    BinaryOp, CastKind, ClassBinding, FetchMode, IncDec, IncludeKind, Instruction, RuntimeError,
-    UnaryOp,
+    BinaryOp, CastKind, ClassBinding, FetchMode, FinallyEntry, IncDec, IncludeKind, Instruction,
+    RuntimeError, UnaryOp,
 };
 pub use unit::{CompiledUnit, Constant, ConstantKey, Symbol, Type, TypeMask};

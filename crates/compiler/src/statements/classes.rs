@@ -15,6 +15,9 @@ impl Compiler<'_> {
         timing: DeclarationTiming,
         line: usize,
     ) -> Result<(), CompileError> {
+        if self.function.name.contains("::") {
+            return Err(self.error("Class declarations may not be nested", line));
+        }
         if !matches!(
             declaration.kind,
             ast::ClassKind::Class | ast::ClassKind::Interface
@@ -29,6 +32,7 @@ impl Compiler<'_> {
         } else {
             format!("{}\\{}", self.namespace, identifier.name)
         };
+        self.validate_class_declaration(declaration, &name)?;
         if declaration.attributes.iter().any(|attribute| {
             attribute.name.text.trim_start_matches('\\') != "AllowDynamicProperties"
         }) {
@@ -128,7 +132,7 @@ impl Compiler<'_> {
             {
                 return Err(self.error(
                     format!("Cannot redeclare {name}::{}()", method.name.name),
-                    line,
+                    self.lines.line(method.name.span.start),
                 ));
             }
             for parameter in &method.parameters {

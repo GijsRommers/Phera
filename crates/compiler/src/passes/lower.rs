@@ -166,7 +166,8 @@ impl Tables {
         // Prologue targets are already final. Source jumps still name IR positions.
         for instruction in &mut function.instructions {
             let target = match instruction {
-                Instruction::ReceiveDefault { passed: target, .. }
+                Instruction::FinallyCall { target, .. }
+                | Instruction::ReceiveDefault { passed: target, .. }
                 | Instruction::BindStatic {
                     initialized: target,
                     ..
@@ -183,6 +184,21 @@ impl Tables {
                 target.0 = offsets.get(target.index()).copied().unwrap_or(target.0);
             }
         }
+        function.handlers = source
+            .handlers
+            .into_iter()
+            .map(|mut handler| {
+                handler.start.0 = offsets[handler.start.index()];
+                handler.end.0 = offsets[handler.end.index()];
+                handler.catch = handler
+                    .catch
+                    .map(|target| phera_bytecode::Target(offsets[target.index()]));
+                handler.finally = handler
+                    .finally
+                    .map(|target| phera_bytecode::Target(offsets[target.index()]));
+                handler
+            })
+            .collect();
         function.observes_arguments =
             function
                 .instructions

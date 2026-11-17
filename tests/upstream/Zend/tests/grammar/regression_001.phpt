@@ -30,5 +30,3 @@ Foo::function
 Foo::function
 
 Done
---XFAIL--
-Requires classes, closures (outside this milestone).

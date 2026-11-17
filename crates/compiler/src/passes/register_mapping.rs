@@ -30,6 +30,13 @@ impl Instruction {
             }
         }
         match self {
+            Instruction::CheckReturn { source } | Instruction::ReturnChecked { source } => {
+                *source = map(*source)
+            }
+            Instruction::FinallyCall { state, .. }
+            | Instruction::FinallyReturn { state }
+            | Instruction::FinallyDiscard { state } => *state = map(*state),
+            Instruction::Throw { source } => *source = map(*source),
             Instruction::ClassConstant {
                 destination, class, ..
             } => {
