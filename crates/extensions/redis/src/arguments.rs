@@ -1,120 +1,144 @@
-//! Some phpredis C parsers intentionally differ from their reflected union signatures.
-//! For example, `Redis::bitop()` returns false and deprecated aliases warn before parsing.
-use phera_extension_api::{Context, MethodPreparation, NativeError, Param, ParamType, Value};
+//! Methods whose arguments phpredis's C code checks by hand, so that PHP's
+//! answer differs from what their declared signature would give:
+//!
+//! ```php
+//! $redis->bitop('AND', 'destination');   // false, not an ArgumentCountError
+//! $redis->del(new stdClass());           // Error: Object of class stdClass could not be converted to string
+//! $redis->delete('key');                 // Deprecated: Method Redis::delete() is deprecated
+//! ```
+//!
+//! Each function is the preparation hook (see `MethodEntry::with_preparation`)
+//! of the methods that the registration attaches it to; every other method's
+//! arguments are checked against its declared signature.
 
-pub fn prepare(
+use phera_extension_api::value::to_php_string;
+use phera_extension_api::{Context, MethodPreparation, NativeError, Param, Value, prepare_call};
+
+type Preparation = Result<MethodPreparation, NativeError>;
+
+/// The deprecated aliases (`delete`, `open`, `sortAsc` ...) warn first.
+pub fn deprecated(name: &str, context: &mut dyn Context) {
+    context.deprecated(format!("Method {name}() is deprecated"));
+}
+
+/// Checks the arguments against `parsed`, the signature phpredis's parser
+/// really uses, instead of the declared one.
+pub fn parse_as(
     name: &str,
-    c: &mut dyn Context,
-    reflected: &[Param],
-    a: &mut [Value],
-) -> Result<MethodPreparation, NativeError> {
-    let method = name.strip_prefix("Redis::").unwrap_or(name).to_lowercase();
-    if matches!(
-        method.as_str(),
-        "delete"
-            | "open"
-            | "popen"
-            | "slaveof"
-            | "sortasc"
-            | "sortdesc"
-            | "sortascalpha"
-            | "sortdescalpha"
-    ) {
-        c.deprecated(format!("Method {name}() is deprecated"));
+    parsed: &[Param],
+    context: &mut dyn Context,
+    arguments: &mut [Value],
+) -> Preparation {
+    prepare_call(name, parsed, arguments, context)?;
+    Ok(MethodPreparation::Prepared)
+}
+
+/// A list of keys (`del`, `exists`, `blPop` ...): any value is a key, and an
+/// object in first place must be convertible to a string.
+pub fn key_list(
+    name: &str,
+    parsed: &[Param],
+    context: &mut dyn Context,
+    arguments: &mut [Value],
+) -> Preparation {
+    prepare_call(name, parsed, arguments, context)?;
+    if let Some(object @ Value::Object(_)) = arguments.first() {
+        to_php_string(object, context.diagnostics())?;
     }
-    let mut params = reflected.to_vec();
-    match method.as_str() {
-        "bitop" => {
-            if a.len() < 3 || a.iter().any(|v| matches!(v, Value::Object(_))) {
-                return Ok(MethodPreparation::Return(Value::Bool(false)));
-            }
-        }
-        "geoadd" | "spop" | "zpopmin" | "zpopmax" if a.is_empty() => {
-            return Err(NativeError::argument_count_error(format!(
-                "Wrong parameter count for {name}()"
-            )));
-        }
-        "hset" | "lpush" | "rpush" | "zadd" => {
-            let required = if method == "zadd" { 3 } else { 2 };
-            if a.len() < required {
-                return Err(NativeError::argument_count_error(format!(
-                    "{name}() expects at least {required} arguments, {} given",
-                    a.len()
-                )));
-            }
-        }
-        "zrangebylex" | "zrevrangebylex" if !matches!(a.len(), 3 | 5) => {
-            c.warning(format!("{name}(): Must pass either 3 or 5 arguments"));
-            return Ok(MethodPreparation::Return(Value::Bool(false)));
-        }
-        "rawcommand" if a.first().is_some_and(|v| !matches!(v, Value::String(_))) => {
-            c.warning(format!(
-                "{name}(): When sending a 'raw' command, the first argument must be a string!"
-            ));
-            return Ok(MethodPreparation::Return(Value::Bool(false)));
-        }
-        "script" if a.first().is_some_and(|v| !matches!(v, Value::String(_))) => {
-            return Ok(MethodPreparation::Return(Value::Bool(false)));
-        }
-        "pfcount"
-            if a.first()
-                .is_some_and(|v| !matches!(v, Value::String(_) | Value::Array(_))) =>
-        {
-            c.warning(format!(
-                "{name}(): Argument must be either an array or a string"
-            ));
-            return Ok(MethodPreparation::Return(Value::Bool(false)));
-        }
-        "xclaim" => params[5].optional = true,
-        "smismember" => {
-            for param in params.iter_mut().skip(1) {
-                param.ty = ParamType::Mixed;
-            }
-        }
-        "sdiffstore" | "sunionstore" => params[1].optional = true,
-        "sort" | "sort_ro" => params[1].nullable = false,
-        "command" | "slaveof" | "replicaof"
-            if a.first().is_some_and(|v| matches!(v, Value::Object(_))) =>
-        {
-            // These implementations use a non-nullable parser despite nullable stubs.
-            params[0].nullable = false;
-        }
-        _ => (),
-    }
-    if matches!(
-        method.as_str(),
-        "blpop"
-            | "brpop"
-            | "bzpopmin"
-            | "bzpopmax"
-            | "del"
-            | "delete"
-            | "exists"
-            | "sdiff"
-            | "sdiffstore"
-            | "sinter"
-            | "sinterstore"
-            | "sunion"
-            | "sunionstore"
-            | "touch"
-            | "unlink"
-            | "watch"
-            | "geoadd"
-    ) {
-        for param in &mut params {
-            param.ty = ParamType::Mixed;
-        }
-        phera_extension_api::prepare_call(name, &params, a, c)?;
-        if a.first().is_some_and(|v| matches!(v, Value::Object(_))) {
-            let object = &a[0];
-            phera_extension_api::value::to_php_string(object, c.diagnostics())?;
-        }
-        return Ok(MethodPreparation::Prepared);
-    }
-    if params != reflected {
-        phera_extension_api::prepare_call(name, &params, a, c)?;
-        Ok(MethodPreparation::Prepared)
+    Ok(MethodPreparation::Prepared)
+}
+
+/// `command()`, `slaveof()` and `replicaof()` accept null, but not an object
+/// where null may go.
+pub fn object_not_null(
+    name: &str,
+    parsed: &[Param],
+    context: &mut dyn Context,
+    arguments: &mut [Value],
+) -> Preparation {
+    if matches!(arguments.first(), Some(Value::Object(_))) {
+        parse_as(name, parsed, context, arguments)
     } else {
         Ok(MethodPreparation::Default)
     }
+}
+
+/// `geoAdd()`, `sPop()`, `zPopMin()` and `zPopMax()` with no argument at all.
+pub fn not_empty(name: &str, arguments: &[Value]) -> Result<(), NativeError> {
+    if arguments.is_empty() {
+        return Err(NativeError::argument_count_error(format!(
+            "Wrong parameter count for {name}()"
+        )));
+    }
+    Ok(())
+}
+
+/// `hSet()`, `lPush()`, `rPush()` and `zAdd()` take their values as variadic
+/// arguments but need at least `required` arguments in all.
+pub fn at_least(name: &str, required: usize, arguments: &[Value]) -> Preparation {
+    if arguments.len() < required {
+        return Err(NativeError::argument_count_error(format!(
+            "{name}() expects at least {required} arguments, {} given",
+            arguments.len()
+        )));
+    }
+    Ok(MethodPreparation::Default)
+}
+
+/// `bitop()` returns false for too few operands or an object among them.
+pub fn bitop(arguments: &[Value]) -> Preparation {
+    if arguments.len() < 3
+        || arguments
+            .iter()
+            .any(|value| matches!(value, Value::Object(_)))
+    {
+        return Ok(MethodPreparation::Return(Value::Bool(false)));
+    }
+    Ok(MethodPreparation::Default)
+}
+
+/// `zRangeByLex()` and `zRevRangeByLex()`: a range, or a range with LIMIT.
+pub fn three_or_five(name: &str, context: &mut dyn Context, arguments: &[Value]) -> Preparation {
+    if !matches!(arguments.len(), 3 | 5) {
+        context.warning(format!("{name}(): Must pass either 3 or 5 arguments"));
+        return Ok(MethodPreparation::Return(Value::Bool(false)));
+    }
+    Ok(MethodPreparation::Default)
+}
+
+pub fn raw_command(name: &str, context: &mut dyn Context, arguments: &[Value]) -> Preparation {
+    if arguments
+        .first()
+        .is_some_and(|value| !matches!(value, Value::String(_)))
+    {
+        context.warning(format!(
+            "{name}(): When sending a 'raw' command, the first argument must be a string!"
+        ));
+        return Ok(MethodPreparation::Return(Value::Bool(false)));
+    }
+    Ok(MethodPreparation::Default)
+}
+
+/// `script()` returns false, without a warning, unless the subcommand is a string.
+pub fn script(arguments: &[Value]) -> Preparation {
+    if arguments
+        .first()
+        .is_some_and(|value| !matches!(value, Value::String(_)))
+    {
+        return Ok(MethodPreparation::Return(Value::Bool(false)));
+    }
+    Ok(MethodPreparation::Default)
+}
+
+pub fn pfcount(name: &str, context: &mut dyn Context, arguments: &[Value]) -> Preparation {
+    if arguments
+        .first()
+        .is_some_and(|value| !matches!(value, Value::String(_) | Value::Array(_)))
+    {
+        context.warning(format!(
+            "{name}(): Argument must be either an array or a string"
+        ));
+        return Ok(MethodPreparation::Return(Value::Bool(false)));
+    }
+    Ok(MethodPreparation::Default)
 }
