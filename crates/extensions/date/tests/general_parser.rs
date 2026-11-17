@@ -167,3 +167,35 @@ fn parser_zones_fractions_and_extremes() {
     }
     matrix.finish("date-parser-zones-fractions");
 }
+
+#[test]
+fn parser_week_and_ordinal_boundaries() {
+    let mut matrix = Matrix::new();
+    for year in [0, 1, 69, 1900, 2000, 2024, 2026, 9999] {
+        for week in [0, 1, 9, 52, 53, 54, 99] {
+            let mut inputs = vec![format!("{year:04}-W{week:02}")];
+            for day in 0..=8 {
+                inputs.push(format!("{year:04}-W{week:02}-{day}"));
+                inputs.push(format!("{year:04}W{week:02}{day}"));
+            }
+            for input in inputs {
+                matrix.case("date_parse", vec![Value::from(input.clone())]);
+                matrix.case(
+                    "strtotime",
+                    vec![Value::from(input), Value::Int(1706704496)],
+                );
+            }
+        }
+        for ordinal in [0, 1, 59, 60, 365, 366, 367, 999] {
+            for separator in ["", ".", "-"] {
+                let input = format!("{year:04}{separator}{ordinal:03}");
+                matrix.case("date_parse", vec![Value::from(input.clone())]);
+                matrix.case(
+                    "strtotime",
+                    vec![Value::from(input), Value::Int(1706704496)],
+                );
+            }
+        }
+    }
+    matrix.finish("date-parser-week-ordinal");
+}

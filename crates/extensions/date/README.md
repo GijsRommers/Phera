@@ -1,7 +1,7 @@
 # Date extension: incomplete implementation
 
 This branch implements the request timezone, calendar core, procedural formatters,
-and format-directed parsing. It does **not** complete PHP's date extension.
+format-directed parsing, and the general date string parser. It does **not** complete PHP's date extension.
 The PR must remain a draft until the missing functions, classes, and Linux gate pass.
 Standard's existing clock and sleep functions remain in the standard extension.
 
@@ -26,8 +26,8 @@ It does not assert exhaustive proof or a passing Linux CI run.
 | `date_parse_from_format` | DONE | Fields, modifiers, zones, warnings, and errors. |
 | `strftime` | NOT DONE | C-locale formatting and deprecation. |
 | `gmstrftime` | NOT DONE | C-locale UTC formatting and deprecation. |
-| `strtotime` | NOT DONE | General timelib absolute and relative grammar. |
-| `date_parse` | NOT DONE | General parser fields and diagnostic arrays. |
+| `strtotime` | DONE | Hand-written timelib grammar, base filling, relative arithmetic, and DST resolution. |
+| `date_parse` | DONE | Absolute/relative fields, unset values, zones, and diagnostic arrays. |
 | `DateTimeInterface` | NOT DONE | Interface and format constants. |
 | `DateTime` | NOT DONE | Native state and all methods. |
 | `DateTimeImmutable` | NOT DONE | Native state and all methods. |
@@ -114,7 +114,9 @@ The abbreviation lookup in `data/abbreviations.tsv` contains the first mapping f
 each abbreviation in PHP's timelib `timezonemap.h`. Its license is retained in
 `data/TIMELIB-LICENSE.txt`. Format parsing follows `parse_date.re`'s format parser,
 including its permissive numeric and timezone scanning. This is separate from the
-general parser required by `strtotime` and `date_parse`, which is still missing.
+general parser used by `strtotime` and `date_parse`. The fallback abbreviation table
+is consulted by timelib only for offset/DST reverse lookup; these string parsers use
+the first abbreviation mapping, as does PHP.
 
 ## Verified local comparisons
 
@@ -131,7 +133,14 @@ Repeated debugging runs are not included in the count.
 | Procedural validation and integer boundaries | 2,602 | 0 |
 | Format parser grammar, dates, zones, and bytes | 42,298 | 0 |
 | Runtime compiler/VM calls, two requests | 334 | 0 |
-| **Total** | **1,029,694** | **0** |
+| General parser generated strings and forty base/zone combinations | 530,094 | 0 |
+| General parser examples | 1,305 | 0 |
+| General parser corrupted/ambiguous inputs | 39,864 | 0 |
+| General parser timezone names, fractions, and integer extremes | 3,052 | 0 |
+| General parser hostile bytes and long inputs | 2,060 | 0 |
+| General parser argument diagnostics | 30 | 0 |
+| General parser ISO-week and ordinal boundaries | 2,512 | 0 |
+| **Total** | **1,608,611** | **0** |
 
 The core matrix includes transition boundaries, negative timestamps, leap dates,
 years before 1900 and after 2100, and the endpoints of the signed 64-bit range.
@@ -142,13 +151,18 @@ so elapsed wall time cannot change their output.
 
 The wall-time test calls PHP's DateTime constructor as the reference for the Rust
 calendar resolver. It does **not** mean a Phera DateTime class has been implemented.
-The required 2,000-string `strtotime`/`date_parse` matrix and class matrix are absent.
-The large formatting count does not substitute for those missing acceptance gates.
+The parser suite adds **578,917 comparisons** (including five timezone-setting calls).
+The generated table has **12,929 distinct strings**, each passed to `date_parse` and
+`strtotime` with all eight fixed base timestamps and all five default zones. Additional
+suites cover 19,932 ambiguous/corrupted byte strings, all 256 byte values, 10,000-byte
+inputs, repeated parts, all embedded zone names and abbreviations, long fractions,
+argument diagnostics, and integer overflow. No test requires the current clock.
+The class matrix remains absent because classes are the next task.
 
 Commands observed passing locally:
 
 ```sh
-cargo test -p phera-ext-date -- --nocapture
+cargo test --release -p phera-ext-date -- --nocapture
 cargo test -p phera-runtime --test date -- --nocapture
 cargo clippy -p phera-ext-date --all-targets -- -D warnings
 cargo build -p phera-cli
@@ -162,26 +176,83 @@ was then run separately and passed, bringing that matrix to 27.
 The optional `audit_phpt` example compares selected upstream PHPT **FILE sections**
 by subprocess exit status, stdout, and stderr. Of 35 selected files, **22 matched**,
 **0 differed**, and **13 have unsupported INI/environment setup**. It does not
-implement PHPT EXPECT/EXPECTF or constitute a full PHPT harness. No general-parser
-PHPT tests pass yet. Evidence is retained under `target/date-phpt-audit` when run:
+implement PHPT EXPECT/EXPECTF or constitute a full PHPT harness. The general-parser audit below is separate. Evidence is retained under `target/date-phpt-audit` when run:
 
 ```sh
 cargo run -p phera-ext-date --example audit_phpt -- PHP_SRC target/debug/phera
 ```
 
-Linux CI initially used distribution PHP's system timezone database: it rejected
-`EST`, `CET`, and `US/Eastern`, and accepted `posixrules`. The initial core commit
-failed there. CI now requests `timezonedb-2026.5`, the `-n` wrapper loads it, and
-prerequisites verify the database version. The tests have not been weakened to
-match whichever zoneinfo happens to be installed. This configuration change still
-needs a successful hosted run. The initial run also reported 194 mismatches in the
-unchanged standard string suite. Full local `make ci` was not run because its
-prerequisite script connects to and provisions databases, excluded by this task.
+## General date string parser
+
+`src/parse` implements byte scanning by hand, without a parser generator, a regex
+engine, a C library, or calls to PHP in production. Each format family offers its
+longest prefix; equal lengths use timelib's grammar order. Matching and field
+assignment are separate, including partial results after duplicate specifications.
+Weekdays, Monday-based weeks, month edges, and weekday counts retain their distinct
+normalization stages. Calendar overflow rolls forward instead of clamping.
+
+The scanner covers the documented numeric/textual dates and clocks, compound forms,
+ISO weeks and ordinal dates, Unix timestamps with fractions, timezone offsets/names,
+and relative words/units. Diagnostic positions are byte positions after timelib's
+leading/trailing whitespace trimming. C's whitespace and non-finite float-to-integer
+behavior differ on macOS/ARM and Linux/x86; the adapter follows the target platform.
+The thirteen non-deprecated procedural `DATE_*` format constants are registered for
+parser/formatter round trips. No DateTime classes were added.
+
+The optional `parser_audit` example discovers upstream tests mentioning either parser.
+It copies FILE sections, translates `date.timezone` INI settings, and uses PHP's
+tokenizer to pin procedural clock calls to **1706704496**. Both runtimes execute the
+same copy. It honors upstream SKIPIF and compares exit status, stdout, stderr, and
+PHP's result against EXPECT/EXPECTF. Source tests are never modified.
+`phera-phpt` is a **dev-only** dependency for section parsing and EXPECTF matching;
+there are no new runtime dependencies.
+
+```sh
+cargo run -p phera-ext-date --example parser_audit -- PHP_SRC target/debug/phera
+cargo run --release -p phera-ext-date --example benchmark_parser
+```
+
+The audit deliberately exits unsuccessfully for missing unrelated runtime APIs and
+retains per-test outputs and reasons in `target/date-parser-phpt/report.txt`.
+Current audit: **84 pass both PHP comparison and upstream EXPECT/EXPECTF**, **2 fail**,
+**13 need DateTime classes**, **10 need other unsupported APIs**, and **2 skip on
+64-bit platforms**. The broader discovery includes two class tests that mention
+`strtotime` in comments.
+
+- `bug46111.phpt`: missing `timezone_identifiers_list()` (outside this parser task).
+- `format-negative-timestamp.phpt`: missing standard `getrandmax()`.
+- Other dependencies: five environment/INI tests, four sun-function tests, and one
+  IntlDateFormatter test. All results are retained; no failure is marked expected.
+  [Per-file audit snapshot](tests/parser-upstream-results.txt).
+
+The existing date core needs no additional engine API for either parser function.
+
+For **one million calls across twenty common formats**, three alternating subprocess
+runs with `/usr/bin/time -p` measured these CPU times (user plus system):
+
+| Run | PHP 8.5.12 | Rust release native entry point |
+| --- | ---: | ---: |
+| 1 | 0.76 s | 0.82 s |
+| 2 | 0.76 s | 0.89 s |
+| 3 | 0.81 s | 0.95 s |
+| Median | **0.76 s** | **0.89 s** |
+
+The median ratio is **1.17x**, within the requested 2x limit. The benchmark uses UTC,
+a fixed base, and identical checksums (1707946012000000). It measures native function
+calls, not compiler/VM throughput. Process startup is included; compilation is not.
+Wall-clock time is not used because other workloads share this machine.
+
+The existing CI installs `timezonedb-2026.5`, loads it through the `-n` oracle wrapper,
+and verifies its version. Linux checks are still running for the parser push;
+local success is not evidence of a completed hosted gate. Full local `make ci`
+was not run because its prerequisite script provisions/connects to databases,
+excluded by this task. `make fmt-check lint safe-rust`, the entire date crate's
+oracle suite, runtime date tests, and CLI build passed locally.
 
 ## Engine integration still needed
 
-These are specific future integration gaps, not reasons for the missing parser or
-classes themselves. This PR does not modify these engine paths.
+These are specific future integration gaps for the classes, not blockers for the
+completed procedural parser. This PR does not modify these engine paths.
 
 - `crates/value/src/ops/compare.rs` compares class names and property arrays.
   There is no native-state comparison callback, including cross-class comparisons
@@ -202,3 +273,7 @@ classes themselves. This PR does not modify these engine paths.
 The API already provides request state, native class methods/constants/properties,
 `Object::native`, object construction, and typed exception throwing. Those pieces
 are sufficient to continue implementing the date classes after the parser.
+
+The parser required no engine or extension-API changes. Merging `origin/main` into
+this branch required no date-crate compatibility fixes. The two general-parser
+functions have no known local oracle mismatches; hosted CI remains a separate gate.

@@ -21,7 +21,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let Some(body) = phpt.section("FILE") else {
             continue;
         };
-        if !body.contains("strtotime(") && !body.contains("date_parse(") {
+        let lowercase = body.to_ascii_lowercase();
+        let exercises_parser = lowercase
+            .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+            .any(|word| matches!(word, "strtotime" | "date_parse"));
+        if !exercises_parser {
             continue;
         }
         let name = path.file_name().unwrap().to_string_lossy();
@@ -116,8 +120,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             false
         };
         counts[usize::from(!matches)] += 1;
+        let runtime_output = String::from_utf8_lossy(&actual.stdout);
+        let failure = if matches {
+            String::new()
+        } else if let Some((_, rest)) = runtime_output.split_once("Call to undefined function ") {
+            format!(
+                "missing runtime function {}; ",
+                rest.split(" in ").next().unwrap_or(rest)
+            )
+        } else {
+            "subprocess output or exit status differs; ".to_string()
+        };
         report.push_str(&format!(
-            "{} {name}: {}\n",
+            "{} {name}: {failure}{}\n",
             if matches { "PASS" } else { "FAIL" },
             if expected {
                 "upstream expectation matches PHP"
