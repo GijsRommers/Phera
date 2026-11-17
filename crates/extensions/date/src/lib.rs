@@ -1,6 +1,7 @@
 //! PHP's date extension: `date_default_timezone_get()` starts at `UTC` per request.
 
 pub mod calendar;
+mod classes;
 mod format;
 mod functions;
 mod normalize;
@@ -22,6 +23,7 @@ impl Extension for Date {
 
     fn register(&self, registry: &mut Registry) {
         register::functions(registry);
+        classes::register(registry);
         registry.function(FunctionEntry::sync(
             "date_default_timezone_get",
             &[],
