@@ -191,7 +191,7 @@ Real PHP is the oracle at every layer.
 | --- | --- | --- |
 | 1 | **Frontend and foundations.** Lexer, parser, value model, HTTP server. | Done |
 | 2 | **Core execution.** Bytecode, compiler and VM for procedural PHP. `phera file.php` prints output. | Done; a list of parity gaps is being closed |
-| 3 | **Objects.** Classes, exceptions, closures, generators. Design in section 9. | Next |
+| 3 | **Objects.** Classes, exceptions, closures, generators. Design in section 9. | Classes and exceptions done; closures in progress; then traits, enums, magic methods, generators |
 | 4 | **Standard library.** Strings, arrays, math, ctype done (187 functions). Then pcre, mbstring, date, spl, output buffering, files. | First wave done |
 | 5 | **Web.** `phera serve` runs scripts with superglobals and `header()`. Then uploads, cookies, sessions, autoloading. | Started |
 | 6 | **Frameworks.** Reflection, sessions, PDO. Boot a bare Symfony kernel, then a Laravel hello world. | |
