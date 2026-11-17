@@ -2,74 +2,69 @@
 use crate::{
     algorithms::Algorithm,
     functions,
+    hmac::Hmac,
     options::{self, Options},
 };
 use digest::DynDigest;
 use phera_extension_api::{Context, NativeError, NativeResult, Object, PhpArray, Value, args};
 
+/// What a `HashContext` holds between `hash_init()` and `hash_final()`.
 #[derive(Clone)]
 pub struct State {
     algorithm: Algorithm,
     options: Options,
-    digest: Option<Box<dyn DynDigest>>,
-    buffered: Vec<u8>,
-    key: Option<Vec<u8>>,
+    input: Input,
+    /// Set by `hash_init()` with `HASH_HMAC`.
+    hmac: Option<Hmac>,
 }
+
+/// The input so far.
+#[derive(Clone)]
+enum Input {
+    /// Hashed as it arrives.
+    Streaming(Box<dyn DynDigest>),
+    /// Kept whole, for the algorithms that are only computed in one go.
+    Buffered(Vec<u8>),
+}
+
 impl State {
-    pub fn new(algorithm: Algorithm, options: Options, key: Option<Vec<u8>>) -> Self {
-        let mut digest = algorithm.streaming();
-        let key = key.map(|key| {
-            let size = algorithm.block_size().expect("validated HMAC");
-            let key = if key.len() > size {
-                algorithm.digest(&key)
-            } else {
-                key
-            };
-            let mut inner = vec![0x36; size];
-            let mut outer = vec![0x5c; size];
-            for (i, byte) in key.iter().enumerate() {
-                inner[i] ^= byte;
-                outer[i] ^= byte;
-            }
-            if let Some(digest) = &mut digest {
-                digest.update(&inner);
-            }
-            outer
-        });
-        Self {
+    pub fn new(algorithm: Algorithm, options: Options, hmac: Option<Hmac>) -> Self {
+        let input = match algorithm.streaming() {
+            Some(hasher) => Input::Streaming(hasher),
+            None => Input::Buffered(Vec::new()),
+        };
+        let mut state = State {
             algorithm,
             options,
-            digest,
-            buffered: Vec::new(),
-            key,
+            input,
+            hmac: None,
+        };
+        if let Some(hmac) = hmac {
+            state.update(&hmac.inner_pad);
+            state.hmac = Some(hmac);
         }
+        state
     }
 
     pub fn update(&mut self, data: &[u8]) {
-        if let Some(digest) = &mut self.digest {
-            digest.update(data);
-        } else {
-            self.buffered.extend_from_slice(data);
+        match &mut self.input {
+            Input::Streaming(hasher) => hasher.update(data),
+            Input::Buffered(input) => input.extend_from_slice(data),
         }
     }
+
     pub fn finish(self) -> Vec<u8> {
-        let inner = if let Some(digest) = self.digest {
-            digest.finalize().to_vec()
-        } else if let Some(outer) = &self.key {
-            let mut inner: Vec<u8> = outer.iter().map(|byte| byte ^ 0x6a).collect();
-            inner.extend_from_slice(&self.buffered);
-            self.algorithm.digest(&inner)
-        } else {
-            self.algorithm.digest_with(&self.options, &self.buffered)
+        let digest = match self.input {
+            Input::Streaming(hasher) => hasher.finalize().into_vec(),
+            Input::Buffered(input) => self.algorithm.digest_with(&self.options, &input),
         };
-        if let Some(mut outer) = self.key {
-            outer.extend_from_slice(&inner);
-            self.algorithm.digest(&outer)
-        } else {
-            inner
+        match self.hmac {
+            Some(hmac) => hmac.finish(&digest),
+            None => digest,
         }
     }
 }
+
 pub fn create(context: &mut dyn Context, state: State) -> NativeResult {
     let value = context.create_object("HashContext", PhpArray::new())?;
     if let Value::Object(object) = &value {
@@ -79,7 +74,7 @@ pub fn create(context: &mut dyn Context, state: State) -> NativeResult {
 }
 pub fn init(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let algorithm = options::algorithm(args::bytes(arguments, 0), "hash_init")?;
-    let key = if args::int(arguments, 1).unwrap_or(0) & 1 != 0 {
+    let hmac = if args::int(arguments, 1).unwrap_or(0) & 1 != 0 {
         if algorithm.block_size().is_none() {
             return Err(NativeError::value_error(
                 "hash_init(): Argument #1 ($algo) must be a cryptographic hashing algorithm \
@@ -91,12 +86,12 @@ pub fn init(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
                 "hash_init(): Argument #3 ($key) must not be empty when HMAC is requested",
             ));
         }
-        Some(args::bytes(arguments, 2).to_vec())
+        Some(Hmac::new(algorithm, args::bytes(arguments, 2)))
     } else {
         None
     };
     let options = Options::read(context, algorithm, arguments.get(3), "hash_init")?;
-    create(context, State::new(algorithm, options, key))
+    create(context, State::new(algorithm, options, hmac))
 }
 pub fn object<'a>(arguments: &'a [Value], function: &str) -> Result<&'a Object, NativeError> {
     if let Some(object) = args::object(arguments, 0)

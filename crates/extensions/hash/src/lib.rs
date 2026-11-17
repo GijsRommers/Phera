@@ -2,6 +2,7 @@
 mod algorithms;
 mod files;
 mod functions;
+mod hmac;
 mod incremental;
 mod options;
 mod password_info;

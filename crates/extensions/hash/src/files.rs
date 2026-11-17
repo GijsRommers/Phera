@@ -2,6 +2,7 @@
 use crate::{
     algorithms::Algorithm,
     functions,
+    hmac::Hmac,
     incremental::{self, State},
     options::{self, Options},
 };
@@ -96,8 +97,8 @@ pub fn hmac_file(
     Box::pin(async move {
         let algorithm =
             options::cryptographic_algorithm(args::bytes(&arguments, 0), "hash_hmac_file")?;
-        let key = Some(args::bytes(&arguments, 2).to_vec());
-        let mut state = State::new(algorithm, Options::default(), key);
+        let hmac = Hmac::new(algorithm, args::bytes(&arguments, 2));
+        let mut state = State::new(algorithm, Options::default(), Some(hmac));
         if !read(
             context,
             "hash_hmac_file",

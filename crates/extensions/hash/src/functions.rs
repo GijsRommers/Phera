@@ -1,6 +1,7 @@
 //! One-shot hashing: `hash_hmac('sha256', 'message', 'key')` authenticates bytes.
 use crate::{
     algorithms::{ALGORITHMS, Algorithm},
+    hmac::Hmac,
     options::{self, Options},
 };
 use phera_extension_api::{Context, NativeError, NativeResult, PhpArray, Value, args};
@@ -35,33 +36,11 @@ pub fn hash(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         args::bool(arguments, 2).unwrap_or(false),
     ))
 }
-pub fn hmac(algorithm: Algorithm, data: &[u8], key: &[u8]) -> Vec<u8> {
-    let size = algorithm
-        .block_size()
-        .expect("validated cryptographic hash");
-    let key = if key.len() > size {
-        algorithm.digest(key)
-    } else {
-        key.to_vec()
-    };
-    let mut inner = vec![0x36; size];
-    let mut outer = vec![0x5c; size];
-    for (i, byte) in key.iter().enumerate() {
-        inner[i] ^= byte;
-        outer[i] ^= byte;
-    }
-    inner.extend_from_slice(data);
-    outer.extend_from_slice(&algorithm.digest(&inner));
-    algorithm.digest(&outer)
-}
 pub fn hash_hmac(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let algorithm = options::cryptographic_algorithm(args::bytes(arguments, 0), "hash_hmac")?;
+    let hmac = Hmac::new(algorithm, args::bytes(arguments, 2));
     Ok(output(
-        hmac(
-            algorithm,
-            args::bytes(arguments, 1),
-            args::bytes(arguments, 2),
-        ),
+        hmac.sign(args::bytes(arguments, 1)),
         args::bool(arguments, 3).unwrap_or(false),
     ))
 }
@@ -143,14 +122,15 @@ pub fn pbkdf2(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     output
         .try_reserve(bytes)
         .map_err(|_| NativeError::error("Insufficient memory"))?;
-    let password = args::bytes(arguments, 1);
+    // The password is the HMAC key throughout, so its pads are made once.
+    let hmac = Hmac::new(algorithm, args::bytes(arguments, 1));
     for index in 1..=bytes.div_ceil(size) {
         let mut input = args::bytes(arguments, 2).to_vec();
         input.extend_from_slice(&(index as u32).to_be_bytes());
-        let mut block = hmac(algorithm, &input, password);
+        let mut block = hmac.sign(&input);
         let mut sum = block.clone();
         for _ in 1..iterations {
-            block = hmac(algorithm, &block, password);
+            block = hmac.sign(&block);
             for (a, b) in sum.iter_mut().zip(&block) {
                 *a ^= b;
             }
@@ -188,13 +168,15 @@ pub fn hkdf(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         )));
     }
     let length = if length == 0 { size } else { length as usize };
-    let extracted = hmac(algorithm, key, args::bytes(arguments, 4));
+    // RFC 5869: extract a key with the salt, then expand it with the info.
+    let extracted = Hmac::new(algorithm, args::bytes(arguments, 4)).sign(key);
+    let expand = Hmac::new(algorithm, &extracted);
     let mut result = Vec::with_capacity(length);
     let mut previous = Vec::new();
     for i in 1..=length.div_ceil(size) {
         previous.extend_from_slice(args::bytes(arguments, 3));
         previous.push(i as u8);
-        previous = hmac(algorithm, &previous, &extracted);
+        previous = expand.sign(&previous);
         result.extend_from_slice(&previous);
     }
     result.truncate(length);
