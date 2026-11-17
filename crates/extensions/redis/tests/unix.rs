@@ -1,15 +1,17 @@
-//! A task-owned Unix socket forwards to the same Redis container for transport parity.
+//! `connect('/path/to/socket')` over a Unix socket, compared with phpredis.
+//! The test owns the socket and forwards it to the test Redis server.
+
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn unix_socket_matches_php() {
-    use phera_extension_api::testing::oracle::find_php;
-    use std::path::PathBuf;
-    use std::process::Command;
-    let Ok(binary) = std::env::var("PHERA_BIN") else {
+    use phera_extension_api::testing::scripts::{Comparison, Runtime};
+
+    let Some(comparison) = Comparison::from_environment("redis-unix") else {
         return;
     };
-    let php = find_php().expect("PHP oracle");
-    let socket = PathBuf::from(format!("/tmp/phera-redis-{}.sock", std::process::id()));
+    // Not in the temporary directory, whose path may exceed the 104 bytes a
+    // Unix socket path may have on macOS.
+    let socket = std::path::PathBuf::from(format!("/tmp/phera-redis-{}.sock", std::process::id()));
     let listener = tokio::net::UnixListener::bind(&socket).unwrap();
     let proxy = tokio::spawn(async move {
         loop {
@@ -22,10 +24,7 @@ async fn unix_socket_matches_php() {
             });
         }
     });
-    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
-        "../../../target/redis-unix-{}.php",
-        std::process::id()
-    ));
+    let script = comparison.artifacts.join("unix.php");
     std::fs::write(
         &script,
         format!(
@@ -37,14 +36,12 @@ var_dump($r->close(),$r->isConnected());
         ),
     )
     .unwrap();
-    let outputs = tokio::task::spawn_blocking(move || {
-        [php, PathBuf::from(binary)]
-            .map(|binary| Command::new(binary).arg(&script).output().unwrap())
-    })
-    .await
-    .unwrap();
+    // The scripts block this thread; the proxy runs on the other one.
+    let [php, phera] = tokio::task::block_in_place(|| {
+        [Runtime::Php, Runtime::Phera]
+            .map(|runtime| comparison.command(runtime, &script).output().unwrap())
+    });
     proxy.abort();
     std::fs::remove_file(socket).unwrap();
-    assert!(outputs.iter().all(|o| o.status.success()));
-    assert_eq!(outputs[0].stdout, outputs[1].stdout);
+    comparison.check("unix", &php, &phera).unwrap();
 }
