@@ -28,12 +28,12 @@ impl Vm {
             let Some((stored_key, value)) = properties.entry_at(index) else {
                 break;
             };
-            let name = crate::path_update::property_name(stored_key);
+            let name = crate::path_update::property_name(&stored_key);
             if self
                 .property_key(object, &name)
-                .is_ok_and(|resolved| resolved == *stored_key)
+                .is_ok_and(|resolved| resolved == stored_key)
             {
-                self.check_iteration_reference(object, stored_key)?;
+                self.check_iteration_reference(object, &stored_key)?;
                 let reference = if value.is_reference() {
                     value.clone()
                 } else {

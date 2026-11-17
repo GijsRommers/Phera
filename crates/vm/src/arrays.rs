@@ -61,7 +61,7 @@ impl Vm {
                 if matches!(key, ArrayKey::Int(_)) {
                     array.push(value.clone())?;
                 } else {
-                    array.insert(key.clone(), value.clone());
+                    array.insert(key, value.clone());
                 }
             }
         } else if let Some(key) = key {

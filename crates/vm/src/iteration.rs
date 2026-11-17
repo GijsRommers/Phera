@@ -135,7 +135,7 @@ impl Vm {
         let entry = array
             .as_ref()
             .and_then(|array| position.and_then(|position| array.entry_at(position)))
-            .map(|(element_key, element)| (element_key.clone(), element.deref().clone()));
+            .map(|(element_key, element)| (element_key, element.deref().clone()));
         drop(array);
         if let Some((element_key, element)) = entry {
             self.bind_iteration_entry(element_key, element, state.source.as_ref(), key, value)?;
@@ -182,7 +182,7 @@ impl Vm {
             self.set(
                 key,
                 match element_key {
-                    ArrayKey::Int(integer) => Value::Int(*integer),
+                    ArrayKey::Int(integer) => Value::Int(integer),
                     ArrayKey::String(string) => Value::String(string.clone()),
                 },
             );
