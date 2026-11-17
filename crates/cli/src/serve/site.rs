@@ -8,6 +8,7 @@ use std::path::{Component, Path, PathBuf};
 pub(crate) struct Site {
     /// Canonical, so "is this file inside the site?" is a prefix test.
     document_root: PathBuf,
+    excluded: Vec<PathBuf>,
     /// Frameworks route every URL through one script ("front controller").
     /// It is `index.php` in the document root when that exists, or the
     /// script named on the command line.
@@ -34,6 +35,7 @@ impl Site {
         if path.is_dir() {
             let index = path.join("index.php");
             Ok(Site {
+                excluded: Vec::new(),
                 front_controller: index.is_file().then_some(index),
                 document_root: path,
             })
@@ -44,9 +46,14 @@ impl Site {
                 .ok_or_else(|| io::Error::other("the script has no directory"))?;
             Ok(Site {
                 document_root,
+                excluded: Vec::new(),
                 front_controller: Some(path),
             })
         }
+    }
+
+    pub(crate) fn exclude_files(&mut self, paths: Vec<PathBuf>) {
+        self.excluded = paths;
     }
 
     pub(crate) fn document_root(&self) -> &Path {
@@ -76,6 +83,9 @@ impl Site {
         let Ok(file) = candidate.canonicalize() else {
             return fallback();
         };
+        if self.excluded.contains(&file) {
+            return Resolved::NotFound;
+        }
         if !file.starts_with(&self.document_root) || !file.is_file() {
             return fallback();
         }

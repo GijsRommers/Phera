@@ -1,5 +1,10 @@
 //! Ordered byte strings shared by native startup and PHP's `getenv()`.
 
+mod load;
+mod parser;
+pub use load::{FileSelection, Loaded};
+pub use parser::{ParseError, parse};
+
 use indexmap::IndexMap;
 
 /// An environment in enumeration order. Deliberately has no Debug implementation.

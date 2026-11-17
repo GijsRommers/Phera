@@ -1,19 +1,23 @@
 //! Reading the command line. Written by hand: the grammar is four lines.
 
+use phera_dotenv::FileSelection;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
 pub(crate) const USAGE: &str = "\
 Usage:
-  phera [run] <file.php> [arguments...]   run a script
-  phera serve [--listen ADDRESS] [--workers N] [PATH]
+  phera [run] [ENV OPTIONS] <file.php> [arguments...]   run a script
+  phera serve [ENV OPTIONS] [--listen ADDRESS] [--workers N] [PATH]
                                           serve PATH (a directory, or one
                                           script that answers every request)
   phera --dump <file.php>                 print the compiled bytecode
-  phera --version";
+  phera --version
+
+ENV OPTIONS: --env-file PATH (repeatable) or --no-env-file";
 
 pub(crate) enum Command {
     Run {
+        files: FileSelection,
         script: String,
         /// What the script sees as `$argv`: its own name first.
         arguments: Vec<String>,
@@ -26,6 +30,7 @@ pub(crate) enum Command {
 }
 
 pub(crate) struct ServeOptions {
+    pub files: FileSelection,
     pub listen: SocketAddr,
     /// `None` means one worker per CPU core.
     pub workers: Option<usize>,
@@ -34,6 +39,8 @@ pub(crate) struct ServeOptions {
 
 pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, String> {
     let mut arguments = arguments.peekable();
+    let mut files = FileSelection::Automatic;
+    leading_files(&mut arguments, &mut files)?;
     match arguments.peek().map(String::as_str) {
         None => Err("No script given.".to_string()),
         Some("--version") => Ok(Command::Version),
@@ -44,26 +51,72 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
         }
         Some("serve") => {
             arguments.next();
-            parse_serve(arguments).map(Command::Serve)
+            parse_serve(arguments, files).map(Command::Serve)
         }
         Some(_) => {
             // `phera run file.php` and `phera file.php` mean the same.
             arguments.next_if(|argument| argument == "run");
+            leading_files(&mut arguments, &mut files)?;
             let arguments: Vec<String> = arguments.collect();
             let script = arguments.first().cloned().ok_or("No script given.")?;
-            Ok(Command::Run { script, arguments })
+            Ok(Command::Run {
+                script,
+                arguments,
+                files,
+            })
         }
     }
 }
 
-fn parse_serve(mut arguments: impl Iterator<Item = String>) -> Result<ServeOptions, String> {
+fn leading_files(
+    arguments: &mut std::iter::Peekable<impl Iterator<Item = String>>,
+    files: &mut FileSelection,
+) -> Result<(), String> {
+    while let Some(option) =
+        arguments.next_if(|s| matches!(s.as_str(), "--env-file" | "--no-env-file"))
+    {
+        file_option(&option, arguments, files)?;
+    }
+    Ok(())
+}
+
+fn file_option(
+    option: &str,
+    arguments: &mut impl Iterator<Item = String>,
+    files: &mut FileSelection,
+) -> Result<(), String> {
+    match (option, &mut *files) {
+        ("--no-env-file", FileSelection::Disabled | FileSelection::Automatic) => {
+            *files = FileSelection::Disabled
+        }
+        ("--env-file", mode @ FileSelection::Automatic) => {
+            *mode = FileSelection::Explicit(vec![
+                arguments.next().ok_or("--env-file needs a path.")?.into(),
+            ]);
+        }
+        ("--env-file", FileSelection::Explicit(paths)) => {
+            paths.push(arguments.next().ok_or("--env-file needs a path.")?.into())
+        }
+        _ => return Err("Use either --env-file or --no-env-file.".into()),
+    }
+    Ok(())
+}
+
+fn parse_serve(
+    mut arguments: impl Iterator<Item = String>,
+    files: FileSelection,
+) -> Result<ServeOptions, String> {
     let mut options = ServeOptions {
+        files,
         listen: SocketAddr::from(([127, 0, 0, 1], 8080)),
         workers: None,
         path: PathBuf::from("."),
     };
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
+            "--env-file" | "--no-env-file" => {
+                file_option(&argument, &mut arguments, &mut options.files)?
+            }
             "--listen" => {
                 let value = arguments.next().ok_or("--listen needs an address.")?;
                 options.listen = value

@@ -19,7 +19,11 @@ static ALLOCATOR: MiMalloc = MiMalloc;
 
 fn main() -> ExitCode {
     match arguments::parse(std::env::args().skip(1)) {
-        Ok(Command::Run { script, arguments }) => run::script(&script, &arguments),
+        Ok(Command::Run {
+            script,
+            arguments,
+            files,
+        }) => run::script(&script, &arguments, files),
         Ok(Command::Dump { script }) => run::dump(&script),
         Ok(Command::Serve(options)) => serve::serve(options),
         Ok(Command::Version) => {

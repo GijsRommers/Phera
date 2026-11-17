@@ -7,6 +7,10 @@ license.workspace = true
 
 [dependencies]
 indexmap.workspace = true
+regex.workspace = true
+
+[dev-dependencies]
+serde_json = "1"
 
 [lints]
 workspace = true
