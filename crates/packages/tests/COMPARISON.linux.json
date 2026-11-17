@@ -1,0 +1,1146 @@
+[
+  {
+    "fixture": "composer--class-map-generator",
+    "composer_install": 0,
+    "phera_install": 0,
+    "composer_time": {
+      "wall": 1.7835459690001016,
+      "cpu": 2.19643
+    },
+    "phera_time": {
+      "wall": 0.7193291969999791,
+      "cpu": 1.0005200000000003
+    },
+    "package_differences": [],
+    "generated_differences": [
+      "autoload.php",
+      "bin/phpstan",
+      "bin/phpstan.phar",
+      "bin/phpunit",
+      "composer/LICENSE",
+      "composer/autoload_classmap.php",
+      "composer/autoload_files.php",
+      "composer/autoload_namespaces.php",
+      "composer/autoload_psr4.php",
+      "composer/autoload_real.php",
+      "composer/autoload_static.php",
+      "composer/installed.json",
+      "composer/installed.php",
+      "composer/platform_check.php"
+    ],
+    "installed_identical": true,
+    "autoload_identical": true,
+    "composer_update": 0,
+    "phera_update": 0,
+    "composer_update_time": {
+      "wall": 0.5273450509999975,
+      "cpu": 0.34354400000000007
+    },
+    "phera_update_time": {
+      "wall": 1.1184435490000624,
+      "cpu": 0.1723309999999998
+    },
+    "resolution_differences": {},
+    "composer_accepts_lock": true,
+    "composer_installs_phera_lock": true
+  },
+  {
+    "fixture": "composer--metadata-minifier",
+    "composer_install": 0,
+    "phera_install": 0,
+    "composer_time": {
+      "wall": 1.1226540800000748,
+      "cpu": 1.1623489999999994
+    },
+    "phera_time": {
+      "wall": 0.5874806540000463,
+      "cpu": 0.7182880000000011
+    },
+    "package_differences": [],
+    "generated_differences": [
+      "autoload.php",
+      "bin/composer",
+      "bin/jsonlint",
+      "bin/phpstan",
+      "bin/phpstan.phar",
+      "bin/simple-phpunit",
+      "bin/validate-json",
+      "composer/LICENSE",
+      "composer/autoload_classmap.php",
+      "composer/autoload_files.php",
+      "composer/autoload_namespaces.php",
+      "composer/autoload_psr4.php",
+      "composer/autoload_real.php",
+      "composer/autoload_static.php",
+      "composer/installed.json",
+      "composer/installed.php",
+      "composer/platform_check.php"
+    ],
+    "installed_identical": true,
+    "autoload_identical": true,
+    "composer_update": 0,
+    "phera_update": 0,
+    "composer_update_time": {
+      "wall": 0.5385756429999446,
+      "cpu": 0.3741300000000005
+    },
+    "phera_update_time": {
+      "wall": 1.002868729999932,
+      "cpu": 0.24406399999999984
+    },
+    "resolution_differences": {},
+    "composer_accepts_lock": true,
+    "composer_installs_phera_lock": true
+  },
+  {
+    "fixture": "composer--semver",
+    "composer_install": 0,
+    "phera_install": 0,
+    "composer_time": {
+      "wall": 0.5526005220000343,
+      "cpu": 0.4542799999999989
+    },
+    "phera_time": {
+      "wall": 0.05045603000007759,
+      "cpu": 0.06128199999999939
+    },
+    "package_differences": [],
+    "generated_differences": [
+      "autoload.php",
+      "bin/phpstan",
+      "bin/phpstan.phar",
+      "bin/simple-phpunit",
+      "composer/LICENSE",
+      "composer/autoload_classmap.php",
+      "composer/autoload_files.php",
+      "composer/autoload_namespaces.php",
+      "composer/autoload_psr4.php",
+      "composer/autoload_real.php",
+      "composer/autoload_static.php",
+      "composer/installed.json",
+      "composer/installed.php",
+      "composer/platform_check.php"
+    ],
+    "installed_identical": true,
+    "autoload_identical": true,
+    "composer_update": 0,
+    "phera_update": 0,
+    "composer_update_time": {
+      "wall": 0.2643686129999878,
+      "cpu": 0.19784900000000016
+    },
+    "phera_update_time": {
+      "wall": 0.10020706499994958,
+      "cpu": 0.03693100000000138
+    },
+    "resolution_differences": {},
+    "composer_accepts_lock": true,
+    "composer_installs_phera_lock": true
+  },
+  {
+    "fixture": "doctrine--collections",
+    "composer_install": 0,
+    "phera_install": 0,
+    "composer_time": {
+      "wall": 1.7067544230000067,
+      "cpu": 2.427449999999999
+    },
+    "phera_time": {
+      "wall": 0.5792169750000085,
+      "cpu": 1.1980399999999998
+    },
+    "package_differences": [],
+    "generated_differences": [
+      "autoload.php",
+      "bin/php-parse",
+      "bin/phpcbf",
+      "bin/phpcs",
+      "bin/phpstan",
+      "bin/phpstan.phar",
+      "bin/phpunit",
+      "composer/LICENSE",
+      "composer/autoload_classmap.php",
+      "composer/autoload_files.php",
+      "composer/autoload_namespaces.php",
+      "composer/autoload_psr4.php",
+      "composer/autoload_real.php",
+      "composer/autoload_static.php",
+      "composer/installed.json",
+      "composer/installed.php",
+      "composer/platform_check.php"
+    ],
+    "installed_identical": true,
+    "autoload_identical": true,
+    "composer_update": 0,
+    "phera_update": 0,
+    "composer_update_time": {
+      "wall": 0.4859874529998933,
+      "cpu": 0.2737890000000007
+    },
+    "phera_update_time": {
+      "wall": 0.6332023979999803,
+      "cpu": 0.13559500000000035
+    },
+    "resolution_differences": {},
+    "composer_accepts_lock": true,
+    "composer_installs_phera_lock": true
+  },
+  {
+    "fixture": "guzzlehttp--guzzle",
+    "composer_install": 0,
+    "phera_install": 0,
+    "composer_time": {
+      "wall": 1.1789163949999875,
+      "cpu": 1.065309
+    },
+    "phera_time": {
+      "wall": 0.36418425700003354,
+      "cpu": 0.5711249999999986
+    },
+    "package_differences": [],
+    "generated_differences": [
+      "autoload.php",
+      "bin/http_test_server",
+      "bin/php-parse",
+      "bin/phpunit",
+      "composer/LICENSE",
+      "composer/autoload_classmap.php",
+      "composer/autoload_files.php",
+      "composer/autoload_namespaces.php",
+      "composer/autoload_psr4.php",
+      "composer/autoload_real.php",
+      "composer/autoload_static.php",
+      "composer/installed.json",
+      "composer/installed.php",
+      "composer/platform_check.php"
+    ],
+    "installed_identical": true,
+    "autoload_identical": true,
+    "composer_update": 0,
+    "phera_update": 0,
+    "composer_update_time": {
+      "wall": 0.6361416360000476,
+      "cpu": 0.2718259999999981
+    },
+    "phera_update_time": {
+      "wall": 0.7294654219999757,
+      "cpu": 0.13376000000000143
+    },
+    "resolution_differences": {},
+    "composer_accepts_lock": true,
+    "composer_installs_phera_lock": true
+  },
+  {
+    "fixture": "laravel--laravel",
+    "composer_install": 0,
+    "phera_install": 0,
+    "composer_time": {
+      "wall": 2.6240911949998917,
+      "cpu": 3.652573000000001
+    },
+    "phera_time": {
+      "wall": 1.6296648060000507,
+      "cpu": 3.8988309999999977
+    },
+    "package_differences": [],
+    "generated_differences": [
+      "autoload.php",
+      "bin/carbon",
+      "bin/patch-type-declarations",
+      "bin/php-parse",
+      "bin/phpunit",
+      "bin/pint",
+      "bin/psysh",
+      "bin/var-dump-server",
+      "composer/LICENSE",
+      "composer/autoload_classmap.php",
+      "composer/autoload_files.php",
+      "composer/autoload_namespaces.php",
+      "composer/autoload_psr4.php",
+      "composer/autoload_real.php",
+      "composer/autoload_static.php",
+      "composer/installed.json",
+      "composer/installed.php",
+      "composer/platform_check.php"
+    ],
+    "installed_identical": true,
+    "autoload_identical": true,
+    "composer_update": 0,
+    "phera_update": 0,
+    "composer_update_time": {
+      "wall": 1.456672884999989,
+      "cpu": 1.0988070000000008
+    },
+    "phera_update_time": {
+      "wall": 7.275934113999938,
+      "cpu": 4.000241999999993
+    },
+    "resolution_differences": {},
+    "composer_accepts_lock": true,
+    "composer_installs_phera_lock": true
+  },
+  {
+    "fixture": "league--commonmark",
+    "composer_install": 0,
+    "phera_install": 0,
+    "composer_time": {
+      "wall": 3.068415047999906,
+      "cpu": 4.660616000000001
+    },
+    "phera_time": {
+      "wall": 2.149860618000048,
+      "cpu": 3.2538460000000047
+    },
+    "package_differences": [],
+    "generated_differences": [
+      "autoload.php",
+      "bin/markdown",
+      "bin/ocular",
+      "bin/php-parse",
+      "bin/phpcbf",
+      "bin/phpcs",
+      "bin/phpstan",
+      "bin/phpstan.phar",
+      "bin/phpunit",
+      "bin/psalm",
+      "bin/psalm-language-server",
+      "bin/psalm-plugin",
+      "bin/psalm-refactor",
+      "bin/psalm-review",
+      "bin/psalter",
+      "bin/yaml-lint",
+      "composer/LICENSE",
+      "composer/autoload_classmap.php",
+      "composer/autoload_files.php",
+      "composer/autoload_namespaces.php",
+      "composer/autoload_psr4.php",
+      "composer/autoload_real.php",
+      "composer/autoload_static.php",
+      "composer/installed.json",
+      "composer/installed.php",
+      "composer/platform_check.php"
+    ],
+    "installed_identical": true,
+    "autoload_identical": true,
+    "composer_update": 0,
+    "phera_update": 0,
+    "composer_update_time": {
+      "wall": 1.5178332980000278,
+      "cpu": 0.7179069999999967
+    },
+    "phera_update_time": {
+      "wall": 4.580819131999988,
+      "cpu": 0.6547009999999993
+    },
+    "resolution_differences": {},
+    "composer_accepts_lock": true,
+    "composer_installs_phera_lock": true
+  },
+  {
+    "fixture": "league--csv",
+    "composer_install": 0,
+    "phera_install": 0,
+    "composer_time": {
+      "wall": 2.194828282000003,
+      "cpu": 3.5978460000000005
+    },
+    "phera_time": {
+      "wall": 1.6070561359999829,
+      "cpu": 1.957587999999994
+    },
+    "package_differences": [],
+    "generated_differences": [
+      "autoload.php",
+      "bin/jsonlint",
+      "bin/php-cs-fixer",
+      "bin/php-parse",
+      "bin/phpbench",
+      "bin/phpstan",
+      "bin/phpstan.phar",
+      "bin/phpunit",
+      "bin/rector",
+      "bin/var-dump-server",
+      "composer/LICENSE",
+      "composer/autoload_classmap.php",
+      "composer/autoload_files.php",
+      "composer/autoload_namespaces.php",
+      "composer/autoload_psr4.php",
+      "composer/autoload_real.php",
+      "composer/autoload_static.php",
+      "composer/installed.json",
+      "composer/installed.php",
+      "composer/platform_check.php"
+    ],
+    "installed_identical": true,
+    "autoload_identical": true,
+    "composer_update": 0,
+    "phera_update": 0,
+    "composer_update_time": {
+      "wall": 0.6962721639999927,
+      "cpu": 0.45277499999999904
+    },
+    "phera_update_time": {
+      "wall": 2.0717145099999925,
+      "cpu": 0.4787360000000014
+    },
+    "resolution_differences": {},
+    "composer_accepts_lock": true,
+    "composer_installs_phera_lock": true
+  },
+  {
+    "fixture": "league--flysystem",
+    "composer_install": 0,
+    "phera_install": 0,
+    "composer_time": {
+      "wall": 2.9509621859999697,
+      "cpu": 4.297351000000006
+    },
+    "phera_time": {
+      "wall": 2.180392946999973,
+      "cpu": 3.6163179999999926
+    },
+    "package_differences": [],
+    "generated_differences": [
+      "autoload.php",
+      "bin/generate_vcards",
+      "bin/google-cloud-batch",
+      "bin/jp.php",
+      "bin/naturalselection",
+      "bin/php-cs-fixer",
+      "bin/php-parse",
+      "bin/phpstan",
+      "bin/phpstan.phar",
+      "bin/phpunit",
+      "bin/sabredav",
+      "bin/vobject",
+      "composer/LICENSE",
+      "composer/autoload_classmap.php",
+      "composer/autoload_files.php",
+      "composer/autoload_namespaces.php",
+      "composer/autoload_psr4.php",
+      "composer/autoload_real.php",
+      "composer/autoload_static.php",
+      "composer/installed.json",
+      "composer/installed.php",
+      "composer/platform_check.php"
+    ],
+    "installed_identical": true,
+    "autoload_identical": true,
+    "composer_update": 0,
+    "phera_update": 0,
+    "composer_update_time": {
+      "wall": 1.5851952540000411,
+      "cpu": 0.8406210000000023
+    },
+    "phera_update_time": {
+      "wall": 2.370162257000061,
+      "cpu": 0.8205840000000002
+    },
+    "resolution_differences": {},
+    "composer_accepts_lock": true,
+    "composer_installs_phera_lock": true
+  },
+  {
+    "fixture": "nesbot--carbon",
+    "composer_install": 0,
+    "phera_install": 0,
+    "composer_time": {
+      "wall": 2.994687558999999,
+      "cpu": 3.969159000000001
+    },
+    "phera_time": {
+      "wall": 0.9497960740000053,
+      "cpu": 2.1516449999999985
+    },
+    "package_differences": [],
+    "generated_differences": [
+      "autoload.php",
+      "bin/multi-tester",
+      "bin/pdepend",
+      "bin/php-cs-fixer",
+      "bin/php-parse",
+      "bin/phpcbf",
+      "bin/phpcs",
+      "bin/phpmd",
+      "bin/phpstan",
+      "bin/phpstan.phar",
+      "bin/phpunit",
+      "bin/yaml-lint",
+      "composer/LICENSE",
+      "composer/autoload_classmap.php",
+      "composer/autoload_files.php",
+      "composer/autoload_namespaces.php",
+      "composer/autoload_psr4.php",
+      "composer/autoload_real.php",
+      "composer/autoload_static.php",
+      "composer/installed.json",
+      "composer/installed.php",
+      "composer/platform_check.php"
+    ],
+    "installed_identical": true,
+    "autoload_identical": true,
+    "composer_update": 0,
+    "phera_update": 0,
+    "composer_update_time": {
+      "wall": 1.1579512299999806,
+      "cpu": 0.6629019999999954
+    },
+    "phera_update_time": {
+      "wall": 3.4755997089999937,
+      "cpu": 2.0438370000000035
+    },
+    "resolution_differences": {},
+    "composer_accepts_lock": true,
+    "composer_installs_phera_lock": true
+  },
+  {
+    "fixture": "nikic--php-parser",
+    "composer_install": 0,
+    "phera_install": 0,
+    "composer_time": {
+      "wall": 0.984917788999951,
+      "cpu": 0.7112990000000039
+    },
+    "phera_time": {
+      "wall": 0.21971226200003002,
+      "cpu": 0.2168800000000033
+    },
+    "package_differences": [],
+    "generated_differences": [
+      "autoload.php",
+      "bin/phpunit",
+      "bin/phpyacc",
+      "composer/LICENSE",
+      "composer/autoload_classmap.php",
+      "composer/autoload_files.php",
+      "composer/autoload_namespaces.php",
+      "composer/autoload_psr4.php",
+      "composer/autoload_real.php",
+      "composer/autoload_static.php",
+      "composer/installed.json",
+      "composer/installed.php",
+      "composer/platform_check.php"
+    ],
+    "installed_identical": true,
+    "autoload_identical": true,
+    "composer_update": 0,
+    "phera_update": 0,
+    "composer_update_time": {
+      "wall": 0.4646919549999211,
+      "cpu": 0.2836510000000061
+    },
+    "phera_update_time": {
+      "wall": 0.35411763399997653,
+      "cpu": 0.09178799999998688
+    },
+    "resolution_differences": {},
+    "composer_accepts_lock": true,
+    "composer_installs_phera_lock": true
+  },
+  {
+    "fixture": "psr--cache",
+    "composer_install": 0,
+    "phera_install": 0,
+    "composer_time": {
+      "wall": 0.2402312990000155,
+      "cpu": 0.17832899999999796
+    },
+    "phera_time": {
+      "wall": 0.009522907000018677,
+      "cpu": 0.010438000000007719
+    },
+    "package_differences": [],
+    "generated_differences": [
+      "autoload.php",
+      "composer/LICENSE",
+      "composer/autoload_classmap.php",
+      "composer/autoload_files.php",
+      "composer/autoload_namespaces.php",
+      "composer/autoload_psr4.php",
+      "composer/autoload_real.php",
+      "composer/autoload_static.php",
+      "composer/installed.json",
+      "composer/installed.php",
+      "composer/platform_check.php"
+    ],
+    "installed_identical": true,
+    "autoload_identical": true,
+    "composer_update": 0,
+    "phera_update": 0,
+    "composer_update_time": {
+      "wall": 0.21733756999992693,
+      "cpu": 0.170893999999997
+    },
+    "phera_update_time": {
+      "wall": 0.007148489000087466,
+      "cpu": 0.005966999999998279
+    },
+    "resolution_differences": {},
+    "composer_accepts_lock": true,
+    "composer_installs_phera_lock": true
+  },
+  {
+    "fixture": "psr--container",
+    "composer_install": 0,
+    "phera_install": 0,
+    "composer_time": {
+      "wall": 0.2321430080000937,
+      "cpu": 0.1782440000000065
+    },
+    "phera_time": {
+      "wall": 0.0074220340000010765,
+      "cpu": 0.009537000000001683
+    },
+    "package_differences": [],
+    "generated_differences": [
+      "autoload.php",
+      "composer/LICENSE",
+      "composer/autoload_classmap.php",
+      "composer/autoload_files.php",
+      "composer/autoload_namespaces.php",
+      "composer/autoload_psr4.php",
+      "composer/autoload_real.php",
+      "composer/autoload_static.php",
+      "composer/installed.json",
+      "composer/installed.php",
+      "composer/platform_check.php"
+    ],
+    "installed_identical": true,
+    "autoload_identical": true,
+    "composer_update": 0,
+    "phera_update": 0,
+    "composer_update_time": {
+      "wall": 0.21705301999998028,
+      "cpu": 0.17231499999999755
+    },
+    "phera_update_time": {
+      "wall": 0.007596799999987525,
+      "cpu": 0.006085999999996261
+    },
+    "resolution_differences": {},
+    "composer_accepts_lock": true,
+    "composer_installs_phera_lock": true
+  },
+  {
+    "fixture": "psr--http-client",
+    "composer_install": 0,
+    "phera_install": 0,
+    "composer_time": {
+      "wall": 0.4162082119999013,
+      "cpu": 0.20870100000001202
+    },
+    "phera_time": {
+      "wall": 0.011702119999995375,
+      "cpu": 0.012772999999988599
+    },
+    "package_differences": [],
+    "generated_differences": [
+      "autoload.php",
+      "composer/LICENSE",
+      "composer/autoload_classmap.php",
+      "composer/autoload_files.php",
+      "composer/autoload_namespaces.php",
+      "composer/autoload_psr4.php",
+      "composer/autoload_real.php",
+      "composer/autoload_static.php",
+      "composer/installed.json",
+      "composer/installed.php",
+      "composer/platform_check.php"
+    ],
+    "installed_identical": true,
+    "autoload_identical": true,
+    "composer_update": 0,
+    "phera_update": 0,
+    "composer_update_time": {
+      "wall": 0.24140882999995483,
+      "cpu": 0.1767770000000013
+    },
+    "phera_update_time": {
+      "wall": 0.06300280399989333,
+      "cpu": 0.008569999999998856
+    },
+    "resolution_differences": {},
+    "composer_accepts_lock": true,
+    "composer_installs_phera_lock": true
+  },
+  {
+    "fixture": "psr--http-factory",
+    "composer_install": 0,
+    "phera_install": 0,
+    "composer_time": {
+      "wall": 0.4223681649999662,
+      "cpu": 0.21165400000001
+    },
+    "phera_time": {
+      "wall": 0.011768754999934572,
+      "cpu": 0.012942999999999927
+    },
+    "package_differences": [],
+    "generated_differences": [
+      "autoload.php",
+      "composer/LICENSE",
+      "composer/autoload_classmap.php",
+      "composer/autoload_files.php",
+      "composer/autoload_namespaces.php",
+      "composer/autoload_psr4.php",
+      "composer/autoload_real.php",
+      "composer/autoload_static.php",
+      "composer/installed.json",
+      "composer/installed.php",
+      "composer/platform_check.php"
+    ],
+    "installed_identical": true,
+    "autoload_identical": true,
+    "composer_update": 0,
+    "phera_update": 0,
+    "composer_update_time": {
+      "wall": 0.2471690759999774,
+      "cpu": 0.17789599999998984
+    },
+    "phera_update_time": {
+      "wall": 0.06452935900006196,
+      "cpu": 0.008363999999993155
+    },
+    "resolution_differences": {},
+    "composer_accepts_lock": true,
+    "composer_installs_phera_lock": true
+  },
+  {
+    "fixture": "psr--http-message",
+    "composer_install": 0,
+    "phera_install": 0,
+    "composer_time": {
+      "wall": 0.22521662300005119,
+      "cpu": 0.1789320000000032
+    },
+    "phera_time": {
+      "wall": 0.009488626999996086,
+      "cpu": 0.011487000000009573
+    },
+    "package_differences": [],
+    "generated_differences": [
+      "autoload.php",
+      "composer/LICENSE",
+      "composer/autoload_classmap.php",
+      "composer/autoload_files.php",
+      "composer/autoload_namespaces.php",
+      "composer/autoload_psr4.php",
+      "composer/autoload_real.php",
+      "composer/autoload_static.php",
+      "composer/installed.json",
+      "composer/installed.php",
+      "composer/platform_check.php"
+    ],
+    "installed_identical": true,
+    "autoload_identical": true,
+    "composer_update": 0,
+    "phera_update": 0,
+    "composer_update_time": {
+      "wall": 0.2292861939999966,
+      "cpu": 0.1840930000000114
+    },
+    "phera_update_time": {
+      "wall": 0.010272147999899062,
+      "cpu": 0.005789999999997519
+    },
+    "resolution_differences": {},
+    "composer_accepts_lock": true,
+    "composer_installs_phera_lock": true
+  },
+  {
+    "fixture": "psr--log",
+    "composer_install": 0,
+    "phera_install": 0,
+    "composer_time": {
+      "wall": 0.2272915240000657,
+      "cpu": 0.17866599999999977
+    },
+    "phera_time": {
+      "wall": 0.008693517999972755,
+      "cpu": 0.010741999999993368
+    },
+    "package_differences": [],
+    "generated_differences": [
+      "autoload.php",
+      "composer/LICENSE",
+      "composer/autoload_classmap.php",
+      "composer/autoload_files.php",
+      "composer/autoload_namespaces.php",
+      "composer/autoload_psr4.php",
+      "composer/autoload_real.php",
+      "composer/autoload_static.php",
+      "composer/installed.json",
+      "composer/installed.php",
+      "composer/platform_check.php"
+    ],
+    "installed_identical": true,
+    "autoload_identical": true,
+    "composer_update": 0,
+    "phera_update": 0,
+    "composer_update_time": {
+      "wall": 0.22678913300001113,
+      "cpu": 0.176991000000001
+    },
+    "phera_update_time": {
+      "wall": 0.008071098999948845,
+      "cpu": 0.005889999999993734
+    },
+    "resolution_differences": {},
+    "composer_accepts_lock": true,
+    "composer_installs_phera_lock": true
+  },
+  {
+    "fixture": "ramsey--uuid",
+    "composer_install": 0,
+    "phera_install": 0,
+    "composer_time": {
+      "wall": 2.305576939000048,
+      "cpu": 3.1162299999999945
+    },
+    "phera_time": {
+      "wall": 0.47303189799993106,
+      "cpu": 0.893632999999987
+    },
+    "package_differences": [],
+    "generated_differences": [
+      "autoload.php",
+      "bin/captainhook",
+      "bin/jsonlint",
+      "bin/parallel-lint",
+      "bin/php-parse",
+      "bin/phpbench",
+      "bin/phpcbf",
+      "bin/phpcs",
+      "bin/phpstan",
+      "bin/phpstan.phar",
+      "bin/phpunit",
+      "composer/LICENSE",
+      "composer/autoload_classmap.php",
+      "composer/autoload_files.php",
+      "composer/autoload_namespaces.php",
+      "composer/autoload_psr4.php",
+      "composer/autoload_real.php",
+      "composer/autoload_static.php",
+      "composer/installed.json",
+      "composer/installed.php",
+      "composer/platform_check.php"
+    ],
+    "installed_identical": true,
+    "autoload_identical": true,
+    "composer_update": 0,
+    "phera_update": 0,
+    "composer_update_time": {
+      "wall": 1.060090865999996,
+      "cpu": 0.5359150000000028
+    },
+    "phera_update_time": {
+      "wall": 2.075475439999991,
+      "cpu": 0.42920899999999307
+    },
+    "resolution_differences": {},
+    "composer_accepts_lock": true,
+    "composer_installs_phera_lock": true
+  },
+  {
+    "fixture": "slim--slim-skeleton",
+    "composer_install": 0,
+    "phera_install": 0,
+    "composer_time": {
+      "wall": 1.5974077460000444,
+      "cpu": 1.9367370000000008
+    },
+    "phera_time": {
+      "wall": 0.4842710520000537,
+      "cpu": 0.8152829999999938
+    },
+    "package_differences": [],
+    "generated_differences": [
+      "autoload.php",
+      "bin/php-parse",
+      "bin/phpcbf",
+      "bin/phpcs",
+      "bin/phpstan",
+      "bin/phpstan.phar",
+      "bin/phpunit",
+      "composer/LICENSE",
+      "composer/autoload_classmap.php",
+      "composer/autoload_files.php",
+      "composer/autoload_namespaces.php",
+      "composer/autoload_psr4.php",
+      "composer/autoload_real.php",
+      "composer/autoload_static.php",
+      "composer/installed.json",
+      "composer/installed.php",
+      "composer/platform_check.php"
+    ],
+    "installed_identical": true,
+    "autoload_identical": true,
+    "composer_update": 0,
+    "phera_update": 0,
+    "composer_update_time": {
+      "wall": 0.5515630390000297,
+      "cpu": 0.33923099999999096
+    },
+    "phera_update_time": {
+      "wall": 0.9811108919999469,
+      "cpu": 0.20708599999998967
+    },
+    "resolution_differences": {},
+    "composer_accepts_lock": true,
+    "composer_installs_phera_lock": true
+  },
+  {
+    "fixture": "symfony--console",
+    "composer_install": 0,
+    "phera_install": 0,
+    "composer_time": {
+      "wall": 1.4320910379999532,
+      "cpu": 1.0507649999999984
+    },
+    "phera_time": {
+      "wall": 0.6535032030000139,
+      "cpu": 0.6878110000000035
+    },
+    "package_differences": [],
+    "generated_differences": [
+      "autoload.php",
+      "bin/patch-type-declarations",
+      "bin/var-dump-server",
+      "composer/LICENSE",
+      "composer/autoload_classmap.php",
+      "composer/autoload_files.php",
+      "composer/autoload_namespaces.php",
+      "composer/autoload_psr4.php",
+      "composer/autoload_real.php",
+      "composer/autoload_static.php",
+      "composer/installed.json",
+      "composer/installed.php",
+      "composer/platform_check.php"
+    ],
+    "installed_identical": true,
+    "autoload_identical": true,
+    "composer_update": 0,
+    "phera_update": 0,
+    "composer_update_time": {
+      "wall": 0.6916899450000074,
+      "cpu": 0.3927979999999991
+    },
+    "phera_update_time": {
+      "wall": 2.224609595000061,
+      "cpu": 1.0084129999999973
+    },
+    "resolution_differences": {},
+    "composer_accepts_lock": true,
+    "composer_installs_phera_lock": true
+  },
+  {
+    "fixture": "symfony--filesystem",
+    "composer_install": 0,
+    "phera_install": 0,
+    "composer_time": {
+      "wall": 0.43584299500003,
+      "cpu": 0.2390749999999855
+    },
+    "phera_time": {
+      "wall": 0.016432959999974628,
+      "cpu": 0.023921999999991783
+    },
+    "package_differences": [],
+    "generated_differences": [
+      "autoload.php",
+      "composer/LICENSE",
+      "composer/autoload_classmap.php",
+      "composer/autoload_files.php",
+      "composer/autoload_namespaces.php",
+      "composer/autoload_psr4.php",
+      "composer/autoload_real.php",
+      "composer/autoload_static.php",
+      "composer/installed.json",
+      "composer/installed.php",
+      "composer/platform_check.php"
+    ],
+    "installed_identical": true,
+    "autoload_identical": true,
+    "composer_update": 0,
+    "phera_update": 0,
+    "composer_update_time": {
+      "wall": 0.2767878429999655,
+      "cpu": 0.19407200000001268
+    },
+    "phera_update_time": {
+      "wall": 0.15311842599999181,
+      "cpu": 0.05575499999999067
+    },
+    "resolution_differences": {},
+    "composer_accepts_lock": true,
+    "composer_installs_phera_lock": true
+  },
+  {
+    "fixture": "symfony--finder",
+    "composer_install": 0,
+    "phera_install": 0,
+    "composer_time": {
+      "wall": 0.4276375869999356,
+      "cpu": 0.23670000000000613
+    },
+    "phera_time": {
+      "wall": 0.015540339000040149,
+      "cpu": 0.022784999999998945
+    },
+    "package_differences": [],
+    "generated_differences": [
+      "autoload.php",
+      "composer/LICENSE",
+      "composer/autoload_classmap.php",
+      "composer/autoload_files.php",
+      "composer/autoload_namespaces.php",
+      "composer/autoload_psr4.php",
+      "composer/autoload_real.php",
+      "composer/autoload_static.php",
+      "composer/installed.json",
+      "composer/installed.php",
+      "composer/platform_check.php"
+    ],
+    "installed_identical": true,
+    "autoload_identical": true,
+    "composer_update": 0,
+    "phera_update": 0,
+    "composer_update_time": {
+      "wall": 0.2839578250000159,
+      "cpu": 0.19780999999999693
+    },
+    "phera_update_time": {
+      "wall": 0.14792997999995805,
+      "cpu": 0.0408299999999997
+    },
+    "resolution_differences": {},
+    "composer_accepts_lock": true,
+    "composer_installs_phera_lock": true
+  },
+  {
+    "fixture": "symfony--polyfill-mbstring",
+    "composer_install": 0,
+    "phera_install": 0,
+    "composer_time": {
+      "wall": 0.22718793199999254,
+      "cpu": 0.1817360000000079
+    },
+    "phera_time": {
+      "wall": 0.009666929999980312,
+      "cpu": 0.011272999999995648
+    },
+    "package_differences": [],
+    "generated_differences": [
+      "autoload.php",
+      "composer/LICENSE",
+      "composer/autoload_classmap.php",
+      "composer/autoload_files.php",
+      "composer/autoload_namespaces.php",
+      "composer/autoload_psr4.php",
+      "composer/autoload_real.php",
+      "composer/autoload_static.php",
+      "composer/installed.json",
+      "composer/installed.php",
+      "composer/platform_check.php"
+    ],
+    "installed_identical": true,
+    "autoload_identical": true,
+    "composer_update": 0,
+    "phera_update": 0,
+    "composer_update_time": {
+      "wall": 0.22117551600001661,
+      "cpu": 0.1743669999999966
+    },
+    "phera_update_time": {
+      "wall": 0.007200542000077803,
+      "cpu": 0.005723999999993623
+    },
+    "resolution_differences": {},
+    "composer_accepts_lock": true,
+    "composer_installs_phera_lock": true
+  },
+  {
+    "fixture": "symfony--skeleton",
+    "composer_install": 0,
+    "phera_install": 0,
+    "composer_time": {
+      "wall": 0.5679284770000095,
+      "cpu": 0.24256300000000408
+    },
+    "phera_time": {
+      "wall": 0.08829649699998754,
+      "cpu": 0.04978100000000296
+    },
+    "package_differences": [],
+    "generated_differences": [
+      "autoload.php",
+      "composer/LICENSE",
+      "composer/autoload_classmap.php",
+      "composer/autoload_files.php",
+      "composer/autoload_namespaces.php",
+      "composer/autoload_psr4.php",
+      "composer/autoload_real.php",
+      "composer/autoload_static.php",
+      "composer/installed.json",
+      "composer/installed.php",
+      "composer/platform_check.php"
+    ],
+    "installed_identical": true,
+    "autoload_identical": true,
+    "composer_update": 0,
+    "phera_update": 0,
+    "composer_update_time": {
+      "wall": 0.25935147100005906,
+      "cpu": 0.1844910000000013
+    },
+    "phera_update_time": {
+      "wall": 0.5341486469999381,
+      "cpu": 0.1060019999999966
+    },
+    "resolution_differences": {},
+    "composer_accepts_lock": true,
+    "composer_installs_phera_lock": true
+  },
+  {
+    "fixture": "webmozart--assert",
+    "composer_install": 0,
+    "phera_install": 0,
+    "composer_time": {
+      "wall": 0.2641164720000688,
+      "cpu": 0.18750800000000112
+    },
+    "phera_time": {
+      "wall": 0.010446415000046727,
+      "cpu": 0.010168999999990547
+    },
+    "package_differences": [],
+    "generated_differences": [
+      "autoload.php",
+      "composer/LICENSE",
+      "composer/autoload_classmap.php",
+      "composer/autoload_files.php",
+      "composer/autoload_namespaces.php",
+      "composer/autoload_psr4.php",
+      "composer/autoload_real.php",
+      "composer/autoload_static.php",
+      "composer/installed.json",
+      "composer/installed.php",
+      "composer/platform_check.php"
+    ],
+    "installed_identical": true,
+    "autoload_identical": true,
+    "composer_update": 0,
+    "phera_update": 0,
+    "composer_update_time": {
+      "wall": 0.22138751299996784,
+      "cpu": 0.17453100000000177
+    },
+    "phera_update_time": {
+      "wall": 0.005218005999950037,
+      "cpu": 0.005592000000007147
+    },
+    "resolution_differences": {},
+    "composer_accepts_lock": true,
+    "composer_installs_phera_lock": true
+  }
+]
