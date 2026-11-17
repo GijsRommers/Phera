@@ -613,7 +613,10 @@ function invoke($name,$args){global $diag;$diag='';$refs=[];if(in_array($name,['
         writeln!(
             script,
             "invoke('{name}',[{}]);",
-            a.iter().map(oracle::php_literal).collect::<Vec<_>>().join(",")
+            a.iter()
+                .map(oracle::php_literal)
+                .collect::<Vec<_>>()
+                .join(",")
         )
         .expect("format");
     }
