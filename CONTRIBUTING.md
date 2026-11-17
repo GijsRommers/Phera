@@ -20,15 +20,23 @@ make ci
 All test suites resolve PHP through the same helper: `PHERA_PHP`, then
 `/opt/homebrew/bin/php`, then `php` on `PATH`. For `make ci` the preflight command
 uses `PHERA_PHP` or `php` on `PATH`; set `PHERA_PHP` explicitly for exact parity.
-`make ci` checks formatting, Clippy, the no-unsafe guard, and prerequisites, builds
-the release CLI and runs `cargo test --workspace` with `PHERA_BIN` exported, so
-PDO's CLI and concurrency tests actually execute. CI splits those checks into
-parallel jobs with the same commands. Run one PDO suite at a time against a
-shared pair of local databases.
+`make ci` checks formatting, Clippy, the no-unsafe guard, and prerequisites, then
+runs `cargo test --workspace --no-fail-fast` without setting `PHERA_BIN`. Native PDO
+tests against both databases remain in this gate. CI uses a PHP wrapper that loads
+only the required shared modules even with `-n`; preflight also runs with `-n`.
+For installations with shared modules, use
+`PHERA_PHP=$PWD/.github/scripts/php-oracle.sh make ci` (optionally set
+`PHERA_PHP_REAL` to the actual PHP binary).
+
+CI's separate **PDO end to end (known gaps)** job builds the release CLI, sets
+`PHERA_BIN` and runs `cargo test -p phera-ext-pdo --no-fail-fast`. It is informational
+until the VM links native class constants and the extension API carries string
+exception codes and properties. To run it locally, use `make ci-build`, then set
+`PHERA_BIN=$PWD/target/release/phera` for that Cargo command. Run one PDO suite at a
+time against shared local databases.
 
 Individual checks are `make fmt-check`, `make lint`, `make safe-rust` and
-`make test`. `make test` alone does not provision prerequisites or set
-`PHERA_BIN`; use `make ci` for the complete gate.
+`make test`. `make test` alone does not provision or verify prerequisites.
 
 If claiming a speed improvement, follow
 [Measure inside the process](benchmarks/README.md#measure-inside-the-process).

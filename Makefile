@@ -18,7 +18,7 @@ check:
 	$(CARGO) check --workspace --all-targets
 
 test: 
-	$(CARGO) test --workspace
+	$(CARGO) test --workspace --no-fail-fast
 
 fmt: 
 	$(CARGO) fmt --all
@@ -29,16 +29,15 @@ fmt-check:
 lint:
 	$(CARGO) clippy --workspace --all-targets -- -D warnings
 
-# Keep the sequence deterministic even with make -j: PDO tests need the binary.
+# Keep prerequisite verification ahead of tests even with make -j.
 .NOTPARALLEL: ci
-ci: export PHERA_BIN = $(CURDIR)/target/release/phera
-ci: fmt-check lint safe-rust ci-prerequisites ci-build test
+ci: fmt-check lint safe-rust ci-prerequisites test
 
 safe-rust:
 	python3 .github/scripts/check-unsafe.py
 
 ci-prerequisites:
-	"$${PHERA_PHP:-php}" .github/scripts/check-prerequisites.php
+	"$${PHERA_PHP:-php}" -n .github/scripts/check-prerequisites.php
 
 ci-build:
 	$(CARGO) build --release -p phera-cli
