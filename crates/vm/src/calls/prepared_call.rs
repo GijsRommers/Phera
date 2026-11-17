@@ -17,10 +17,8 @@
 //! arguments. Everything else, such as a parameter's name for a named
 //! argument, is read from the callee's bytecode when it is needed.
 
-use std::rc::Rc;
-
 use phera_bytecode::{CompiledUnit, Function, Type};
-use phera_value::{Object, PhpString};
+use phera_value::PhpString;
 
 use crate::calls::call_state::{Callee, ParameterSpec};
 use crate::code_table::FunctionIndex;
@@ -175,8 +173,6 @@ impl PreparedCall {
 pub(crate) struct CallDetails {
     /// The callee, when it is not plain PHP code.
     pub(crate) callee: Option<Callee>,
-    /// A closure object that must stay alive while the call runs.
-    pub(crate) owner: Option<Rc<Object>>,
     /// The parameter name the next `Send` is for.
     pub(crate) named: Option<PhpString>,
     /// Named arguments that the variadic parameter collects, by position.

@@ -30,6 +30,7 @@ mod fast_methods;
 mod fast_objects;
 pub(crate) mod frame;
 pub(crate) mod frame_extras;
+pub(crate) mod frame_view;
 mod native;
 pub(crate) mod parameter_binding;
 pub(crate) mod pending;

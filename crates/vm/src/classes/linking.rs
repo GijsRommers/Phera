@@ -264,7 +264,7 @@ impl Vm {
             };
             let value = match property.default {
                 Some(phera_bytecode::Initializer::Literal(index)) => {
-                    crate::calls::frame::value(&unit.constants[index.index()])
+                    crate::unit_caches::value(&unit.constants[index.index()])
                 }
                 _ => phera_value::Value::Null,
             };

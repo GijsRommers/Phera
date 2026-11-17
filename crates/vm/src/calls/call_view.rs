@@ -113,7 +113,7 @@ impl<'a> CallView<'a> {
                 crate::calls::pending::php_window(self.code, function)
             }
             (PreparedCallee::General, Some(callee)) => {
-                crate::calls::pending::general_window(self.code, callee).unwrap_or(1)
+                crate::calls::pending::general_window(callee)
             }
             (PreparedCallee::General | PreparedCallee::Constructed, _) => 1,
         };

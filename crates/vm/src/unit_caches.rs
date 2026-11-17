@@ -3,7 +3,8 @@
 
 use std::{cell::RefCell, rc::Rc};
 
-use phera_bytecode::CompiledUnit;
+use phera_bytecode::{CompiledUnit, Constant};
+use phera_value::{PhpArray, Value};
 
 /// Materialized immutable literals share PHP COW values across frame activations.
 /// Keyed by constant/symbol index in a retained unit; populated at first unit use.
@@ -68,7 +69,7 @@ impl UnitCache {
             constants: unit
                 .constants
                 .iter()
-                .map(crate::calls::frame::value)
+                .map(crate::unit_caches::value)
                 .collect(),
             classes: unit.symbols.iter().map(|_| RefCell::new(None)).collect(),
             type_scopes: unit
@@ -85,5 +86,34 @@ impl UnitCache {
                 .map(|symbol| phera_value::Value::from(symbol.written.as_str()))
                 .collect(),
         }
+    }
+}
+
+/// Materialize bytecode constants as request-local PHP values.
+pub(crate) fn value(constant: &Constant) -> Value {
+    match constant {
+        Constant::Null => Value::Null,
+        Constant::Array(entries) => {
+            let mut array = PhpArray::new();
+            for (key, constant) in entries {
+                let value = value(constant);
+                match key {
+                    phera_bytecode::ConstantKey::Next => {
+                        let _ = array.push(value);
+                    }
+                    phera_bytecode::ConstantKey::Int(key) => {
+                        array.insert(phera_value::ArrayKey::Int(*key), value);
+                    }
+                    phera_bytecode::ConstantKey::String(key) => {
+                        array.insert(phera_value::ArrayKey::String(key.clone().into()), value);
+                    }
+                }
+            }
+            Value::Array(Rc::new(array))
+        }
+        Constant::Bool(value) => Value::Bool(*value),
+        Constant::Int(value) => Value::Int(*value),
+        Constant::Float(value) => Value::Float(*value),
+        Constant::String(value) => Value::from(value.clone()),
     }
 }

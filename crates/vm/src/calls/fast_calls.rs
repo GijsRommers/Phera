@@ -157,7 +157,7 @@ impl Machine<'_> {
                 !call.flags.contains(CallFlags::DETAILS)
                     && self.accepts_argument(function, index, &value)
             }
-            PreparedCallee::General => self.general_accepts(index, &value),
+            PreparedCallee::General => self.general_accepts(index),
             PreparedCallee::Constructed => false,
         };
         if !accepted {
@@ -190,19 +190,16 @@ impl Machine<'_> {
         })
     }
 
-    /// The same for a general callee: a method written in PHP is checked
-    /// like a function; a native one takes any value for an untyped
-    /// by-value parameter. A pending named argument takes the general path.
-    fn general_accepts(&self, index: usize, value: &Value) -> bool {
+    /// The same for a general callee, which is native code: any value, for
+    /// an untyped by-value parameter. A pending named argument takes the
+    /// general path.
+    fn general_accepts(&self, index: usize) -> bool {
         let Some(details) = self.stack.top_details() else {
             return false;
         };
         let Some(callee) = details.callee.as_ref().filter(|_| details.named.is_none()) else {
             return false;
         };
-        if let Some(function) = callee.php_function() {
-            return self.accepts_argument(function, index, value);
-        }
         let intrinsic = matches!(callee.target, CallTarget::Intrinsic(_));
         callee.parameters.get(index).is_some_and(|parameter| {
             !intrinsic && !parameter.by_reference && !parameter.variadic && parameter.ty.is_none()

@@ -96,14 +96,7 @@ impl Vm {
             crate::callables::CallableUse::Direct
         };
         let callee = self.resolve_callable_for(&value, usage)?;
-        self.prepare_call(callee)?;
-        if let Value::Object(object) = value
-            && object.class.name() == "Closure"
-            && self.call_stack.top_details().is_some()
-        {
-            self.call_stack.top_details_mut()?.owner = Some(object);
-        }
-        Ok(())
+        self.prepare_call(callee)
     }
 
     /// Snapshot the signature and target so argument evaluation cannot change resolution.
@@ -179,15 +172,10 @@ impl Vm {
     /// to PHP code needs only the record; anything else keeps its
     /// description in the call's details.
     pub(crate) fn prepare_call(&mut self, callee: Callee) -> Result<(), NativeError> {
-        match self.prepare_php_callee(callee) {
-            Ok(()) => Ok(()),
-            Err(callee) => prepare_general(
-                &self.code,
-                &mut self.call_stack,
-                &mut self.registers,
-                callee,
-            ),
+        if let Err(callee) = self.prepare_php_callee(callee) {
+            prepare_general(&mut self.call_stack, &mut self.registers, callee);
         }
+        Ok(())
     }
 
     /// The following send routes to a named parameter rather than the next position.
@@ -251,12 +239,11 @@ pub(crate) fn php_window(code: &CodeTable, function: FunctionIndex) -> usize {
 /// Reserve the window of a call to a general callee and record the call,
 /// with the callee in its details.
 pub(crate) fn prepare_general(
-    code: &CodeTable,
     stack: &mut crate::calls::call_stack::CallStack,
     registers: &mut crate::calls::registers::Registers,
     callee: Callee,
-) -> Result<(), NativeError> {
-    let size = general_window(code, &callee)?;
+) {
+    let size = general_window(&callee);
     let base = registers.len();
     registers.grow_to(base + size);
     let details = CallDetails {
@@ -267,23 +254,10 @@ pub(crate) fn prepare_general(
         PreparedCall::new(PreparedCallee::General, base),
         Some(details),
     );
-    Ok(())
 }
 
-/// The window size of a call to a general callee: the registers of the PHP
-/// function it runs, if any, else one per parameter.
-pub(crate) fn general_window(code: &CodeTable, callee: &Callee) -> Result<usize, NativeError> {
-    let function = match &callee.target {
-        CallTarget::Closure(object) => {
-            let native = object.native.borrow();
-            let state = native
-                .as_ref()
-                .and_then(|value| value.downcast_ref::<crate::closures::ClosureState>())
-                .ok_or_else(|| internal_error!("closure state"))?;
-            state.callee.user_function()
-        }
-        _ => callee.user_function(),
-    };
-    let registers = function.map_or(0, |function| php_window(code, function));
-    Ok(registers.max(callee.parameters.len()).max(1))
+/// The window size of a call to a general callee (native code): one
+/// register per parameter, and at least one.
+pub(crate) fn general_window(callee: &Callee) -> usize {
+    callee.parameters.len().max(1)
 }

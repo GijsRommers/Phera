@@ -122,19 +122,4 @@ impl crate::calls::call_state::Callee {
             _ => None,
         }
     }
-
-    /// The PHP function a call enters, when its target is PHP code: a
-    /// function, a method written in PHP, or a closure over a PHP function.
-    pub(crate) fn php_function(&self) -> Option<crate::code_table::FunctionIndex> {
-        match &self.target {
-            CallTarget::Closure(object) => object
-                .native
-                .borrow()
-                .as_ref()?
-                .downcast_ref::<crate::closures::ClosureState>()?
-                .callee
-                .user_function(),
-            _ => self.user_function(),
-        }
-    }
 }

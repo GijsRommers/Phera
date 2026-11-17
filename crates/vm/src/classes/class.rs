@@ -188,7 +188,7 @@ pub(crate) fn literal_initializer(
         },
         Instruction::LoadConst { dst, constant } => LiteralLoad {
             destination: dst,
-            value: crate::calls::frame::value(
+            value: crate::unit_caches::value(
                 code.unit(*reference).constants.get(constant.index())?,
             ),
         },

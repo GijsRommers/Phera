@@ -63,6 +63,7 @@ mod exceptions;
 mod extract;
 mod fast;
 mod finally;
+mod function_facts;
 mod function_table;
 mod global_instructions;
 mod global_paths;
