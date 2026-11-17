@@ -26,15 +26,8 @@ impl Vm {
         let mut steps = place.steps()?;
         if matches!(steps.next(), Some(Step::Append))
             && steps.next().is_none()
-            && let Some(Value::Array(array)) = self
-                .call_stack
-                .current_mut()
-                .and_then(|frame| {
-                    frame
-                        .slots_mut(&mut self.registers)
-                        .get_mut(register.index())
-                })
-                .and_then(Option::as_mut)
+            && let Some(Value::Array(array)) =
+                self.current_slot_mut(register).and_then(Option::as_mut)
         {
             Rc::make_mut(array).push(value)?;
             return Ok(());
@@ -58,13 +51,7 @@ impl Vm {
             keys
         };
         let mut root = self
-            .call_stack
-            .current_mut()
-            .and_then(|frame| {
-                frame
-                    .slots_mut(&mut self.registers)
-                    .get_mut(register.0 as usize)
-            })
+            .current_slot_mut(register)
             .and_then(Option::take)
             .unwrap_or_default();
         let previous_reference = if keys.iter().next().is_none() && binding == Binding::ByReference
@@ -167,13 +154,7 @@ impl Vm {
         let keys = self.property_keys(place, root_value.clone())?;
         self.validate_property_mutation(root_value, &keys, &mut Value::Null, Mutation::Unset)?;
         let mut root = self
-            .call_stack
-            .current_mut()
-            .and_then(|frame| {
-                frame
-                    .slots_mut(&mut self.registers)
-                    .get_mut(register.0 as usize)
-            })
+            .current_slot_mut(register)
             .and_then(Option::take)
             .unwrap_or_default();
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);

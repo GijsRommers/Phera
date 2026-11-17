@@ -6,7 +6,7 @@ use phera_bytecode::{CompiledUnit, Reg};
 use phera_extension_api::{LocalFuture, Registry, RequestState};
 use phera_value::{PhpArray, Value};
 
-use crate::calls::frame::Frame;
+use crate::calls::frame::{Frame, FrameView};
 use crate::path::AccessPath;
 
 /// Compiler invariant failures are PHP errors. Keep literal construction here:
@@ -39,6 +39,7 @@ mod closure_methods;
 mod closure_tests;
 mod closure_types;
 mod closures;
+mod code_table;
 mod constant_table;
 mod constants;
 mod context;
@@ -82,7 +83,6 @@ mod iterator_instructions;
 mod iterators;
 mod locals;
 mod native_diagnostics;
-mod object_instructions;
 mod object_iteration;
 mod operators;
 mod ops;
@@ -98,7 +98,6 @@ mod property_sites;
 mod property_storage;
 mod property_targets;
 mod references;
-mod scalar_batches;
 mod scope_intrinsics;
 mod static_variables;
 mod string_offsets;
@@ -107,7 +106,6 @@ mod typed_references;
 mod types;
 mod unit_caches;
 mod unpacking;
-mod value_instructions;
 
 /// Resolves PHP includes through the embedding runtime code cache.
 pub trait CodeLoader: Send + Sync {
@@ -127,8 +125,6 @@ impl OutputSink for Vec<u8> {
 
 /// Default limit permits 200,000-deep PHP recursion without consuming Rust stack.
 pub const DEFAULT_FRAME_LIMIT: usize = 250_000;
-/// Per-symbol resolved callees shared by frames of one compiled unit.
-type SymbolCache = Rc<unit_caches::UnitCache>;
 
 /// One request interpreter; PHP calls use heap frames rather than Rust recursion.
 pub struct Vm {
@@ -139,7 +135,8 @@ pub struct Vm {
     argument_origin: calls::callback_binding::ArgumentOrigin,
     prelinked_classes: std::collections::HashSet<(usize, usize)>,
     function_table: function_table::FunctionTable,
-    unit_caches: unit_caches::UnitCaches,
+    /// Every loaded file and function of the request, by number.
+    code: code_table::CodeTable,
     globals: globals::Globals,
     static_variables: static_variables::StaticVariables,
     diagnostic_reporter: diagnostic_reporter::DiagnosticReporter,
@@ -179,7 +176,7 @@ impl Vm {
             argument_origin: calls::callback_binding::ArgumentOrigin::Php,
             prelinked_classes: std::collections::HashSet::new(),
             function_table: function_table::FunctionTable::new(),
-            unit_caches: unit_caches::UnitCaches::new(),
+            code: code_table::CodeTable::default(),
             globals: globals::Globals::new(),
             static_variables: static_variables::StaticVariables::new(),
             diagnostic_reporter: diagnostic_reporter::DiagnosticReporter::new(),
@@ -239,34 +236,30 @@ impl Vm {
 
     /// Run a compiled top-level function on the request heap stack and report its exit status.
     pub async fn run(&mut self, unit: Arc<CompiledUnit>) -> i32 {
+        let main = self.code.load(&unit);
         for id in &unit.hoisted {
-            if let Some(frame) = unit.functions.get(id.index()) {
-                self.function_table.insert(
-                    frame.name.to_ascii_lowercase(),
-                    crate::function_table::FunctionRef {
-                        unit: unit.clone(),
-                        index: id.index(),
-                    },
-                );
+            if let Some(function) = unit.functions.get(id.index()) {
+                let index = self.code.declared(main, id.index());
+                self.function_table
+                    .insert(function.name.to_ascii_lowercase(), index);
             }
         }
         self.include_state.record(unit.file.clone());
-        let cache = self.unit_caches.symbols(&unit);
-        let class_unit = unit.clone();
-        let mut frame = Frame::new(cache, &mut self.registers, unit, None, None, 0);
+        let registers = unit.main.registers as usize;
+        self.registers.grow_to(registers);
+        self.call_stack.push(Frame::new(main, 0, None));
         for (name, value) in self.globals.iter() {
-            if let Some(i) = frame
-                .function()
+            if let Some(i) = unit
+                .main
                 .locals
                 .iter()
-                .position(|candidate| frame.unit.names.get(candidate.index()) == Some(name))
+                .position(|candidate| unit.names.get(candidate.index()) == Some(name))
             {
-                frame.set(&mut self.registers, Reg(i as u16), value.clone());
+                self.registers.window_mut(i, 1)[0] = Some(value.clone());
             }
         }
-        self.call_stack.push(frame);
-        self.publish_declaration_warnings(&class_unit);
-        if let Err(error) = self.hoist_classes(&class_unit) {
+        self.publish_declaration_warnings(&unit);
+        if let Err(error) = self.hoist_classes(&unit) {
             self.unwind(error);
             return self.status;
         }
@@ -280,9 +273,35 @@ impl Vm {
         self.status
     }
 
+    /// The running frame, with its code and side-table entry.
     #[inline]
-    fn current(&self) -> Option<&Frame> {
-        self.call_stack.current()
+    fn current(&self) -> Option<FrameView<'_>> {
+        let depth = self.call_stack.depth().checked_sub(1)?;
+        self.frame_at(depth)
+    }
+
+    /// The frame at `depth`, with its code and side-table entry.
+    fn frame_at(&self, depth: usize) -> Option<FrameView<'_>> {
+        Some(FrameView {
+            frame: *self.call_stack.at(depth)?,
+            code: &self.code,
+            extras: self.call_stack.extras(depth),
+        })
+    }
+
+    /// Every frame, from the script's top-level code to the running one.
+    fn frames(&self) -> impl DoubleEndedIterator<Item = FrameView<'_>> + ExactSizeIterator {
+        let code = &self.code;
+        let stack = &self.call_stack;
+        stack
+            .frames()
+            .iter()
+            .enumerate()
+            .map(move |(depth, frame)| FrameView {
+                frame: *frame,
+                code,
+                extras: stack.extras(depth),
+            })
     }
 
     /// Read an operator operand without creating another PHP value owner.
@@ -302,10 +321,36 @@ impl Vm {
             .unwrap_or_default()
     }
 
+    /// A register of the running frame, for writing.
+    #[inline]
+    fn current_slot_mut(&mut self, register: Reg) -> Option<&mut Option<Value>> {
+        let frame = self.current()?;
+        let (base, count) = (frame.base(), frame.count());
+        self.registers
+            .window_mut(base, count)
+            .get_mut(register.index())
+    }
+
+    /// A register of the script's top-level code, where globals live.
+    fn main_slot_mut(&mut self, register: Reg) -> Option<&mut Option<Value>> {
+        let frame = self.frame_at(0)?;
+        let (base, count) = (frame.base(), frame.count());
+        self.registers
+            .window_mut(base, count)
+            .get_mut(register.index())
+    }
+
     #[inline]
     fn set(&mut self, register: Reg, value: Value) {
-        if let Some(frame) = self.call_stack.current_mut() {
-            frame.set(&mut self.registers, register, value)
+        if let Some(frame) = self.current() {
+            let (base, count) = (frame.base(), frame.count());
+            if let Some(slot) = self
+                .registers
+                .window_mut(base, count)
+                .get_mut(register.index())
+            {
+                *slot = Some(value)
+            }
         }
     }
 }

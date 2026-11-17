@@ -88,10 +88,10 @@ impl Vm {
             .current()
             .ok_or_else(|| internal_error!("static site"))?;
         Ok(StaticContext {
-            scope: frame.method.as_ref().map(|context| context.scope.clone()),
-            called: frame.method.as_ref().map(|context| context.called.clone()),
+            scope: frame.method().map(|context| context.scope.clone()),
+            called: frame.method().map(|context| context.called.clone()),
             receiver: frame
-                .method
+                .method()
                 .as_ref()
                 .and_then(|context| context.receiver.clone()),
         })

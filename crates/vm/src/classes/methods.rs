@@ -20,7 +20,7 @@ impl Vm {
         let unit = self
             .current()
             .ok_or_else(|| internal_error!("method frame"))?
-            .unit
+            .unit()
             .clone();
         let name = unit
             .names
@@ -60,7 +60,7 @@ impl Vm {
             })?;
             let instruction = self
                 .current()
-                .and_then(|frame| frame.function().instructions.get(frame.ip));
+                .and_then(|frame| frame.function().instructions.get(frame.ip()));
             let usage = match instruction {
                 Some(phera_bytecode::Instruction::MakeCallable { .. }) => {
                     crate::callables::CallableUse::FirstClass
@@ -115,7 +115,7 @@ impl Vm {
                 method.declaring, method.name
             )));
         }
-        let signature = method.signature();
+        let signature = method.signature(&self.code);
         let call_name = signature.name.clone();
         let parameters = signature.parameters.clone();
         let context = MethodContext {
@@ -141,7 +141,7 @@ impl Vm {
             .and_then(|name| self.classes.get(name));
         let scope = initializer_scope.as_ref().or_else(|| {
             self.current()
-                .and_then(|frame| frame.method.as_ref())
+                .and_then(|frame| frame.method())
                 .map(|context| &context.scope)
         });
         let allowed = match method.visibility {

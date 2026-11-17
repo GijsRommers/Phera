@@ -48,7 +48,7 @@ impl Vm {
         let frame = self
             .current()
             .ok_or_else(|| internal_error!("method site"))?;
-        let caller = frame.method.as_ref().map(|context| context.scope.clone());
+        let caller = frame.method().map(|context| context.scope.clone());
         if let Some(slot) = frame.site_cache()
             && let crate::unit_caches::CachedSite::Method(entry) = &*slot.borrow()
             && Rc::ptr_eq(&entry.class, class)

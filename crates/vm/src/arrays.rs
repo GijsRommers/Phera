@@ -38,13 +38,7 @@ impl Vm {
             .transpose()?;
         drop(diagnostics);
         let mut target = self
-            .call_stack
-            .current_mut()
-            .and_then(|frame| {
-                frame
-                    .slots_mut(&mut self.registers)
-                    .get_mut(register.index())
-            })
+            .current_slot_mut(register)
             .and_then(Option::take)
             .unwrap_or_default();
         let Value::Array(array) = &mut target else {

@@ -19,17 +19,16 @@ impl Vm {
         missing: Missing,
     ) -> Result<Option<Reg>, NativeError> {
         let main = self
-            .call_stack
-            .main_mut()
+            .frame_at(0)
             .ok_or_else(|| internal_error!("global without main"))?;
         let index = main
             .function()
             .locals
             .iter()
-            .position(|candidate| main.unit.names.get(candidate.index()) == Some(&name));
+            .position(|candidate| main.unit().names.get(candidate.index()) == Some(&name));
         let main_register = index
             .map(|index| Reg(index as u16))
-            .or_else(|| main.dynamic.get(&name).copied());
+            .or_else(|| main.extras.dynamic.get(&name).copied());
         let existing = main_register
             .and_then(|register| main.slots(&self.registers).get(register.index()))
             .and_then(Option::as_ref)
@@ -51,11 +50,9 @@ impl Vm {
         }
         let reference = self.globals.reference(name.clone());
         if let Some(main_register) = main_register {
-            let main = self
-                .call_stack
-                .main_mut()
-                .ok_or_else(|| internal_error!("global without main"))?;
-            main.set(&mut self.registers, main_register, reference.clone());
+            if let Some(slot) = self.main_slot_mut(main_register) {
+                *slot = Some(reference.clone());
+            }
             if self.call_stack.depth() == 1 {
                 return Ok(Some(main_register));
             }
@@ -70,15 +67,15 @@ impl Vm {
         for (name, value) in self.globals.iter() {
             values.insert(ArrayKey::str(name.as_str()), self.copy_global_value(value));
         }
-        if let Some(main) = self.call_stack.iter().next() {
+        if let Some(main) = self.frames().next() {
             for (index, name) in main.function().locals.iter().enumerate() {
-                if let Some(name) = main.unit.names.get(name.index())
+                if let Some(name) = main.unit().names.get(name.index())
                     && let Some(Some(value)) = main.slots(&self.registers).get(index)
                 {
                     values.insert(ArrayKey::str(name.as_str()), self.copy_global_value(value));
                 }
             }
-            for (name, register) in main.dynamic.iter() {
+            for (name, register) in main.extras.dynamic.iter() {
                 if let Some(Some(value)) = main.slots(&self.registers).get(register.index()) {
                     values.insert(ArrayKey::str(name.as_str()), self.copy_global_value(value));
                 }
@@ -98,14 +95,14 @@ impl Vm {
             .iter()
             .filter(|(_, value)| same_cell(value))
             .count();
-        if let Some(main) = self.call_stack.iter().next() {
+        if let Some(main) = self.frames().next() {
             let named_cell = main
                 .slots(&self.registers)
                 .iter()
                 .take(main.function().locals.len())
                 .flatten()
                 .any(&same_cell)
-                || main.dynamic.iter().any(|(_, register)| {
+                || main.extras.dynamic.iter().any(|(_, register)| {
                     main.slots(&self.registers)
                         .get(register.index())
                         .and_then(Option::as_ref)
@@ -113,7 +110,7 @@ impl Vm {
                 });
             internal_owners += usize::from(named_cell);
         }
-        for frame in self.call_stack.iter() {
+        for frame in self.frames() {
             for (index, slot) in frame
                 .slots(&self.registers)
                 .iter()
@@ -121,6 +118,7 @@ impl Vm {
                 .skip(frame.function().locals.len())
             {
                 if !frame
+                    .extras
                     .dynamic
                     .iter()
                     .any(|(_, register)| register.index() == index)
@@ -140,39 +138,41 @@ impl Vm {
     /// Rebinding a whole global replaces its symbol cell, including the main-scope slot.
     pub(crate) fn publish_global(&mut self, name: String, value: Value) {
         self.globals.insert(name.clone(), value.clone());
-        if let Some(main) = self.call_stack.main_mut() {
-            let register = main
-                .function()
+        let register = self.frame_at(0).and_then(|main| {
+            main.function()
                 .locals
                 .iter()
-                .position(|candidate| main.unit.names.get(candidate.index()) == Some(&name))
+                .position(|candidate| main.unit().names.get(candidate.index()) == Some(&name))
                 .map(|index| Reg(index as u16))
-                .or_else(|| main.dynamic.get(&name).copied());
-            if let Some(register) = register {
-                main.set(&mut self.registers, register, value);
-            }
+                .or_else(|| main.extras.dynamic.get(&name).copied())
+        });
+        if let Some(slot) = register.and_then(|register| self.main_slot_mut(register)) {
+            *slot = Some(value);
         }
     }
 
     /// Removing a symbol never writes null through other references to its former value.
     pub(crate) fn remove_global(&mut self, name: &str) {
         self.globals.remove(name);
-        if let Some(main) = self.call_stack.main_mut() {
+        if let Some(main) = self.frame_at(0) {
             let index = main.function().locals.iter().position(|candidate| {
-                main.unit
+                main.unit()
                     .names
                     .get(candidate.index())
                     .is_some_and(|candidate| candidate == name)
             });
             let register = index
                 .map(|index| Reg(index as u16))
-                .or_else(|| main.dynamic.get(name).copied());
-            if let Some(register) = register
-                && let Some(slot) = main
-                    .slots_mut(&mut self.registers)
+                .or_else(|| main.extras.dynamic.get(name).copied());
+            if let Some(register) = register {
+                let (base, count) = (main.base(), main.count());
+                if let Some(slot) = self
+                    .registers
+                    .window_mut(base, count)
                     .get_mut(register.index())
-            {
-                *slot = None;
+                {
+                    *slot = None;
+                }
             }
         }
     }

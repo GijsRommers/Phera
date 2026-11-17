@@ -60,7 +60,7 @@ impl Vm {
         {
             return result;
         }
-        let context = self.current().and_then(|frame| frame.method.as_ref());
+        let context = self.current().and_then(|frame| frame.method());
         let matches = |name: &str| {
             let resolved = match name.trim_matches(['(', ')']) {
                 "self" => context.map(|context| context.scope.name.as_str()),

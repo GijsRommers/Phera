@@ -33,7 +33,7 @@ impl Vm {
         let unit = self
             .current()
             .ok_or_else(|| internal_error!("known static frame"))?
-            .unit
+            .unit()
             .clone();
         let method = unit
             .symbols
@@ -44,10 +44,7 @@ impl Vm {
             .classes
             .get(&name)
             .ok_or_else(|| NativeError::error(format!("Class \"{name}\" not found")))?;
-        let context = self
-            .current()
-            .and_then(|frame| frame.method.as_ref())
-            .cloned();
+        let context = self.current().and_then(|frame| frame.method()).cloned();
         let receiver = context
             .as_ref()
             .and_then(|context| context.receiver.clone())

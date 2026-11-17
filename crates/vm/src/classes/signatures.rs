@@ -25,21 +25,21 @@ struct Contract {
 
 impl Contract {
     /// Copy small declaration metadata without executing default expressions.
-    fn from_method(method: &Method) -> Option<Self> {
+    fn from_method(method: &Method, code: &crate::code_table::CodeTable) -> Option<Self> {
         let MethodBody::User(reference) = &method.body else {
             return None;
         };
-        let function = &reference.unit.functions[reference.index];
+        let function = code.function(*reference);
         Some(Self {
             returns_reference: function.returns_reference,
             parameters: function
                 .parameters
                 .iter()
                 .map(|parameter| ParameterContract {
-                    name: reference.unit.names[parameter.name.index()].clone(),
+                    name: code.unit(*reference).names[parameter.name.index()].clone(),
                     declaration: parameter
                         .ty
-                        .map(|index| reference.unit.types[index.index()].display.clone()),
+                        .map(|index| code.unit(*reference).types[index.index()].display.clone()),
                     by_reference: parameter.by_reference,
                     variadic: parameter.variadic,
                     optional: parameter.has_default,
@@ -48,7 +48,7 @@ impl Contract {
                 .collect(),
             returns: function
                 .return_type
-                .map(|index| reference.unit.types[index.index()].display.clone()),
+                .map(|index| code.unit(*reference).types[index.index()].display.clone()),
         })
     }
 
@@ -104,8 +104,8 @@ impl Vm {
             return Ok(());
         }
         let (Some(base), Some(child)) = (
-            Contract::from_method(inherited),
-            Contract::from_method(method),
+            Contract::from_method(inherited, &self.code),
+            Contract::from_method(method, &self.code),
         ) else {
             return Ok(());
         };
@@ -164,8 +164,8 @@ impl Vm {
                     child.display(method),
                     base.display(inherited)
                 ),
-                file: reference.unit.file.clone(),
-                line: reference.unit.functions[reference.index].definition_line as usize,
+                file: self.code.unit(*reference).file.clone(),
+                line: self.code.function(*reference).definition_line as usize,
             },
         ))))
     }

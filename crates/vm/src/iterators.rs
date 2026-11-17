@@ -17,12 +17,6 @@ impl Iterators {
         }
     }
 
-    /// Recycled activations retain capacity across different function signatures.
-    pub(crate) fn resize(&mut self, count: u16) {
-        self.clear();
-        self.slots.resize_with(count as usize, || None);
-    }
-
     /// Return releases every iterator owner without freeing its backing storage.
     pub(crate) fn clear(&mut self) {
         self.slots.fill_with(|| None);
@@ -56,9 +50,11 @@ impl Iterators {
 
     /// A compiler-assigned slot replaces any traversal already stored there.
     pub(crate) fn insert(&mut self, index: u16, state: IteratorState) {
-        if let Some(slot) = self.slots.get_mut(index as usize) {
-            *slot = Some(state)
+        let index = index as usize;
+        if self.slots.len() <= index {
+            self.slots.resize_with(index + 1, || None);
         }
+        self.slots[index] = Some(state);
     }
 
     /// Ending foreach transfers its remaining owners out of the activation.

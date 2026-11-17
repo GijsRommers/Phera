@@ -24,7 +24,7 @@ pub(crate) mod callback_execution;
 pub(crate) mod callback_references;
 pub(crate) mod execution_loop;
 pub(crate) mod frame;
-pub(crate) mod frame_lifecycle;
+pub(crate) mod frame_extras;
 mod native;
 pub(crate) mod parameter_binding;
 pub(crate) mod pending;

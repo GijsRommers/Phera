@@ -34,11 +34,8 @@ pub(crate) enum CallTarget {
     /// A class without a constructor still consumes sends and returns the allocated handle.
     Constructed(Rc<phera_value::Object>),
     Closure(Rc<phera_value::Object>),
-    /// Compiled code ownership is shared without allocating a per-invocation callee record.
-    User {
-        unit: std::sync::Arc<phera_bytecode::CompiledUnit>,
-        index: usize,
-    },
+    /// A declared PHP function.
+    User(crate::code_table::FunctionIndex),
     Native(FunctionEntry),
     Intrinsic(crate::intrinsics::Intrinsic),
 }

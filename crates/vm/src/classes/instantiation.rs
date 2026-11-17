@@ -12,10 +12,10 @@ impl Vm {
     pub(crate) fn class_symbol(&self, symbol: SymbolId) -> Result<String, NativeError> {
         let name = self
             .current()
-            .and_then(|frame| frame.unit.symbols.get(symbol.index()))
+            .and_then(|frame| frame.unit().symbols.get(symbol.index()))
             .map(|symbol| symbol.written.clone())
             .ok_or_else(|| internal_error!("class symbol"))?;
-        let context = self.current().and_then(|frame| frame.method.as_ref());
+        let context = self.current().and_then(|frame| frame.method());
         match name.as_str() {
             "self" | "static" => {
                 let context = context.ok_or_else(|| {
@@ -48,7 +48,7 @@ impl Vm {
     pub(crate) fn new_object(&mut self, symbol: SymbolId) -> Result<(), NativeError> {
         let frame = self.current().ok_or_else(|| internal_error!("new site"))?;
         let written = &frame
-            .unit
+            .unit()
             .symbols
             .get(symbol.index())
             .ok_or_else(|| internal_error!("new symbol"))?
@@ -58,7 +58,7 @@ impl Vm {
             return self.new_named_object(&name);
         }
         let cached = frame
-            .cache
+            .cache()
             .classes
             .get(symbol.index())
             .and_then(|slot| slot.borrow().clone());
@@ -71,7 +71,7 @@ impl Vm {
                 .ok_or_else(|| NativeError::error(format!("Class \"{written}\" not found")))?;
             if let Some(slot) = self
                 .current()
-                .and_then(|frame| frame.cache.classes.get(symbol.index()))
+                .and_then(|frame| frame.cache().classes.get(symbol.index()))
             {
                 *slot.borrow_mut() = Some(class.clone());
             }
@@ -196,7 +196,7 @@ impl Vm {
     pub(crate) fn fetch_this(&mut self, destination: Reg) -> Result<(), NativeError> {
         let receiver = self
             .current()
-            .and_then(|frame| frame.method.as_ref())
+            .and_then(|frame| frame.method())
             .and_then(|context| context.receiver.clone())
             .ok_or_else(|| NativeError::error("Using $this when not in object context"))?;
         self.set(destination, Value::Object(receiver));
@@ -211,19 +211,19 @@ impl Vm {
             .current()
             .ok_or_else(|| internal_error!("class name frame"))?;
         let name = &frame
-            .unit
+            .unit()
             .symbols
             .get(symbol.index())
             .ok_or_else(|| internal_error!("class name symbol"))?
             .written;
-        let context = frame.method.as_ref();
+        let context = frame.method();
         let class = match name.as_str() {
             "self" => context.map(|context| &context.scope),
             "static" => context.map(|context| &context.called),
             "parent" => context.and_then(|context| context.scope.parent.as_ref()),
             _ => {
                 return frame
-                    .cache
+                    .cache()
                     .class_names
                     .get(symbol.index())
                     .cloned()
