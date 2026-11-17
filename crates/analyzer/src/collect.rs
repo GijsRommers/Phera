@@ -29,9 +29,10 @@ pub fn collect(index: &mut Index, file: &str, source: &str, program: &Program) {
                 StatementKind::Class(class) => {
                     if let Some(name) = &class.name {
                         let info = class_info(class, &names, &location);
-                        index
-                            .classes
-                            .insert(names.declaration(&name.name).to_lowercase(), info);
+                        let name = names.declaration(&name.name).to_ascii_lowercase();
+                        if !index.builtin_classes.contains(&name) {
+                            index.classes.insert(name, info);
+                        }
                     }
                     for member in &class.members {
                         if let ClassMemberKind::Method(method) = &member.kind
@@ -42,26 +43,16 @@ pub fn collect(index: &mut Index, file: &str, source: &str, program: &Program) {
                     }
                 }
                 StatementKind::Function(function) => {
-                    let mut signature = Signature::new(
-                        &function.parameters,
-                        function.return_type.as_ref(),
-                        &names,
-                        location(statement.span.start),
-                    );
-                    signature.accepts_extra = uses_argument_introspection(&function.body);
-                    let name = names.declaration(&function.name.name).to_lowercase();
+                    let signature =
+                        function_signature(function, &names, location(statement.span.start));
+                    let name = names.declaration(&function.name.name).to_ascii_lowercase();
                     if !index.builtin_functions.contains(&name) {
                         index.functions.insert(name, signature);
                     }
                     pending.push((&function.body, names.clone()));
                 }
                 StatementKind::Const { items, .. } => {
-                    for item in items {
-                        index.constants.insert(
-                            names.declaration(&item.name.name),
-                            ConstantInfo::untyped(location(item.span.start)),
-                        );
-                    }
+                    collect_constants(index, items, &names, &location)
                 }
                 _ => {
                     for block in child_blocks(statement) {
@@ -115,7 +106,7 @@ pub(crate) fn uses_argument_introspection(body: &[Statement]) -> bool {
                     if let ExpressionKind::Call { callee, .. } = &expr.kind
                         && let ExpressionKind::Name(name) = &callee.kind
                         && matches!(
-                            name.text.to_lowercase().as_str(),
+                            name.text.to_ascii_lowercase().as_str(),
                             "func_get_args" | "func_get_arg" | "func_num_args"
                         )
                     {
@@ -167,7 +158,7 @@ fn collect_expression_declarations<'a>(
             }
             let mut info = class_info(class, names, location);
             info.name = anonymous_name(&location(class.span.start).file, class.span.start);
-            index.classes.insert(info.name.to_lowercase(), info);
+            index.classes.insert(info.name.to_ascii_lowercase(), info);
         }
         match &expression.kind {
             ExpressionKind::Closure(closure) => blocks.push(closure.body.as_slice()),
@@ -181,4 +172,40 @@ fn collect_expression_declarations<'a>(
 
 pub fn anonymous_name(file: &str, offset: usize) -> String {
     format!("@anonymous:{file}:{offset}")
+}
+
+fn function_signature(
+    function: &FunctionDeclaration,
+    names: &Names,
+    location: Location,
+) -> Signature {
+    let mut signature = Signature::new(
+        &function.parameters,
+        function.return_type.as_ref(),
+        names,
+        location,
+    );
+    signature.accepts_extra = uses_argument_introspection(&function.body);
+    signature.global_effects = crate::global_effects::of(&function.body);
+    signature
+}
+
+fn collect_constants(
+    index: &mut Index,
+    items: &[ConstantDeclaration],
+    names: &Names,
+    location: &impl Fn(usize) -> Location,
+) {
+    for item in items {
+        let location = location(item.span.start);
+        let ty = crate::constant_types::infer(&item.value, names, location.clone(), index);
+        index.constants.insert(
+            names.declaration(&item.name.name),
+            ConstantInfo {
+                ty,
+                modifiers: Modifiers::default(),
+                location,
+            },
+        );
+    }
 }

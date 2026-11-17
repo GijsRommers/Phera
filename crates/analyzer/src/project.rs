@@ -16,6 +16,9 @@ pub struct ParsedFile {
 
 pub fn discover(paths: &[String], excluded: &[String]) -> Result<Vec<PathBuf>, String> {
     let mut files = std::collections::BTreeSet::new();
+    let working_directory = std::env::current_dir()
+        .and_then(|p| p.canonicalize())
+        .map_err(|e| e.to_string())?;
     for path in paths {
         let root = PathBuf::from(path);
         if !root.exists() {
@@ -25,7 +28,17 @@ pub fn discover(paths: &[String], excluded: &[String]) -> Result<Vec<PathBuf>, S
         let mut pending = vec![root];
         while let Some(path) = pending.pop() {
             let name = display_path(&path);
-            if excluded.iter().any(|pattern| glob(pattern, &name)) {
+            let relative = if excluded.is_empty() {
+                name.clone()
+            } else {
+                path.canonicalize()
+                    .map(|p| display_path(p.strip_prefix(&working_directory).unwrap_or(&p)))
+                    .unwrap_or_else(|_| name.clone())
+            };
+            if excluded
+                .iter()
+                .any(|pattern| glob(pattern, &name) || glob(pattern, &relative))
+            {
                 continue;
             }
             let metadata = std::fs::symlink_metadata(&path).map_err(|e| e.to_string())?;

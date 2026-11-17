@@ -7,7 +7,7 @@ pub fn encode_type(ty: &ValueType) -> String {
     match ty {
         ValueType::Class(name) => format!("@{name}"),
         ValueType::Union(items) => items.iter().map(encode_type).collect::<Vec<_>>().join("|"),
-        _ => format!("{ty:?}").to_lowercase(),
+        _ => format!("{ty:?}").to_ascii_lowercase(),
     }
 }
 
@@ -34,12 +34,18 @@ pub fn decode_type(text: &str) -> ValueType {
 
 pub fn flags(m: Modifiers) -> String {
     format!(
-        "{},{},{},{},{}",
+        "{},{},{},{},{},{}",
         m.visibility.unwrap_or(Visibility::Public) as u8,
         m.is_static,
         m.is_abstract,
         m.is_final,
-        m.is_readonly
+        m.is_readonly,
+        match m.set_visibility {
+            None => "-",
+            Some(Visibility::Public) => "0",
+            Some(Visibility::Protected) => "1",
+            Some(Visibility::Private) => "2",
+        }
     )
 }
 
@@ -55,7 +61,12 @@ pub fn modifiers(text: &str) -> Modifiers {
         is_abstract: parts.get(2) == Some(&"true"),
         is_final: parts.get(3) == Some(&"true"),
         is_readonly: parts.get(4) == Some(&"true"),
-        ..Modifiers::default()
+        set_visibility: match parts.get(5).copied() {
+            Some("0") => Some(Visibility::Public),
+            Some("1") => Some(Visibility::Protected),
+            Some("2") => Some(Visibility::Private),
+            _ => None,
+        },
     }
 }
 

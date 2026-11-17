@@ -22,7 +22,12 @@ impl Analyzer<'_> {
             }
             ExpressionKind::Name(name) => {
                 self.constant_name(name, scope);
-                ValueType::Mixed
+                self.context
+                    .names
+                    .resolve(name, UseKind::Constant)
+                    .iter()
+                    .find_map(|name| self.index.constants.get(name))
+                    .map_or(ValueType::Mixed, |c| c.ty.clone())
             }
             ExpressionKind::MagicConstant(MagicConstant::Line) => ValueType::Int,
             ExpressionKind::MagicConstant(_) => ValueType::String,
@@ -30,7 +35,10 @@ impl Analyzer<'_> {
         }
     }
     pub fn constant_name(&mut self, name: &Name, scope: &Scope) {
-        if matches!(name.text.to_lowercase().as_str(), "true" | "false" | "null") {
+        if matches!(
+            name.text.to_ascii_lowercase().as_str(),
+            "true" | "false" | "null"
+        ) {
             return;
         }
         let candidates = self.context.names.resolve(name, UseKind::Constant);

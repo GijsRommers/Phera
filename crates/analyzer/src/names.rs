@@ -28,8 +28,8 @@ impl Names {
                         .map(|a| a.name.as_str())
                         .unwrap_or_else(|| item.name.text.rsplit('\\').next().unwrap_or(""));
                     let (map, key) = match item.kind {
-                        UseKind::Class => (&mut names.classes, alias.to_lowercase()),
-                        UseKind::Function => (&mut names.functions, alias.to_lowercase()),
+                        UseKind::Class => (&mut names.classes, alias.to_ascii_lowercase()),
+                        UseKind::Function => (&mut names.functions, alias.to_ascii_lowercase()),
                         UseKind::Constant => (&mut names.constants, alias.to_string()),
                     };
                     map.insert(key, item.name.text.clone());
@@ -63,7 +63,7 @@ impl Names {
         let key = if kind == UseKind::Constant && tail.is_empty() {
             head.to_string()
         } else {
-            head.to_lowercase()
+            head.to_ascii_lowercase()
         };
         if let Some(imported) = map.get(&key) {
             return vec![if tail.is_empty() {

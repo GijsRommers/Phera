@@ -23,42 +23,75 @@ impl Analyzer<'_> {
                 )
             }
             ExpressionKind::StaticProperty { class, name } => {
-                let class = self.class_expression(class, scope);
-                if let Variable::Named(name) = name
-                    && let Some(class) = class
-                {
-                    return self.named_property(
-                        &class,
-                        name,
-                        expression.span,
-                        quiet,
-                        PropertyAccess::Static,
-                    );
-                }
-                if let Variable::Dynamic(name) = name {
-                    self.expression(name, scope, false);
-                }
-                ValueType::Mixed
+                self.static_property(class, name, scope, expression.span, quiet)
             }
             ExpressionKind::ClassConstant { class, name } => {
-                let class = self.class_expression(class, scope);
-                if let MemberName::Expression(name) = name {
-                    self.expression(name, scope, false);
-                }
-                if let (Some(class), MemberName::Identifier(name)) = (class, name)
-                    && !name.name.eq_ignore_ascii_case("class")
-                    && self.index.class(&class).is_some()
-                    && self.index.complete(&class)
-                    && !self.index.constant(&class, &name.name)
-                {
-                    self.report(
-                        Finding::UnknownClassConstant(format!("{class}::{}", name.name)),
-                        name.span,
-                    );
-                }
-                ValueType::Mixed
+                self.class_constant(class, name, scope)
             }
             _ => ValueType::Mixed,
         }
+    }
+    fn static_property(
+        &mut self,
+        class: &Expression,
+        name: &Variable,
+        scope: &mut Scope,
+        span: Span,
+        quiet: bool,
+    ) -> ValueType {
+        let late_static = matches!(&class.kind, ExpressionKind::Name(name)
+                    if name.text.eq_ignore_ascii_case("static"));
+        let class = self.class_expression(class, scope);
+        if let Variable::Named(name) = name
+            && let Some(class) = class
+        {
+            return self.named_property(
+                &class,
+                name,
+                span,
+                quiet
+                    || (late_static
+                        && self
+                            .index
+                            .class(&class)
+                            .is_some_and(|c| c.modifiers.is_abstract)),
+                PropertyAccess::Static,
+            );
+        }
+        if let Variable::Dynamic(name) = name {
+            self.expression(name, scope, false);
+        }
+        ValueType::Mixed
+    }
+
+    fn class_constant(
+        &mut self,
+        class: &Expression,
+        name: &MemberName,
+        scope: &mut Scope,
+    ) -> ValueType {
+        let late_static = matches!(&class.kind, ExpressionKind::Name(name)
+                    if name.text.eq_ignore_ascii_case("static"));
+        let class = self.class_expression(class, scope);
+        if let MemberName::Expression(name) = name {
+            self.expression(name, scope, false);
+        }
+        if let (Some(class), MemberName::Identifier(name)) = (class, name)
+            && !name.name.eq_ignore_ascii_case("class")
+            && self.index.class(&class).is_some()
+            && self.index.complete(&class)
+            && !(late_static
+                && self
+                    .index
+                    .class(&class)
+                    .is_some_and(|c| c.modifiers.is_abstract))
+            && !self.index.constant(&class, &name.name)
+        {
+            self.report(
+                Finding::UnknownClassConstant(format!("{class}::{}", name.name)),
+                name.span,
+            );
+        }
+        ValueType::Mixed
     }
 }

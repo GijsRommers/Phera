@@ -101,13 +101,19 @@ fn add_method(
         location(offset),
     );
     signature.modifiers = method.modifiers;
+    signature.global_effects = method
+        .body
+        .as_ref()
+        .map_or(crate::global_effects::GlobalEffects::Unknown, |body| {
+            crate::global_effects::of(body)
+        });
     signature.abstract_body = method.body.is_none() || info.kind == ClassKind::Interface;
     signature.accepts_extra = method
         .body
         .as_ref()
         .is_some_and(|body| uses_argument_introspection(body));
     info.methods
-        .insert(method.name.name.to_lowercase(), signature);
+        .insert(method.name.name.to_ascii_lowercase(), signature);
     for p in &method.parameters {
         if p.modifiers.visibility.is_some() {
             info.properties.insert(
@@ -164,15 +170,15 @@ fn add_traits(
                 source: trait_name
                     .as_ref()
                     .map(|n| names.resolve(n, UseKind::Class)[0].clone()),
-                method: method.name.to_lowercase(),
-                alias: alias.as_ref().unwrap_or(method).name.to_lowercase(),
+                method: method.name.to_ascii_lowercase(),
+                alias: alias.as_ref().unwrap_or(method).name.to_ascii_lowercase(),
                 visibility: *visibility,
             },
             TraitAdaptation::Precedence {
                 trait_name, method, ..
             } => MemberAdaptation::Precedence {
                 source: names.resolve(trait_name, UseKind::Class)[0].clone(),
-                method: method.name.to_lowercase(),
+                method: method.name.to_ascii_lowercase(),
             },
         });
     }

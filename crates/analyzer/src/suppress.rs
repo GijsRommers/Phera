@@ -73,19 +73,26 @@ fn has_identifier(text: &str, identifier: &str) -> bool {
 
 fn psalm_identifier(id: &str) -> &str {
     match id {
-        "UndefinedClass" => "class.notFound",
+        "UndefinedClass" | "UndefinedInterface" | "UndefinedTrait" => "class.notFound",
         "UndefinedFunction" => "function.notFound",
-        "UndefinedMethod" => "method.notFound",
-        "UndefinedPropertyFetch" | "UndefinedPropertyAssignment" => "property.notFound",
+        "UndefinedMethod" | "UndefinedInterfaceMethod" => "method.notFound",
+        "UndefinedPropertyFetch"
+        | "UndefinedPropertyAssignment"
+        | "UndefinedThisPropertyFetch"
+        | "UndefinedThisPropertyAssignment" => "property.notFound",
         "UndefinedConstant" => "constant.notFound",
-        "UndefinedVariable" | "PossiblyUndefinedVariable" | "InvalidScope" => "variable.undefined",
+        "UndefinedVariable"
+        | "PossiblyUndefinedVariable"
+        | "UndefinedGlobalVariable"
+        | "PossiblyUndefinedGlobalVariable"
+        | "InvalidScope" => "variable.undefined",
         "TooManyArguments" | "TooFewArguments" => "arguments.count",
         "InvalidNamedArgument" => "argument.unknown",
         "InvalidReturnStatement" => "return.void",
         "InvalidReturnType" => "return.missing",
         "AbstractInstantiation" => "new.abstract",
-        "InvalidStaticInvocation" => "method.staticCall",
-        "UnimplementedInterfaceMethod" => "method.abstract",
+        "InvalidStaticInvocation" | "NonStaticSelfCall" => "method.staticCall",
+        "UnimplementedInterfaceMethod" | "UnimplementedAbstractMethod" => "method.abstract",
         _ => "",
     }
 }
@@ -115,8 +122,15 @@ fn declaration_end(file: &ParsedFile, start: usize) -> usize {
 
 fn psalm_matches(id: &str, identifier: &str) -> bool {
     psalm_identifier(id) == identifier
+        || (matches!(id, "InvalidReturnType" | "InvalidReturnStatement")
+            && matches!(identifier, "return.void" | "return.missing"))
         || (id == "UndefinedConstant" && identifier == "classConstant.notFound")
-        || (matches!(id, "UndefinedPropertyFetch" | "UndefinedPropertyAssignment")
-            && identifier == "staticProperty.notFound")
+        || (matches!(
+            id,
+            "UndefinedPropertyFetch"
+                | "UndefinedPropertyAssignment"
+                | "UndefinedThisPropertyFetch"
+                | "UndefinedThisPropertyAssignment"
+        ) && identifier == "staticProperty.notFound")
         || (id == "AbstractInstantiation" && identifier == "new.interface")
 }

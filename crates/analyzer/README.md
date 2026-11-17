@@ -23,14 +23,15 @@ An optional `phera.toml` in the working directory supports:
 level = 1
 paths = ["src", "tests"]
 exclude = ["tests/generated/*", "src/cache"]
+format = "text"
+no_progress = false
 baseline = "check-baseline.json"
 ```
 
 Arrays may span lines. Basic and literal strings and comments are supported.
 Other tables are ignored. Paths and baseline names are relative to the working
 directory. Exclusions match a path, its subtree, or a `*`/`?` wildcard pattern;
-`*` also matches directory separators. Files are sorted and deduplicated. Directory
-symlinks are not followed. `vendor` directories are skipped unless an input path
+`*` also matches directory separators. Files are sorted and deduplicated. Symlinks are not followed. `vendor` directories are skipped unless an input path
 explicitly names `vendor` or something below it. To include dependency declarations,
 pass their paths too, for example `phera check src vendor/psr`.
 
@@ -126,6 +127,8 @@ CLI stubs are included as well. Conditional alternatives use the last declaratio
 which selects the default OpenLDAP signature rather than Oracle LDAP's alternative.
 No PECL extension stubs or PHPDoc generics are invented.
 
+The table contains **10,072 declarations**: 2,238 functions, 338 classes/interfaces/traits/enums,
+3,345 global constants and 4,151 members. No declarations were skipped.
 `data/generation.txt` records counts, provenance and every parser workaround.
 `clone`, `exit` and `die` are stub pseudo-functions whose reserved-word names are
 renamed for parsing and then restored in the index. No parser changes are needed.
@@ -180,6 +183,12 @@ PHPSTAN=/outside/repo/vendor/bin/phpstan crates/analyzer/tests/compare-with-phps
 The comparison script regenerates `.phpstan` line sets beside each fixture, saves
 full diagnostic JSON under `/private/tmp/phera-check-comparison` by default, prints
 every differing file/level, and fails on any difference without an exact filename
-entry in `corpus/DIFFERENCES.md`. `.expect` files are separately maintained semantic
+entry (including its level and both line sets) in `corpus/DIFFERENCES.md`. `.expect` files are separately maintained semantic
 expectations for Phera. The public CLI is tested for every corpus file at both levels.
 PHPStan/Composer dependencies belong only in a scratch project outside this repository.
+
+The corpus currently contains 382 files. PHPStan 2.3.6 agrees on both levels for
+306 files; 76 have explicitly explained rule/level or PHP-semantic differences,
+with zero unexplained differences. The comparison cache can be reused with
+`--reuse-phpstan`; this requires an identical source SHA-256 and PHPStan version,
+and always reruns Phera. The default regenerates all PHPStan observations.

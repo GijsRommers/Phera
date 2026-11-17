@@ -3,7 +3,7 @@
 
 use crate::diagnostic::Format;
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct Options {
     pub level: u8,
     pub paths: Vec<String>,
@@ -14,12 +14,23 @@ pub struct Options {
     pub no_progress: bool,
 }
 
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            level: 1,
+            paths: Vec::new(),
+            exclude: Vec::new(),
+            baseline: None,
+            generate_baseline: None,
+            format: Format::Text,
+            no_progress: false,
+        }
+    }
+}
+
 impl Options {
     pub fn parse(arguments: impl Iterator<Item = String>) -> Result<Self, String> {
-        let mut options = Self {
-            level: 1,
-            ..Self::default()
-        };
+        let mut options = Self::default();
         match std::fs::read_to_string("phera.toml") {
             Ok(source) => options.read_config(&source)?,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -127,6 +138,21 @@ impl Options {
                 self.exclude = values.iter().map(|s| string(s)).collect::<Result<_, _>>()?
             }
             "baseline" if !array => self.baseline = Some(string(scalar()?)?),
+            "format" if !array => {
+                self.format = match string(scalar()?)?.as_str() {
+                    "text" => Format::Text,
+                    "json" => Format::Json,
+                    "github" => Format::Github,
+                    _ => return Err("phera.toml: format must be text, json or github".into()),
+                }
+            }
+            "no_progress" | "no-progress" if !array => {
+                self.no_progress = match scalar()?.as_str() {
+                    "true" => true,
+                    "false" => false,
+                    _ => return Err("phera.toml: no_progress must be true or false".into()),
+                }
+            }
             _ => {
                 return Err(format!(
                     "phera.toml: unsupported check setting or value: {key}"

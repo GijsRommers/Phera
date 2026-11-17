@@ -53,7 +53,7 @@ impl ValueType {
         let mut result: Option<Self> = None;
         while let Some(ty) = pending.pop() {
             let next = match &ty.kind {
-                TypeKind::Named(name) => match name.text.to_lowercase().as_str() {
+                TypeKind::Named(name) => match name.text.to_ascii_lowercase().as_str() {
                     "null" => Self::Null,
                     "true" | "false" | "bool" => Self::Bool,
                     "int" => Self::Int,
@@ -64,6 +64,7 @@ impl ValueType {
                     "void" => Self::Void,
                     "never" => Self::Never,
                     "mixed" | "callable" => Self::Mixed,
+                    "self" | "static" | "parent" => Self::Class(name.text.to_ascii_lowercase()),
                     _ => Self::Class(names.resolve(name, UseKind::Class)[0].clone()),
                 },
                 TypeKind::Nullable(inner) => {

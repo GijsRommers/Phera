@@ -47,28 +47,37 @@ impl Analyzer<'_> {
                 value,
                 body,
                 ..
-            } => {
-                self.expression(subject, scope, false);
-                let before = scope.clone();
-                if let Some(key) = key {
-                    self.write(key, ValueType::Mixed, scope);
-                }
-                self.write(value, ValueType::Mixed, scope);
-                let (flow, frame) = self.control_body(body, scope);
-                let mut paths = frame.breaks;
-                paths.extend(frame.continues);
-                if flow == Flow::Next {
-                    paths.push(scope.clone());
-                }
-                let nonempty = matches!(&subject.kind, ExpressionKind::Array(items)
-                    if items.iter().any(|i| !i.spread));
-                if !nonempty {
-                    paths.push(before);
-                }
-                Self::finish_paths(paths, scope)
-            }
+            } => self.foreach_loop(subject, key.as_ref(), value, body, scope),
             _ => Flow::Next,
         }
+    }
+
+    fn foreach_loop(
+        &mut self,
+        subject: &Expression,
+        key: Option<&Expression>,
+        value: &Expression,
+        body: &[Statement],
+        scope: &mut Scope,
+    ) -> Flow {
+        self.expression(subject, scope, false);
+        let before = scope.clone();
+        if let Some(key) = key {
+            self.write(key, ValueType::Mixed, scope);
+        }
+        self.write(value, ValueType::Mixed, scope);
+        let (flow, frame) = self.control_body(body, scope);
+        let mut paths = frame.breaks;
+        paths.extend(frame.continues);
+        if flow == Flow::Next {
+            paths.push(scope.clone());
+        }
+        let nonempty = matches!(&subject.kind, ExpressionKind::Array(items)
+                    if items.iter().any(|i| !i.spread));
+        if !nonempty {
+            paths.push(before);
+        }
+        Self::finish_paths(paths, scope)
     }
 
     fn for_loop(

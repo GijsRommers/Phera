@@ -27,19 +27,33 @@ impl Analyzer<'_> {
                 }
             }
             StatementKind::Unset(expressions) => {
-                for e in expressions {
-                    self.expression(e, scope, true);
-                    if let ExpressionKind::Variable(Variable::Named(name)) = &e.kind {
-                        scope.variables.remove(name);
-                        scope.aliases.remove(name);
-                        scope.values.remove(name);
-                        for aliases in scope.aliases.values_mut() {
-                            aliases.remove(name);
-                        }
-                    }
+                for expression in expressions {
+                    self.unset(expression, scope);
                 }
             }
             _ => {}
+        }
+    }
+
+    fn unset(&mut self, expression: &Expression, scope: &mut Scope) {
+        self.expression(expression, scope, true);
+        let name = match &expression.kind {
+            ExpressionKind::Variable(Variable::Named(name)) => Some(name.as_str()),
+            ExpressionKind::Index { target, .. }
+                if self.context.scope_kind == ScopeKind::Global
+                    && crate::global_effects::is_globals(target) =>
+            {
+                crate::global_effects::variable_name(expression)
+            }
+            _ => None,
+        };
+        if let Some(name) = name {
+            scope.variables.remove(name);
+            scope.aliases.remove(name);
+            scope.values.remove(name);
+            for aliases in scope.aliases.values_mut() {
+                aliases.remove(name);
+            }
         }
     }
 }

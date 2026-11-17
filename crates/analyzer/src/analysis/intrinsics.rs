@@ -8,7 +8,7 @@ impl Analyzer<'_> {
         let Arguments::List(arguments) = arguments else {
             return;
         };
-        match name.to_lowercase().as_str() {
+        match name.to_ascii_lowercase().as_str() {
             "extract" | "parse_str" if arguments.len() == 1 => scope.unknown_writes(),
             "extract" => scope.unknown_writes(),
             "compact" => {

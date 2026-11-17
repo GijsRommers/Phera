@@ -35,17 +35,29 @@ impl Analyzer<'_> {
                 arguments,
             } => {
                 let class_name = self.class_expression(class, scope);
+                let forwarding = self.context.object
+                    && self.context.this_class.as_ref().is_none_or(|object| {
+                        class_name.as_ref().is_some_and(|class| {
+                            self.index
+                                .ancestry(object)
+                                .iter()
+                                .any(|ancestor| ancestor.name.eq_ignore_ascii_case(class))
+                        })
+                    });
                 let ty = class_name.map_or(ValueType::Mixed, ValueType::Class);
-                let forwarding = matches!(&class.kind, ExpressionKind::Name(n)
-                    if matches!(n.text.to_lowercase().as_str(), "self" | "static" | "parent"))
-                    && self.context.object;
                 self.method_call(
                     &ty,
                     name,
                     arguments,
                     scope,
                     expression.span,
-                    if forwarding {
+                    if matches!(&class.kind, ExpressionKind::Name(name)
+                        if name.text.eq_ignore_ascii_case("static"))
+                    {
+                        Access::LateStatic {
+                            has_object: forwarding,
+                        }
+                    } else if forwarding {
                         Access::Forwarded
                     } else {
                         Access::Static

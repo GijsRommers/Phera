@@ -28,6 +28,7 @@ pub struct Signature {
     pub modifiers: Modifiers,
     pub abstract_body: bool,
     pub accepts_extra: bool,
+    pub global_effects: crate::global_effects::GlobalEffects,
 }
 
 impl Signature {
@@ -53,6 +54,7 @@ impl Signature {
             modifiers: Modifiers::default(),
             abstract_body: false,
             accepts_extra: false,
+            global_effects: crate::global_effects::GlobalEffects::None,
         }
     }
 }
@@ -114,6 +116,7 @@ pub struct ClassInfo {
 #[derive(Clone, Debug, Default)]
 pub struct Index {
     pub builtin_functions: BTreeSet<String>,
+    pub builtin_classes: BTreeSet<String>,
     pub classes: BTreeMap<String, ClassInfo>,
     pub functions: BTreeMap<String, Signature>,
     pub constants: BTreeMap<String, ConstantInfo>,
@@ -121,7 +124,7 @@ pub struct Index {
 
 impl Index {
     pub fn class(&self, name: &str) -> Option<&ClassInfo> {
-        self.classes.get(&name.to_lowercase())
+        self.classes.get(&name.to_ascii_lowercase())
     }
 
     pub fn ancestry(&self, name: &str) -> Vec<&ClassInfo> {
@@ -129,7 +132,7 @@ impl Index {
         let mut seen = BTreeSet::new();
         let mut result = Vec::new();
         while let Some(name) = pending.pop() {
-            if !seen.insert(name.to_lowercase()) {
+            if !seen.insert(name.to_ascii_lowercase()) {
                 continue;
             }
             if let Some(class) = self.class(&name) {
@@ -145,7 +148,7 @@ impl Index {
     pub fn method(&self, class: &str, method: &str) -> Option<&Signature> {
         let mut contract = None;
         for ancestor in self.ancestry(class) {
-            if let Some(signature) = ancestor.methods.get(&method.to_lowercase()) {
+            if let Some(signature) = ancestor.methods.get(&method.to_ascii_lowercase()) {
                 if matches!(ancestor.kind, ClassKind::Trait | ClassKind::Interface)
                     && (signature.abstract_body || signature.modifiers.is_abstract)
                 {

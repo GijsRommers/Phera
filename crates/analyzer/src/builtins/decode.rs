@@ -101,6 +101,7 @@ fn signature(f: &[&str]) -> Signature {
         modifiers: modifiers(f[4]),
         abstract_body: f[5] == "true",
         accepts_extra: f[6] == "true",
+        global_effects: crate::global_effects::GlobalEffects::None,
         location: location(f[7]),
     }
 }

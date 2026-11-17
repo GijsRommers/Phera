@@ -64,10 +64,10 @@ impl Analyzer<'_> {
             && let ExpressionKind::Literal(Literal::String(bytes)) = &argument.value.kind
             && let Ok(value) = std::str::from_utf8(bytes)
         {
-            let symbol = match name.text.to_lowercase().as_str() {
-                "function_exists" => Some(Symbol::Function(value.to_lowercase())),
+            let symbol = match name.text.to_ascii_lowercase().as_str() {
+                "function_exists" => Some(Symbol::Function(value.to_ascii_lowercase())),
                 "class_exists" | "interface_exists" | "trait_exists" | "enum_exists" => {
-                    Some(Symbol::Class(value.to_lowercase()))
+                    Some(Symbol::Class(value.to_ascii_lowercase()))
                 }
                 "defined" => Some(Symbol::Constant(value.into())),
                 _ => None,
@@ -97,13 +97,29 @@ impl Analyzer<'_> {
             arguments: Arguments::List(arguments),
         } = &expression.kind
             && let ExpressionKind::Name(name) = &callee.kind
-            && name.text.eq_ignore_ascii_case("function_exists")
             && let Some(argument) = arguments.first()
             && let ExpressionKind::Literal(Literal::String(bytes)) = &argument.value.kind
-            && let Ok(name) = std::str::from_utf8(bytes)
-            && self.index.builtin_functions.contains(&name.to_lowercase())
+            && let Ok(value) = std::str::from_utf8(bytes)
         {
-            return Some(!inverted);
+            let value = value.to_ascii_lowercase();
+            let known = match name.text.to_ascii_lowercase().as_str() {
+                "function_exists" => self.index.builtin_functions.contains(&value),
+                "class_exists" | "interface_exists" | "trait_exists" | "enum_exists" => {
+                    self.index.builtin_classes.contains(&value)
+                        && self.index.class(&value).is_some_and(|c| {
+                            match name.text.to_ascii_lowercase().as_str() {
+                                "interface_exists" => c.kind == ClassKind::Interface,
+                                "trait_exists" => c.kind == ClassKind::Trait,
+                                "enum_exists" => c.kind == ClassKind::Enum,
+                                _ => matches!(c.kind, ClassKind::Class | ClassKind::Enum),
+                            }
+                        })
+                }
+                _ => false,
+            };
+            if known {
+                return Some(!inverted);
+            }
         }
         None
     }

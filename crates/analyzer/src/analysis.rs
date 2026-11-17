@@ -19,6 +19,7 @@ mod atoms;
 mod binding_statements;
 mod bindings;
 mod calls;
+mod closure_binding;
 mod composite;
 mod control;
 mod declarations;
@@ -40,11 +41,13 @@ pub const MAX_DEPTH: usize = 256;
 pub struct Context {
     pub names: Names,
     pub class: Option<String>,
+    pub this_class: Option<String>,
     pub object: bool,
     pub returns: ValueType,
     pub declared_return: bool,
     pub by_reference: bool,
     pub function: String,
+    pub scope_kind: ScopeKind,
     pub incomplete: bool,
 }
 
@@ -58,6 +61,7 @@ pub struct Analyzer<'a> {
     pub exception_scopes: Vec<Vec<Scope>>,
     pub return_scopes: Vec<Vec<Scope>>,
     pub controls: Vec<control::ControlFrame>,
+    pub pending_binding: Option<(usize, closure_binding::ClosureBinding)>,
 }
 
 impl<'a> Analyzer<'a> {
@@ -71,14 +75,17 @@ impl<'a> Analyzer<'a> {
             exception_scopes: Vec::new(),
             return_scopes: Vec::new(),
             controls: Vec::new(),
+            pending_binding: None,
             context: Context {
                 names: Names::for_block(String::new(), &file.program.statements),
                 class: None,
+                this_class: None,
                 object: false,
                 returns: ValueType::Mixed,
                 declared_return: false,
                 by_reference: false,
                 function: "top level".into(),
+                scope_kind: ScopeKind::Global,
                 incomplete: false,
             },
         }
@@ -114,7 +121,7 @@ impl<'a> Analyzer<'a> {
             }
             return self
                 .context
-                .class
+                .this_class
                 .as_ref()
                 .map_or(ValueType::Mixed, |class| ValueType::Class(class.clone()));
         }
@@ -130,7 +137,7 @@ impl<'a> Analyzer<'a> {
     }
 
     pub fn class_name(&mut self, name: &Name, report: bool) -> Option<String> {
-        let special = name.text.to_lowercase();
+        let special = name.text.to_ascii_lowercase();
         let resolved = match special.as_str() {
             "self" | "static" => self.context.class.clone(),
             "parent" => self
@@ -160,7 +167,9 @@ impl<'a> Analyzer<'a> {
             let class = self.class_name(name, false);
             if let Some(class) = &class
                 && self.index.class(class).is_none()
-                && !scope.known.contains(&Symbol::Class(class.to_lowercase()))
+                && !scope
+                    .known
+                    .contains(&Symbol::Class(class.to_ascii_lowercase()))
             {
                 self.report(Finding::UnknownClass(class.clone()), name.span);
             }
@@ -178,6 +187,7 @@ pub enum Access {
     Inferred,
     Static,
     Forwarded,
+    LateStatic { has_object: bool },
 }
 
 impl Access {
@@ -187,6 +197,12 @@ impl Access {
         } else {
             Self::Inferred
         }
+    }
+    pub fn static_call(self) -> bool {
+        matches!(self, Self::Static | Self::LateStatic { has_object: false })
+    }
+    pub fn dynamic_receiver(self) -> bool {
+        matches!(self, Self::Checked | Self::LateStatic { .. })
     }
     pub fn reports_missing(self) -> bool {
         !matches!(self, Self::Inferred)
@@ -203,4 +219,10 @@ pub enum CallKind {
 pub enum PropertyAccess {
     Instance,
     Static,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ScopeKind {
+    Global,
+    Function,
 }

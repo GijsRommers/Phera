@@ -28,29 +28,7 @@ pub fn add(index: &mut Index, source: &StubSource<'_>) -> Result<usize, String> 
             )?),
         );
     }
-    let hash = source.read("ext/hash/hash.c")?;
-    let mut table = false;
-    for (line, text) in hash.lines().enumerate() {
-        if text.contains("mhash_to_hash[MHASH_NUM_ALGOS] = {") {
-            table = true;
-            continue;
-        }
-        if table && text.starts_with("};") {
-            break;
-        }
-        if table
-            && let Some(text) = text.trim().strip_prefix("{\"")
-            && let Some((name, _)) = text.split_once('"')
-        {
-            index.constants.insert(
-                format!("MHASH_{name}"),
-                ConstantInfo::untyped(Location {
-                    file: "ext/hash/hash.c".into(),
-                    line: line + 1,
-                }),
-            );
-        }
-    }
+    add_mhash(index, source)?;
     if let Some(class) = index.classes.get_mut("closure") {
         let mut signature = Signature::new(
             &[],
@@ -105,7 +83,11 @@ pub fn aliases(index: &mut Index, file: &str, source: &str) -> usize {
         }
         let mut alias = class.clone();
         alias.name = name.into();
-        if index.classes.insert(name.to_lowercase(), alias).is_none() {
+        if index
+            .classes
+            .insert(name.to_ascii_lowercase(), alias)
+            .is_none()
+        {
             added += 1;
         }
     }
@@ -123,4 +105,31 @@ fn native_location(source: &StubSource<'_>, file: &str, needle: &str) -> Result<
         file: file.into(),
         line,
     })
+}
+
+fn add_mhash(index: &mut Index, source: &StubSource<'_>) -> Result<(), String> {
+    let hash = source.read("ext/hash/hash.c")?;
+    let mut table = false;
+    for (line, text) in hash.lines().enumerate() {
+        if text.contains("mhash_to_hash[MHASH_NUM_ALGOS] = {") {
+            table = true;
+            continue;
+        }
+        if table && text.starts_with("};") {
+            break;
+        }
+        if table
+            && let Some(text) = text.trim().strip_prefix("{\"")
+            && let Some((name, _)) = text.split_once('"')
+        {
+            index.constants.insert(
+                format!("MHASH_{name}"),
+                ConstantInfo::untyped(Location {
+                    file: "ext/hash/hash.c".into(),
+                    line: line + 1,
+                }),
+            );
+        }
+    }
+    Ok(())
 }

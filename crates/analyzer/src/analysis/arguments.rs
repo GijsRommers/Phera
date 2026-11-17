@@ -38,7 +38,10 @@ impl Analyzer<'_> {
         for (position, argument) in arguments.iter().enumerate() {
             let parameter = signature.and_then(|s| {
                 if let Some(name) = &argument.name {
-                    s.parameters.iter().find(|p| p.name == name.name)
+                    s.parameters
+                        .iter()
+                        .find(|p| p.name == name.name)
+                        .or_else(|| s.parameters.last().filter(|p| p.variadic))
                 } else {
                     s.parameters
                         .get(position)
@@ -49,17 +52,17 @@ impl Analyzer<'_> {
                 self.ensure_reference(&argument.value, scope);
             }
             self.expression(&argument.value, scope, signature.is_none());
-            if signature.is_none()
+            if (signature.is_none() || parameter.is_some_and(|p| p.by_reference))
                 && let ExpressionKind::Variable(Variable::Named(name)) = &argument.value.kind
-                && scope.get(name).definition == Definition::Absent
             {
-                scope.variables.insert(
-                    name.clone(),
-                    crate::scope::VariableInfo {
-                        definition: Definition::Unknown,
-                        ty: ValueType::Mixed,
-                    },
-                );
+                let definition = scope.get(name).definition;
+                scope.define(name, ValueType::Mixed);
+                if signature.is_none()
+                    && definition != Definition::Definite
+                    && let Some(variable) = scope.variables.get_mut(name)
+                {
+                    variable.definition = Definition::Unknown;
+                }
             }
         }
     }

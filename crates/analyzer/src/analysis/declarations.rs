@@ -11,7 +11,7 @@ impl Analyzer<'_> {
             match &ty.kind {
                 TypeKind::Named(name) => {
                     if !matches!(
-                        name.text.to_lowercase().as_str(),
+                        name.text.to_ascii_lowercase().as_str(),
                         "int"
                             | "float"
                             | "string"
@@ -44,8 +44,10 @@ impl Analyzer<'_> {
         let exceptions = std::mem::take(&mut self.exception_scopes);
         let controls = std::mem::take(&mut self.controls);
         let returns = std::mem::take(&mut self.return_scopes);
+        self.context.scope_kind = ScopeKind::Function;
         self.context.incomplete = false;
         self.context.class = None;
+        self.context.this_class = None;
         self.context.object = false;
         self.context.function = self.context.names.declaration(&function.name.name);
         self.context.declared_return = function.return_type.is_some();
@@ -80,22 +82,7 @@ impl Analyzer<'_> {
         }
         for member in &class.members {
             match &member.kind {
-                ClassMemberKind::Method(method) => {
-                    self.context.incomplete = false;
-                    self.context.object = !method.modifiers.is_static;
-                    self.context.function = method.name.name.clone();
-                    self.context.declared_return = method.return_type.is_some();
-                    self.context.by_reference = method.by_reference;
-                    self.context.returns =
-                        ValueType::declared(method.return_type.as_ref(), &self.context.names);
-                    let mut scope = Scope::default();
-                    self.parameter_scope(&method.parameters, &mut scope);
-                    self.check_type(method.return_type.as_ref());
-                    if let Some(body) = &method.body {
-                        let flow = self.block(body, &mut scope);
-                        self.check_return_path(flow, body, member.span);
-                    }
-                }
+                ClassMemberKind::Method(method) => self.method_declaration(method, member.span),
                 ClassMemberKind::Property { ty, items, .. } => {
                     self.check_type(ty.as_ref());
                     for item in items {
@@ -124,11 +111,34 @@ impl Analyzer<'_> {
         self.return_scopes = returns;
     }
 
+    fn method_declaration(&mut self, method: &Method, span: Span) {
+        self.context.scope_kind = ScopeKind::Function;
+        self.context.incomplete = false;
+        self.context.object = !method.modifiers.is_static;
+        self.context.this_class = if self.context.object {
+            self.context.class.clone()
+        } else {
+            None
+        };
+        self.context.function = method.name.name.clone();
+        self.context.declared_return = method.return_type.is_some();
+        self.context.by_reference = method.by_reference;
+        self.context.returns =
+            ValueType::declared(method.return_type.as_ref(), &self.context.names);
+        let mut scope = Scope::default();
+        self.parameter_scope(&method.parameters, &mut scope);
+        self.check_type(method.return_type.as_ref());
+        if let Some(body) = &method.body {
+            let flow = self.block(body, &mut scope);
+            self.check_return_path(flow, body, span);
+        }
+    }
+
     fn required_methods(&mut self, name: &str, span: Span) {
         let Some(class) = self.index.class(name) else {
             return;
         };
-        if class.kind != ClassKind::Class
+        if !matches!(class.kind, ClassKind::Class | ClassKind::Enum)
             || class.modifiers.is_abstract
             || !self.index.complete(name)
         {
@@ -180,6 +190,7 @@ impl Analyzer<'_> {
                 }
             }
         }
+        let span = body.first().map_or(span, |statement| statement.span);
         self.report(Finding::MissingReturn(self.context.function.clone()), span);
     }
 }

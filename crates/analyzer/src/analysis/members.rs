@@ -18,7 +18,12 @@ impl Analyzer<'_> {
                 class,
                 &name.name,
                 span,
-                quiet || !access.reports_missing(),
+                quiet
+                    || !access.reports_missing()
+                    || self
+                        .index
+                        .class(class)
+                        .is_some_and(|c| c.modifiers.is_abstract),
                 PropertyAccess::Instance,
             )
         } else {
@@ -62,9 +67,16 @@ impl Analyzer<'_> {
 
     pub fn relative_type(&self, ty: ValueType, class: &str) -> ValueType {
         match &ty {
-            ValueType::Class(name) if matches!(name.to_lowercase().as_str(), "self" | "static") => {
+            ValueType::Class(name)
+                if matches!(name.to_ascii_lowercase().as_str(), "self" | "static") =>
+            {
                 ValueType::Class(class.into())
             }
+            ValueType::Class(name) if name.eq_ignore_ascii_case("parent") => self
+                .index
+                .class(class)
+                .and_then(|c| c.parents.first())
+                .map_or(ValueType::Mixed, |p| ValueType::Class(p.clone())),
             _ => ty,
         }
     }

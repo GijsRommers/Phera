@@ -6,6 +6,11 @@ use crate::index::{Location, Signature};
 
 impl Analyzer<'_> {
     pub fn write(&mut self, target: &Expression, ty: ValueType, scope: &mut Scope) {
+        if self.context.scope_kind == ScopeKind::Global
+            && let Some(name) = crate::global_effects::variable_name(target)
+        {
+            scope.define(name, ValueType::Mixed);
+        }
         let mut pending = vec![(target, ty)];
         while let Some((target, ty)) = pending.pop() {
             match &target.kind {
@@ -72,10 +77,13 @@ impl Analyzer<'_> {
             if let Some(default) = &parameter.default {
                 self.expression(default, scope, false);
             }
-            scope.define(
-                &parameter.name,
-                ValueType::declared(parameter.ty.as_ref(), &self.context.names),
-            );
+            let ty = ValueType::declared(parameter.ty.as_ref(), &self.context.names);
+            let ty = self
+                .context
+                .class
+                .as_ref()
+                .map_or(ty.clone(), |class| self.relative_type(ty, class));
+            scope.define(&parameter.name, ty);
         }
     }
 
@@ -95,8 +103,12 @@ impl Analyzer<'_> {
         let exceptions = std::mem::take(&mut self.exception_scopes);
         let controls = std::mem::take(&mut self.controls);
         let returns = std::mem::take(&mut self.return_scopes);
+        self.context.scope_kind = ScopeKind::Function;
         self.context.incomplete = false;
         self.context.object = previous.object && !closure.is_static;
+        if !closure.is_static {
+            self.apply_binding(span);
+        }
         self.context.function = "Closure".into();
         self.context.declared_return = closure.return_type.is_some();
         self.context.by_reference = closure.by_reference;
@@ -106,7 +118,7 @@ impl Analyzer<'_> {
         self.check_type(closure.return_type.as_ref());
         let flow = self.block(&closure.body, &mut inner);
         self.check_return_path(flow, &closure.body, span);
-        let signature = Signature::new(
+        let mut signature = Signature::new(
             &closure.parameters,
             closure.return_type.as_ref(),
             &self.context.names,
@@ -115,6 +127,7 @@ impl Analyzer<'_> {
                 line: self.file.lines.line(span.start),
             },
         );
+        signature.global_effects = crate::global_effects::of(&closure.body);
         self.context = previous;
         self.exception_scopes = exceptions;
         self.controls = controls;
@@ -128,15 +141,19 @@ impl Analyzer<'_> {
         let controls = std::mem::take(&mut self.controls);
         let returns = std::mem::take(&mut self.return_scopes);
         let mut inner = outer.clone();
+        self.context.scope_kind = ScopeKind::Function;
         self.context.incomplete = false;
         self.context.object = previous.object && !arrow.is_static;
+        if !arrow.is_static {
+            self.apply_binding(span);
+        }
         self.parameter_scope(&arrow.parameters, &mut inner);
         self.check_type(arrow.return_type.as_ref());
         self.expression(&arrow.body, &mut inner, false);
         if ValueType::declared(arrow.return_type.as_ref(), &self.context.names) == ValueType::Void {
             self.report(Finding::VoidReturn, span);
         }
-        let signature = Signature::new(
+        let mut signature = Signature::new(
             &arrow.parameters,
             arrow.return_type.as_ref(),
             &self.context.names,
@@ -145,6 +162,7 @@ impl Analyzer<'_> {
                 line: self.file.lines.line(span.start),
             },
         );
+        signature.global_effects = crate::global_effects::expression(&arrow.body);
         self.context = previous;
         self.exception_scopes = exceptions;
         self.controls = controls;
