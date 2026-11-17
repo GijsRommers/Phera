@@ -5,6 +5,41 @@ use crate::functions;
 use phera_extension_api::{FunctionEntry, Param, ParamType, Registry};
 
 pub fn functions(registry: &mut Registry) {
+    // Procedural format constants are also used by parser round-trip tests.
+    for (name, format) in [
+        ("DATE_ATOM", "Y-m-d\\TH:i:sP"),
+        ("DATE_COOKIE", "l, d-M-Y H:i:s T"),
+        ("DATE_ISO8601", "Y-m-d\\TH:i:sO"),
+        ("DATE_ISO8601_EXPANDED", "X-m-d\\TH:i:sP"),
+        ("DATE_RFC822", "D, d M y H:i:s O"),
+        ("DATE_RFC850", "l, d-M-y H:i:s T"),
+        ("DATE_RFC1036", "D, d M y H:i:s O"),
+        ("DATE_RFC1123", "D, d M Y H:i:s O"),
+        ("DATE_RFC2822", "D, d M Y H:i:s O"),
+        ("DATE_RFC3339", "Y-m-d\\TH:i:sP"),
+        ("DATE_RFC3339_EXTENDED", "Y-m-d\\TH:i:s.vP"),
+        ("DATE_RSS", "D, d M Y H:i:s O"),
+        ("DATE_W3C", "Y-m-d\\TH:i:sP"),
+    ] {
+        registry.constant(name, format);
+    }
+    const STRING: &[Param] = &[Param::new("datetime", ParamType::String)];
+    const STRTOTIME: &[Param] = &[
+        Param::new("datetime", ParamType::String),
+        Param::new("baseTimestamp", ParamType::Int)
+            .nullable()
+            .optional(),
+    ];
+    registry.function(FunctionEntry::sync(
+        "date_parse",
+        STRING,
+        crate::parse::date_parse,
+    ));
+    registry.function(FunctionEntry::sync(
+        "strtotime",
+        STRTOTIME,
+        crate::parse::strtotime,
+    ));
     const PARSE: &[Param] = &[
         Param::new("format", ParamType::String),
         Param::new("datetime", ParamType::String),

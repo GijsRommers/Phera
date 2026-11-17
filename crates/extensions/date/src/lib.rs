@@ -4,6 +4,7 @@ pub mod calendar;
 mod format;
 mod functions;
 mod normalize;
+mod parse;
 mod parse_format;
 mod posix;
 mod register;

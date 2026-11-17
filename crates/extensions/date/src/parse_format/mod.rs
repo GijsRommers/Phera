@@ -2,9 +2,9 @@
 //! retains February 30 and reports its warning instead of rejecting the parse.
 
 mod numeric;
-mod result;
+pub(crate) mod result;
 mod text;
-mod zone;
+pub(crate) mod zone;
 
 use phera_extension_api::{Context, NativeError, NativeResult, Value, args};
 use result::Parsed;

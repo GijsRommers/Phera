@@ -3,7 +3,7 @@
 
 use crate::calendar::{Civil, month_days};
 
-pub fn timestamp(mut date: Civil) -> i64 {
+pub(crate) fn civil(mut date: Civil) -> Civil {
     carry(&mut date.second, &mut date.minute, 60);
     carry(&mut date.minute, &mut date.hour, 60);
     carry(&mut date.hour, &mut date.day, 24);
@@ -22,6 +22,11 @@ pub fn timestamp(mut date: Civil) -> i64 {
         date.month += 1;
         normalize_month(&mut date);
     }
+    date
+}
+
+pub fn timestamp(date: Civil) -> i64 {
+    let date = civil(date);
     let year = date.year.wrapping_sub(i64::from(date.month <= 2));
     let era = if year >= 0 {
         year
