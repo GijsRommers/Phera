@@ -149,6 +149,9 @@ impl Analyzer<'_> {
     }
     fn isset_truth(&self, expression: &Expression, scope: &Scope) -> Option<bool> {
         if let ExpressionKind::Variable(Variable::Named(name)) = &expression.kind {
+            if name == "this" && (self.context.object || self.context.unbound_this.is_some()) {
+                return self.context.object.then_some(true);
+            }
             // Superglobals such as $_SESSION are optional at runtime; only use tracked writes.
             if let Some(variable) = scope.variables.get(name) {
                 if variable.ty == ValueType::Null {

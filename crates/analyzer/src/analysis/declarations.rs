@@ -52,6 +52,7 @@ impl Analyzer<'_> {
         self.context.class = None;
         self.context.this_class = None;
         self.context.object = false;
+        self.context.unbound_this = None;
         self.context.function = self.context.names.declaration(&function.name.name);
         self.context.declared_return = function.return_type.is_some();
         self.context.by_reference = function.by_reference;
@@ -121,6 +122,7 @@ impl Analyzer<'_> {
         self.context.scope_kind = ScopeKind::Function;
         self.context.incomplete = false;
         self.context.object = !method.modifiers.is_static;
+        self.context.unbound_this = None;
         self.context.this_class = if self.context.object {
             self.context.class.clone()
         } else {

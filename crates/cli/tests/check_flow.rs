@@ -28,6 +28,11 @@ fn only_continuing_expression_paths_supply_variables_and_returns() {
         "class A { function m($a) {} } class B { function m() {} }
             $x = new B; $x ??= new A; $x->m();",
         "$x = 1; while (isset($x)) { $y = 1; unset($x); } echo $y;",
+        "class Box { private $x = 7; } $f = function () { return $this->x; };
+            $g = $f->bindTo(new Box, Box::class); $g();",
+        "$f = function () { if (isset($this)) { return $this; } }; $f();",
+        "$f = function () { return (fn() => $this)(); };
+            $bound = Closure::bind($f, new stdClass); $bound();",
         "class A { function m($a) {} } class B { function m() {} }
             $x = new A; $y =& $x; $z = new B; $y =& $z; $y = new B; $x->m(1);",
         "class A { function m($a) {} } class B { function m() {} }
@@ -92,4 +97,18 @@ fn declarations_after_a_terminal_statement_still_have_their_bodies_checked() {
     let output = project.run(&["deferred.php"]);
     assert_eq!(output.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&output.stdout).contains("function.notFound"));
+}
+
+#[test]
+fn a_known_unbound_closure_call_reports_the_original_this_read() {
+    let project = Project::new();
+    project.write(
+        "unbound.php",
+        "<?php\n$f = function () { return $this; };\n$f();",
+    );
+    let output = project.run(&["--format", "json", "unbound.php"]);
+    assert_eq!(output.status.code(), Some(1));
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(text.contains("variable.undefined"));
+    assert!(text.contains("\"line\":2"));
 }

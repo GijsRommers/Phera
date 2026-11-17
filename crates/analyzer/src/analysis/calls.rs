@@ -49,6 +49,9 @@ impl Analyzer<'_> {
             return ValueType::Never;
         }
         if !matches!(arguments, Arguments::FirstClassCallable) {
+            if let Some(signature) = &resolved.signature {
+                self.unbound_invocation(signature);
+            }
             self.apply_global_effects(resolved.signature.as_ref(), scope);
         }
         if let Some(name) = resolved.intrinsic {

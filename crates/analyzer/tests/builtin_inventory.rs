@@ -1,11 +1,10 @@
 //! Verify the generated table against the real PHP 8.5 oracle's default build.
 //! Runtime functions, classes and constants must all be known to static analysis.
 
-use phera_analyzer::builtins;
+use phera_analyzer::{builtins, index::Signature};
 use std::process::Command;
 
-#[test]
-fn default_php_symbols_and_parameter_names_are_present() {
+fn native_inventory() -> String {
     let php = std::env::var("PHERA_PHP").unwrap_or_else(|_| {
         if std::path::Path::new("/opt/homebrew/bin/php").exists() {
             "/opt/homebrew/bin/php".into()
@@ -34,47 +33,24 @@ fn default_php_symbols_and_parameter_names_are_present() {
         "PHP 8.5 is required: {:?}",
         output.status
     );
+    String::from_utf8(output.stdout).unwrap()
+}
+
+#[test]
+fn default_php_symbols_and_parameter_names_are_present() {
     let index = builtins::load();
     let mut missing = Vec::new();
-    for line in String::from_utf8(output.stdout).unwrap().lines() {
+    for line in native_inventory().lines() {
         let fields: Vec<_> = line.split('\t').collect();
         match fields[0] {
-            "F" => match index.functions.get(&fields[1].to_lowercase()) {
-                Some(signature) => {
-                    let parameters = signature
-                        .parameters
-                        .iter()
-                        .map(|p| p.name.as_str())
-                        .collect::<Vec<_>>()
-                        .join(",");
-                    if parameters != fields[2] {
-                        missing.push(format!(
-                            "{} parameter names: {parameters} != {}",
-                            fields[1], fields[2]
-                        ));
-                    }
-                }
-                None => missing.push(line.to_string()),
-            },
+            "F" => check_parameters(
+                index.functions.get(&fields[1].to_ascii_lowercase()),
+                &fields,
+                &mut missing,
+            ),
             "M" => {
                 let (class, method) = fields[1].split_once("::").unwrap();
-                match index.method(class, method) {
-                    Some(signature) => {
-                        let parameters = signature
-                            .parameters
-                            .iter()
-                            .map(|p| p.name.as_str())
-                            .collect::<Vec<_>>()
-                            .join(",");
-                        if parameters != fields[2] {
-                            missing.push(format!(
-                                "{} parameter names: {parameters} != {}",
-                                fields[1], fields[2]
-                            ));
-                        }
-                    }
-                    None => missing.push(line.to_string()),
-                }
+                check_parameters(index.method(class, method), &fields, &mut missing);
             }
             "C" if index.class(fields[1]).is_none() => missing.push(line.to_string()),
             "K" if !index.constants.contains_key(fields[1]) => missing.push(line.to_string()),
@@ -82,4 +58,23 @@ fn default_php_symbols_and_parameter_names_are_present() {
         }
     }
     assert!(missing.is_empty(), "{}", missing.join("\n"));
+}
+
+fn check_parameters(signature: Option<&Signature>, fields: &[&str], missing: &mut Vec<String>) {
+    let Some(signature) = signature else {
+        missing.push(format!("Missing {}", fields[1]));
+        return;
+    };
+    let parameters = signature
+        .parameters
+        .iter()
+        .map(|p| p.name.as_str())
+        .collect::<Vec<_>>()
+        .join(",");
+    if parameters != fields[2] {
+        missing.push(format!(
+            "{} parameter names: {parameters} != {}",
+            fields[1], fields[2]
+        ));
+    }
 }

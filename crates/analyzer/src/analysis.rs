@@ -6,7 +6,7 @@ use crate::{
     index::Index,
     names::Names,
     project::ParsedFile,
-    rules::{self, Finding},
+    rules::Finding,
     scope::{Definition, Scope, Symbol},
     types::ValueType,
 };
@@ -36,6 +36,7 @@ mod match_expression;
 mod member_expressions;
 mod members;
 mod refine;
+mod reporting;
 mod short_circuit;
 mod statements;
 mod switch;
@@ -50,6 +51,7 @@ pub struct Context {
     pub class: Option<String>,
     pub this_class: Option<String>,
     pub object: bool,
+    pub unbound_this: Option<Vec<crate::index::Location>>,
     pub returns: ValueType,
     pub declared_return: bool,
     pub by_reference: bool,
@@ -91,6 +93,7 @@ impl<'a> Analyzer<'a> {
                 class: None,
                 this_class: None,
                 object: false,
+                unbound_this: None,
                 returns: ValueType::Mixed,
                 declared_return: false,
                 by_reference: false,
@@ -110,25 +113,18 @@ impl<'a> Analyzer<'a> {
         self.diagnostics
     }
 
-    pub fn report(&mut self, finding: Finding, span: Span) {
-        for rule in rules::all() {
-            if rule.level() <= self.level
-                && let Some(message) = rule.message(&finding)
-            {
-                self.diagnostics.push(Diagnostic {
-                    file: self.file.path.clone(),
-                    line: self.file.lines.line(span.start),
-                    identifier: rule.identifier().into(),
-                    message,
-                });
-            }
-        }
-    }
-
     pub fn read(&mut self, name: &str, scope: &Scope, span: Span, quiet: bool) -> ValueType {
         if name == "this" {
-            if !self.context.object && !quiet {
-                self.report(Finding::ThisContext, span);
+            if !self.context.object && !quiet && scope.get(name).definition != Definition::Definite
+            {
+                if let Some(reads) = &mut self.context.unbound_this {
+                    reads.push(crate::index::Location {
+                        file: self.file.path.clone(),
+                        line: self.file.lines.line(span.start),
+                    });
+                } else {
+                    self.report(Finding::ThisContext, span);
+                }
             }
             return self
                 .context

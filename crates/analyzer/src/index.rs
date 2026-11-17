@@ -28,6 +28,7 @@ pub struct Signature {
     pub modifiers: Modifiers,
     pub abstract_body: bool,
     pub accepts_extra: bool,
+    pub unbound_this: Vec<Location>,
     pub global_effects: crate::global_effects::GlobalEffects,
 }
 
@@ -54,6 +55,7 @@ impl Signature {
             modifiers: Modifiers::default(),
             abstract_body: false,
             accepts_extra: false,
+            unbound_this: Vec::new(),
             global_effects: crate::global_effects::GlobalEffects::None,
         }
     }

@@ -69,6 +69,7 @@ impl Analyzer<'_> {
         self.context.scope_kind = ScopeKind::Function;
         self.context.incomplete = false;
         self.context.object = previous.object && !closure.is_static;
+        self.context.unbound_this = (!closure.is_static && !previous.object).then(Vec::new);
         if !closure.is_static {
             self.apply_binding(span);
         }
@@ -90,6 +91,7 @@ impl Analyzer<'_> {
                 line: self.file.lines.line(span.start),
             },
         );
+        signature.unbound_this = self.context.unbound_this.take().unwrap_or_default();
         signature.global_effects = crate::global_effects::of(&closure.body);
         self.context = previous;
         self.exception_scopes = exceptions;
@@ -108,6 +110,7 @@ impl Analyzer<'_> {
         self.context.scope_kind = ScopeKind::Function;
         self.context.incomplete = false;
         self.context.object = previous.object && !arrow.is_static;
+        self.context.unbound_this = (!arrow.is_static && !previous.object).then(Vec::new);
         if !arrow.is_static {
             self.apply_binding(span);
         }
@@ -126,6 +129,7 @@ impl Analyzer<'_> {
                 line: self.file.lines.line(span.start),
             },
         );
+        signature.unbound_this = self.context.unbound_this.take().unwrap_or_default();
         signature.global_effects = crate::global_effects::expression(&arrow.body);
         self.context = previous;
         self.exception_scopes = exceptions;
