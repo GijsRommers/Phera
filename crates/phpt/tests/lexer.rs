@@ -2,8 +2,9 @@
 //! `--FILE--` section of each selected `.phpt` test.
 //!
 //! Only tests the lexer is meant to handle are compared: a test is "not
-//! relevant" if PHP produces any token Phera doesn't support yet (comments,
-//! interpolated strings, casts, ...). Those are counted, not failed.
+//! relevant" if PHP produces a token Phera rejects on purpose (backticks,
+//! `${}` interpolation, short open tags, ...), or if Phera rejects the code
+//! and the test expects a parse error anyway. Those are counted, not failed.
 //!
 //! Needs a `php` binary (override with `PHP=/path/to/php`); skipped without one.
 //! Set `PHERA_LEX_SCAN=<dir>` to check every `.phpt` file under a directory,
@@ -58,6 +59,8 @@ fn main() -> ExitCode {
 
     let mut sources = Vec::new();
 
+    let mut not_relevant: BTreeMap<String, usize> = BTreeMap::new();
+
     for (index, path) in tests.iter().enumerate() {
         let Ok(phpt) = Phpt::parse_file(path) else {
             continue;
@@ -66,13 +69,23 @@ fn main() -> ExitCode {
             continue;
         };
 
+        // Sources in other encodings (`zend.multibyte` tests) aren't valid
+        // UTF-8, and Phera's lexer only takes `&str`. `Phpt` reads lossily, so
+        // such code shows up with replacement characters.
+        if code.contains('\u{FFFD}') {
+            *not_relevant
+                .entry("source is not UTF-8".into())
+                .or_default() += 1;
+            continue;
+        }
+
         let file = work_dir.join(format!("{index}.php"));
         fs::write(&file, code).expect("cannot write source file");
-        sources.push((path, file, code.to_string()));
+        sources.push((path, file, code.to_string(), expects_parse_error(&phpt)));
     }
 
     let php_tokens =
-        match tokenize_with_php(&php, sources.iter().map(|(_, file, _)| file.as_path())) {
+        match tokenize_with_php(&php, sources.iter().map(|(_, file, _, _)| file.as_path())) {
             Ok(tokens) => tokens,
             Err(error) => {
                 eprintln!("error: {error}");
@@ -82,9 +95,8 @@ fn main() -> ExitCode {
 
     let mut passed = 0;
     let mut failures = Vec::new();
-    let mut not_relevant: BTreeMap<String, usize> = BTreeMap::new();
 
-    for ((path, _, code), tokens) in sources.iter().zip(php_tokens) {
+    for ((path, _, code, parse_error), tokens) in sources.iter().zip(php_tokens) {
         let expected = match expected_tokens(&tokens) {
             Ok(expected) => expected,
             Err(reason) => {
@@ -98,9 +110,15 @@ fn main() -> ExitCode {
                 passed += 1;
                 println!("PASS  {}", name(path));
             }
+            // Invalid code has no meaningful token stream to compare against.
+            Err(Mismatch::LexError(_)) if *parse_error => {
+                *not_relevant
+                    .entry("Phera rejects it; the test expects a parse error".into())
+                    .or_default() += 1;
+            }
             Err(details) => {
                 println!("FAIL  {}", name(path));
-                failures.push((name(path), details));
+                failures.push((name(path), details.to_string()));
             }
         }
     }
@@ -117,11 +135,11 @@ fn main() -> ExitCode {
         let mut reasons: Vec<_> = not_relevant.into_iter().collect();
         reasons.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
 
-        for (reason, count) in reasons.iter().take(15) {
+        for (reason, count) in reasons.iter().take(25) {
             println!("  {count:>6}  {reason}");
         }
-        if reasons.len() > 15 {
-            println!("  ... and {} more kinds", reasons.len() - 15);
+        if reasons.len() > 25 {
+            println!("  ... and {} more kinds", reasons.len() - 25);
         }
     }
 
@@ -209,6 +227,14 @@ fn decode_hex(hex: &str) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
+/// Whether the test expects PHP to reject its code with a parse error.
+fn expects_parse_error(phpt: &Phpt) -> bool {
+    ["EXPECT", "EXPECTF", "EXPECTREGEX"]
+        .iter()
+        .filter_map(|section| phpt.section(section))
+        .any(|expected| expected.contains("Parse error") || expected.contains("ParseError"))
+}
+
 /// Maps PHP's tokens to what Phera's lexer should produce, skipping whitespace
 /// and comments. Fails with the first PHP token Phera doesn't support.
 fn expected_tokens(tokens: &[PhpToken]) -> Result<Vec<(TokenKind, &str)>, String> {
@@ -224,36 +250,36 @@ fn expected_tokens(tokens: &[PhpToken]) -> Result<Vec<(TokenKind, &str)>, String
             continue;
         }
 
-        // Phera leaves casts like `(int)` to the parser: `(`, `int`, `)`.
-        if token.name.ends_with("_CAST") {
-            let word = text[1..text.len() - 1].trim_matches([' ', '\t']);
-            expected.extend([
-                (TokenKind::LeftParen, "("),
-                (name_kind(word), word),
-                (TokenKind::RightParen, ")"),
-            ]);
-            continue;
-        }
-
-        // Phera leaves `yield from` to the parser too.
-        if token.name == "T_YIELD_FROM" {
-            expected.extend(text.split_whitespace().map(|word| (name_kind(word), word)));
-            continue;
-        }
-
         let kind = match token.name.as_str() {
-            // Phera doesn't stop at `__halt_compiler`, or support short `<?` tags.
-            "T_HALT_COMPILER" => None,
+            // Phera doesn't support short `<?` tags.
             "T_OPEN_TAG" if !text.to_ascii_lowercase().starts_with("<?php") => None,
+            "T_OPEN_TAG" => Some(TokenKind::OpenTag),
+            "T_OPEN_TAG_WITH_ECHO" => Some(TokenKind::OpenTagWithEcho),
+            "T_CLOSE_TAG" => Some(TokenKind::CloseTag),
             "T_INLINE_HTML" => Some(TokenKind::InlineHtml),
+
+            // Keywords that depend on context, which `name_kind` can't tell.
+            "T_ENUM" => Some(TokenKind::Enum),
+            "T_YIELD_FROM" => Some(TokenKind::YieldFrom),
+            "T_PUBLIC_SET" => Some(TokenKind::PublicSet),
+            "T_PROTECTED_SET" => Some(TokenKind::ProtectedSet),
+            "T_PRIVATE_SET" => Some(TokenKind::PrivateSet),
+
+            // Strings, whose literal parts and labels may look like names.
+            "T_CONSTANT_ENCAPSED_STRING" => Some(TokenKind::String),
+            "\"" | "b\"" | "B\"" => Some(TokenKind::DoubleQuote),
+            "T_ENCAPSED_AND_WHITESPACE" => Some(TokenKind::StringPart),
+            "T_START_HEREDOC" => Some(TokenKind::StartHeredoc),
+            "T_END_HEREDOC" => Some(TokenKind::EndHeredoc),
+            "T_CURLY_OPEN" => Some(TokenKind::CurlyOpen),
+            "T_NUM_STRING" => Some(TokenKind::NumString),
+            // Phera rejects `${...}` interpolation and backticks on purpose.
+            "T_DOLLAR_OPEN_CURLY_BRACES" | "T_STRING_VARNAME" | "`" => None,
 
             // Keywords, and names PHP treats as plain strings in context, like
             // `$a->class`: Phera always lexes names as keywords where possible.
             _ if is_name(text) => Some(name_kind(text)),
 
-            "T_OPEN_TAG" => Some(TokenKind::OpenTag),
-            "T_OPEN_TAG_WITH_ECHO" => Some(TokenKind::OpenTagWithEcho),
-            "T_CLOSE_TAG" => Some(TokenKind::CloseTag),
             "T_VARIABLE" => Some(TokenKind::Variable),
             "T_NAME_QUALIFIED" => Some(TokenKind::QualifiedName),
             "T_NAME_FULLY_QUALIFIED" => Some(TokenKind::FullyQualifiedName),
@@ -262,9 +288,18 @@ fn expected_tokens(tokens: &[PhpToken]) -> Result<Vec<(TokenKind, &str)>, String
             // Integers too big for 64 bits are floats in PHP, but not in Phera's lexer.
             "T_DNUMBER" if !looks_like_float(text) => Some(TokenKind::Integer),
             "T_DNUMBER" => Some(TokenKind::Float),
-            "T_CONSTANT_ENCAPSED_STRING" if text.starts_with(['\'', '"']) => {
-                Some(TokenKind::String)
-            }
+
+            "T_INT_CAST" => Some(TokenKind::IntCast),
+            // `(real)` was removed in PHP 8; Phera rejects it too.
+            "T_DOUBLE_CAST" if text.to_ascii_lowercase().contains("real") => None,
+            "T_DOUBLE_CAST" => Some(TokenKind::FloatCast),
+            "T_STRING_CAST" => Some(TokenKind::StringCast),
+            "T_ARRAY_CAST" => Some(TokenKind::ArrayCast),
+            "T_OBJECT_CAST" => Some(TokenKind::ObjectCast),
+            "T_BOOL_CAST" => Some(TokenKind::BoolCast),
+            "T_UNSET_CAST" => Some(TokenKind::UnsetCast),
+            "T_VOID_CAST" => Some(TokenKind::VoidCast),
+
             name => operator_kind(name),
         };
 
@@ -297,8 +332,11 @@ fn name_kind(name: &str) -> TokenKind {
 }
 
 fn looks_like_float(text: &str) -> bool {
-    let prefixed =
-        text.len() > 1 && text.starts_with('0') && text.as_bytes()[1].is_ascii_alphabetic();
+    let prefixed = text.starts_with('0')
+        && text
+            .as_bytes()
+            .get(1)
+            .is_some_and(|b| b"xXbBoO".contains(b));
     !prefixed && text.contains(['.', 'e', 'E'])
 }
 
@@ -377,34 +415,56 @@ fn operator_kind(name: &str) -> Option<TokenKind> {
     Some(kind)
 }
 
+/// Why Phera's tokens differ from PHP's.
+enum Mismatch {
+    /// Phera rejected the code where PHP tokenized it.
+    LexError(String),
+    /// Phera produced a different token.
+    Token(String),
+}
+
+impl std::fmt::Display for Mismatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Mismatch::LexError(details) | Mismatch::Token(details) => f.write_str(details),
+        }
+    }
+}
+
 /// Lexes `code` with Phera and compares it with PHP's tokens.
-fn compare(code: &str, expected: &[(TokenKind, &str)]) -> Result<(), String> {
+fn compare(code: &str, expected: &[(TokenKind, &str)]) -> Result<(), Mismatch> {
     let mut lexer = Lexer::new(code);
 
     for (index, &(kind, text)) in expected.iter().enumerate() {
         let token = lexer.next_token().map_err(|error| {
-            format!("token {index}: PHP has {kind:?} {text:?}, Phera errors with {error:?}")
+            Mismatch::LexError(format!(
+                "token {index}: PHP has {kind:?} {text:?}, Phera errors with {error:?}\n  at byte {} in:\n{}",
+                error.span.start,
+                context(code, error.span.start)
+            ))
         })?;
 
         let actual = &code[token.span.start..token.span.end];
 
         if token.kind != kind || actual != text {
-            return Err(format!(
+            return Err(Mismatch::Token(format!(
                 "token {index}: PHP has {kind:?} {text:?}, Phera has {:?} {actual:?}\n  at byte {} in:\n{}",
                 token.kind,
                 token.span.start,
                 context(code, token.span.start)
-            ));
+            )));
         }
     }
 
     match lexer.next_token() {
         Ok(token) if token.kind == TokenKind::Eof => Ok(()),
-        Ok(token) => Err(format!(
+        Ok(token) => Err(Mismatch::Token(format!(
             "Phera has an extra {:?} token at byte {} after PHP's last token",
             token.kind, token.span.start
-        )),
-        Err(error) => Err(format!("Phera errors after PHP's last token: {error:?}")),
+        ))),
+        Err(error) => Err(Mismatch::LexError(format!(
+            "Phera errors after PHP's last token: {error:?}"
+        ))),
     }
 }
 

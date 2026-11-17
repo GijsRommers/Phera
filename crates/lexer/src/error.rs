@@ -10,7 +10,8 @@ pub struct LexError {
 pub enum LexErrorKind {
     UnexpectedCharacter(char),
     UnterminatedString,
+    UnterminatedHeredoc,
     UnterminatedComment,
-    /// Valid PHP the lexer doesn't handle yet, such as string interpolation.
+    /// PHP syntax Phera rejects on purpose, such as backtick shell execution.
     Unsupported(&'static str),
 }

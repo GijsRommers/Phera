@@ -7,3 +7,11 @@ license.workspace = true
 
 [dependencies]
 phera-extension-api.workspace = true
+tokio.workspace = true
+tokio-postgres.workspace = true
+mysql_async.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+
+[lints]
+workspace = true

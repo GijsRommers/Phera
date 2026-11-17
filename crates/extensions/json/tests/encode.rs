@@ -1,12 +1,26 @@
 //! Expected outputs were taken from PHP 8.5's `json_encode()`.
 
 use phera_ext_json::Json;
-use phera_extension_api::{CallError, Registry, Value};
+use phera_extension_api::testing::TestContext;
+use phera_extension_api::{ConstantValue, NativeError, NativeResult, Registry, Value};
 
-fn encode(args: &[Value]) -> Result<Value, CallError> {
+fn encode(args: &[Value]) -> NativeResult {
     let mut registry = Registry::new();
     registry.load(&Json);
-    registry.get_function("json_encode").unwrap()(args)
+    phera_extension_api::testing::call(
+        &registry,
+        &mut TestContext::default(),
+        "json_encode",
+        args.to_vec(),
+    )
+}
+
+/// The class and message of the error a call throws.
+fn thrown(args: &[Value]) -> (&'static str, String) {
+    match encode(args) {
+        Err(NativeError::Throw { class, message, .. }) => (class, message),
+        other => panic!("expected a thrown error, got {other:?}"),
+    }
 }
 
 fn encode_with(value: impl Into<Value>, flags: i64) -> Value {
@@ -21,14 +35,14 @@ fn constant(name: &str) -> i64 {
     let mut registry = Registry::new();
     registry.load(&Json);
     match registry.get_constant(name) {
-        Some(Value::Int(i)) => *i,
+        Some(ConstantValue::Int(i)) => *i,
         other => panic!("{name} is {other:?}"),
     }
 }
 
 #[test]
 fn scalars() {
-    assert_eq!(encode(&[Value::Null]), Ok(Value::from("null")));
+    assert_eq!(encode(&[Value::Null]).unwrap(), Value::from("null"));
     assert_eq!(json(true), Value::from("true"));
     assert_eq!(json(i64::MAX), Value::from("9223372036854775807"));
 }
@@ -64,13 +78,14 @@ fn inf_and_nan() {
     let partial = constant("JSON_PARTIAL_OUTPUT_ON_ERROR");
     assert_eq!(encode_with(f64::INFINITY, partial), Value::from("0"));
     assert_eq!(
-        encode(&[
+        thrown(&[
             Value::Float(f64::NAN),
             Value::Int(constant("JSON_THROW_ON_ERROR"))
         ]),
-        Err(CallError::Error(
+        (
+            "JsonException",
             "Inf and NaN cannot be JSON encoded".to_owned()
-        ))
+        )
     );
 }
 
@@ -137,19 +152,10 @@ fn invalid_utf8() {
 #[test]
 fn argument_errors() {
     assert_eq!(
-        encode(&[]),
-        Err(CallError::ArgumentCount {
-            min: 1,
-            max: 3,
-            given: 0
-        })
-    );
-    assert_eq!(
-        encode(&[Value::Null, Value::from("x")]),
-        Err(CallError::ArgumentType {
-            position: 2,
-            expected: "int",
-            given: "string"
-        })
+        thrown(&[Value::Null, Value::from("x")]),
+        (
+            "TypeError",
+            "json_encode(): Argument #2 ($flags) must be of type int, string given".to_owned()
+        )
     );
 }

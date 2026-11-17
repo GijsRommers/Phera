@@ -1,0 +1,8 @@
+--TEST--
+Exceptions: class_divisionbyzeroerror_parent
+--FILE--
+<?php
+try { throw new DivisionByZeroError("failure", 17); } catch (ArithmeticError $error) { echo get_class($error),"|",$error->getMessage(),"|",$error->getCode(),"|",$error->getLine(),"|",basename($error->getFile()),"\n",$error->getTraceAsString(),"\n"; }
+--EXPECTF--
+DivisionByZeroError|failure|17|2|%s
+#0 {main}

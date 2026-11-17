@@ -7,6 +7,7 @@ members = [
     "crates/parser",
     "crates/ast",
     "crates/source",
+    "crates/value",
     "crates/bytecode",
     "crates/compiler",
     "crates/vm",
@@ -23,11 +24,17 @@ version = "0.1.0"
 authors = ["Gijs Rommers <gijs.rommers@gmail.com>"]
 license = "MIT OR Apache-2.0"
 
+# Phera is written in safe Rust only. Unsafe code in dependencies is fine;
+# unsafe code in this workspace does not compile.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
 [workspace.dependencies]
 phera-lexer = { path = "crates/lexer" }
 phera-parser = { path = "crates/parser" }
 phera-ast = { path = "crates/ast" }
 phera-source = { path = "crates/source" }
+phera-value = { path = "crates/value" }
 phera-bytecode = { path = "crates/bytecode" }
 phera-compiler = { path = "crates/compiler" }
 phera-vm = { path = "crates/vm" }
@@ -35,3 +42,24 @@ phera-runtime = { path = "crates/runtime" }
 phera-server = { path = "crates/server" }
 phera-phpt = { path = "crates/phpt" }
 phera-extension-api = { path = "crates/extension-api" }
+phera-ext-core = { path = "crates/extensions/core" }
+phera-ext-ctype = { path = "crates/extensions/ctype" }
+phera-ext-http = { path = "crates/extensions/http" }
+phera-ext-json = { path = "crates/extensions/json" }
+phera-ext-pcre = { path = "crates/extensions/pcre" }
+phera-ext-pdo = { path = "crates/extensions/pdo" }
+phera-ext-standard = { path = "crates/extensions/standard" }
+bytes = "1"
+http-body-util = "0.1"
+hyper = { version = "1", default-features = false, features = ["http1", "server"] }
+hyper-util = { version = "0.1", default-features = false, features = ["tokio", "http1", "server-graceful"] }
+socket2 = { version = "0.5", features = ["all"] }
+tokio = { version = "1", features = ["rt", "net", "time", "sync", "signal", "macros"] }
+# PHP's own regex engine. Pinned because the bundled PCRE2 source version
+# (10.46) decides compile error texts.
+pcre2 = "=0.2.11"
+pcre2-sys = "=0.2.10"
+
+tokio-postgres = "0.7.18"
+mysql_async = { version = "0.37.1", default-features = false, features = ["minimal-rust"] }
+chrono = { version = "0.4", default-features = false, features = ["std"] }

@@ -9,3 +9,17 @@ license.workspace = true
 phera-lexer.workspace = true
 phera-ast.workspace = true
 phera-source.workspace = true
+
+[dev-dependencies]
+phera-phpt.workspace = true
+
+[[test]]
+name = "php_src"
+harness = false
+
+[[test]]
+name = "precedence_oracle"
+harness = false
+
+[lints]
+workspace = true

@@ -18,7 +18,8 @@ to work.
 
 > [!WARNING]
 > Phera is in its earliest stages. The workspace and crate boundaries are in
-> place, and the lexer and parser are just getting started. It can't run PHP yet.
+> place and the lexer is complete, but the parser is just getting started. It
+> can't run PHP yet.
 
 ## ✨ Goals
 
@@ -27,6 +28,16 @@ to work.
 - 🧱 **Clean layering.** Each stage of the pipeline is its own crate with strict, one-way dependencies.
 - 🦀 **Rust all the way down.** Memory safety and predictable performance, no C extensions required.
 - 🌐 **Batteries included.** `phera serve` boots an HTTP server straight from the CLI.
+
+### What's left out on purpose
+
+The lexer handles everything PHP 8.5 can lex, with a few deliberate exceptions
+that nothing modern depends on. Each is a clear error, not a silent gap:
+
+- Backtick shell execution (`` `ls` ``)
+- `${expr}` string interpolation, deprecated since PHP 8.2 (`"{$expr}"` works)
+- The `(real)` cast, removed in PHP 8
+- Short `<?` and ASP `<%` open tags
 
 ## 🏗️ Architecture
 
@@ -82,11 +93,13 @@ copied from php-src into `tests/upstream/`. `tests/fixtures/` holds Phera's own
 `make phpt` isn't part of `make test` yet, since Phera can't run PHP. Narrow
 either runner with `FILTER=<part of a path>`.
 
-The lexer comparison needs a `php` binary and skips itself without one. It only
-compares tests made entirely of tokens Phera supports, and lists the most common
-unsupported tokens for the rest. Point it at a php-src checkout with
-`make phpt-lexer PHP_SRC=/path/to/php-src` to find newly relevant tests after
-extending the lexer.
+The lexer comparison needs a `php` binary and skips itself without one. Its
+token stream matches `token_get_all` exactly, including inside interpolated
+strings and heredocs. Tests that use syntax Phera rejects on purpose, or whose
+code Phera rejects where PHP expects a parse error too, are counted as not
+relevant rather than failed. Point it at a php-src checkout with
+`make phpt-lexer PHP_SRC=/path/to/php-src` to run it over every test there; the
+lexer passes all of them.
 
 To check the tests themselves against real PHP, run them with PHP instead:
 

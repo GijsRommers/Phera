@@ -1,0 +1,1 @@
+<?php $name='caller'; $$name += 2; $snapshot=compact('caller'); extract(['created'=>9]); $alias =& $caller; $alias++; return [$snapshot['caller'], $created];

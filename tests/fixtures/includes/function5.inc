@@ -1,0 +1,1 @@
+<?php function included5() { return 17; }

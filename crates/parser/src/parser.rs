@@ -1,1 +1,374 @@
-//! Placeholder for shared parser mechanics.
+//! The parser's shared mechanics: a pre-lexed token buffer and the small
+//! helpers every parsing routine uses.
+//!
+//! The whole file is lexed up front. That keeps a two-token lookahead trivial
+//! and lets `__halt_compiler` hand the rest of the file back as one raw
+//! `InlineHtml` token, exactly like the lexer produces it.
+
+use phera_ast::{Program, Statement, StatementKind};
+use phera_lexer::{LexError, Lexer, Token, TokenKind};
+use phera_source::Span;
+
+use crate::error::ParseError;
+
+/// How deeply expressions and statements may nest before the parser gives up
+/// with an error. Real code stays under a hundred; PHP itself gives up
+/// somewhere in the tens of thousands. A recursive-descent parser needs stack
+/// in proportion to this depth, so the limit and [`crate::PARSER_STACK_BYTES`]
+/// go together: at this depth the parser must still fit in that stack, in a
+/// debug build too. Long chains such as `a . b . c ...` are parsed in loops and
+/// do not count.
+const MAX_DEPTH: u32 = 1000;
+
+pub(crate) struct Parser<'src> {
+    pub(crate) source: &'src str,
+    tokens: Vec<Token>,
+    pos: usize,
+    /// The lexer error that stopped lexing early, if any. A synthetic `Eof`
+    /// token sits at the end of `tokens` in that case.
+    lex_error: Option<LexError>,
+    /// End offset of the last consumed token, for building spans.
+    pub(crate) prev_end: usize,
+    depth: u32,
+    /// Set after `__halt_compiler();`: the rest of the file is raw data, so
+    /// every open block is implicitly closed.
+    pub(crate) halted: bool,
+}
+
+impl<'src> Parser<'src> {
+    pub(crate) fn new(source: &'src str) -> Self {
+        let mut lexer = Lexer::new(source);
+        let mut tokens = Vec::new();
+        let mut lex_error = None;
+
+        loop {
+            match lexer.next_token() {
+                Ok(token) => {
+                    let eof = token.kind == TokenKind::Eof;
+                    tokens.push(token);
+                    if eof {
+                        break;
+                    }
+                }
+                Err(error) => {
+                    lex_error = Some(error);
+                    tokens.push(Token {
+                        kind: TokenKind::Eof,
+                        span: Span::new(0, 0),
+                    });
+                    break;
+                }
+            }
+        }
+
+        Self {
+            source,
+            tokens,
+            pos: 0,
+            lex_error,
+            prev_end: 0,
+            depth: 0,
+            halted: false,
+        }
+    }
+
+    pub(crate) fn parse_program(mut self) -> Result<Program, ParseError> {
+        let statements = self.parse_top_level(&[])?;
+        if self.at(TokenKind::RightBrace) {
+            return Err(self.error("unexpected '}'"));
+        }
+        Ok(Program { statements })
+    }
+
+    /// Parses top-level statements, stopping (without consuming) at any token
+    /// in `stop` or at the end of the file.
+    pub(crate) fn parse_top_level(
+        &mut self,
+        stop: &[TokenKind],
+    ) -> Result<Vec<Statement>, ParseError> {
+        let mut statements = Vec::new();
+
+        loop {
+            match self.kind() {
+                TokenKind::Eof => {
+                    // Lexing stopped early with an error: surface it.
+                    if let Some(error) = &self.lex_error {
+                        return Err(ParseError::from_lex(error));
+                    }
+                    break;
+                }
+                kind if stop.contains(&kind) => break,
+                // A braced body (namespace, ...) ends here; at the true top
+                // level `parse_program` reports the stray `}`.
+                TokenKind::RightBrace => break,
+                TokenKind::OpenTag | TokenKind::CloseTag | TokenKind::Semicolon => {
+                    self.bump()?;
+                }
+                TokenKind::InlineHtml => {
+                    let token = self.bump()?;
+                    let html = self.text_of(&token).to_string();
+                    statements.push(Statement {
+                        kind: StatementKind::InlineHtml(html),
+                        span: token.span,
+                    });
+                }
+                TokenKind::OpenTagWithEcho => {
+                    statements.push(self.parse_echo()?);
+                }
+                TokenKind::Namespace => {
+                    if stop.contains(&TokenKind::Namespace) {
+                        break;
+                    }
+                    statements.push(self.parse_namespace()?);
+                }
+                TokenKind::HaltCompiler => {
+                    statements.push(self.parse_halt_compiler()?);
+                    // Everything after `__halt_compiler();` is raw data.
+                    break;
+                }
+                _ => statements.push(self.parse_top_statement()?),
+            }
+        }
+
+        Ok(statements)
+    }
+
+    // --- Token access --------------------------------------------------------
+
+    fn current(&self) -> &Token {
+        &self.tokens[self.pos.min(self.tokens.len() - 1)]
+    }
+
+    fn second(&self) -> &Token {
+        &self.tokens[(self.pos + 1).min(self.tokens.len() - 1)]
+    }
+
+    /// The kind of the current token.
+    pub(crate) fn kind(&self) -> TokenKind {
+        self.current().kind
+    }
+
+    /// The kind of the token after the current one.
+    pub(crate) fn kind2(&self) -> TokenKind {
+        self.second().kind
+    }
+
+    /// The kind of the token two positions ahead.
+    pub(crate) fn kind3(&self) -> TokenKind {
+        self.tokens[(self.pos + 2).min(self.tokens.len() - 1)].kind
+    }
+
+    /// The kind of the token three positions ahead.
+    pub(crate) fn kind4(&self) -> TokenKind {
+        self.tokens[(self.pos + 3).min(self.tokens.len() - 1)].kind
+    }
+
+    pub(crate) fn peek_span(&self) -> Span {
+        self.current().span
+    }
+
+    /// The source text of the current token.
+    pub(crate) fn text(&self) -> &'src str {
+        self.text_of(self.current())
+    }
+
+    pub(crate) fn text_of(&self, token: &Token) -> &'src str {
+        &self.source[token.span.start..token.span.end]
+    }
+
+    pub(crate) fn at(&self, kind: TokenKind) -> bool {
+        self.kind() == kind
+    }
+
+    pub(crate) fn at2(&self, kind: TokenKind) -> bool {
+        self.kind2() == kind
+    }
+
+    /// Consumes the current token.
+    pub(crate) fn bump(&mut self) -> Result<Token, ParseError> {
+        let token = self.current().clone();
+
+        if token.kind == TokenKind::Eof
+            && let Some(error) = &self.lex_error
+        {
+            return Err(ParseError::from_lex(error));
+        }
+
+        self.prev_end = token.span.end;
+        self.pos += 1;
+        Ok(token)
+    }
+
+    /// Consumes the current token if it has the given kind.
+    pub(crate) fn eat(&mut self, kind: TokenKind) -> Result<bool, ParseError> {
+        if self.at(kind) {
+            self.bump()?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Consumes the current token, which must have the given kind.
+    pub(crate) fn expect(&mut self, kind: TokenKind, what: &str) -> Result<Token, ParseError> {
+        if self.at(kind) {
+            self.bump()
+        } else {
+            Err(self.error(format!(
+                "expected {what}, found {}",
+                self.describe_current()
+            )))
+        }
+    }
+
+    // --- Errors ----------------------------------------------------------------
+
+    /// An error at the current token. A lexer error that stopped lexing early
+    /// takes precedence, since it is the real cause.
+    pub(crate) fn error(&self, message: impl Into<String>) -> ParseError {
+        if self.current().kind == TokenKind::Eof
+            && let Some(error) = &self.lex_error
+        {
+            return ParseError::from_lex(error);
+        }
+        ParseError::new(message, self.current().span)
+    }
+
+    pub(crate) fn error_at(&self, span: Span, message: impl Into<String>) -> ParseError {
+        ParseError::new(message, span)
+    }
+
+    /// A short description of the current token for error messages.
+    pub(crate) fn describe_current(&self) -> String {
+        let token = self.current();
+        if token.kind == TokenKind::Eof {
+            "end of file".to_string()
+        } else {
+            let text = self.text_of(token);
+            let text = if text.chars().count() > 30 {
+                format!("{}...", text.chars().take(30).collect::<String>())
+            } else {
+                text.to_string()
+            };
+            format!("token \"{text}\"")
+        }
+    }
+
+    // --- Spans and recursion ---------------------------------------------------
+
+    /// A span from `start` up to the end of the last consumed token.
+    pub(crate) fn span_since(&self, start: Span) -> Span {
+        Span::new(start.start, self.prev_end)
+    }
+
+    /// Enters a recursive parsing routine, refusing absurd nesting depth.
+    pub(crate) fn enter(&mut self) -> Result<(), ParseError> {
+        self.depth += 1;
+        if self.depth > MAX_DEPTH {
+            self.depth -= 1;
+            return Err(self.error("expression or statement nesting is too deep"));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn leave(&mut self) {
+        self.depth -= 1;
+    }
+}
+
+/// Whether `kind` can be used as an identifier where PHP allows reserved
+/// words: after `->` and `::`, as method/constant/enum-case names, and in
+/// named arguments. Any keyword token is accepted; the source text is the name.
+pub(crate) fn is_word_token(kind: TokenKind) -> bool {
+    use TokenKind::*;
+    matches!(
+        kind,
+        Identifier
+            | Abstract
+            | And
+            | Array
+            | As
+            | Break
+            | Callable
+            | Case
+            | Catch
+            | Class
+            | Clone
+            | Const
+            | Continue
+            | Declare
+            | Default
+            | Do
+            | Echo
+            | Else
+            | ElseIf
+            | Empty
+            | EndDeclare
+            | EndFor
+            | EndForeach
+            | EndIf
+            | EndSwitch
+            | EndWhile
+            | Eval
+            | Exit
+            | Extends
+            | Final
+            | Finally
+            | Fn
+            | For
+            | Foreach
+            | Function
+            | Global
+            | Goto
+            | If
+            | Implements
+            | Include
+            | IncludeOnce
+            | InstanceOf
+            | InsteadOf
+            | Interface
+            | Isset
+            | List
+            | Match
+            | Namespace
+            | New
+            | Or
+            | Print
+            | Private
+            | Protected
+            | Public
+            | Readonly
+            | Require
+            | RequireOnce
+            | Return
+            | Static
+            | Switch
+            | Throw
+            | Trait
+            | Try
+            | Unset
+            | Use
+            | Var
+            | While
+            | Xor
+            | Yield
+            | YieldFrom
+            | Enum
+            | HaltCompiler
+            | PublicSet
+            | ProtectedSet
+            | PrivateSet
+            | True
+            | False
+            | Null
+            | MagicDir
+            | MagicFile
+            | MagicLine
+            | MagicClass
+            | MagicFunction
+            | MagicMethod
+            | MagicNamespace
+            | MagicTrait
+            | MagicProperty
+    )
+}

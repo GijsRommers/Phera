@@ -1,6 +1,17 @@
-//! PHP's `ext/pdo`. Registers nothing yet: PDO is built from classes
-//! (`PDO`, `PDOStatement`, `PDOException`), which the extension API can't
-//! express so far.
+//! Async PDO for PHP: `$pdo = new PDO($dsn); $rows = $pdo->query($sql)->fetchAll()`.
+
+mod attributes;
+mod connection;
+mod constants;
+mod drivers;
+mod dsn;
+mod errors;
+mod fetch;
+mod parameters;
+mod placeholders;
+mod registration;
+mod statement;
+mod transactions;
 
 use phera_extension_api::{Extension, Registry};
 
@@ -10,6 +21,7 @@ impl Extension for Pdo {
     fn name(&self) -> &'static str {
         "pdo"
     }
-
-    fn register(&self, _registry: &mut Registry) {}
+    fn register(&self, registry: &mut Registry) {
+        registration::register(registry);
+    }
 }

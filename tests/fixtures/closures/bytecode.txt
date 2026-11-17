@@ -1,0 +1,52 @@
+file closure-listing.php
+  const#0 = Null
+  symbol#0 = strlen
+
+function {main} (12 registers, dynamic scope)
+  r0 = $a
+  r1 = $b
+  r2 = $f
+  r3 = $g
+  r4 = $h
+  0000  line 2    LoadInt { dst: r5, value: 1 }
+  0001  line 2    Assign { local: r0, src: r5 }
+  0002  line 3    LoadInt { dst: r6, value: 2 }
+  0003  line 3    Assign { local: r1, src: r6 }
+  0004  line 4    Capture { src: r0, kind: Value }
+  0005  line 4    Capture { src: r1, kind: Reference }
+  0006  line 4    MakeClosure { dst: r7, function: function#0, binding: Bound }
+  0007  line 4    Assign { local: r2, src: r7 }
+  0008  line 4    Clear { reg: r7 }
+  0009  line 5    Capture { src: r0, kind: Quiet }
+  0010  line 5    MakeClosure { dst: r8, function: function#1, binding: Bound }
+  0011  line 5    Assign { local: r3, src: r8 }
+  0012  line 5    Clear { reg: r8 }
+  0013  line 6    InitCall { function: symbol#0 }
+  0014  line 6    MakeCallable { dst: r9 }
+  0015  line 6    Assign { local: r4, src: r9 }
+  0016  line 6    Clear { reg: r9 }
+  0017  line 1    LoadInt { dst: r10, value: 1 }
+  0018  line 1    Return { src: r10 }
+
+function {closure:closure-listing.php:4} (6 registers)
+  r0 = $x
+  r1 = $a
+  r2 = $b
+  0000  line 4    Move { dst: r3, src: r0 }
+  0001  line 4    Move { dst: r4, src: r1 }
+  0002  line 4    Binary { op: Add, dst: r3, lhs: r3, rhs: r4 }
+  0003  line 4    Move { dst: r4, src: r2 }
+  0004  line 4    Binary { op: Add, dst: r3, lhs: r3, rhs: r4 }
+  0005  line 4    Return { src: r3 }
+  0006  line 4    LoadConst { dst: r4, constant: const#0 }
+  0007  line 4    Return { src: r4 }
+
+function {closure:closure-listing.php:5} (6 registers)
+  r0 = $x
+  r1 = $a
+  0000  line 5    Move { dst: r2, src: r0 }
+  0001  line 5    Move { dst: r3, src: r1 }
+  0002  line 5    Binary { op: Add, dst: r2, lhs: r2, rhs: r3 }
+  0003  line 5    Return { src: r2 }
+  0004  line 5    LoadConst { dst: r4, constant: const#0 }
+  0005  line 5    Return { src: r4 }

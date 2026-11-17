@@ -1,0 +1,129 @@
+//! End-to-end register execution, bounded stacks, and amortised writes.
+
+use std::sync::Arc;
+
+use phera_extension_api::Registry;
+use phera_vm::Vm;
+
+/// Compile and run PHP in a fresh request with a configurable heap-frame bound.
+async fn execute(source: &str, limit: usize) -> (i32, Vec<u8>) {
+    let unit = Arc::new(phera_compiler::compile(source, "test.php").expect("valid PHP"));
+    let mut vm = Vm::new(Arc::new(Registry::new()));
+    vm.frame_limit = limit;
+    let status = vm.run(unit).await;
+    (status, vm.output)
+}
+
+/// Long expression chains must execute without consuming an unbounded Rust stack.
+#[tokio::test(flavor = "current_thread")]
+async fn deep_chains() {
+    for (operator, term, expected) in [
+        ("+", "1", "50000".to_owned()),
+        (".", "'x'", "x".repeat(50_000)),
+    ] {
+        let source = format!(
+            "<?php echo {};",
+            std::iter::repeat_n(term, 50_000)
+                .collect::<Vec<_>>()
+                .join(operator)
+        );
+        let (status, output) = execute(&source, 10).await;
+        assert_eq!(status, 0);
+        assert_eq!(output, expected.as_bytes());
+    }
+}
+
+/// PHP recursion uses heap frames even at depths far beyond a native stack.
+#[tokio::test(flavor = "current_thread")]
+async fn deep_php_recursion() {
+    let(status,output)=execute("<?php function descend($n){if($n==0)return 42; return descend($n-1);} echo descend(200000);",250_000).await;
+    assert_eq!(status, 0);
+    assert_eq!(output, b"42");
+}
+
+/// Exceeding the configured frame limit must produce PHP output, not a panic.
+#[tokio::test(flavor = "current_thread")]
+async fn recursion_limit_is_php_error() {
+    let (status, output) = execute("<?php function forever(){forever();} forever();", 256).await;
+    assert_eq!(status, 255);
+    assert!(String::from_utf8_lossy(&output).contains("Maximum call stack depth of 256 exceeded"));
+}
+
+/// An awaited native callback must resume the same isolated VM.
+#[tokio::test(flavor = "current_thread")]
+async fn async_native_callback_runs_on_same_vm() {
+    use phera_extension_api::{
+        Context, FunctionEntry, LocalFuture, NativeResult, Param, ParamType, Value,
+    };
+    fn callback<'a>(
+        context: &'a mut dyn Context,
+        arguments: Vec<Value>,
+    ) -> LocalFuture<'a, NativeResult> {
+        Box::pin(async move {
+            tokio::task::yield_now().await;
+            let callable = arguments.first().cloned().unwrap_or_default();
+            context.call(&callable, vec![Value::Int(21)]).await
+        })
+    }
+    const PARAMS: &[Param] = &[Param::new("fn", ParamType::Mixed)];
+    let mut registry = Registry::new();
+    registry.function(FunctionEntry::asynchronous("callback", PARAMS, callback));
+    let unit = Arc::new(
+        phera_compiler::compile(
+            "<?php function twice($x){return $x*2;}echo callback('twice');",
+            "test.php",
+        )
+        .expect("valid PHP"),
+    );
+    let mut vm = Vm::new(Arc::new(registry));
+    assert_eq!(vm.run(unit).await, 0);
+    assert_eq!(vm.output, b"42");
+}
+
+/// Repeated PHP concatenation retains amortized string growth.
+#[tokio::test(flavor = "current_thread")]
+async fn million_string_appends() {
+    let (status, output) = execute(
+        "<?php $text='';for($index=0;$index<1000000;$index++){$text.='x';}echo $text;",
+        10,
+    )
+    .await;
+    assert_eq!(status, 0);
+    assert_eq!(output.len(), 1_000_000);
+    assert!(output.iter().all(|byte| *byte == b'x'));
+}
+
+/// Appending repeatedly must not retain a temporary COW owner.
+#[tokio::test(flavor = "current_thread")]
+async fn million_array_pushes() {
+    let (status,output) = execute("<?php $values=[];for($index=0;$index<1000000;$index++){$values[]=$index;}echo $values[999999];",10).await;
+    assert_eq!((status, output), (0, b"999999".to_vec()));
+}
+
+/// Nested reconstruction must preserve every element during repeated writes.
+#[tokio::test(flavor = "current_thread")]
+async fn million_nested_array_writes() {
+    let (status,output) = execute("<?php $grid=[];for($row=0;$row<1000;$row++){for($column=0;$column<1000;$column++){$grid[$row][$column]=$row+$column;}}echo $grid[999][999];",10).await;
+    assert_eq!((status, output), (0, b"1998".to_vec()));
+}
+
+/// PHP's argument introspection sees assignments to the original parameter slot.
+#[tokio::test(flavor = "current_thread")]
+async fn observed_arguments_follow_parameter_assignment() {
+    let (status, output) = execute(
+        "<?php function inspect($value){$value=9;echo func_num_args(),':',func_get_arg(0),':';$args=func_get_args();echo $args[0];}inspect(1);",
+        10,
+    ).await;
+    assert_eq!((status, output), (0, b"1:9:9".to_vec()));
+}
+
+/// A cached namespace fallback must observe a later definition in that namespace.
+#[tokio::test(flavor = "current_thread")]
+async fn constant_cache_invalidates_namespace_fallbacks() {
+    let (status, output) = execute(
+        "<?php namespace A;define('K',1);echo K;define('A\\K',2);echo K;",
+        10,
+    )
+    .await;
+    assert_eq!((status, output), (0, b"12".to_vec()));
+}
