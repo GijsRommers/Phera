@@ -128,6 +128,20 @@ fn push_overflow_is_an_error() {
     );
 }
 
+/// The next free key stops at PHP_INT_MAX, and `$a[]` may still use it once.
+#[test]
+fn push_may_use_php_int_max_once() {
+    // $a = [PHP_INT_MAX - 1 => 1]; $a[] = 2; gives key PHP_INT_MAX.
+    let mut a = PhpArray::from_iter([(k(i64::MAX - 1), vi(1))]);
+    assert_eq!(a.push(vi(2)).unwrap(), k(i64::MAX));
+    assert!(a.push(vi(3)).is_err());
+    // After unset($b[PHP_INT_MAX]) the key is free again.
+    let mut b = PhpArray::from_iter([(k(i64::MAX), vi(1))]);
+    assert!(b.push(vi(2)).is_err());
+    b.remove(&k(i64::MAX));
+    assert_eq!(b.push(vi(2)).unwrap(), k(i64::MAX));
+}
+
 /// Shift renumbers the integer keys that remain; pop keeps every key.
 #[test]
 fn shift_and_pop_reindexing() {

@@ -46,7 +46,7 @@ const INVALID: u32 = u32::MAX;
 pub struct PhpArray {
     storage: Storage,
     /// The key `$a[]` uses next: one more than the largest integer key ever
-    /// inserted, `None` before the first. It stays at `i64::MAX` once there.
+    /// inserted, `None` before the first. It stops at `i64::MAX`.
     next_free: Option<i64>,
     /// Number of holes in `storage`.
     dead: u32,

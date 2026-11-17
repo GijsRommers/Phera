@@ -53,17 +53,18 @@ impl PhpArray {
         self.maybe_compact();
     }
 
-    /// `$a[] = $value`: appends at the next free integer key. Fails once
-    /// that key has reached `PHP_INT_MAX`, as PHP does.
+    /// `$a[] = $value`: appends at the next free integer key. That key
+    /// stops at `PHP_INT_MAX`, which can be used once: `$a[]` fails only
+    /// when the entry `PHP_INT_MAX` exists.
     #[inline]
     pub fn push(&mut self, value: Value) -> Result<ArrayKey, OpError> {
         let key = self.next_free.unwrap_or(0);
-        if key == i64::MAX {
+        if key == i64::MAX && self.contains_key(&ArrayKey::Int(key)) {
             return Err(OpError::error(
                 "Cannot add element to the array as the next element is already occupied",
             ));
         }
-        self.next_free = Some(key + 1);
+        self.next_free = Some(key.saturating_add(1));
         self.push_entry(ArrayKey::Int(key), value);
         Ok(ArrayKey::Int(key))
     }
