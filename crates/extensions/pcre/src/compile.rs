@@ -1,8 +1,8 @@
 //! Compile PHP patterns once: `/a+/u` uses Unicode properties and bounded PCRE2 work.
 
 use crate::{pattern, transform};
-use pcre2::bytes::{Regex, RegexBuilder};
-use std::cell::OnceCell;
+use pcre2::bytes::{CaptureLocations, Regex, RegexBuilder};
+use std::cell::{Cell, OnceCell};
 
 pub(crate) struct Compiled {
     pub regex: Regex,
@@ -10,8 +10,22 @@ pub(crate) struct Compiled {
     retry_source: String,
     retry_regex: OnceCell<Result<Regex, pcre2::Error>>,
     builder: RegexBuilder,
+    /// Match data for `regex`, kept from one call to the next. Making it
+    /// allocates a match context, the capture offsets and a JIT stack of
+    /// up to 192 KiB, which costs more than a short match does.
+    spare_locations: Cell<Option<CaptureLocations>>,
 }
 impl Compiled {
+    /// Match data for `regex`: the spare one, or a new one when it is in use
+    /// (a callback that matches the same pattern again).
+    pub(crate) fn take_locations(&self) -> CaptureLocations {
+        self.spare_locations
+            .take()
+            .unwrap_or_else(|| self.regex.capture_locations())
+    }
+    pub(crate) fn put_back_locations(&self, locations: CaptureLocations) {
+        self.spare_locations.set(Some(locations));
+    }
     pub(crate) fn retry(&self) -> Result<&Regex, pcre2::Error> {
         self.retry_regex
             .get_or_init(|| self.builder.build(&self.retry_source))
@@ -109,6 +123,7 @@ pub(crate) fn compile(bytes: &[u8]) -> Result<Compiled, String> {
         retry_source,
         retry_regex: OnceCell::new(),
         builder,
+        spare_locations: Cell::new(None),
     })
 }
 

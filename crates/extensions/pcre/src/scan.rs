@@ -2,6 +2,7 @@
 
 use crate::compile::Compiled;
 use crate::errors::Error;
+use pcre2::bytes::CaptureLocations;
 
 pub(crate) type Captures = Vec<Option<(usize, usize)>>;
 pub(crate) struct Scanner<'a> {
@@ -11,6 +12,18 @@ pub(crate) struct Scanner<'a> {
     after_empty: bool,
     finished: bool,
     validated: bool,
+    /// Borrowed from `compiled` for the scan and given back on drop; `None`
+    /// only while being given back.
+    locations: Option<CaptureLocations>,
+    /// Match data for the retry pattern, made on the first retry.
+    retry_locations: Option<CaptureLocations>,
+}
+impl Drop for Scanner<'_> {
+    fn drop(&mut self) {
+        if let Some(locations) = self.locations.take() {
+            self.compiled.put_back_locations(locations);
+        }
+    }
 }
 impl<'a> Scanner<'a> {
     pub(crate) fn new(compiled: &'a Compiled, subject: &'a [u8], position: usize) -> Self {
@@ -21,6 +34,8 @@ impl<'a> Scanner<'a> {
             after_empty: false,
             finished: false,
             validated: false,
+            locations: Some(compiled.take_locations()),
+            retry_locations: None,
         }
     }
     pub(crate) fn validate(&self) -> Result<(), Error> {
@@ -38,11 +53,13 @@ impl<'a> Scanner<'a> {
         Ok(())
     }
     /// PHP performs this retry even for preg_match when no $matches argument was supplied.
-    pub(crate) fn check_empty_retry(&self) -> Result<(), Error> {
+    pub(crate) fn check_empty_retry(&mut self) -> Result<(), Error> {
         if self.after_empty {
             let retry = self.compiled.retry()?;
-            let mut locations = retry.capture_locations();
-            retry.captures_read_at(&mut locations, self.subject, self.position)?;
+            let locations = self
+                .retry_locations
+                .get_or_insert_with(|| retry.capture_locations());
+            retry.captures_read_at(locations, self.subject, self.position)?;
         }
         Ok(())
     }
@@ -55,13 +72,17 @@ impl<'a> Scanner<'a> {
             self.validated = true;
         }
         loop {
-            let regex = if self.after_empty {
-                self.compiled.retry()?
+            let (regex, locations) = if self.after_empty {
+                let retry = self.compiled.retry()?;
+                let locations = self
+                    .retry_locations
+                    .get_or_insert_with(|| retry.capture_locations());
+                (retry, locations)
             } else {
-                &self.compiled.regex
+                let locations = self.locations.as_mut().expect("held until drop");
+                (&self.compiled.regex, locations)
             };
-            let mut locations = regex.capture_locations();
-            let found = regex.captures_read_at(&mut locations, self.subject, self.position)?;
+            let found = regex.captures_read_at(locations, self.subject, self.position)?;
             if let Some(found) = found {
                 if found.end() < found.start() {
                     return Err(Error::Internal);

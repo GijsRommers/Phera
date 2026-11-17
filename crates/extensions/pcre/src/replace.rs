@@ -74,6 +74,8 @@ fn run(context: &mut dyn Context, arguments: &[Value], filter: bool) -> NativeRe
                 replaced += 1;
             }
             output.extend_from_slice(&subject[previous_end..]);
+            // The scanner borrows `subject` until it gives its match data back.
+            drop(scanner);
             subject = output;
         }
         Ok(if filter && count == old_count {
