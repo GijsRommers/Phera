@@ -93,13 +93,14 @@ fn select(context: &mut dyn Context, arguments: &[Value], extremum: Extremum) ->
             result
         } else {
             path = ComparisonPath::Generic;
-            extremum.prefers(value::compare(candidate, best, context.diagnostics())?, 0)
+            // PHP compares the current winner on the left, which matters for cycles.
+            extremum.prefers(0, value::compare(best, candidate, context.diagnostics())?)
         };
         if replace {
             best = candidate;
         }
     }
-    Ok(best.clone())
+    Ok(best.try_deref()?.clone())
 }
 
 /// Avoid rounding an integer before comparison with another exact integer.

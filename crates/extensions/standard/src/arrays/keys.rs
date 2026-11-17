@@ -135,7 +135,7 @@ fn array_keys(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     if let Some(array) = args::array(arguments, 0) {
         for (key, value) in array.iter() {
             if !args::given(arguments, 1)
-                || comparison.equal(context, value, arguments.get(1).unwrap_or(&Value::Null))?
+                || comparison.equal(context, args::value(arguments, 1), value)?
             {
                 result.push(key_value(&key))?;
             }
