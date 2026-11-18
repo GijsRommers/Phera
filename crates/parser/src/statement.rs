@@ -265,7 +265,7 @@ impl Parser<'_> {
             TokenKind::InlineHtml if !self.halted => {
                 let token = self.bump()?;
                 Ok(Some(Statement {
-                    kind: StatementKind::InlineHtml(self.text_of(&token).to_string()),
+                    kind: StatementKind::InlineHtml(self.bytes_of(&token).to_vec()),
                     span: token.span,
                 }))
             }

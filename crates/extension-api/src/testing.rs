@@ -17,8 +17,8 @@ use std::rc::Rc;
 use phera_value::{CollectDiagnostics, Diagnostics, Object, PhpArray, Value};
 
 use crate::{
-    Context, FunctionEntry, LocalFuture, NativeError, NativeFn, NativeResult, Registry,
-    RequestState,
+    CompileDiagnostic, CompileDiagnosticKind, CompileDiagnosticSite, Context, FunctionEntry,
+    LocalFuture, NativeError, NativeFn, NativeResult, Registry, RequestState,
 };
 
 /// Records output and diagnostics. Calling back into PHP is not possible
@@ -29,6 +29,7 @@ pub struct TestContext {
     pub diagnostics: CollectDiagnostics,
     pub strict_types: bool,
     pub state: RequestState,
+    pub caller: Option<(String, usize)>,
 }
 
 impl Context for TestContext {
@@ -38,6 +39,28 @@ impl Context for TestContext {
 
     fn diagnostics(&mut self) -> &mut dyn Diagnostics {
         &mut self.diagnostics
+    }
+
+    fn compile_diagnostic(
+        &mut self,
+        diagnostic: &CompileDiagnostic,
+        site: CompileDiagnosticSite<'_>,
+    ) {
+        match diagnostic.kind {
+            CompileDiagnosticKind::Warning => {
+                let (file, line) = match site {
+                    CompileDiagnosticSite::Caller => self
+                        .caller
+                        .as_ref()
+                        .map_or(("Unknown", diagnostic.line), |(file, line)| {
+                            (file.as_str(), *line)
+                        }),
+                    CompileDiagnosticSite::Source(file) => (file, diagnostic.line),
+                };
+                self.write(diagnostic.render(file, line).as_bytes());
+            }
+            CompileDiagnosticKind::Deprecated => self.deprecated(diagnostic.message.clone()),
+        }
     }
 
     fn state(&mut self) -> &mut RequestState {

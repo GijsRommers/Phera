@@ -169,7 +169,23 @@ impl Vm {
                 }
                 match entry.handler {
                     phera_extension_api::NativeMethod::Sync(handler) => {
+                        let track =
+                            self.error_handlers.error.is_some() && !self.error_handlers.active;
+                        let previous = if track {
+                            let operator = if method.is_static { "::" } else { "->" };
+                            self.error_handlers.native_site.replace(
+                                crate::error_traces::NativeTrace::new(
+                                    &format!("{}{operator}{}", method.declaring, method.name),
+                                    &arguments,
+                                ),
+                            )
+                        } else {
+                            None
+                        };
                         let result = handler(self, context.receiver.as_ref(), &arguments);
+                        if track {
+                            self.error_handlers.native_site = previous;
+                        }
                         self.call_stack.recycle_native_arguments(arguments);
                         result
                     }

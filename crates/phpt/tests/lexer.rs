@@ -63,19 +63,18 @@ fn main() -> ExitCode {
         let Ok(phpt) = Phpt::parse_file(path) else {
             continue;
         };
-        let Some(code) = phpt.section("FILE") else {
+        let Some(bytes) = phpt.section_bytes("FILE") else {
             continue;
         };
 
-        // Sources in other encodings (`zend.multibyte` tests) aren't valid
-        // UTF-8, and Phera's lexer only takes `&str`. `Phpt` reads lossily, so
-        // such code shows up with replacement characters.
-        if code.contains('\u{FFFD}') {
+        // This comparison represents token text as UTF-8. The tokenizer
+        // extension's oracle also compares binary source.
+        let Ok(code) = std::str::from_utf8(bytes) else {
             *not_relevant
                 .entry("source is not UTF-8".into())
                 .or_default() += 1;
             continue;
-        }
+        };
 
         let file = work_dir.join(format!("{index}.php"));
         fs::write(&file, code).expect("cannot write source file");

@@ -1511,6 +1511,9 @@ dependencies = [
 [[package]]
 name = "phera-bytecode"
 version = "0.1.0"
+dependencies = [
+ "phera-source",
+]
 
 [[package]]
 name = "phera-cli"
@@ -1665,9 +1668,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "phera-ext-tokenizer"
+version = "0.1.0"
+dependencies = [
+ "phera-ext-core",
+ "phera-extension-api",
+ "phera-lexer",
+ "phera-parser",
+ "phera-phpt",
+]
+
+[[package]]
 name = "phera-extension-api"
 version = "0.1.0"
 dependencies = [
+ "phera-source",
  "phera-value",
 ]
 
@@ -1722,6 +1737,7 @@ dependencies = [
  "phera-ext-random",
  "phera-ext-redis",
  "phera-ext-standard",
+ "phera-ext-tokenizer",
  "phera-extension-api",
  "phera-value",
  "phera-vm",
