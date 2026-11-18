@@ -5,7 +5,8 @@ use phera_extension_api::{
     PhpString, Value, args,
 };
 
-use super::{CaseSensitivity, reserve, stringify};
+use super::{CaseSensitivity, reserve};
+use crate::arguments::stringify;
 
 pub(super) const FUNCTIONS: &[FunctionEntry] = &[STR_REPLACE, STR_IREPLACE];
 

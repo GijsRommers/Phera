@@ -1,14 +1,13 @@
 //! Building arrays from other values: `array_combine`, `array_flip`,
 //! `array_fill`, `array_fill_keys` and `array_pad`.
 
-use phera_extension_api::value::to_php_string;
 use phera_extension_api::{
-    ArrayKey, Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, PhpArray, Value,
-    args,
+    ArrayKey, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType,
+    PhpArray, Value, args,
 };
 
 use super::{IntegerKeys, append_entry};
-use crate::arguments::required_array;
+use crate::arguments::{required_array, stringify};
 
 pub(super) const FUNCTIONS: &[FunctionEntry] = &[
     ARRAY_COMBINE,
@@ -24,14 +23,14 @@ const MAX_ARRAY_SIZE: u64 = 1 << 30;
 /// A value as a key the way `array_combine` and `array_fill_keys` read it:
 /// an int stays an int, anything else becomes a string first, so `true` is
 /// `"1"` and `1.5` is `"1.5"` (where `$array[1.5]` would be 1).
-pub(super) fn key_from_string(
+async fn key_from_string(
     context: &mut dyn Context,
     value: &Value,
 ) -> Result<ArrayKey, NativeError> {
     if let Value::Int(integer) = &*value.deref() {
         return Ok(ArrayKey::Int(*integer));
     }
-    let string = to_php_string(value, context.diagnostics())?;
+    let string = stringify(context, value).await?;
     Ok(ArrayKey::from_value(&Value::String(string))?)
 }
 
@@ -44,7 +43,7 @@ pub(super) fn key_from_string(
 /// array_combine(["a", "a"], [1, 2]);  // ["a" => 2]
 /// array_combine(["a"], [1, 2]);       // ValueError
 /// ```
-const ARRAY_COMBINE: FunctionEntry = FunctionEntry::sync(
+const ARRAY_COMBINE: FunctionEntry = FunctionEntry::asynchronous(
     "array_combine",
     &[
         Param::new("keys", ParamType::Array),
@@ -53,19 +52,24 @@ const ARRAY_COMBINE: FunctionEntry = FunctionEntry::sync(
     array_combine,
 );
 
-fn array_combine(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let keys = required_array(arguments, 0);
-    let values = required_array(arguments, 1);
-    if keys.len() != values.len() {
-        return Err(NativeError::value_error(
-            "array_combine(): Argument #1 ($keys) and argument #2 ($values) must have the same number of elements",
-        ));
-    }
-    let mut result = PhpArray::new();
-    for (key, value) in keys.values().zip(values.values()) {
-        result.insert(key_from_string(context, key)?, value.clone());
-    }
-    Ok(Value::from(result))
+fn array_combine(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        let keys = required_array(&arguments, 0);
+        let values = required_array(&arguments, 1);
+        if keys.len() != values.len() {
+            return Err(NativeError::value_error(
+                "array_combine(): Argument #1 ($keys) and argument #2 ($values) must have the same number of elements",
+            ));
+        }
+        let mut result = PhpArray::new();
+        for (key, value) in keys.values().zip(values.values()) {
+            result.insert(key_from_string(context, key).await?, value.clone());
+        }
+        Ok(Value::from(result))
+    })
 }
 
 /// `array_flip(array $array): array`, keys and values swapped. Values that
@@ -141,7 +145,7 @@ fn array_fill(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
 /// ```php
 /// array_fill_keys(["a", 5], 0); // ["a" => 0, 5 => 0]
 /// ```
-const ARRAY_FILL_KEYS: FunctionEntry = FunctionEntry::sync(
+const ARRAY_FILL_KEYS: FunctionEntry = FunctionEntry::asynchronous(
     "array_fill_keys",
     &[
         Param::new("keys", ParamType::Array),
@@ -150,13 +154,18 @@ const ARRAY_FILL_KEYS: FunctionEntry = FunctionEntry::sync(
     array_fill_keys,
 );
 
-fn array_fill_keys(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let value = &arguments[1];
-    let mut result = PhpArray::new();
-    for key in required_array(arguments, 0).values() {
-        result.insert(key_from_string(context, key)?, value.clone());
-    }
-    Ok(Value::from(result))
+fn array_fill_keys(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        let value = &arguments[1];
+        let mut result = PhpArray::new();
+        for key in required_array(&arguments, 0).values() {
+            result.insert(key_from_string(context, key).await?, value.clone());
+        }
+        Ok(Value::from(result))
+    })
 }
 
 /// `array_pad(array $array, int $length, mixed $value): array`, padded with

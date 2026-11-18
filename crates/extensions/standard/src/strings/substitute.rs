@@ -7,7 +7,8 @@ use phera_extension_api::{
     PhpArray, Value, args, prepare_call, prepare_single_argument,
 };
 
-use super::{buffer, reserve, stringify};
+use super::{buffer, reserve};
+use crate::arguments::stringify;
 use crate::offsets::clamped_range;
 
 pub(super) const FUNCTIONS: &[FunctionEntry] = &[SUBSTR_REPLACE, STRTR];

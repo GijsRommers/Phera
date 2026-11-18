@@ -7,13 +7,13 @@ use std::collections::HashSet;
 
 use phera_extension_api::value::to_php_string;
 use phera_extension_api::{
-    ArrayKey, Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, PhpArray, Value,
-    args,
+    ArrayKey, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType,
+    PhpArray, Value, args,
 };
 
 use super::ordering::SortFlags;
 use super::zend_sort;
-use crate::arguments::required_array;
+use crate::arguments::{required_array, stringify};
 use crate::constants::SORT_STRING;
 
 pub(super) const FUNCTIONS: &[FunctionEntry] = &[
@@ -252,7 +252,7 @@ fn contains(
 /// array_unique(["a" => 1, "b" => "1", "c" => 2]); // ["a" => 1, "c" => 2]
 /// array_unique([4, "4", "3", 4, 3], SORT_REGULAR); // [0 => 4, 2 => "3"]
 /// ```
-const ARRAY_UNIQUE: FunctionEntry = FunctionEntry::sync(
+const ARRAY_UNIQUE: FunctionEntry = FunctionEntry::asynchronous(
     "array_unique",
     &[
         Param::new("array", ParamType::Array),
@@ -261,7 +261,11 @@ const ARRAY_UNIQUE: FunctionEntry = FunctionEntry::sync(
     array_unique,
 );
 
-fn array_unique(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn array_unique(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move { unique(context, &arguments).await })
+}
+
+async fn unique(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let flags = args::int(arguments, 1).unwrap_or(SORT_STRING);
     let array = required_array(arguments, 0);
     if array.len() <= 1 {
@@ -271,7 +275,7 @@ fn array_unique(context: &mut dyn Context, arguments: &[Value]) -> NativeResult 
         let mut seen = HashSet::new();
         let mut result = PhpArray::new();
         for (key, value) in array.iter() {
-            if seen.insert(to_php_string(value, context.diagnostics())?) {
+            if seen.insert(stringify(context, value).await?) {
                 result.insert(key, value.clone());
             }
         }
@@ -279,16 +283,22 @@ fn array_unique(context: &mut dyn Context, arguments: &[Value]) -> NativeResult 
     }
     let flags = SortFlags::from_flags(flags);
     let entries: Vec<_> = array.iter().collect();
-    let order = zend_sort::order(entries.len(), |left, right| {
-        flags.compare(context, entries[left].1, entries[right].1)
-    })?;
+    let order = zend_sort::order_async(entries.len(), async |left, right| {
+        flags
+            .compare_with_objects(context, entries[left].1, entries[right].1)
+            .await
+    })
+    .await?;
     // Walk the sorted entries; of a run of equal values, the one that came
     // first in the array stays.
     let mut result = (**array).clone();
     let mut kept: Option<usize> = None;
     for index in order {
         if let Some(last) = kept
-            && flags.compare(context, entries[last].1, entries[index].1)? == Ordering::Equal
+            && flags
+                .compare_with_objects(context, entries[last].1, entries[index].1)
+                .await?
+                == Ordering::Equal
         {
             if last > index {
                 result.remove(&entries[last].0);
