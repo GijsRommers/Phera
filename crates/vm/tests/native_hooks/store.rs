@@ -14,6 +14,7 @@ pub(crate) fn register(registry: &mut Registry) {
         hooks: const {
             Some(&ClassHooks {
                 dimensions: Some(NativeDimensions {
+                    fallback_if_overridden: &[],
                     get,
                     exists,
                     set,

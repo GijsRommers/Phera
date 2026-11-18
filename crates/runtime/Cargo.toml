@@ -23,6 +23,7 @@ phera-ext-pcre.workspace = true
 phera-ext-pdo.workspace = true
 phera-ext-sqlite3.workspace = true
 phera-ext-random.workspace = true
+phera-ext-spl.workspace = true
 phera-ext-standard.workspace = true
 phera-ext-tokenizer.workspace = true
 phera-value.workspace = true

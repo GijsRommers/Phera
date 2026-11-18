@@ -47,6 +47,8 @@ pub enum ParamType {
     ArrayOrFloat,
     /// `array|bool`, used by sorted-set range options.
     ArrayOrBool,
+    /// `array|object`
+    ArrayOrObject,
 }
 
 impl ParamType {

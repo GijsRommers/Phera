@@ -90,6 +90,19 @@ pub trait Context {
         })
     }
 
+    /// Resolves a class name, including autoloading and class aliases.
+    fn lookup_class<'a>(
+        &'a mut self,
+        _name: &'a str,
+    ) -> LocalFuture<'a, Result<Option<Rc<dyn phera_value::ClassHandle>>, NativeError>> {
+        Box::pin(std::future::ready(Ok(None)))
+    }
+
+    /// Tests whether a language operation should dispatch to a PHP implementation.
+    fn is_user_method(&self, _object: &Object, _name: &str) -> bool {
+        false
+    }
+
     /// The class selected by a native static method call, including inherited factories.
     fn called_class(&self) -> Option<&str> {
         None

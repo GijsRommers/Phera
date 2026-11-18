@@ -240,10 +240,17 @@ impl Vm {
 fn native(object: &Object, method: &str) -> Option<NativeDimensions> {
     let class = object.class.as_any().downcast_ref::<Class>()?;
     let handler = class.hooks.as_ref()?.dimensions?;
-    if class
-        .methods
-        .get(method)
-        .is_some_and(|method| matches!(method.body, crate::classes::MethodBody::User(_)))
+    let overridden = |method| {
+        class
+            .methods
+            .get(method)
+            .is_some_and(|method| matches!(method.body, crate::classes::MethodBody::User(_)))
+    };
+    if overridden(method)
+        || handler
+            .fallback_if_overridden
+            .iter()
+            .any(|name| overridden(name))
     {
         return None;
     }

@@ -128,6 +128,29 @@ impl Context for Vm {
         }
     }
 
+    fn lookup_class<'a>(
+        &'a mut self,
+        name: &'a str,
+    ) -> LocalFuture<
+        'a,
+        Result<Option<std::rc::Rc<dyn phera_value::ClassHandle>>, phera_extension_api::NativeError>,
+    > {
+        Box::pin(async move {
+            Ok(Vm::lookup_class(self, name)
+                .await?
+                .map(|class| class as std::rc::Rc<dyn phera_value::ClassHandle>))
+        })
+    }
+
+    fn is_user_method(&self, object: &phera_value::Object, name: &str) -> bool {
+        object
+            .class
+            .as_any()
+            .downcast_ref::<crate::classes::Class>()
+            .and_then(|class| class.methods.get(&name.to_ascii_lowercase()))
+            .is_some_and(|method| matches!(method.body, crate::classes::MethodBody::User(_)))
+    }
+
     fn called_class(&self) -> Option<&str> {
         self.native_called_class
             .as_ref()

@@ -33,7 +33,7 @@ pub enum PropertyPurpose {
 /// Native classes may copy their state or explicitly forbid cloning.
 #[derive(Clone, Copy)]
 pub enum NativeClone {
-    Copy(fn(&Object, &Object) -> Result<(), NativeError>),
+    Copy(fn(&Rc<Object>, &Object) -> Result<(), NativeError>),
     Forbidden,
 }
 
@@ -52,6 +52,8 @@ pub type IteratorFactory =
 /// ArrayAccess's four methods can be serviced directly by native state.
 #[derive(Clone, Copy)]
 pub struct NativeDimensions {
+    /// Other methods the fast path depends on retaining their native implementation.
+    pub fallback_if_overridden: &'static [&'static str],
     pub get: fn(&mut dyn Context, &Object, Value) -> NativeResult,
     pub exists: fn(&mut dyn Context, &Object, Value) -> Result<bool, NativeError>,
     pub set: fn(&mut dyn Context, &Object, Value, Value) -> Result<(), NativeError>,

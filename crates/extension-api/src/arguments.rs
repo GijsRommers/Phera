@@ -143,6 +143,7 @@ pub(crate) fn type_text(ty: ParamType) -> &'static str {
         ParamType::ArrayOrNumber => "array|int|float",
         ParamType::ArrayOrFloat => "array|float",
         ParamType::ArrayOrBool => "array|bool",
+        ParamType::ArrayOrObject => "array|object",
     }
 }
 
@@ -236,6 +237,9 @@ fn convert(
             _ if strict => None,
             _ => to_float(value, site, context).map(Some),
         },
+        ParamType::ArrayOrObject => {
+            matches!(value, Value::Array(_) | Value::Object(_)).then_some(None)
+        }
         ParamType::ArrayOrBool => match value {
             Value::Array(_) | Value::Bool(_) => Some(None),
             _ if strict => None,
