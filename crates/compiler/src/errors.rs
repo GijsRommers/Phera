@@ -1,7 +1,16 @@
 //! Public PHP wording for frontend diagnostics.
 
 /// Preserve frontend errors while normalizing the CLI wording PHP exposes.
-pub(super) fn parse_message(message: &str, source: &str, token: &str) -> String {
+pub(super) fn parse_message(message: &str, source: &str, token: &str, line: usize) -> String {
+    if message == "unterminated comment" {
+        return format!("Unterminated comment starting line {line}");
+    }
+    if message.starts_with("invalid numeric literal") {
+        return "Invalid numeric literal".to_owned();
+    }
+    if message == "unsupported syntax: the (real) cast, removed in PHP 8" {
+        return "The (real) cast has been removed, use (float) instead".to_owned();
+    }
     if let Some(rest) = message.strip_prefix("invalid ") {
         return format!(
             "Invalid {}",

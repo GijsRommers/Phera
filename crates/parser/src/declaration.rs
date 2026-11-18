@@ -470,7 +470,7 @@ impl Parser<'_> {
             while self.eat(TokenKind::Comma)? {
                 instead_of.push(self.parse_class_name()?);
             }
-            self.expect(TokenKind::Semicolon, "';'")?;
+            self.expect_end()?;
             let trait_name = trait_name.ok_or_else(|| {
                 self.error("'insteadof' requires a trait-qualified method reference")
             })?;
@@ -493,7 +493,7 @@ impl Parser<'_> {
             } else if is_word_token(self.kind()) {
                 alias = Some(self.parse_identifier()?);
             }
-            self.expect(TokenKind::Semicolon, "';'")?;
+            self.expect_end()?;
             Ok(TraitAdaptation::Alias {
                 trait_name,
                 method,
