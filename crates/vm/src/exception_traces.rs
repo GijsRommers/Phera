@@ -80,7 +80,14 @@ impl Vm {
                 .iter()
                 .rev()
                 .find(|site| site.boundary == callee_index);
-            if warning.is_some() || autoload.is_some() {
+            let mut callbacks = self
+                .error_handlers
+                .callback_sites
+                .iter()
+                .rev()
+                .filter(|site| site.boundary == callee_index)
+                .peekable();
+            if warning.is_some() || autoload.is_some() || callbacks.peek().is_some() {
                 entry.remove(&ArrayKey::str("file"));
                 entry.remove(&ArrayKey::str("line"));
             }
@@ -94,6 +101,10 @@ impl Vm {
                 );
             } else if let Some(site) = autoload {
                 append_native(&mut trace, &site.native, &caller.unit().file, caller.line());
+            } else {
+                for site in callbacks {
+                    append_native(&mut trace, &site.native, &caller.unit().file, caller.line());
+                }
             }
         }
         if let Some(frame) = self.frames().next()
@@ -163,6 +174,12 @@ pub(crate) struct WarningSite {
     pub(crate) boundary: usize,
     pub(crate) native: crate::error_traces::NativeTrace,
     pub(crate) location: crate::diagnostics::SourceLocation,
+}
+
+/// PHP extensions can call back through a native frame, such as json_encode.
+pub(crate) struct NativeCallbackSite {
+    pub(crate) boundary: usize,
+    pub(crate) native: crate::error_traces::NativeTrace,
 }
 
 /// A nested unit is shown as the construct that entered it.

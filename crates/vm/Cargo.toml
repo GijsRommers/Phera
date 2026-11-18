@@ -19,3 +19,4 @@ workspace = true
 [dev-dependencies]
 # The VM's tests use the real exception classes.
 phera-ext-core.workspace = true
+phera-ext-json.workspace = true

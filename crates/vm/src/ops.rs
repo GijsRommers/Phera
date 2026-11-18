@@ -2,9 +2,9 @@
 
 use phera_bytecode::{BinaryOp as Binary, UnaryOp as Unary};
 use phera_value::{
-    Diagnostics, OpError, Value, add, bitwise_and, bitwise_not, bitwise_or, bitwise_xor,
-    compare_op, concat, div, less, less_equal, modulo, mul, negate, pow, shift_left, shift_right,
-    strict_equals, sub, to_bool, unary_plus,
+    Diagnostics, OpError, Value, add, bitwise_and, bitwise_not, bitwise_or, bitwise_xor, concat,
+    div, modulo, mul, negate, pow, shift_left, shift_right, strict_equals, sub, to_bool,
+    unary_plus,
 };
 
 /// Delegate coercion and warnings to the value layer for each PHP binary operator.
@@ -32,23 +32,25 @@ pub fn binary(
         Binary::BitwiseXor => bitwise_xor(left, right, diagnostics),
         Binary::ShiftLeft => shift_left(left, right, diagnostics),
         Binary::ShiftRight => shift_right(left, right, diagnostics),
-        Binary::Equal => crate::closure_equality::equal(left, right, diagnostics),
         Binary::Identical => strict_equals(left, right, diagnostics),
-        Binary::NotEqual => Ok(Value::Bool(!to_bool(&crate::closure_equality::equal(
-            left,
-            right,
-            diagnostics,
-        )?))),
         Binary::NotIdentical => Ok(Value::Bool(!to_bool(&strict_equals(
             left,
             right,
             diagnostics,
         )?))),
-        Binary::Less => less(left, right, diagnostics),
-        Binary::LessEqual => less_equal(left, right, diagnostics),
-        Binary::Greater => less(right, left, diagnostics),
-        Binary::GreaterEqual => less_equal(right, left, diagnostics),
-        Binary::Spaceship => compare_op(left, right, diagnostics),
+        Binary::Equal
+        | Binary::NotEqual
+        | Binary::Less
+        | Binary::LessEqual
+        | Binary::Greater
+        | Binary::GreaterEqual
+        | Binary::Spaceship => crate::object_comparison::compare(
+            operator,
+            left,
+            right,
+            diagnostics,
+            &mut crate::object_comparison::compare_objects,
+        ),
         Binary::LogicalXor => Ok(Value::Bool(to_bool(left) ^ to_bool(right))),
     }
 }

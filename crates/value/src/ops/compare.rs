@@ -11,6 +11,7 @@
 
 use std::rc::Rc;
 
+use crate::array::PhpArray;
 use crate::convert::{NumVal, parse_numeric};
 use crate::error::{Diagnostics, OpError};
 use crate::float_format::{NumberText, float_text_precision14};
@@ -40,7 +41,7 @@ pub fn strict_equals(a: &Value, b: &Value, d: &mut dyn Diagnostics) -> Result<Va
             compare_tables(
                 Table::Array(a.clone()),
                 Table::Array(b.clone()),
-                Comparison::Strict,
+                &mut Comparison::Strict,
                 d,
             )? == 0
         }
@@ -65,35 +66,51 @@ pub fn less_equal(a: &Value, b: &Value, d: &mut dyn Diagnostics) -> Result<Value
 pub fn compare(a: &Value, b: &Value, d: &mut dyn Diagnostics) -> Result<i8, OpError> {
     let a = a.try_deref()?;
     let b = b.try_deref()?;
-    compare_resolved(&a, &b, Comparison::Loose, d)
+    compare_resolved(&a, &b, &mut Comparison::Loose, d)
 }
 
 /// A native sort keeps comparing while the first comparison error is pending.
 pub fn compare_after_error(a: &Value, b: &Value, d: &mut dyn Diagnostics) -> Result<i8, OpError> {
     let a = a.try_deref()?;
     let b = b.try_deref()?;
-    compare_resolved(&a, &b, Comparison::PendingError, d)
+    compare_resolved(&a, &b, &mut Comparison::PendingError, d)
 }
 
-/// A native class can supply its own equality, as in `strlen(...) == strlen(...)`.
-pub type ObjectEquality = fn(&Object, &Object) -> Option<bool>;
+/// A native class can supply an ordering or the two property tables to compare.
+pub enum ObjectComparison {
+    Default,
+    Compared(i8),
+    Projected(PhpArray, PhpArray),
+}
+
+pub type ObjectComparator<'a> =
+    dyn FnMut(&Object, &Object, &mut dyn Diagnostics) -> Result<ObjectComparison, OpError> + 'a;
+
+/// The same hook serves ordering and equality, including objects inside containers.
+pub fn compare_with_objects(
+    a: &Value,
+    b: &Value,
+    d: &mut dyn Diagnostics,
+    compare: &mut ObjectComparator<'_>,
+) -> Result<i8, OpError> {
+    let a = a.try_deref()?;
+    let b = b.try_deref()?;
+    compare_resolved(&a, &b, &mut Comparison::Native(compare), d)
+}
 
 pub fn loose_equals_with_objects(
     a: &Value,
     b: &Value,
     d: &mut dyn Diagnostics,
-    object_equality: ObjectEquality,
+    compare: &mut ObjectComparator<'_>,
 ) -> Result<Value, OpError> {
-    let a = a.try_deref()?;
-    let b = b.try_deref()?;
-    let result = compare_resolved(&a, &b, Comparison::NativeEquality(object_equality), d)?;
-    Ok(Value::Bool(result == 0))
+    Ok(Value::Bool(compare_with_objects(a, b, d, compare)? == 0))
 }
 
 fn compare_resolved(
     a: &Value,
     b: &Value,
-    comparison: Comparison,
+    comparison: &mut Comparison<'_, '_>,
     d: &mut dyn Diagnostics,
 ) -> Result<i8, OpError> {
     match (a, b) {
@@ -109,13 +126,10 @@ fn compare_resolved(
                 )
             }
         }
-        (Value::Object(a), Value::Object(b)) => {
-            if let Some(result) = comparison.object_equality(a, b) {
-                Ok(result)
-            } else {
-                compare_tables(Table::object(a)?, Table::object(b)?, comparison, d)
-            }
-        }
+        (Value::Object(a), Value::Object(b)) => match comparison.objects(a, b, d)? {
+            structure::Pair::Compared(result) => Ok(result),
+            structure::Pair::Tables(left, right) => compare_tables(left, right, comparison, d),
+        },
         _ => comparison.leaf(a, b, d),
     }
 }
@@ -123,7 +137,7 @@ fn compare_resolved(
 fn compare_leaf(
     a: &Value,
     b: &Value,
-    comparison: Comparison,
+    comparison: &Comparison<'_, '_>,
     d: &mut dyn Diagnostics,
 ) -> Result<i8, OpError> {
     // Resources compare numerically as their ids (zend's silent number
@@ -151,7 +165,7 @@ fn compare_leaf(
 fn compare_non_resource(
     a: &Value,
     b: &Value,
-    comparison: Comparison,
+    comparison: &Comparison<'_, '_>,
     d: &mut dyn Diagnostics,
 ) -> Result<i8, OpError> {
     match (a, b) {

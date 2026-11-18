@@ -62,7 +62,10 @@ impl Vm {
                 };
                 return Ok(match function {
                     Operation::GetClass => Value::from(object.class.name()),
-                    Operation::GetObjectVars => Value::from(self.visible_properties(&object)),
+                    Operation::GetObjectVars => Value::from(self.visible_properties(
+                        &object,
+                        phera_extension_api::PropertyPurpose::ObjectVars,
+                    )?),
                     Operation::ObjectId => Value::Int(object.id.into()),
                     _ => Value::from(format!("{:016x}{:016x}", object.id, 0)),
                 });
