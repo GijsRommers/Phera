@@ -70,6 +70,7 @@ impl Vm {
                         let mut linked =
                             copy_method(method, name, &provider.name, alias.visibility);
                         linked.is_final |= alias.is_final;
+                        self.check_trait_finality(unit, declaration.line, method, &linked);
                         imports.add(self, linked, &method.name)?;
                     } else {
                         visibility = alias.visibility.or(visibility);
@@ -79,6 +80,7 @@ impl Vm {
                 if !rules.excludes(&provider_name, key) {
                     let mut linked = copy_method(method, &method.name, &provider.name, visibility);
                     linked.is_final |= is_final;
+                    self.check_trait_finality(unit, declaration.line, method, &linked);
                     imports.add(self, linked, &method.name)?;
                 }
             }
@@ -119,6 +121,27 @@ impl Vm {
             }
         }
         Ok(())
+    }
+
+    fn check_trait_finality(
+        &mut self,
+        unit: &CompiledUnit,
+        line: u32,
+        original: &Method,
+        imported: &Method,
+    ) {
+        if !original.is_final
+            && imported.is_final
+            && imported.visibility == Visibility::Private
+            && !imported.name.eq_ignore_ascii_case("__construct")
+        {
+            self.warn_at_declaration(
+                unit,
+                line,
+                "Private methods cannot be final as they are never overridden by other classes"
+                    .into(),
+            );
+        }
     }
 
     fn trait_body_order(&self, method: &Method) -> usize {
