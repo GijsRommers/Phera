@@ -5,6 +5,7 @@
 mod constants;
 mod count;
 mod dump;
+mod interfaces;
 mod throwable;
 mod types;
 
@@ -18,6 +19,7 @@ impl Extension for Core {
     }
 
     fn register(&self, registry: &mut Registry) {
+        interfaces::register(registry);
         constants::register(registry);
         count::register(registry);
         dump::register(registry);

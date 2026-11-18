@@ -10,6 +10,8 @@ pub(crate) mod method_lookup;
 pub(crate) mod method_table;
 mod methods;
 mod native;
+pub(crate) mod operations;
+mod protocol_methods;
 mod signatures;
 mod static_calls;
 mod static_known;

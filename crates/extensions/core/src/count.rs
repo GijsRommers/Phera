@@ -4,43 +4,47 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use phera_extension_api::{
-    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, PhpArray, Registry, Value,
-    args,
+    Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, PhpArray,
+    Registry, Value, args,
 };
 
 pub(crate) const COUNT_NORMAL: i64 = 0;
 pub(crate) const COUNT_RECURSIVE: i64 = 1;
 
 pub(crate) fn register(registry: &mut Registry) {
-    // PHP's type is `Countable|array`; objects are checked here because the
-    // declared types cannot name an interface.
+    // Keep PHP's union diagnostics and validate the mode before calling count().
     const PARAMS: &[Param] = &[
         Param::new("value", ParamType::Mixed),
         Param::new("mode", ParamType::Int).optional(),
     ];
-    registry.function(FunctionEntry::sync("count", PARAMS, count));
-    registry.function(FunctionEntry::sync("sizeof", PARAMS, sizeof));
+    registry.function(FunctionEntry::asynchronous("count", PARAMS, count));
+    registry.function(FunctionEntry::asynchronous("sizeof", PARAMS, sizeof));
     registry.constant("COUNT_NORMAL", COUNT_NORMAL);
     registry.constant("COUNT_RECURSIVE", COUNT_RECURSIVE);
 }
 
-fn count(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    count_as("count", context, arguments)
+fn count(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(count_as("count", context, arguments))
 }
 
-fn sizeof(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    count_as("sizeof", context, arguments)
+fn sizeof(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(count_as("sizeof", context, arguments))
 }
 
 /// `name` is the name the function was called by, which PHP uses in errors.
-fn count_as(name: &str, context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let mode = args::int(arguments, 1).unwrap_or(COUNT_NORMAL);
+async fn count_as(name: &str, context: &mut dyn Context, arguments: Vec<Value>) -> NativeResult {
+    let mode = args::int(&arguments, 1).unwrap_or(COUNT_NORMAL);
     if mode != COUNT_NORMAL && mode != COUNT_RECURSIVE {
         return Err(NativeError::value_error(format!(
             "{name}(): Argument #2 ($mode) must be either COUNT_NORMAL or COUNT_RECURSIVE"
         )));
     }
-    let value = args::value(arguments, 0);
+    let value = args::value(&arguments, 0);
+    if let Value::Object(object) = value
+        && object.class.is_countable()
+    {
+        return context.count_object(object.clone()).await;
+    }
     let Value::Array(array) = value else {
         let given = match value {
             Value::Bool(true) => "true".to_string(),

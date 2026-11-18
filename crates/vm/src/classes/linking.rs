@@ -131,6 +131,35 @@ impl Vm {
                  Error instead"
             )));
         }
+        use super::operations::ClassOperations;
+        let operations = ClassOperations::link(name, parent.as_deref(), &interfaces);
+        if declaration.kind == ClassKind::Class {
+            let iterator = operations.has(ClassOperations::ITERATOR);
+            let aggregate = operations.has(ClassOperations::AGGREGATE);
+            if iterator && aggregate {
+                return Err(NativeError::error(format!(
+                    "Class {name} cannot implement both Iterator and IteratorAggregate at the same time"
+                )));
+            }
+            if operations.has(ClassOperations::TRAVERSABLE)
+                && !iterator
+                && !aggregate
+                && !declaration.is_abstract
+                && parent.as_ref().is_none_or(|parent| {
+                    !parent.operations.has(ClassOperations::TRAVERSABLE) || parent.is_abstract
+                })
+            {
+                return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
+                    crate::error_traces::DeclarationFailure {
+                        message: format!(
+                            "Class {name} must implement interface Traversable as part of either Iterator or IteratorAggregate"
+                        ),
+                        file: "Unknown".into(),
+                        line: 0,
+                    },
+                ))));
+            }
+        }
         let mut methods = parent
             .as_ref()
             .map(|class| class.methods.clone())
@@ -154,12 +183,16 @@ impl Vm {
             methods.insert(method_name.to_ascii_lowercase(), linked);
         }
         for interface in &interfaces {
-            for (name, method) in &interface.methods {
-                if let Some(implementation) = methods.get(name) {
+            for (method_name, method) in &interface.methods {
+                if let Some(implementation) = methods.get(method_name) {
+                    if matches!(method.body, MethodBody::Native(entry) if entry.tentative_return.is_some())
+                    {
+                        super::inheritance_checks::check_override(name, method, implementation)?;
+                    }
                     self.check_method_contract(method, implementation, &unit)?;
                 }
                 methods
-                    .entry(name.clone())
+                    .entry(method_name.clone())
                     .or_insert_with(|| method.clone());
             }
         }
@@ -343,6 +376,7 @@ impl Vm {
             name.to_ascii_lowercase(),
             Rc::new_cyclic(|identity| Class {
                 index,
+                operations,
                 origin: super::class::ClassOrigin::User,
                 identity: identity.clone(),
                 declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),

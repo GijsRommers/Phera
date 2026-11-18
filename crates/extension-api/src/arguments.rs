@@ -124,7 +124,7 @@ impl Site<'_> {
 }
 
 /// The type as PHP writes it in messages.
-fn type_text(ty: ParamType) -> &'static str {
+pub(crate) fn type_text(ty: ParamType) -> &'static str {
     match ty {
         ParamType::Mixed => "mixed",
         ParamType::Bool => "bool",
@@ -133,6 +133,7 @@ fn type_text(ty: ParamType) -> &'static str {
         ParamType::String => "string",
         ParamType::Array => "array",
         ParamType::Object => "object",
+        ParamType::Class(name) => name,
         ParamType::Callable => "callable",
         ParamType::Iterable => "Traversable|array",
         ParamType::Number => "int|float",
@@ -174,8 +175,11 @@ fn convert(
         // exist, which only the VM knows; `Context::call` reports it.
         ParamType::Mixed | ParamType::Callable => return Ok(()),
         ParamType::Array => matches!(value, Value::Array(_)).then_some(None),
+        ParamType::Class(name) => {
+            matches!(value, Value::Object(obj) if obj.class.is_instance_of(name)).then_some(None)
+        }
         ParamType::Object => matches!(value, Value::Object(_)).then_some(None),
-        ParamType::Iterable => matches!(value, Value::Array(_) | Value::Object(_)).then_some(None),
+        ParamType::Iterable => value.is_iterable().then_some(None),
         ParamType::Bool => match value {
             Value::Bool(_) => Some(None),
             _ if strict => None,

@@ -17,6 +17,7 @@ impl ClassTable {
             "stdclass".into(),
             Rc::new_cyclic(|identity| Class {
                 index,
+                operations: super::operations::ClassOperations::default(),
                 origin: super::class::ClassOrigin::Native,
                 identity: identity.clone(),
                 declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
@@ -110,7 +111,7 @@ impl ClassTable {
                     initialized: true,
                     initializer: None,
                     ty: None,
-                    is_readonly: false,
+                    is_readonly: property.is_readonly,
                     static_initialized: Rc::new(std::cell::Cell::new(true)),
                     value_initialized: Rc::new(std::cell::Cell::new(true)),
                 });
@@ -152,6 +153,11 @@ impl ClassTable {
                 entry.name.to_ascii_lowercase(),
                 Rc::new_cyclic(|identity| Class {
                     index,
+                    operations: super::operations::ClassOperations::link(
+                        entry.name,
+                        parent.as_deref(),
+                        &interfaces,
+                    ),
                     origin: if entry.name == "Closure" {
                         super::class::ClassOrigin::Closure
                     } else {

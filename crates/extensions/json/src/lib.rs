@@ -17,7 +17,9 @@ mod flags;
 mod string;
 
 use error::Error;
-use phera_extension_api::{Extension, FunctionEntry, Param, ParamType, Registry};
+use phera_extension_api::{
+    ClassEntry, Extension, FunctionEntry, MethodEntry, Param, ParamType, Registry,
+};
 
 pub struct Json;
 
@@ -27,6 +29,10 @@ impl Extension for Json {
     }
 
     fn register(&self, registry: &mut Registry) {
+        registry.class(ClassEntry {
+            methods: const { &[MethodEntry::required("jsonSerialize", &[]).tentative_return("mixed")] },
+            ..ClassEntry::interface("JsonSerializable")
+        });
         const ENCODE: &[Param] = &[
             Param::new("value", ParamType::Mixed),
             Param::new("flags", ParamType::Int).optional(),

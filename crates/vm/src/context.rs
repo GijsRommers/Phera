@@ -73,6 +73,18 @@ impl Context for Vm {
         Ok(Value::Object(object))
     }
 
+    fn call_method(
+        &mut self,
+        object: std::rc::Rc<phera_value::Object>,
+        name: &str,
+        arguments: Vec<Value>,
+    ) -> LocalFuture<'_, NativeResult> {
+        match self.protocol_method(object, name) {
+            Ok(callee) => self.invoke_resolved_callable(callee, arguments),
+            Err(error) => Box::pin(std::future::ready(Err(error))),
+        }
+    }
+
     fn state(&mut self) -> &mut RequestState {
         &mut self.state
     }

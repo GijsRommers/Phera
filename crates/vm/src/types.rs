@@ -103,7 +103,7 @@ pub(crate) fn coerce(
         return Ok(value);
     }
     if mask.intersects(TypeMask::VOID) && value.is_null()
-        || mask.intersects(TypeMask::ITERABLE) && value.is_array()
+        || mask.intersects(TypeMask::ITERABLE) && value.is_iterable()
     {
         return Ok(value);
     }

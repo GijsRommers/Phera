@@ -1,7 +1,8 @@
 use std::future::Future;
 use std::pin::Pin;
+use std::rc::Rc;
 
-use phera_value::{Diagnostics, PhpArray, Value};
+use phera_value::{Diagnostics, Object, PhpArray, Value};
 
 use crate::{NativeError, NativeResult, RequestState};
 
@@ -38,6 +39,29 @@ pub trait Context {
         callable: &'a Value,
         arguments: Vec<Value>,
     ) -> LocalFuture<'a, NativeResult>;
+
+    /// Invokes a public instance method selected by a language protocol.
+    fn call_method(
+        &mut self,
+        object: Rc<Object>,
+        name: &str,
+        arguments: Vec<Value>,
+    ) -> LocalFuture<'_, NativeResult> {
+        drop(arguments);
+        let message = format!(
+            "Cannot call {}::{name}() without a runtime",
+            object.class.name()
+        );
+        Box::pin(std::future::ready(Err(NativeError::error(message))))
+    }
+
+    /// Countable results are converted to integers even without a declared return type.
+    fn count_object(&mut self, object: Rc<Object>) -> LocalFuture<'_, NativeResult> {
+        Box::pin(async move {
+            let value = self.call_method(object, "count", Vec::new()).await?;
+            Ok(Value::Int(phera_value::to_int(&value, self.diagnostics())?))
+        })
+    }
 
     /// Creates an object of the named class with these properties, without
     /// calling its constructor. This is how `json_decode` and `(object)`

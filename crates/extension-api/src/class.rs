@@ -56,6 +56,8 @@ pub struct MethodEntry {
     pub is_static: bool,
     /// Subclasses may not override it.
     pub is_final: bool,
+    /// PHP's compatibility contract for an internal method.
+    pub tentative_return: Option<&'static str>,
 }
 
 impl MethodEntry {
@@ -68,6 +70,7 @@ impl MethodEntry {
             visibility: Visibility::Public,
             is_static: false,
             is_final: false,
+            tentative_return: None,
         }
     }
 
@@ -86,6 +89,7 @@ impl MethodEntry {
             visibility: Visibility::Public,
             is_static: false,
             is_final: false,
+            tentative_return: None,
         }
     }
 
@@ -98,7 +102,13 @@ impl MethodEntry {
             visibility: Visibility::Public,
             is_static: false,
             is_final: false,
+            tentative_return: None,
         }
+    }
+
+    pub const fn tentative_return(mut self, ty: &'static str) -> Self {
+        self.tentative_return = Some(ty);
+        self
     }
 
     pub const fn final_(mut self) -> Self {
@@ -124,6 +134,7 @@ pub struct PropertyEntry {
     pub default: ConstantValue,
     pub visibility: Visibility,
     pub is_static: bool,
+    pub is_readonly: bool,
 }
 
 impl PropertyEntry {
@@ -133,7 +144,13 @@ impl PropertyEntry {
             default,
             visibility,
             is_static: false,
+            is_readonly: false,
         }
+    }
+
+    pub const fn readonly(mut self) -> Self {
+        self.is_readonly = true;
+        self
     }
 }
 

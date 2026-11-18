@@ -10,6 +10,7 @@ use phera_value::{ArrayKey, ClassHandle, Object, Value};
 /// A linked class is immutable; its parent keeps inherited metadata alive.
 pub(crate) struct Class {
     /// The class's number in the request's class table.
+    pub(crate) operations: super::operations::ClassOperations,
     pub(crate) index: super::ClassIndex,
     /// Only user class scopes may be assigned freely by Closure::bind.
     pub(crate) origin: ClassOrigin,
@@ -103,6 +104,20 @@ pub(crate) struct MethodContext {
 }
 
 impl ClassHandle for Class {
+    fn is_traversable(&self) -> bool {
+        self.operations
+            .has(super::operations::ClassOperations::TRAVERSABLE)
+    }
+
+    fn is_countable(&self) -> bool {
+        self.operations
+            .has(super::operations::ClassOperations::COUNTABLE)
+    }
+
+    fn is_instance_of(&self, name: &str) -> bool {
+        self.is_a(name)
+    }
+
     fn name(&self) -> &str {
         &self.name
     }

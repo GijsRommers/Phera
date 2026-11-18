@@ -45,6 +45,15 @@ impl std::ops::Deref for ValueRef<'_> {
 }
 
 impl Value {
+    /// Arrays and objects implementing Traversable satisfy PHP's iterable type.
+    pub fn is_iterable(&self) -> bool {
+        match self {
+            Self::Array(_) => true,
+            Self::Object(object) => object.class.is_traversable(),
+            _ => false,
+        }
+    }
+
     /// Follows a `Reference` to the value it points at; non-reference values
     /// return themselves. The borrow is held through a guard because the
     /// referred value lives in a `RefCell`.

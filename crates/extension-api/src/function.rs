@@ -30,6 +30,7 @@ pub enum ParamType {
     String,
     Array,
     Object,
+    Class(&'static str),
     Callable,
     Iterable,
     /// `int|float`
@@ -38,6 +39,12 @@ pub enum ParamType {
     IntOrString,
     /// `array|string`
     ArrayOrString,
+}
+
+impl ParamType {
+    pub fn name(self) -> &'static str {
+        crate::arguments::type_text(self)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
