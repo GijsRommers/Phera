@@ -165,18 +165,14 @@ fn array_intersect_key(context: &mut dyn Context, arguments: &[Value]) -> Native
 
 /// `array_intersect_assoc(array $array, array ...$arrays): array`, the
 /// entries that every other array has with the same key and value.
-const ARRAY_INTERSECT_ASSOC: FunctionEntry = FunctionEntry::sync(
+const ARRAY_INTERSECT_ASSOC: FunctionEntry = FunctionEntry::asynchronous(
     "array_intersect_assoc",
     &[
         Param::new("array", ParamType::Array),
         Param::new("arrays", ParamType::Array).variadic(),
     ],
-    array_intersect_assoc,
+    super::callback_sets::intersect_associative_strings,
 );
-
-fn array_intersect_assoc(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    keep_entries(context, arguments, Keep::InAll, Match::KeyAndValue)
-}
 
 /// Which entries of the first array a set function keeps.
 #[derive(Clone, Copy, PartialEq, Eq)]

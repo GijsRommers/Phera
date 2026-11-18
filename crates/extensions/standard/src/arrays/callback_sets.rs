@@ -340,6 +340,30 @@ pub(super) fn intersect_strings(
         values: Values::Strings,
         keys: Keys::Ignored,
     };
+    run_builtin_intersection(context, arguments, variant)
+}
+
+pub(super) fn intersect_associative_strings(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    run_builtin_intersection(
+        context,
+        arguments,
+        Variant {
+            function: "array_intersect_assoc",
+            result: SetResult::Intersection,
+            values: Values::Strings,
+            keys: Keys::Exact,
+        },
+    )
+}
+
+fn run_builtin_intersection(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+    variant: Variant,
+) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
         run_set(context, &arguments, variant)
             .await
