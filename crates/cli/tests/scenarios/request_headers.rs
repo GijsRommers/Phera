@@ -107,13 +107,8 @@ fn repeated_headers_and_form_bodies_match_php() {
     let mut differences = Vec::new();
     for (method, headers, body) in REQUESTS {
         let expected = answer_from_php(&theirs.address, method, headers, body);
-        let actual = body_of(&raw_response(
-            &ours.address,
-            method,
-            "/show.php",
-            headers,
-            body,
-        ));
+        let actual = raw_response(&ours.address, method, "/show.php", headers, body)
+            .map_or_else(|| "(no answer)".to_string(), |response| body_of(&response));
         if expected != actual {
             differences.push(format!(
                 "{method} {headers:?} {body:?}\n  PHP:   {expected:?}\n  Phera: {actual:?}"
@@ -128,8 +123,7 @@ fn repeated_headers_and_form_bodies_match_php() {
 /// own server gets no such second chance.
 fn answer_from_php(address: &str, method: &str, headers: &str, body: &str) -> String {
     for _ in 0..5 {
-        let response = raw_response(address, method, "/show.php", headers, body);
-        if !response.is_empty() {
+        if let Some(response) = raw_response(address, method, "/show.php", headers, body) {
             return body_of(&response);
         }
         std::thread::sleep(std::time::Duration::from_millis(100));

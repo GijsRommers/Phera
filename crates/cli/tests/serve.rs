@@ -96,7 +96,8 @@ fn send_request(
     extra_headers: &str,
     body: &str,
 ) -> (u16, String) {
-    let response = raw_response(address, method, target, extra_headers, body);
+    let response = raw_response(address, method, target, extra_headers, body)
+        .unwrap_or_else(|| panic!("no answer from {address} to {method} {target}"));
     let (head, body) = response.split_once("\r\n\r\n").unwrap_or((&response, ""));
     let status = head
         .split_whitespace()
@@ -106,28 +107,25 @@ fn send_request(
     (status, body.to_string())
 }
 
-/// Everything the server at `address` sent back for one request; empty when
-/// it closed the connection without answering.
+/// Everything the server at `address` sent back for one request, or `None`
+/// when it refused, reset or closed the connection without answering.
 fn raw_response(
     address: &str,
     method: &str,
     target: &str,
     extra_headers: &str,
     body: &str,
-) -> String {
-    let mut stream = TcpStream::connect(address).expect("connect");
-    write!(
-        stream,
+) -> Option<String> {
+    let request = format!(
         "{method} {target} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\
          Content-Length: {}\r\n{extra_headers}\r\n{body}",
         body.len()
-    )
-    .expect("send request");
+    );
+    let mut stream = TcpStream::connect(address).ok()?;
+    stream.write_all(request.as_bytes()).ok()?;
     let mut response = String::new();
-    // A connection the server resets counts as "no answer", like one it
-    // closes: the caller decides whether that is acceptable.
-    let _ = stream.read_to_string(&mut response);
-    response
+    stream.read_to_string(&mut response).ok()?;
+    (!response.is_empty()).then_some(response)
 }
 
 impl Drop for Served {
