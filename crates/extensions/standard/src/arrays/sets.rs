@@ -5,7 +5,6 @@
 use std::cmp::Ordering;
 use std::collections::HashSet;
 
-use phera_extension_api::value::to_php_string;
 use phera_extension_api::{
     ArrayKey, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType,
     PhpArray, Value, args,
@@ -32,7 +31,7 @@ pub(super) const FUNCTIONS: &[FunctionEntry] = &[
 /// ```php
 /// array_diff(["a" => 1, "b" => 2, "c" => 3], [2], ["3"]); // ["a" => 1]
 /// ```
-const ARRAY_DIFF: FunctionEntry = FunctionEntry::sync(
+const ARRAY_DIFF: FunctionEntry = FunctionEntry::asynchronous(
     "array_diff",
     &[
         Param::new("array", ParamType::Array),
@@ -44,7 +43,15 @@ const ARRAY_DIFF: FunctionEntry = FunctionEntry::sync(
 /// Like php_array_diff, this converts each value to a string once and looks
 /// it up, instead of comparing pairs; that decides which conversions (and
 /// their warnings) happen.
-fn array_diff(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn array_diff(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        difference(context, &arguments)
+            .await
+            .map_err(|error| context.native_call_error("array_diff", &arguments, error))
+    })
+}
+
+async fn difference(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let array = required_array(arguments, 0);
     if array.is_empty() {
         return Ok(arguments[0].clone());
@@ -52,10 +59,10 @@ fn array_diff(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     // One value: PHP compares it with the others' values one by one, and
     // stops at the first that is equal.
     if let (1, Some(only)) = (array.len(), array.values().next()) {
-        let only = to_php_string(only, context.diagnostics())?;
+        let only = stringify(context, only).await?;
         for other in other_arrays(arguments) {
             for value in other.values() {
-                if only == to_php_string(value, context.diagnostics())? {
+                if only == stringify(context, value).await? {
                     return Ok(Value::from(PhpArray::new()));
                 }
             }
@@ -68,7 +75,7 @@ fn array_diff(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let mut excluded = HashSet::new();
     for other in other_arrays(arguments) {
         for value in other.values() {
-            excluded.insert(to_php_string(value, context.diagnostics())?);
+            excluded.insert(stringify(context, value).await?);
         }
     }
     if excluded.is_empty() {
@@ -76,7 +83,7 @@ fn array_diff(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     }
     let mut result = PhpArray::new();
     for (key, value) in array.iter() {
-        if !excluded.contains(&to_php_string(value, context.diagnostics())?) {
+        if !excluded.contains(&stringify(context, value).await?) {
             result.insert(key, value.clone());
         }
     }
