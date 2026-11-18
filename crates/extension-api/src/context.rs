@@ -139,6 +139,12 @@ pub trait Context {
         self.call_method(object, name, arguments)
     }
 
+    /// Throws an exception object the script itself made, as `throw $object`
+    /// would. The returned error is what the native function hands back.
+    fn throw_object(&mut self, _object: Rc<Object>) -> NativeError {
+        NativeError::error("Cannot throw an object without a runtime")
+    }
+
     /// Countable results are converted to integers even without a declared return type.
     fn count_object(&mut self, object: Rc<Object>) -> LocalFuture<'_, NativeResult> {
         Box::pin(async move {
