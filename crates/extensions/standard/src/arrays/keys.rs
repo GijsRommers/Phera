@@ -67,7 +67,8 @@ fn array_keys(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let equality = Equality::from_strict_argument(arguments);
     let mut result = PhpArray::new();
     for (key, value) in array.iter() {
-        if equality.equal(context, value, filter)? {
+        // The filter is the left operand, which matters for a recursive array.
+        if equality.equal(context, filter, value)? {
             result.push(Value::from(key))?;
         }
     }

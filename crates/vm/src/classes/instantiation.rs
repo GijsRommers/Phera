@@ -86,7 +86,7 @@ impl Vm {
             let class = self
                 .classes
                 .get(written)
-                .ok_or_else(|| NativeError::error(format!("Class \"{written}\" not found")))?;
+                .ok_or_else(|| Self::class_miss(written, "Class"))?;
             if let Some(slot) = self
                 .current()
                 .and_then(|frame| frame.cache().classes.get(symbol.index()))
@@ -103,7 +103,7 @@ impl Vm {
         let class = self
             .classes
             .get(name)
-            .ok_or_else(|| NativeError::error(format!("Class \"{name}\" not found")))?;
+            .ok_or_else(|| Self::class_miss(name, "Class"))?;
         self.new_linked_object(class)
     }
 
@@ -215,7 +215,7 @@ impl Vm {
             Value::Object(object) => self
                 .classes
                 .get(object.class.name())
-                .is_some_and(|class| class.is_a(&name)),
+                .is_some_and(|class| self.class_matches(&class, &name)),
             _ => false,
         };
         self.set(destination, Value::Bool(matches));

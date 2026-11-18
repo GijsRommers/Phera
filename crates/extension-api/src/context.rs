@@ -3,7 +3,10 @@ use std::pin::Pin;
 
 use phera_value::{Diagnostics, PhpArray, Value};
 
-use crate::{NativeError, NativeResult, RequestState};
+use crate::{
+    CompileDiagnostic, CompileDiagnosticKind, CompileDiagnosticSite, NativeError, NativeResult,
+    RequestState,
+};
 
 /// A future that stays on the worker thread it was created on. PHP values are
 /// reference counted with `Rc`, so nothing that holds one can be `Send`.
@@ -56,6 +59,24 @@ pub trait Context {
         Err(NativeError::error(format!(
             "An object of class {class} cannot be created here"
         )))
+    }
+
+    /// Publishes scanner diagnostics with PHP's severity and location.
+    fn compile_diagnostic(
+        &mut self,
+        diagnostic: &CompileDiagnostic,
+        site: CompileDiagnosticSite<'_>,
+    ) {
+        match diagnostic.kind {
+            CompileDiagnosticKind::Warning => {
+                let file = match site {
+                    CompileDiagnosticSite::Caller => "Unknown",
+                    CompileDiagnosticSite::Source(file) => file,
+                };
+                self.write(diagnostic.render(file, diagnostic.line).as_bytes());
+            }
+            CompileDiagnosticKind::Deprecated => self.deprecated(diagnostic.message.clone()),
+        }
     }
 
     fn warning(&mut self, message: String) {

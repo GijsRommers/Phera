@@ -234,6 +234,14 @@ impl Vm {
 
     /// Stored object metadata survives complete unwinding of the original stack.
     pub(crate) fn report_throwable(&mut self, object: &Rc<Object>) {
+        if object.class.name() == "ParseError" {
+            let message = property_text(object, "message");
+            let file = property_text(object, "file");
+            let line = property_text(object, "line");
+            self.out(format!("\nParse error: {message} in {file} on line {line}\n").as_bytes());
+            self.status = 255;
+            return;
+        }
         let text = crate::exception_rendering::describe_chain(
             object,
             self.error_handlers.trace_string_limit,

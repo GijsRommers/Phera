@@ -42,6 +42,23 @@ impl Compiler<'_> {
                 );
                 Ok(destination)
             }
+            ast::ExpressionKind::ClassConstant {
+                class,
+                name: ast::MemberName::Expression(name),
+            } => {
+                let class = self.compile_class_target(class, line)?;
+                let name = self.compile_expression(name)?;
+                let destination = self.allocate_register()?;
+                self.emit(
+                    Instruction::DynamicClassConstant {
+                        destination,
+                        class,
+                        name,
+                    },
+                    line,
+                );
+                Ok(destination)
+            }
             ast::ExpressionKind::New {
                 class: ast::NewTarget::Class(class),
                 arguments,

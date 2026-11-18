@@ -1,0 +1,5 @@
+# These fixtures compare literal source and output bytes, including CRLF.
+*.phpt -text
+*.inc -text
+comments.phpt -diff
+parse-error.phpt -diff

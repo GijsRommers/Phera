@@ -170,13 +170,17 @@ async fn walk(context: &mut dyn Context, arguments: Vec<Value>, depth: Depth) ->
     }
     let callback = args::value(&arguments, 1);
     super::callback::check_callback(name, callback)?;
-    let mut active = HashSet::from([Rc::as_ptr(&target)]);
+    // PHP protects arrays on descent, so a root containing itself is visited twice.
+    let mut active = HashSet::new();
     let mut frames = vec![Frame::new(target)?];
     while let Some(frame) = frames.last_mut() {
         let Some(key) = frame.keys.next() else {
             frame.ensure_container()?;
-            active.remove(&Rc::as_ptr(&frame.target));
+            let finished = Rc::as_ptr(&frame.target);
             frames.pop();
+            if !frames.is_empty() {
+                active.remove(&finished);
+            }
             continue;
         };
         let Some(element) = frame.element(&key)? else {

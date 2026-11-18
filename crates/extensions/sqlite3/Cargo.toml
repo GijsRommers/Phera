@@ -1,0 +1,13 @@
+[package]
+name = "phera-ext-sqlite3"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+phera-sqlite.workspace = true
+phera-extension-api.workspace = true
+
+[lints]
+workspace = true

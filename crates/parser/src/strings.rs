@@ -20,7 +20,7 @@ impl Parser<'_> {
     /// [`Literal::String`].
     pub(crate) fn parse_string_token(&mut self) -> Result<Expression, ParseError> {
         let token = self.bump()?;
-        let text = self.text_of(&token);
+        let text = self.bytes_of(&token);
 
         let (quote, body) = split_quoted(text);
         let bytes = if quote == b'\'' {
@@ -50,7 +50,7 @@ impl Parser<'_> {
                 }
                 TokenKind::StringPart => {
                     let token = self.bump()?;
-                    let bytes = decode_double_quoted(self.text_of(&token), false, token.span)?;
+                    let bytes = decode_double_quoted(self.bytes_of(&token), false, token.span)?;
                     parts.push(StringPart::Literal(bytes));
                 }
                 TokenKind::Variable => {
@@ -76,7 +76,7 @@ impl Parser<'_> {
     /// Parses a heredoc or nowdoc, starting at the `StartHeredoc` token.
     pub(crate) fn parse_heredoc(&mut self) -> Result<Expression, ParseError> {
         let start_token = self.expect(TokenKind::StartHeredoc, "heredoc start")?;
-        let (label, nowdoc) = parse_heredoc_start(self.text_of(&start_token));
+        let (label, nowdoc) = parse_heredoc_start(self.bytes_of(&start_token));
 
         let mut parts: Vec<RawPart> = Vec::new();
 
@@ -84,15 +84,12 @@ impl Parser<'_> {
             match self.kind() {
                 TokenKind::EndHeredoc => {
                     let token = self.bump()?;
-                    let end_text = self.text_of(&token);
-                    break end_text[..end_text.len() - label.len()].to_string();
+                    let end_text = self.bytes_of(&token);
+                    break &end_text[..end_text.len() - label.len()];
                 }
                 TokenKind::StringPart => {
                     let token = self.bump()?;
-                    parts.push(RawPart::Literal(
-                        self.text_of(&token).to_string(),
-                        token.span,
-                    ));
+                    parts.push(RawPart::Literal(self.bytes_of(&token), token.span));
                 }
                 TokenKind::Variable if !nowdoc => {
                     parts.push(RawPart::Expression(self.parse_encaps_var()?));
@@ -111,7 +108,7 @@ impl Parser<'_> {
             }
         };
 
-        let body = self.finish_heredoc(parts, &indent, nowdoc)?;
+        let body = self.finish_heredoc(parts, indent, nowdoc)?;
         Ok(Expression {
             kind: body.into_kind(),
             span: self.span_since(start_token.span),
@@ -180,13 +177,13 @@ impl Parser<'_> {
             TokenKind::RightBracket => return Ok(None),
             TokenKind::NumString => {
                 let token = self.bump()?;
-                num_string_literal(self.text_of(&token), token.span)
+                num_string_literal(&self.text_of(&token), token.span)
             }
             TokenKind::Minus => {
                 self.bump()?;
                 let token = self.expect(TokenKind::NumString, "a number")?;
                 let text = self.text_of(&token);
-                match canonical_decimal(text) {
+                match canonical_decimal(&text) {
                     Some(value) => Expression {
                         kind: ExpressionKind::Literal(Literal::Int(-value)),
                         span,
@@ -211,9 +208,7 @@ impl Parser<'_> {
             kind if is_word_token(kind) => {
                 let token = self.bump()?;
                 Expression {
-                    kind: ExpressionKind::Literal(Literal::String(
-                        self.text_of(&token).as_bytes().to_vec(),
-                    )),
+                    kind: ExpressionKind::Literal(Literal::String(self.bytes_of(&token).to_vec())),
                     span: token.span,
                 }
             }
@@ -258,20 +253,20 @@ impl Parser<'_> {
     /// builds the final expression.
     fn finish_heredoc(
         &self,
-        parts: Vec<RawPart>,
-        indent: &str,
+        parts: Vec<RawPart<'_>>,
+        indent: &[u8],
         nowdoc: bool,
     ) -> Result<Expression, ParseError> {
         // PHP 7.3 flexible heredoc rules: the closing label's indentation must
         // be a prefix of every non-blank body line, and tabs and spaces may
         // not be mixed.
-        if indent.contains(' ') && indent.contains('\t') {
+        if indent.contains(&b' ') && indent.contains(&b'\t') {
             return Err(ParseError::new(
                 "invalid indentation - tabs and spaces cannot be mixed",
                 Span::new(0, 0),
             ));
         }
-        let indent_style = if indent.contains('\t') { b'\t' } else { b' ' };
+        let indent_style = if indent.contains(&b'\t') { b'\t' } else { b' ' };
 
         let mut result: Vec<StringPart> = Vec::new();
         let mut at_line_start = true;
@@ -286,7 +281,7 @@ impl Parser<'_> {
                         return Err(ParseError::new(
                             format!(
                                 "invalid body indentation level (expecting an indentation level of at least {})",
-                                indent.chars().count()
+                                indent.len()
                             ),
                             expression.span,
                         ));
@@ -296,17 +291,17 @@ impl Parser<'_> {
                 }
                 RawPart::Literal(raw, span) => {
                     let mut text =
-                        strip_heredoc_indent(&raw, indent, &mut at_line_start, indent_style, span)?;
+                        strip_heredoc_indent(raw, indent, &mut at_line_start, indent_style, span)?;
                     if Some(index) == last_literal {
-                        for suffix in ["\r\n", "\n", "\r"] {
-                            if let Some(stripped) = text.strip_suffix(suffix) {
-                                text = stripped.to_string();
-                                break;
-                            }
-                        }
+                        let newline = if text.ends_with(b"\r\n") {
+                            2
+                        } else {
+                            usize::from(ends_in_newline(&text))
+                        };
+                        text.truncate(text.len() - newline);
                     }
                     let bytes = if nowdoc {
-                        text.into_bytes()
+                        text
                     } else {
                         decode_double_quoted(&text, true, span)?
                     };
@@ -319,36 +314,32 @@ impl Parser<'_> {
     }
 }
 
-enum RawPart {
-    Literal(String, Span),
+enum RawPart<'a> {
+    Literal(&'a [u8], Span),
     Expression(Expression),
 }
 
 /// Splits a `String` token's text into its quote character and body.
-fn split_quoted(text: &str) -> (u8, &str) {
-    let bytes = text.as_bytes();
-    let prefix = usize::from(matches!(bytes.first(), Some(b'b' | b'B')));
-    let quote = bytes[prefix];
+fn split_quoted(text: &[u8]) -> (u8, &[u8]) {
+    let prefix = usize::from(matches!(text.first(), Some(b'b' | b'B')));
+    let quote = text[prefix];
     (quote, &text[prefix + 1..text.len() - 1])
 }
 
 /// The label and nowdoc flag of a `StartHeredoc` token's text, like
 /// `<<<EOT\n`, `<<<"EOT"\n`, `<<<'EOT'\n` or `b<<<EOT\n`.
-fn parse_heredoc_start(text: &str) -> (String, bool) {
-    let text = text.strip_prefix(['b', 'B']).unwrap_or(text);
-    let text = text.strip_prefix("<<<").unwrap_or(text);
-    let text = text.trim_start_matches([' ', '\t']);
-
-    let (quote, rest) = match text.as_bytes().first() {
-        Some(quote @ (b'\'' | b'"')) => (Some(*quote), &text[1..]),
+fn parse_heredoc_start(text: &[u8]) -> (&[u8], bool) {
+    let prefix = usize::from(matches!(text.first(), Some(b'b' | b'B')));
+    let text = text[prefix + 3..].trim_ascii_start();
+    let (quote, rest) = match text {
+        [quote @ (b'\'' | b'"'), rest @ ..] => (Some(*quote), rest),
         _ => (None, text),
     };
-
-    let label_end = rest
-        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+    let end = rest
+        .iter()
+        .position(|byte| byte.is_ascii() && !byte.is_ascii_alphanumeric() && *byte != b'_')
         .unwrap_or(rest.len());
-
-    (rest[..label_end].to_string(), quote == Some(b'\''))
+    (&rest[..end], quote == Some(b'\''))
 }
 
 /// Removes the closing label's indentation from the start of every line of a
@@ -359,14 +350,13 @@ fn parse_heredoc_start(text: &str) -> (String, bool) {
 /// `at_line_start` tracks whether the next byte starts a line (the body starts
 /// at a line start; an interpolation ends mid-line).
 fn strip_heredoc_indent(
-    text: &str,
-    indent: &str,
+    text: &[u8],
+    indent: &[u8],
     at_line_start: &mut bool,
     indent_style: u8,
     span: Span,
-) -> Result<String, ParseError> {
-    let validate_line = |line: &str| -> Result<(), ParseError> {
-        let bytes = line.as_bytes();
+) -> Result<Vec<u8>, ParseError> {
+    let validate_line = |bytes: &[u8]| -> Result<(), ParseError> {
         for i in 0..indent.len() {
             match bytes.get(i) {
                 // Whitespace-only (or empty) line: exempt.
@@ -383,7 +373,7 @@ fn strip_heredoc_indent(
                     return Err(ParseError::new(
                         format!(
                             "invalid body indentation level (expecting an indentation level of at least {})",
-                            indent.chars().count()
+                            indent.len()
                         ),
                         span,
                     ));
@@ -394,46 +384,48 @@ fn strip_heredoc_indent(
     };
 
     if indent.is_empty() {
-        *at_line_start = text.ends_with(['\n', '\r']);
-        return Ok(text.to_string());
+        *at_line_start = ends_in_newline(text);
+        return Ok(text.to_vec());
     }
 
-    let mut out = String::with_capacity(text.len());
+    let mut out = Vec::with_capacity(text.len());
     let mut rest = text;
     let mut line_start = *at_line_start;
 
     loop {
         if line_start {
-            let line_end = rest.find(['\n', '\r']).unwrap_or(rest.len());
+            let line_end = rest
+                .iter()
+                .position(|byte| matches!(byte, b'\n' | b'\r'))
+                .unwrap_or(rest.len());
             validate_line(&rest[..line_end])?;
             if rest.starts_with(indent) {
                 rest = &rest[indent.len()..];
             }
         }
 
-        match rest.find(['\n', '\r']) {
+        match rest.iter().position(|byte| matches!(byte, b'\n' | b'\r')) {
             Some(newline) => {
                 let (line, after) = rest.split_at(newline);
-                out.push_str(line);
-                let newline_len = if after.starts_with("\r\n") { 2 } else { 1 };
-                out.push_str(&after[..newline_len]);
+                out.extend_from_slice(line);
+                let newline_len = if after.starts_with(b"\r\n") { 2 } else { 1 };
+                out.extend_from_slice(&after[..newline_len]);
                 rest = &after[newline_len..];
                 line_start = true;
             }
             None => {
-                out.push_str(rest);
+                out.extend_from_slice(rest);
                 break;
             }
         }
     }
 
-    *at_line_start = text.ends_with(['\n', '\r']);
+    *at_line_start = ends_in_newline(text);
     Ok(out)
 }
 
 /// Resolves the escapes of a single-quoted string body: only `\\` and `\'`.
-fn decode_single_quoted(body: &str) -> Vec<u8> {
-    let bytes = body.as_bytes();
+fn decode_single_quoted(bytes: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
 
@@ -453,8 +445,7 @@ fn decode_single_quoted(body: &str) -> Vec<u8> {
 /// Resolves the escapes of a double-quoted string or heredoc body. In a
 /// heredoc `\"` stays two characters; every other double-quote escape works
 /// the same. Unknown escapes keep their backslash.
-fn decode_double_quoted(body: &str, heredoc: bool, span: Span) -> Result<Vec<u8>, ParseError> {
-    let bytes = body.as_bytes();
+fn decode_double_quoted(bytes: &[u8], heredoc: bool, span: Span) -> Result<Vec<u8>, ParseError> {
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
 
@@ -462,9 +453,8 @@ fn decode_double_quoted(body: &str, heredoc: bool, span: Span) -> Result<Vec<u8>
         let byte = bytes[i];
 
         if byte != b'\\' {
-            let len = utf8_len(byte).min(bytes.len() - i);
-            out.extend_from_slice(&bytes[i..i + len]);
-            i += len;
+            out.push(byte);
+            i += 1;
             continue;
         }
 
@@ -526,8 +516,12 @@ fn decode_double_quoted(body: &str, heredoc: bool, span: Span) -> Result<Vec<u8>
                 if bytes.get(i) != Some(&b'}') || i == start {
                     return Err(invalid(""));
                 }
-                let codepoint =
-                    u32::from_str_radix(&body[start..i], 16).map_err(|_| invalid(""))?;
+                let codepoint = bytes[start..i]
+                    .iter()
+                    .try_fold(0u32, |value, &digit| {
+                        value.checked_mul(16)?.checked_add(hex_value(digit))
+                    })
+                    .ok_or_else(|| invalid(": codepoint too large"))?;
                 i += 1; // consume '}'
                 if codepoint > 0x10FFFF {
                     return Err(invalid(": codepoint too large"));
@@ -538,9 +532,8 @@ fn decode_double_quoted(body: &str, heredoc: bool, span: Span) -> Result<Vec<u8>
             _ => {
                 // Unknown escape: keep the backslash and the whole character.
                 out.push(b'\\');
-                let len = utf8_len(escape).min(bytes.len() - i);
-                out.extend_from_slice(&bytes[i..i + len]);
-                i += len;
+                out.push(escape);
+                i += 1;
             }
         }
     }
@@ -561,16 +554,8 @@ fn hex_value(byte: u8) -> u32 {
     }
 }
 
-fn utf8_len(first: u8) -> usize {
-    if first < 0x80 {
-        1
-    } else if first < 0xE0 {
-        2
-    } else if first < 0xF0 {
-        3
-    } else {
-        4
-    }
+fn ends_in_newline(bytes: &[u8]) -> bool {
+    matches!(bytes.last(), Some(b'\r' | b'\n'))
 }
 
 /// Encodes a codepoint as UTF-8, including surrogate codepoints (PHP encodes
