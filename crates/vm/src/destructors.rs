@@ -54,6 +54,7 @@ impl Vm {
     /// Calls the destructor of every released object, oldest release first,
     /// including objects released by those destructors.
     pub(crate) async fn run_destructors(&mut self) -> Result<(), NativeError> {
+        Box::pin(self.collect_cycles_if_due()).await?;
         let mut failure: Option<NativeError> = None;
         loop {
             let doomed = self.classes.ids().take_doomed();
@@ -92,10 +93,18 @@ impl Vm {
                     Visibility::Private => "private",
                     _ => "protected",
                 };
+                // PHP is running no code here, so it names no place.
+                let previous =
+                    self.diagnostic_location
+                        .replace(crate::diagnostics::SourceLocation {
+                            file: "Unknown".into(),
+                            line: 0,
+                        });
                 self.warn(format!(
                     "Call to {visibility} {}::__destruct() from global scope during shutdown ignored",
                     class.name
                 ));
+                self.diagnostic_location = previous;
                 return Ok(());
             }
             self.check_destructor_visibility(&method, &class.name)?;
@@ -123,10 +132,10 @@ impl Vm {
                 Visibility::Private => "private",
                 _ => "protected",
             };
-            let from = self
-                .current()
-                .and_then(|frame| frame.scope())
-                .map_or_else(|| "global scope".to_string(), |scope| format!("scope {}", scope.name));
+            let from = self.current().and_then(|frame| frame.scope()).map_or_else(
+                || "global scope".to_string(),
+                |scope| format!("scope {}", scope.name),
+            );
             NativeError::error(format!(
                 "Call to {visibility} {class}::__destruct() from {from}"
             ))

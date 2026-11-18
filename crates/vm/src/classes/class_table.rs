@@ -26,6 +26,10 @@ pub(crate) struct ClassTable {
     pub(crate) has_property_views: bool,
     pub(crate) objects: Vec<Weak<Object>>,
     ids: Rc<ObjectIds>,
+    /// Allocations left before the cycle collector should run (see
+    /// `crate::cycles`).
+    allocations_before_collection: crate::cycles::Countdown,
+    collection_requested: bool,
 }
 
 impl ClassTable {
@@ -82,7 +86,34 @@ impl ClassTable {
         }
         let object = Rc::new(object);
         self.track(&object);
+        self.count_allocation();
         object
+    }
+
+    /// One more allocation towards the next automatic cycle collection.
+    /// When it is due, the interpreter's check for due destructors fires.
+    #[inline]
+    fn count_allocation(&mut self) {
+        if self.allocations_before_collection.tick() {
+            self.collection_requested = true;
+            self.ids.wake_interpreter();
+        }
+    }
+
+    /// Whether a collection was asked for; clears the request.
+    pub(crate) fn take_collection_request(&mut self) -> bool {
+        std::mem::take(&mut self.collection_requested)
+    }
+
+    /// The next automatic collection comes after `allocations` more objects.
+    pub(crate) fn request_collection_after(&mut self, allocations: usize) {
+        self.allocations_before_collection = crate::cycles::Countdown::new(allocations);
+    }
+
+    /// Every live object, each handle made as it is taken, for the cycle
+    /// collector.
+    pub(crate) fn live_objects(&self) -> impl Iterator<Item = Rc<Object>> + '_ {
+        self.objects.iter().filter_map(Weak::upgrade)
     }
 
     /// Records a live object under its id, for the end of the request: its

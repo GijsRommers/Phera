@@ -165,8 +165,9 @@ impl Machine<'_> {
                     return LoopExit::Slow(instruction);
                 }
             }
-            // Simple instructions never release an object (see
-            // `fast::store`), so only these steps need the test.
+            // Simple instructions test for due destructors themselves,
+            // and only after releasing a value that could own an object
+            // (see `fast::replace`); these steps test here.
             if self.classes.ids().has_doomed() {
                 self.publish(position.ip);
                 return LoopExit::Destructors;
@@ -203,8 +204,16 @@ impl Machine<'_> {
                 },
                 complete => complete,
             };
-            if step == ScalarStep::Fallback {
-                break Ok(instruction);
+            match step {
+                ScalarStep::Complete => {}
+                ScalarStep::Fallback => break Ok(instruction),
+                // The write dropped a value that could own an object: run
+                // a destructor it made due before the next instruction.
+                ScalarStep::Released => {
+                    if self.classes.ids().has_doomed() {
+                        break Err(LoopExit::Destructors);
+                    }
+                }
             }
             // Only backward jumps count as work; comparing positions also
             // covers fused compare-and-branch instructions.

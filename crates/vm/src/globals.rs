@@ -40,6 +40,15 @@ impl Globals {
             .collect()
     }
 
+    /// Drops the global `name` when it is this very cell: the main script
+    /// unset the variable that a function had bound with `global` or
+    /// `$GLOBALS`, so the global is gone, as in PHP.
+    pub(crate) fn forget_cell(&mut self, name: &str, cell: &Rc<RefCell<Value>>) {
+        if matches!(self.values.get(name), Some(Value::Reference(held)) if Rc::ptr_eq(held, cell)) {
+            self.values.remove(name);
+        }
+    }
+
     pub(crate) fn iter(&self) -> impl Iterator<Item = (&String, &Value)> {
         self.values.iter()
     }

@@ -15,6 +15,7 @@ use phera_bytecode::{FunctionId, Reg};
 use phera_value::Value;
 
 use crate::calls::call_state::CallTarget;
+use crate::calls::discarded_results::{may_own_objects, result_discarded};
 use crate::calls::execution_loop::{Machine, Position, Step};
 use crate::calls::frame::Frame;
 use crate::calls::prepared_call::{CallFlags, CallKind, PreparedCallee};
@@ -127,10 +128,28 @@ impl Machine<'_> {
             (_, Some(source)) => self.registers.take(frame.base() + source.index()),
             (_, None) => Value::Null,
         };
+        // An unused temporary result goes before the frame's variables
+        // (see `discarded_results`).
+        let value = if may_own_objects(&value)
+            && let (CallKind::Function | CallKind::Method | CallKind::Closure, Some(source)) =
+                (kind, source)
+            && source.index() >= self.code.function(frame.function).locals.len()
+            && result_discarded(
+                self.code.instructions(caller.function),
+                caller.ip(),
+                destination,
+            ) {
+            drop(value);
+            None
+        } else {
+            Some(value)
+        };
         self.stack.pop();
         self.registers.release_frame(start, frame.base());
-        self.registers
-            .put(caller.base() + destination.index(), value);
+        if let Some(value) = value {
+            self.registers
+                .put(caller.base() + destination.index(), value);
+        }
         Step::Switched(Position {
             frame: caller,
             ip: caller.ip(),

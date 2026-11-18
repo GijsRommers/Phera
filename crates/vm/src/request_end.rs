@@ -96,6 +96,30 @@ impl Vm {
         self.registers.release_frame(frame.start(), frame.base());
     }
 
+    /// The main script's variable in `register` was unset while it shared a
+    /// cell with the globals table: the global goes too.
+    pub(crate) fn forget_global_cell(
+        &mut self,
+        register: phera_bytecode::Reg,
+        cell: &Rc<std::cell::RefCell<Value>>,
+    ) {
+        let Some(frame) = self.current() else {
+            return;
+        };
+        if frame.frame.start() != 0 || Some(frame.frame.function) != self.request_end.main {
+            return;
+        }
+        let name = frame
+            .function()
+            .locals
+            .get(register.index())
+            .and_then(|name| frame.unit().names.get(name.index()))
+            .cloned();
+        if let Some(name) = name {
+            self.globals.forget_cell(&name, cell);
+        }
+    }
+
     /// `exit` leaves every function: their variables are released, the
     /// innermost frame first. The main script's variables stay for the end
     /// of the request.

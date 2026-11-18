@@ -50,6 +50,8 @@ pub(crate) enum Intrinsic {
     IniSet,
     /// PHP `ini_get()` runtime service.
     IniGet,
+    /// The cycle collector belongs to the request.
+    Gc(crate::cycles::GcFunction),
 }
 
 impl Intrinsic {
@@ -91,7 +93,10 @@ impl Intrinsic {
             "get_include_path" => Self::GetIncludePath,
             "set_include_path" => Self::SetIncludePath,
             name => {
-                if let Some(function) = crate::class_intrinsics::ClassFunction::resolve(name) {
+                if let Some(function) = crate::cycles::GcFunction::resolve(name) {
+                    Self::Gc(function)
+                } else if let Some(function) = crate::class_intrinsics::ClassFunction::resolve(name)
+                {
                     Self::Class(function)
                 } else if let Some(function) = crate::spl_autoload::SplAutoload::resolve(name) {
                     Self::SplAutoload(function)

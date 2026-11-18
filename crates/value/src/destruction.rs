@@ -139,6 +139,13 @@ impl ObjectIds {
         self.doomed.waiting.get()
     }
 
+    /// Makes the interpreter's check for due destructors fire at the next
+    /// instruction boundary, for other work that must happen there (an
+    /// automatic cycle collection).
+    pub fn wake_interpreter(&self) {
+        self.doomed.waiting.set(true);
+    }
+
     /// The objects waiting for their destructor, in the order they were
     /// released, leaving the queue empty.
     pub fn take_doomed(&self) -> Vec<Rc<Object>> {

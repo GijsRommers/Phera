@@ -12,6 +12,9 @@ use crate::operators::fast_binary;
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ScalarStep {
     Complete,
+    /// Complete, and the register written held a value that could own an
+    /// object: a destructor may now be due (see `crate::destructors`).
+    Released,
     Fallback,
 }
 
@@ -34,29 +37,39 @@ fn integer_at(slots: &[Option<Value>], register: Reg) -> Option<i64> {
 #[inline(always)]
 fn store_integer(slots: &mut [Option<Value>], register: Reg, integer: i64) -> ScalarStep {
     match slots.get_mut(register.index()) {
-        Some(Some(Value::Int(target))) => *target = integer,
-        Some(slot) if !may_own_objects(slot) => *slot = Some(Value::Int(integer)),
-        _ => return ScalarStep::Fallback,
+        Some(Some(Value::Int(target))) => {
+            *target = integer;
+            ScalarStep::Complete
+        }
+        Some(slot) => replace(slot, Value::Int(integer)),
+        None => ScalarStep::Fallback,
     }
-    ScalarStep::Complete
 }
 
 /// Stores any result, dropping what the register held before.
 #[inline(always)]
 fn store(slots: &mut [Option<Value>], register: Reg, value: Value) -> ScalarStep {
     match slots.get_mut(register.index()) {
-        Some(slot) if !may_own_objects(slot) => {
-            *slot = Some(value);
-            ScalarStep::Complete
-        }
-        _ => ScalarStep::Fallback,
+        Some(slot) => replace(slot, value),
+        None => ScalarStep::Fallback,
     }
 }
 
-/// Whether dropping what a register holds could free an object, and so
-/// make a destructor due. The simple instructions leave such a register to
-/// the general handlers, after which the interpreter runs the destructor;
-/// that keeps the test for due destructors out of the simple loop.
+/// Writes a register and says whether what it held could own an object,
+/// whose release may make a destructor due. Only then does the loop test
+/// for due destructors, so simple instructions on scalars never do.
+#[inline(always)]
+fn replace(slot: &mut Option<Value>, value: Value) -> ScalarStep {
+    let released = may_own_objects(slot);
+    *slot = Some(value);
+    if released {
+        ScalarStep::Released
+    } else {
+        ScalarStep::Complete
+    }
+}
+
+/// Whether dropping what a register holds could free an object.
 #[inline(always)]
 fn may_own_objects(slot: &Option<Value>) -> bool {
     matches!(
@@ -284,11 +297,16 @@ pub(crate) fn scalar_step(
         }
         Instruction::Clear { reg: register } | Instruction::UnsetLocal { local: register } => {
             match slots.get_mut(register.index()) {
-                Some(slot) if !may_own_objects(slot) => {
+                Some(slot) => {
+                    let released = may_own_objects(slot);
                     *slot = None;
-                    ScalarStep::Complete
+                    if released {
+                        ScalarStep::Released
+                    } else {
+                        ScalarStep::Complete
+                    }
                 }
-                _ => ScalarStep::Fallback,
+                None => ScalarStep::Fallback,
             }
         }
         _ => ScalarStep::Fallback,
@@ -333,9 +351,5 @@ pub(crate) fn array_index_step(
     let Some(target) = slots.get_mut(destination.index()) else {
         return ScalarStep::Fallback;
     };
-    if may_own_objects(target) {
-        return ScalarStep::Fallback;
-    }
-    *target = Some(value);
-    ScalarStep::Complete
+    replace(target, value)
 }

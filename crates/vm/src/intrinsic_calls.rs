@@ -61,6 +61,10 @@ impl Vm {
                     .unwrap_or(name);
                 Ok(Value::from(name))
             }
+            Intrinsic::Gc(function) => {
+                drop(diagnostics);
+                Box::pin(self.gc_intrinsic(function)).await
+            }
             Intrinsic::Class(function) => {
                 drop(diagnostics);
                 Box::pin(self.class_intrinsic(function, arguments, origin)).await

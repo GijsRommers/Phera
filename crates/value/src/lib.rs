@@ -3,6 +3,7 @@
 
 mod array;
 mod convert;
+mod cycles;
 mod destruction;
 mod error;
 mod float_format;
@@ -16,6 +17,7 @@ pub use convert::{
     NumVal, NumericParse, cast_to_bool, is_numeric, parse_numeric, strtod_prefix, to_array,
     to_bool, to_float, to_int, to_php_string,
 };
+pub use cycles::{Garbage, find_garbage};
 pub use destruction::Destruction;
 pub use error::{
     CollectDiagnostics, DiagnosticKind, Diagnostics, ErrorKind, NoDiagnostics, OpError,

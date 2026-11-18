@@ -49,9 +49,11 @@ mod constant_table;
 mod constants;
 mod context;
 mod control_flow;
+mod cycles;
 mod debug_info;
 mod declaration_diagnostics;
 mod default_autoload;
+mod destructors;
 mod diagnostic_reporter;
 mod diagnostics;
 mod dimension_instructions;
@@ -68,11 +70,10 @@ mod exception_rendering;
 #[cfg(test)]
 mod exception_tests;
 mod exception_traces;
-mod destructors;
-mod request_end;
 mod exception_unwind;
 mod exceptions;
 mod extract;
+mod failed_construction;
 mod fast;
 mod finally;
 mod function_facts;
@@ -124,6 +125,7 @@ mod property_strings;
 mod property_targets;
 mod reference_holders;
 mod references;
+mod request_end;
 mod scope_intrinsics;
 mod spl_autoload;
 mod static_variables;
@@ -204,6 +206,7 @@ pub struct Vm {
     autoload: autoload::Autoloaders,
     include_path: Option<phera_value::PhpString>,
     request_end: request_end::RequestEnd,
+    cycles: cycles::CycleCollector,
 }
 
 impl Vm {
@@ -226,6 +229,7 @@ impl Vm {
             autoload: Default::default(),
             include_path: None,
             request_end: Default::default(),
+            cycles: Default::default(),
             native_callback_sites: Vec::new(),
             debug_objects: Vec::new(),
             property_guards: Vec::new(),
