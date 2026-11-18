@@ -25,7 +25,12 @@ pub(crate) fn translate(
     let current = error_at.map(|index| &tokens[index]);
     let eof_line = 1 + newlines(code);
     let mut line = current.map_or(eof_line, |token| token.line);
-    let message = if error.message.starts_with("invalid numeric literal") {
+    if error.is_compile_error() {
+        return exception("CompileError", error.message, line);
+    }
+    let message = if error.message.starts_with("syntax error,") {
+        error.message
+    } else if error.message.starts_with("invalid numeric literal") {
         "Invalid numeric literal".to_owned()
     } else if let Some(suffix) = error
         .message
@@ -237,6 +242,7 @@ fn expected_token(message: &str) -> Option<&'static str> {
         "'{'" => Some(r#""{""#),
         "'}'" => Some(r#""}""#),
         "']'" => Some(r#""]""#),
+        "'class'" => Some(r#""class""#),
         "an identifier" => Some("identifier"),
         _ => None,
     }

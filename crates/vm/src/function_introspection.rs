@@ -201,10 +201,10 @@ impl Vm {
                     .unwrap_or_else(|| NativeError::error(format!("Class \"{class}\" not found"))))
                 };
             };
-            let accessible = entry
-                .constants
-                .get(constant)
-                .is_some_and(|constant| self.can_read_class_constant(constant));
+            let accessible = entry.constants.get(constant).is_some_and(|constant| {
+                entry.kind != phera_bytecode::ClassKind::Trait
+                    && self.can_read_class_constant(constant)
+            });
             if predicate && !accessible {
                 return Ok(Value::Bool(false));
             }
@@ -226,6 +226,11 @@ impl Vm {
             loop {
                 match self.class_constant_with_access(&class, constant, access) {
                     Ok(value) => return Ok(if predicate { Value::Bool(true) } else { value }),
+                    Err(error) if entry.kind == phera_bytecode::ClassKind::Trait => {
+                        self.failed_native =
+                            Some(crate::error_traces::NativeTrace::new(function, &arguments));
+                        return Err(error);
+                    }
                     Err(error) => {
                         let miss = crate::autoload::ClassMiss::take(error)?;
                         if self.lookup_class_from(&miss.name, origin).await?.is_none() {

@@ -244,6 +244,9 @@ fn compare_non_resource(
                     }
                 });
             }
+            if matches!(obj, Value::Object(object) if object.class.is_enum()) {
+                return Ok(1);
+            }
             match other {
                 Value::Int(_) | Value::Float(_) => {
                     // stdClass cannot cast to numbers: PHP notices and

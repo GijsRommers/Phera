@@ -84,6 +84,7 @@ mod handler_installation;
 mod include_scope;
 mod include_state;
 mod includes;
+mod initializer_tasks;
 mod initializers;
 mod inline_stack;
 mod instructions;
@@ -161,6 +162,7 @@ pub const DEFAULT_FRAME_LIMIT: usize = 250_000;
 /// One request interpreter; PHP calls use heap frames rather than Rust recursion.
 pub struct Vm {
     classes: classes::ClassTable,
+    enum_cases: classes::enums::EnumCases,
     native_callback_sites: Vec<error_traces::NativeCallbackSite>,
     debug_objects: Vec<u32>,
     property_guards: Vec<magic_properties::PropertyGuard>,
@@ -169,6 +171,7 @@ pub struct Vm {
     closure_captures: Vec<closures::PendingCapture>,
     /// Pure defaults retain lexical class scope while running outside a method frame.
     initializer_scope: Option<String>,
+    initializer_class: Option<initializers::InitializerClass>,
     argument_origin: calls::callback_binding::ArgumentOrigin,
     native_called_class: Option<std::rc::Rc<classes::Class>>,
     pending_dimension: Option<dimensions::DimensionPath>,
@@ -225,6 +228,7 @@ impl Vm {
             })
             .collect();
         Self {
+            enum_cases: classes::enums::EnumCases::default(),
             classes: classes::ClassTable::native(&registry),
             autoload: Default::default(),
             include_path: None,
@@ -236,6 +240,7 @@ impl Vm {
             property_references: Default::default(),
             closure_captures: Vec::new(),
             initializer_scope: None,
+            initializer_class: None,
             argument_origin: calls::callback_binding::ArgumentOrigin::Php,
             native_called_class: None,
             pending_dimension: None,

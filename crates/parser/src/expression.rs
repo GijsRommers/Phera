@@ -1032,20 +1032,31 @@ impl Parser<'_> {
 
         let mut modifiers = Modifiers::default();
         loop {
-            if self.eat(TokenKind::Abstract)? {
-                modifiers.is_abstract = true;
-            } else if self.eat(TokenKind::Final)? {
-                modifiers.is_final = true;
-            } else if self.eat(TokenKind::Readonly)? {
-                modifiers.is_readonly = true;
-            } else {
-                break;
-            }
+            let modifier = match self.kind() {
+                TokenKind::Abstract => "abstract",
+                TokenKind::Final => "final",
+                TokenKind::Readonly => {
+                    if modifiers.is_readonly {
+                        return Err(ParseError::compile(
+                            "Multiple readonly modifiers are not allowed",
+                            self.peek_span(),
+                        ));
+                    }
+                    self.bump()?;
+                    modifiers.is_readonly = true;
+                    continue;
+                }
+                _ => break,
+            };
+            return Err(ParseError::compile(
+                format!("Cannot use the {modifier} modifier on an anonymous class"),
+                self.peek_span(),
+            ));
         }
 
-        if self.at(TokenKind::Class) {
+        if modifiers.is_readonly || self.at(TokenKind::Class) {
             let mut arguments = Arguments::List(vec![]);
-            let class = self.parse_anonymous_class(start, attributes, modifiers, &mut arguments)?;
+            let class = self.parse_anonymous_class(attributes, modifiers, &mut arguments)?;
             return Ok(Expression {
                 kind: ExpressionKind::New {
                     class: NewTarget::Anonymous(Box::new(class)),

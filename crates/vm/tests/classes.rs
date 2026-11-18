@@ -19,9 +19,6 @@ fn later_milestones_remain_compile_errors() {
     for source in [
         "<?php $callback = function () {};",
         "<?php $callback = fn () => 1;",
-        "<?php trait Example {}",
-        "<?php enum Example {}",
-        "<?php new class {};",
         "<?php goto target; target:",
         "<?php class Example {static function method(){}} Example::method(...);",
         "<?php class Example {function method(){}} (new Example)->method(...);",
@@ -61,6 +58,27 @@ fn generator_body_starts_with_a_suspension_boundary() {
         [function] if function.is_generator
             && matches!(function.instructions.first(), Some(phera_bytecode::Instruction::GeneratorStart))
     ));
+}
+
+#[test]
+fn class_forms_emit_their_declaration_kind() {
+    use phera_bytecode::{ClassKind, Instruction};
+
+    for (source, kind) in [
+        ("<?php trait Example {}", ClassKind::Trait),
+        ("<?php enum Example {}", ClassKind::Enum),
+        ("<?php new class {};", ClassKind::Anonymous),
+    ] {
+        let unit = phera_compiler::compile(source, "supported.php").unwrap();
+        assert_eq!(unit.classes.len(), 1);
+        assert_eq!(unit.classes[0].kind, kind);
+        assert!(
+            unit.main
+                .instructions
+                .iter()
+                .any(|instruction| matches!(instruction, Instruction::DeclareClass { .. }))
+        );
+    }
 }
 
 #[test]

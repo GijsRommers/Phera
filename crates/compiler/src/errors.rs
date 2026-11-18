@@ -62,6 +62,7 @@ pub(super) fn parse_message(message: &str, source: &str, token: &str, line: usiz
     };
     let expectation = match expected {
         "')'" => ", expecting \")\"",
+        "'class'" => ", expecting \"class\"",
         "'}'" if found == "\"{\"" => ", expecting \"->\" or \"?->\" or \"[\"",
         "';' or close tag" if unexpected.starts_with("identifier") => "",
         "';' or close tag" if source.contains("const ") => ", expecting \",\" or \";\"",
