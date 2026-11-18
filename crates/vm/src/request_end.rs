@@ -169,6 +169,9 @@ impl Vm {
             self.unwind(error);
         }
         self.request_end.shutting_down = false;
+        // Output buffers that are flushed next run with no PHP code
+        // calling, as PHP's do ("in Unknown on line 0").
+        self.call_stack.clear();
     }
 
     /// Phase 2: globals holding the only reference to an object, last to
