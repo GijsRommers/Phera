@@ -267,7 +267,7 @@ impl Context for Vm {
             Ok(self
                 .lookup_class(name)
                 .await?
-                .as_deref()
+                .as_ref()
                 .map(Self::serialization_class_info))
         })
     }
@@ -315,6 +315,16 @@ impl Context for Vm {
     fn create_unserialized_object(&mut self, name: &str) -> NativeResult {
         let class = self.factory_class(name)?;
         self.allocate_unserialized_object(class)
+    }
+
+    fn create_plain_unserialized_object(
+        &mut self,
+        class: &dyn phera_value::ClassHandle,
+        properties: phera_value::PhpArray,
+    ) -> Option<std::rc::Rc<phera_value::Object>> {
+        let class = class.as_any().downcast_ref::<crate::classes::Class>()?;
+        let class = class.identity.upgrade()?;
+        Some(self.classes.allocate_with_properties(class, properties))
     }
 
     fn serialization_properties(

@@ -229,6 +229,15 @@ pub trait Context {
         self.create_object(name, PhpArray::new())
     }
 
+    /// Publish a table of scalar properties verified against the class's linked layout.
+    fn create_plain_unserialized_object(
+        &mut self,
+        _class: &dyn crate::value::ClassHandle,
+        _properties: PhpArray,
+    ) -> Option<Rc<Object>> {
+        None
+    }
+
     /// Enumerate stored properties in declaration order, including mangled names.
     fn serialization_properties(&mut self, object: &Object) -> Result<PhpArray, NativeError> {
         self.object_properties(object, crate::PropertyPurpose::Serialize)

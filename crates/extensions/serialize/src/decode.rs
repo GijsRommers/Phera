@@ -4,6 +4,7 @@ mod graph;
 mod objects;
 mod options;
 mod plain;
+mod plain_object;
 
 use std::{borrow::Cow, rc::Rc};
 
@@ -23,6 +24,7 @@ struct Decoder<'a> {
     delayed: Vec<Delayed>,
     options: Options,
     last_class: Option<(&'a [u8], Rc<SerializationClass>)>,
+    tracks_references: bool,
 }
 
 struct Frame {
@@ -82,6 +84,10 @@ pub async fn unserialize(context: &mut dyn Context, arguments: Vec<Value>) -> Na
         delayed: Vec::new(),
         options,
         last_class: None,
+        tracks_references: input
+            .as_bytes()
+            .windows(2)
+            .any(|pair| pair[1] == b':' && matches!(pair[0], b'R' | b'r' | b'C')),
     };
     let root = decoder.graph.new_place();
     let build = decoder.build(context, root).await;
@@ -147,8 +153,10 @@ impl Decoder<'_> {
         let token = self.reader.token(false);
         emit_diagnostic(context, &mut self.reader);
         let token = token?;
-        self.graph
-            .enter(place, !matches!(token, Token::Reference(_)));
+        self.graph.enter(
+            place,
+            self.tracks_references && !matches!(token, Token::Reference(_)),
+        );
         let scalar = match token {
             Token::Null => Value::Null,
             Token::Bool(value) => Value::Bool(value),

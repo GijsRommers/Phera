@@ -2,6 +2,7 @@
 
 mod declarations;
 mod enums;
+mod layout;
 mod properties;
 mod property_index;
 pub(crate) mod settings;
@@ -40,7 +41,7 @@ impl Vm {
         let result = self
             .lookup_class(name)
             .await?
-            .as_deref()
+            .as_ref()
             .map(Self::serialization_class_info);
         if result.is_none() {
             self.warn(format!(
@@ -50,12 +51,13 @@ impl Vm {
         Ok(result)
     }
 
-    pub(crate) fn serialization_class_info(class: &Class) -> SerializationClass {
+    pub(crate) fn serialization_class_info(class: &Rc<Class>) -> SerializationClass {
         SerializationClass {
             name: class.name.clone(),
             forbidden: Self::class_forbids_serialization(class),
             custom: class.is_a("Serializable"),
             has_unserialize: Self::serialization_method(class, "__unserialize").is_some(),
+            plain: layout::plain_layout(class),
         }
     }
 

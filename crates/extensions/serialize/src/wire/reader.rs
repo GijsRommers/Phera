@@ -5,6 +5,7 @@ use std::borrow::Cow;
 use super::numbers::{digits_end, float_end, signed, signed_end, unsigned};
 use super::{Diagnostic, ObjectFormat, ParseError, Token};
 
+#[derive(Clone)]
 pub struct Reader<'a> {
     input: &'a [u8],
     offset: usize,
@@ -26,6 +27,15 @@ impl<'a> Reader<'a> {
 
     pub fn take_diagnostic(&mut self) -> Option<Diagnostic> {
         self.diagnostic.take()
+    }
+
+    pub fn consume(&mut self, prefix: &[u8]) -> bool {
+        if self.input[self.offset..].starts_with(prefix) {
+            self.offset += prefix.len();
+            true
+        } else {
+            false
+        }
     }
 
     pub fn close(&mut self) -> Result<(), ParseError> {

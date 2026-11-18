@@ -63,6 +63,16 @@ impl<'a> Decoder<'a> {
                     context.warning(format!("Erroneous data format for unserializing '{name}'"));
                     return Err(Failure::Parse);
                 }
+                let limit = self.options.max_depth;
+                if !self.tracks_references
+                    && (limit == 0 || self.frames.len() < limit)
+                    && let Some(layout) = info.as_ref().and_then(|info| info.plain.as_ref())
+                    && let Some(object) =
+                        super::plain_object::read(context, &mut self.reader, layout, count)
+                {
+                    self.graph.value(place, Value::Object(object));
+                    return Ok(());
+                }
                 let object = allocate(context, name)?;
                 if info.is_none() {
                     object.set(ArrayKey::str(INCOMPLETE_CLASS_NAME), Value::from(class));
