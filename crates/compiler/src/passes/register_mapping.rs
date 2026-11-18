@@ -56,6 +56,7 @@ impl Instruction {
                 *destination = map(*destination);
                 *class = map(*class);
             }
+
             Instruction::NewDynamic { class } => *class = map(*class),
             Instruction::DynamicMethodCall { receiver, method } => {
                 *receiver = map(*receiver);

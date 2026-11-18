@@ -41,6 +41,13 @@ pub struct Parameter {
     pub span: Span,
 }
 
+impl Parameter {
+    /// A readonly constructor parameter promotes even without explicit visibility.
+    pub fn is_promoted(&self) -> bool {
+        self.modifiers.promotes_property()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Visibility {
     Public,
@@ -166,6 +173,9 @@ pub enum TraitAdaptation {
         method: Identifier,
         alias: Option<Identifier>,
         visibility: Option<Visibility>,
+        is_final: bool,
+        /// Disallowed modifiers are diagnosed during compilation.
+        invalid_modifier: Option<Identifier>,
     },
 }
 

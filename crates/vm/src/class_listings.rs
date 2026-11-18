@@ -71,7 +71,7 @@ impl Vm {
                 }
                 let value = if let Some(initializer) = &property.initializer {
                     loop {
-                        match self.evaluate_initializer(initializer, &property.declaring) {
+                        match self.evaluate_property_initializer(initializer, property) {
                             Ok(value) => break value,
                             Err(error) => {
                                 let miss = crate::autoload::ClassMiss::take(error)?;
@@ -131,6 +131,12 @@ impl Vm {
     /// A subclass lists inherited interfaces before its own additions.
     pub(crate) fn class_relations(&self, operation: ClassFunction, class: &Class) -> NativeResult {
         let mut result = PhpArray::new();
+        if matches!(operation, ClassFunction::ClassUses) {
+            for name in &class.traits {
+                result.insert(ArrayKey::str(name.as_str()), Value::from(name.as_str()));
+            }
+            return Ok(Value::from(result));
+        }
         let mut ancestors = Vec::new();
         let mut parent = class.parent.as_deref();
         while let Some(class) = parent {
@@ -235,6 +241,11 @@ impl Vm {
         }
         let declaration = match &method.body {
             crate::classes::MethodBody::User(reference) => reference.index(),
+            crate::classes::MethodBody::Enum(operation) => match operation {
+                crate::classes::enums::EnumMethod::Cases => usize::MAX - 2,
+                crate::classes::enums::EnumMethod::From => usize::MAX - 1,
+                crate::classes::enums::EnumMethod::TryFrom => usize::MAX,
+            },
             crate::classes::MethodBody::Closure(operation) => {
                 crate::closure_methods::ClosureMethod::entries()
                     .iter()

@@ -322,6 +322,16 @@ pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
             is_final: declaration.is_final,
             is_readonly: declaration.is_readonly,
             allows_dynamic_properties: declaration.allows_dynamic_properties,
+            traits: declaration.traits,
+            enum_backing: declaration.enum_backing,
+            enum_cases: declaration
+                .enum_cases
+                .into_iter()
+                .map(|(name, backing)| phera_bytecode::EnumCase {
+                    name: tables.name(&name),
+                    backing: backing.map(|index| FunctionId(index as u32)),
+                })
+                .collect(),
             constants: declaration
                 .constants
                 .into_iter()

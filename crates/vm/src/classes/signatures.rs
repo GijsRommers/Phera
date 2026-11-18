@@ -79,13 +79,13 @@ impl Contract {
     }
 
     /// PHP lists declaration modifiers before names, then optional defaults and return types.
-    fn display(&self, method: &Method) -> String {
-        let magic = super::magic::MagicMethods::is_linked_magic(&method.name);
+    fn display(&self, method: &Method, type_name: impl Fn(&str) -> String) -> String {
         let declared = |name: &str| {
-            if magic {
-                ordered_magic_union(name)
+            let name = type_name(name);
+            if super::magic::MagicMethods::is_linked_magic(&method.name) {
+                ordered_magic_union(&name)
             } else {
-                name.to_owned()
+                name
             }
         };
         let parameters = self
@@ -114,7 +114,7 @@ impl Contract {
         format!(
             "{}{}::{}({parameters}){}",
             if self.returns_reference { "& " } else { "" },
-            method.declaring,
+            super::trait_methods::display(&method.declaring),
             method.name,
             self.returns
                 .as_ref()
@@ -132,7 +132,27 @@ impl Vm {
         method: &Method,
         unit: &phera_bytecode::CompiledUnit,
     ) -> Result<(), NativeError> {
-        if inherited.visibility == phera_bytecode::Visibility::Private
+        self.check_contract(inherited, method, None, unit)
+    }
+
+    pub(super) fn check_trait_contract(
+        &mut self,
+        inherited: &Method,
+        method: &Method,
+        consuming_class: &str,
+        unit: &phera_bytecode::CompiledUnit,
+    ) -> Result<(), NativeError> {
+        self.check_contract(inherited, method, Some(consuming_class), unit)
+    }
+
+    fn check_contract(
+        &mut self,
+        inherited: &Method,
+        method: &Method,
+        trait_scope: Option<&str>,
+        unit: &phera_bytecode::CompiledUnit,
+    ) -> Result<(), NativeError> {
+        if (inherited.visibility == phera_bytecode::Visibility::Private && !inherited.is_abstract)
             || (method.name.eq_ignore_ascii_case("__construct") && !inherited.is_abstract)
         {
             return Ok(());
@@ -143,6 +163,7 @@ impl Vm {
         ) else {
             return Ok(());
         };
+        let inherited_scope = trait_scope.unwrap_or(&inherited.declaring);
         let mut unresolved = None;
         let mut compatible = !base.returns_reference || child.returns_reference;
         compatible &= child
@@ -171,13 +192,7 @@ impl Vm {
             compatible &= !parameter.optional || implementation.optional || implementation.variadic;
             let source = parameter.declaration.as_deref();
             let target = implementation.declaration.as_deref();
-            if !self.type_subset(
-                source,
-                &inherited.declaring,
-                target,
-                &method.declaring,
-                unit,
-            ) {
+            if !self.type_subset(source, inherited_scope, target, &method.declaring, unit) {
                 compatible = false;
                 unresolved =
                     unresolved.or_else(|| self.unresolved_contract_type(source, target, unit));
@@ -187,13 +202,7 @@ impl Vm {
             let source = child.returns.as_deref();
             let target = base.returns.as_deref();
             if (base.tentative && source.is_none())
-                || !self.type_subset(
-                    source,
-                    &method.declaring,
-                    target,
-                    &inherited.declaring,
-                    unit,
-                )
+                || !self.type_subset(source, &method.declaring, target, inherited_scope, unit)
             {
                 if base.tentative && compatible {
                     if let MethodBody::User(reference) = method.body
@@ -218,7 +227,8 @@ impl Vm {
                         let previous = self.diagnostic_location.replace(location);
                         self.diagnostic("Deprecated", format!(
                             "Return type of {} should either be compatible with {}, or the #[\\ReturnTypeWillChange] attribute should be used to temporarily suppress the notice",
-                            child.display(method), base.display(inherited)
+                            child.display(method, |ty| self.contract_type_name(ty, &method.declaring, trait_scope, unit)),
+                            base.display(inherited, |ty| self.contract_type_name(ty, inherited_scope, trait_scope, unit))
                         ));
                         self.diagnostic_location = previous;
                     }
@@ -235,8 +245,12 @@ impl Vm {
         let MethodBody::User(reference) = &method.body else {
             return Ok(());
         };
-        let child = child.display(method);
-        let base = base.display(inherited);
+        let child = child.display(method, |ty| {
+            self.contract_type_name(ty, &method.declaring, trait_scope, unit)
+        });
+        let base = base.display(inherited, |ty| {
+            self.contract_type_name(ty, inherited_scope, trait_scope, unit)
+        });
         let file = self.code.unit(*reference).file.clone();
         let line = self.code.function(*reference).definition_line as usize;
         if let Some(name) = unresolved {
@@ -256,6 +270,30 @@ impl Vm {
                 line,
             },
         ))))
+    }
+
+    fn contract_type_name(
+        &self,
+        ty: &str,
+        scope: &str,
+        trait_scope: Option<&str>,
+        unit: &phera_bytecode::CompiledUnit,
+    ) -> String {
+        if trait_scope.is_none() {
+            return ty.to_owned();
+        }
+        let separators = ['|', '&', '?', '(', ')'];
+        let mut display = String::new();
+        for segment in ty.split_inclusive(separators) {
+            let name = segment.trim_end_matches(separators);
+            if matches!(name, "self" | "parent") {
+                display.push_str(&self.resolve_signature_keyword(name, scope, unit));
+                display.push_str(&segment[name.len()..]);
+            } else {
+                display.push_str(segment);
+            }
+        }
+        display
     }
 
     /// Linking a method signature can require class identities even though passing arguments does not.

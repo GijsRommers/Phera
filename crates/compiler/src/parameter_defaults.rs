@@ -97,6 +97,16 @@ pub(crate) fn initializer_error(
                     pending.push(name);
                 }
             }
+            Property {
+                target,
+                name,
+                nullsafe: false,
+            } => {
+                pending.push(target);
+                if let MemberName::Expression(name) = name {
+                    pending.push(name);
+                }
+            }
             Call {
                 callee,
                 arguments: Arguments::FirstClassCallable,

@@ -44,7 +44,7 @@ impl Compiler<'_> {
         line: usize,
     ) -> Result<(), CompileError> {
         for parameter in parameters {
-            if parameter.modifiers.promotes_property() {
+            if parameter.is_promoted() {
                 let scratch = self.allocate_register()?;
                 let source = self.local(&parameter.name)?;
                 let place = Place {

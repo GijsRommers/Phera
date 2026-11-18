@@ -190,6 +190,7 @@ impl Vm {
                     None => {}
                 }
             }
+            MethodBody::Enum(_) => {}
             MethodBody::Closure(operation) => {
                 reflected.parameters = native_parameters(operation.parameters());
                 reflected.extension = Some("Core".into());

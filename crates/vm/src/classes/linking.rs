@@ -4,9 +4,7 @@ use std::{rc::Rc, sync::Arc};
 
 use phera_bytecode::{ClassId, ClassKind, CompiledUnit, Visibility};
 use phera_extension_api::NativeError;
-use phera_value::{ArrayKey, Object};
 
-use super::class::PropertyDefault;
 use super::{Class, Method, MethodBody};
 use crate::Vm;
 
@@ -49,6 +47,11 @@ impl Vm {
         {
             return Ok(());
         }
+        let declaration = &unit.classes[index.index()];
+        if declaration.kind == ClassKind::Anonymous && self.classes.get(&declaration.name).is_some()
+        {
+            return Ok(());
+        }
         self.link_class(unit, index)
     }
 
@@ -82,15 +85,39 @@ impl Vm {
             })
             .transpose()?;
         if let Some(parent) = &parent {
+            let display = name.split('\0').next().unwrap_or(name);
+            if parent.kind == ClassKind::Enum {
+                return Err(NativeError::error(format!(
+                    "Class {display} cannot extend enum {}",
+                    parent.name
+                )));
+            }
             if parent.is_final {
                 return Err(NativeError::error(format!(
-                    "Class {name} cannot extend final class {}",
+                    "Class {display} cannot extend final class {}",
                     parent.name
                 )));
             }
             if parent.kind == ClassKind::Interface {
                 return Err(NativeError::error(format!(
-                    "Class {name} cannot extend interface {}",
+                    "Class {display} cannot extend interface {}",
+                    parent.name
+                )));
+            }
+            if parent.kind == ClassKind::Trait {
+                return Err(NativeError::error(format!(
+                    "Class {display} cannot extend trait {}",
+                    parent.name
+                )));
+            }
+            if declaration.is_readonly != parent.is_readonly {
+                let (child, inherited) = if declaration.is_readonly {
+                    ("Readonly", "non-readonly")
+                } else {
+                    ("Non-readonly", "readonly")
+                };
+                return Err(NativeError::error(format!(
+                    "{child} class {display} cannot extend {inherited} class {}",
                     parent.name
                 )));
             }
@@ -115,18 +142,15 @@ impl Vm {
         let mut seen = std::collections::HashSet::new();
         if let Some(duplicate) = interfaces
             .iter()
-            .find(|interface| !seen.insert(interface.name.as_str()))
+            .find(|interface| !seen.insert(interface.index))
         {
-            let kind = if declaration.kind == ClassKind::Interface {
-                "Interface"
-            } else {
-                "Class"
-            };
+            let kind = declaration.kind.description();
             return Err(NativeError::error(format!(
                 "{kind} {name} cannot implement previously implemented interface {}",
                 duplicate.name
             )));
         }
+        self.link_enum_interfaces(declaration, &mut interfaces)?;
         if declaration.kind != ClassKind::Interface
             && interfaces
                 .iter()
@@ -135,6 +159,11 @@ impl Vm {
                 .as_ref()
                 .is_none_or(|parent| !parent.is_a("Throwable"))
         {
+            if declaration.kind == ClassKind::Enum {
+                return Err(NativeError::error(format!(
+                    "Enum {name} cannot implement interface Throwable"
+                )));
+            }
             return Err(NativeError::error(format!(
                 "Class {name} cannot implement interface Throwable, extend Exception or \
                  Error instead"
@@ -142,7 +171,8 @@ impl Vm {
         }
         use super::operations::ClassOperations;
         let operations = ClassOperations::link(name, parent.as_deref(), &interfaces);
-        if declaration.kind == ClassKind::Class {
+        if !matches!(declaration.kind, ClassKind::Trait | ClassKind::Interface) {
+            let name = super::trait_methods::display(name);
             let iterator = operations.has(ClassOperations::ITERATOR);
             let aggregate = operations.has(ClassOperations::AGGREGATE);
             if iterator && aggregate {
@@ -158,10 +188,11 @@ impl Vm {
                     !parent.operations.has(ClassOperations::TRAVERSABLE) || parent.is_abstract
                 })
             {
+                let kind = declaration.kind.description();
                 return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
                     crate::error_traces::DeclarationFailure {
                         message: format!(
-                            "Class {name} must implement interface Traversable as part of either Iterator or IteratorAggregate"
+                            "{kind} {name} must implement interface Traversable as part of either Iterator or IteratorAggregate"
                         ),
                         file: "Unknown".into(),
                         line: 0,
@@ -218,7 +249,17 @@ impl Vm {
             }
             methods.insert(key, linked);
         }
-        if let Some(method) = methods.get("__tostring") {
+        let mut enum_info = self.install_enum_methods(declaration, &mut methods)?;
+        let traits = self.resolve_traits(declaration)?;
+        if !traits.is_empty() {
+            self.compose_trait_methods(declaration, &unit, &traits, &mut methods)?;
+        }
+        if enum_info.is_some() {
+            super::enums::check_magic_methods(name, &methods)?;
+        }
+        if declaration.kind != ClassKind::Trait
+            && let Some(method) = methods.get("__tostring")
+        {
             if method.visibility != Visibility::Public
                 && let MethodBody::User(function) = method.body
             {
@@ -226,7 +267,8 @@ impl Vm {
                 let line = self.code.function(function).definition_line as usize;
                 let message = format!(
                     "Access level to {}::{}() must be public (as in class Stringable)",
-                    method.declaring, method.name
+                    phera_value::class_display_name(&method.declaring),
+                    method.name
                 );
                 return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
                     crate::error_traces::DeclarationFailure {
@@ -250,16 +292,27 @@ impl Vm {
         for interface in &interfaces {
             for (method_name, method) in &interface.methods {
                 if let Some(implementation) = methods.get(method_name) {
-                    if matches!(method.body, MethodBody::Native(entry) if entry.return_type.is_some())
+                    let native = matches!(method.body, MethodBody::Native(entry) if entry.return_type.is_some());
+                    if native
+                        || matches!(declaration.kind, ClassKind::Enum | ClassKind::Anonymous)
+                        || !traits.is_empty()
                     {
-                        super::inheritance_checks::check_override(name, method, implementation)
-                            .map_err(|error| {
+                        super::inheritance_checks::check_override(
+                            super::trait_methods::display(name),
+                            method,
+                            implementation,
+                        )
+                        .map_err(|error| {
+                            if native {
                                 super::declaration_errors::method_failure(
                                     &self.code,
                                     implementation,
                                     error,
                                 )
-                            })?;
+                            } else {
+                                error
+                            }
+                        })?;
                     }
                     self.check_method_contract(method, implementation, &unit)?;
                 }
@@ -272,203 +325,34 @@ impl Vm {
             name,
             declaration.kind,
             declaration.is_abstract,
+            declaration.is_final,
             &methods,
             &self.registry,
         )?;
-        let hooks =
-            super::operations::user_hooks(&unit, declaration, parent.as_deref(), operations);
-        let mut defaults = parent
-            .as_ref()
-            .map(|class| class.defaults.clone())
-            .unwrap_or_default();
-        let mut constants = parent
-            .as_ref()
-            .map(|class| class.constants.clone())
-            .unwrap_or_default();
-        super::declaration_errors::merge_interface_constants(
-            declaration,
-            &unit,
-            &interfaces,
-            &mut constants,
-        )?;
-        for constant in &declaration.constants {
-            let constant_name = unit.names[constant.name.index()].clone();
-            if let Some(inherited) = constants.get(&constant_name) {
-                let narrower = match inherited.visibility {
-                    Visibility::Public => constant.visibility != Visibility::Public,
-                    Visibility::Protected => constant.visibility == Visibility::Private,
-                    Visibility::Private => false,
-                };
-                if narrower {
-                    let visibility = match inherited.visibility {
-                        Visibility::Public => "public",
-                        Visibility::Protected => "protected",
-                        Visibility::Private => unreachable!(),
-                    };
-                    return Err(NativeError::error(format!(
-                        "Access level to {name}::{constant_name} must be {visibility} \
-                         (as in class {})",
-                        inherited.declaring
-                    )));
-                }
-            }
-            if constants
-                .get(&constant_name)
-                .is_some_and(|constant| constant.is_final)
-            {
-                let declaring = constants[&constant_name].declaring.clone();
-                return Err(NativeError::error(format!(
-                    "{name}::{constant_name} cannot override final constant \
-                     {declaring}::{constant_name}"
-                )));
-            }
-            if let Some(inherited) = constants.get(&constant_name)
-                && inherited.visibility != Visibility::Private
-                && let Some(expected) = &inherited.ty
-            {
-                let declared = constant.ty.map(|index| &unit.types[index.index()]);
-                let compatible = self.type_subset(
-                    declared.map(|declared| declared.display.as_str()),
-                    name,
-                    Some(&expected.display),
-                    &inherited.declaring,
-                    &unit,
-                );
-                if !compatible {
-                    return Err(NativeError::error(format!(
-                        "Type of {name}::{constant_name} must be compatible with \
-                         {}::{constant_name} of type {}",
-                        inherited.declaring, expected.display
-                    )));
-                }
-            }
-            constants.insert(
-                constant_name,
-                Rc::new(super::LinkedConstant {
-                    deprecated: crate::attribute_diagnostics::attribute(
-                        &constant.metadata.attributes,
-                        "Deprecated",
-                    )
-                    .map(|attr| {
-                        crate::attribute_diagnostics::deprecation_message(
-                            attr,
-                            &format!("Constant {name}::{}", unit.names[constant.name.index()]),
-                        )
-                    }),
-                    declaring: name.clone(),
-                    visibility: constant.visibility,
-                    is_final: constant.is_final,
-                    initializer: super::class::ConstantInitializer::Compiled {
-                        function: self
-                            .code
-                            .index_in(&unit, Some(constant.initializer.index())),
-                        state: std::cell::RefCell::new(super::ConstantState::Uninitialized),
-                    },
-                    ty: constant.ty.map(|index| unit.types[index.index()].clone()),
-                }),
-            );
+        let hooks = super::operations::user_hooks(&methods, parent.as_deref(), operations);
+        let mut constants =
+            self.link_class_constants(declaration, &unit, parent.as_ref(), &interfaces)?;
+        let (mut defaults, mut static_properties) =
+            self.link_class_properties(declaration, &unit, parent.as_ref())?;
+        if !traits.is_empty() {
+            self.compose_trait_members(
+                declaration,
+                &unit,
+                &traits,
+                &mut defaults,
+                &mut static_properties,
+                &mut constants,
+            )?;
         }
-        let mut static_properties = parent
-            .as_ref()
-            .map(|class| class.static_properties.clone())
-            .unwrap_or_default();
-        for property in &declaration.properties {
-            let property_name = &unit.names[property.name.index()];
-            let key = match property.visibility {
-                Visibility::Public => ArrayKey::str(property_name.as_bytes()),
-                Visibility::Protected => Object::protected_key(property_name),
-                Visibility::Private => Object::private_key(name, property_name),
-            };
-            let value = match property.default {
-                Some(phera_bytecode::Initializer::Literal(index)) => {
-                    crate::unit_caches::value(&unit.constants[index.index()])
-                }
-                _ => phera_value::Value::Null,
-            };
-            let mut linked = PropertyDefault {
-                set_visibility: property.set_visibility,
-                is_final: property.is_final,
-                key: key.clone(),
-                static_storage: property
-                    .is_static
-                    .then(|| crate::reference_holders::StaticProperty::new(value.clone())),
-                value,
-                name: property_name.clone(),
-                declaring: name.clone(),
-                visibility: property.visibility,
-                initialized: property.default.is_some() || property.ty.is_none(),
-                initializer: match property.default {
-                    Some(phera_bytecode::Initializer::Function(index)) => {
-                        Some(self.code.index_in(&unit, Some(index.index())))
-                    }
-                    _ => None,
-                },
-                ty: property.ty.map(|index| unit.types[index.index()].clone()),
-                is_readonly: property.is_readonly,
-                static_initialized: Rc::new(std::cell::Cell::new(false)),
-                value_initialized: Rc::new(std::cell::Cell::new(
-                    property.default.is_some() || property.ty.is_none(),
-                )),
-            };
-            if let Some(value) = linked
-                .initializer
-                .as_ref()
-                .and_then(|reference| super::class::literal_initializer(&self.code, reference))
-            {
-                if let Some(storage) = &linked.static_storage {
-                    *storage.reference.borrow().borrow_mut() = value.clone();
-                }
-                linked.value = value;
-                linked.initializer = None;
-            }
-            let inherited = if property.is_static {
-                &static_properties
-            } else {
-                &defaults
-            };
-            if crate::attribute_diagnostics::attribute(&property.metadata.attributes, "Override")
-                .is_some()
-                && !inherited.iter().any(|candidate| {
-                    candidate.name == *property_name
-                        && candidate.declaring != *name
-                        && candidate.visibility != Visibility::Private
-                })
-            {
-                return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
-                    crate::error_traces::DeclarationFailure {
-                        message: format!(
-                            "{name}::${property_name} has #[\\Override] attribute, but no matching parent property exists"
-                        ),
-                        file: unit.file.clone(),
-                        line: property.metadata.start_line as usize,
-                    },
-                ))));
-            }
-            let other_storage = if property.is_static {
-                &defaults
-            } else {
-                &static_properties
-            };
-            if let Some(inherited) = inherited.iter().chain(other_storage).find(|candidate| {
-                candidate.name == *property_name && candidate.visibility != Visibility::Private
-            }) {
-                self.check_property_override(&linked, inherited, &unit)?;
-            }
-            let target = if property.is_static {
-                &mut static_properties
-            } else {
-                &mut defaults
-            };
-            if let Some(inherited) = target.iter_mut().find(|entry| {
-                entry.key == key
-                    || (entry.name == *property_name
-                        && entry.visibility != Visibility::Private
-                        && property.visibility != Visibility::Private)
-            }) {
-                *inherited = linked;
-            } else {
-                target.push(linked);
-            }
+        if let Some(enum_info) = &mut enum_info {
+            self.link_enum_members(
+                declaration,
+                &unit,
+                enum_info,
+                &mut defaults,
+                &static_properties,
+                &mut constants,
+            )?;
         }
         let allows_dynamic_properties = declaration.allows_dynamic_properties
             || parent
@@ -499,6 +383,11 @@ impl Vm {
                 has_native_layout: parent.as_ref().is_some_and(|class| class.has_native_layout),
                 parent,
                 interfaces,
+                traits: traits
+                    .into_iter()
+                    .map(|used_trait| used_trait.name.clone())
+                    .collect(),
+                enum_info,
                 kind: declaration.kind,
                 is_abstract: declaration.is_abstract,
                 is_throwable,

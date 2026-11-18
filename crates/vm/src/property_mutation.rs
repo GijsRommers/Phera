@@ -113,10 +113,10 @@ impl Vm {
     ) -> Result<(), NativeError> {
         let name = &property.name;
         let key = &property.key;
+        let declaring = phera_value::class_display_name(&property.declaring);
         if indirect || mutation == Mutation::Bind {
             return Err(NativeError::error(format!(
-                "Cannot indirectly modify readonly property {}::${name}",
-                property.declaring
+                "Cannot indirectly modify readonly property {declaring}::${name}"
             )));
         }
         if crate::property_storage::read(object, key).is_some()
@@ -128,8 +128,7 @@ impl Vm {
                 "modify"
             };
             return Err(NativeError::error(format!(
-                "Cannot {action} readonly property {}::${name}",
-                property.declaring
+                "Cannot {action} readonly property {declaring}::${name}"
             )));
         }
         let change = if mutation == Mutation::Unset {
@@ -233,11 +232,12 @@ impl Vm {
                         && mutation != Mutation::Unset
                     {
                         if class.is_readonly
+                            || class.kind == phera_bytecode::ClassKind::Enum
                             || class.origin == crate::classes::class::ClassOrigin::Closure
                         {
                             return Err(NativeError::error(format!(
                                 "Cannot create dynamic property {}::${name}",
-                                class.name
+                                phera_value::class_display_name(&class.name)
                             )));
                         }
                         if !class.allows_dynamic_properties {

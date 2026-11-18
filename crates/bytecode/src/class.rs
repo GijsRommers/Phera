@@ -2,6 +2,9 @@
 
 use crate::{ConstId, FunctionId, NameId, SymbolId, TypeId};
 
+/// Internal class-name symbol for the lexical consuming class of a trait body.
+pub const TRAIT_CLASS_NAME: &str = "\0trait-class";
+
 /// PHP visibility is retained independently of the mangled instance storage key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Visibility {
@@ -11,11 +14,65 @@ pub enum Visibility {
     Private,
 }
 
-/// Interfaces cannot be instantiated; traits and enums belong to later milestones.
+/// Anonymous declarations are linked once per source occurrence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClassKind {
     Class,
     Interface,
+    Anonymous,
+    Trait,
+    Enum,
+}
+
+impl ClassKind {
+    pub fn is_class(self) -> bool {
+        matches!(self, Self::Class | Self::Anonymous | Self::Enum)
+    }
+
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::Class | Self::Anonymous => "Class",
+            Self::Interface => "Interface",
+            Self::Enum => "Enum",
+            Self::Trait => "Trait",
+        }
+    }
+}
+
+/// `enum Status: int` and `enum Status: string` use different lookup keys.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnumBacking {
+    Int,
+    String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnumCase {
+    pub name: NameId,
+    pub backing: Option<FunctionId>,
+}
+
+/// Resolved names and source-order rules for `use T, U { T::m insteadof U; }`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TraitUse {
+    pub names: Vec<String>,
+    pub adaptations: Vec<TraitAdaptation>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TraitAdaptation {
+    Precedence {
+        trait_name: String,
+        method: String,
+        instead_of: Vec<String>,
+    },
+    Alias {
+        trait_name: Option<String>,
+        method: String,
+        alias: Option<String>,
+        visibility: Option<Visibility>,
+        is_final: bool,
+    },
 }
 
 /// A default is either immutable literal data or lazily evaluated bytecode.
@@ -42,6 +99,9 @@ pub struct ClassDeclaration {
     pub constants: Vec<ClassConstant>,
     pub properties: Vec<PropertyDeclaration>,
     pub methods: Vec<MethodDeclaration>,
+    pub traits: Vec<TraitUse>,
+    pub enum_backing: Option<EnumBacking>,
+    pub enum_cases: Vec<EnumCase>,
 }
 
 /// A class constant computes its value on first access in the declaring scope.

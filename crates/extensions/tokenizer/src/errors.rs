@@ -28,7 +28,9 @@ pub(crate) fn translate(
     if error.is_compile_error() {
         return exception("CompileError", error.message, line);
     }
-    let message = if error.message.starts_with("invalid numeric literal") {
+    let message = if error.message.starts_with("syntax error,") {
+        error.message
+    } else if error.message.starts_with("invalid numeric literal") {
         "Invalid numeric literal".to_owned()
     } else if let Some(suffix) = error
         .message
@@ -240,6 +242,7 @@ fn expected_token(message: &str) -> Option<&'static str> {
         "'{'" => Some(r#""{""#),
         "'}'" => Some(r#""}""#),
         "']'" => Some(r#""]""#),
+        "'class'" => Some(r#""class""#),
         "an identifier" => Some("identifier"),
         _ => None,
     }

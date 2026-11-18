@@ -209,7 +209,11 @@ impl ReflectionContext for Vm {
             .get(class)
             .and_then(|class| class.constants.get(name).cloned())
             .ok_or_else(|| exception(format!("Constant {class}::{name} does not exist")))?;
-        self.evaluate_class_constant(&constant, name)
+        self.class_constant_with_access(
+            &constant.declaring,
+            name,
+            crate::class_constants::ConstantAccess::Reflect,
+        )
     }
 
     fn reflect_construct(
@@ -297,7 +301,11 @@ impl Vm {
     fn reflection_class_info(&self, class: &Class) -> ClassInfo {
         use crate::classes::class::ClassOrigin;
         let kind = match class.kind {
-            phera_bytecode::ClassKind::Class => ReflectedClassKind::Class,
+            phera_bytecode::ClassKind::Class | phera_bytecode::ClassKind::Anonymous => {
+                ReflectedClassKind::Class
+            }
+            phera_bytecode::ClassKind::Enum => ReflectedClassKind::Enum,
+            phera_bytecode::ClassKind::Trait => ReflectedClassKind::Trait,
             phera_bytecode::ClassKind::Interface => ReflectedClassKind::Interface,
         };
         let constructor_public = class

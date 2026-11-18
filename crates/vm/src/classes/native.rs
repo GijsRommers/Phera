@@ -28,6 +28,8 @@ impl ClassTable {
                 name: "stdClass".into(),
                 parent: None,
                 interfaces: Vec::new(),
+                traits: Vec::new(),
+                enum_info: None,
                 kind: ClassKind::Class,
                 is_abstract: false,
                 is_throwable: false,
@@ -57,6 +59,7 @@ impl ClassTable {
             .classes()
             .chain(std::iter::once(&closure))
             .chain(internal_iterator)
+            .chain(super::enums::INTERFACES)
         {
             let parent = entry.parent.and_then(|name| table.get(name));
             let mut methods = parent
@@ -201,6 +204,8 @@ impl ClassTable {
                     name: entry.name.into(),
                     parent,
                     interfaces,
+                    traits: Vec::new(),
+                    enum_info: None,
                     kind: if entry.kind == NativeKind::Interface {
                         ClassKind::Interface
                     } else {

@@ -25,7 +25,7 @@ pub(crate) use crate::function_facts::{FunctionFacts, FunctionShape};
 use crate::unit_caches::UnitCache;
 
 /// A function's position in the request's code table.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub(crate) struct FunctionIndex(pub(crate) u32);
 
 /// A name, lowercased, as one number for the whole request: every file that
@@ -63,9 +63,14 @@ pub(crate) struct CodeTable {
     functions: Vec<FunctionFacts>,
     /// Every lowercased name of every loaded file, numbered.
     names: std::collections::HashMap<String, NameKey>,
+    trait_method_names: std::collections::HashMap<FunctionIndex, String>,
 }
 
 impl CodeTable {
+    pub(crate) fn next_unit_index(&self) -> UnitIndex {
+        UnitIndex(self.units.len() as u32)
+    }
+
     /// Adds a compiled file and numbers its functions, or finds it when it
     /// was loaded before. Returns the number of its top-level code.
     pub(crate) fn load(&mut self, unit: &Arc<CompiledUnit>) -> FunctionIndex {
@@ -76,7 +81,7 @@ impl CodeTable {
         {
             return loaded.first;
         }
-        let index = UnitIndex(self.units.len() as u32);
+        let index = self.next_unit_index();
         let first = FunctionIndex(self.functions.len() as u32);
         let bodies = std::iter::once((None, &unit.main)).chain(
             unit.functions
@@ -177,6 +182,44 @@ impl CodeTable {
         class: crate::classes::ClassIndex,
     ) {
         self.functions[function.index()].class = Some(class);
+    }
+
+    /// Flattened methods share immutable instructions and own their scope and static cells.
+    fn import_trait_body(
+        &mut self,
+        source: FunctionIndex,
+        scope: crate::classes::ClassIndex,
+    ) -> FunctionIndex {
+        let mut facts = self.facts(source).clone();
+        facts.class = Some(scope);
+        let function = FunctionIndex(self.functions.len() as u32);
+        self.functions.push(facts);
+        function
+    }
+
+    pub(crate) fn import_trait_method(
+        &mut self,
+        source: FunctionIndex,
+        scope: crate::classes::ClassIndex,
+        name: String,
+    ) -> FunctionIndex {
+        let function = self.import_trait_body(source, scope);
+        self.trait_method_names.insert(function, name);
+        function
+    }
+
+    pub(crate) fn function_name(&self, function: FunctionIndex) -> &str {
+        self.trait_method_names
+            .get(&function)
+            .map_or_else(|| self.function(function).name.as_str(), String::as_str)
+    }
+
+    /// Composed methods reached through multiple traits can share the original body.
+    pub(crate) fn original_function(&self, source: FunctionIndex) -> FunctionIndex {
+        let facts = self.facts(source);
+        facts.local.map_or(facts.unit_first, |local| {
+            self.declared(facts.unit_first, local as usize)
+        })
     }
 
     #[inline]

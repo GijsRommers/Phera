@@ -115,6 +115,17 @@ impl Compiler<'_> {
         match_expression: &ast::MagicConstant,
         line: usize,
     ) -> Result<Reg, CompileError> {
+        if *match_expression == ast::MagicConstant::Class && self.trait_scope.is_some() {
+            let destination = self.allocate_register()?;
+            self.emit(
+                crate::ir::Instruction::ClassName {
+                    destination,
+                    class: phera_bytecode::TRAIT_CLASS_NAME.into(),
+                },
+                line,
+            );
+            return Ok(destination);
+        }
         self.literal(
             match match_expression {
                 ast::MagicConstant::Line => Constant::Int(line as i64),
@@ -130,6 +141,11 @@ impl Compiler<'_> {
                 ast::MagicConstant::Function | ast::MagicConstant::Method => {
                     Constant::Bytes(if self.function.name == "{main}" {
                         vec![]
+                    } else if *match_expression == ast::MagicConstant::Function
+                        && let Some((_, method)) = self.function.name.rsplit_once("::")
+                        && !self.function.name.starts_with("{closure:")
+                    {
+                        method.as_bytes().to_vec()
                     } else {
                         self.function.name.as_bytes().to_vec()
                     })
@@ -144,6 +160,13 @@ impl Compiler<'_> {
                 ast::MagicConstant::Namespace => {
                     Constant::Bytes(self.namespace.as_bytes().to_vec())
                 }
+                ast::MagicConstant::Trait => Constant::Bytes(
+                    self.trait_scope
+                        .as_deref()
+                        .unwrap_or("")
+                        .as_bytes()
+                        .to_vec(),
+                ),
                 _ => Constant::Bytes(vec![]),
             },
             line,

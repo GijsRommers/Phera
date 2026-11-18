@@ -165,8 +165,7 @@ impl Vm {
             let body = self.code.function(function);
             for (index, name) in body.statics.iter().enumerate() {
                 let key = crate::references::StaticKey {
-                    unit: std::sync::Arc::as_ptr(unit) as usize,
-                    function: self.code.local(function),
+                    function,
                     variable: index as u16,
                 };
                 let value = self

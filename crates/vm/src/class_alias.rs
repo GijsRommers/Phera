@@ -72,10 +72,7 @@ impl Vm {
                 Ok(Value::Bool(true))
             }
             Entry::Occupied(_) => {
-                let kind = match class.kind {
-                    phera_bytecode::ClassKind::Interface => "interface",
-                    _ => "class",
-                };
+                let kind = class.kind.description().to_ascii_lowercase();
                 let mut message = format!("Cannot redeclare {kind} {alias}");
                 if let Some((function, index)) = class.declaration {
                     let unit = self.code.unit(function);

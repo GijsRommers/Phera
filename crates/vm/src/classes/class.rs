@@ -30,6 +30,8 @@ pub(crate) struct Class {
     pub(crate) ancestors: std::collections::HashSet<String>,
     pub(crate) parent: Option<Rc<Class>>,
     pub(crate) interfaces: Vec<Rc<Class>>,
+    pub(crate) traits: Vec<String>,
+    pub(crate) enum_info: Option<super::enums::EnumInfo>,
     pub(crate) kind: ClassKind,
     pub(crate) is_abstract: bool,
     /// Immutable Throwable membership avoids ancestry allocation on every ordinary new.
@@ -95,10 +97,12 @@ pub(crate) enum ClassOrigin {
 }
 
 /// Native and user methods share argument sends but execute through different handlers.
+#[derive(Clone)]
 pub(crate) enum MethodBody {
     Closure(crate::closure_methods::ClosureMethod),
     User(crate::code_table::FunctionIndex),
     Native(MethodEntry),
+    Enum(super::enums::EnumMethod),
 }
 
 /// Receiver, lexical scope and called class differ under inheritance and static dispatch.
@@ -131,6 +135,9 @@ impl ClassHandle for Class {
     }
     fn as_any(&self) -> &dyn Any {
         self
+    }
+    fn is_enum(&self) -> bool {
+        self.kind == ClassKind::Enum
     }
 }
 
@@ -172,6 +179,10 @@ pub(crate) enum ConstantInitializer {
         state: std::cell::RefCell<ConstantState>,
     },
     Value(Value),
+    EnumCase {
+        name: String,
+        backing: Option<crate::code_table::FunctionIndex>,
+    },
 }
 
 /// A failed evaluation restores Uninitialized so later accesses can retry.
@@ -293,6 +304,11 @@ impl Method {
                 MethodBody::Native(entry) => {
                     entry.params.iter().map(ParameterSpec::native).collect()
                 }
+                MethodBody::Enum(operation) => operation
+                    .parameters()
+                    .iter()
+                    .map(ParameterSpec::native)
+                    .collect(),
             };
             MethodSignature {
                 name: format!("{}::{}", method.declaring, method.name).into(),
@@ -312,4 +328,10 @@ impl Class {
         }
         self.declaration_matches.borrow().get(name).copied()
     }
+}
+
+/// A default int can widen to float without scalar coercion from strings.
+pub(crate) fn widen_property_value(value: Value, ty: Option<&phera_bytecode::Type>) -> Value {
+    ty.and_then(|ty| crate::types::widen_int_to_float(&value, ty.mask))
+        .unwrap_or(value)
 }

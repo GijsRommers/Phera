@@ -120,12 +120,16 @@ impl Vm {
         // The coercion below may run PHP code (a `__toString`), so it gets
         // its own owner of the unit instead of a borrow of the code table.
         let unit = unit.clone();
-        let function = self.code.function(entry);
         let name = match parameter.variadic {
             true => String::new(),
             false => unit.names[parameter.name.index()].clone(),
         };
-        let function_name = function.name.clone();
+        let function_name = self.code.function_name(entry);
+        let function_name = function_name
+            .split('\0')
+            .next()
+            .unwrap_or(function_name)
+            .to_owned();
         let declared = &unit.types[declaration.index()];
         let context = match scope {
             types::DeclarationScope::Relative => self.prepared_context(entry, call).method(),
@@ -140,6 +144,7 @@ impl Vm {
 
     /// Arity errors keep the caller's source location and the complete supplied arity.
     pub(crate) fn missing_argument(&self, function: FunctionIndex, supplied: usize) -> NativeError {
+        let name = self.code.function_name(function);
         let function = self.code.function(function);
         let required = function
             .parameters
@@ -160,7 +165,7 @@ impl Vm {
         NativeError::argument_count_error(format!(
             "Too few arguments to function {}(), {supplied} passed{location} and \
              {qualifier} {required} expected",
-            function.name,
+            name,
         ))
     }
 
