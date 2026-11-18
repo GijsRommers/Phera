@@ -9,8 +9,10 @@ pub mod environment;
 mod math;
 mod natural;
 mod offsets;
+mod path_metadata;
 mod strings;
 mod time;
+mod version_compare;
 
 pub struct Standard;
 
@@ -20,6 +22,10 @@ impl Extension for Standard {
     }
 
     fn register(&self, registry: &mut Registry) {
+        registry.function(version_compare::ENTRY);
+        for entry in path_metadata::FUNCTIONS {
+            registry.function(*entry);
+        }
         strings::register(registry);
         math::register(registry);
         arrays::register(registry);

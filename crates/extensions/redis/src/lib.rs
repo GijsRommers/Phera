@@ -19,6 +19,10 @@ impl Extension for Redis {
     fn name(&self) -> &'static str {
         "redis"
     }
+    /// The phpredis release whose behaviour this class is compared with.
+    fn module_version(&self) -> Option<&'static str> {
+        Some("6.3.0")
+    }
     fn register(&self, registry: &mut Registry) {
         registration::register(registry);
     }

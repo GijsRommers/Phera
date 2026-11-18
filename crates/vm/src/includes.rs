@@ -1,12 +1,12 @@
 //! Include resolution and sharing caller variable references.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use phera_bytecode::{IncludeKind, Reg};
 use phera_extension_api::NativeError;
 use phera_value::{Value, to_php_string};
 
-use crate::{Vm, calls::frame::Frame, include_scope::ScopeBinding};
+use crate::Vm;
 
 impl Vm {
     /// Execute included top-level code with references to the caller scope.
@@ -29,47 +29,8 @@ impl Vm {
             self.set(destination, Value::Bool(true));
             return Ok(());
         }
-        if self.call_stack.depth() >= self.frame_limit {
-            return Err(NativeError::error(format!(
-                "Maximum call stack depth of {} exceeded",
-                self.frame_limit
-            )));
-        }
         self.include_state.record(unit.file.clone());
-        self.publish_declaration_warnings(&unit);
-        self.declare_included_functions(&unit)?;
-        self.push_include_frame(unit, destination)
-    }
-
-    /// Sharing the caller scope happens before the included frame takes its register window.
-    fn push_include_frame(
-        &mut self,
-        unit: std::sync::Arc<phera_bytecode::CompiledUnit>,
-        destination: Reg,
-    ) -> Result<(), NativeError> {
-        let bindings = self.include_bindings(&unit)?;
-        let function = self.code.load(&unit);
-        let base = self.registers.len();
-        let mut count = unit.main.registers as usize;
-        self.registers.grow_to(base + count);
-        self.call_stack
-            .push(Frame::new(function, base, Some(destination)));
-        for ScopeBinding {
-            register,
-            name,
-            value,
-        } in bindings
-        {
-            if let Some(name) = name {
-                self.registers.push_undefined();
-                count += 1;
-                let extras = self.call_stack.current_extras_mut();
-                extras.dynamic_count = Some(count);
-                extras.dynamic.insert(name, register);
-            }
-            self.registers.window_mut(base + register.index(), 1)[0] = Some(value);
-        }
-        Ok(())
+        self.enter_scoped_unit(unit, Some(destination))
     }
 }
 
@@ -99,11 +60,13 @@ impl Vm {
         ));
         if matches!(kind, IncludeKind::Require | IncludeKind::RequireOnce) {
             return Err(NativeError::error(format!(
-                "Failed opening required '{name}' (include_path='.')"
+                "Failed opening required '{name}' (include_path='{}')",
+                self.include_path()
             )));
         }
         self.warn(format!(
-            "{construct}(): Failed opening '{name}' for inclusion (include_path='.')"
+            "{construct}(): Failed opening '{name}' for inclusion (include_path='{}')",
+            self.include_path()
         ));
         self.set(destination, Value::Bool(false));
         Ok(())
@@ -111,7 +74,7 @@ impl Vm {
 
     /// Resolve relative includes against the caller only after the first load fails.
     /// Parse errors terminate the request before any fallback lookup.
-    async fn load_include(
+    pub(crate) async fn load_include(
         &mut self,
         name: &str,
     ) -> Result<Result<std::sync::Arc<phera_bytecode::CompiledUnit>, String>, NativeError> {
@@ -119,34 +82,44 @@ impl Vm {
             .include_state
             .loader()
             .ok_or_else(|| NativeError::error("Includes need a runtime code loader"))?;
-        let mut result = loader.load(PathBuf::from(name)).await;
-        if let Err(error) = &result
-            && (error.contains("Fatal error:") || error.contains("Parse error:"))
-        {
-            self.out(error.as_bytes());
-            self.status = 255;
-            return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
-                (),
-            ))));
-        }
-        if result.is_err()
-            && !Path::new(name).is_absolute()
-            && !name.starts_with("./")
-            && !name.starts_with("../")
-        {
+        let mut candidates = Vec::new();
+        let path = Path::new(name);
+        if path.is_absolute() || name.starts_with("./") || name.starts_with("../") {
+            candidates.push(path.to_path_buf());
+        } else {
+            candidates.extend(std::env::split_paths(self.include_path()).map(|directory| {
+                if directory == Path::new(".") {
+                    path.to_path_buf()
+                } else {
+                    directory.join(path)
+                }
+            }));
             let file = self.location().file;
             if let Some(parent) = Path::new(&file).parent() {
-                result = loader.load(parent.join(name)).await;
+                let relative = parent.join(path);
+                if !candidates.contains(&relative) {
+                    candidates.push(relative);
+                }
+            }
+            if !candidates.iter().any(|candidate| candidate == path) {
+                candidates.push(path.to_path_buf());
             }
         }
-        if let Err(error) = &result
-            && (error.contains("Fatal error:") || error.contains("Parse error:"))
-        {
-            self.out(error.as_bytes());
-            self.status = 255;
-            return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
-                (),
-            ))));
+        let mut result = Err(String::new());
+        for candidate in candidates {
+            result = loader.load(candidate).await;
+            if let Err(error) = &result
+                && (error.contains("Fatal error:") || error.contains("Parse error:"))
+            {
+                self.out(error.as_bytes());
+                self.status = 255;
+                return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
+                    (),
+                ))));
+            }
+            if result.is_ok() {
+                break;
+            }
         }
         Ok(result.map_err(|error| {
             if error.contains("Permission denied") {
@@ -158,7 +131,7 @@ impl Vm {
     }
 
     /// Included declarations reject names that already exist in this request.
-    fn declare_included_functions(
+    pub(crate) fn declare_included_functions(
         &mut self,
         unit: &std::sync::Arc<phera_bytecode::CompiledUnit>,
     ) -> Result<(), NativeError> {

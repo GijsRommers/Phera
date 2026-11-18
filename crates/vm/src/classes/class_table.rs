@@ -48,7 +48,7 @@ impl ClassTable {
 
     /// Class identifiers ignore case, including names produced by dynamic expressions.
     pub(crate) fn get(&self, name: &str) -> Option<Rc<Class>> {
-        let name = name.trim_start_matches('\\');
+        let name = name.strip_prefix('\\').unwrap_or(name);
         if name.bytes().any(|byte| byte.is_ascii_uppercase()) {
             self.entries.get(&name.to_ascii_lowercase()).cloned()
         } else {

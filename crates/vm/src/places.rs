@@ -28,7 +28,11 @@ impl Vm {
             } => {
                 let reference = match self.static_property(class, name) {
                     Ok(reference) => reference,
-                    Err(_) if creation == Creation::Existing && missing != Missing::Warn => {
+                    Err(error)
+                        if creation == Creation::Existing
+                            && missing != Missing::Warn
+                            && !crate::autoload::ClassMiss::is(&error) =>
+                    {
                         return Ok(None);
                     }
                     Err(error) => return Err(error),

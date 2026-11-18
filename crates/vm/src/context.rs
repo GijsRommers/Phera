@@ -125,10 +125,11 @@ impl Context for Vm {
         callable: &'a Value,
         arguments: Vec<Value>,
     ) -> LocalFuture<'a, NativeResult> {
-        match self.resolve_callable(callable) {
-            Ok(callee) => self.invoke_resolved_callable(callee, arguments),
-            Err(error) => Box::pin(std::future::ready(Err(error))),
-        }
+        Box::pin(async move {
+            self.autoload_callable(callable).await?;
+            let callee = self.resolve_callable(callable)?;
+            self.invoke_resolved_callable(callee, arguments).await
+        })
     }
 }
 

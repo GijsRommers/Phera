@@ -1,9 +1,7 @@
 //! Invalid linked declarations remain fatal and never enter PHP catch handlers.
 
 use super::{Class, LinkedConstant, class::PropertyDefault};
-use phera_bytecode::{
-    ClassDeclaration, ClassId, CompiledUnit, Instruction, PropertyDeclaration, Visibility,
-};
+use phera_bytecode::{ClassDeclaration, ClassId, CompiledUnit, PropertyDeclaration, Visibility};
 use phera_extension_api::{NativeError, Unwind};
 use std::{collections::HashMap, rc::Rc};
 
@@ -15,14 +13,10 @@ pub(crate) fn link_failure(unit: &CompiledUnit, index: ClassId, error: NativeErr
             message,
             ..
         } if !message.ends_with("not found") => {
-            let line = std::iter::once(&unit.main).chain(&unit.functions).find_map(|function| {
-                function.instructions.iter().position(|instruction| matches!(instruction, Instruction::DeclareClass { class } if *class == index))
-                    .and_then(|position| function.lines.get(position).copied())
-            }).unwrap_or(1);
             NativeError::Unwind(Unwind(Box::new(crate::error_traces::DeclarationFailure {
                 message,
                 file: unit.file.clone(),
-                line: line as usize,
+                line: unit.classes[index.index()].line as usize,
             })))
         }
         error => error,

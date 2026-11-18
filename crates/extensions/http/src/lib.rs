@@ -41,6 +41,10 @@ impl Extension for Http {
         "http"
     }
 
+    fn php_module(&self) -> Option<&'static str> {
+        None
+    }
+
     fn register(&self, registry: &mut Registry) {
         registry.function(FunctionEntry::sync("header", HEADER_PARAMS, header));
         registry.function(FunctionEntry::sync(

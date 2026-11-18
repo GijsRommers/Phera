@@ -56,9 +56,9 @@ impl Vm {
         // Mirrors the resolved-name membership path below without reparsing an
         // already seen absolute declaration on every parameter and return check.
         if !matches!(declaration.display.as_str(), "self" | "parent" | "static")
-            && let Some(result) = class.cached_declaration_result(&declaration.display)
+            && class.cached_declaration_result(&declaration.display) == Some(true)
         {
-            return result;
+            return true;
         }
         let context = self.current().and_then(|frame| frame.method());
         let context = context.as_ref();
@@ -71,7 +71,9 @@ impl Vm {
                     .map(|parent| parent.name.as_str()),
                 name => Some(name),
             };
-            resolved.is_some_and(|name| class.matches_declaration(name))
+            resolved.is_some_and(|name| {
+                class.matches_declaration(name) || self.alias_matches(class, name)
+            })
         };
         let names = declaration.display.trim_start_matches('?').split('|');
         names

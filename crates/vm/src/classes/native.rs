@@ -39,6 +39,7 @@ impl ClassTable {
                 defaults: Vec::new(),
                 static_properties: Vec::new(),
                 constants: HashMap::new(),
+                declaration: None,
             }),
         );
         let closure = phera_extension_api::ClassEntry {
@@ -191,6 +192,7 @@ impl ClassTable {
                     defaults,
                     static_properties: Vec::new(),
                     constants,
+                    declaration: None,
                 }),
             );
         }
