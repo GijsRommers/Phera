@@ -8,35 +8,32 @@ impl Vm {
     /// Dynamic-scope operations reuse declared locals before allocating a new named slot.
     pub(crate) fn named_slot(&mut self, name: &str) -> Result<Reg, NativeError> {
         let frame = self
-            .call_stack
-            .current_mut()
+            .current()
             .ok_or_else(|| internal_error!("no variable frame"))?;
         if let Some(i) = frame.function().locals.iter().position(|candidate| {
             frame
-                .unit
+                .unit()
                 .names
                 .get(candidate.index())
                 .is_some_and(|value| value == name)
         }) {
             return Ok(Reg(i as u16));
         }
-        if let Some(register) = frame.dynamic.get(name) {
+        if let Some(register) = frame.extras.dynamic.get(name) {
             return Ok(*register);
         }
-        let register = Reg(u16::try_from(frame.count)
+        let count = frame.count();
+        let register = Reg(u16::try_from(count)
             .map_err(|_| NativeError::error("Phera register limit exceeded"))?);
-        let insertion = frame.base + frame.count;
+        let insertion = frame.base() + count;
         self.registers.insert_undefined(insertion);
-        if let Some(base) = &mut frame.saved_arguments {
+        let extras = self.call_stack.current_extras_mut();
+        if let Some(base) = &mut extras.arguments.saved {
             *base += 1;
         }
-        frame.count += 1;
-        frame.dynamic.insert(name.into(), register);
-        for call in &mut self.call_stack.preparing {
-            if call.window.base >= insertion {
-                call.window.base += 1;
-            }
-        }
+        extras.dynamic_count = Some(count + 1);
+        extras.dynamic.insert(name.into(), register);
+        self.call_stack.shift_calls_from(insertion);
         Ok(register)
     }
 

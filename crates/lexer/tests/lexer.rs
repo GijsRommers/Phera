@@ -972,3 +972,33 @@ fn error_after_valid_tokens_reports_correct_span() {
 fn underscore_must_follow_a_digit() {
     assert_eq!(lexemes("100._0"), ["100.", "_0"]);
 }
+
+#[test]
+fn carriage_return_ends_line_comments_and_close_tags() {
+    let source = "<?php // comment\recho 'é'; ?>\rhtml";
+    let actual: Vec<_> = file_tokens(source)
+        .into_iter()
+        .map(|token| (token.kind, &source[token.span.start..token.span.end]))
+        .collect();
+    assert_eq!(
+        actual,
+        [
+            (OpenTag, "<?php"),
+            (Echo, "echo"),
+            (String, "'é'"),
+            (Semicolon, ";"),
+            (CloseTag, "?>\r"),
+            (InlineHtml, "html"),
+            (Eof, ""),
+        ]
+    );
+}
+
+#[test]
+fn comments_between_the_object_operator_and_the_property() {
+    let actual: Vec<_> = tokens("$object->#[comment]\n property")
+        .into_iter()
+        .map(|token| token.kind)
+        .collect();
+    assert_eq!(actual, [Variable, Arrow, Identifier, Eof]);
+}

@@ -25,21 +25,21 @@ struct Contract {
 
 impl Contract {
     /// Copy small declaration metadata without executing default expressions.
-    fn from_method(method: &Method) -> Option<Self> {
+    fn from_method(method: &Method, code: &crate::code_table::CodeTable) -> Option<Self> {
         let MethodBody::User(reference) = &method.body else {
             return None;
         };
-        let function = &reference.unit.functions[reference.index];
+        let function = code.function(*reference);
         Some(Self {
             returns_reference: function.returns_reference,
             parameters: function
                 .parameters
                 .iter()
                 .map(|parameter| ParameterContract {
-                    name: reference.unit.names[parameter.name.index()].clone(),
+                    name: code.unit(*reference).names[parameter.name.index()].clone(),
                     declaration: parameter
                         .ty
-                        .map(|index| reference.unit.types[index.index()].display.clone()),
+                        .map(|index| code.unit(*reference).types[index.index()].display.clone()),
                     by_reference: parameter.by_reference,
                     variadic: parameter.variadic,
                     optional: parameter.has_default,
@@ -48,7 +48,7 @@ impl Contract {
                 .collect(),
             returns: function
                 .return_type
-                .map(|index| reference.unit.types[index.index()].display.clone()),
+                .map(|index| code.unit(*reference).types[index.index()].display.clone()),
         })
     }
 
@@ -104,11 +104,12 @@ impl Vm {
             return Ok(());
         }
         let (Some(base), Some(child)) = (
-            Contract::from_method(inherited),
-            Contract::from_method(method),
+            Contract::from_method(inherited, &self.code),
+            Contract::from_method(method, &self.code),
         ) else {
             return Ok(());
         };
+        let mut unresolved = None;
         let mut compatible = !base.returns_reference || child.returns_reference;
         compatible &= child
             .parameters
@@ -134,22 +135,34 @@ impl Vm {
             compatible &= parameter.by_reference == implementation.by_reference;
             compatible &= !parameter.variadic || implementation.variadic;
             compatible &= !parameter.optional || implementation.optional || implementation.variadic;
-            compatible &= self.type_subset(
-                parameter.declaration.as_deref(),
+            let source = parameter.declaration.as_deref();
+            let target = implementation.declaration.as_deref();
+            if !self.type_subset(
+                source,
                 &inherited.declaring,
-                implementation.declaration.as_deref(),
+                target,
                 &method.declaring,
                 unit,
-            );
+            ) {
+                compatible = false;
+                unresolved =
+                    unresolved.or_else(|| self.unresolved_contract_type(source, target, unit));
+            }
         }
         if base.returns.is_some() {
-            compatible &= self.type_subset(
-                child.returns.as_deref(),
+            let source = child.returns.as_deref();
+            let target = base.returns.as_deref();
+            if !self.type_subset(
+                source,
                 &method.declaring,
-                base.returns.as_deref(),
+                target,
                 &inherited.declaring,
                 unit,
-            );
+            ) {
+                compatible = false;
+                unresolved =
+                    unresolved.or_else(|| self.unresolved_contract_type(source, target, unit));
+            }
         }
         if compatible {
             return Ok(());
@@ -157,21 +170,62 @@ impl Vm {
         let MethodBody::User(reference) = &method.body else {
             return Ok(());
         };
+        let child = child.display(method);
+        let base = base.display(inherited);
+        let file = self.code.unit(*reference).file.clone();
+        let line = self.code.function(*reference).definition_line as usize;
+        if let Some(name) = unresolved {
+            let failure = crate::error_traces::DeclarationFailure {
+                message: format!(
+                    "Could not check compatibility between {child} and {base}, because class {name} is not available"
+                ),
+                file,
+                line,
+            };
+            return Err(crate::autoload::ClassMiss::signature(name, failure));
+        }
         Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
             crate::error_traces::DeclarationFailure {
-                message: format!(
-                    "Declaration of {} must be compatible with {}",
-                    child.display(method),
-                    base.display(inherited)
-                ),
-                file: reference.unit.file.clone(),
-                line: reference.unit.functions[reference.index].definition_line as usize,
+                message: format!("Declaration of {child} must be compatible with {base}"),
+                file,
+                line,
             },
         ))))
     }
 
+    /// Linking a method signature can require class identities even though passing arguments does not.
+    fn unresolved_contract_type<'a>(
+        &self,
+        source: Option<&'a str>,
+        target: Option<&'a str>,
+        unit: &phera_bytecode::CompiledUnit,
+    ) -> Option<&'a str> {
+        let members = |ty: &'a str| ty.split(['?', '|', '&', '(', ')']);
+        let may_have_ancestry = |ty: Option<&str>| {
+            ty.is_some_and(|ty| {
+                ty.split(['?', '|', '&', '(', ')'])
+                    .any(|name| name == "iterable" || name == "object" || is_class_type_name(name))
+            })
+        };
+        if !may_have_ancestry(source) || !may_have_ancestry(target) {
+            return None;
+        }
+        [source, target]
+            .into_iter()
+            .flatten()
+            .flat_map(members)
+            .find(|name| {
+                is_class_type_name(name)
+                    && self.classes.get(name).is_none()
+                    && !unit
+                        .classes
+                        .iter()
+                        .any(|class| class.name.eq_ignore_ascii_case(name))
+            })
+    }
+
     /// Union members must each fit some destination member; intersections require all bounds.
-    fn type_subset(
+    pub(super) fn type_subset(
         &self,
         narrow: Option<&str>,
         narrow_scope: &str,
@@ -243,7 +297,7 @@ impl Vm {
                 return true;
             }
             if let Some(class) = self.classes.get(&name)
-                && (target == "object" || class.is_a(target))
+                && (target == "object" || self.class_matches(&class, target))
             {
                 return true;
             }
@@ -292,4 +346,28 @@ impl Vm {
             _ => name.to_owned(),
         }
     }
+}
+
+/// Native type spellings cannot be supplied by an autoloader.
+fn is_class_type_name(name: &str) -> bool {
+    !matches!(
+        name,
+        "" | "null"
+            | "true"
+            | "false"
+            | "bool"
+            | "int"
+            | "float"
+            | "string"
+            | "array"
+            | "object"
+            | "mixed"
+            | "iterable"
+            | "callable"
+            | "void"
+            | "never"
+            | "self"
+            | "parent"
+            | "static"
+    )
 }

@@ -12,9 +12,9 @@ function test() {
 
 try {
     test();
-} catch (Throwable $e) {
-    echo $e::class, ': ', $e->getMessage(), "\n";
+} catch (Exception $e) {
+    echo $e->getMessage(), "\n";
 }
 ?>
 --EXPECT--
-Exception: ops
+ops

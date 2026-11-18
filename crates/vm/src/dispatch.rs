@@ -24,7 +24,6 @@ impl Vm {
         &mut self,
         instruction: Instruction,
         stop: usize,
-        _work: &mut usize,
     ) -> Result<DispatchResult, NativeError> {
         match instruction {
             Instruction::ReturnChecked { source } => {
@@ -52,6 +51,7 @@ impl Vm {
             Instruction::Exit { src: source } => {
                 return self.exit_value(source).map(DispatchResult::Returned);
             }
+            Instruction::Eval { dst, source } => self.eval(dst, source).await?,
             Instruction::Include {
                 dst: destination,
                 path,

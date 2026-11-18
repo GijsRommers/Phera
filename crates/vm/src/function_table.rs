@@ -1,13 +1,14 @@
 //! Request-local function table state kept separate from register execution.
 
-use std::{cell::RefCell, collections::HashMap, sync::Arc};
+use std::{cell::RefCell, collections::HashMap};
 
-use phera_bytecode::CompiledUnit;
+use crate::code_table::FunctionIndex;
 
 /// Owns the request state for function table.
 pub(crate) struct FunctionTable {
     /// Request-owned functions.
-    functions: HashMap<String, FunctionRef>,
+    functions: HashMap<String, FunctionIndex>,
+    order: Vec<FunctionIndex>,
     /// Raw callable names retain resolved signatures until the declaration table changes.
     resolved: RefCell<HashMap<phera_value::PhpString, crate::calls::call_state::Callee>>,
 }
@@ -16,22 +17,16 @@ impl FunctionTable {
     pub(crate) fn new() -> Self {
         Self {
             functions: HashMap::new(),
+            order: Vec::new(),
             resolved: RefCell::new(HashMap::new()),
         }
     }
 }
 
-/// A declared PHP function and the immutable unit that owns its instructions.
-#[derive(Clone)]
-pub(crate) struct FunctionRef {
-    pub(crate) unit: Arc<CompiledUnit>,
-    pub(crate) index: usize,
-}
-
 impl FunctionTable {
     /// Callers normalize names once; PHP function names are case-insensitive.
-    pub(crate) fn get(&self, lowercase_name: &str) -> Option<&FunctionRef> {
-        self.functions.get(lowercase_name)
+    pub(crate) fn get(&self, lowercase_name: &str) -> Option<FunctionIndex> {
+        self.functions.get(lowercase_name).copied()
     }
 
     pub(crate) fn contains(&self, lowercase_name: &str) -> bool {
@@ -39,9 +34,14 @@ impl FunctionTable {
     }
 
     /// Redeclaration checks stay at the caller because main and include differ.
-    pub(crate) fn insert(&mut self, lowercase_name: String, function: FunctionRef) {
+    pub(crate) fn insert(&mut self, lowercase_name: String, function: FunctionIndex) {
         self.resolved.get_mut().clear();
         self.functions.insert(lowercase_name, function);
+        self.order.push(function);
+    }
+
+    pub(crate) fn declaration_order(&self) -> impl Iterator<Item = FunctionIndex> + '_ {
+        self.order.iter().copied()
     }
 }
 

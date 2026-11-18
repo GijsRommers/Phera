@@ -1,0 +1,50 @@
+name: Benchmarks
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: benchmarks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    name: Benchmark comparison (informational)
+    runs-on: ubuntu-latest
+    # Shared runners are noisy; benchmark observations never block the gate.
+    continue-on-error: true
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: .benchmark-base
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: '1.99.1'
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: |
+            . -> target
+            .benchmark-base -> target
+          shared-key: benchmarks
+      - name: Build base release
+        working-directory: .benchmark-base
+        run: cargo build --locked --release -p phera-cli
+      - name: Build head release
+        run: cargo build --locked --release -p phera-cli
+      # A PR comment needs pull-requests:write; keep the default read-only token.
+      - name: Compare medians using hrtime inside the PHP process
+        run: >-
+          python3 .github/scripts/benchmark.py
+          --base .benchmark-base/target/release/phera
+          --head target/release/phera
+          --runs 5
+          --base-sha '${{ github.event.pull_request.base.sha }}'
+          --head-sha '${{ github.event.pull_request.head.sha }}'

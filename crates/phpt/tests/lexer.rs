@@ -6,7 +6,7 @@
 //! `${}` interpolation, short open tags, ...), or if Phera rejects the code
 //! and the test expects a parse error anyway. Those are counted, not failed.
 //!
-//! Needs a `php` binary (override with `PHP=/path/to/php`); skipped without one.
+//! Needs a `php` binary (override with `PHERA_PHP=/path/to/php`); skipped without one.
 //! Set `PHERA_LEX_SCAN=<dir>` to check every `.phpt` file under a directory,
 //! such as a php-src checkout, instead of the selected tests.
 
@@ -20,12 +20,10 @@ use phera_lexer::{Lexer, TokenKind, keyword};
 use phera_phpt::{Phpt, display_path, filters_from_args, matches_filters};
 
 fn main() -> ExitCode {
-    let php = std::env::var("PHP").unwrap_or_else(|_| "php".into());
-
-    if Command::new(&php).arg("-v").output().is_err() {
-        println!("skipping lexer comparison: `{php}` not found (set PHP=/path/to/php)");
+    let Some(php) = phera_extension_api::testing::oracle::find_php() else {
+        println!("skipping oracle: PHP not found (set PHERA_PHP=/path/to/php)");
         return ExitCode::SUCCESS;
-    }
+    };
 
     let scan_dir = std::env::var_os("PHERA_LEX_SCAN")
         .filter(|dir| !dir.is_empty())
@@ -65,19 +63,18 @@ fn main() -> ExitCode {
         let Ok(phpt) = Phpt::parse_file(path) else {
             continue;
         };
-        let Some(code) = phpt.section("FILE") else {
+        let Some(bytes) = phpt.section_bytes("FILE") else {
             continue;
         };
 
-        // Sources in other encodings (`zend.multibyte` tests) aren't valid
-        // UTF-8, and Phera's lexer only takes `&str`. `Phpt` reads lossily, so
-        // such code shows up with replacement characters.
-        if code.contains('\u{FFFD}') {
+        // This comparison represents token text as UTF-8. The tokenizer
+        // extension's oracle also compares binary source.
+        let Ok(code) = std::str::from_utf8(bytes) else {
             *not_relevant
                 .entry("source is not UTF-8".into())
                 .or_default() += 1;
             continue;
-        }
+        };
 
         let file = work_dir.join(format!("{index}.php"));
         fs::write(&file, code).expect("cannot write source file");
@@ -163,7 +160,7 @@ struct PhpToken {
 }
 
 fn tokenize_with_php<'a>(
-    php: &str,
+    php: &Path,
     files: impl Iterator<Item = &'a Path>,
 ) -> Result<Vec<Vec<PhpToken>>, String> {
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/tokenize.php");
@@ -174,7 +171,7 @@ fn tokenize_with_php<'a>(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("cannot start `{php}`: {e}"))?;
+        .map_err(|e| format!("cannot start `{php:?}`: {e}"))?;
 
     let mut input = String::new();
     for file in files {
@@ -187,11 +184,11 @@ fn tokenize_with_php<'a>(
 
     let output = child
         .wait_with_output()
-        .map_err(|e| format!("cannot run `{php}`: {e}"))?;
+        .map_err(|e| format!("cannot run `{php:?}`: {e}"))?;
     let _ = writer.join();
 
     if !output.status.success() {
-        return Err(format!("`{php}` failed with {}", output.status));
+        return Err(format!("`{php:?}` failed with {}", output.status));
     }
 
     let mut files = Vec::new();

@@ -9,22 +9,30 @@ use phera_extension_api::{
 };
 
 use crate::connection::{Session, session};
+use crate::constants::PARAM_STR;
 use crate::drivers::{Prepared, Rows};
 use crate::errors::{DbError, ErrorState, unsupported};
 use crate::fetch::FetchMode;
 use crate::parameters::{self, Binding, ParameterType};
 use crate::placeholders::Sql;
+use crate::statement_execute::{execute_named, fail};
 
 pub struct Statement {
+    // Rust drops fields in declaration order. Queue statement cleanup before
+    // releasing the session, whose final drop may immediately start pool reset.
+    pub prepared: Prepared,
     pub connection: Rc<Session>,
     pub sql: Sql,
-    pub prepared: Prepared,
     pub bindings: HashMap<String, Binding>,
     pub rows: Rows,
     pub cursor: usize,
     pub fetch: FetchMode,
     pub column: usize,
+    pub fetch_flags: i64,
     pub error: ErrorState,
+    /// SQLite: whether the statement ran since it was prepared or its
+    /// cursor closed, which `getColumnMeta()` needs.
+    pub sqlite_executed: bool,
 }
 
 pub fn state(this: Option<&Rc<Object>>) -> Result<Rc<RefCell<Statement>>, NativeError> {
@@ -87,28 +95,38 @@ async fn create(
         return Err(unsupported("Statement driver options"));
     }
     let attributes = connection.attributes.borrow().clone();
-    let fetch = if query {
-        FetchMode::parse(args::int(arguments, 1).unwrap_or(0), attributes.fetch)?
+    let configuration = if query {
+        crate::fetch_options::validate(
+            crate::fetch_options::Method::Query,
+            arguments,
+            attributes.fetch,
+            0,
+            0,
+        )?
     } else {
-        attributes.fetch
+        crate::fetch_options::Configuration {
+            mode: attributes.fetch,
+            column: 0,
+            flags: 0,
+        }
     };
-    let column = if query {
-        args::int(arguments, 2).unwrap_or(0)
-    } else {
-        0
+    // SQLite numbers its own `?`, `?2`, `:name` and `@name` placeholders.
+    let parsed = match connection.name {
+        crate::dsn::DriverName::Sqlite => Ok(Sql::sqlite(source.clone())),
+        _ => Sql::parse(source.clone()),
     };
-    let column = usize::try_from(column)
-        .map_err(|_| NativeError::value_error("Column index must be greater than or equal to 0"))?;
-    let sql = match Sql::parse(source.clone()) {
+    let sql = match parsed {
         Ok(sql) => sql,
         Err(error) => return connection.fail(context, error, method),
     };
     let prepared = if attributes.emulate {
         Prepared::Emulated
     } else if connection.name == crate::dsn::DriverName::Postgres {
-        Prepared::PostgresDeferred
+        let number = connection.statement_sequence.get() + 1;
+        connection.statement_sequence.set(number);
+        Prepared::PostgresDeferred { number }
     } else {
-        let result = connection.driver.lock().await.prepare(&sql).await;
+        let result = connection.driver.lock().await.prepare(&sql, 0).await;
         match result {
             Ok(prepared) => prepared,
             Err(error) => return connection.fail(context, error, method),
@@ -139,111 +157,76 @@ async fn create(
         bindings: HashMap::new(),
         rows: Rows::default(),
         cursor: 0,
-        fetch,
-        column,
+        fetch: configuration.mode,
+        column: configuration.column,
+        fetch_flags: configuration.flags,
         error,
+        sqlite_executed: false,
     }))));
     Ok(result)
 }
 
-pub fn execute<'a>(
-    context: &'a mut dyn Context,
-    this: Option<Rc<Object>>,
-    arguments: Vec<Value>,
-) -> LocalFuture<'a, NativeResult> {
-    execute_named(context, this, arguments, "PDOStatement::execute")
-}
-
-fn execute_named<'a>(
-    context: &'a mut dyn Context,
-    this: Option<Rc<Object>>,
-    arguments: Vec<Value>,
-    method: &'static str,
-) -> LocalFuture<'a, NativeResult> {
-    Box::pin(async move {
-        let state = state(this.as_ref())?;
-        if let Some(params) = arguments.first().filter(|value| !value.is_null()) {
-            state.borrow_mut().bindings = parameters::execute_bindings(params)?;
-        }
-        let (connection, sql, prepared, values) = {
-            let statement = state.borrow();
-            let mut ordered = parameters::ordered(&statement.sql, &statement.bindings);
-            if matches!(statement.prepared, Prepared::Mysql(_))
-                && statement.sql.parameters.len() > statement.bindings.len()
-            {
-                ordered = Err(DbError::parameter(""));
-            }
-            let values = match ordered {
-                Ok(bindings) => Ok(bindings
-                    .into_iter()
-                    .map(|b| b.read(context))
-                    .collect::<Result<Vec<_>, _>>()?),
-                Err(error) => Err(error),
-            };
-            (
-                statement.connection.clone(),
-                statement.sql.clone(),
-                statement.prepared.clone(),
-                values,
-            )
-        };
-        let values = match values {
-            Ok(values) => values,
-            Err(error) => return fail(&state, context, error, method),
-        };
-        let result = connection
-            .driver
-            .lock()
-            .await
-            .execute(&sql, &prepared, &values)
-            .await;
-        match result {
-            Ok(rows) => {
-                let mut statement = state.borrow_mut();
-                statement.rows = rows;
-                statement.cursor = 0;
-                statement.error = ErrorState::Success;
-                Ok(Value::Bool(true))
-            }
-            Err(error) => fail(&state, context, error, method),
-        }
-    })
-}
-
-fn fail(
-    state: &RefCell<Statement>,
-    context: &mut dyn Context,
-    error: DbError,
-    method: &str,
-) -> NativeResult {
-    let mode = {
-        let mut statement = state.borrow_mut();
-        *statement.connection.last_error.borrow_mut() = Some(error.clone());
-        statement.error = ErrorState::Failed(error.clone());
-        statement.rows = Rows::default();
-        statement.cursor = 0;
-        statement.connection.attributes.borrow().errors
-    };
-    error.report(context, mode, method)
-}
-
-pub fn bind(
+pub fn bind_value(
     context: &mut dyn Context,
     this: Option<&Rc<Object>>,
     arguments: &[Value],
+) -> NativeResult {
+    bind(context, this, arguments, "PDOStatement::bindValue")
+}
+
+pub fn bind_param(
+    context: &mut dyn Context,
+    this: Option<&Rc<Object>>,
+    arguments: &[Value],
+) -> NativeResult {
+    bind(context, this, arguments, "PDOStatement::bindParam")
+}
+
+fn bind(
+    context: &mut dyn Context,
+    this: Option<&Rc<Object>>,
+    arguments: &[Value],
+    method: &str,
 ) -> NativeResult {
     if args::int(arguments, 3).unwrap_or(0) != 0 || !args::value(arguments, 4).is_null() {
         return Err(unsupported("Output parameter bindings"));
     }
     let state = state(this)?;
-    let key = parameters::key(args::value(arguments, 0), false)?;
-    let kind = ParameterType::parse(args::int(arguments, 2).unwrap_or(2))?;
-    let binding = Binding {
+    let key = parameters::key(args::value(arguments, 0), Some(method))?;
+    let invalid = {
+        let statement = state.borrow();
+        if matches!(
+            statement.prepared,
+            Prepared::PostgresDeferred { .. } | Prepared::Postgres { .. }
+        ) {
+            let valid = crate::native_parameters::valid_key(&statement.sql, &key)
+                || (statement.sql.parameters.is_empty() && key.parse::<usize>().is_ok());
+            if valid {
+                None
+            } else {
+                let detail = match args::value(arguments, 0) {
+                    Value::String(_) => format!(":{key}"),
+                    _ => "parameter was not defined".into(),
+                };
+                Some(DbError::parameter(&detail))
+            }
+        } else {
+            None
+        }
+    };
+    if let Some(error) = invalid {
+        return fail(&state, context, error, method);
+    }
+    let kind = ParameterType::parse(args::int(arguments, 2).unwrap_or(PARAM_STR))?;
+    let mut binding = Binding {
         value: args::value(arguments, 1).clone(),
         kind,
     };
-    // Conversion errors are immediate for bindValue; references are read at execute time.
-    if !binding.value.is_reference() {
+    // Conversion errors are immediate for bindValue; references are read at
+    // execute time. pdo_sqlite converts the bound variable itself at once.
+    if state.borrow().connection.name == crate::dsn::DriverName::Sqlite {
+        crate::drivers::sqlite::bindings::normalize(context, &mut binding)?;
+    } else if !binding.value.is_reference() {
         binding.read(context)?;
     }
     state.borrow_mut().bindings.insert(key, binding);
@@ -261,6 +244,7 @@ pub fn column_count(_: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value])
 pub fn close(_: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
     let state = state(this)?;
     let mut statement = state.borrow_mut();
+    statement.sqlite_executed = false;
     statement.rows.values.clear();
     statement.cursor = 0;
     Ok(Value::Bool(true))

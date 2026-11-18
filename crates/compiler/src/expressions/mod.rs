@@ -94,6 +94,7 @@ impl Compiler<'_> {
                 then,
                 otherwise,
             } => self.compile_ternary(condition, then, otherwise, line),
+            ExpressionKind::Eval(code) => self.compile_eval(code, line),
             ExpressionKind::Include { kind, path } => self.compile_include(kind, path, line),
             ExpressionKind::Print(expression) => self.compile_print(expression, line),
             ExpressionKind::Exit(expression) => self.compile_exit(expression, line),

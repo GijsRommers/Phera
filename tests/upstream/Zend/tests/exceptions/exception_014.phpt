@@ -9,14 +9,14 @@ class C {
 $x = new C;
 try {
     var_dump($x->p);
-} catch (Throwable $e) {
-    echo $e::class, ': ', $e->getMessage(), ' in ', $e->getFile(), ' on line ', $e->getLine(), "\n";
+} catch (Error $e) {
+    echo "\nException: " . $e->getMessage() . " in " , $e->getFile() . " on line " . $e->getLine() . "\n";
 }
 
 var_dump($x->p);
 ?>
 --EXPECTF--
-Error: Cannot access private property C::$p in %sexception_014.php on line %d
+Exception: Cannot access private property C::$p in %sexception_014.php on line %d
 
 Fatal error: Uncaught Error: Cannot access private property C::$p in %sexception_014.php:%d
 Stack trace:

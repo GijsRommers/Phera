@@ -100,13 +100,13 @@ impl Vm {
                 .iter()
                 .position(|candidate| {
                     frame
-                        .unit
+                        .unit()
                         .names
                         .get(candidate.index())
                         .is_some_and(|candidate| candidate == name)
                 })
                 .map(|index| phera_bytecode::Reg(index as u16))
-                .or_else(|| frame.dynamic.get(name).copied());
+                .or_else(|| frame.extras.dynamic.get(name).copied());
             match register.and_then(|register| frame.slots(&self.registers).get(register.index())) {
                 Some(Some(_)) => SymbolStatus::Defined,
                 Some(None) => SymbolStatus::Undefined,
@@ -130,7 +130,7 @@ impl Vm {
         let entries: Vec<_> = array
             .iter()
             .map(|(key, value)| ExtractEntry {
-                key: key.clone(),
+                key,
                 value: value.clone(),
             })
             .collect();

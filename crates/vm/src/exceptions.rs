@@ -148,20 +148,44 @@ impl Vm {
     /// Turn engine/native failures into the same transport as an explicit PHP throw.
     #[cold]
     pub(crate) fn materialize_error(&mut self, error: NativeError) -> NativeError {
-        let NativeError::Throw {
-            class,
-            message,
-            code,
-        } = error
-        else {
-            if matches!(&error, NativeError::Unwind(payload) if payload.0.is::<Thrown>()) {
-                self.failed_native = None;
+        let (class, message, code, properties) = match error.into_exception_parts() {
+            Ok(parts) => parts,
+            Err(error) => {
+                if matches!(&error, NativeError::Unwind(payload) if payload.0.is::<Thrown>()) {
+                    self.failed_native = None;
+                }
+                return error;
             }
-            return error;
         };
         let Some(linked) = self.classes.get(class) else {
-            return NativeError::throw_with_code(class, message, code);
+            return match code {
+                Value::Int(code) if properties.is_empty() => {
+                    NativeError::throw_with_code(class, message, code)
+                }
+                _ => NativeError::error(format!(
+                    "Phera internal error: native exception class {class} is not registered"
+                )),
+            };
         };
+        let mut declared_properties = Vec::with_capacity(properties.len());
+        for (name, value) in properties.iter() {
+            let property = linked
+                .defaults
+                .iter()
+                .rev()
+                .find(|property| name == phera_value::ArrayKey::str(property.name.as_str()));
+            let Some(property) = property else {
+                let name = match name {
+                    phera_value::ArrayKey::String(name) => name.to_string_lossy(),
+                    phera_value::ArrayKey::Int(name) => name.to_string(),
+                };
+                return self.materialize_error(NativeError::error(format!(
+                    "Phera internal error: native exception property \
+                     {class}::${name} is not declared"
+                )));
+            };
+            declared_properties.push((property.key.clone(), value.clone()));
+        }
         let object = self.classes.allocate(linked.clone());
         for property in &linked.defaults {
             if property.initialized {
@@ -170,7 +194,10 @@ impl Vm {
         }
         self.initialize_throwable(&object, TraceOrigin::Engine);
         object.set(Object::protected_key("message"), Value::from(message));
-        object.set(Object::protected_key("code"), Value::Int(code));
+        object.set(Object::protected_key("code"), code);
+        for (key, value) in declared_properties {
+            object.set(key, value);
+        }
         Thrown {
             object,
             skip_handlers: None,
@@ -207,6 +234,14 @@ impl Vm {
 
     /// Stored object metadata survives complete unwinding of the original stack.
     pub(crate) fn report_throwable(&mut self, object: &Rc<Object>) {
+        if object.class.name() == "ParseError" {
+            let message = property_text(object, "message");
+            let file = property_text(object, "file");
+            let line = property_text(object, "line");
+            self.out(format!("\nParse error: {message} in {file} on line {line}\n").as_bytes());
+            self.status = 255;
+            return;
+        }
         let text = crate::exception_rendering::describe_chain(
             object,
             self.error_handlers.trace_string_limit,

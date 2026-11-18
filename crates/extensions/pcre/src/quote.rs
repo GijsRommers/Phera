@@ -1,6 +1,12 @@
-//! `preg_quote('a.b#c', '/')` escapes punctuation and represents NUL as `\000`.
+//! `preg_quote`: escapes the characters that mean something in a pattern.
+//!
+//! ```php
+//! preg_quote('a.b#c', '/');   // "a\.b\#c"
+//! preg_quote("a\0b");         // "a\000b": NUL as an octal escape
+//! ```
 
 use phera_extension_api::{Context, NativeResult, Value, args};
+
 pub(crate) fn quote(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let delimiter = args::bytes(arguments, 1).first().copied();
     let mut result = Vec::new();

@@ -10,7 +10,7 @@ use crate::Vm;
 use crate::calls::call_state::{CallTarget, Callee, ParameterSpec};
 use crate::classes::{Invocation, MethodContext};
 use crate::closures::{ClosureOrigin, ClosureState};
-use crate::function_table::FunctionRef;
+use crate::code_table::FunctionIndex;
 
 /// Initializers prepare a target, produce a value, or continue scalar evaluation.
 pub(crate) enum InitializerCallable {
@@ -24,15 +24,17 @@ impl Vm {
     pub(crate) fn initializer_callable(
         &mut self,
         instruction: Instruction,
-        reference: &FunctionRef,
+        reference: &FunctionIndex,
         scope: &str,
         prepared: &mut Option<Callee>,
         slots: &[Option<Value>],
     ) -> Result<InitializerCallable, NativeError> {
         match instruction {
             Instruction::InitCall { function } => {
-                let symbol = &reference.unit.symbols[function.index()];
-                *prepared = Some(self.resolve_callee(&symbol.written)?);
+                let symbol = self.code.unit(*reference).symbols[function.index()]
+                    .written
+                    .clone();
+                *prepared = Some(self.resolve_callee(&symbol)?);
                 Ok(InitializerCallable::Prepared)
             }
             Instruction::InitDynamicCall { callee } => {
@@ -46,9 +48,10 @@ impl Vm {
                 Ok(InitializerCallable::Prepared)
             }
             Instruction::InitStaticCall { class, method, .. } => {
-                let name = &reference.unit.symbols[class.index()].written;
+                let unit = self.code.unit(*reference).clone();
+                let name = &unit.symbols[class.index()].written;
                 let class = self.initializer_class(name, scope)?;
-                let method = &reference.unit.symbols[method.index()].written;
+                let method = &unit.symbols[method.index()].written;
                 self.prepare_method(class, None, method, Invocation::Method)?;
                 *prepared = Some(self.take_resolved_callable()?);
                 Ok(InitializerCallable::Prepared)
@@ -75,18 +78,20 @@ impl Vm {
     /// Static literal closures have lexical scope but no receiver or captured locals.
     fn initializer_closure(
         &mut self,
-        reference: &FunctionRef,
+        reference: &FunctionIndex,
         function: phera_bytecode::FunctionId,
         scope: &str,
         binding: phera_bytecode::ClosureBinding,
     ) -> Result<Rc<phera_value::Object>, NativeError> {
-        let index = function.index();
-        let body = &reference.unit.functions[index];
+        let main = self.code.facts(*reference).unit_first;
+        let index = self.code.declared(main, function.index());
+        let body = self.code.function(index);
         let parameters = body
             .parameters
             .iter()
-            .map(|parameter| ParameterSpec::user(&reference.unit, parameter))
+            .map(|parameter| ParameterSpec::user(self.code.unit(index), parameter))
             .collect();
+        let name = body.name.as_str().into();
         let context = self.classes.get(scope).map(|scope| MethodContext {
             called: scope.clone(),
             scope,
@@ -95,12 +100,9 @@ impl Vm {
         });
         let callee = Callee {
             argument_binding: crate::calls::callback_binding::ArgumentBinding::Caller,
-            name: body.name.as_str().into(),
+            name,
             parameters,
-            target: CallTarget::User {
-                unit: reference.unit.clone(),
-                index,
-            },
+            target: CallTarget::User(index),
         };
         let state = ClosureState {
             origin: ClosureOrigin::Lexical,

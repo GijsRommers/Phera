@@ -9,6 +9,8 @@ pub struct CompiledUnit {
     pub file: String,
     /// Non-fatal declaration diagnostics are emitted when this file is compiled for execution.
     pub declaration_warnings: Vec<DeclarationWarning>,
+    /// Scanner diagnostics replayed in the request that executes this file.
+    pub scanner_diagnostics: Vec<phera_source::CompileDiagnostic>,
     /// The file's top-level code.
     pub main: Function,
     /// Every function the file declares, in source order.

@@ -3,89 +3,41 @@
 use phera_ext_standard::Standard;
 use phera_extension_api::{
     ArrayKey, NativeError, PhpArray, PhpString, Registry, Value,
-    testing::{TestContext, call},
+    testing::{TestContext, call, oracle},
     value,
 };
-use std::{fmt::Write, process::Command};
+use std::{fmt::Write, io::Write as _, process::Command};
 fn hex(s: &[u8]) -> String {
     s.iter().map(|b| format!("{b:02x}")).collect()
-}
-fn enc(v: &Value) -> String {
-    match v {
-        Value::Reference(r) => enc(&r.borrow()),
-        Value::Null => "N".into(),
-        Value::Bool(b) => format!("B:{}", u8::from(*b)),
-        Value::Int(n) => format!("I:{n}"),
-        Value::Float(f) => {
-            if f.is_nan() {
-                "F:NAN".into()
-            } else {
-                format!("F:{}", hex(&f.to_be_bytes()))
-            }
-        }
-        Value::String(s) => format!("S:{}", hex(s.as_bytes())),
-        Value::Array(a) => format!(
-            "A({})",
-            a.iter()
-                .map(|(k, v)| format!(
-                    "{}>{};",
-                    enc(&match k {
-                        ArrayKey::Int(i) => Value::Int(*i),
-                        ArrayKey::String(s) => Value::String(s.clone()),
-                    }),
-                    enc(v)
-                ))
-                .collect::<String>()
-        ),
-        _ => panic!("unsupported oracle value"),
-    }
-}
-fn php(v: &Value) -> String {
-    match v {
-        Value::Reference(r) => php(&r.borrow()),
-        Value::Null => "null".into(),
-        Value::Bool(b) => b.to_string(),
-        Value::Int(i) => {
-            if *i == i64::MIN {
-                "(-PHP_INT_MAX-1)".into()
-            } else {
-                i.to_string()
-            }
-        }
-        Value::Float(f) => {
-            if f.is_nan() {
-                "NAN".into()
-            } else if f.is_infinite() {
-                if f.is_sign_negative() {
-                    "-INF".into()
-                } else {
-                    "INF".into()
-                }
-            } else {
-                format!("{f:?}")
-            }
-        }
-        Value::String(s) => format!("hex2bin('{}')", hex(s.as_bytes())),
-        Value::Array(a) => format!(
-            "[{}]",
-            a.iter()
-                .map(|(k, v)| format!(
-                    "{}=>{}",
-                    php(&match k {
-                        ArrayKey::Int(i) => Value::Int(*i),
-                        ArrayKey::String(s) => Value::String(s.clone()),
-                    }),
-                    php(v)
-                ))
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
-        _ => panic!("unsupported"),
-    }
 }
 fn s(bytes: &[u8]) -> Value {
     Value::String(PhpString::from(bytes))
 }
+
+// PHP forwards these hyperbolic functions to platform libm. Hosted Linux
+// differs by one ULP for atanh(0.5), while macOS matches exactly. Permit
+// that rounding difference only for this family, only on finite floats.
+// Other math families stay exact until hosted evidence calls for an opt-in.
+const PLATFORM_LIBM_FUNCTIONS: &[&str] = &["sinh", "cosh", "tanh", "asinh", "acosh", "atanh"];
+
+fn uses_libm_tolerance(name: &str, expected: &str, actual: &str) -> bool {
+    PLATFORM_LIBM_FUNCTIONS.contains(&name)
+        && oracle::float_results_within_one_ulp(expected, actual)
+}
+
+#[test]
+fn tolerance_is_limited_to_the_explicit_libm_family() {
+    let php = "F:3fe193ea7aad030b|O:";
+    let rust = "F:3fe193ea7aad030a|O:";
+    assert!(uses_libm_tolerance("atanh", php, rust));
+    for name in [
+        "sqrt", "floor", "ceil", "round", "abs", "intdiv", "fdiv", "fmod", "sin", "exp", "pow",
+        "fpow", "**", "floatval",
+    ] {
+        assert!(!uses_libm_tolerance(name, php, rust), "{name}");
+    }
+}
+
 #[test]
 fn php_oracle() {
     let mut cases: Vec<(&str, Vec<Value>)> = Vec::new();
@@ -646,11 +598,10 @@ fn php_oracle() {
     run(cases);
 }
 fn run(cases: Vec<(&str, Vec<Value>)>) {
-    let php_bin = "/opt/homebrew/bin/php";
-    if !std::path::Path::new(php_bin).exists() {
+    let Some(php_bin) = phera_extension_api::testing::oracle::find_php() else {
         eprintln!("PHP missing; skipping oracle");
         return;
-    }
+    };
     let mut script = String::from(
         r#"<?php
 function enc($v){if(is_null($v))return 'N';if(is_bool($v))return 'B:'.(int)$v;if(is_int($v))return 'I:'.$v;if(is_float($v))return is_nan($v)?'F:NAN':'F:'.bin2hex(pack('E',$v));if(is_string($v))return 'S:'.bin2hex($v);$s='A(';foreach($v as $k=>$x)$s.=enc($k).'>'.enc($x).';';return $s.')';}
@@ -662,14 +613,15 @@ function invoke($name,$args){global $diag;$diag='';$refs=[];if(in_array($name,['
         writeln!(
             script,
             "invoke('{name}',[{}]);",
-            a.iter().map(php).collect::<Vec<_>>().join(",")
+            a.iter()
+                .map(oracle::php_literal)
+                .collect::<Vec<_>>()
+                .join(",")
         )
         .expect("format");
     }
-    let dir = std::path::Path::new(
-        "/private/tmp/claude-501/-Users-gijsr--t3-worktrees-phera-t3-f1d03fb9/8823bb04-57b9-49e9-a9e2-fe9f0dede31c/scratchpad/stdlib",
-    );
-    std::fs::create_dir_all(dir).expect("mkdir");
+    let dir = std::env::temp_dir().join("phera-stdlib-oracle");
+    std::fs::create_dir_all(&dir).expect("mkdir");
     let path = dir.join("standard-oracle.php");
     std::fs::write(&path, script).expect("write");
     let output = Command::new(php_bin)
@@ -773,11 +725,12 @@ function invoke($name,$args){global $diag;$diag='';$refs=[];if(in_array($name,['
     let mut registry = Registry::new();
     registry.load(&Standard);
     let mut failures = Vec::new();
+    let mut tolerant_comparisons = std::collections::BTreeMap::new();
     for ((name, a), expected) in cases.iter().zip(lines) {
         let mut c = TestContext::default();
         let result = call(&registry, &mut c, name, a.clone());
         let mut actual = match result {
-            Ok(v) => enc(&v),
+            Ok(v) => oracle::encode(&v),
             Err(NativeError::Throw { class, message, .. }) => {
                 format!("E:{class}:{}", hex(message.as_bytes()))
             }
@@ -785,7 +738,7 @@ function invoke($name,$args){global $diag;$diag='';$refs=[];if(in_array($name,['
         };
         for v in a {
             if let Value::Reference(r) = v {
-                write!(actual, "|R:{}", enc(&r.borrow())).expect("format");
+                write!(actual, "|R:{}", oracle::encode(&r.borrow())).expect("format");
             }
         }
         for (kind, message) in c.diagnostics.entries {
@@ -798,16 +751,25 @@ function invoke($name,$args){global $diag;$diag='';$refs=[];if(in_array($name,['
         }
         write!(actual, "|O:{}", hex(&c.output)).expect("format");
         if actual != expected {
-            failures.push(format!(
-                "{name}({a:?})\n actual {actual}\n expect {expected}"
-            ));
+            if uses_libm_tolerance(name, expected, &actual) {
+                *tolerant_comparisons.entry(*name).or_insert(0usize) += 1;
+            } else {
+                failures.push(format!(
+                    "{name}({a:?})\n actual {actual}\n expect {expected}"
+                ));
+            }
         }
     }
-    eprintln!(
-        "{} oracle cases, {} mismatches",
+    // Write directly so successful hosted tests expose the count even when
+    // the test harness captures println!/eprintln! output.
+    writeln!(
+        std::io::stderr(),
+        "{} oracle cases, {} mismatches, {} comparisons used the 1-ULP tolerance: {tolerant_comparisons:?}",
         cases.len(),
-        failures.len()
-    );
+        failures.len(),
+        tolerant_comparisons.values().sum::<usize>()
+    )
+    .expect("write oracle summary");
     assert!(
         failures.is_empty(),
         "{}",

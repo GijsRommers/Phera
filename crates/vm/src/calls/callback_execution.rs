@@ -17,7 +17,7 @@ impl Vm {
     ) -> phera_extension_api::LocalFuture<'_, NativeResult> {
         let origin = callee.argument_binding.origin(origin);
         let base = self.registers.len();
-        let depth = self.call_stack.preparing.len();
+        let depth = self.call_stack.call_depth();
         let routed = self.prepare_call(callee).and_then(|()| {
             for (index, value) in arguments.into_iter().enumerate() {
                 self.store_sent_value(index, value)?;
@@ -49,7 +49,7 @@ impl Vm {
                 Err(error) => Err(error),
             };
             let result = result.map_err(|error| self.materialize_error(error));
-            self.call_stack.preparing.truncate(depth);
+            self.call_stack.truncate_calls(depth);
             self.registers.truncate(base);
             result
         })
@@ -64,7 +64,14 @@ impl Vm {
         let stop = self.call_stack.depth();
         let entered = self.with_argument_origin(origin, |vm| vm.enter_prepared_call(None));
         match entered {
-            Ok(true) => self.interpret(stop).await,
+            Ok(true) => {
+                // A PHP callback may return before it needs any async service.
+                let mut work = 0;
+                match self.run_batch(stop, &mut work) {
+                    Ok(crate::calls::execution_loop::BatchExit::Returned(value)) => Ok(value),
+                    pending => self.continue_execution(stop, work, Some(pending)).await,
+                }
+            }
             Ok(false) => {
                 let previous = std::mem::replace(&mut self.argument_origin, origin);
                 let result = Box::pin(self.finish_native_window()).await;

@@ -17,33 +17,44 @@ impl Vm {
         }
     }
 
+    pub(crate) fn fetch_dynamic_class_constant(
+        &mut self,
+        destination: Reg,
+        class: Reg,
+        name: Reg,
+    ) -> Result<(), NativeError> {
+        let class = self.class_target(class)?;
+        let linked = self
+            .classes
+            .get(&class)
+            .ok_or_else(|| Self::class_miss(&class, "Class"))?;
+        let name = self.read_local(name);
+        let Value::String(name) = name else {
+            return Err(NativeError::error(format!(
+                "Cannot use value of type {} as class constant name",
+                name.type_name()
+            )));
+        };
+        let name = name.to_string_lossy();
+        let value = if name.eq_ignore_ascii_case("class") {
+            linked.name_value.clone()
+        } else {
+            self.class_constant(&class, &name)?
+        };
+        self.set(destination, value);
+        Ok(())
+    }
+
     /// Resolve inherited constants while retaining the scope of their original declaration.
     pub(crate) fn class_constant(&mut self, class: &str, name: &str) -> NativeResult {
-        if name.eq_ignore_ascii_case("class") {
-            return Ok(Value::from(class.to_owned()));
-        }
         let class = self
             .classes
             .get(class)
-            .ok_or_else(|| NativeError::error(format!("Class \"{class}\" not found")))?;
+            .ok_or_else(|| Self::class_miss(class, "Class"))?;
         let constant = class.constants.get(name).cloned().ok_or_else(|| {
             NativeError::error(format!("Undefined constant {}::{name}", class.name))
         })?;
-        let scope = self
-            .initializer_scope
-            .as_ref()
-            .and_then(|name| self.classes.get(name))
-            .or_else(|| {
-                self.current()
-                    .and_then(|frame| frame.method.as_ref())
-                    .map(|context| context.scope.clone())
-            });
-        let allowed = match constant.visibility {
-            Visibility::Public => true,
-            Visibility::Private => scope.is_some_and(|scope| scope.name == constant.declaring),
-            Visibility::Protected => scope.is_some_and(|scope| scope.is_a(&constant.declaring)),
-        };
-        if !allowed {
+        if !self.can_read_class_constant(&constant) {
             let visibility = if constant.visibility == Visibility::Private {
                 "private"
             } else {
@@ -54,7 +65,46 @@ impl Vm {
                 constant.declaring
             )));
         }
-        match &*constant.state.borrow() {
+        if let Some(message) = constant.deprecated {
+            self.diagnostic("Deprecated", message.into());
+        }
+        self.evaluate_class_constant(&constant, name)
+    }
+
+    pub(crate) fn can_read_class_constant(
+        &self,
+        constant: &crate::classes::LinkedConstant,
+    ) -> bool {
+        let scope = self
+            .initializer_scope
+            .as_ref()
+            .and_then(|name| self.classes.get(name))
+            .or_else(|| self.current().and_then(|frame| frame.scope().cloned()));
+        match constant.visibility {
+            Visibility::Public => true,
+            Visibility::Private => scope.is_some_and(|scope| scope.name == constant.declaring),
+            Visibility::Protected => scope.is_some_and(|scope| {
+                scope.is_a(&constant.declaring)
+                    || self
+                        .classes
+                        .get(&constant.declaring)
+                        .is_some_and(|declaring| declaring.is_a(&scope.name))
+            }),
+        }
+    }
+
+    fn evaluate_class_constant(
+        &mut self,
+        constant: &crate::classes::LinkedConstant,
+        name: &str,
+    ) -> NativeResult {
+        let (initializer, state) = match &constant.initializer {
+            crate::classes::class::ConstantInitializer::Value(value) => return Ok(value.clone()),
+            crate::classes::class::ConstantInitializer::Compiled { function, state } => {
+                (function, state)
+            }
+        };
+        match &*state.borrow() {
             ConstantState::Ready(value) => return Ok(value.clone()),
             ConstantState::Evaluating => {
                 return Err(NativeError::error(format!(
@@ -64,9 +114,9 @@ impl Vm {
             }
             ConstantState::Uninitialized => {}
         }
-        *constant.state.borrow_mut() = ConstantState::Evaluating;
+        *state.borrow_mut() = ConstantState::Evaluating;
         let result = self
-            .evaluate_initializer(&constant.initializer, &constant.declaring)
+            .evaluate_initializer(initializer, &constant.declaring)
             .and_then(|value| {
                 if let Some(declaration_type) = &constant.ty {
                     let actual = value.type_name();
@@ -86,7 +136,7 @@ impl Vm {
                     Ok(value)
                 }
             });
-        *constant.state.borrow_mut() = match &result {
+        *state.borrow_mut() = match &result {
             Ok(value) => ConstantState::Ready(value.clone()),
             Err(_) => ConstantState::Uninitialized,
         };

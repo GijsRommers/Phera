@@ -1,36 +1,31 @@
-//! Test database locations: `new PDO('pgsql:host=127.0.0.1;port=54329;dbname=phera_test')`.
+//! Where the test databases are: `new PDO('pgsql:host=127.0.0.1;port=54329;dbname=phera_test')`.
+//! Start them as described in ../README.md; never port 5432.
 
-use std::process::Command;
-
-pub const PHP: &str = "/opt/homebrew/bin/php";
-pub const SCRATCH: &str = concat!(
-    "/private/tmp/claude-501/-Users-gijsr--t3-worktrees-phera-t3-f1d03fb9/",
-    "8823bb04-57b9-49e9-a9e2-fe9f0dede31c/scratchpad/pdo"
-);
+use phera_extension_api::testing::oracle::run_php;
 
 pub fn dsn(driver: &str) -> String {
     let port = match driver {
         "pgsql" => 54329,
         "mysql" => 33069,
-        _ => panic!("Unknown driver"),
+        _ => panic!("unknown driver {driver}"),
     };
     format!("{driver}:host=127.0.0.1;port={port};dbname=phera_test")
 }
 
+/// Whether PHP and both databases are there; a test without them skips.
 pub fn databases_available() -> bool {
-    let mut available = true;
-    for driver in ["pgsql", "mysql"] {
-        let script = format!(
-            "try {{new PDO('{}','phera','phera');}} catch (Throwable $e) {{exit(1);}}",
-            dsn(driver)
-        );
-        let result = Command::new(PHP).args(["-r", &script]).output();
-        if !result.is_ok_and(|output| output.status.success()) {
-            available = false;
-        }
-    }
+    let probe = ["pgsql", "mysql"]
+        .map(|driver| {
+            format!(
+                "try {{ new PDO('{}','phera','phera'); echo 'ok'; }} catch (Throwable $e) {{}}",
+                dsn(driver)
+            )
+        })
+        .join("\n");
+    let available = run_php("pdo-databases", &format!("<?php\n{probe}"))
+        .is_some_and(|lines| lines.concat() == "okok");
     if !available {
-        eprintln!("SKIP: PDO test databases or PHP 8.5 are unavailable");
+        eprintln!("SKIP: PHP 8.5 or the PDO test databases are unavailable");
     }
     available
 }

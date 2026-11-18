@@ -1,59 +1,22 @@
 //! Byte-oriented string matrices compared with the installed PHP executable.
-use phera_ext_standard::Standard;
-use phera_extension_api::{
-    ArrayKey, Extension, PhpArray, Registry, Value,
-    testing::{TestContext, call, oracle},
-};
+
+mod oracle_table;
+
+use oracle_table::OracleTable;
+use phera_extension_api::{ArrayKey, PhpArray, Value};
 
 #[test]
 fn strings_match_php() {
-    let mut registry = Registry::new();
-    Standard.register(&mut registry);
-    let mut script = String::from("<?php\n");
-    script.push_str(oracle::PHP_PREAMBLE);
-    let mut labels = Vec::new();
-    let mut results = Vec::new();
+    let mut table = OracleTable::new();
     let mut check = |name: &str, mut arguments: Vec<Value>| {
-        let expression = format!(
-            "{name}({})",
-            arguments
-                .iter()
-                .map(oracle::php_literal)
-                .collect::<Vec<_>>()
-                .join(",")
-        );
+        // similar_text reports its percentage through a third, by-reference
+        // argument.
         if name == "similar_text" {
-            let params = arguments
-                .iter()
-                .map(oracle::php_literal)
-                .collect::<Vec<_>>()
-                .join(",");
-            script.push_str(&format!("run('{name}',function(){{$p=null;$r=similar_text({params},$p);return [$r,$p];}});\n"));
+            arguments.push(Value::Null);
+            table.check_by_reference(name, arguments, 2);
         } else {
-            script.push_str(&format!("run('{name}',fn()=>{expression});\n"));
+            table.check(name, arguments);
         }
-        labels.push(expression);
-        let percent = std::rc::Rc::new(std::cell::RefCell::new(Value::Null));
-        if name == "similar_text" {
-            arguments.push(Value::Reference(percent.clone()));
-        }
-        let mut context = TestContext::default();
-        let result = call(&registry, &mut context, name, arguments).map(|result| {
-            if name == "similar_text" {
-                let mut array = PhpArray::new();
-                array.insert(ArrayKey::Int(0), result);
-                array.insert(ArrayKey::Int(1), percent.borrow().clone());
-                Value::from(array)
-            } else {
-                result
-            }
-        });
-        results.push(oracle::encode_case(
-            name,
-            &result,
-            &context.output,
-            &context.diagnostics,
-        ));
     };
     let mut strings: Vec<Value> = [
         "",
@@ -532,17 +495,63 @@ fn strings_match_php() {
             }
         }
     }
-    let Some(php) = oracle::run_php("standard-strings", &script) else {
-        panic!("PHP oracle required")
-    };
-    oracle::compare("strings", &labels, &php, &results);
-    let mut counts = std::collections::BTreeMap::new();
-    for line in &results {
-        if let Some((name, _)) = line.split_once('=') {
-            *counts.entry(name).or_insert(0usize) += 1;
+    table.finish("strings", sign_of_comparison);
+}
+
+/// The functions PHP implements with the C library's `memcmp`. PHP returns
+/// whatever `memcmp` returns for them, and that number is only specified by
+/// its sign: one machine answers -1, another -32, a third a large negative
+/// number, depending on the C library and even on the CPU model. PHP
+/// documents "less than, equal to, or greater than zero", so that is what
+/// the comparison with real PHP checks.
+const COMPARED_BY_SIGN: [&str; 7] = [
+    "strcmp",
+    "strcasecmp",
+    "strncmp",
+    "strncasecmp",
+    "substr_compare",
+    "strnatcmp",
+    "strnatcasecmp",
+];
+
+/// Replaces the integer result of one of those functions by its sign, and
+/// leaves every other line (other functions, errors, warnings) untouched.
+fn sign_of_comparison(line: &str) -> String {
+    for name in COMPARED_BY_SIGN {
+        let Some(number) = line
+            .strip_prefix(name)
+            .and_then(|rest| rest.strip_prefix("=I:"))
+        else {
+            continue;
+        };
+        // The encoded line may carry output or diagnostics after the number.
+        let (digits, rest) = match number.find('|') {
+            Some(end) => number.split_at(end),
+            None => (number, ""),
+        };
+        if let Ok(value) = digits.parse::<i64>() {
+            return format!("{name}=I:{}{rest}", value.signum());
         }
     }
-    for (name, count) in counts {
-        println!("{name}: {count}");
-    }
+    line.to_owned()
+}
+
+#[test]
+fn comparison_results_are_reduced_to_their_sign() {
+    assert_eq!(sign_of_comparison("strcmp=I:-32"), "strcmp=I:-1");
+    assert_eq!(
+        sign_of_comparison("substr_compare=I:-269484064"),
+        "substr_compare=I:-1"
+    );
+    assert_eq!(sign_of_comparison("strcmp=I:0"), "strcmp=I:0");
+    assert_eq!(
+        sign_of_comparison("strncasecmp=I:7|O:"),
+        "strncasecmp=I:1|O:"
+    );
+    // Other functions and error results stay exact.
+    assert_eq!(sign_of_comparison("strlen=I:-32"), "strlen=I:-32");
+    assert_eq!(
+        sign_of_comparison("strcmp=E:TypeError:00"),
+        "strcmp=E:TypeError:00"
+    );
 }

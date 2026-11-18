@@ -9,20 +9,46 @@ use phera_value::{Object, ObjectIds};
 
 use super::Class;
 
+/// A class's position in the request's class table: a method frame's class
+/// scope and called class are kept as these numbers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ClassIndex(u32);
+
 /// One request owns the id pool; weak records exist solely for cycle cleanup.
 #[derive(Default)]
 pub(crate) struct ClassTable {
     /// Preserve registration/declaration order for get_declared_classes.
     pub(crate) order: Vec<String>,
     pub(crate) entries: HashMap<String, Rc<Class>>,
+    /// Every class, by number.
+    numbered: Vec<Rc<Class>>,
     pub(crate) objects: Vec<Weak<Object>>,
     ids: Rc<ObjectIds>,
 }
 
 impl ClassTable {
+    /// The number the next registered class gets.
+    pub(crate) fn next_index(&self) -> ClassIndex {
+        ClassIndex(self.numbered.len() as u32)
+    }
+
+    /// Register a class made with [`ClassTable::next_index`] under its
+    /// lowercased name.
+    pub(crate) fn insert(&mut self, lowercase_name: String, class: Rc<Class>) {
+        debug_assert_eq!(class.index, self.next_index());
+        self.numbered.push(class.clone());
+        self.entries.insert(lowercase_name, class);
+    }
+
+    /// The class with number `index`.
+    #[inline]
+    pub(crate) fn class(&self, index: ClassIndex) -> &Rc<Class> {
+        &self.numbered[index.0 as usize]
+    }
+
     /// Class identifiers ignore case, including names produced by dynamic expressions.
     pub(crate) fn get(&self, name: &str) -> Option<Rc<Class>> {
-        let name = name.trim_start_matches('\\');
+        let name = name.strip_prefix('\\').unwrap_or(name);
         if name.bytes().any(|byte| byte.is_ascii_uppercase()) {
             self.entries.get(&name.to_ascii_lowercase()).cloned()
         } else {

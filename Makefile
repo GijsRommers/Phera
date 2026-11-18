@@ -2,7 +2,7 @@ CARGO ?= cargo
 
 .DEFAULT_GOAL := help
 
-.PHONY: help build release check test fmt fmt-check lint ci run clean phpt phpt-lexer
+.PHONY: help build release check test fmt fmt-check lint ci ci-prerequisites ci-build safe-rust run clean phpt phpt-sweep phpt-lexer
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -18,7 +18,7 @@ check:
 	$(CARGO) check --workspace --all-targets
 
 test: 
-	$(CARGO) test --workspace
+	$(CARGO) test --workspace --no-fail-fast
 
 fmt: 
 	$(CARGO) fmt --all
@@ -29,7 +29,18 @@ fmt-check:
 lint:
 	$(CARGO) clippy --workspace --all-targets -- -D warnings
 
-ci: fmt-check lint test
+# Keep prerequisite verification ahead of tests even with make -j.
+.NOTPARALLEL: ci
+ci: fmt-check lint safe-rust ci-prerequisites test
+
+safe-rust:
+	python3 .github/scripts/check-unsafe.py
+
+ci-prerequisites:
+	"$${PHERA_PHP:-php}" -n .github/scripts/check-prerequisites.php
+
+ci-build:
+	$(CARGO) build --release -p phera-cli
 
 run: 
 	$(CARGO) run -p phera-cli -- $(ARGS)
@@ -39,6 +50,11 @@ clean:
 
 phpt:
 	$(CARGO) test -p phera-cli --test phpt -- $(FILTER)
+
+# Set PHP_SRC to a php-src checkout: adds every test of it that passes on real
+# PHP and on Phera to tests/upstream/ (see tests/phpt/sweep.sh).
+phpt-sweep:
+	tests/phpt/sweep.sh $(PHP_SRC)
 
 # Set PHP_SRC to a php-src checkout to compare against all of its tests.
 phpt-lexer:

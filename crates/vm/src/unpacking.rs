@@ -1,6 +1,8 @@
 //! Array unpacking routes string keys by name and preserves writable element cells.
 
-use crate::{Vm, calls::call_state::ArgumentOrder};
+use crate::Vm;
+use crate::calls::call_view::CallView;
+use crate::calls::prepared_call::CallFlags;
 use phera_bytecode::Reg;
 use phera_extension_api::NativeError;
 use phera_value::{ArrayKey, Value};
@@ -33,7 +35,7 @@ impl Vm {
         let snapshot = array.clone();
         for (key, value) in snapshot.iter() {
             let entry = UnpackedEntry {
-                key: key.clone(),
+                key,
                 value: value.clone(),
             };
             let value = self.unpack_entry(&entry)?;
@@ -51,23 +53,21 @@ impl Vm {
 
     /// PHP binds integer keys positionally and rejects them after any string key.
     fn unpack_entry(&mut self, entry: &UnpackedEntry) -> Result<Value, NativeError> {
-        let call = self.call_stack.pending_mut()?;
-        call.window.named = match &entry.key {
-            ArrayKey::String(name) => Some(name.clone()),
-            ArrayKey::Int(_) => {
-                if call.window.order == ArgumentOrder::Named {
-                    return Err(NativeError::error(
-                        "Cannot use positional argument after named argument during unpacking",
-                    ));
-                }
-                None
+        match &entry.key {
+            ArrayKey::String(name) => self.call_stack.top_details_mut()?.named = Some(name.clone()),
+            ArrayKey::Int(_) if self.call_stack.top_call()?.flags.contains(CallFlags::NAMED) => {
+                return Err(NativeError::error(
+                    "Cannot use positional argument after named argument during unpacking",
+                ));
             }
-        };
-        let index = call.argument_index()?;
-        let by_reference = call
-            .callee
-            .parameter(index)
-            .is_some_and(|parameter| parameter.by_reference);
+            ArrayKey::Int(_) => {}
+        }
+        let view = CallView::top(&self.code, &self.call_stack)?;
+        let index = view.argument_index()?;
+        let parameters = view.parameters();
+        let by_reference = parameters
+            .receiving(index)
+            .is_some_and(|parameter| parameters.by_reference(parameter));
         let value = if by_reference {
             if entry.value.is_reference() {
                 entry.value.clone()

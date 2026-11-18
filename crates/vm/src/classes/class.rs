@@ -9,6 +9,8 @@ use phera_value::{ArrayKey, ClassHandle, Object, Value};
 
 /// A linked class is immutable; its parent keeps inherited metadata alive.
 pub(crate) struct Class {
+    /// The class's number in the request's class table.
+    pub(crate) index: super::ClassIndex,
     /// Only user class scopes may be assigned freely by Closure::bind.
     pub(crate) origin: ClassOrigin,
     /// The owning Rc can be recovered from an object's borrowed ClassHandle without a name lookup.
@@ -31,17 +33,19 @@ pub(crate) struct Class {
     pub(crate) is_final: bool,
     pub(crate) is_readonly: bool,
     pub(crate) allows_dynamic_properties: bool,
+    pub(crate) property_access: Option<&'static phera_extension_api::NativePropertyAccess>,
     pub(crate) methods: HashMap<String, Rc<Method>>,
+    /// The same methods by name key, built on first use by a fast call.
+    pub(crate) method_table: std::cell::OnceCell<super::method_table::MethodTable>,
     /// Constructor presence is immutable after linking, including inheritance.
     pub(crate) constructor: Option<Rc<Method>>,
     /// Root-first property keys reproduce the layout used by native testing helpers.
     pub(crate) defaults: Vec<PropertyDefault>,
     /// Literal defaults are materialized once at linking; objects clone this COW table.
     pub(crate) property_template: Option<phera_value::PhpArray>,
-    /// An absent constructor still has a shared signature for argument diagnostics.
-    pub(crate) empty_constructor: MethodSignature,
     pub(crate) static_properties: Vec<PropertyDefault>,
     pub(crate) constants: HashMap<String, Rc<LinkedConstant>>,
+    pub(crate) declaration: Option<(crate::code_table::FunctionIndex, u32)>,
 }
 
 /// Defaults retain their mangled keys so private ancestors do not collide.
@@ -49,11 +53,12 @@ pub(crate) struct Class {
 pub(crate) struct PropertyDefault {
     pub(crate) key: ArrayKey,
     pub(crate) value: Value,
+    pub(crate) static_storage: Option<Rc<crate::reference_holders::StaticProperty>>,
     pub(crate) name: String,
     pub(crate) declaring: String,
     pub(crate) visibility: Visibility,
     pub(crate) initialized: bool,
-    pub(crate) initializer: Option<crate::function_table::FunctionRef>,
+    pub(crate) initializer: Option<crate::code_table::FunctionIndex>,
     pub(crate) ty: Option<phera_bytecode::Type>,
     pub(crate) is_readonly: bool,
     pub(crate) static_initialized: Rc<std::cell::Cell<bool>>,
@@ -85,7 +90,7 @@ pub(crate) enum ClassOrigin {
 /// Native and user methods share argument sends but execute through different handlers.
 pub(crate) enum MethodBody {
     Closure(crate::closure_methods::ClosureMethod),
-    User(crate::function_table::FunctionRef),
+    User(crate::code_table::FunctionIndex),
     Native(MethodEntry),
 }
 
@@ -100,6 +105,10 @@ pub(crate) struct MethodContext {
 }
 
 impl ClassHandle for Class {
+    fn is_instance_of(&self, name: &str) -> bool {
+        self.is_a(name)
+    }
+
     fn name(&self) -> &str {
         &self.name
     }
@@ -131,12 +140,21 @@ pub(crate) enum Invocation {
 
 /// Lazy constants retain declaring scope and detect recursive initializers before borrowing values.
 pub(crate) struct LinkedConstant {
+    pub(crate) deprecated: Option<&'static str>,
     pub(crate) declaring: String,
     pub(crate) visibility: Visibility,
     pub(crate) is_final: bool,
-    pub(crate) initializer: crate::function_table::FunctionRef,
-    pub(crate) state: std::cell::RefCell<ConstantState>,
+    pub(crate) initializer: ConstantInitializer,
     pub(crate) ty: Option<phera_bytecode::Type>,
+}
+
+/// Native values such as `PDO::FETCH_ASSOC` never need a compiled initializer or evaluation state.
+pub(crate) enum ConstantInitializer {
+    Compiled {
+        function: crate::code_table::FunctionIndex,
+        state: std::cell::RefCell<ConstantState>,
+    },
+    Value(Value),
 }
 
 /// A failed evaluation restores Uninitialized so later accesses can retry.
@@ -153,9 +171,12 @@ struct LiteralLoad {
 }
 
 /// Only literal loads followed by return can be folded without changing diagnostics.
-pub(crate) fn literal_initializer(reference: &crate::function_table::FunctionRef) -> Option<Value> {
+pub(crate) fn literal_initializer(
+    code: &crate::code_table::CodeTable,
+    reference: &crate::code_table::FunctionIndex,
+) -> Option<Value> {
     use phera_bytecode::Instruction;
-    let instructions = &reference.unit.functions.get(reference.index)?.instructions;
+    let instructions = &code.function(*reference).instructions;
     let [load, Instruction::Return { src }] = instructions.as_slice() else {
         return None;
     };
@@ -174,7 +195,9 @@ pub(crate) fn literal_initializer(reference: &crate::function_table::FunctionRef
         },
         Instruction::LoadConst { dst, constant } => LiteralLoad {
             destination: dst,
-            value: crate::calls::frame::value(reference.unit.constants.get(constant.index())?),
+            value: crate::unit_caches::value(
+                code.unit(*reference).constants.get(constant.index())?,
+            ),
         },
         _ => return None,
     };
@@ -216,14 +239,6 @@ pub(crate) fn ancestor_names(
     names
 }
 
-/// Missing constructors have no parameters; their diagnostic name is linked once.
-pub(crate) fn empty_constructor(name: &str) -> MethodSignature {
-    MethodSignature {
-        name: format!("{name}::__construct").into(),
-        parameters: Rc::from([]),
-    }
-}
-
 impl Class {
     /// Avoid repeated lowercase allocation for names from compiled type declarations.
     pub(crate) fn matches_declaration(&self, name: &str) -> bool {
@@ -243,14 +258,15 @@ impl Class {
 
 impl Method {
     /// Build receiver-independent argument metadata once for an immutable linked method.
-    pub(crate) fn signature(&self) -> &MethodSignature {
+    pub(crate) fn signature(&self, code: &crate::code_table::CodeTable) -> &MethodSignature {
         let method = self;
         method.signature.get_or_init(|| {
             let parameters: Rc<[ParameterSpec]> = match &method.body {
-                MethodBody::User(reference) => reference.unit.functions[reference.index]
+                MethodBody::User(reference) => code
+                    .function(*reference)
                     .parameters
                     .iter()
-                    .map(|parameter| ParameterSpec::user(&reference.unit, parameter))
+                    .map(|parameter| ParameterSpec::user(code.unit(*reference), parameter))
                     .collect(),
                 MethodBody::Closure(operation) => operation
                     .parameters()

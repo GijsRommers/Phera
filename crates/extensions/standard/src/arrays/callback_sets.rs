@@ -1,158 +1,339 @@
-//! Callback sets preserve first-array keys: `array_udiff([3, 2], [2], 'strcmp')`.
+//! The set functions with callbacks: `array_udiff`, `array_diff_ukey`,
+//! `array_uintersect_uassoc` and the rest, which keep the first array's
+//! keys.
+//!
+//! Except where keys are compared exactly (the `_assoc` forms with a value
+//! callback only), PHP sorts every array with the callbacks and then walks
+//! them side by side (callback_set_merge.rs), so the callbacks see the same
+//! comparisons as in PHP.
 
 use std::cmp::Ordering;
 use std::rc::Rc;
 
 use phera_extension_api::{
-    AsyncFn, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType,
-    PhpArray, Registry, Value,
+    ArrayKey, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType,
+    PhpArray, Value,
 };
 
-use super::callback::Comparison;
+use super::callback::{BoolResult, UserComparison};
 
-pub(super) type Entry = (phera_extension_api::ArrayKey, Value);
+mod comparison;
+mod merge;
 
-const PARAMS: &[Param] = &[
-    // PHP parses trailing callbacks before checking array types and requires
-    // a different minimum arity for one versus two callbacks. The generic API
-    // cannot express that order, so run() performs the complete validation.
-    Param::new("array", ParamType::Mixed).optional(),
-    Param::new("rest", ParamType::Mixed).variadic(),
+use comparison::SetComparison;
+
+/// A key and its value, as the sorted copies of the arrays hold them.
+pub(super) type Entry = (ArrayKey, Value);
+
+pub(super) const FUNCTIONS: &[FunctionEntry] = &[
+    ARRAY_UDIFF,
+    ARRAY_UDIFF_ASSOC,
+    ARRAY_UDIFF_UASSOC,
+    ARRAY_DIFF_UKEY,
+    ARRAY_DIFF_UASSOC,
+    ARRAY_UINTERSECT,
+    ARRAY_UINTERSECT_ASSOC,
+    ARRAY_UINTERSECT_UASSOC,
+    ARRAY_INTERSECT_UKEY,
+    ARRAY_INTERSECT_UASSOC,
 ];
 
-pub(crate) fn register(registry: &mut Registry) {
-    for (name, handler) in [
-        ("array_udiff", udiff as AsyncFn),
-        ("array_udiff_assoc", udiff_assoc),
-        ("array_udiff_uassoc", udiff_uassoc),
-        ("array_diff_ukey", diff_ukey),
-        ("array_diff_uassoc", diff_uassoc),
-        ("array_uintersect", uintersect),
-        ("array_uintersect_assoc", uintersect_assoc),
-        ("array_uintersect_uassoc", uintersect_uassoc),
-        ("array_intersect_ukey", intersect_ukey),
-        ("array_intersect_uassoc", intersect_uassoc),
-    ] {
-        registry.function(FunctionEntry::asynchronous(name, PARAMS, handler));
-    }
+/// What one of the ten functions computes and compares.
+#[derive(Clone, Copy)]
+struct Variant {
+    function: &'static str,
+    result: SetResult,
+    values: Values,
+    keys: Keys,
 }
 
-fn udiff(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(run(context, args, "array_udiff"))
-}
-fn udiff_assoc(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(run(context, args, "array_udiff_assoc"))
-}
-fn udiff_uassoc(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(run(context, args, "array_udiff_uassoc"))
-}
-fn diff_ukey(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(run(context, args, "array_diff_ukey"))
-}
-fn diff_uassoc(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(run(context, args, "array_diff_uassoc"))
-}
-fn uintersect(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(run(context, args, "array_uintersect"))
-}
-fn uintersect_assoc(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(run(context, args, "array_uintersect_assoc"))
-}
-fn uintersect_uassoc(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(run(context, args, "array_uintersect_uassoc"))
-}
-fn intersect_ukey(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(run(context, args, "array_intersect_ukey"))
-}
-fn intersect_uassoc(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(run(context, args, "array_intersect_uassoc"))
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SetResult {
+    Difference,
+    Intersection,
 }
 
-pub(super) struct SetComparison<'a> {
-    pub comparison: Comparison<'a>,
-    pub data: Option<&'a Value>,
-    pub keys: Option<&'a Value>,
-    pub key_only: bool,
+/// How values are compared: with the first callback, as strings, or not.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Values {
+    Callback,
+    Strings,
+    Ignored,
 }
 
-impl SetComparison<'_> {
-    pub async fn order(
-        &mut self,
-        context: &mut dyn Context,
-        left: &Entry,
-        right: &Entry,
-    ) -> Result<Ordering, NativeError> {
-        if let Some(callback) = self.keys {
-            self.comparison
-                .compare(
-                    context,
-                    callback,
-                    super::key_value(&left.0),
-                    super::key_value(&right.0),
-                    true,
-                )
-                .await
-        } else {
-            self.data(context, left, right, true).await
-        }
-    }
-
-    /// php_array_intersect leaves its global callback set to the data callback
-    /// after a successful associative value comparison. Later key scans in the
-    /// same outer iteration therefore use that callback on keys too.
-    pub async fn continuing_order(
-        &mut self,
-        context: &mut dyn Context,
-        left: &Entry,
-        right: &Entry,
-        data_compares_keys: bool,
-    ) -> Result<Ordering, NativeError> {
-        if data_compares_keys && let Some(callback) = self.data {
-            return self
-                .comparison
-                .compare(
-                    context,
-                    callback,
-                    super::key_value(&left.0),
-                    super::key_value(&right.0),
-                    true,
-                )
-                .await;
-        }
-        self.order(context, left, right).await
-    }
-
-    pub async fn data(
-        &mut self,
-        context: &mut dyn Context,
-        left: &Entry,
-        right: &Entry,
-        boolean_retry: bool,
-    ) -> Result<Ordering, NativeError> {
-        if let Some(callback) = self.data {
-            self.comparison
-                .compare(
-                    context,
-                    callback,
-                    left.1.clone(),
-                    right.1.clone(),
-                    boolean_retry,
-                )
-                .await
-        } else {
-            super::ordering::compare_values(
-                context,
-                &left.1,
-                &right.1,
-                super::ordering::SortOrder::String { ignore_case: false },
-            )
-        }
-    }
+/// How keys are compared: with the last callback, with `===`, or not.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Keys {
+    Callback,
+    Exact,
+    Ignored,
 }
 
-async fn run(context: &mut dyn Context, arguments: Vec<Value>, name: &str) -> NativeResult {
-    let user_data = name.starts_with("array_u");
-    let user_keys = name.ends_with("ukey") || name.ends_with("uassoc");
+/// `array_udiff(array $array, array ...$arrays, callable ...$callbacks): array`,
+/// the entries whose value no other array has, by a value callback.
+///
+/// ```php
+/// array_udiff([1, 5, 3], [3], fn($a, $b) => $a <=> $b); // [0 => 1, 1 => 5]
+/// ```
+const ARRAY_UDIFF: FunctionEntry = FunctionEntry::asynchronous(
+    "array_udiff",
+    // PHP checks the callbacks at the end before the arrays, and needs one
+    // more argument per callback; run() does all of it, in that order.
+    &[
+        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("rest", ParamType::Mixed).variadic(),
+    ],
+    array_udiff,
+);
+
+fn array_udiff(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    let variant = Variant {
+        function: "array_udiff",
+        result: SetResult::Difference,
+        values: Values::Callback,
+        keys: Keys::Ignored,
+    };
+    Box::pin(run(context, arguments, variant))
+}
+
+/// `array_udiff_assoc(array $array, array ...$arrays, callable ...$callbacks): array`,
+/// by a value callback, keys compared exactly.
+const ARRAY_UDIFF_ASSOC: FunctionEntry = FunctionEntry::asynchronous(
+    "array_udiff_assoc",
+    // PHP checks the callbacks at the end before the arrays, and needs one
+    // more argument per callback; run() does all of it, in that order.
+    &[
+        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("rest", ParamType::Mixed).variadic(),
+    ],
+    array_udiff_assoc,
+);
+
+fn array_udiff_assoc(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    let variant = Variant {
+        function: "array_udiff_assoc",
+        result: SetResult::Difference,
+        values: Values::Callback,
+        keys: Keys::Exact,
+    };
+    Box::pin(run(context, arguments, variant))
+}
+
+/// `array_udiff_uassoc(array $array, array ...$arrays, callable ...$callbacks): array`,
+/// by a value callback and a key callback.
+const ARRAY_UDIFF_UASSOC: FunctionEntry = FunctionEntry::asynchronous(
+    "array_udiff_uassoc",
+    // PHP checks the callbacks at the end before the arrays, and needs one
+    // more argument per callback; run() does all of it, in that order.
+    &[
+        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("rest", ParamType::Mixed).variadic(),
+    ],
+    array_udiff_uassoc,
+);
+
+fn array_udiff_uassoc(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    let variant = Variant {
+        function: "array_udiff_uassoc",
+        result: SetResult::Difference,
+        values: Values::Callback,
+        keys: Keys::Callback,
+    };
+    Box::pin(run(context, arguments, variant))
+}
+
+/// `array_diff_ukey(array $array, array ...$arrays, callable ...$callbacks): array`,
+/// the entries whose key no other array has, by a key callback.
+const ARRAY_DIFF_UKEY: FunctionEntry = FunctionEntry::asynchronous(
+    "array_diff_ukey",
+    // PHP checks the callbacks at the end before the arrays, and needs one
+    // more argument per callback; run() does all of it, in that order.
+    &[
+        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("rest", ParamType::Mixed).variadic(),
+    ],
+    array_diff_ukey,
+);
+
+fn array_diff_ukey(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    let variant = Variant {
+        function: "array_diff_ukey",
+        result: SetResult::Difference,
+        values: Values::Ignored,
+        keys: Keys::Callback,
+    };
+    Box::pin(run(context, arguments, variant))
+}
+
+/// `array_diff_uassoc(array $array, array ...$arrays, callable ...$callbacks): array`,
+/// values compared as strings, keys by a callback.
+const ARRAY_DIFF_UASSOC: FunctionEntry = FunctionEntry::asynchronous(
+    "array_diff_uassoc",
+    // PHP checks the callbacks at the end before the arrays, and needs one
+    // more argument per callback; run() does all of it, in that order.
+    &[
+        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("rest", ParamType::Mixed).variadic(),
+    ],
+    array_diff_uassoc,
+);
+
+fn array_diff_uassoc(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    let variant = Variant {
+        function: "array_diff_uassoc",
+        result: SetResult::Difference,
+        values: Values::Strings,
+        keys: Keys::Callback,
+    };
+    Box::pin(run(context, arguments, variant))
+}
+
+/// `array_uintersect(array $array, array ...$arrays, callable ...$callbacks): array`,
+/// the entries whose value every other array has, by a value callback.
+const ARRAY_UINTERSECT: FunctionEntry = FunctionEntry::asynchronous(
+    "array_uintersect",
+    // PHP checks the callbacks at the end before the arrays, and needs one
+    // more argument per callback; run() does all of it, in that order.
+    &[
+        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("rest", ParamType::Mixed).variadic(),
+    ],
+    array_uintersect,
+);
+
+fn array_uintersect(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    let variant = Variant {
+        function: "array_uintersect",
+        result: SetResult::Intersection,
+        values: Values::Callback,
+        keys: Keys::Ignored,
+    };
+    Box::pin(run(context, arguments, variant))
+}
+
+/// `array_uintersect_assoc(array $array, array ...$arrays, callable ...$callbacks): array`,
+/// by a value callback, keys compared exactly.
+const ARRAY_UINTERSECT_ASSOC: FunctionEntry = FunctionEntry::asynchronous(
+    "array_uintersect_assoc",
+    // PHP checks the callbacks at the end before the arrays, and needs one
+    // more argument per callback; run() does all of it, in that order.
+    &[
+        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("rest", ParamType::Mixed).variadic(),
+    ],
+    array_uintersect_assoc,
+);
+
+fn array_uintersect_assoc(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    let variant = Variant {
+        function: "array_uintersect_assoc",
+        result: SetResult::Intersection,
+        values: Values::Callback,
+        keys: Keys::Exact,
+    };
+    Box::pin(run(context, arguments, variant))
+}
+
+/// `array_uintersect_uassoc(array $array, array ...$arrays, callable ...$callbacks): array`,
+/// by a value callback and a key callback.
+const ARRAY_UINTERSECT_UASSOC: FunctionEntry = FunctionEntry::asynchronous(
+    "array_uintersect_uassoc",
+    // PHP checks the callbacks at the end before the arrays, and needs one
+    // more argument per callback; run() does all of it, in that order.
+    &[
+        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("rest", ParamType::Mixed).variadic(),
+    ],
+    array_uintersect_uassoc,
+);
+
+fn array_uintersect_uassoc(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    let variant = Variant {
+        function: "array_uintersect_uassoc",
+        result: SetResult::Intersection,
+        values: Values::Callback,
+        keys: Keys::Callback,
+    };
+    Box::pin(run(context, arguments, variant))
+}
+
+/// `array_intersect_ukey(array $array, array ...$arrays, callable ...$callbacks): array`,
+/// the entries whose key every other array has, by a key callback.
+const ARRAY_INTERSECT_UKEY: FunctionEntry = FunctionEntry::asynchronous(
+    "array_intersect_ukey",
+    // PHP checks the callbacks at the end before the arrays, and needs one
+    // more argument per callback; run() does all of it, in that order.
+    &[
+        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("rest", ParamType::Mixed).variadic(),
+    ],
+    array_intersect_ukey,
+);
+
+fn array_intersect_ukey(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    let variant = Variant {
+        function: "array_intersect_ukey",
+        result: SetResult::Intersection,
+        values: Values::Ignored,
+        keys: Keys::Callback,
+    };
+    Box::pin(run(context, arguments, variant))
+}
+
+/// `array_intersect_uassoc(array $array, array ...$arrays, callable ...$callbacks): array`,
+/// values compared as strings, keys by a callback.
+const ARRAY_INTERSECT_UASSOC: FunctionEntry = FunctionEntry::asynchronous(
+    "array_intersect_uassoc",
+    // PHP checks the callbacks at the end before the arrays, and needs one
+    // more argument per callback; run() does all of it, in that order.
+    &[
+        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("rest", ParamType::Mixed).variadic(),
+    ],
+    array_intersect_uassoc,
+);
+
+fn array_intersect_uassoc(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    let variant = Variant {
+        function: "array_intersect_uassoc",
+        result: SetResult::Intersection,
+        values: Values::Strings,
+        keys: Keys::Callback,
+    };
+    Box::pin(run(context, arguments, variant))
+}
+
+async fn run(context: &mut dyn Context, arguments: Vec<Value>, variant: Variant) -> NativeResult {
+    let name = variant.function;
+    let user_data = variant.values == Values::Callback;
+    let user_keys = variant.keys == Keys::Callback;
     let callback_count = usize::from(user_data) + usize::from(user_keys);
     let minimum = callback_count + 1;
     if arguments.len() < minimum {
@@ -163,19 +344,19 @@ async fn run(context: &mut dyn Context, arguments: Vec<Value>, name: &str) -> Na
     }
     let array_count = arguments.len() - callback_count;
     for (index, callback) in arguments.iter().enumerate().skip(array_count) {
-        super::callback::validate(name, index + 1, false, callback, false)?;
+        super::callback::check_trailing_callback(name, index + 1, callback)?;
     }
     let mut comparison = SetComparison {
-        comparison: Comparison {
-            name,
+        comparison: UserComparison {
+            function: name,
             deprecated: false,
         },
         data: user_data.then(|| &arguments[array_count]),
         keys: user_keys.then(|| &arguments[arguments.len() - 1]),
-        key_only: name.ends_with("ukey"),
+        key_only: variant.values == Values::Ignored,
     };
-    let exact_keys = name.ends_with("_assoc");
-    let intersection = name.contains("intersect");
+    let exact_keys = variant.keys == Keys::Exact;
+    let intersection = variant.result == SetResult::Intersection;
     let mut arrays = Vec::new();
     let mut sorted = Vec::new();
     for (index, value) in arguments.iter().take(array_count).enumerate() {
@@ -184,16 +365,16 @@ async fn run(context: &mut dyn Context, arguments: Vec<Value>, name: &str) -> Na
             return Err(NativeError::type_error(format!(
                 "{name}(): Argument #{}{parameter} must be of type array, {} given",
                 index + 1,
-                crate::argument_type_name(value)
+                crate::arguments::given_type(value)
             )));
         };
         arrays.push(array.clone());
         if !exact_keys {
             let entries: Vec<Entry> = array
                 .iter()
-                .map(|(key, value)| (key.clone(), value.clone()))
+                .map(|(key, value)| (key, value.clone()))
                 .collect();
-            let indices = super::sort_order_async::order(entries.len(), async |left, right| {
+            let indices = super::zend_sort::order_async(entries.len(), async |left, right| {
                 comparison
                     .order(context, &entries[left], &entries[right])
                     .await
@@ -210,8 +391,7 @@ async fn run(context: &mut dyn Context, arguments: Vec<Value>, name: &str) -> Na
     if exact_keys {
         exact(context, &arrays, &mut comparison, intersection).await
     } else {
-        super::callback_set_merge::run(context, &arrays[0], &sorted, &mut comparison, intersection)
-            .await
+        merge::run(context, &arrays[0], &sorted, &mut comparison, intersection).await
     }
 }
 
@@ -226,13 +406,13 @@ async fn exact(
     for (key, value) in arrays[0].iter() {
         let mut keep = true;
         for array in arrays.iter().skip(1) {
-            let found = if let Some(other) = array.get(key) {
+            let found = if let Some(other) = array.get(&key) {
                 comparison
                     .data(
                         context,
                         &(key.clone(), value.clone()),
                         &(key.clone(), other.clone()),
-                        false,
+                        BoolResult::Number,
                     )
                     .await?
                     == Ordering::Equal
@@ -245,7 +425,7 @@ async fn exact(
             }
         }
         if keep {
-            result.insert(key.clone(), value.clone());
+            result.insert(key, value.clone());
         }
     }
     Ok(Value::from(result))

@@ -93,6 +93,8 @@ const ERROR_EXCEPTION_METHODS: &[MethodEntry] = &[
 /// Each class with its parent, parents first.
 const DERIVED: &[(&str, &str)] = &[
     ("TypeError", "Error"),
+    ("CompileError", "Error"),
+    ("ParseError", "CompileError"),
     ("ValueError", "Error"),
     ("ArithmeticError", "Error"),
     ("DivisionByZeroError", "ArithmeticError"),
@@ -235,6 +237,7 @@ fn get_message(
     Ok(protected(this, "message"))
 }
 
+/// PDO can store a SQLSTATE string: `$exception->getCode()` must preserve `"42P01"`.
 fn get_code(
     _context: &mut dyn Context,
     this: Option<&Rc<Object>>,

@@ -4,7 +4,7 @@
 //! Set `PHERA_PARSE_SCAN=<dir>` to scan every `.phpt` under a directory (such
 //! as a php-src checkout). Without it, the repository's selected tests
 //! (`tests/upstream` + `tests/fixtures`) run. Needs a `php` binary (override
-//! with `PHP=/path/to/php`); skipped without one.
+//! with `PHERA_PHP=/path/to/php`); skipped without one.
 //!
 //! Files Phera rejects on purpose (lexer `Unsupported`: backticks, `${...}`,
 //! `(real)`, short tags), non-UTF-8 sources and nesting beyond Phera's limit
@@ -26,12 +26,10 @@ struct Source {
 }
 
 fn main() -> ExitCode {
-    let php = std::env::var("PHP").unwrap_or_else(|_| "php".into());
-
-    if Command::new(&php).arg("-v").output().is_err() {
-        println!("skipping parser scan: `{php}` not found (set PHP=/path/to/php)");
+    let Some(php) = phera_extension_api::testing::oracle::find_php() else {
+        println!("skipping oracle: PHP not found (set PHERA_PHP=/path/to/php)");
         return ExitCode::SUCCESS;
-    }
+    };
 
     let scan_dir = std::env::var_os("PHERA_PARSE_SCAN")
         .filter(|dir| !dir.is_empty())
@@ -173,7 +171,7 @@ fn main() -> ExitCode {
 }
 
 /// Asks PHP, in one process, which of the sources its parser accepts.
-fn check_with_php(php: &str, sources: &[Source]) -> Result<Vec<bool>, String> {
+fn check_with_php(php: &Path, sources: &[Source]) -> Result<Vec<bool>, String> {
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/parse_check.php");
 
     let mut child = Command::new(php)
@@ -182,7 +180,7 @@ fn check_with_php(php: &str, sources: &[Source]) -> Result<Vec<bool>, String> {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("cannot start `{php}`: {e}"))?;
+        .map_err(|e| format!("cannot start `{php:?}`: {e}"))?;
 
     let mut input = String::new();
     for source in sources {
@@ -195,11 +193,11 @@ fn check_with_php(php: &str, sources: &[Source]) -> Result<Vec<bool>, String> {
 
     let output = child
         .wait_with_output()
-        .map_err(|e| format!("cannot run `{php}`: {e}"))?;
+        .map_err(|e| format!("cannot run `{php:?}`: {e}"))?;
     let _ = writer.join();
 
     if !output.status.success() {
-        return Err(format!("`{php}` failed with {}", output.status));
+        return Err(format!("`{php:?}` failed with {}", output.status));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);

@@ -56,11 +56,12 @@ impl Vm {
         // Mirrors the resolved-name membership path below without reparsing an
         // already seen absolute declaration on every parameter and return check.
         if !matches!(declaration.display.as_str(), "self" | "parent" | "static")
-            && let Some(result) = class.cached_declaration_result(&declaration.display)
+            && class.cached_declaration_result(&declaration.display) == Some(true)
         {
-            return result;
+            return true;
         }
-        let context = self.current().and_then(|frame| frame.method.as_ref());
+        let context = self.current().and_then(|frame| frame.method());
+        let context = context.as_ref();
         let matches = |name: &str| {
             let resolved = match name.trim_matches(['(', ')']) {
                 "self" => context.map(|context| context.scope.name.as_str()),
@@ -70,11 +71,34 @@ impl Vm {
                     .map(|parent| parent.name.as_str()),
                 name => Some(name),
             };
-            resolved.is_some_and(|name| class.matches_declaration(name))
+            resolved.is_some_and(|name| {
+                class.matches_declaration(name) || self.alias_matches(class, name)
+            })
         };
         let names = declaration.display.trim_start_matches('?').split('|');
         names
             .into_iter()
             .any(|alternative| alternative.split('&').all(matches))
     }
+}
+
+/// Whether the unit's cache already remembers that the class of `value`
+/// satisfies the class type `declaration`, by identity of the class. Only a
+/// remembered "yes" counts: anything else is left to the general check, which
+/// also fills the cache.
+pub(crate) fn known_class_match(
+    cache: &crate::unit_caches::UnitCache,
+    declaration: phera_bytecode::TypeId,
+    value: &Value,
+) -> bool {
+    let Value::Object(object) = value else {
+        return false;
+    };
+    let index = declaration.index();
+    cache.type_scopes.get(index) == Some(&crate::types::DeclarationScope::Absolute)
+        && cache.class_types.get(index).is_some_and(|slot| {
+            slot.borrow().as_ref().is_some_and(|entry| {
+                entry.matches && std::rc::Rc::ptr_eq(&entry.class, &object.class)
+            })
+        })
 }

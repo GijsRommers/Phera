@@ -1,195 +1,289 @@
-//! Stable array sorting with PHP-compatible comparison traversal.
+//! Sorting in place: `sort`, `rsort`, `asort`, `arsort`, `ksort`, `krsort`,
+//! `natsort` and `natcasesort`.
+//!
+//! All of them use PHP's own algorithm ([`super::zend_sort`]) so that they
+//! make the same comparisons, and like PHP 8 they are stable: entries that
+//! compare equal keep their order, also when sorting in reverse.
 
 use std::cmp::Ordering;
 
+use phera_extension_api::value::compare_after_error;
 use phera_extension_api::{
-    ArrayKey, Context, FunctionEntry, NativeResult, Param, ParamType, PhpArray, Registry, Value,
+    ArrayKey, Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, PhpArray, Value,
     args,
 };
 
-use super::Keys;
-use super::ordering::SortOrder;
+use super::ordering::SortFlags;
+use super::{IntegerKeys, change_array_argument, zend_sort};
 
+pub(super) const FUNCTIONS: &[FunctionEntry] = &[
+    SORT,
+    RSORT,
+    ASORT,
+    ARSORT,
+    KSORT,
+    KRSORT,
+    NATSORT,
+    NATCASESORT,
+];
+
+/// What one of the sort functions sorts, and how.
 #[derive(Clone, Copy)]
-enum Direction {
-    Ascending,
-    Descending,
+struct Sort {
+    by: SortBy,
+    reverse: bool,
+    keys: IntegerKeys,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum SortBy {
     Values,
     Keys,
 }
 
-const ARRAY_SORT_PARAMS: &[Param] = &[
-    Param::new("array", ParamType::Array).by_ref(),
-    Param::new("flags", ParamType::Int).optional(),
-];
-
-const ARRAY_NATURAL_PARAMS: &[Param] = &[Param::new("array", ParamType::Array).by_ref()];
-
-pub(crate) fn register(registry: &mut Registry) {
-    for (name, body) in [
-        ("sort", sort as phera_extension_api::SyncFn),
-        ("rsort", rsort),
-        ("asort", asort),
-        ("arsort", arsort),
-        ("ksort", ksort),
-        ("krsort", krsort),
-    ] {
-        registry.function(FunctionEntry::sync(name, ARRAY_SORT_PARAMS, body));
-    }
-    registry.function(FunctionEntry::sync(
-        "natsort",
-        ARRAY_NATURAL_PARAMS,
-        natsort,
-    ));
-    registry.function(FunctionEntry::sync(
-        "natcasesort",
-        ARRAY_NATURAL_PARAMS,
-        natcasesort,
-    ));
-}
+/// `sort(array &$array, int $flags = SORT_REGULAR): true`, the values in
+/// ascending order, numbered from 0.
+///
+/// ```php
+/// $a = [3, "10", 2];
+/// sort($a);              // $a is [2, 3, "10"]
+/// sort($a, SORT_STRING); // $a is ["10", 2, 3]
+/// ```
+const SORT: FunctionEntry = FunctionEntry::sync(
+    "sort",
+    &[
+        Param::new("array", ParamType::Array).by_ref(),
+        Param::new("flags", ParamType::Int).optional(),
+    ],
+    sort,
+);
 
 fn sort(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    run(
-        context,
-        arguments,
-        Keys::Renumber,
-        SortBy::Values,
-        Direction::Ascending,
-        None,
-    )
+    let sort = Sort {
+        by: SortBy::Values,
+        reverse: false,
+        keys: IntegerKeys::Renumber,
+    };
+    sort_array(context, arguments, sort, flags_argument(arguments))
 }
+
+/// `rsort()`, `sort()` in descending order.
+const RSORT: FunctionEntry = FunctionEntry::sync(
+    "rsort",
+    &[
+        Param::new("array", ParamType::Array).by_ref(),
+        Param::new("flags", ParamType::Int).optional(),
+    ],
+    rsort,
+);
 
 fn rsort(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    run(
-        context,
-        arguments,
-        Keys::Renumber,
-        SortBy::Values,
-        Direction::Descending,
-        None,
-    )
+    let sort = Sort {
+        by: SortBy::Values,
+        reverse: true,
+        keys: IntegerKeys::Renumber,
+    };
+    sort_array(context, arguments, sort, flags_argument(arguments))
 }
+
+/// `asort()`, `sort()` keeping each value's key.
+///
+/// ```php
+/// $a = ["x" => 3, "y" => 1];
+/// asort($a); // $a is ["y" => 1, "x" => 3]
+/// ```
+const ASORT: FunctionEntry = FunctionEntry::sync(
+    "asort",
+    &[
+        Param::new("array", ParamType::Array).by_ref(),
+        Param::new("flags", ParamType::Int).optional(),
+    ],
+    asort,
+);
 
 fn asort(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    run(
-        context,
-        arguments,
-        Keys::Preserve,
-        SortBy::Values,
-        Direction::Ascending,
-        None,
-    )
+    let sort = Sort {
+        by: SortBy::Values,
+        reverse: false,
+        keys: IntegerKeys::Preserve,
+    };
+    sort_array(context, arguments, sort, flags_argument(arguments))
 }
+
+/// `arsort()`, `asort()` in descending order.
+const ARSORT: FunctionEntry = FunctionEntry::sync(
+    "arsort",
+    &[
+        Param::new("array", ParamType::Array).by_ref(),
+        Param::new("flags", ParamType::Int).optional(),
+    ],
+    arsort,
+);
 
 fn arsort(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    run(
-        context,
-        arguments,
-        Keys::Preserve,
-        SortBy::Values,
-        Direction::Descending,
-        None,
-    )
+    let sort = Sort {
+        by: SortBy::Values,
+        reverse: true,
+        keys: IntegerKeys::Preserve,
+    };
+    sort_array(context, arguments, sort, flags_argument(arguments))
 }
+
+/// `ksort(array &$array, int $flags = SORT_REGULAR): true`, the entries in
+/// ascending order of their keys.
+///
+/// ```php
+/// $a = ["b" => 1, "a" => 2, 10 => 3];
+/// ksort($a); // $a is ["a" => 2, "b" => 1, 10 => 3]
+/// ```
+const KSORT: FunctionEntry = FunctionEntry::sync(
+    "ksort",
+    &[
+        Param::new("array", ParamType::Array).by_ref(),
+        Param::new("flags", ParamType::Int).optional(),
+    ],
+    ksort,
+);
 
 fn ksort(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    run(
-        context,
-        arguments,
-        Keys::Preserve,
-        SortBy::Keys,
-        Direction::Ascending,
-        None,
-    )
+    let sort = Sort {
+        by: SortBy::Keys,
+        reverse: false,
+        keys: IntegerKeys::Preserve,
+    };
+    sort_array(context, arguments, sort, flags_argument(arguments))
 }
+
+/// `krsort()`, `ksort()` in descending order.
+const KRSORT: FunctionEntry = FunctionEntry::sync(
+    "krsort",
+    &[
+        Param::new("array", ParamType::Array).by_ref(),
+        Param::new("flags", ParamType::Int).optional(),
+    ],
+    krsort,
+);
 
 fn krsort(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    run(
-        context,
-        arguments,
-        Keys::Preserve,
-        SortBy::Keys,
-        Direction::Descending,
-        None,
-    )
+    let sort = Sort {
+        by: SortBy::Keys,
+        reverse: true,
+        keys: IntegerKeys::Preserve,
+    };
+    sort_array(context, arguments, sort, flags_argument(arguments))
 }
+
+/// `natsort(array &$array): true`, `asort()` in `strnatcmp` order.
+///
+/// ```php
+/// $a = ["img12", "img10", "img2"];
+/// natsort($a); // $a is [2 => "img2", 1 => "img10", 0 => "img12"]
+/// ```
+const NATSORT: FunctionEntry = FunctionEntry::sync(
+    "natsort",
+    &[Param::new("array", ParamType::Array).by_ref()],
+    natsort,
+);
 
 fn natsort(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    run(
-        context,
-        arguments,
-        Keys::Preserve,
-        SortBy::Values,
-        Direction::Ascending,
-        Some(SortOrder::Natural { ignore_case: false }),
-    )
+    let sort = Sort {
+        by: SortBy::Values,
+        reverse: false,
+        keys: IntegerKeys::Preserve,
+    };
+    let flags = SortFlags::Natural { ignore_case: false };
+    sort_array(context, arguments, sort, flags)
 }
+
+/// `natcasesort()`, `natsort()` ignoring ASCII case.
+const NATCASESORT: FunctionEntry = FunctionEntry::sync(
+    "natcasesort",
+    &[Param::new("array", ParamType::Array).by_ref()],
+    natcasesort,
+);
 
 fn natcasesort(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    run(
-        context,
-        arguments,
-        Keys::Preserve,
-        SortBy::Values,
-        Direction::Ascending,
-        Some(SortOrder::Natural { ignore_case: true }),
-    )
+    let sort = Sort {
+        by: SortBy::Values,
+        reverse: false,
+        keys: IntegerKeys::Preserve,
+    };
+    let flags = SortFlags::Natural { ignore_case: true };
+    sort_array(context, arguments, sort, flags)
 }
 
-/// Original ordinals break ties even for descending sorts, retaining PHP 8 stability.
-fn run(
+fn flags_argument(arguments: &[Value]) -> SortFlags {
+    SortFlags::from_flags(args::int(arguments, 1).unwrap_or_default())
+}
+
+fn sort_array(
     context: &mut dyn Context,
     arguments: &[Value],
-    keys: Keys,
-    sort_by: SortBy,
-    direction: Direction,
-    fixed: Option<SortOrder>,
+    sort: Sort,
+    flags: SortFlags,
 ) -> NativeResult {
-    let order =
-        fixed.unwrap_or_else(|| SortOrder::from_flags(args::int(arguments, 1).unwrap_or_default()));
-    super::stack::mutate(arguments, |array| {
-        let entries: Vec<(ArrayKey, Value)> = array
+    let variable = args::reference(arguments, 0).ok_or_else(super::not_a_variable)?;
+    // Entries may refer to this variable, so comparison needs it unborrowed.
+    let entries: Vec<(ArrayKey, Value)> = match &*variable
+        .try_borrow()
+        .map_err(|_| super::variable_in_use())?
+    {
+        Value::Array(array) => array
             .iter()
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect();
-        let indices = super::sort_order::order(entries.len(), |left, right| {
-            let (Some(left_entry), Some(right_entry)) = (entries.get(left), entries.get(right))
-            else {
-                return Ok(Ordering::Equal);
-            };
-            let order = if matches!(sort_by, SortBy::Keys) {
-                super::ordering::compare_values(
-                    context,
-                    &super::key_value(&left_entry.0),
-                    &super::key_value(&right_entry.0),
-                    order,
-                )?
-            } else {
-                super::ordering::compare_values(context, &left_entry.1, &right_entry.1, order)?
-            };
-            let order = if matches!(direction, Direction::Descending) {
-                order.reverse()
-            } else {
-                order
-            };
-            Ok(order.then_with(|| left.cmp(&right)))
-        })?;
-        let mut result = PhpArray::new();
-        for index in indices {
-            if let Some((key, value)) = entries.get(index) {
-                if matches!(keys, Keys::Preserve) {
-                    result.insert(key.clone(), value.clone());
-                } else {
-                    result.push(value.clone())?;
-                }
+            .map(|(key, value)| (key, value.clone()))
+            .collect(),
+        _ => return Err(super::not_a_variable()),
+    };
+    let mut failure = None;
+    let order = zend_sort::order(entries.len(), |left, right| {
+        let (Some(left_entry), Some(right_entry)) = (entries.get(left), entries.get(right)) else {
+            return Ok(Ordering::Equal);
+        };
+        let compared = match sort.by {
+            SortBy::Values if failure.is_some() && matches!(flags, SortFlags::Regular) => {
+                compare_after_error(&left_entry.1, &right_entry.1, context.diagnostics())
+                    .map(|result| result.cmp(&0))
+                    .map_err(NativeError::from)
             }
+            SortBy::Values => flags.compare(context, &left_entry.1, &right_entry.1),
+            SortBy::Keys => flags.compare(
+                context,
+                &Value::from(left_entry.0.clone()),
+                &Value::from(right_entry.0.clone()),
+            ),
+        };
+        let order = match compared {
+            Ok(order) => order,
+            Err(error) => {
+                // Zend continues sorting with an uncomparable result and throws afterward.
+                failure.get_or_insert(error);
+                Ordering::Greater
+            }
+        };
+        let order = if sort.reverse { order.reverse() } else { order };
+        // PHP 8's stable sort: equal entries stay in their old order.
+        Ok(order.then_with(|| left.cmp(&right)))
+    })?;
+    let mut result = PhpArray::with_capacity(entries.len());
+    for index in order {
+        let Some((key, value)) = entries.get(index) else {
+            return Err(NativeError::error(
+                "Internal error: invalid array sort position",
+            ));
+        };
+        if sort.keys == IntegerKeys::Preserve {
+            result.insert(key.clone(), value.clone());
+        } else {
+            result.push(value.clone())?;
         }
-        result.reset();
+    }
+    result.reset();
+    change_array_argument(arguments, |array| {
         *array = result;
-        Ok(Value::Bool(true))
-    })
+        Ok(())
+    })?;
+    match failure {
+        Some(error) => Err(error),
+        None => Ok(Value::Bool(true)),
+    }
 }

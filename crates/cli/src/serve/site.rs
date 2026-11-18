@@ -8,6 +8,7 @@ use std::path::{Component, Path, PathBuf};
 pub(crate) struct Site {
     /// Canonical, so "is this file inside the site?" is a prefix test.
     document_root: PathBuf,
+    excluded: Vec<PathBuf>,
     /// Frameworks route every URL through one script ("front controller").
     /// It is `index.php` in the document root when that exists, or the
     /// script named on the command line.
@@ -34,6 +35,7 @@ impl Site {
         if path.is_dir() {
             let index = path.join("index.php");
             Ok(Site {
+                excluded: Vec::new(),
                 front_controller: index.is_file().then_some(index),
                 document_root: path,
             })
@@ -44,8 +46,21 @@ impl Site {
                 .ok_or_else(|| io::Error::other("the script has no directory"))?;
             Ok(Site {
                 document_root,
+                excluded: Vec::new(),
                 front_controller: Some(path),
             })
+        }
+    }
+
+    pub(crate) fn exclude_files(&mut self, paths: Vec<PathBuf>) {
+        self.excluded = paths;
+        if self
+            .front_controller
+            .as_ref()
+            .and_then(|p| p.canonicalize().ok())
+            .is_some_and(|p| self.excluded.contains(&p))
+        {
+            self.front_controller = None;
         }
     }
 
@@ -76,10 +91,19 @@ impl Site {
         let Ok(file) = candidate.canonicalize() else {
             return fallback();
         };
+        if self.excluded.contains(&file) {
+            return Resolved::NotFound;
+        }
         if !file.starts_with(&self.document_root) || !file.is_file() {
             return fallback();
         }
-        if file.extension().is_some_and(|extension| extension == "php") {
+        // `.PHP` and `.Php` run as scripts too, as in PHP's own server. Serving
+        // them as files would hand out their source, with whatever passwords
+        // it contains.
+        let is_script = file
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("php"));
+        if is_script {
             return Resolved::Script(file);
         }
         match std::fs::read(&file) {

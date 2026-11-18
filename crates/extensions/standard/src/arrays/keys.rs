@@ -1,111 +1,166 @@
-//! Keys operations for PHP values.
-
-use std::rc::Rc;
+//! Keys, values and lookups: `array_keys`, `in_array`, `array_search`,
+//! `array_key_exists`, `array_first` and their relatives.
 
 use phera_extension_api::value::{loose_equals, strict_equals};
 use phera_extension_api::{
     ArrayKey, Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, PhpArray,
-    PhpString, Registry, SyncFn, Value, args,
+    PhpString, Value, args,
 };
 
-use super::key_value;
+use super::list;
+use crate::arguments::required_array;
 
-const ARRAY_READ_PARAMS: &[Param] = &[Param::new("array", ParamType::Array)];
-
-const ARRAY_KEYS_PARAMS: &[Param] = &[
-    Param::new("array", ParamType::Array),
-    Param::new("filter_value", ParamType::Mixed).optional(),
-    Param::new("strict", ParamType::Bool).optional(),
+pub(super) const FUNCTIONS: &[FunctionEntry] = &[
+    ARRAY_VALUES,
+    ARRAY_KEYS,
+    ARRAY_KEY_FIRST,
+    ARRAY_KEY_LAST,
+    ARRAY_FIRST,
+    ARRAY_LAST,
+    ARRAY_IS_LIST,
+    IN_ARRAY,
+    ARRAY_SEARCH,
+    ARRAY_KEY_EXISTS,
+    KEY_EXISTS,
 ];
 
-const ARRAY_SEARCH_PARAMS: &[Param] = &[
-    Param::new("needle", ParamType::Mixed),
-    Param::new("haystack", ParamType::Array),
-    Param::new("strict", ParamType::Bool).optional(),
-];
+/// `array_values(array $array): array`, the values as a list.
+///
+/// ```php
+/// array_values(["a" => 1, 5 => 2]); // [1, 2]
+/// ```
+const ARRAY_VALUES: FunctionEntry = FunctionEntry::sync(
+    "array_values",
+    &[Param::new("array", ParamType::Array)],
+    array_values,
+);
 
-const ARRAY_KEY_EXISTS_PARAMS: &[Param] = &[
-    Param::new("key", ParamType::Mixed),
-    Param::new("array", ParamType::Array),
-];
-
-pub(crate) fn register(registry: &mut Registry) {
-    for (name, function) in [
-        ("array_values", array_values as SyncFn),
-        ("array_key_first", array_key_first),
-        ("array_key_last", array_key_last),
-        ("array_first", array_first),
-        ("array_last", array_last),
-        ("array_is_list", array_is_list),
-    ] {
-        registry.function(FunctionEntry::sync(name, ARRAY_READ_PARAMS, function));
-    }
-    registry.function(FunctionEntry::sync(
-        "array_keys",
-        ARRAY_KEYS_PARAMS,
-        array_keys,
-    ));
-    for (name, function) in [
-        ("in_array", in_array as SyncFn),
-        ("array_search", array_search),
-    ] {
-        registry.function(FunctionEntry::sync(name, ARRAY_SEARCH_PARAMS, function));
-    }
-    for name in ["array_key_exists", "key_exists"] {
-        registry.function(FunctionEntry::sync(
-            name,
-            ARRAY_KEY_EXISTS_PARAMS,
-            array_key_exists,
-        ));
-    }
-}
-
-/// Values discard all keys, including strings, and receive consecutive integer positions.
 fn array_values(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let values = args::array(arguments, 0)
-        .into_iter()
-        .flat_map(|array| array.values().cloned());
-    Ok(Value::from(super::list_array(values)?))
+    let values = required_array(arguments, 0).values().cloned();
+    Ok(Value::from(list(values)))
 }
+
+/// `array_keys(array $array, mixed $filter_value, bool $strict = false):
+/// array`, the keys as a list, or only those whose value equals
+/// `$filter_value` (with `==`, or `===` when strict).
+///
+/// ```php
+/// array_keys(["a" => 1, "b" => "1", "c" => 2]);          // ["a", "b", "c"]
+/// array_keys(["a" => 1, "b" => "1", "c" => 2], 1);       // ["a", "b"]
+/// array_keys(["a" => 1, "b" => "1", "c" => 2], 1, true); // ["a"]
+/// ```
+const ARRAY_KEYS: FunctionEntry = FunctionEntry::sync(
+    "array_keys",
+    &[
+        Param::new("array", ParamType::Array),
+        Param::new("filter_value", ParamType::Mixed).optional(),
+        Param::new("strict", ParamType::Bool).optional(),
+    ],
+    array_keys,
+);
+
+fn array_keys(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let array = required_array(arguments, 0);
+    let Some(filter) = arguments.get(1) else {
+        return Ok(Value::from(list(array.keys().map(Value::from))));
+    };
+    let equality = Equality::from_strict_argument(arguments);
+    let mut result = PhpArray::new();
+    for (key, value) in array.iter() {
+        // The filter is the left operand, which matters for a recursive array.
+        if equality.equal(context, filter, value)? {
+            result.push(Value::from(key))?;
+        }
+    }
+    Ok(Value::from(result))
+}
+
+/// `array_key_first(array $array): int|string|null`
+///
+/// ```php
+/// array_key_first(["x" => 1, "y" => 2]); // "x"
+/// array_key_first([]);                   // null
+/// ```
+const ARRAY_KEY_FIRST: FunctionEntry = FunctionEntry::sync(
+    "array_key_first",
+    &[Param::new("array", ParamType::Array)],
+    array_key_first,
+);
 
 fn array_key_first(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(args::array(arguments, 0)
-        .and_then(|arguments| arguments.first())
-        .map_or(Value::Null, |(key, _)| key_value(key)))
+    let first = required_array(arguments, 0).first();
+    Ok(first.map_or(Value::Null, |(key, _)| Value::from(key)))
 }
+
+/// `array_key_last(array $array): int|string|null`
+const ARRAY_KEY_LAST: FunctionEntry = FunctionEntry::sync(
+    "array_key_last",
+    &[Param::new("array", ParamType::Array)],
+    array_key_last,
+);
 
 fn array_key_last(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(args::array(arguments, 0)
-        .and_then(|arguments| arguments.last())
-        .map_or(Value::Null, |(key, _)| key_value(key)))
+    let last = required_array(arguments, 0).last();
+    Ok(last.map_or(Value::Null, |(key, _)| Value::from(key)))
 }
+
+/// `array_first(array $array): mixed`, new in PHP 8.5; null for `[]`.
+///
+/// ```php
+/// array_first(["x" => 1, "y" => 2]); // 1
+/// ```
+const ARRAY_FIRST: FunctionEntry = FunctionEntry::sync(
+    "array_first",
+    &[Param::new("array", ParamType::Array)],
+    array_first,
+);
 
 fn array_first(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(args::array(arguments, 0)
-        .and_then(|arguments| arguments.first())
-        .map_or(Value::Null, |(_, value)| value.clone()))
+    let first = required_array(arguments, 0).first();
+    Ok(first.map_or(Value::Null, |(_, value)| value.clone()))
 }
+
+/// `array_last(array $array): mixed`, new in PHP 8.5; null for `[]`.
+const ARRAY_LAST: FunctionEntry = FunctionEntry::sync(
+    "array_last",
+    &[Param::new("array", ParamType::Array)],
+    array_last,
+);
 
 fn array_last(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(args::array(arguments, 0)
-        .and_then(|arguments| arguments.last())
-        .map_or(Value::Null, |(_, value)| value.clone()))
+    let last = required_array(arguments, 0).last();
+    Ok(last.map_or(Value::Null, |(_, value)| value.clone()))
 }
+
+/// `array_is_list(array $array): bool`, whether the keys are 0, 1, 2… in
+/// order.
+///
+/// ```php
+/// array_is_list([1, 2]);        // true
+/// array_is_list([1 => 1, 0 => 2]); // false
+/// ```
+const ARRAY_IS_LIST: FunctionEntry = FunctionEntry::sync(
+    "array_is_list",
+    &[Param::new("array", ParamType::Array)],
+    array_is_list,
+);
 
 fn array_is_list(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(Value::Bool(
-        args::array(arguments, 0).is_none_or(|arguments| arguments.is_list()),
-    ))
+    Ok(Value::Bool(required_array(arguments, 0).is_list()))
 }
 
+/// How `in_array`, `array_search` and `array_keys` compare.
 #[derive(Clone, Copy)]
-enum Comparison {
+enum Equality {
+    /// `==`, with PHP's type juggling.
     Loose,
+    /// `===`.
     Strict,
 }
 
-impl Comparison {
-    fn from_arguments(arguments: &[Value]) -> Self {
+impl Equality {
+    /// From the `$strict` argument, which is the third in all three.
+    fn from_strict_argument(arguments: &[Value]) -> Self {
         if args::bool(arguments, 2).unwrap_or(false) {
             Self::Strict
         } else {
@@ -113,7 +168,6 @@ impl Comparison {
         }
     }
 
-    /// Loose searches coerce values, while strict searches also compare PHP types.
     fn equal(
         self,
         context: &mut dyn Context,
@@ -128,53 +182,99 @@ impl Comparison {
     }
 }
 
-/// An optional filter uses PHP equality and returns the original keys as list values.
-fn array_keys(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let comparison = Comparison::from_arguments(arguments);
-    let mut result = PhpArray::new();
-    if let Some(array) = args::array(arguments, 0) {
-        for (key, value) in array.iter() {
-            if !args::given(arguments, 1)
-                || comparison.equal(context, value, arguments.get(1).unwrap_or(&Value::Null))?
-            {
-                result.push(key_value(key))?;
-            }
-        }
-    }
-    Ok(Value::Array(Rc::new(result)))
+/// `in_array(mixed $needle, array $haystack, bool $strict = false): bool`
+///
+/// ```php
+/// in_array("1e1", [10]);       // true: "1e1" == 10
+/// in_array("1e1", [10], true); // false
+/// ```
+const IN_ARRAY: FunctionEntry = FunctionEntry::sync(
+    "in_array",
+    &[
+        Param::new("needle", ParamType::Mixed),
+        Param::new("haystack", ParamType::Array),
+        Param::new("strict", ParamType::Bool).optional(),
+    ],
+    in_array,
+);
+
+fn in_array(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    Ok(Value::Bool(search(context, arguments)?.is_some()))
 }
 
-/// Return the first matching key, including zero and the empty string.
-fn find(context: &mut dyn Context, arguments: &[Value]) -> Result<Option<Value>, NativeError> {
-    let comparison = Comparison::from_arguments(arguments);
-    if let Some(array) = args::array(arguments, 1) {
-        for (key, value) in array.iter() {
-            if comparison.equal(context, arguments.first().unwrap_or(&Value::Null), value)? {
-                return Ok(Some(key_value(key)));
-            }
+/// `array_search(mixed $needle, array $haystack, bool $strict = false):
+/// int|string|false`, the first key whose value equals the needle.
+///
+/// ```php
+/// array_search("b", ["x" => "a", "y" => "b"]); // "y"
+/// array_search("c", ["a"]);                    // false
+/// ```
+const ARRAY_SEARCH: FunctionEntry = FunctionEntry::sync(
+    "array_search",
+    &[
+        Param::new("needle", ParamType::Mixed),
+        Param::new("haystack", ParamType::Array),
+        Param::new("strict", ParamType::Bool).optional(),
+    ],
+    array_search,
+);
+
+fn array_search(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let found = search(context, arguments)?;
+    Ok(found.map_or(Value::Bool(false), Value::from))
+}
+
+/// The first key of `$haystack` whose value equals `$needle`.
+fn search(context: &mut dyn Context, arguments: &[Value]) -> Result<Option<ArrayKey>, NativeError> {
+    let needle = &arguments[0];
+    let equality = Equality::from_strict_argument(arguments);
+    for (key, value) in required_array(arguments, 1).iter() {
+        if equality.equal(context, needle, value)? {
+            return Ok(Some(key));
         }
     }
     Ok(None)
 }
 
-fn array_search(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(find(context, arguments)?.unwrap_or(Value::Bool(false)))
-}
+/// `array_key_exists(string|int|float|bool|resource|null $key, array
+/// $array): bool`, true also when the value is null, unlike `isset`.
+///
+/// The key is converted as in `$array[$key]`; a null key is the empty
+/// string, which PHP 8.5 deprecates.
+///
+/// ```php
+/// array_key_exists("a", ["a" => null]); // true
+/// array_key_exists("1", [1 => "x"]);    // true
+/// ```
+const ARRAY_KEY_EXISTS: FunctionEntry = FunctionEntry::sync(
+    "array_key_exists",
+    &[
+        Param::new("key", ParamType::Mixed),
+        Param::new("array", ParamType::Array),
+    ],
+    array_key_exists,
+);
 
-fn in_array(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(Value::Bool(find(context, arguments)?.is_some()))
-}
+/// `key_exists()`, another name for `array_key_exists()`.
+const KEY_EXISTS: FunctionEntry = FunctionEntry::sync(
+    "key_exists",
+    &[
+        Param::new("key", ParamType::Mixed),
+        Param::new("array", ParamType::Array),
+    ],
+    array_key_exists,
+);
 
-/// Null keys still map to the empty string, but PHP 8.5 emits a deprecation.
 fn array_key_exists(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let value = arguments.first().unwrap_or(&Value::Null);
-    let key = if value.is_null() {
-        context.deprecated("Using null as the key parameter for array_key_exists() is deprecated, use an empty string instead".into());
+    let key = &arguments[0];
+    let key = if key.is_null() {
+        context.deprecated(
+            "Using null as the key parameter for array_key_exists() is deprecated, use an empty string instead"
+                .into(),
+        );
         ArrayKey::String(PhpString::new())
     } else {
-        ArrayKey::from_value_diag(value, context.diagnostics())?
+        ArrayKey::from_value_diag(key, context.diagnostics())?
     };
-    Ok(Value::Bool(
-        args::array(arguments, 1).is_some_and(|array| array.contains_key(&key)),
-    ))
+    Ok(Value::Bool(required_array(arguments, 1).contains_key(&key)))
 }

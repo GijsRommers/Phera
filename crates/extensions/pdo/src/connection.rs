@@ -9,22 +9,32 @@ use phera_extension_api::{
 use tokio::sync::Mutex;
 
 use crate::attributes::Attributes;
-use crate::drivers::Driver;
+use crate::constants::{PARAM_BOOL, PARAM_INT, PARAM_NULL, PARAM_STR};
 use crate::dsn::{DriverName, Dsn};
 use crate::errors::{DbError, ErrorState, unsupported};
+use crate::pool::{self, Lease, Policy};
 
 pub struct Session {
-    pub driver: Mutex<Driver>,
+    pub driver: Mutex<Lease>,
     pub name: DriverName,
     pub version: String,
     pub attributes: RefCell<Attributes>,
     pub error: RefCell<ErrorState>,
     pub last_error: RefCell<Option<DbError>>,
     pub transaction: Cell<bool>,
+    pub statement_sequence: Cell<u64>,
 }
 
 impl Session {
-    pub fn fail(&self, context: &mut dyn Context, error: DbError, method: &str) -> NativeResult {
+    pub fn fail(
+        &self,
+        context: &mut dyn Context,
+        mut error: DbError,
+        method: &str,
+    ) -> NativeResult {
+        if self.name == DriverName::Sqlite {
+            crate::drivers::sqlite::normalize(&mut error, self.attributes.borrow().extended);
+        }
         *self.last_error.borrow_mut() = Some(error.clone());
         *self.error.borrow_mut() = ErrorState::Failed(error.clone());
         let mode = self.attributes.borrow().errors;
@@ -60,28 +70,39 @@ pub fn construct<'a>(
         let dsn_text = args::string(&arguments, 0)
             .map(|s| s.to_string_lossy())
             .unwrap_or_default();
-        let dsn = Dsn::parse(&dsn_text)?;
+        let mut dsn = Dsn::parse(&dsn_text)?;
         let username = args::string(&arguments, 1)
             .map(|s| s.to_string_lossy())
             .unwrap_or_else(|| dsn.get("user", "").to_owned());
         let password = args::string(&arguments, 2)
             .map(|s| s.to_string_lossy())
             .unwrap_or_else(|| dsn.get("password", "").to_owned());
+        let policy = Policy::from_options(args::array(&arguments, 3).map(Rc::as_ref));
         let mut attributes = Attributes::new(dsn.driver);
         if let Some(options) = args::array(&arguments, 3) {
             for (key, value) in options.iter() {
-                if let ArrayKey::Int(attribute) = key {
-                    attributes.set(context, *attribute, value)?;
+                if let ArrayKey::Int(attribute) = key
+                    && attribute != pool::PHERA_ATTR_POOL
+                    && crate::attributes::constructor_accepts(dsn.driver, attribute)
+                {
+                    attributes.set(context, attribute, value)?;
                 }
             }
         }
-        let driver = match Driver::connect(&dsn, &username, &password).await {
+        if dsn.driver == DriverName::Sqlite {
+            // The driver opens the file with the options' flags and timeout.
+            dsn.fields
+                .insert("flags".into(), attributes.sqlite_flags.to_string());
+            dsn.fields
+                .insert("timeout".into(), attributes.timeout.to_string());
+        }
+        let driver = match pool::acquire(&dsn, &username, &password, policy).await {
             Ok(driver) => driver,
             Err(error) => {
                 let code = error.code.unwrap_or(0);
-                return Err(NativeError::throw_with_code(
-                    "PDOException",
+                return Err(crate::errors::exception(
                     format!("SQLSTATE[{}] [{code}] {}", error.state, error.detail),
+                    Some(&error),
                     code,
                 ));
             }
@@ -95,6 +116,7 @@ pub fn construct<'a>(
             error: RefCell::new(ErrorState::Unused),
             last_error: RefCell::new(None),
             transaction: Cell::new(false),
+            statement_sequence: Cell::new(0),
         })));
         Ok(Value::Null)
     })
@@ -104,6 +126,7 @@ pub fn available(_: &mut dyn Context, _: Option<&Rc<Object>>, _: &[Value]) -> Na
     let mut drivers = PhpArray::new();
     drivers.push(Value::from("mysql"))?;
     drivers.push(Value::from("pgsql"))?;
+    drivers.push(Value::from("sqlite"))?;
     Ok(Value::from(drivers))
 }
 
@@ -126,7 +149,12 @@ pub fn exec<'a>(
                 "PDO::exec(): Argument #1 ($statement) must not be empty",
             ));
         }
-        let result = session.driver.lock().await.exec(&sql).await;
+        let mut driver = session.driver.lock().await;
+        let result = driver.exec(&sql).await;
+        if let Some(active) = driver.observed_transaction_state() {
+            session.transaction.set(active);
+        }
+        drop(driver);
         match result {
             Ok(rows) => {
                 session.success();
@@ -149,7 +177,12 @@ pub fn quote<'a>(
 ) -> LocalFuture<'a, NativeResult> {
     Box::pin(async move {
         let session = session(this.as_ref())?;
-        if !matches!(args::int(&arguments, 1).unwrap_or(2), 0 | 1 | 2 | 5) {
+        if session.name == DriverName::Sqlite {
+            let bytes = args::string(&arguments, 0).map_or(&b""[..], |s| s.as_bytes());
+            return Ok(Value::from(crate::drivers::sqlite::quote(bytes)));
+        }
+        let kind = args::int(&arguments, 1).unwrap_or(PARAM_STR);
+        if !matches!(kind, PARAM_NULL | PARAM_INT | PARAM_STR | PARAM_BOOL) {
             return Err(unsupported("LOB quoting"));
         }
         let bytes = args::string(&arguments, 0).map_or(&b""[..], |s| s.as_bytes());
@@ -192,4 +225,30 @@ pub fn error_code(_: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value]) -
 
 pub fn error_info(_: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
     session(this)?.error.borrow().info()
+}
+
+/// PHP 8.4's static factory uses exactly the same constructor path.
+pub fn connect<'a>(
+    context: &'a mut dyn Context,
+    _: Option<Rc<Object>>,
+    arguments: Vec<Value>,
+) -> LocalFuture<'a, NativeResult> {
+    Box::pin(async move {
+        let dsn = args::string(&arguments, 0)
+            .map(|value| value.to_string_lossy())
+            .unwrap_or_default();
+        let class = match Dsn::parse_named(&dsn, "PDO::connect")?.driver {
+            DriverName::Postgres => "Pdo\\Pgsql",
+            DriverName::Mysql => "Pdo\\Mysql",
+            DriverName::Sqlite => "Pdo\\Sqlite",
+        };
+        let object = context.create_object(class, PhpArray::new())?;
+        let Value::Object(instance) = &object else {
+            return Err(NativeError::error(
+                "PDO allocation did not create an object",
+            ));
+        };
+        construct(context, Some(instance.clone()), arguments).await?;
+        Ok(object)
+    })
 }

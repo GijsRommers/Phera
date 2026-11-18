@@ -1,99 +1,115 @@
-//! Array construction and padding, including PHP's key stringification rules.
+//! Building arrays from other values: `array_combine`, `array_flip`,
+//! `array_fill`, `array_fill_keys` and `array_pad`.
 
 use phera_extension_api::value::to_php_string;
 use phera_extension_api::{
-    ArrayKey, Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, PhpArray,
-    Registry, Value, args,
+    ArrayKey, Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, PhpArray, Value,
+    args,
 };
 
-const ARRAY_COMBINE_PARAMS: &[Param] = &[
-    Param::new("keys", ParamType::Array),
-    Param::new("values", ParamType::Array),
+use super::{IntegerKeys, append_entry};
+use crate::arguments::required_array;
+
+pub(super) const FUNCTIONS: &[FunctionEntry] = &[
+    ARRAY_COMBINE,
+    ARRAY_FLIP,
+    ARRAY_FILL,
+    ARRAY_FILL_KEYS,
+    ARRAY_PAD,
 ];
 
-const ARRAY_FLIP_PARAMS: &[Param] = &[Param::new("array", ParamType::Array)];
+/// The most entries `array_pad` makes, PHP's `HT_MAX_SIZE` on 64 bits.
+const MAX_ARRAY_SIZE: u64 = 1 << 30;
 
-const ARRAY_FILL_PARAMS: &[Param] = &[
-    Param::new("start_index", ParamType::Int),
-    Param::new("count", ParamType::Int),
-    Param::new("value", ParamType::Mixed),
-];
-
-const ARRAY_FILL_KEYS_PARAMS: &[Param] = &[
-    Param::new("keys", ParamType::Array),
-    Param::new("value", ParamType::Mixed),
-];
-
-const ARRAY_PAD_PARAMS: &[Param] = &[
-    Param::new("array", ParamType::Array),
-    Param::new("length", ParamType::Int),
-    Param::new("value", ParamType::Mixed),
-];
-
-pub(crate) fn register(registry: &mut Registry) {
-    for (name, params, body) in [
-        (
-            "array_combine",
-            ARRAY_COMBINE_PARAMS,
-            array_combine as phera_extension_api::SyncFn,
-        ),
-        ("array_flip", ARRAY_FLIP_PARAMS, array_flip),
-        ("array_fill", ARRAY_FILL_PARAMS, array_fill),
-        ("array_fill_keys", ARRAY_FILL_KEYS_PARAMS, array_fill_keys),
-        ("array_pad", ARRAY_PAD_PARAMS, array_pad),
-    ] {
-        registry.function(FunctionEntry::sync(name, params, body));
-    }
-}
-
-/// Construction stringifies noninteger keys, unlike ordinary offset conversion.
-pub(super) fn string_key(
+/// A value as a key the way `array_combine` and `array_fill_keys` read it:
+/// an int stays an int, anything else becomes a string first, so `true` is
+/// `"1"` and `1.5` is `"1.5"` (where `$array[1.5]` would be 1).
+pub(super) fn key_from_string(
     context: &mut dyn Context,
     value: &Value,
 ) -> Result<ArrayKey, NativeError> {
     if let Value::Int(integer) = &*value.deref() {
         return Ok(ArrayKey::Int(*integer));
     }
-    Ok(ArrayKey::from_value(&Value::String(to_php_string(
-        value,
-        context.diagnostics(),
-    )?))?)
+    let string = to_php_string(value, context.diagnostics())?;
+    Ok(ArrayKey::from_value(&Value::String(string))?)
 }
 
-/// Duplicate constructed keys overwrite values without moving their original positions.
+/// `array_combine(array $keys, array $values): array`
+///
+/// A key that comes twice keeps its first place and its last value.
+///
+/// ```php
+/// array_combine(["a", "b"], [1, 2]);  // ["a" => 1, "b" => 2]
+/// array_combine(["a", "a"], [1, 2]);  // ["a" => 2]
+/// array_combine(["a"], [1, 2]);       // ValueError
+/// ```
+const ARRAY_COMBINE: FunctionEntry = FunctionEntry::sync(
+    "array_combine",
+    &[
+        Param::new("keys", ParamType::Array),
+        Param::new("values", ParamType::Array),
+    ],
+    array_combine,
+);
+
 fn array_combine(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let keys = required_array(arguments, 0);
+    let values = required_array(arguments, 1);
+    if keys.len() != values.len() {
+        return Err(NativeError::value_error(
+            "array_combine(): Argument #1 ($keys) and argument #2 ($values) must have the same number of elements",
+        ));
+    }
     let mut result = PhpArray::new();
-    if let (Some(keys), Some(values)) = (args::array(arguments, 0), args::array(arguments, 1)) {
-        if keys.len() != values.len() {
-            return Err(NativeError::value_error(
-                "array_combine(): Argument #1 ($keys) and argument #2 ($values) must have the same number of elements",
-            ));
-        }
-        for (key, value) in keys.values().zip(values.values()) {
-            result.insert(string_key(context, key)?, value.clone());
-        }
+    for (key, value) in keys.values().zip(values.values()) {
+        result.insert(key_from_string(context, key)?, value.clone());
     }
     Ok(Value::from(result))
 }
 
-/// Only integer and string values can become flipped keys; others emit warnings.
+/// `array_flip(array $array): array`, keys and values swapped. Values that
+/// cannot be keys are skipped with a warning.
+///
+/// ```php
+/// array_flip(["a" => 1, "b" => 2]); // [1 => "a", 2 => "b"]
+/// ```
+const ARRAY_FLIP: FunctionEntry = FunctionEntry::sync(
+    "array_flip",
+    &[Param::new("array", ParamType::Array)],
+    array_flip,
+);
+
 fn array_flip(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let mut result = PhpArray::new();
-    if let Some(array) = args::array(arguments, 0) {
-        for (key, value) in array.iter() {
-            if matches!(&*value.deref(), Value::Int(_) | Value::String(_)) {
-                result.insert(ArrayKey::from_value(value)?, super::key_value(key));
-            } else {
-                context.warning(
-                    "array_flip(): Can only flip string and integer values, entry skipped".into(),
-                );
-            }
+    for (key, value) in required_array(arguments, 0).iter() {
+        if matches!(&*value.deref(), Value::Int(_) | Value::String(_)) {
+            result.insert(ArrayKey::from_value(value)?, Value::from(key));
+        } else {
+            context.warning(
+                "array_flip(): Can only flip string and integer values, entry skipped".into(),
+            );
         }
     }
     Ok(Value::from(result))
 }
 
-/// Negative starting keys keep increasing from that key, as in PHP 8.
+/// `array_fill(int $start_index, int $count, mixed $value): array`
+///
+/// ```php
+/// array_fill(5, 2, "x");  // [5 => "x", 6 => "x"]
+/// array_fill(-3, 2, "x"); // [-3 => "x", -2 => "x"] since PHP 8
+/// ```
+const ARRAY_FILL: FunctionEntry = FunctionEntry::sync(
+    "array_fill",
+    &[
+        Param::new("start_index", ParamType::Int),
+        Param::new("count", ParamType::Int),
+        Param::new("value", ParamType::Mixed),
+    ],
+    array_fill,
+);
+
 fn array_fill(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let count = args::int(arguments, 1).unwrap_or_default();
     if count < 0 {
@@ -112,54 +128,82 @@ fn array_fill(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
             "Cannot add element to the array as the next element is already occupied",
         ));
     }
+    let value = &arguments[2];
     let mut result = PhpArray::new();
     for offset in 0..count {
-        if let Some(key) = start.checked_add(offset) {
-            result.insert(ArrayKey::Int(key), args::value(arguments, 2).clone());
-        }
+        result.insert(ArrayKey::Int(start + offset), value.clone());
     }
     Ok(Value::from(result))
 }
 
-/// Values become keys through string conversion, including bool and null values.
+/// `array_fill_keys(array $keys, mixed $value): array`
+///
+/// ```php
+/// array_fill_keys(["a", 5], 0); // ["a" => 0, 5 => 0]
+/// ```
+const ARRAY_FILL_KEYS: FunctionEntry = FunctionEntry::sync(
+    "array_fill_keys",
+    &[
+        Param::new("keys", ParamType::Array),
+        Param::new("value", ParamType::Mixed),
+    ],
+    array_fill_keys,
+);
+
 fn array_fill_keys(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let value = &arguments[1];
     let mut result = PhpArray::new();
-    if let Some(keys) = args::array(arguments, 0) {
-        for key in keys.values() {
-            result.insert(string_key(context, key)?, args::value(arguments, 1).clone());
-        }
+    for key in required_array(arguments, 0).values() {
+        result.insert(key_from_string(context, key)?, value.clone());
     }
     Ok(Value::from(result))
 }
 
-/// Padding renumbers integer keys but returns an unchanged copy when already long enough.
+/// `array_pad(array $array, int $length, mixed $value): array`, padded with
+/// `$value` to `$length` entries: at the end, or at the start when the
+/// length is negative. Integer keys are numbered again; an array that is
+/// long enough comes back as it is.
+///
+/// ```php
+/// array_pad([1, 2], 4, 0);  // [1, 2, 0, 0]
+/// array_pad([1, 2], -4, 0); // [0, 0, 1, 2]
+/// ```
+const ARRAY_PAD: FunctionEntry = FunctionEntry::sync(
+    "array_pad",
+    &[
+        Param::new("array", ParamType::Array),
+        Param::new("length", ParamType::Int),
+        Param::new("value", ParamType::Mixed),
+    ],
+    array_pad,
+);
+
 fn array_pad(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let length = args::int(arguments, 1).unwrap_or_default();
-    let count = length.unsigned_abs();
-    if count > 1_073_741_824 {
+    let wanted = length.unsigned_abs();
+    if wanted > MAX_ARRAY_SIZE {
         return Err(NativeError::value_error(
             "array_pad(): Argument #2 ($length) must not exceed the maximum allowed array size",
         ));
     }
-    let Some(array) = args::array(arguments, 0) else {
-        return Ok(Value::from(PhpArray::new()));
-    };
-    if count <= array.len() as u64 {
+    let array = required_array(arguments, 0);
+    if wanted <= array.len() as u64 {
         return Ok(Value::Array(array.clone()));
     }
-    let padding = count.saturating_sub(array.len() as u64);
+    let padding = wanted - array.len() as u64;
+    let value = &arguments[2];
     let mut result = PhpArray::new();
     if length < 0 {
         for _ in 0..padding {
-            result.push(args::value(arguments, 2).clone())?;
+            result.push(value.clone())?;
         }
     }
-    for (key, value) in array.iter() {
-        super::slice::insert(&mut result, key, value, super::Keys::Renumber)?;
+    for (key, entry) in array.iter() {
+        append_entry(&mut result, key, entry, IntegerKeys::Renumber)?;
     }
     if length > 0 {
         for _ in 0..padding {
-            result.push(args::value(arguments, 2).clone())?;
+            result.push(value.clone())?;
         }
     }
     Ok(Value::from(result))

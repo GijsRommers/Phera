@@ -1,4 +1,6 @@
-//! Differential observations include return, references, diagnostics and last error.
+//! The comparison with PHP: each case is a call, observed in its result or
+//! exception, the by-reference arguments afterwards, the diagnostics and
+//! `preg_last_error()`.
 
 mod callbacks;
 mod corpus;
@@ -9,8 +11,6 @@ pub use edges::cases as edge_cases;
 use phera_extension_api::testing::oracle;
 use phera_extension_api::{ArrayKey, NativeError, PhpArray, Value};
 use std::cell::RefCell;
-use std::io::Write;
-use std::process::{Command, Stdio};
 use std::rc::Rc;
 
 pub fn list(values: impl IntoIterator<Item = Value>) -> Value {
@@ -99,30 +99,10 @@ function inspect($m) { return enc($m); }
         ));
         self.labels.push(expression.chars().take(550).collect());
     }
+    /// Runs every case in PHP, in one process, and compares the lines.
     pub fn compare(self, name: &str) {
-        // Feed stdin on a separate writer so large scripts/output cannot fill both pipes.
-        // No temporary artifacts outside the task's assigned scratch directory.
-        let mut child = Command::new("/opt/homebrew/bin/php")
-            .args(["-n", "-d", "memory_limit=1G", "-d", "error_reporting=-1"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("PHP 8.5 oracle required");
-        let mut stdin = child.stdin.take().unwrap();
-        let writer = std::thread::spawn(move || stdin.write_all(self.script.as_bytes()).unwrap());
-        let output = child.wait_with_output().unwrap();
-        writer.join().unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let php: Vec<String> = String::from_utf8(output.stdout)
-            .unwrap()
-            .lines()
-            .map(str::to_string)
-            .collect();
+        let script_name = format!("pcre-{}", name.replace(' ', "-"));
+        let php = oracle::run_php(&script_name, &self.script).expect("PHP 8.5 oracle required");
         oracle::compare(name, &self.labels, &php, &self.rust);
     }
 }

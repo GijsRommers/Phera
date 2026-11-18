@@ -1,6 +1,10 @@
 //! `phera serve` from the outside: start the real binary, talk HTTP to it
 //! over a socket, and check what comes back.
 
+mod scenarios {
+    mod environment;
+}
+
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::path::PathBuf;
@@ -20,6 +24,16 @@ impl Served {
     }
 
     fn start_with_workers(name: &str, workers: usize, files: &[(&str, &str)]) -> Served {
+        Self::start_in(name, workers, files, ".", &[])
+    }
+
+    fn start_in(
+        name: &str,
+        workers: usize,
+        files: &[(&str, &str)],
+        directory: &str,
+        flags: &[&str],
+    ) -> Served {
         let root = std::env::temp_dir().join(format!("phera-serve-{name}-{}", std::process::id()));
         for (path, contents) in files {
             let file = root.join(path);
@@ -30,7 +44,9 @@ impl Served {
         let mut process = Command::new(env!("CARGO_BIN_EXE_phera"))
             .args(["serve", "--listen", "127.0.0.1:0", "--workers"])
             .arg(workers.to_string())
-            .arg(&root)
+            .current_dir(&root)
+            .args(flags)
+            .arg(root.join(directory))
             .stdout(Stdio::piped())
             .spawn()
             .expect("start phera serve");
@@ -242,4 +258,44 @@ fn a_long_computation_lets_other_requests_through() {
             "the quick request took {quick_took:?}, the slow one {slow_took:?}"
         );
     });
+}
+
+/// Three findings of the security test of the server, each fixed and kept
+/// fixed here.
+#[test]
+fn hostile_requests_do_not_get_source_wrong_framing_or_a_filled_post() {
+    let served = Served::start(
+        "hardening",
+        &[
+            ("secret.PHP", "<?php $password = 'do-not-leak'; echo 'ran';"),
+            (
+                "length.php",
+                "<?php header('Content-Length: 5'); echo str_repeat('A', 100);",
+            ),
+            (
+                "form.php",
+                "<?php echo count($_POST), ' ', $_SERVER['REQUEST_METHOD'];",
+            ),
+        ],
+    );
+
+    // An upper-case extension runs the script. Serving it as a file would
+    // print its source.
+    assert_eq!(served.get("/secret.PHP"), (200, "ran".to_string()));
+
+    // A script cannot announce a shorter body than it sends: the client gets
+    // all 100 bytes, framed by the server's own length.
+    let (status, body) = served.get("/length.php");
+    assert_eq!((status, body.len()), (200, 100));
+
+    // Only POST fills `$_POST`, as in PHP.
+    let form = "Content-Type: application/x-www-form-urlencoded\r\n";
+    assert_eq!(
+        served.request("PUT", "/form.php", form, "a=1&b=2"),
+        (200, "0 PUT".to_string())
+    );
+    assert_eq!(
+        served.request("POST", "/form.php", form, "a=1&b=2"),
+        (200, "2 POST".to_string())
+    );
 }

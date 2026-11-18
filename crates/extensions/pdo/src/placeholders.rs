@@ -13,14 +13,26 @@ pub struct Sql {
     pub source: String,
     pub parameters: Vec<Parameter>,
     spans: Vec<(usize, usize)>,
+    /// Native PostgreSQL tokens are not PDO placeholders and must not be rewritten.
+    pub has_dollar_parameters: bool,
 }
 
 impl Sql {
+    pub fn sqlite(source: String) -> Self {
+        Self {
+            source,
+            parameters: Vec::new(),
+            spans: Vec::new(),
+            has_dollar_parameters: false,
+        }
+    }
+
     pub fn parse(source: String) -> Result<Self, DbError> {
         let bytes = source.as_bytes();
         let mut parameters = Vec::new();
         let mut spans = Vec::new();
         let mut index = 0;
+        let mut has_dollar_parameters = false;
         while index < bytes.len() {
             let start = index;
             match bytes[index] {
@@ -28,7 +40,15 @@ impl Sql {
                 b'-' if bytes.get(index + 1) == Some(&b'-') => index = line(bytes, index),
                 b'#' => index = line(bytes, index),
                 b'/' if bytes.get(index + 1) == Some(&b'*') => index = comment(bytes, index),
-                b'$' => index = dollar(bytes, index).unwrap_or(index + 1),
+                b'$' => {
+                    if let Some(end) = dollar(bytes, index) {
+                        index = end;
+                    } else {
+                        has_dollar_parameters |=
+                            bytes.get(index + 1).is_some_and(u8::is_ascii_digit);
+                        index += 1;
+                    }
+                }
                 b':' if bytes.get(index + 1) == Some(&b':') => index += 2,
                 b':' if bytes.get(index + 1).is_some_and(|b| name_start(*b)) => {
                     index += 2;
@@ -60,6 +80,7 @@ impl Sql {
             source,
             parameters,
             spans,
+            has_dollar_parameters,
         })
     }
 
@@ -80,7 +101,7 @@ fn name_start(byte: u8) -> bool {
     byte.is_ascii_alphabetic() || byte == b'_'
 }
 
-fn quoted(bytes: &[u8], start: usize) -> usize {
+pub(crate) fn quoted(bytes: &[u8], start: usize) -> usize {
     let delimiter = bytes[start];
     let mut index = start + 1;
     while index < bytes.len() {
@@ -99,14 +120,14 @@ fn quoted(bytes: &[u8], start: usize) -> usize {
     index
 }
 
-fn line(bytes: &[u8], start: usize) -> usize {
+pub(crate) fn line(bytes: &[u8], start: usize) -> usize {
     bytes[start..]
         .iter()
         .position(|b| *b == b'\n')
         .map_or(bytes.len(), |n| start + n + 1)
 }
 
-fn comment(bytes: &[u8], start: usize) -> usize {
+pub(crate) fn comment(bytes: &[u8], start: usize) -> usize {
     let mut depth = 1;
     let mut index = start + 2;
     while index + 1 < bytes.len() {
@@ -128,7 +149,7 @@ fn comment(bytes: &[u8], start: usize) -> usize {
     bytes.len()
 }
 
-fn dollar(bytes: &[u8], start: usize) -> Option<usize> {
+pub(crate) fn dollar(bytes: &[u8], start: usize) -> Option<usize> {
     let mut end = start + 1;
     while bytes
         .get(end)

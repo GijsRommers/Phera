@@ -16,6 +16,7 @@ pub(crate) fn define_superglobals(
     request: &HttpRequest,
     script: &Path,
     document_root: &Path,
+    environment: PhpArray,
 ) {
     let mut get = PhpArray::new();
     parse_pairs(
@@ -26,7 +27,9 @@ pub(crate) fn define_superglobals(
     );
 
     let mut post = PhpArray::new();
-    if is_form(request) {
+    // PHP fills `$_POST` for the POST method only. A form body sent with PUT
+    // or GET stays in the raw request body.
+    if request.method.eq_ignore_ascii_case("POST") && is_form(request) {
         parse_pairs(&mut post, &request.body, b'&', Duplicates::Replace);
     }
 
@@ -44,7 +47,7 @@ pub(crate) fn define_superglobals(
 
     vm.set_global(
         "_SERVER",
-        Value::from(server(request, script, document_root)),
+        Value::from(server(request, script, document_root, environment)),
     );
     vm.set_global("_GET", Value::from(get));
     vm.set_global("_POST", Value::from(post));
@@ -64,8 +67,12 @@ fn is_form(request: &HttpRequest) -> bool {
     })
 }
 
-fn server(request: &HttpRequest, script: &Path, document_root: &Path) -> PhpArray {
-    let mut server = PhpArray::new();
+fn server(
+    request: &HttpRequest,
+    script: &Path,
+    document_root: &Path,
+    mut server: PhpArray,
+) -> PhpArray {
     let mut set = |name: &str, value: Value| {
         server.insert(ArrayKey::str(name), value);
     };

@@ -40,7 +40,6 @@ impl Vm {
         right: Reg,
     ) -> Result<(), NativeError> {
         let frame = self
-            .call_stack
             .current()
             .ok_or_else(|| internal_error!("operator frame"))?;
         let left = frame
@@ -74,13 +73,7 @@ impl Vm {
         let source = to_php_string(&diagnostics.vm.operand(source), &mut diagnostics.buffer)?;
         let target = diagnostics
             .vm
-            .call_stack
-            .current_mut()
-            .and_then(|frame| {
-                frame
-                    .slots_mut(&mut diagnostics.vm.registers)
-                    .get_mut(local.index())
-            })
+            .current_slot_mut(local)
             .and_then(Option::as_mut);
         let changed = match target {
             Some(Value::String(target)) => {
@@ -204,7 +197,7 @@ impl Vm {
                                     phera_value::ArrayKey::Int(index) => {
                                         phera_value::ArrayKey::str(index.to_string())
                                     }
-                                    key => key.clone(),
+                                    key => key,
                                 };
                                 object.set(key, value.clone());
                             }

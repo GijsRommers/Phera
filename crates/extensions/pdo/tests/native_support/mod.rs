@@ -51,6 +51,16 @@ impl Harness {
     }
 
     pub async fn connect(&mut self, driver: &str) -> Rc<Object> {
+        self.connect_options(driver, phera_extension_api::PhpArray::new())
+            .await
+            .unwrap()
+    }
+
+    pub async fn connect_options(
+        &mut self,
+        driver: &str,
+        options: phera_extension_api::PhpArray,
+    ) -> Result<Rc<Object>, phera_extension_api::NativeError> {
         let object = instantiate(&self.registry, "PDO").unwrap();
         self.call(
             &object,
@@ -59,11 +69,11 @@ impl Harness {
                 Value::from(super::support::dsn(driver)),
                 Value::from("phera"),
                 Value::from("phera"),
+                Value::from(options),
             ],
         )
-        .await
-        .unwrap();
-        object
+        .await?;
+        Ok(object)
     }
 }
 
