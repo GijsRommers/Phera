@@ -4,7 +4,14 @@ use crate::calls::execution_loop::BatchExit;
 use phera_bytecode::{BinaryOp, FetchMode, IncDec, Instruction, PathId, Reg};
 use phera_extension_api::NativeError;
 
-use crate::{Vm, ops};
+use crate::{
+    AccessPath, Vm,
+    access_mode::{Binding, Creation, Missing},
+    inline_stack::InlineStack,
+    ops,
+    path_update::PathKey,
+};
+use phera_value::Value;
 
 impl Vm {
     /// Append through aliases using the ordinary PHP write semantics.
@@ -92,7 +99,7 @@ impl Vm {
                 src: source,
             })));
         }
-        let left = self.read_place(&place, crate::access_mode::Missing::Warn)?;
+        let (register, keys, left) = self.read_indexed_update(&place)?;
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let value = ops::binary(
             operator,
@@ -102,7 +109,7 @@ impl Vm {
         );
         drop(diagnostics);
         let value = value?;
-        self.write_place(&place, value.clone(), crate::access_mode::Binding::ByValue)?;
+        self.finish_indexed_update(&place, register, keys, value.clone())?;
         self.set(destination, value);
         Ok(None)
     }
@@ -128,7 +135,7 @@ impl Vm {
                 path,
             })));
         }
-        let old = self.read_place(&place, crate::access_mode::Missing::Warn)?;
+        let (register, keys, old) = self.read_indexed_update(&place)?;
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let value = if matches!(mode, IncDec::PreIncrement | IncDec::PostIncrement) {
             phera_value::increment(&old, &mut diagnostics.buffer)
@@ -137,7 +144,7 @@ impl Vm {
         };
         drop(diagnostics);
         let value = value?;
-        self.write_place(&place, value.clone(), crate::access_mode::Binding::ByValue)?;
+        self.finish_indexed_update(&place, register, keys, value.clone())?;
         self.set(
             destination,
             if matches!(mode, IncDec::PostIncrement | IncDec::PostDecrement) {
@@ -147,6 +154,48 @@ impl Vm {
             },
         );
         Ok(None)
+    }
+
+    /// Resolve a writable index once for both halves of a compound update.
+    fn read_indexed_update(
+        &mut self,
+        place: &AccessPath,
+    ) -> Result<(Option<Reg>, InlineStack<PathKey>, Value), NativeError> {
+        let register = self.base_register(place, Creation::Existing, Missing::Warn)?;
+        self.check_static_read(place, Missing::Warn)?;
+        let mut value = register.map_or(Value::Null, |register| {
+            self.read_root(register, Missing::Warn)
+        });
+        let mut keys = InlineStack::new();
+        for step in place.steps()? {
+            let phera_bytecode::Step::Index(index) = step else {
+                return Err(NativeError::error("Cannot use [] for reading"));
+            };
+            let key = self.write_index_key(&value, index)?;
+            value = self.read_writable_index(value, &key)?;
+            keys.push(PathKey::Index(Some(key)));
+        }
+        Ok((register, keys, value))
+    }
+
+    fn finish_indexed_update(
+        &mut self,
+        place: &AccessPath,
+        register: Option<Reg>,
+        keys: InlineStack<PathKey>,
+        value: Value,
+    ) -> Result<(), NativeError> {
+        if keys.iter().next().is_none() {
+            self.write_place(place, value, Binding::ByValue)
+        } else {
+            let register = match register {
+                Some(register) => register,
+                None => self
+                    .base_register(place, Creation::Create, Missing::Silent)?
+                    .ok_or_else(|| internal_error!("missing indexed update"))?,
+            };
+            self.write_resolved_place(place, register, keys, value, Binding::ByValue)
+        }
     }
 
     /// Implements PHP AssignPath semantics outside the dispatch loop.

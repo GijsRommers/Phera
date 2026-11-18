@@ -109,6 +109,7 @@ mod operators;
 mod ops;
 mod output;
 mod path;
+mod path_dimensions;
 mod path_instructions;
 mod path_update;
 mod place_mutation;

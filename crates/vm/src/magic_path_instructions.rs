@@ -68,6 +68,14 @@ impl Vm {
         value: Value,
     ) -> Result<(), NativeError> {
         match target {
+            Some(UpdateTarget::Resolved { register, keys }) => {
+                let current = self.read_root(register, crate::access_mode::Missing::Silent);
+                let mut value = value;
+                if !self.validate_property_mutation(current, &keys, &mut value, Mutation::Assign)? {
+                    self.write_resolved_place(place, register, *keys, value, Binding::ByValue)?;
+                }
+                Ok(())
+            }
             Some(UpdateTarget::Indirect { root, keys }) => self
                 .write_detached_place(root, &keys, value, Mutation::Assign)
                 .await

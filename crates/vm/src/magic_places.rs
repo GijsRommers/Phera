@@ -1,12 +1,12 @@
 //! `$object->items['key']` walks properties and offsets in source order.
 //! The last step of isset/empty uses a different hook protocol from ??.
 
-use phera_bytecode::{FetchMode, PathBase, Step};
+use phera_bytecode::{FetchMode, PathBase, Reg, Step};
 use phera_extension_api::{NativeError, NativeResult};
 use phera_value::{ArrayKey, Object, Value};
 use std::rc::Rc;
 
-use crate::access_mode::{Creation, Missing};
+use crate::access_mode::{Creation, Missing, Mutation};
 use crate::inline_stack::InlineStack;
 use crate::magic_properties::{PropertyRead, PropertyReadSource};
 use crate::path_update::PathKey;
@@ -18,6 +18,10 @@ pub(crate) struct ReadPlace {
 }
 
 pub(crate) enum UpdateTarget {
+    Resolved {
+        register: Reg,
+        keys: Box<InlineStack<PathKey>>,
+    },
     Indirect {
         root: Value,
         keys: Box<InlineStack<PathKey>>,
@@ -74,12 +78,13 @@ impl Vm {
         purpose: ReadPurpose,
     ) -> Result<ReadPlace, NativeError> {
         let mut indirect: Option<IndirectPath> = None;
+        let mut resolved = (purpose == ReadPurpose::Update).then(InlineStack::new);
         let mut target = None;
         let quiet = matches!(mode, FetchMode::Quiet | FetchMode::Isset | FetchMode::Empty);
-        let missing = if quiet {
-            Missing::Silent
-        } else {
-            Missing::Warn
+        let missing = match mode {
+            FetchMode::Isset | FetchMode::Empty => Missing::Isset,
+            FetchMode::Quiet => Missing::Silent,
+            _ => Missing::Warn,
         };
         let Some(register) = self.base_register(place, Creation::Existing, missing)? else {
             return Ok(ReadPlace {
@@ -102,16 +107,22 @@ impl Vm {
                     target,
                 });
             }
-            let (key, converted) = self.magic_path_key(step).await?;
+            let key = if let Step::Index(index) = step {
+                if purpose == ReadPurpose::Update {
+                    PathKey::Index(Some(self.write_index_key(&value, index)?))
+                } else if matches!(value, Value::Array(_) | Value::String(_)) {
+                    PathKey::Index(Some(self.read_index_key(index, missing)?))
+                } else {
+                    // No offset is converted if the container cannot be indexed.
+                    value = self.read_nonarray_offset(value, missing)?;
+                    continue;
+                }
+            } else {
+                self.magic_path_key(step).await?
+            };
             let last = steps.peek().is_none();
-            if purpose == ReadPurpose::Update && converted && !last {
-                indirect = Some(IndirectPath {
-                    root: value.clone(),
-                    keys: InlineStack::new(),
-                });
-            }
-            if let Some(indirect) = &mut indirect {
-                let resolved = match (&key, &value) {
+            if purpose == ReadPurpose::Update {
+                let stored = match (&key, &value) {
                     (PathKey::Property(key), Value::Object(object)) => {
                         let name = crate::path_update::property_name(key);
                         PathKey::Property(
@@ -121,7 +132,14 @@ impl Vm {
                     }
                     _ => key.clone(),
                 };
-                indirect.keys.push(resolved);
+                match &mut indirect {
+                    Some(path) => path.keys.push(stored),
+                    None => {
+                        if let Some(keys) = &mut resolved {
+                            keys.push(stored);
+                        }
+                    }
+                }
             }
             value = match key {
                 PathKey::Property(key) => {
@@ -139,7 +157,6 @@ impl Vm {
                     };
                     if purpose == ReadPurpose::Update
                         && last
-                        && (converted || indirect.is_some())
                         && let Value::Object(object) = &value
                     {
                         target = Some(UpdateTarget::Property {
@@ -151,6 +168,29 @@ impl Vm {
                     let name = owner
                         .as_ref()
                         .map(|_| crate::path_update::property_name(&key));
+                    if let Some(object) = &owner
+                        && matches!(steps.peek(), Some(Step::Index(_) | Step::Append))
+                        && let Some(class) = self.classes.for_object(object)
+                        && class.property_access.is_none()
+                        && let (stored, Some(slot)) =
+                            self.property_slot(object, &crate::path_update::property_name(&key))
+                        && (stored.is_some()
+                            || self.typed_property_uninitialized(&class, object, &slot)
+                            || self
+                                .property_hook(
+                                    &class,
+                                    object,
+                                    &key,
+                                    crate::magic_properties::PropertyHook::Get,
+                                )
+                                .is_none())
+                    {
+                        value = self
+                            .prepare_property_dimension(object, &slot, Mutation::Assign)?
+                            .deref()
+                            .clone();
+                        continue;
+                    }
                     let result = self.resolve_property_read(value, key, read).await?;
                     if result.source == PropertyReadSource::Getter
                         && let (Some(owner), Some(name)) = (owner, name)
@@ -172,14 +212,24 @@ impl Vm {
                 }
                 PathKey::Index(key) => {
                     let key = key.ok_or_else(|| NativeError::error("Cannot use [] for reading"))?;
-                    self.read_path_index(value, &key, missing)?
+                    if purpose == ReadPurpose::Update {
+                        self.read_writable_index(value, &key)?
+                    } else {
+                        self.read_path_index(value, &key, missing)?
+                    }
                 }
             };
         }
         let target = target.or_else(|| {
-            indirect.map(|path| UpdateTarget::Indirect {
-                root: path.root,
-                keys: Box::new(path.keys),
+            resolved.map(|keys| match indirect {
+                Some(path) => UpdateTarget::Indirect {
+                    root: path.root,
+                    keys: Box::new(path.keys),
+                },
+                None => UpdateTarget::Resolved {
+                    register,
+                    keys: Box::new(keys),
+                },
             })
         });
         Ok(ReadPlace { value, target })
@@ -187,10 +237,7 @@ impl Vm {
 
     /// Resolve dynamic property names as strings. A dimension key keeps
     /// its own PHP conversion rules, which never use __toString.
-    pub(crate) async fn magic_path_key(
-        &mut self,
-        step: Step,
-    ) -> Result<(PathKey, bool), NativeError> {
+    pub(crate) async fn magic_path_key(&mut self, step: Step) -> Result<PathKey, NativeError> {
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let key = match step {
             Step::Property(name) => PathKey::Property(ArrayKey::str(diagnostics.vm.name(name)?)),
@@ -204,7 +251,7 @@ impl Vm {
                 if value.is_object() {
                     drop(diagnostics);
                     let text = self.stringify_value(&value).await?;
-                    return Ok((PathKey::Property(ArrayKey::String(text)), true));
+                    return Ok(PathKey::Property(ArrayKey::String(text)));
                 }
                 PathKey::Property(ArrayKey::String(phera_value::to_php_string(
                     &value,
@@ -212,46 +259,6 @@ impl Vm {
                 )?))
             }
         };
-        Ok((key, false))
-    }
-
-    pub(crate) fn read_path_index(
-        &mut self,
-        value: Value,
-        key: &ArrayKey,
-        missing: Missing,
-    ) -> NativeResult {
-        let value = match value {
-            Value::Array(array) => {
-                if let Some(value) = array.get(key) {
-                    value.deref().clone()
-                } else {
-                    if missing == Missing::Warn {
-                        self.warn(format!(
-                            "Undefined array key {}",
-                            crate::places::display_key(key)
-                        ));
-                    }
-                    Value::Null
-                }
-            }
-            Value::String(string) => self.read_string_offset(&string, key.clone(), missing)?,
-            Value::Object(object) => {
-                return Err(NativeError::error(format!(
-                    "Cannot use object of type {} as array",
-                    object.class.name()
-                )));
-            }
-            other => {
-                if missing == Missing::Warn {
-                    self.warn(format!(
-                        "Trying to access array offset on {}",
-                        other.type_name()
-                    ));
-                }
-                Value::Null
-            }
-        };
-        Ok(value)
+        Ok(key)
     }
 }

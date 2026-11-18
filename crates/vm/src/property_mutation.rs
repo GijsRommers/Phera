@@ -87,16 +87,15 @@ impl Vm {
     ) -> Result<(), NativeError> {
         let name = &property.name;
         let key = &property.key;
-        if mutation == Mutation::Bind {
+        if indirect || mutation == Mutation::Bind {
             return Err(NativeError::error(format!(
                 "Cannot indirectly modify readonly property {}::${name}",
                 property.declaring
             )));
         }
         let scope = self.current().and_then(|frame| frame.scope());
-        if (crate::property_storage::read(object, key).is_some()
-            && !self.clone_can_update(object, key))
-            || indirect
+        if crate::property_storage::read(object, key).is_some()
+            && !self.clone_can_update(object, key)
         {
             let action = if mutation == Mutation::Unset {
                 "unset"

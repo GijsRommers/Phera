@@ -202,13 +202,12 @@ impl Vm {
     ) -> NativeResult {
         match step {
             Step::Index(register) => {
-                let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
-                let key = ArrayKey::from_value_diag(
-                    &diagnostics.vm.operand(register),
-                    &mut diagnostics.buffer,
-                )?;
-                drop(diagnostics);
-                self.read_path_index(value, &key, missing)
+                if matches!(value, Value::Array(_) | Value::String(_)) {
+                    let key = self.read_index_key(register, missing)?;
+                    self.read_path_index(value, &key, missing)
+                } else {
+                    self.read_nonarray_offset(value, missing)
+                }
             }
             Step::Append => Err(NativeError::error("Cannot use [] for reading")),
             Step::Property(name) => {

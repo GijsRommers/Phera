@@ -3,7 +3,8 @@
 
 use std::{cell::RefCell, rc::Rc};
 
-use phera_extension_api::NativeResult;
+use phera_bytecode::Step;
+use phera_extension_api::{NativeError, NativeResult};
 use phera_value::Value;
 
 use crate::access_mode::{Creation, Missing, Mutation};
@@ -15,114 +16,113 @@ use crate::{AccessPath, Vm};
 impl Vm {
     /// The alias returned by &__get points to the getter's own storage.
     pub(crate) async fn magic_reference(&mut self, place: &AccessPath) -> NativeResult {
-        let Some(register) = self.base_register(place, Creation::Existing, Missing::Silent)? else {
-            return self.reference(place);
-        };
-        let keys = self.keys(place)?;
-        let mut cursor = self.read_root(register, Missing::Silent);
-        let mut steps = keys.iter().peekable();
-        while let Some(key) = steps.next() {
-            cursor = match key {
-                PathKey::Property(key) => {
-                    let Value::Object(object) = cursor.deref().clone() else {
-                        break;
-                    };
-                    let display = crate::path_update::property_name(key);
-                    if let Some(value) =
+        let register = self
+            .base_register(place, Creation::Create, Missing::Silent)?
+            .ok_or_else(|| internal_error!("missing reference place"))?;
+        let mut cursor = self.raw_local(register);
+        let mut detached = None;
+        let mut keys = InlineStack::new();
+        let mut steps = place.steps()?.peekable();
+        while let Some(step) = steps.next() {
+            let current = cursor.deref().clone();
+            let key = if let Step::Index(index) = step {
+                PathKey::Index(Some(self.write_index_key(&current, index)?))
+            } else {
+                self.magic_path_key(step).await?
+            };
+            let (key, next) = match (current, key) {
+                (Value::Object(object), PathKey::Property(name)) => {
+                    let display = crate::path_update::property_name(&name);
+                    let (stored, slot) = self.property_slot(&object, &display);
+                    if let Some(native) =
                         self.native_property_read(&object, &display, Missing::Silent)?
                     {
-                        if steps.peek().is_none() {
-                            return self.reference(place);
-                        }
-                        cursor = value;
-                        continue;
-                    }
-                    let (stored, slot) = self.property_slot(&object, &display);
-                    if let Some(value) = stored {
-                        value.deref().clone()
-                    } else if let Some(class) = self.classes.for_object(&object)
-                        && !slot.as_ref().is_some_and(|key| {
-                            self.typed_property_uninitialized(&class, &object, key)
-                        })
-                        && self
-                            .property_hook(&class, &object, key, PropertyHook::Get)
-                            .is_some()
-                    {
-                        let value = self
-                            .read_overloaded_property(
-                                Value::Object(object.clone()),
-                                key.clone(),
-                                PropertyRead::Read,
-                            )
-                            .await?;
-                        self.warn_indirect_magic_property(&object, &display, &value);
-                        if steps.peek().is_none() {
-                            return Ok(match value {
-                                Value::Reference(_) => value,
-                                _ => Value::Reference(Rc::new(RefCell::new(value))),
-                            });
-                        }
-                        return self.reference_from_magic(value, steps.cloned());
+                        (PathKey::Property(slot.unwrap_or(name)), native)
                     } else {
-                        Value::Null
+                        let class = self
+                            .classes
+                            .for_object(&object)
+                            .ok_or_else(|| internal_error!("property class"))?;
+                        if stored.is_none()
+                            && !slot.as_ref().is_some_and(|key| {
+                                self.typed_property_uninitialized(&class, &object, key)
+                            })
+                            && self
+                                .property_hook(&class, &object, &name, PropertyHook::Get)
+                                .is_some()
+                        {
+                            let value = self
+                                .read_overloaded_property(
+                                    Value::Object(object.clone()),
+                                    name,
+                                    PropertyRead::Read,
+                                )
+                                .await?;
+                            self.warn_indirect_magic_property(&object, &display, &value);
+                            if steps.peek().is_none() {
+                                return Ok(match value {
+                                    Value::Reference(_) => value,
+                                    _ => Value::Reference(Rc::new(RefCell::new(value))),
+                                });
+                            }
+                            cursor = value.clone();
+                            detached = Some(value);
+                            keys = InlineStack::new();
+                            continue;
+                        }
+                        let key = match slot {
+                            Some(key) => key,
+                            None => self.property_key(&object, &display)?,
+                        };
+                        let value = if matches!(steps.peek(), Some(Step::Index(_) | Step::Append)) {
+                            self.prepare_property_dimension(&object, &key, Mutation::Bind)?
+                        } else {
+                            stored.unwrap_or_default()
+                        };
+                        (PathKey::Property(key), value)
                     }
                 }
-                PathKey::Index(Some(key)) => self.read_path_index(cursor, key, Missing::Silent)?,
-                PathKey::Index(None) => Value::Null,
+                (Value::Array(array), PathKey::Index(Some(key))) => {
+                    let value = array.get(&key).cloned().unwrap_or_default();
+                    (PathKey::Index(Some(key)), value)
+                }
+                (Value::String(_), PathKey::Index(_)) => {
+                    return Err(NativeError::error(
+                        "Cannot create references to/from string offsets",
+                    ));
+                }
+                (_, key) => (key, Value::Null),
             };
+            cursor = next;
+            keys.push(key);
         }
-        self.reference(place)
+        if let Some(root) = detached {
+            self.reference_from_magic(root, &keys, cursor)
+        } else {
+            self.reference_resolved(place, register, keys)
+        }
     }
 
     fn reference_from_magic(
         &mut self,
         mut root: Value,
-        tail: impl Iterator<Item = PathKey>,
+        keys: &InlineStack<PathKey>,
+        value: Value,
     ) -> NativeResult {
-        let mut keys = InlineStack::new();
-        let mut value = root.deref().clone();
-        for key in tail {
-            value = match key {
-                PathKey::Property(key) => {
-                    let (resolved, target) = match &value {
-                        Value::Object(object) => {
-                            let resolved = self
-                                .property_key(object, &crate::path_update::property_name(&key))?;
-                            let target = crate::property_storage::read(object, &resolved)
-                                .unwrap_or_default();
-                            (resolved, target)
-                        }
-                        _ => (key, Value::Null),
-                    };
-                    keys.push(PathKey::Property(resolved));
-                    target
-                }
-                PathKey::Index(key) => {
-                    let value = match (&*value.deref(), &key) {
-                        (Value::Array(array), Some(key)) => {
-                            array.get(key).cloned().unwrap_or_default()
-                        }
-                        _ => Value::Null,
-                    };
-                    keys.push(PathKey::Index(key));
-                    value
-                }
-            };
-        }
         if value.is_reference() {
             return Ok(value);
         }
         let mut reference = Value::Reference(Rc::new(RefCell::new(value)));
         self.validate_property_mutation(
             root.deref().clone(),
-            &keys,
+            keys,
             &mut reference,
             Mutation::Bind,
         )?;
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         crate::path_update::update(
             &mut root,
-            &keys,
+            keys,
             reference.clone(),
             Mutation::Bind,
             &mut diagnostics.buffer,

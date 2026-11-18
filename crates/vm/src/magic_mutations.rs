@@ -1,7 +1,7 @@
 //! `$object->items['key'] = 1` writes through a getter's reference or object.
 //! A getter returning an array by value gives a detached temporary.
 
-use phera_bytecode::Reg;
+use phera_bytecode::{Reg, Step};
 use phera_extension_api::NativeError;
 use phera_value::Value;
 
@@ -11,54 +11,17 @@ use crate::magic_properties::PropertyHook;
 use crate::path_update::PathKey;
 use crate::{AccessPath, Vm};
 
+mod write_value;
+pub(crate) use write_value::WriteValue;
+
 pub(crate) enum PropertyMutation {
     Write(WriteValue, Binding),
     Unset,
 }
 
-pub(crate) struct WriteValue {
-    value: Value,
-    local: Option<AssignmentLocal>,
-}
-
-#[derive(Clone, Copy)]
-struct AssignmentLocal {
-    source: Reg,
-    destination: Reg,
-}
-
-impl WriteValue {
-    pub(crate) fn evaluated(value: Value) -> Self {
-        Self { value, local: None }
-    }
-
-    pub(crate) fn local(source: Reg, destination: Reg) -> Self {
-        Self {
-            value: Value::Null,
-            local: Some(AssignmentLocal {
-                source,
-                destination,
-            }),
-        }
-    }
-
-    /// Read a local only when the write reaches the final destination.
-    fn read(&mut self, vm: &mut Vm) -> &Value {
-        if let Some(local) = self.local.take() {
-            self.value = vm.read_local(local.source);
-            vm.set(local.destination, self.value.clone());
-        }
-        &self.value
-    }
-
-    fn into_value(mut self, vm: &mut Vm) -> Value {
-        self.read(vm);
-        self.value
-    }
-}
-
 enum OverloadedMutation {
-    Ordinary,
+    Ordinary(Reg, InlineStack<PathKey>),
+    Unresolved,
     Handled,
     Converted(Value),
     Detached(Value, Box<InlineStack<PathKey>>),
@@ -72,7 +35,25 @@ impl Vm {
     ) -> Result<Option<Value>, NativeError> {
         let plan = self.plan_magic_mutation(place, &mut operation).await?;
         match plan {
-            OverloadedMutation::Ordinary => match operation {
+            OverloadedMutation::Ordinary(register, keys) => match operation {
+                PropertyMutation::Write(value, binding) => {
+                    let mut value = value.into_value(self);
+                    let current = self.read_root(register, Missing::Silent);
+                    if !self.validate_property_mutation(
+                        current,
+                        &keys,
+                        &mut value,
+                        binding.into(),
+                    )? {
+                        self.write_resolved_place(place, register, keys, value, binding)?;
+                    }
+                    Ok(None)
+                }
+                PropertyMutation::Unset => {
+                    self.unset_resolved_place(register, &keys).map(|()| None)
+                }
+            },
+            OverloadedMutation::Unresolved => match operation {
                 PropertyMutation::Write(value, binding) => {
                     let value = value.into_value(self);
                     self.write_place(place, value, binding).map(|()| None)
@@ -153,23 +134,37 @@ impl Vm {
         operation: &mut PropertyMutation,
     ) -> Result<OverloadedMutation, NativeError> {
         let assignment_local = match operation {
-            PropertyMutation::Write(value, _) => value.local,
+            PropertyMutation::Write(value, _) => value.pending_local(),
             PropertyMutation::Unset => None,
         };
-        let Some(register) = self.base_register(place, Creation::Existing, Missing::Silent)? else {
-            return Ok(OverloadedMutation::Ordinary);
+        if place.steps()?.next().is_none() {
+            return Ok(OverloadedMutation::Unresolved);
+        }
+        let creation = match operation {
+            PropertyMutation::Write(..) => Creation::Create,
+            PropertyMutation::Unset => Creation::Existing,
+        };
+        let Some(register) = self.base_register(place, creation, Missing::Silent)? else {
+            return Ok(OverloadedMutation::Handled);
         };
         let mut cursor = self.read_root(register, Missing::Silent);
         let mut detached = None;
         let mut resolved = InlineStack::new();
         let mut steps = place.steps()?.peekable();
         while let Some(step) = steps.next() {
-            let (key, converted_name) = self.magic_path_key(step).await?;
             let current = cursor.deref().clone();
-            if converted_name {
-                detached = Some(cursor.clone());
-                resolved = InlineStack::new();
-            }
+            let key = match (step, &operation) {
+                (Step::Index(index), PropertyMutation::Unset) => {
+                    let Some(key) = self.unset_index_key(&current, index)? else {
+                        return Ok(OverloadedMutation::Handled);
+                    };
+                    PathKey::Index(Some(key))
+                }
+                (Step::Index(index), _) => {
+                    PathKey::Index(Some(self.write_index_key(&current, index)?))
+                }
+                _ => self.magic_path_key(step).await?,
+            };
             if let (PathKey::Property(name), Value::Object(object)) = (&key, &current) {
                 let class = self
                     .classes
@@ -223,11 +218,7 @@ impl Vm {
                             .await?;
                         if hook != PropertyHook::Get {
                             if let Some(local) = assignment_local {
-                                // __set receives a copy, but the assignment result
-                                // still comes from the caller's local after the call.
-                                let value =
-                                    self.read_defined_local(local.source).unwrap_or_default();
-                                self.set(local.destination, value);
+                                local.refresh_result(self);
                             }
                             return Ok(OverloadedMutation::Handled);
                         }
@@ -260,7 +251,15 @@ impl Vm {
                     detached = Some(current.clone());
                     resolved = InlineStack::new();
                 }
-                cursor = stored.unwrap_or_default();
+                cursor = if matches!(steps.peek(), Some(Step::Index(_) | Step::Append)) {
+                    let mutation = match operation {
+                        PropertyMutation::Write(_, binding) => (*binding).into(),
+                        PropertyMutation::Unset => Mutation::Unset,
+                    };
+                    self.prepare_property_dimension(object, &key, mutation)?
+                } else {
+                    stored.unwrap_or_default()
+                };
                 resolved.push(PathKey::Property(key));
             } else {
                 cursor = match (&key, &current) {
@@ -286,7 +285,7 @@ impl Vm {
         }
         Ok(match detached {
             Some(value) => OverloadedMutation::Detached(value, Box::new(resolved)),
-            None => OverloadedMutation::Ordinary,
+            None => OverloadedMutation::Ordinary(register, resolved),
         })
     }
 

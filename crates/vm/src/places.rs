@@ -121,16 +121,8 @@ impl Vm {
         };
         self.check_static_read(place, missing)?;
         let mut value = self.read_root(register, missing);
-        for key in self.keys(place)?.iter().cloned() {
-            if let PathKey::Property(key) = key {
-                value = self.read_property(value, key, missing)?;
-                continue;
-            }
-            let PathKey::Index(key) = key else {
-                return Err(internal_error!("path key"));
-            };
-            let key = key.ok_or_else(|| NativeError::error("Cannot use [] for reading"))?;
-            value = self.read_path_index(value, &key, missing)?;
+        for step in place.steps()? {
+            value = self.ordinary_step(value, step, missing)?;
         }
         Ok(value)
     }
