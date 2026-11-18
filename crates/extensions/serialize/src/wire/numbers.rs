@@ -16,6 +16,24 @@ pub(super) fn unsigned(digits: &[u8]) -> usize {
     })
 }
 
+/// Consume an ordinary unsigned field and its delimiter together. Long and
+/// signed fields keep the caller's PHP-specific overflow and offset behavior.
+pub(super) fn short_unsigned(bytes: &[u8], delimiter: &[u8]) -> Option<(usize, usize)> {
+    let mut value = 0usize;
+    for (index, &byte) in bytes.iter().take(19).enumerate() {
+        if byte.is_ascii_digit() {
+            value = value
+                .wrapping_mul(10)
+                .wrapping_add(usize::from(byte - b'0'));
+        } else if index != 0 && bytes[index..].starts_with(delimiter) {
+            return Some((value, index + delimiter.len()));
+        } else {
+            return None;
+        }
+    }
+    None
+}
+
 pub(super) fn signed(digits: &[u8]) -> (i64, bool) {
     let (negative, digits) = match digits {
         [b'-', digits @ ..] => (true, digits),
@@ -74,26 +92,29 @@ pub(super) fn float_end(input: &[u8], start: usize) -> Option<usize> {
 
 /// Single correctly rounded division suffices for decimal coefficients and
 /// divisors that are both representable exactly as binary64.
-pub(super) fn decimal(bytes: &[u8]) -> Option<f64> {
-    let (sign, bytes) = match bytes {
-        [b'-', rest @ ..] => (-1.0, rest),
-        [b'+', rest @ ..] => (1.0, rest),
-        _ => (1.0, bytes),
+pub(super) fn decimal(bytes: &[u8]) -> Option<(f64, usize)> {
+    let (sign, prefix) = match bytes.first() {
+        Some(b'-') => (-1.0, 1),
+        Some(b'+') => (1.0, 1),
+        _ => (1.0, 0),
     };
-    if bytes.len() > 15 {
-        return None;
-    }
     let mut coefficient = 0u64;
     let mut divider = 0u64;
-    for &digit in bytes {
+    let mut digits = false;
+    for (index, &digit) in bytes[prefix..].iter().take(16).enumerate() {
         match digit {
             b'0'..=b'9' => {
+                digits = true;
                 coefficient = coefficient * 10 + u64::from(digit - b'0');
                 divider *= 10;
             }
-            b'.' => divider = 1,
+            b'.' if divider == 0 => divider = 1,
+            b';' if digits => {
+                let value = coefficient as f64 / divider.max(1) as f64 * sign;
+                return Some((value, prefix + index));
+            }
             _ => return None,
         }
     }
-    Some(coefficient as f64 / divider.max(1) as f64 * sign)
+    None
 }
