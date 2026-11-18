@@ -4,12 +4,24 @@
 //! converts between the server's types and these, so the runtime can be used
 //! and tested without a socket.
 
+mod multipart;
 mod query;
 mod superglobals;
+mod uploads;
 
 use std::net::SocketAddr;
 
 pub(crate) use superglobals::define_superglobals;
+pub(crate) use uploads::{Form, receive as receive_form};
+
+/// The boundary of a `multipart/form-data` request that PHP would read as a
+/// form: only `POST` fills `$_POST` and `$_FILES`.
+pub(crate) fn form_boundary(request: &HttpRequest) -> Option<Vec<u8>> {
+    (request.method == "POST")
+        .then(|| request.header("Content-Type"))
+        .flatten()
+        .and_then(multipart::boundary)
+}
 
 /// One HTTP request, already read in full.
 #[derive(Debug, Clone)]
