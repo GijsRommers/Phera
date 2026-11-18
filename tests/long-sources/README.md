@@ -88,3 +88,9 @@ their length.
 - Concatenating at run time copies the growing string (`$s = $a . 'x' . 'y'
   ...`); only the leading run of string literals is joined while compiling.
 - Attributes are not supported by the compiler yet, at any length.
+- Memory: a 1,000,000-term chain peaks at 594 MB where PHP needs 86 MB, and a
+  1,000,000-statement file at 896 MB against 141 MB. A `Statement` is 336
+  bytes and an `Expression` 96, each in its own box; boxing the large
+  statement kinds (`foreach`, `for`, `try`) would shrink both.
+- A class with 100,000 properties compiles in linear time but takes minutes
+  to link at run time (`crates/vm/src/classes/`).
