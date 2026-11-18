@@ -12,6 +12,16 @@ impl Vm {
         property: &crate::classes::class::PropertyDefault,
         declaration_type: &phera_bytecode::Type,
     ) -> Result<Value, NativeError> {
+        self.coerce_property_in_mode(value, property, declaration_type, None)
+    }
+
+    pub(crate) fn coerce_property_in_mode(
+        &mut self,
+        value: Value,
+        property: &crate::classes::class::PropertyDefault,
+        declaration_type: &phera_bytecode::Type,
+        strict: Option<bool>,
+    ) -> Result<Value, NativeError> {
         if crate::types::accepts_as_is(&value, declaration_type) {
             return Ok(value);
         }
@@ -37,9 +47,10 @@ impl Vm {
                 return Ok(value.clone());
             }
         }
-        let strict = self
-            .current()
-            .is_some_and(|frame| frame.function().strict_types);
+        let strict = strict.unwrap_or_else(|| {
+            self.current()
+                .is_some_and(|frame| frame.function().strict_types)
+        });
         let actual = value.type_name();
         crate::types::coerce(value.clone(), declaration_type, strict.into(), self).map_err(|_| {
             NativeError::type_error(format!(

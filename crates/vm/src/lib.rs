@@ -126,6 +126,7 @@ mod reference_holders;
 mod references;
 mod request_callbacks;
 mod scope_intrinsics;
+mod serialization;
 mod spl_autoload;
 mod static_variables;
 mod string_comparison;

@@ -1,4 +1,6 @@
-use phera_extension_api::value::{float_repr, split_property_key};
+//! `var_export(1.0)` preserves the float type and honors `serialize_precision`.
+
+use phera_extension_api::value::{float_repr_with_precision, split_property_key};
 use phera_extension_api::{
     ArrayKey, Context, FunctionEntry, LocalFuture, NativeResult, Param, ParamType, Registry, Value,
     args,
@@ -52,8 +54,8 @@ fn quote(out: &mut Vec<u8>, bytes: &[u8]) {
 }
 
 /// A float as PHP source. `1.0` must not read back as the int `1`.
-fn float_source(float: f64) -> String {
-    let mut text = float_repr(float);
+fn float_source(float: f64, precision: i32) -> String {
+    let mut text = float_repr_with_precision(float, precision);
     let looks_like_int = text
         .bytes()
         .all(|byte| byte.is_ascii_digit() || byte == b'-');
@@ -90,14 +92,26 @@ impl Style for VarExport {
         true
     }
 
-    fn scalar(&mut self, out: &mut Vec<u8>, value: &Value, _place: Place) {
+    fn scalar(
+        &mut self,
+        out: &mut Vec<u8>,
+        value: &Value,
+        _place: Place,
+        context: &mut dyn Context,
+    ) {
         match value {
             Value::Bool(flag) => out.extend_from_slice(flag.to_string().as_bytes()),
             // The literal 9223372036854775808 is a float, so PHP writes the
             // smallest int as an expression.
             Value::Int(i64::MIN) => out.extend_from_slice(b"-9223372036854775807-1"),
             Value::Int(int) => out.extend_from_slice(int.to_string().as_bytes()),
-            Value::Float(float) => out.extend_from_slice(float_source(*float).as_bytes()),
+            Value::Float(float) => out.extend_from_slice(
+                float_source(
+                    *float,
+                    phera_extension_api::serialization::precision(context),
+                )
+                .as_bytes(),
+            ),
             Value::String(string) => quote(out, string.as_bytes()),
             // A resource has no source form.
             Value::Null
