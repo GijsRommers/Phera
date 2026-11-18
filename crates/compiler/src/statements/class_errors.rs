@@ -89,11 +89,7 @@ impl Compiler<'_> {
         let line = self.lines.line(method.name.span.start);
         let name = &method.name.name;
         let is_interface = declaration.kind == ast::ClassKind::Interface;
-        let message = if matches!(
-            name.to_ascii_lowercase().as_str(),
-            "__construct" | "__invoke"
-        ) && method.modifiers.is_static
-        {
+        let message = if name.eq_ignore_ascii_case("__construct") && method.modifiers.is_static {
             Some(format!("Method {class}::{name}() cannot be static"))
         } else if !is_interface && method.body.is_none() && !method.modifiers.is_abstract {
             Some(format!(

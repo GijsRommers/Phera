@@ -11,8 +11,8 @@
 use std::rc::Rc;
 
 use phera_extension_api::{
-    ClassEntry, ClassKind, Context, MethodEntry, NativeError, NativeResult, Object, Param,
-    ParamType, Value, args,
+    ClassEntry, ClassHooks, ClassKind, Context, MethodEntry, NativeClone, NativeError,
+    NativeResult, Object, Param, ParamType, Value, args,
 };
 
 use crate::engines::{self, Engine, XOSHIRO_JUMP, XOSHIRO_LONG_JUMP, fill, secure_u64};
@@ -73,8 +73,15 @@ fn store(this: Option<&Rc<Object>>, engine: Engine) -> NativeResult {
     Ok(Value::Null)
 }
 
+const ENGINE_HOOKS: ClassHooks = ClassHooks {
+    clone: Some(NativeClone::copy::<Engine>()),
+    property_access: Some(&ENGINE_PROPERTIES),
+    ..ClassHooks::EMPTY
+};
+
 /// `final class Random\Engine\Mt19937`
 const MT19937: ClassEntry = ClassEntry {
+    hooks: Some(&ENGINE_HOOKS),
     kind: ClassKind::FinalClass,
     interfaces: &["Random\\Engine"],
     methods: &[
@@ -115,6 +122,7 @@ fn mt19937_construct(
 
 /// `final class Random\Engine\PcgOneseq128XslRr64`
 const PCG_ONESEQ_128_XSL_RR_64: ClassEntry = ClassEntry {
+    hooks: Some(&ENGINE_HOOKS),
     kind: ClassKind::FinalClass,
     interfaces: &["Random\\Engine"],
     methods: &[
@@ -177,6 +185,7 @@ fn pcg_jump(_: &mut dyn Context, this: Option<&Rc<Object>>, arguments: &[Value])
 
 /// `final class Random\Engine\Xoshiro256StarStar`
 const XOSHIRO_256_STAR_STAR: ClassEntry = ClassEntry {
+    hooks: Some(&ENGINE_HOOKS),
     kind: ClassKind::FinalClass,
     interfaces: &["Random\\Engine"],
     methods: &[
@@ -253,8 +262,27 @@ fn with_xoshiro(this: Option<&Rc<Object>>, polynomial: [u64; 4]) -> NativeResult
 
 /// `final class Random\Engine\Secure`: the operating system's generator.
 const SECURE: ClassEntry = ClassEntry {
+    hooks: Some(&ClassHooks {
+        clone: Some(NativeClone::Forbidden),
+        ..ClassHooks::EMPTY
+    }),
     kind: ClassKind::FinalClass,
     interfaces: &["Random\\CryptoSafeEngine"],
     methods: &[GENERATE],
     ..ClassEntry::class("Random\\Engine\\Secure")
 };
+
+/// PHP's seeded native engines disallow dynamic properties, including clone-with updates.
+const ENGINE_PROPERTIES: phera_extension_api::NativePropertyAccess =
+    phera_extension_api::NativePropertyAccess {
+        read: |_, _, _, _| Ok(None),
+        mutate: |_, object, name, operation| match operation {
+            phera_extension_api::NativePropertyMutation::Assign(_) => {
+                Err(NativeError::error(format!(
+                    "Cannot create dynamic property {}::${name}",
+                    object.class.name()
+                )))
+            }
+            _ => Ok(false),
+        },
+    };

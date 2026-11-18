@@ -49,6 +49,7 @@ mod constant_table;
 mod constants;
 mod context;
 mod control_flow;
+mod debug_info;
 mod declaration_diagnostics;
 mod default_autoload;
 mod diagnostic_reporter;
@@ -94,6 +95,13 @@ mod iteration;
 mod iterator_instructions;
 mod iterators;
 mod locals;
+mod magic_method;
+mod magic_mutations;
+mod magic_path_instructions;
+mod magic_places;
+mod magic_properties;
+mod magic_property_write;
+mod magic_references;
 mod native_diagnostics;
 mod object_comparison;
 mod object_iteration;
@@ -101,6 +109,7 @@ mod operators;
 mod ops;
 mod output;
 mod path;
+mod path_dimensions;
 mod path_instructions;
 mod path_update;
 mod place_mutation;
@@ -109,13 +118,16 @@ mod properties;
 mod property_mutation;
 mod property_sites;
 mod property_storage;
+mod property_strings;
 mod property_targets;
 mod reference_holders;
 mod references;
 mod scope_intrinsics;
 mod spl_autoload;
 mod static_variables;
+mod string_comparison;
 mod string_offsets;
+mod stringable;
 mod traversable_foreach;
 mod traversable_unpack;
 mod traversal;
@@ -148,6 +160,11 @@ pub const DEFAULT_FRAME_LIMIT: usize = 250_000;
 /// One request interpreter; PHP calls use heap frames rather than Rust recursion.
 pub struct Vm {
     classes: classes::ClassTable,
+    native_callback_sites: Vec<error_traces::NativeCallbackSite>,
+    debug_objects: Vec<u32>,
+    property_guards: Vec<magic_properties::PropertyGuard>,
+    unset_typed_properties: std::collections::HashMap<u32, magic_properties::UnsetProperties>,
+    clone_scopes: Vec<classes::cloning::CloneScope>,
     closure_captures: Vec<closures::PendingCapture>,
     /// Pure defaults retain lexical class scope while running outside a method frame.
     initializer_scope: Option<String>,
@@ -205,6 +222,11 @@ impl Vm {
             classes: classes::ClassTable::native(&registry),
             autoload: Default::default(),
             include_path: None,
+            native_callback_sites: Vec::new(),
+            debug_objects: Vec::new(),
+            property_guards: Vec::new(),
+            unset_typed_properties: Default::default(),
+            clone_scopes: Vec::new(),
             property_references: Default::default(),
             closure_captures: Vec::new(),
             initializer_scope: None,

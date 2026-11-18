@@ -1,10 +1,14 @@
 //! Borrowed arithmetic operands and amortised in-place string assignment.
 
-use phera_bytecode::{BinaryOp, CastKind, IncDec, Reg, UnaryOp};
+use crate::calls::execution_loop::BatchExit;
+use phera_bytecode::{BinaryOp, CastKind, IncDec, Instruction, Reg, UnaryOp};
 use phera_extension_api::{Context, NativeError, PropertyPurpose};
-use phera_value::{Value, to_php_string};
+use phera_value::{StringComparisonStep, Value, to_php_string};
 
 use crate::integer_arithmetic::{OverflowOperation, overflow_value};
+use crate::string_comparison::{
+    PendingComparison, begin_comparison, comparison_value, needs_comparison_step,
+};
 use crate::{Vm, ops};
 
 impl Vm {
@@ -34,49 +38,85 @@ impl Vm {
         &mut self,
         operator: BinaryOp,
         destination: Reg,
-        left: Reg,
-        right: Reg,
-    ) -> Result<(), NativeError> {
+        lhs: Reg,
+        rhs: Reg,
+    ) -> Result<Option<BatchExit>, NativeError> {
         let frame = self
             .current()
             .ok_or_else(|| internal_error!("operator frame"))?;
         let left = frame
             .slots(&self.registers)
-            .get(left.index())
+            .get(lhs.index())
             .and_then(Option::as_ref);
         let right = frame
             .slots(&self.registers)
-            .get(right.index())
+            .get(rhs.index())
             .and_then(Option::as_ref);
         let null = Value::Null;
         let left = left.unwrap_or(&null).deref();
         let right = right.unwrap_or(&null).deref();
-        let fast = fast_binary(operator, &left, &right);
-        if fast.is_none()
-            && self.classes.has_property_views
-            && matches!(
-                (&*left, &*right),
-                (Value::Array(_), Value::Array(_)) | (Value::Object(_), Value::Object(_))
-            )
-            && crate::object_comparison::is_comparison(operator)
-        {
-            let (lhs, rhs) = ((*left).clone(), (*right).clone());
-            drop(left);
-            drop(right);
-            let result = self.compare_with_property_views(operator, &lhs, &rhs)?;
-            self.set(destination, result);
-            return Ok(());
-        }
-        let result = fast.map(Ok).unwrap_or_else(|| {
-            ops::binary(operator, &left, &right, self.diagnostic_reporter.operator())
-        });
+        let result = match fast_binary(operator, &left, &right) {
+            Some(value) => Ok(value),
+            None if needs_comparison_step(operator, &left, &right) => {
+                if self.classes.has_property_views
+                    && matches!(
+                        (&*left, &*right),
+                        (Value::Array(_), Value::Array(_)) | (Value::Object(_), Value::Object(_))
+                    )
+                {
+                    let (a, b) = ((*left).clone(), (*right).clone());
+                    drop(left);
+                    drop(right);
+                    let step = self.step_comparison(|diagnostics, objects| {
+                        begin_comparison(operator, &a, &b, diagnostics, objects)
+                    })?;
+                    return Ok(self.store_comparison(step, operator, destination));
+                }
+                let step = begin_comparison(
+                    operator,
+                    &left,
+                    &right,
+                    self.diagnostic_reporter.operator(),
+                    &mut crate::object_comparison::compare_objects,
+                );
+                match step {
+                    Ok(StringComparisonStep::Complete(order)) => {
+                        Ok(comparison_value(operator, order))
+                    }
+                    Ok(StringComparisonStep::Cast(cast)) => {
+                        drop(left);
+                        drop(right);
+                        if self.diagnostic_reporter.has_pending() {
+                            self.flush_operator_diagnostics();
+                        }
+                        return Ok(self.store_comparison(
+                            StringComparisonStep::Cast(cast),
+                            operator,
+                            destination,
+                        ));
+                    }
+                    Err(error) => Err(error),
+                }
+            }
+            None => {
+                if operator == BinaryOp::Concat && (left.is_object() || right.is_object()) {
+                    return Ok(Some(BatchExit::Instruction(Instruction::Binary {
+                        dst: destination,
+                        op: operator,
+                        lhs,
+                        rhs,
+                    })));
+                }
+                ops::binary(operator, &left, &right, self.diagnostic_reporter.operator())
+            }
+        };
         drop(left);
         drop(right);
         if self.diagnostic_reporter.has_pending() {
             self.flush_operator_diagnostics();
         }
         self.set(destination, result?);
-        Ok(())
+        Ok(None)
     }
 
     /// Append directly to strings, including referenced strings, to retain amortized growth.
@@ -156,6 +196,25 @@ pub(crate) fn fast_binary(operator: BinaryOp, left: &Value, right: &Value) -> Op
 
 impl Vm {
     /// Apply PHP conversions and emit their diagnostics before publishing the result.
+    fn store_comparison(
+        &mut self,
+        step: StringComparisonStep,
+        operator: BinaryOp,
+        destination: Reg,
+    ) -> Option<BatchExit> {
+        match step {
+            StringComparisonStep::Complete(order) => {
+                self.set(destination, comparison_value(operator, order));
+                None
+            }
+            StringComparisonStep::Cast(cast) => Some(BatchExit::Compare(PendingComparison {
+                cast,
+                operator,
+                destination,
+            })),
+        }
+    }
+
     pub(crate) fn execute_cast(
         &mut self,
         to: phera_bytecode::CastKind,
@@ -163,19 +222,6 @@ impl Vm {
         source: Reg,
     ) -> Result<(), NativeError> {
         let value = self.get(source);
-        if to == CastKind::String
-            && let Value::Object(object) = &value
-            && self
-                .classes
-                .for_object(object)
-                .is_some_and(|class| class.is_throwable)
-        {
-            let value = self
-                .throwable_method_result("__toString", object)
-                .unwrap_or_default();
-            self.set(destination, value);
-            return Ok(());
-        }
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let result = match to {
             CastKind::Bool => {
@@ -276,7 +322,7 @@ impl Vm {
         operator: BinaryOp,
         local: Reg,
         source: Reg,
-    ) -> Result<(), NativeError> {
+    ) -> Result<Option<BatchExit>, NativeError> {
         // A compiler-elided local snapshot must retain its undefined-variable notice.
         if self
             .current()
@@ -291,11 +337,19 @@ impl Vm {
             .and_then(Option::as_ref)
             .is_some_and(Value::is_reference);
         if operator != phera_bytecode::BinaryOp::Concat && !reference {
-            self.execute_binary(operator, local, local, source)?;
-            return Ok(());
+            return self.execute_binary(operator, local, local, source);
         }
-        if operator == phera_bytecode::BinaryOp::Concat && self.assign_concat(local, source)? {
-            return Ok(());
+        if operator == BinaryOp::Concat {
+            if self.concat_uses_object(local, source) {
+                return Ok(Some(BatchExit::Instruction(Instruction::AssignOp {
+                    op: operator,
+                    local,
+                    src: source,
+                })));
+            }
+            if self.assign_concat(local, source)? {
+                return Ok(None);
+            }
         }
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let value = ops::binary(
@@ -306,7 +360,7 @@ impl Vm {
         );
         drop(diagnostics);
         self.assign_local(local, value?)?;
-        Ok(())
+        Ok(None)
     }
 
     /// Implements PHP Unary semantics outside the dispatch loop.
