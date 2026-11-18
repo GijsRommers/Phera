@@ -10,6 +10,7 @@ pub(crate) enum ArgumentOrigin {
     #[default]
     Php,
     Callback,
+    Attribute,
 }
 
 /// Explicit Closure::__invoke is an internal wrapper, even when called from PHP syntax.
@@ -34,7 +35,7 @@ impl ArgumentOrigin {
     /// Internal callback TypeErrors omit a PHP call-site suffix.
     pub(crate) fn location_suffix(self, file: &str, line: usize) -> String {
         match self {
-            Self::Php => format!(", called in {file} on line {line}"),
+            Self::Php | Self::Attribute => format!(", called in {file} on line {line}"),
             Self::Callback => String::new(),
         }
     }

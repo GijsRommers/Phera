@@ -56,9 +56,18 @@ pub struct Initializer {
 #[derive(Clone, Debug)]
 pub struct AttributeInfo {
     pub validation_error: Option<String>,
+    pub site: Option<AttributeSite>,
     pub name: String,
     pub arguments: Vec<(Option<String>, AttributeValue)>,
     pub target: AttributeTarget,
+}
+
+/// The constructor of an attribute sees the declaration as its PHP caller.
+#[derive(Clone, Debug)]
+pub struct AttributeSite {
+    pub file: String,
+    pub line: usize,
+    pub strict_types: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -154,6 +163,14 @@ pub trait ReflectionContext {
         &mut self,
         class: &str,
         args: Option<PhpArray>,
+    ) -> LocalFuture<'_, NativeResult>;
+
+    /// Attribute construction applies the declaration's scalar typing and location.
+    fn reflect_construct_attribute(
+        &mut self,
+        class: &str,
+        args: PhpArray,
+        site: Option<AttributeSite>,
     ) -> LocalFuture<'_, NativeResult>;
 
     /// Evaluates one compiled declaration expression in its lexical scope.

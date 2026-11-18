@@ -86,6 +86,8 @@ impl Compiler<'_> {
                     .0;
                 compiled.push(phera_bytecode::reflection::Attribute {
                     name,
+                    line: self.lines.line(attribute.span.start),
+                    strict_types: self.function.strict_types,
                     validation_error: None,
                     arguments,
                 });

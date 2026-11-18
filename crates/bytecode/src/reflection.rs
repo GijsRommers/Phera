@@ -46,6 +46,8 @@ pub struct InitializerSource {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Attribute {
     pub name: String,
+    pub line: usize,
+    pub strict_types: bool,
     pub validation_error: Option<String>,
     pub arguments: Vec<AttributeArgument>,
 }

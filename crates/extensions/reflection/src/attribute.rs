@@ -84,6 +84,7 @@ pub(crate) async fn class_attributes(
     if class.name == "stdClass" {
         let marker = AttributeInfo {
             validation_error: None,
+            site: None,
             name: "AllowDynamicProperties".into(),
             target: AttributeTarget::Class,
             arguments: Vec::new(),
@@ -95,6 +96,7 @@ pub(crate) async fn class_attributes(
     {
         let marker = AttributeInfo {
             validation_error: None,
+            site: None,
             name: "Attribute".into(),
             target: AttributeTarget::Class,
             arguments: vec![(None, AttributeValue::Literal(Value::Int(flags)))],
@@ -201,26 +203,7 @@ fn instantiate(
         {
             flags
         } else if let Some(marker) = marker {
-            let marker_args = arguments(context, marker).await?;
-            let flags = marker_args
-                .get(&ArrayKey::Int(0))
-                .or_else(|| marker_args.get(&ArrayKey::str("flags")));
-            match flags {
-                Some(Value::Int(flags)) => *flags,
-                None => 127,
-                Some(_) => {
-                    let value = engine(context)?
-                        .reflect_construct("Attribute", Some(marker_args))
-                        .await?;
-                    match value {
-                        Value::Object(object) => match object.get(&ArrayKey::str("flags")) {
-                            Some(Value::Int(flags)) => flags,
-                            _ => 127,
-                        },
-                        _ => 127,
-                    }
-                }
-            }
+            marker_flags(context, marker).await?
         } else {
             return Err(NativeError::error(format!(
                 "Attempting to use non-attribute class \"{name}\" as attribute"
@@ -233,19 +216,53 @@ fn instantiate(
                 attr.info.target.name()
             )));
         }
+        if let Some(error) = &attr.info.validation_error {
+            return Err(NativeError::error(error.clone()));
+        }
         if attr.repeated && flags & REPEATABLE == 0 {
             return Err(NativeError::error(format!(
                 "Attribute \"{name}\" must not be repeated"
             )));
         }
-        if let Some(error) = &attr.info.validation_error {
-            return Err(NativeError::error(error.clone()));
-        }
         let values = arguments(context, &attr.info).await?;
         engine(context)?
-            .reflect_construct(&class.name, Some(values))
+            .reflect_construct_attribute(&class.name, values, attr.info.site.clone())
             .await
     })
+}
+
+/// Zend reads only the marker's first stored argument and requires an integer.
+async fn marker_flags(
+    context: &mut dyn Context,
+    marker: &AttributeInfo,
+) -> Result<i64, NativeError> {
+    let Some((_, argument)) = marker.arguments.first() else {
+        return Ok(127);
+    };
+    let value = argument_value(context, argument).await?;
+    let Value::Int(flags) = value else {
+        let actual = match value {
+            Value::Bool(value) => value.to_string(),
+            other => other.type_name(),
+        };
+        return Err(NativeError::error(format!(
+            "Attribute::__construct(): Argument #1 ($flags) must be of type int, {actual} given"
+        )));
+    };
+    let flags = flags as u32;
+    if flags & !255 != 0 {
+        return Err(NativeError::error("Invalid attribute flags specified"));
+    }
+    Ok(i64::from(flags))
+}
+
+async fn argument_value(context: &mut dyn Context, argument: &AttributeValue) -> NativeResult {
+    match argument {
+        AttributeValue::Expression(initializer) => {
+            engine(context)?.reflect_evaluate(initializer.clone()).await
+        }
+        AttributeValue::Literal(value) => Ok(value.clone()),
+    }
 }
 
 async fn arguments(
@@ -254,14 +271,7 @@ async fn arguments(
 ) -> Result<PhpArray, NativeError> {
     let mut result = PhpArray::new();
     for (name, argument) in &attribute.arguments {
-        let value = match argument {
-            AttributeValue::Expression(initializer) => {
-                engine(context)?
-                    .reflect_evaluate(initializer.clone())
-                    .await?
-            }
-            AttributeValue::Literal(value) => value.clone(),
-        };
+        let value = argument_value(context, argument).await?;
         match name {
             Some(name) => {
                 result.insert(ArrayKey::str(name.as_str()), value);

@@ -222,8 +222,14 @@ impl Context for Vm {
     }
 
     fn strict_types(&self) -> bool {
-        self.argument_origin == crate::calls::callback_binding::ArgumentOrigin::Php
-            && self.current().is_some_and(|f| f.function().strict_types)
+        use crate::calls::callback_binding::ArgumentOrigin;
+        match self.argument_origin {
+            ArgumentOrigin::Php => self.current().is_some_and(|f| f.function().strict_types),
+            ArgumentOrigin::Attribute => self
+                .attribute_call_site()
+                .is_some_and(|site| site.strict_types),
+            ArgumentOrigin::Callback => false,
+        }
     }
 
     /// Native callbacks await the heap interpreter with a separate bound on Rust nesting.

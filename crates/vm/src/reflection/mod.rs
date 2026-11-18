@@ -4,14 +4,15 @@ use std::rc::Rc;
 
 use phera_bytecode::Visibility;
 use phera_extension_api::reflection::{
-    AttributeInfo, AttributeTarget, ClassInfo, ExtensionInfo, Initializer, MemberInfo, MemberKind,
-    PropertyRead, ReflectedClassKind, ReflectionContext, SourceInfo,
+    AttributeInfo, AttributeSite, AttributeTarget, ClassInfo, ExtensionInfo, Initializer,
+    MemberInfo, MemberKind, PropertyRead, ReflectedClassKind, ReflectionContext, SourceInfo,
 };
 use phera_extension_api::{LocalFuture, NativeError, NativeResult};
 use phera_value::{Object, PhpArray, Value};
 
 use crate::Vm;
 use crate::calls::call_state::{CallTarget, Callee};
+use crate::calls::callback_binding::ArgumentOrigin;
 use crate::classes::{Class, Invocation, Method, MethodBody, MethodContext};
 use crate::code_table::FunctionIndex;
 
@@ -21,6 +22,14 @@ mod functions;
 mod initializers;
 mod members;
 mod properties;
+
+enum Construction {
+    Reflection,
+    Attribute(Option<AttributeSite>),
+}
+
+#[derive(Default)]
+struct AttributeCallSite(Option<AttributeSite>);
 
 pub(super) fn exception(message: impl Into<String>) -> NativeError {
     NativeError::throw("ReflectionException", message)
@@ -194,7 +203,22 @@ impl ReflectionContext for Vm {
         let class = self.classes.get(class);
         Box::pin(async move {
             let class = class.ok_or_else(|| exception("Class does not exist"))?;
-            self.reflection_construct(class, args).await
+            self.reflection_construct(class, args, Construction::Reflection)
+                .await
+        })
+    }
+
+    fn reflect_construct_attribute(
+        &mut self,
+        class: &str,
+        args: PhpArray,
+        site: Option<AttributeSite>,
+    ) -> LocalFuture<'_, NativeResult> {
+        let class = self.classes.get(class);
+        Box::pin(async move {
+            let class = class.ok_or_else(|| exception("Class does not exist"))?;
+            self.reflection_construct(class, Some(args), Construction::Attribute(site))
+                .await
         })
     }
 
@@ -242,6 +266,14 @@ impl ReflectionContext for Vm {
 }
 
 impl Vm {
+    pub(crate) fn attribute_call_site(&self) -> Option<&AttributeSite> {
+        if self.argument_origin == ArgumentOrigin::Attribute {
+            self.state.get::<AttributeCallSite>()?.0.as_ref()
+        } else {
+            None
+        }
+    }
+
     fn reflection_class_info(&self, class: &Class) -> ClassInfo {
         use crate::classes::class::ClassOrigin;
         let kind = match class.kind {
@@ -318,10 +350,16 @@ impl Vm {
         class: Option<&str>,
     ) -> Vec<AttributeInfo> {
         let first = self.code.facts(unit_function).unit_first;
+        let file = &self.code.unit(unit_function).file;
         attributes
             .iter()
             .map(|attribute| AttributeInfo {
                 validation_error: attribute.validation_error.clone(),
+                site: Some(AttributeSite {
+                    file: file.clone(),
+                    line: attribute.line,
+                    strict_types: attribute.strict_types,
+                }),
                 name: attribute.name.clone(),
                 arguments: attribute
                     .arguments
@@ -342,6 +380,7 @@ impl Vm {
         &mut self,
         class: Rc<Class>,
         args: Option<PhpArray>,
+        construction: Construction,
     ) -> NativeResult {
         use phera_extension_api::Context;
         let args = match args {
@@ -367,6 +406,16 @@ impl Vm {
         let constructor = class.constructor.clone();
         match &constructor {
             Some(method) if method.visibility != Visibility::Public => {
+                if matches!(construction, Construction::Attribute(_)) {
+                    let visibility = match method.visibility {
+                        Visibility::Private => "private",
+                        _ => "protected",
+                    };
+                    return Err(NativeError::error(format!(
+                        "Call to {visibility} {}::__construct() from global scope",
+                        method.declaring
+                    )));
+                }
                 if method.declaring == class.name || method.visibility == Visibility::Protected {
                     return Err(exception(format!(
                         "Access to non-public constructor of class {}",
@@ -383,7 +432,7 @@ impl Vm {
                     method.declaring, class.name
                 )));
             }
-            None if !args.is_empty() => {
+            None if !args.is_empty() && matches!(construction, Construction::Reflection) => {
                 return Err(exception(format!(
                     "Class {} does not have a constructor, so you cannot pass any constructor arguments",
                     class.name
@@ -397,7 +446,20 @@ impl Vm {
                 .get(&method.declaring)
                 .ok_or_else(|| exception("Constructor scope does not exist"))?;
             let callee = self.reflection_callee(class, scope, method, Some(object.clone()));
-            self.invoke_array_callback(callee, &args).await?;
+            if let Construction::Attribute(Some(site)) = construction {
+                let previous = self
+                    .state
+                    .get_or_default::<AttributeCallSite>()
+                    .0
+                    .replace(site);
+                let result = self
+                    .invoke_array_callback_origin(callee, &args, ArgumentOrigin::Attribute)
+                    .await;
+                self.state.get_or_default::<AttributeCallSite>().0 = previous;
+                result?;
+            } else {
+                self.invoke_array_callback(callee, &args).await?;
+            }
         }
         Ok(created)
     }

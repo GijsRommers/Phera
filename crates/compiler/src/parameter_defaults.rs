@@ -69,7 +69,7 @@ pub(crate) fn constant_expression(expression: &Expression) -> bool {
 /// Constructors are allowed in defaults for parameters and in attribute arguments.
 pub(crate) fn initializer_error(
     expression: &Expression,
-    permits_new: bool,
+    allow_dynamic: bool,
 ) -> Option<&'static str> {
     use ExpressionKind::*;
     use phera_ast::{Arguments, MemberName, NewTarget};
@@ -78,20 +78,25 @@ pub(crate) fn initializer_error(
     while let Some(expression) = pending.pop() {
         match &expression.kind {
             Literal(_) | Name(_) | MagicConstant(_) => {}
-            ClassConstant {
-                class,
-                name: MemberName::Identifier(member),
-            } => match &class.kind {
-                Name(name) if name.text.eq_ignore_ascii_case("static") => {
-                    return Some(if member.name.eq_ignore_ascii_case("class") {
-                        "static::class cannot be used for compile-time class name resolution"
-                    } else {
-                        "\"static::\" is not allowed in compile-time constants"
-                    });
+            ClassConstant { class, name } => {
+                match &class.kind {
+                    Name(class) if class.text.eq_ignore_ascii_case("static") => {
+                        return Some(
+                            if matches!(name, MemberName::Identifier(member) if member.name.eq_ignore_ascii_case("class"))
+                            {
+                                "static::class cannot be used for compile-time class name resolution"
+                            } else {
+                                "\"static::\" is not allowed in compile-time constants"
+                            },
+                        );
+                    }
+                    Name(_) => {}
+                    _ => return Some("Cannot use dynamic class name in constant expression"),
                 }
-                Name(_) => {}
-                _ => return Some("Cannot use dynamic class name in constant expression"),
-            },
+                if let MemberName::Expression(name) = name {
+                    pending.push(name);
+                }
+            }
             Call {
                 callee,
                 arguments: Arguments::FirstClassCallable,
@@ -108,7 +113,7 @@ pub(crate) fn initializer_error(
             New {
                 class: NewTarget::Class(class),
                 arguments: Arguments::List(arguments),
-            } if permits_new && matches!(class.kind, Name(_)) => {
+            } if allow_dynamic && matches!(class.kind, Name(_)) => {
                 if matches!(&class.kind, Name(name) if name.text.eq_ignore_ascii_case("static")) {
                     return Some("\"static\" is not allowed in compile-time constants");
                 }
@@ -130,6 +135,12 @@ pub(crate) fn initializer_error(
             }
             Unary { operator, operand } if *operator != phera_ast::UnaryOperator::ErrorSuppress => {
                 pending.push(operand)
+            }
+            Cast { kind, operand } => {
+                if !allow_dynamic && *kind == phera_ast::CastKind::Object {
+                    return Some("Object casts are not supported in this context");
+                }
+                pending.push(operand);
             }
             Ternary {
                 condition,
