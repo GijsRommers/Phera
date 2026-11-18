@@ -286,7 +286,13 @@ pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
     tables.unit.functions = source
         .functions
         .into_iter()
-        .map(|function| tables.function(function))
+        .map(|mut function| {
+            tables
+                .unit
+                .function_metadata
+                .push(std::mem::take(&mut function.metadata));
+            tables.function(function)
+        })
         .collect();
     tables.unit.hoisted = source
         .hoisted
@@ -297,6 +303,7 @@ pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
         .classes
         .into_iter()
         .map(|declaration| phera_bytecode::ClassDeclaration {
+            metadata: declaration.metadata,
             line: declaration.line,
             name: declaration.name,
             parent: declaration
@@ -316,6 +323,7 @@ pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
                 .constants
                 .into_iter()
                 .map(|constant| phera_bytecode::ClassConstant {
+                    metadata: constant.metadata,
                     name: tables.name(&constant.name),
                     visibility: constant.visibility,
                     is_final: constant.is_final,
@@ -327,6 +335,8 @@ pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
                 .properties
                 .into_iter()
                 .map(|property| phera_bytecode::PropertyDeclaration {
+                    metadata: property.metadata,
+                    promoted: property.promoted,
                     name: tables.name(&property.name),
                     visibility: property.visibility,
                     is_static: property.is_static,

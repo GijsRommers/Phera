@@ -131,6 +131,7 @@ pub struct Lexer<'src> {
     /// apart from `$obj->__halt_compiler`.
     previous: TokenKind,
     tokenizer: bool,
+    retain_doc_comments: bool,
     short_open_tags: bool,
     diagnostics: Option<diagnostics::ScannerDiagnostics>,
 }
@@ -151,6 +152,7 @@ impl<'src> Lexer<'src> {
             halt_countdown: None,
             previous: TokenKind::Eof,
             tokenizer: false,
+            retain_doc_comments: false,
             short_open_tags: false,
             diagnostics: None,
         }
@@ -163,6 +165,12 @@ impl<'src> Lexer<'src> {
             modes: vec![Mode::Php],
             ..Self::new(source)
         }
+    }
+
+    /// Keep documentation comments while still using the parser scanner.
+    pub fn with_doc_comments(mut self) -> Self {
+        self.retain_doc_comments = true;
+        self
     }
 
     /// Collect PHP scanner warnings and deprecations with source offsets.
@@ -339,7 +347,21 @@ impl<'src> Lexer<'src> {
                 return Ok(self.token(kind, start));
             }
         } else {
-            self.position = self.trivia_end(self.position, property)?;
+            let mut start = self.position;
+            while let Some((kind, end, complete)) = self.trivia_at(start, property) {
+                if !complete {
+                    return Err(LexError {
+                        kind: LexErrorKind::UnterminatedComment,
+                        span: Span::new(start, end),
+                    });
+                }
+                if self.retain_doc_comments && kind == TokenKind::DocComment {
+                    self.position = end;
+                    return Ok(self.token(kind, start));
+                }
+                start = end;
+            }
+            self.position = start;
         }
 
         let start = self.position;

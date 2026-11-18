@@ -25,6 +25,7 @@ const MAX_DEPTH: u32 = 1000;
 pub(crate) struct Parser<'src> {
     pub(crate) source: &'src [u8],
     tokens: Vec<Token>,
+    doc_comments: Vec<(usize, Span)>,
     pos: usize,
     /// The lexer error that stopped lexing early, if any. A synthetic `Eof`
     /// token sits at the end of `tokens` in that case.
@@ -39,18 +40,31 @@ pub(crate) struct Parser<'src> {
 
 impl<'src> Parser<'src> {
     pub(crate) fn new(source: &'src [u8], collect_diagnostics: bool) -> (Self, ScanReport) {
-        let lexer = Lexer::new_bytes(source);
+        let lexer = Lexer::new_bytes(source).with_doc_comments();
         let mut lexer = if collect_diagnostics {
             lexer.with_diagnostics(ScanMode::Parsed)
         } else {
             lexer
         };
         let mut tokens = Vec::new();
+        let mut doc_comments = Vec::new();
+        let mut pending_doc_comment = None;
         let mut lex_error = None;
 
         loop {
             match lexer.next_token() {
                 Ok(token) => {
+                    match token.kind {
+                        TokenKind::DocComment => {
+                            pending_doc_comment = Some(token.span);
+                            continue;
+                        }
+                        TokenKind::Whitespace | TokenKind::Comment => continue,
+                        _ => {}
+                    }
+                    if let Some(comment) = pending_doc_comment.take() {
+                        doc_comments.push((token.span.start, comment));
+                    }
                     let eof = token.kind == TokenKind::Eof;
                     tokens.push(token);
                     if eof {
@@ -71,6 +85,7 @@ impl<'src> Parser<'src> {
         let parser = Self {
             source,
             tokens,
+            doc_comments,
             pos: 0,
             lex_error,
             prev_end: 0,
@@ -169,6 +184,16 @@ impl<'src> Parser<'src> {
     /// The kind of the token three positions ahead.
     pub(crate) fn kind4(&self) -> TokenKind {
         self.tokens[(self.pos + 3).min(self.tokens.len() - 1)].kind
+    }
+
+    /// Doc comment immediately before this token, if the scanner saw one.
+    pub(crate) fn doc_comment(&self) -> Option<Span> {
+        let offset = self.peek_span().start;
+        let index = self
+            .doc_comments
+            .binary_search_by_key(&offset, |(start, _)| *start)
+            .ok()?;
+        self.doc_comments.get(index).map(|(_, comment)| *comment)
     }
 
     pub(crate) fn peek_span(&self) -> Span {

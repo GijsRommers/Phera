@@ -33,11 +33,12 @@ impl Compiler<'_> {
             format!("{}\\{}", self.namespace, identifier.name)
         };
         self.validate_class_declaration(declaration, &name)?;
-        if declaration.attributes.iter().any(|attribute| {
-            attribute.name.text.trim_start_matches('\\') != "AllowDynamicProperties"
-        }) {
-            return Err(self.error("Attributes not supported yet", line));
-        }
+        let metadata = self.declaration_metadata(
+            &declaration.attributes,
+            declaration.span,
+            declaration.doc_comment,
+            Some(&name),
+        )?;
         let mut methods = Vec::new();
         let mut properties = Vec::new();
         let mut constants = Vec::new();
@@ -46,14 +47,21 @@ impl Compiler<'_> {
                 modifiers,
                 ty,
                 items,
-                ..
+                attributes,
             } = &member.kind
             {
+                let metadata = self.declaration_metadata(
+                    attributes,
+                    member.span,
+                    member.doc_comment,
+                    Some(&name),
+                )?;
                 for constant in items {
                     if constant.name.name.eq_ignore_ascii_case("class") {
                         return Err(self.error("A class constant must not be called 'class'; it is reserved for class name fetching", self.lines.line(member.span.start)));
                     }
                     constants.push(crate::ir::ClassConstant {
+                        metadata: metadata.clone(),
                         name: constant.name.name.clone(),
                         visibility: member_visibility(modifiers),
                         is_final: modifiers.is_final,
@@ -72,12 +80,15 @@ impl Compiler<'_> {
                 items,
             } = &member.kind
             {
-                if !attributes.is_empty() {
-                    return Err(self.error("Attributes not supported yet", line));
-                }
                 if modifiers.set_visibility.is_some() {
                     return Err(self.error("Asymmetric visibility not supported yet", line));
                 }
+                let metadata = self.declaration_metadata(
+                    attributes,
+                    member.span,
+                    member.doc_comment,
+                    Some(&name),
+                )?;
                 for property in items {
                     if !property.hooks.is_empty() {
                         return Err(self.error("Property hooks not supported yet", line));
@@ -124,6 +135,8 @@ impl Compiler<'_> {
                         .transpose()?;
                     properties.push(ClassProperty {
                         name: property.name.clone(),
+                        metadata: metadata.clone(),
+                        promoted: false,
                         visibility: match modifiers.visibility {
                             Some(ast::Visibility::Private) => Visibility::Private,
                             Some(ast::Visibility::Protected) => Visibility::Protected,
@@ -168,8 +181,16 @@ impl Compiler<'_> {
             }
             for parameter in &method.parameters {
                 if parameter.modifiers.visibility.is_some() {
+                    let metadata = self.declaration_metadata(
+                        &parameter.attributes,
+                        parameter.span,
+                        None,
+                        Some(&name),
+                    )?;
                     properties.push(ClassProperty {
                         name: parameter.name.clone(),
+                        metadata,
+                        promoted: true,
                         visibility: member_visibility(&parameter.modifiers),
                         is_static: false,
                         is_readonly: parameter.modifiers.is_readonly
@@ -185,11 +206,18 @@ impl Compiler<'_> {
             methods.push(self.compile_method(
                 &name,
                 method,
+                member.doc_comment,
                 self.lines.line(method.name.span.start),
             )?);
         }
         let index = self.classes.len();
+        let allows_dynamic_properties = metadata.attributes.iter().any(|attribute| {
+            attribute
+                .name
+                .eq_ignore_ascii_case("AllowDynamicProperties")
+        });
         self.classes.push(ClassDeclaration {
+            metadata,
             line: line as u32,
             name,
             parent: declaration
@@ -217,10 +245,7 @@ impl Compiler<'_> {
             is_abstract: declaration.modifiers.is_abstract,
             is_final: declaration.modifiers.is_final,
             is_readonly: declaration.modifiers.is_readonly,
-            allows_dynamic_properties: declaration
-                .attributes
-                .iter()
-                .any(|attribute| attribute.name.text == "AllowDynamicProperties"),
+            allows_dynamic_properties,
             constants,
             properties,
             methods,
@@ -278,9 +303,12 @@ impl Compiler<'_> {
         &mut self,
         class: &str,
         method: &ast::Method,
+        doc_comment: Option<phera_source::Span>,
         line: usize,
     ) -> Result<ClassMethod, CompileError> {
         let declaration = ast::FunctionDeclaration {
+            span: method.span,
+            doc_comment,
             attributes: method.attributes.clone(),
             name: ast::Identifier {
                 name: format!("{class}::{}", method.name.name),

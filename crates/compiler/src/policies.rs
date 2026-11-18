@@ -7,6 +7,8 @@ pub(crate) enum DeclarationTiming {
     Hoisted,
     /// Conditional and nested declarations are installed when executed.
     AtExecution,
+    /// An initializer reached only through declaration metadata.
+    Hidden,
 }
 
 /// PHP keeps class, function and constant aliases in separate namespaces.

@@ -89,6 +89,7 @@ fn compile_program(
         }
     })?;
     let mut compiler = Compiler::new(file, lines, "{main}", "", compile_diagnostics);
+    compiler.source = source;
     compiler.function.dynamic_scope = true;
     compiler.block(&ast.statements, DeclarationTiming::Hoisted)?;
     let default = match kind {

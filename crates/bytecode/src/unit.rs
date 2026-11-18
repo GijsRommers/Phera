@@ -15,6 +15,8 @@ pub struct CompiledUnit {
     pub main: Function,
     /// Every function the file declares, in source order.
     pub functions: Vec<Function>,
+    /// Reflection metadata for functions, indexed by their local function number.
+    pub function_metadata: Vec<crate::reflection::FunctionMetadata>,
     /// Source class declarations; runtime linking is request-local.
     pub classes: Vec<crate::ClassDeclaration>,
     /// Unconditional declarations eligible for dependency-aware prelinking.

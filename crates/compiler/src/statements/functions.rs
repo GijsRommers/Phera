@@ -25,7 +25,7 @@ impl<'ast> Compiler<'ast> {
         line: usize,
         captures: &[String],
     ) -> Result<(), CompileError> {
-        self.validate_function_attributes(declaration, line)?;
+        self.validate_parameter_features(declaration, line)?;
         let name = if self.namespace.is_empty()
             || declaration.name.name.contains("::")
             || declaration.name.name.starts_with("{closure:")
@@ -45,6 +45,17 @@ impl<'ast> Compiler<'ast> {
         }
         let mut builder = self.function_builder(declaration, &name, captures, line)?;
         builder.compile_parameter_defaults(&declaration.parameters, line)?;
+        let scope = builder.class_scope.clone();
+        builder.function.metadata.declaration = builder.declaration_metadata(
+            &declaration.attributes,
+            declaration.span,
+            declaration.doc_comment,
+            scope.as_deref(),
+        )?;
+        for parameter in &declaration.parameters {
+            let metadata = builder.reflected_parameter(parameter, line)?;
+            builder.function.metadata.parameters.push(metadata);
+        }
         builder.compile_promoted_properties(&declaration.parameters, line)?;
         builder.function.return_type = declaration
             .return_type
@@ -63,7 +74,7 @@ impl<'ast> Compiler<'ast> {
     }
 
     /// Nested declarations use indices relative to their builder until attached to the unit.
-    fn append_function(
+    pub(super) fn append_function(
         &mut self,
         mut builder: Compiler<'_>,
         timing: DeclarationTiming,
@@ -84,16 +95,22 @@ impl<'ast> Compiler<'ast> {
                 _ => {}
             }
         }
+        for function in std::iter::once(&mut function).chain(&mut builder.functions) {
+            function.metadata.relocate(id + 1);
+        }
         self.functions.push(function);
         self.functions.extend(builder.functions);
         for mut class in builder.classes {
+            class.metadata.relocate(id + 1);
             for method in &mut class.methods {
                 method.function += id + 1;
             }
             for constant in &mut class.constants {
                 constant.initializer += id + 1;
+                constant.metadata.relocate(id + 1);
             }
             for property in &mut class.properties {
+                property.metadata.relocate(id + 1);
                 if let Some(initializer) = &mut property.default {
                     *initializer += id + 1;
                 }
@@ -104,7 +121,7 @@ impl<'ast> Compiler<'ast> {
             .extend(builder.declaration_warnings);
         if timing == DeclarationTiming::Hoisted {
             self.hoisted.push(id)
-        } else {
+        } else if timing == DeclarationTiming::AtExecution {
             self.emit(Instruction::Declare(id), line);
         }
     }
@@ -124,6 +141,7 @@ impl<'ast> Compiler<'ast> {
             &self.namespace,
             self.compile_diagnostics,
         );
+        builder.source = self.source;
         builder.class_scope = if !name.starts_with("{closure:") {
             name.split_once("::")
                 .map(|(class, _)| class.to_owned())

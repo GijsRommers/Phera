@@ -39,6 +39,7 @@ mod display;
 mod function;
 mod ids;
 mod instruction;
+pub mod reflection;
 mod unit;
 
 pub use class::{

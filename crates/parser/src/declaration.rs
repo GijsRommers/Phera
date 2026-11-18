@@ -19,21 +19,22 @@ impl Parser<'_> {
         let mut attributes = Vec::new();
 
         while self.at(TokenKind::AttributeStart) {
+            let preceding_doc_comment = self.doc_comment();
             self.bump()?; // `#[`
             loop {
                 let start = self.peek_span();
                 let name = self.parse_class_name()?;
-                let arguments = if self.at(TokenKind::LeftParen) {
+                let (arguments, first_class_callable) = if self.at(TokenKind::LeftParen) {
                     match self.parse_argument_list()? {
-                        phera_ast::Arguments::List(items) => items,
-                        // `#[A(...)]` parses in PHP (and fails at compile time);
-                        // the AST has no placeholder, so it becomes no arguments.
-                        phera_ast::Arguments::FirstClassCallable => Vec::new(),
+                        phera_ast::Arguments::List(items) => (items, false),
+                        phera_ast::Arguments::FirstClassCallable => (Vec::new(), true),
                     }
                 } else {
-                    Vec::new()
+                    (Vec::new(), false)
                 };
                 attributes.push(Attribute {
+                    preceding_doc_comment,
+                    first_class_callable,
                     name,
                     arguments,
                     span: self.span_since(start),
@@ -46,6 +47,15 @@ impl Parser<'_> {
         }
 
         Ok(attributes)
+    }
+
+    fn declaration_doc_comment(&self, attributes: &[Attribute]) -> Option<Span> {
+        self.doc_comment().or_else(|| {
+            attributes
+                .iter()
+                .rev()
+                .find_map(|attribute| attribute.preceding_doc_comment)
+        })
     }
 
     /// A declaration that may carry attributes: function, class, trait,
@@ -99,6 +109,8 @@ impl Parser<'_> {
         &mut self,
         attributes: Vec<Attribute>,
     ) -> Result<FunctionDeclaration, ParseError> {
+        let start = self.peek_span();
+        let doc_comment = self.declaration_doc_comment(&attributes);
         self.expect(TokenKind::Function, "'function'")?;
         let by_reference = self.eat(TokenKind::Ampersand)?;
         let name = if self.at(TokenKind::Readonly) {
@@ -118,6 +130,8 @@ impl Parser<'_> {
         self.close_brace()?;
 
         Ok(FunctionDeclaration {
+            span: self.span_since(start),
+            doc_comment,
             attributes,
             name,
             by_reference,
@@ -134,6 +148,7 @@ impl Parser<'_> {
         attributes: Vec<Attribute>,
     ) -> Result<ClassDeclaration, ParseError> {
         let start = self.peek_span();
+        let doc_comment = self.declaration_doc_comment(&attributes);
 
         let mut modifiers = Modifiers::default();
         loop {
@@ -205,6 +220,7 @@ impl Parser<'_> {
         self.close_brace()?;
 
         Ok(ClassDeclaration {
+            doc_comment,
             attributes,
             kind,
             modifiers,
@@ -227,6 +243,7 @@ impl Parser<'_> {
         modifiers: Modifiers,
         arguments: &mut phera_ast::Arguments,
     ) -> Result<ClassDeclaration, ParseError> {
+        let doc_comment = self.declaration_doc_comment(&attributes);
         self.expect(TokenKind::Class, "'class'")?;
         *arguments = if self.at(TokenKind::LeftParen) {
             self.parse_argument_list()?
@@ -252,6 +269,7 @@ impl Parser<'_> {
         self.close_brace()?;
 
         Ok(ClassDeclaration {
+            doc_comment,
             attributes,
             kind: ClassKind::Class,
             modifiers,
@@ -281,9 +299,11 @@ impl Parser<'_> {
                 Vec::new()
             };
 
+            let doc_comment = self.declaration_doc_comment(&attributes);
             if self.at(TokenKind::Use) {
                 let member = self.parse_trait_use()?;
                 members.push(ClassMember {
+                    doc_comment,
                     kind: member,
                     span: self.span_since(start),
                 });
@@ -293,6 +313,7 @@ impl Parser<'_> {
             if self.at(TokenKind::Case) {
                 let (name, value) = self.parse_enum_case()?;
                 members.push(ClassMember {
+                    doc_comment,
                     kind: ClassMemberKind::EnumCase {
                         attributes,
                         name,
@@ -361,6 +382,7 @@ impl Parser<'_> {
                 let items = self.parse_const_items(false)?;
                 self.expect(TokenKind::Semicolon, "';'")?;
                 members.push(ClassMember {
+                    doc_comment,
                     kind: ClassMemberKind::Constant {
                         attributes,
                         modifiers,
@@ -375,6 +397,7 @@ impl Parser<'_> {
             if self.at(TokenKind::Function) {
                 let method = self.parse_method(attributes, modifiers)?;
                 members.push(ClassMember {
+                    doc_comment,
                     kind: ClassMemberKind::Method(method),
                     span: self.span_since(start),
                 });
@@ -392,6 +415,7 @@ impl Parser<'_> {
                 };
                 let items = self.parse_property_list()?;
                 members.push(ClassMember {
+                    doc_comment,
                     kind: ClassMemberKind::Property {
                         attributes,
                         modifiers,
@@ -522,6 +546,7 @@ impl Parser<'_> {
         attributes: Vec<Attribute>,
         modifiers: Modifiers,
     ) -> Result<Method, ParseError> {
+        let start = self.peek_span();
         self.expect(TokenKind::Function, "'function'")?;
         let by_reference = self.eat(TokenKind::Ampersand)?;
         let name = self.parse_identifier()?;
@@ -538,6 +563,7 @@ impl Parser<'_> {
         };
 
         Ok(Method {
+            span: self.span_since(start),
             attributes,
             modifiers,
             name,

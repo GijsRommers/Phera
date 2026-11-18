@@ -7,18 +7,12 @@ use crate::{CompileError, Compiler};
 
 impl Compiler<'_> {
     /// Unsupported declaration metadata must fail before any body is emitted.
-    pub(crate) fn validate_function_attributes(
+    pub(crate) fn validate_parameter_features(
         &self,
         declaration: &ast::FunctionDeclaration,
         line: usize,
     ) -> Result<(), CompileError> {
-        if !declaration.attributes.is_empty() {
-            return Err(self.error("Attributes not supported yet", line));
-        }
         for parameter in &declaration.parameters {
-            if !parameter.attributes.is_empty() {
-                return Err(self.error("Attributes not supported yet", line));
-            }
             if !parameter.hooks.is_empty() {
                 return Err(self.error("Property hooks not supported yet", line));
             }

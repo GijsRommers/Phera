@@ -18,6 +18,11 @@ impl Compiler<'_> {
     ) -> Result<Reg, CompileError> {
         let captures = self.closure_captures(closure, line)?;
         let declaration = ast::FunctionDeclaration {
+            span,
+            doc_comment: closure
+                .attributes
+                .first()
+                .and_then(|attribute| attribute.preceding_doc_comment),
             attributes: closure.attributes.clone(),
             name: ast::Identifier {
                 name: self.closure_name(line),
