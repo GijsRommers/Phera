@@ -101,6 +101,10 @@ tokio = { version = "1", features = [
 ] }
 # HTTP dates ("Sun, 06 Nov 1994 08:49:37 GMT"); hyper depends on it already.
 httpdate = "1"
+# Compressing responses in `phera serve`. Both are Rust all the way down:
+# flate2 with its default miniz_oxide backend, and Dropbox's brotli.
+flate2 = "1"
+brotli = "9"
 fluent-uri = "0.4.1"
 url = "2.5"
 foldhash = "0.2"

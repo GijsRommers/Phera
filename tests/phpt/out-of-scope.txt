@@ -1,0 +1,3 @@
+ext/random/tests/01_functions/lcg_value_basic.phpt	lcg_value()
+ext/random/tests/01_functions/lcg_value_deprecation.phpt	lcg_value()
+ext/random/tests/01_functions/mt_srand_unknown_mode.phpt	MT_RAND_PHP (numeric mode 1)

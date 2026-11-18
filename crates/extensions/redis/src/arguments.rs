@@ -16,7 +16,7 @@ use phera_extension_api::{Context, MethodPreparation, NativeError, Param, Value,
 
 type Preparation = Result<MethodPreparation, NativeError>;
 
-/// The deprecated aliases (`delete`, `open`, `sortAsc` ...) warn first.
+/// The deprecated aliases (`delete`, `open` and `popen`) warn first.
 pub fn deprecated(name: &str, context: &mut dyn Context) {
     context.deprecated(format!("Method {name}() is deprecated"));
 }
@@ -48,7 +48,7 @@ pub fn key_list(
     Ok(MethodPreparation::Prepared)
 }
 
-/// `command()`, `slaveof()` and `replicaof()` accept null, but not an object
+/// `command()` and `replicaof()` accept null, but not an object
 /// where null may go.
 pub fn object_not_null(
     name: &str,
