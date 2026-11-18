@@ -1,0 +1,268 @@
+{
+  "profile": "release",
+  "host": "Apple M4, macOS 27.2 arm64",
+  "php": "8.5.12",
+  "phpstan": "2.3.6",
+  "runs": 3,
+  "clock": "process wall time including startup; alternating order; fresh PHPStan cache per run",
+  "analyzer_code_commit": "5ea3db89e3cd951fd93932314e75872d04826345",
+  "binary_sha256": "77714ca96f30f5d88b9a1d65ad34e5a64573e0fcae4bee44369e297862b6a7d6",
+  "projects": [
+    {
+      "name": "options-resolver",
+      "commit": "0a2aa769aced59924bbf5a370aa3def83c836a0f",
+      "files": 14,
+      "runs": {
+        "phera": [
+          0.31402025,
+          0.011080042000000123,
+          0.011247040999999847
+        ],
+        "phpstan": [
+          1.030305416,
+          0.995934791,
+          1.037949791
+        ]
+      },
+      "seconds": {
+        "phera": 0.011247040999999847,
+        "phpstan": 1.030305416
+      },
+      "files_per_second": {
+        "phera": 1244.7718471018459,
+        "phpstan": 13.588203830232025
+      },
+      "diagnostics": {
+        "phera": {
+          "version": 1,
+          "diagnostics": []
+        },
+        "phpstan": {
+          "totals": {
+            "errors": 0,
+            "file_errors": 0
+          },
+          "files": {},
+          "errors": []
+        }
+      },
+      "paths": [
+        "Debug/OptionsResolverIntrospector.php",
+        "Exception/AccessException.php",
+        "Exception/ExceptionInterface.php",
+        "Exception/InvalidArgumentException.php",
+        "Exception/InvalidOptionsException.php",
+        "Exception/MissingOptionsException.php",
+        "Exception/NoConfigurationException.php",
+        "Exception/NoSuchOptionException.php",
+        "Exception/OptionDefinitionException.php",
+        "Exception/UndefinedOptionsException.php",
+        "OptionConfigurator.php",
+        "Options.php",
+        "OptionsResolver.php",
+        "vendor/symfony/deprecation-contracts/function.php"
+      ],
+      "dependencies": [
+        {
+          "name": "symfony/deprecation-contracts",
+          "version": "dev-main",
+          "revision": "feb1edf4e546af3b85c5caebe8359a20db230ca3"
+        }
+      ]
+    },
+    {
+      "name": "container",
+      "commit": "4fee6c75b3368dba3682a67439b57f8e24ab3eb7",
+      "files": 64,
+      "runs": {
+        "phera": [
+          0.016517792000000142,
+          0.01382216699999983,
+          0.013842042000000276
+        ],
+        "phpstan": [
+          1.174500583,
+          1.2998848330000001,
+          1.3309552499999997
+        ]
+      },
+      "seconds": {
+        "phera": 0.013842042000000276,
+        "phpstan": 1.2998848330000001
+      },
+      "files_per_second": {
+        "phera": 4623.59527589923,
+        "phpstan": 49.235130971021945
+      },
+      "diagnostics": {
+        "phera": {
+          "version": 1,
+          "diagnostics": []
+        },
+        "phpstan": {
+          "totals": {
+            "errors": 0,
+            "file_errors": 4
+          },
+          "files": {
+            "src/Container.php": {
+              "errors": 4,
+              "messages": [
+                {
+                  "message": "No error with identifier booleanAnd.alwaysTrue is reported on line 283.",
+                  "line": 283,
+                  "ignorable": false,
+                  "identifier": "ignore.unmatchedIdentifier",
+                  "fixable": true
+                },
+                {
+                  "message": "No error with identifier identical.alwaysTrue is reported on line 283.",
+                  "line": 283,
+                  "ignorable": false,
+                  "identifier": "ignore.unmatchedIdentifier",
+                  "fixable": true
+                },
+                {
+                  "message": "No error with identifier identical.alwaysTrue is reported on line 284.",
+                  "line": 284,
+                  "ignorable": false,
+                  "identifier": "ignore.unmatchedIdentifier",
+                  "fixable": true
+                },
+                {
+                  "message": "No error with identifier deadCode.unreachable is reported on line 293.",
+                  "line": 293,
+                  "ignorable": false,
+                  "identifier": "ignore.unmatchedIdentifier",
+                  "fixable": true
+                }
+              ]
+            }
+          },
+          "errors": []
+        }
+      },
+      "paths": [
+        "src/Argument/ArgumentInterface.php",
+        "src/Argument/ArgumentReflectorInterface.php",
+        "src/Argument/ArgumentReflectorTrait.php",
+        "src/Argument/ArgumentResolverInterface.php",
+        "src/Argument/ArgumentResolverTrait.php",
+        "src/Argument/DefaultValueArgument.php",
+        "src/Argument/DefaultValueInterface.php",
+        "src/Argument/Literal/ArrayArgument.php",
+        "src/Argument/Literal/BooleanArgument.php",
+        "src/Argument/Literal/CallableArgument.php",
+        "src/Argument/Literal/FloatArgument.php",
+        "src/Argument/Literal/IntegerArgument.php",
+        "src/Argument/Literal/ObjectArgument.php",
+        "src/Argument/Literal/StringArgument.php",
+        "src/Argument/LiteralArgument.php",
+        "src/Argument/LiteralArgumentInterface.php",
+        "src/Argument/ResolvableArgument.php",
+        "src/Argument/ResolvableArgumentInterface.php",
+        "src/Attribute/AttributeInterface.php",
+        "src/Attribute/Inject.php",
+        "src/Attribute/Resolve.php",
+        "src/Attribute/Shared.php",
+        "src/Compiler/AnalysisResult.php",
+        "src/Compiler/ArgumentCompiler.php",
+        "src/Compiler/CodeGenerator.php",
+        "src/Compiler/CompilationConfig.php",
+        "src/Compiler/CompilationException.php",
+        "src/Compiler/CompilationResult.php",
+        "src/Compiler/CompiledDefinition.php",
+        "src/Compiler/Compiler.php",
+        "src/Compiler/ConcreteType.php",
+        "src/Compiler/DefinitionAnalyser.php",
+        "src/Compiler/DependencyGraph.php",
+        "src/Container.php",
+        "src/ContainerAwareInterface.php",
+        "src/ContainerAwareTrait.php",
+        "src/ContainerFactory.php",
+        "src/Definition/Definition.php",
+        "src/Definition/DefinitionAggregate.php",
+        "src/Definition/DefinitionAggregateInterface.php",
+        "src/Definition/DefinitionInterface.php",
+        "src/DefinitionContainerInterface.php",
+        "src/Event/BeforeResolveEvent.php",
+        "src/Event/ContainerEvent.php",
+        "src/Event/DefinitionResolvedEvent.php",
+        "src/Event/EventAwareTrait.php",
+        "src/Event/EventDispatcher.php",
+        "src/Event/EventFilter.php",
+        "src/Event/OnDefineEvent.php",
+        "src/Event/ServiceResolvedEvent.php",
+        "src/Exception/ContainerException.php",
+        "src/Exception/NotFoundException.php",
+        "src/ReflectionContainer.php",
+        "src/ServiceProvider/AbstractServiceProvider.php",
+        "src/ServiceProvider/BootableServiceProviderInterface.php",
+        "src/ServiceProvider/ServiceProviderAggregate.php",
+        "src/ServiceProvider/ServiceProviderAggregateInterface.php",
+        "src/ServiceProvider/ServiceProviderInterface.php",
+        "vendor/psr/container/src/ContainerExceptionInterface.php",
+        "vendor/psr/container/src/ContainerInterface.php",
+        "vendor/psr/container/src/NotFoundExceptionInterface.php",
+        "vendor/psr/event-dispatcher/src/EventDispatcherInterface.php",
+        "vendor/psr/event-dispatcher/src/ListenerProviderInterface.php",
+        "vendor/psr/event-dispatcher/src/StoppableEventInterface.php"
+      ],
+      "dependencies": [
+        {
+          "name": "psr/container",
+          "version": "2.0.2",
+          "revision": "c71ecc56dfe541dbd90c5360474fbc405f8d5963"
+        },
+        {
+          "name": "psr/event-dispatcher",
+          "version": "1.0.0",
+          "revision": "dbefd12671e8a14ec7f180cab83036ed26714bb0"
+        }
+      ]
+    },
+    {
+      "name": "password_compat",
+      "commit": "dfdbc467fba0d1db4c2f51fda58e1717046f3284",
+      "files": 1,
+      "runs": {
+        "phera": [
+          0.00947758299999979,
+          0.009462415999999862,
+          0.008894875000001079
+        ],
+        "phpstan": [
+          0.9157148329999991,
+          0.905589333,
+          0.9223053330000006
+        ]
+      },
+      "seconds": {
+        "phera": 0.009462415999999862,
+        "phpstan": 0.9157148329999991
+      },
+      "files_per_second": {
+        "phera": 105.68125518895117,
+        "phpstan": 1.0920430290769365
+      },
+      "diagnostics": {
+        "phera": {
+          "version": 1,
+          "diagnostics": []
+        },
+        "phpstan": {
+          "totals": {
+            "errors": 0,
+            "file_errors": 0
+          },
+          "files": {},
+          "errors": []
+        }
+      },
+      "paths": [
+        "lib/password.php"
+      ],
+      "dependencies": []
+    }
+  ]
+}

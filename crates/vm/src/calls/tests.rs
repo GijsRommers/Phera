@@ -45,14 +45,17 @@ async fn checkpoint(vm: &mut Vm) -> (usize, usize, usize) {
     loop {
         match vm.run_batch(0, &mut work) {
             Ok(BatchExit::NativeCall(destination)) => {
-                let checkpoint =
-                    vm.call_stack.preparing.last().unwrap().callee.name.as_ref() == "checkpoint";
+                let checkpoint = vm
+                    .call_stack
+                    .top_details()
+                    .and_then(|details| details.callee.as_ref())
+                    .is_some_and(|callee| callee.name.as_ref() == "checkpoint");
                 let value = vm.finish_native_window().await.unwrap();
                 vm.set(destination, value);
                 if checkpoint {
                     return (
                         vm.registers.len(),
-                        vm.call_stack.preparing.len(),
+                        vm.call_stack.call_depth(),
                         vm.call_stack.depth(),
                     );
                 }
@@ -81,7 +84,7 @@ async fn ten_million_calls_release_their_windows() {
     assert_eq!(
         (
             vm.registers.len(),
-            vm.call_stack.preparing.len(),
+            vm.call_stack.call_depth(),
             vm.call_stack.depth()
         ),
         (0, 0, 0)

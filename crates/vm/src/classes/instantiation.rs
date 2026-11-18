@@ -30,7 +30,7 @@ impl Vm {
                 })
             }
             "parent" => context
-                .and_then(|context| context.scope.parent.as_ref())
+                .and_then(|context| context.scope.parent.clone())
                 .map(|parent| parent.name.clone())
                 .ok_or_else(|| {
                     NativeError::error(
@@ -146,7 +146,8 @@ impl Vm {
             self.initialize_throwable(&object, crate::exceptions::TraceOrigin::Construction);
         }
         let Some(constructor) = class.constructor.clone() else {
-            return self.prepare_constructed_object(&class, object);
+            self.prepare_constructed_object(object);
+            return Ok(());
         };
         if constructor.visibility == phera_bytecode::Visibility::Public
             && let Some(scope) = super::method_lookup::declaring_class(&class, &constructor)
@@ -225,8 +226,7 @@ impl Vm {
     pub(crate) fn fetch_this(&mut self, destination: Reg) -> Result<(), NativeError> {
         let receiver = self
             .current()
-            .and_then(|frame| frame.method())
-            .and_then(|context| context.receiver.clone())
+            .and_then(|frame| frame.this().cloned())
             .ok_or_else(|| NativeError::error("Using $this when not in object context"))?;
         self.set(destination, Value::Object(receiver));
         Ok(())
@@ -245,11 +245,10 @@ impl Vm {
             .get(symbol.index())
             .ok_or_else(|| internal_error!("class name symbol"))?
             .written;
-        let context = frame.method();
         let class = match name.as_str() {
-            "self" => context.map(|context| &context.scope),
-            "static" => context.map(|context| &context.called),
-            "parent" => context.and_then(|context| context.scope.parent.as_ref()),
+            "self" => frame.scope().cloned(),
+            "static" => frame.called(),
+            "parent" => frame.scope().and_then(|scope| scope.parent.clone()),
             _ => {
                 return frame
                     .cache()

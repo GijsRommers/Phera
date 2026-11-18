@@ -10,19 +10,14 @@
 //! frame is at depth `d`; a frame that stores something sets its "extras"
 //! flag, and the entry is emptied when that frame returns or unwinds.
 
-use std::rc::Rc;
-
-use phera_value::Object;
-
 use crate::dynamic_variables::{DynamicVariables, VariableScope};
 use crate::iterators::Iterators;
 
 /// The optional state of one frame.
 pub(crate) struct FrameExtras {
-    /// The closure object being run; it owns the closure's captures.
-    pub(crate) closure: Option<Rc<Object>>,
-    /// `$this`, the class scope and the called class of a method frame.
-    pub(crate) method: Option<crate::classes::MethodContext>,
+    /// The called class of a static method frame, when it is not the class
+    /// that declares the method (`static::` after `Child::create()`).
+    pub(crate) called: Option<crate::classes::ClassIndex>,
     /// Variables created by name (`$$name`, `extract`) after entry.
     pub(crate) dynamic: DynamicVariables,
     /// The register count once variables were created by name.
@@ -60,8 +55,7 @@ impl FrameExtras {
     /// An entry that holds nothing.
     pub(crate) fn new() -> Self {
         Self {
-            closure: None,
-            method: None,
+            called: None,
             dynamic: DynamicVariables::new(VariableScope::Static),
             dynamic_count: None,
             iterators: Iterators::new(0),
@@ -69,31 +63,19 @@ impl FrameExtras {
         }
     }
 
-    /// Whether the entry holds only what a method or closure call keeps
-    /// (its class context, its closure object), so that returning only has
-    /// to drop those.
-    pub(crate) fn holds_only_call_context(&self) -> bool {
+    /// Whether the entry holds nothing but a called class, so that
+    /// returning has nothing to release.
+    pub(crate) fn holds_only_called_class(&self) -> bool {
         self.dynamic_count.is_none()
             && self.dynamic.is_empty()
             && self.iterators.is_empty()
             && self.arguments.is_default()
     }
 
-    /// The object a constructor frame is constructing: what `new` evaluates
-    /// to, whatever the constructor returns.
-    pub(crate) fn constructed_object(&self) -> Option<&Rc<Object>> {
-        let context = self.method.as_ref()?;
-        match context.invocation {
-            crate::classes::Invocation::Constructor => context.receiver.as_ref(),
-            crate::classes::Invocation::Method => None,
-        }
-    }
-
     /// Releases what the frame owned, keeping the storage for the next frame
     /// at this depth.
     pub(crate) fn clear(&mut self) {
-        self.closure = None;
-        self.method = None;
+        self.called = None;
         self.dynamic.reset(VariableScope::Static);
         self.dynamic_count = None;
         self.iterators.clear();

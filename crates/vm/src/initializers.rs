@@ -53,7 +53,7 @@ impl Vm {
             let (destination, value) = match instruction {
                 Instruction::LoadConst { dst, constant } => (
                     dst,
-                    crate::calls::frame::value(&unit.constants[constant.index()]),
+                    crate::unit_caches::value(&unit.constants[constant.index()]),
                 ),
                 Instruction::FetchClassName { dst, class } => {
                     let name = &unit.symbols[class.index()].written;
