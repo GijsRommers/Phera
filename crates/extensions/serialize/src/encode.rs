@@ -79,14 +79,14 @@ impl Encoder {
                 // A hook can change the request's serialization precision.
                 self.precision = None;
             }
-            let Some(next) = self.next_value() else {
+            let Some(next) = self.next_value(context) else {
                 return Ok(());
             };
             value = next;
         }
     }
 
-    fn next_value(&mut self) -> Option<Value> {
+    fn next_value(&mut self, context: &mut dyn Context) -> Option<Value> {
         while let Some(frame) = self.frames.last_mut() {
             if let Some(position) = frame.position
                 && let Some((key, value)) = frame.entries.entry_at(position)
@@ -95,6 +95,10 @@ impl Encoder {
                 match key {
                     ArrayKey::Int(key) => self.output.integer(key),
                     ArrayKey::String(key) => self.output.string(key.as_bytes()),
+                }
+                if write_scalar(&mut self.output, &mut self.precision, context, value) {
+                    self.slots.count += 1;
+                    continue;
                 }
                 let value = match value {
                     Value::Reference(reference) if Rc::strong_count(reference) == 1 => reference
@@ -175,26 +179,40 @@ impl Encoder {
             value
         };
         match resolved {
-            Value::Null => self.output.null(),
-            Value::Bool(boolean) => self.output.boolean(boolean),
-            Value::Int(integer) => self.output.integer(integer),
-            Value::Float(float) => self.float(context, float),
-            Value::String(string) => self.output.string(string.as_bytes()),
             Value::Array(array) => {
                 self.output.array(array.len());
                 self.entries(array, Contents::Array);
             }
             Value::Object(object) => return Ok(Some(object)),
-            Value::Resource(_) => self.output.integer(0),
-            Value::Reference(_) => return Err(NativeError::error("Invalid nested PHP reference")),
+            scalar => {
+                if !write_scalar(&mut self.output, &mut self.precision, context, &scalar) {
+                    return Err(NativeError::error("Invalid nested PHP reference"));
+                }
+            }
         }
         Ok(None)
     }
+}
 
-    fn float(&mut self, context: &mut dyn Context, float: f64) {
-        let precision = *self.precision.get_or_insert_with(|| precision(context));
-        if precision >= 0 || !self.output.short_float(float) {
-            with_float_repr(float, precision, |decimal| self.output.float(decimal));
+fn write_scalar(
+    output: &mut Writer,
+    cached_precision: &mut Option<i32>,
+    context: &mut dyn Context,
+    value: &Value,
+) -> bool {
+    match value {
+        Value::Null => output.null(),
+        Value::Bool(boolean) => output.boolean(*boolean),
+        Value::Int(integer) => output.integer(*integer),
+        Value::Float(float) => {
+            let precision = *cached_precision.get_or_insert_with(|| precision(context));
+            if precision >= 0 || !output.short_float(*float) {
+                with_float_repr(*float, precision, |decimal| output.float(decimal));
+            }
         }
+        Value::String(string) => output.string(string.as_bytes()),
+        Value::Resource(_) => output.integer(0),
+        _ => return false,
     }
+    true
 }

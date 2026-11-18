@@ -2,7 +2,7 @@
 
 use phera_extension_api::{Context, NativeError, Object, Value};
 
-use super::Encoder;
+use super::super::{Encoder, write_scalar};
 
 impl Encoder {
     pub(in crate::encode) fn write_plain_object(
@@ -33,14 +33,8 @@ impl Encoder {
                     .object(object.class.name().as_bytes(), fields.len());
                 for (value, field) in properties.values().zip(fields.iter()) {
                     self.output.property(&field.token);
-                    match value {
-                        Value::Null => self.output.null(),
-                        Value::Bool(value) => self.output.boolean(*value),
-                        Value::Int(value) => self.output.integer(*value),
-                        Value::Float(value) => self.float(context, *value),
-                        Value::String(value) => self.output.string(value.as_bytes()),
-                        Value::Resource(_) => self.output.integer(0),
-                        _ => return Err(NativeError::error("Invalid scalar property table")),
+                    if !write_scalar(&mut self.output, &mut self.precision, context, value) {
+                        return Err(NativeError::error("Invalid scalar property table"));
                     }
                 }
                 self.slots.count += fields.len();
