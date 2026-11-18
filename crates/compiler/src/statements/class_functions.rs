@@ -41,6 +41,18 @@ impl Compiler<'_> {
         method: &ast::Method,
         line: usize,
     ) -> Result<ClassMethod, CompileError> {
+        if method.modifiers.is_final
+            && method.modifiers.visibility == Some(ast::Visibility::Private)
+            && !method.name.name.eq_ignore_ascii_case("__construct")
+        {
+            self.declaration_warnings
+                .push(phera_bytecode::DeclarationWarning {
+                message:
+                    "Private methods cannot be final as they are never overridden by other classes"
+                        .into(),
+                line: line as u32,
+            });
+        }
         if trait_scope.is_some() {
             for parameter in &method.parameters {
                 let Some(ty) = &parameter.ty else {

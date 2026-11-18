@@ -13,6 +13,11 @@ pub(crate) fn check_override(
     inherited: &Method,
     method: &Method,
 ) -> Result<(), NativeError> {
+    if inherited.visibility == Visibility::Private
+        && !inherited.name.eq_ignore_ascii_case("__construct")
+    {
+        return Ok(());
+    }
     if inherited.is_final {
         return Err(NativeError::error(format!(
             "Cannot override final method {}::{}()",

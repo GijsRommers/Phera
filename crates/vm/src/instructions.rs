@@ -245,7 +245,12 @@ impl Vm {
         class: Reg,
         name: phera_bytecode::NameId,
     ) -> Result<(), NativeError> {
-        let name = self.name(name)?;
+        let unit = self
+            .current()
+            .ok_or_else(|| internal_error!("constant frame"))?
+            .unit()
+            .clone();
+        let name = &unit.names[name.index()];
         if name.eq_ignore_ascii_case("class") {
             let value = self.read_local(class);
             let Value::Object(object) = value else {
@@ -257,8 +262,17 @@ impl Vm {
             self.set(destination, Value::from(object.class.name()));
             return Ok(());
         }
-        let class = self.class_target(class)?;
-        let value = self.class_constant(&class, &name)?;
+        let target = self.read_local(class);
+        let class = match &target {
+            Value::Object(object) => std::borrow::Cow::Borrowed(object.class.name()),
+            Value::String(name) => String::from_utf8_lossy(name.as_bytes()),
+            _ => {
+                return Err(NativeError::error(
+                    "Class name must be a valid object or a string",
+                ));
+            }
+        };
+        let value = self.class_constant(&class, name)?;
         self.set(destination, value);
         Ok(())
     }
