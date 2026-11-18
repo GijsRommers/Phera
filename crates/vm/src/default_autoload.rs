@@ -20,7 +20,7 @@ impl Vm {
         let stop = self.call_stack.depth();
         for extension in extensions.split_terminator(',') {
             let candidate = format!("{path}{extension}");
-            let Ok(unit) = self.load_include(&candidate).await? else {
+            let Ok(unit) = self.load_include(candidate.as_bytes()).await? else {
                 continue;
             };
             if self.include_state.contains(&unit.file) {

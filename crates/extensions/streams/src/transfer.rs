@@ -174,8 +174,13 @@ fn fpassthru(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_
     Box::pin(async move {
         let stream = stream_arg(&arguments, "fpassthru")?;
         let mut total = 0;
+        let policy = with_stream(stream, |stream| stream.read_policy(None))?;
         loop {
-            match read(stream, Some(crate::io_policy::CHUNK as u64)).await? {
+            let result = operate(stream, policy, |stream| {
+                stream.read(Some(crate::io_policy::CHUNK as u64))
+            })
+            .await?;
+            match result {
                 Ok(bytes) if bytes.is_empty() => break,
                 Ok(bytes) => {
                     total += bytes.len();
@@ -183,7 +188,7 @@ fn fpassthru(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_
                 }
                 Err(error) => {
                     read_notice(context, "fpassthru", &error, read_amount(None));
-                    break;
+                    return Ok(Value::Int(if total == 0 { -1 } else { total as i64 }));
                 }
             }
         }

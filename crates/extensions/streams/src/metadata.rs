@@ -11,7 +11,7 @@ use rustix::fs::{Access, access, statvfs};
 
 use crate::errors::{check_path, reason, warn_false, wrapper_warning};
 use crate::handles::{FILENAME, STREAM};
-use crate::request::{bytes, files, path};
+use crate::request::{bytes, canonical, directory, path};
 use crate::resource::{stream_arg, with_stream};
 use crate::wrapper::Target;
 
@@ -96,7 +96,7 @@ impl Query {
             }
             _ => None,
         };
-        let resolved = file.and_then(|file| files(context).resolve(path(file)).ok());
+        let resolved = file.and_then(|file| directory(context).resolve(path(file)).ok());
         if let Some(path) = resolved {
             if let Self::Access(mode) = self {
                 return Ok(Value::Bool(access(path, mode).is_ok()));
@@ -257,9 +257,9 @@ fn fstat(_: &mut dyn Context, args: &[Value]) -> NativeResult {
 fn realpath(context: &mut dyn Context, args: &[Value]) -> NativeResult {
     let name = args::bytes(args, 0);
     check_path("realpath", "#1 ($path)", name)?;
-    let result = files(context)
+    let result = directory(context)
         .resolve(path(name))
-        .and_then(fs::canonicalize);
+        .and_then(|path| canonical(&path));
     Ok(result.map_or(Value::Bool(false), |path| {
         Value::from(bytes(&path).to_vec())
     }))
@@ -282,11 +282,12 @@ fn disk_space(
     if name.is_empty() {
         return Ok(Value::Bool(false));
     }
-    let result = files(context)
+    let result = directory(context)
         .resolve(path(name))
         .and_then(|name| statvfs(name).map_err(Into::into));
     match result {
         Ok(stats) => Ok(Value::Float(field(&stats) as f64 * stats.f_frsize as f64)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotADirectory => Ok(Value::Bool(false)),
         Err(error) => warn_false(context, format!("{function}(): {}", reason(&error))),
     }
 }

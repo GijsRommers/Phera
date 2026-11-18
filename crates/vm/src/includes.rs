@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use phera_bytecode::{IncludeKind, Reg};
-use phera_extension_api::NativeError;
+use phera_extension_api::{NativeError, WorkingDirectory};
 use phera_value::{Value, to_php_string};
 
 use crate::Vm;
@@ -18,12 +18,13 @@ impl Vm {
     ) -> Result<(), NativeError> {
         let once = matches!(kind, IncludeKind::IncludeOnce | IncludeKind::RequireOnce);
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
-        let name = to_php_string(&diagnostics.vm.operand(path), &mut diagnostics.buffer)?
-            .to_string_lossy();
+        let name = to_php_string(&diagnostics.vm.operand(path), &mut diagnostics.buffer)?;
         drop(diagnostics);
-        let unit = match self.load_include(&name).await? {
+        let unit = match self.load_include(name.as_bytes()).await? {
             Ok(unit) => unit,
-            Err(reason) => return self.failed_include(destination, &name, kind, &reason),
+            Err(reason) => {
+                return self.failed_include(destination, &name.to_string_lossy(), kind, &reason);
+            }
         };
         if once && self.include_state.contains(&unit.file) {
             self.set(destination, Value::Bool(true));
@@ -76,15 +77,16 @@ impl Vm {
     /// Parse errors terminate the request before any fallback lookup.
     pub(crate) async fn load_include(
         &mut self,
-        name: &str,
+        name: &[u8],
     ) -> Result<Result<std::sync::Arc<phera_bytecode::CompiledUnit>, String>, NativeError> {
         let loader = self
             .include_state
             .loader()
             .ok_or_else(|| NativeError::error("Includes need a runtime code loader"))?;
         let mut candidates = Vec::new();
-        let path = Path::new(name);
-        if path.is_absolute() || name.starts_with("./") || name.starts_with("../") {
+        let name_os = include_path_os(name);
+        let path = Path::new(&name_os);
+        if path.is_absolute() || name.starts_with(b"./") || name.starts_with(b"../") {
             candidates.push(path.to_path_buf());
         } else {
             let include_path = include_path_os(self.include_path().as_bytes());
@@ -108,6 +110,17 @@ impl Vm {
         }
         let mut result = Err(String::new());
         for candidate in candidates {
+            let candidate = if let Some(cwd) = self.state.get::<WorkingDirectory>() {
+                match cwd.resolve(&candidate) {
+                    Ok(path) => path,
+                    Err(error) => {
+                        result = Err(error.to_string());
+                        continue;
+                    }
+                }
+            } else {
+                candidate
+            };
             result = loader.load(candidate).await;
             if let Err(error) = &result
                 && (error.contains("Fatal error:") || error.contains("Parse error:"))

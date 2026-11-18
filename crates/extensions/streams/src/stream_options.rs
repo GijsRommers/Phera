@@ -1,8 +1,8 @@
 //! `stream_get_meta_data($stream)['seekable']` reports support for seeking.
 
 use phera_extension_api::{
-    ArrayKey, Context, FunctionEntry, LocalFuture, NativeResult, Param, ParamType, PhpArray,
-    Registry, Value, args, value::to_php_string,
+    ArrayKey, ConstantValue, Context, FunctionEntry, LocalFuture, NativeResult, Param, ParamType,
+    PhpArray, Registry, Value, args, value::to_php_string,
 };
 use rustix::fs::{OFlags, fcntl_getfl, fcntl_setfl};
 
@@ -17,7 +17,7 @@ pub fn register(registry: &mut Registry) {
     const TIMEOUT: &[Param] = &[
         STREAM,
         Param::new("seconds", ParamType::Int),
-        Param::new("microseconds", ParamType::Int).optional(),
+        Param::new("microseconds", ParamType::Int).with_default(ConstantValue::Int(0)),
     ];
     const BUFFER: &[Param] = &[STREAM, Param::new("size", ParamType::Int)];
     const BLOCK: &[Param] = &[STREAM, Param::new("enable", ParamType::Bool)];

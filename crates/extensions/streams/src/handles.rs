@@ -3,21 +3,22 @@
 use std::io::{self, SeekFrom, Write};
 
 use phera_extension_api::{
-    Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, Registry,
-    Value, args,
+    ConstantValue, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param,
+    ParamType, Registry, Value, args,
 };
 
-use crate::context_options::{OPTIONAL_CONTEXT, validate};
+use crate::context_options::{OPTIONAL_CONTEXT, attach, validate};
 use crate::errors::{check_path, nonnegative, reason};
 use crate::io_policy::{CHUNK, IoPolicy};
-use crate::request::new_resource;
+use crate::request::{files, new_resource};
 use crate::resource::{operate, stream_arg, with_stream};
 use crate::stream::Wrapper;
 use crate::wrapper::open;
 
 pub const STREAM: Param = Param::new("stream", ParamType::Mixed);
 pub const FILENAME: Param = Param::new("filename", ParamType::String);
-pub const INCLUDE_PATH: Param = Param::new("use_include_path", ParamType::Bool).optional();
+pub const INCLUDE_PATH: Param =
+    Param::new("use_include_path", ParamType::Bool).with_default(ConstantValue::Bool(false));
 pub const LENGTH: Param = Param::new("length", ParamType::Int).optional().nullable();
 
 pub fn register(registry: &mut Registry) {
@@ -48,7 +49,7 @@ pub fn register(registry: &mut Registry) {
                     &[
                         STREAM,
                         Param::new("offset", ParamType::Int),
-                        Param::new("whence", ParamType::Int).optional(),
+                        Param::new("whence", ParamType::Int).with_default(ConstantValue::Int(0)),
                     ]
                 },
                 fseek,
@@ -82,14 +83,20 @@ fn fopen(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
         )
         .await?;
         Ok(match stream {
-            Some(stream) => new_resource(context.state(), "stream", stream),
+            Some(stream) => {
+                let resource = new_resource(context.state(), "stream", stream);
+                attach(context, &resource, args::value(&arguments, 3));
+                resource
+            }
             None => Value::Bool(false),
         })
     })
 }
 
-fn fclose(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    stream_arg(arguments, "fclose")?.data.borrow_mut().take();
+fn fclose(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let resource = stream_arg(arguments, "fclose")?;
+    resource.data.borrow_mut().take();
+    files(context).stream_contexts.remove(&resource.id);
     Ok(Value::Bool(true))
 }
 

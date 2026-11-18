@@ -3,8 +3,8 @@
 use std::io;
 
 use phera_extension_api::{
-    Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, PhpArray,
-    Registry, Value, args, value::to_php_string,
+    ConstantValue, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param,
+    ParamType, PhpArray, Registry, Value, args, value::to_php_string,
 };
 
 use crate::handles::{LENGTH, STREAM, read_amount, read_notice};
@@ -12,9 +12,12 @@ use crate::resource::{operate, stream_arg, with_stream};
 use crate::stream::Stream;
 use crate::transfer::write;
 
-const SEPARATOR: Param = Param::new("separator", ParamType::String).optional();
-const ENCLOSURE: Param = Param::new("enclosure", ParamType::String).optional();
-const ESCAPE: Param = Param::new("escape", ParamType::String).optional();
+const SEPARATOR: Param =
+    Param::new("separator", ParamType::String).with_default(ConstantValue::String(","));
+const ENCLOSURE: Param =
+    Param::new("enclosure", ParamType::String).with_default(ConstantValue::String("\""));
+const ESCAPE: Param =
+    Param::new("escape", ParamType::String).with_default(ConstantValue::String("\\"));
 
 pub fn register(registry: &mut Registry) {
     const READ: &[Param] = &[STREAM, LENGTH, SEPARATOR, ENCLOSURE, ESCAPE];
@@ -24,7 +27,7 @@ pub fn register(registry: &mut Registry) {
         SEPARATOR,
         ENCLOSURE,
         ESCAPE,
-        Param::new("eol", ParamType::String).optional(),
+        Param::new("eol", ParamType::String).with_default(ConstantValue::String("\n")),
     ];
     registry.function(FunctionEntry::asynchronous("fgetcsv", READ, get));
     registry.function(FunctionEntry::asynchronous("fputcsv", WRITE, put));

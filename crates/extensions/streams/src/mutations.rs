@@ -6,14 +6,15 @@ use std::os::unix::fs::{DirBuilderExt, PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 
 use phera_extension_api::{
-    Context, FunctionEntry, LocalFuture, NativeResult, Param, ParamType, Registry, Value, args,
+    ConstantValue, Context, FunctionEntry, LocalFuture, NativeResult, Param, ParamType, Registry,
+    Value, args,
 };
 
 use crate::context_options::{OPTIONAL_CONTEXT, validate};
 use crate::errors::{check_path, reason, warn_false, wrapper_warning};
 use crate::handles::FILENAME;
 use crate::io_policy::IoPolicy;
-use crate::request::{bytes, files, path};
+use crate::request::{bytes, directory, files, path};
 use crate::wrapper::Target;
 
 pub const DIRECTORY: Param = Param::new("directory", ParamType::String);
@@ -27,8 +28,8 @@ pub fn register(registry: &mut Registry) {
     ];
     const MKDIR: &[Param] = &[
         DIRECTORY,
-        PERMISSIONS.optional(),
-        Param::new("recursive", ParamType::Bool).optional(),
+        PERMISSIONS.with_default(ConstantValue::Int(0o777)),
+        Param::new("recursive", ParamType::Bool).with_default(ConstantValue::Bool(false)),
         OPTIONAL_CONTEXT,
     ];
     const UMASK: &[Param] = &[Param::new("mask", ParamType::Int).optional().nullable()];
@@ -168,10 +169,10 @@ pub fn local(context: &mut dyn Context, function: &str, name: &[u8]) -> io::Resu
         return Err(rustix::io::Errno::NOENT.into());
     }
     match Target::parse(name) {
-        Target::File(name) => files(context).resolve(path(name)),
+        Target::File(name) => directory(context).resolve(path(name)),
         Target::Unavailable(scheme) => {
             wrapper_warning(context, function, scheme);
-            files(context).resolve(path(name))
+            directory(context).resolve(path(name))
         }
         Target::RemoteFile => {
             context.warning(format!(
@@ -219,8 +220,8 @@ async fn link(
         Ok((name, destination)) => {
             IoPolicy::Blocking
                 .run(move || match link {
-                    Link::Hard => fs::hard_link(name, destination),
-                    Link::Symbolic => symlink(name, destination),
+                    Link::Hard => hard_link(&name, &destination),
+                    Link::Symbolic => symlink(name, link_destination(destination)?),
                 })
                 .await?
         }
@@ -232,13 +233,44 @@ async fn link(
     }
 }
 
+fn hard_link(name: &Path, destination: &Path) -> io::Result<()> {
+    #[cfg(target_os = "macos")]
+    if destination.symlink_metadata().is_ok() {
+        return Err(rustix::io::Errno::EXIST.into());
+    }
+    fs::hard_link(name, destination)
+}
+
+fn link_destination(mut destination: PathBuf) -> io::Result<PathBuf> {
+    // PHP expands the destination first, including a final dangling link.
+    for _ in 0..40 {
+        match destination.read_link() {
+            Ok(target) if target.is_absolute() => destination = target,
+            Ok(target) => {
+                destination.pop();
+                destination.push(target);
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::InvalidInput | io::ErrorKind::NotFound
+                ) =>
+            {
+                return Ok(destination);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Err(rustix::io::Errno::LOOP.into())
+}
+
 fn readlink(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let name = args::bytes(arguments, 0);
     check_path("readlink", "#1 ($path)", name)?;
     let resolved = if name.is_empty() {
         Err(rustix::io::Errno::NOENT.into())
     } else {
-        files(context).resolve(path(name))
+        directory(context).resolve(path(name))
     };
     match resolved.and_then(fs::read_link) {
         Ok(path) => Ok(Value::from(bytes(&path).to_vec())),

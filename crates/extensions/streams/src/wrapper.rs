@@ -3,6 +3,7 @@
 use std::fs;
 use std::io::{self, Cursor};
 use std::os::fd::AsFd;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use base64::{
@@ -10,12 +11,12 @@ use base64::{
     engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig},
 };
 use phera_extension_api::{Context, NativeError, Value};
-use rustix::io::dup;
+use rustix::io::fcntl_dupfd_cloexec;
 
 use crate::errors::{nonempty_path, open_failed, reason, wrapper_warning};
 use crate::io_policy::IoPolicy;
 use crate::mode::Mode;
-use crate::request::{files, path, resource};
+use crate::request::{directory, files, path, resource, search};
 use crate::stream::{Backing, Stream, Wrapper};
 
 const TEMP_DEFAULT: u64 = 2 * 1024 * 1024;
@@ -61,6 +62,20 @@ impl<'a> Target<'a> {
     }
 }
 
+struct OpenFailure {
+    detail: String,
+    resolved: Option<PathBuf>,
+}
+
+impl OpenFailure {
+    fn new(detail: impl Into<String>) -> Self {
+        Self {
+            detail: detail.into(),
+            resolved: None,
+        }
+    }
+}
+
 pub async fn open(
     context: &mut dyn Context,
     function: &str,
@@ -77,7 +92,7 @@ pub async fn open(
             None,
         ),
         Target::RemoteFile => (
-            Err("no suitable wrapper could be found".into()),
+            Err(OpenFailure::new("no suitable wrapper could be found")),
             Some(format!(
                 "{function}(): Remote host file access not supported, {}",
                 String::from_utf8_lossy(name)
@@ -85,15 +100,21 @@ pub async fn open(
         ),
         Target::Php(target) => {
             match open_php(target, mode, name, files(context).input.clone()).await? {
-                Some(result) => (result.map_err(|error| reason(&error)), None),
+                Some(result) => (
+                    result.map_err(|error| OpenFailure::new(reason(&error))),
+                    None,
+                ),
                 None => (
-                    Err("operation failed".into()),
+                    Err(OpenFailure::new("operation failed")),
                     Some(format!("{function}(): Invalid php:// URL specified")),
                 ),
             }
         }
-        Target::Data(data) => (open_data(data, mode, name).map_err(str::to_owned), None),
+        Target::Data(data) => (open_data(data, mode, name).map_err(OpenFailure::new), None),
         Target::Unavailable(scheme) => {
+            if include_path {
+                wrapper_warning(context, function, scheme);
+            }
             wrapper_warning(context, function, scheme);
             (open_file(context, name, name, mode, false).await?, None)
         }
@@ -103,8 +124,12 @@ pub async fn open(
     }
     match result {
         Ok(stream) => Ok(Some(stream)),
-        Err(reason) => {
-            open_failed(context, function, name, &reason);
+        Err(failure) => {
+            let uri = failure
+                .resolved
+                .as_deref()
+                .map_or(name, crate::request::bytes);
+            open_failed(context, function, uri, &failure.detail);
             Ok(None)
         }
     }
@@ -116,24 +141,26 @@ async fn open_file(
     uri: &[u8],
     mode: &[u8],
     include_path: bool,
-) -> Result<Result<Stream, String>, NativeError> {
+) -> Result<Result<Stream, OpenFailure>, NativeError> {
     let Some(parsed) = Mode::parse(mode) else {
-        return Ok(Err(format!(
+        return Ok(Err(OpenFailure::new(format!(
             "`{}' is not a valid mode for fopen",
             String::from_utf8_lossy(mode)
-        )));
+        ))));
     };
     let include = include_path.then(|| (context.include_path(), context.script_path()));
-    let request = files(context);
-    let found =
-        include.and_then(|(include, script)| request.search(filename, &include, script.as_deref()));
-    let filename = match found.map_or_else(|| request.resolve(path(filename)), Ok) {
+    let mask = files(context).mask;
+    let directory = directory(context);
+    let found = include
+        .and_then(|(include, script)| search(directory, filename, &include, script.as_deref()));
+    let found_by_include = found.is_some();
+    let filename = match found.map_or_else(|| directory.resolve(path(filename)), Ok) {
         Ok(filename) => filename,
-        Err(error) => return Ok(Err(reason(&error))),
+        Err(error) => return Ok(Err(OpenFailure::new(reason(&error)))),
     };
-    let mask = request.mask;
     let mode = mode[..mode.len().min(15)].to_vec();
     let uri = uri.to_vec();
+    let resolved = found_by_include.then(|| filename.clone());
     // Opening a FIFO can wait for the other endpoint even before the first read.
     let policy = match fs::metadata(&filename) {
         Ok(metadata) if !metadata.is_file() && !metadata.is_dir() => IoPolicy::Blocking,
@@ -148,7 +175,14 @@ async fn open_file(
                     stream.blocked = parsed.blocked();
                     stream
                 })
-                .map_err(|error| reason(&error))
+                .map_err(|error| {
+                    let detail = if error.kind() == io::ErrorKind::NotADirectory {
+                        reason(&rustix::io::Errno::NOENT.into())
+                    } else {
+                        reason(&error)
+                    };
+                    OpenFailure { detail, resolved }
+                })
         })
         .await
 }
@@ -192,11 +226,12 @@ async fn open_php(
 }
 
 fn buffer(kind: Wrapper, mode: &[u8], uri: &[u8]) -> Stream {
-    let effective = match mode.first() {
-        Some(b'a') => b"a+b".as_slice(),
-        Some(b'w') => b"w+b",
-        _ if mode.contains(&b'+') => b"w+b",
-        _ => b"rb",
+    let effective: &[u8] = if mode.contains(&b'a') {
+        b"a+b"
+    } else if mode.contains(&b'w') || mode.contains(&b'+') {
+        b"w+b"
+    } else {
+        b"rb"
     };
     Stream::new(
         Backing::Memory(Cursor::new(Vec::new())),
@@ -208,9 +243,9 @@ fn buffer(kind: Wrapper, mode: &[u8], uri: &[u8]) -> Stream {
 
 fn standard(target: &[u8], mode: &[u8], uri: &[u8]) -> io::Result<Stream> {
     let descriptor = match target {
-        b"stdin" => dup(io::stdin().as_fd())?,
-        b"stdout" => dup(io::stdout().as_fd())?,
-        _ => dup(io::stderr().as_fd())?,
+        b"stdin" => fcntl_dupfd_cloexec(io::stdin().as_fd(), 0)?,
+        b"stdout" => fcntl_dupfd_cloexec(io::stdout().as_fd(), 0)?,
+        _ => fcntl_dupfd_cloexec(io::stderr().as_fd(), 0)?,
     };
     Ok(Stream::file(
         descriptor.into(),
@@ -279,7 +314,7 @@ fn open_data(data: &[u8], mode: &[u8], uri: &[u8]) -> Result<Stream, &'static st
 
 pub fn resolve_file(context: &mut dyn Context, name: &[u8]) -> io::Result<std::path::PathBuf> {
     match Target::parse(name) {
-        Target::File(bytes) => files(context).resolve(path(bytes)),
+        Target::File(bytes) => directory(context).resolve(path(bytes)),
         _ => Err(io::ErrorKind::Unsupported.into()),
     }
 }

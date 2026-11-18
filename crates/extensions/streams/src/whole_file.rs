@@ -5,8 +5,8 @@
 use std::io::SeekFrom;
 
 use phera_extension_api::{
-    Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, PhpArray,
-    Registry, Value, args, value::to_php_string,
+    ConstantValue, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param,
+    ParamType, PhpArray, Registry, Value, args, value::to_php_string,
 };
 use rustix::fs::{FlockOperation, flock};
 
@@ -27,7 +27,7 @@ pub const NO_DEFAULT_CONTEXT: i64 = 16;
 const LOCK_EX: i64 = 2;
 
 pub fn register(registry: &mut Registry) {
-    const FLAGS: Param = Param::new("flags", ParamType::Int).optional();
+    const FLAGS: Param = Param::new("flags", ParamType::Int).with_default(ConstantValue::Int(0));
     const OPEN_PARAMETERS: &[Param] = &[FILENAME, INCLUDE_PATH, OPTIONAL_CONTEXT];
     for entry in const {
         [
@@ -38,7 +38,7 @@ pub fn register(registry: &mut Registry) {
                         FILENAME,
                         INCLUDE_PATH,
                         OPTIONAL_CONTEXT,
-                        Param::new("offset", ParamType::Int).optional(),
+                        Param::new("offset", ParamType::Int).with_default(ConstantValue::Int(0)),
                         LENGTH,
                     ]
                 },
@@ -122,9 +122,23 @@ fn readfile(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_,
         let Some(stream) = open(context, function, name, b"rb", use_include).await? else {
             return Ok(Value::Bool(false));
         };
-        let bytes = collect(context, stream, function, None).await?;
-        context.write(&bytes);
-        Ok(Value::Int(bytes.len() as i64))
+        let result = stream
+            .read_policy(None)
+            .run(move || {
+                let mut stream = stream;
+                stream.read(None)
+            })
+            .await?;
+        match result {
+            Ok(bytes) => {
+                context.write(&bytes);
+                Ok(Value::Int(bytes.len() as i64))
+            }
+            Err(error) => {
+                read_notice(context, function, &error, CHUNK as u64);
+                Ok(Value::Int(-1))
+            }
+        }
     })
 }
 

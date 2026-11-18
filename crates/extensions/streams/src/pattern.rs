@@ -4,7 +4,7 @@ use phera_extension_api::{
     Context, FunctionEntry, NativeResult, Param, ParamType, Registry, Value, args,
 };
 
-use crate::errors::check_path;
+use crate::errors::{check_path, warn_false};
 
 const NOESCAPE: i64 = nix::libc::FNM_NOESCAPE as i64;
 const PATHNAME: i64 = nix::libc::FNM_PATHNAME as i64;
@@ -28,11 +28,26 @@ pub fn register(registry: &mut Registry) {
     }
 }
 
-fn fnmatch(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn fnmatch(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let pattern = args::bytes(arguments, 0);
     let name = args::bytes(arguments, 1);
     check_path("fnmatch", "#1 ($pattern)", pattern)?;
     check_path("fnmatch", "#2 ($filename)", name)?;
+    let limit = if cfg!(target_os = "linux") {
+        4096
+    } else {
+        1024
+    };
+    for (argument, bytes) in [("Pattern", pattern), ("Filename", name)] {
+        if bytes.len() >= limit {
+            return warn_false(
+                context,
+                format!(
+                    "fnmatch(): {argument} exceeds the maximum allowed length of {limit} characters"
+                ),
+            );
+        }
+    }
     let flags = args::int(arguments, 2).unwrap_or(0);
     let options = Options {
         escape: flags & NOESCAPE == 0,

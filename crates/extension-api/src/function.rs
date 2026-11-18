@@ -1,6 +1,6 @@
 use phera_value::Value;
 
-use crate::{Context, LocalFuture, NativeResult};
+use crate::{ConstantValue, Context, LocalFuture, NativeResult};
 
 /// A native function that finishes without waiting for anything.
 ///
@@ -49,13 +49,14 @@ pub enum ParamType {
     ArrayOrBool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Param {
     /// Without the `$`. Used for named arguments and in error messages.
     pub name: &'static str,
     pub ty: ParamType,
     pub nullable: bool,
     pub optional: bool,
+    pub named_default: Option<ConstantValue>,
     pub by_ref: bool,
     pub variadic: bool,
 }
@@ -67,6 +68,7 @@ impl Param {
             ty,
             nullable: false,
             optional: false,
+            named_default: None,
             by_ref: false,
             variadic: false,
         }
@@ -81,6 +83,13 @@ impl Param {
     /// when it is left out.
     pub const fn optional(mut self) -> Self {
         self.optional = true;
+        self
+    }
+
+    /// The value used when a later named argument skips this parameter.
+    pub const fn with_default(mut self, value: ConstantValue) -> Self {
+        self.optional = true;
+        self.named_default = Some(value);
         self
     }
 

@@ -4,7 +4,7 @@ use phera_extension_api::{Context, FunctionEntry, NativeResult, Registry, Value,
 
 use crate::errors::check_path;
 use crate::handles::FILENAME;
-use crate::request::{bytes, files, path};
+use crate::request::{bytes, directory, path, search};
 use crate::wrapper::Target;
 
 pub fn register(registry: &mut Registry) {
@@ -21,11 +21,11 @@ fn resolve(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let include_path = context.include_path();
     let script = context.script_path();
     let found = match Target::parse(name) {
-        Target::File(file) if file != name || name.is_empty() => files(context)
+        Target::File(file) if file != name || name.is_empty() => directory(context)
             .resolve(path(file))
             .ok()
             .and_then(|p| p.canonicalize().ok()),
-        Target::File(file) => files(context).search(file, &include_path, script.as_deref()),
+        Target::File(file) => search(directory(context), file, &include_path, script.as_deref()),
         _ => None,
     };
     Ok(found.map_or(Value::Bool(false), |path| {

@@ -12,6 +12,7 @@ mod function;
 mod registry;
 mod state;
 pub mod testing;
+mod working_directory;
 
 pub use phera_source::{CompileDiagnostic, CompileDiagnosticKind, CompileDiagnosticSite};
 pub use phera_value as value;
@@ -28,6 +29,7 @@ pub use error::{NativeError, NativeResult, Unwind};
 pub use function::{AsyncFn, FunctionEntry, NativeFn, Param, ParamType, SyncFn};
 pub use registry::{ConstantValue, Registry};
 pub use state::RequestState;
+pub use working_directory::WorkingDirectory;
 
 /// The PHP version exposed by the engine and its built-in modules.
 pub const PHP_VERSION: &str = "8.5.12";

@@ -7,7 +7,7 @@ use tempfile::Builder;
 
 use crate::errors::{check_path, reason};
 use crate::io_policy::IoPolicy;
-use crate::request::{bytes, files, new_resource, path};
+use crate::request::{bytes, directory as cwd, new_resource, path};
 use crate::stream::{Stream, Wrapper};
 
 pub fn register(registry: &mut Registry) {
@@ -61,7 +61,7 @@ fn tempnam(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, 
         let directory = if directory.is_empty() {
             None
         } else {
-            files(context).resolve(path(directory)).ok()
+            cwd(context).resolve(path(directory)).ok()
         };
         let (result, fallback) = IoPolicy::Blocking
             .run(move || {

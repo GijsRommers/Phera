@@ -110,7 +110,13 @@ impl Stream {
         let length = limit.or_else(|| {
             self.metadata()
                 .ok()
-                .map(|meta| meta.len().saturating_sub(self.position))
+                .map(|meta| meta.len())
+                .or_else(|| self.memory_size().map(|size| size as u64))
+                .or_else(|| match &self.backing {
+                    Backing::Input(cursor) => Some(cursor.get_ref().len() as u64),
+                    _ => None,
+                })
+                .map(|length| length.saturating_sub(self.position))
         });
         IoPolicy::transfer(self.seekable && self.wrapper != Wrapper::Standard, length)
     }
@@ -144,6 +150,9 @@ impl Stream {
                 break;
             }
             self.position += count as u64;
+            output
+                .try_reserve(count)
+                .map_err(|_| io::ErrorKind::OutOfMemory)?;
             output.extend_from_slice(&buffer[..count]);
             if !all && !self.seekable {
                 break;
@@ -191,7 +200,7 @@ impl Stream {
         let written = match &mut self.backing {
             Backing::File(file) => {
                 if self.seekable && !file.buffer().is_empty() {
-                    file.seek_relative(0)?;
+                    file.seek(SeekFrom::Start(self.position))?;
                 }
                 file.get_mut().write(bytes)?
             }
@@ -199,6 +208,14 @@ impl Stream {
                 if self.appending {
                     cursor.set_position(cursor.get_ref().len() as u64);
                 }
+                let end = usize::try_from(cursor.position())
+                    .ok()
+                    .and_then(|position| position.checked_add(bytes.len()))
+                    .ok_or(io::ErrorKind::OutOfMemory)?;
+                let memory = cursor.get_mut();
+                memory
+                    .try_reserve(end.saturating_sub(memory.len()))
+                    .map_err(|_| io::ErrorKind::OutOfMemory)?;
                 cursor.write(bytes)?
             }
             Backing::Memory(_) | Backing::Input(_) => {
@@ -247,8 +264,8 @@ impl Stream {
     }
 
     pub fn truncate(&mut self, size: u64) -> io::Result<()> {
-        if !self.writable || self.wrapper == Wrapper::Data {
-            return Err(io::ErrorKind::Unsupported.into());
+        if !self.writable && matches!(self.wrapper, Wrapper::Memory | Wrapper::Temp) {
+            return Err(io::ErrorKind::PermissionDenied.into());
         }
         match &mut self.backing {
             Backing::File(file) => file.get_mut().set_len(size),
@@ -259,6 +276,7 @@ impl Stream {
                     .try_reserve(size.saturating_sub(bytes.len()))
                     .map_err(|_| io::ErrorKind::OutOfMemory)?;
                 bytes.resize(size, 0);
+                cursor.set_position(cursor.position().min(size as u64));
                 Ok(())
             }
             _ => Err(io::ErrorKind::Unsupported.into()),

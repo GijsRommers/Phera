@@ -12,7 +12,7 @@ use phera_extension_api::{
 use crate::errors::{check_path, warn_false};
 use crate::io_policy::IoPolicy;
 use crate::pattern::Options;
-use crate::request::{files, path};
+use crate::request::{directory, path};
 
 // PHP uses glibc's glob flags on Linux and the bundled BSD glob elsewhere.
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
@@ -75,7 +75,7 @@ fn glob(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeRe
                 "glob(): Pattern exceeds the maximum allowed length".into(),
             );
         }
-        let Some(cwd) = files(context).cwd.clone() else {
+        let Some(cwd) = directory(context).path().map(Path::to_owned) else {
             return Ok(Value::Bool(false));
         };
         let [

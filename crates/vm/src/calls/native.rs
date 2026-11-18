@@ -112,6 +112,11 @@ impl Vm {
             let value = self.registers.window_mut(slots.slot(index), 1)[0].take();
             let value = value.unwrap_or_else(|| match callee.target {
                 CallTarget::Intrinsic(intrinsic) => intrinsic.named_default(index),
+                CallTarget::Native(entry) => entry
+                    .params
+                    .get(index)
+                    .and_then(|parameter| parameter.named_default)
+                    .map_or(Value::Null, |value| value.to_value()),
                 _ => Value::Null,
             });
             arguments.push(value);

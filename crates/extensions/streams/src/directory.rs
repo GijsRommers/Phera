@@ -14,7 +14,7 @@ use crate::context_options::{OPTIONAL_CONTEXT, validate};
 use crate::errors::{check_path, reason, warn_false};
 use crate::io_policy::IoPolicy;
 use crate::mutations::{DIRECTORY, local, path_call};
-use crate::request::{bytes, files, new_resource};
+use crate::request::{bytes, directory, files, new_resource};
 use crate::resource::given;
 
 const HANDLE: Param = Param::new("dir_handle", ParamType::Mixed).optional();
@@ -23,7 +23,7 @@ pub fn register(registry: &mut Registry) {
     const OPEN: &[Param] = &[DIRECTORY, OPTIONAL_CONTEXT];
     const SCAN: &[Param] = &[
         DIRECTORY,
-        Param::new("sorting_order", ParamType::Int).optional(),
+        Param::new("sorting_order", ParamType::Int).with_default(ConstantValue::Int(0)),
         OPTIONAL_CONTEXT,
     ];
     for entry in [
@@ -310,9 +310,8 @@ async fn with_directory<T: Send + 'static>(
 }
 
 fn getcwd(context: &mut dyn Context, _: &[Value]) -> NativeResult {
-    Ok(files(context)
-        .cwd
-        .as_deref()
+    Ok(directory(context)
+        .path()
         .map_or(Value::Bool(false), |cwd| Value::from(bytes(cwd).to_vec())))
 }
 
@@ -331,7 +330,7 @@ fn chdir(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     });
     match expected {
         Ok(cwd) => {
-            files(context).cwd = Some(cwd);
+            directory(context).set(cwd);
             Ok(Value::Bool(true))
         }
         Err(error) => warn_false(

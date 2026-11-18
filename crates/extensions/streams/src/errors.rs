@@ -46,7 +46,11 @@ pub fn open_failed(context: &mut dyn Context, function: &str, path: &[u8], reaso
 pub fn wrapper_warning(context: &mut dyn Context, function: &str, scheme: &[u8]) {
     let scheme = String::from_utf8_lossy(scheme);
     context.warning(format!(
-        "{function}(): Unable to find the wrapper \"{scheme}\" - did you forget to enable          it when you configured PHP?"
+        concat!(
+            "{}(): Unable to find the wrapper \"{}\" - did you forget to enable ",
+            "it when you configured PHP?"
+        ),
+        function, scheme
     ));
 }
 

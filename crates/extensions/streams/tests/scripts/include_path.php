@@ -11,3 +11,6 @@ var_dump(file_get_contents('content.txt', true));
 $stream = fopen('content.txt', 'r', true);
 var_dump(fread($stream, 5), fclose($stream));
 var_dump(require 'message.php');
+chdir('library');
+var_dump(file_get_contents('content.txt'));
+var_dump(require './message.php');
