@@ -196,27 +196,6 @@ pub(crate) enum HookRead {
 }
 
 impl Vm {
-    pub(crate) async fn read_declared_hook(
-        &mut self,
-        object: &Rc<Object>,
-        property: &PropertyDefault,
-        hooks: &LinkedPropertyHooks,
-        indirect: bool,
-    ) -> Result<Option<Value>, NativeError> {
-        let function = match self.declared_hook_read(object, property, hooks, indirect)? {
-            HookRead::Storage => return Ok(None),
-            HookRead::Value(value) => return Ok(Some(value)),
-            HookRead::Getter(function) => function,
-        };
-        let value = self
-            .invoke_declared_hook(function, object.clone(), None)
-            .await?;
-        if indirect && !value.is_reference() && !value.is_object() {
-            return Err(indirect_error(object, &property.name));
-        }
-        Ok(Some(value))
-    }
-
     pub(crate) fn declared_hook_read(
         &mut self,
         object: &Object,

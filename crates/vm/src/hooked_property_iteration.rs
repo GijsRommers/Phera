@@ -10,8 +10,13 @@ use phera_value::{ArrayKey, Object, PhpArray, Value};
 use crate::Vm;
 use crate::access_mode::Binding;
 use crate::calls::frame::IteratorState;
-use crate::classes::{Class, property_hooks::property_error};
+use crate::classes::{
+    Class,
+    property_hooks::{HookRead, property_error},
+};
+use crate::code_table::FunctionIndex;
 use crate::path_update::property_name;
+use crate::property_hook_continuation::HookContinuation;
 
 pub(crate) struct HookedPropertyIterator {
     object: Rc<Object>,
@@ -20,6 +25,25 @@ pub(crate) struct HookedPropertyIterator {
     next_dynamic: Option<usize>,
     declared: HashSet<ArrayKey>,
     binding: Binding,
+}
+
+enum IterationStep {
+    End,
+    Entry(ArrayKey, Value),
+    Getter(FunctionIndex, ArrayKey, String),
+}
+
+pub(crate) struct PropertyIteration {
+    cursor: Box<HookedPropertyIterator>,
+    iterator: IterId,
+    key: Option<Reg>,
+    destination: Reg,
+}
+
+pub(crate) struct IterationGetter {
+    pub(crate) iteration: PropertyIteration,
+    pub(crate) name: ArrayKey,
+    pub(crate) property: String,
 }
 
 impl HookedPropertyIterator {
@@ -39,11 +63,11 @@ impl HookedPropertyIterator {
         }
     }
 
-    async fn next(
+    fn next(
         &mut self,
         vm: &mut Vm,
         purpose: PropertyPurpose,
-    ) -> Result<Option<(ArrayKey, Value)>, NativeError> {
+    ) -> Result<IterationStep, NativeError> {
         let by_reference = self.binding == Binding::ByReference;
         let public_only = purpose == PropertyPurpose::Json;
         let scoped = matches!(
@@ -80,11 +104,21 @@ impl HookedPropertyIterator {
                         ));
                     }
                 }
-                if let Some(value) = vm
-                    .read_declared_hook(&self.object, property, hooks, by_reference)
-                    .await?
-                {
-                    return Ok(Some((enumeration_key(purpose, property), value)));
+                match vm.declared_hook_read(&self.object, property, hooks, by_reference)? {
+                    HookRead::Storage => {}
+                    HookRead::Value(value) => {
+                        return Ok(IterationStep::Entry(
+                            enumeration_key(purpose, property),
+                            value,
+                        ));
+                    }
+                    HookRead::Getter(function) => {
+                        return Ok(IterationStep::Getter(
+                            function,
+                            enumeration_key(purpose, property),
+                            property.name.clone(),
+                        ));
+                    }
                 }
             }
             let stored = self.object.get(&property.key).or_else(|| {
@@ -101,7 +135,10 @@ impl HookedPropertyIterator {
                 } else {
                     value
                 };
-                return Ok(Some((enumeration_key(purpose, property), value)));
+                return Ok(IterationStep::Entry(
+                    enumeration_key(purpose, property),
+                    value,
+                ));
             }
         }
         let properties = self.object.to_array();
@@ -123,11 +160,11 @@ impl HookedPropertyIterator {
                 } else {
                     value.clone()
                 };
-                return Ok(Some((key, value)));
+                return Ok(IterationStep::Entry(key, value));
             }
             position = properties.next_position(index);
         }
-        Ok(None)
+        Ok(IterationStep::End)
     }
 }
 
@@ -191,10 +228,66 @@ impl Vm {
         let Some(mut cursor) = iterator_state.and_then(|state| state.property_hooks.take()) else {
             return Ok(false);
         };
-        let entry = cursor.next(self, PropertyPurpose::Foreach).await?;
-        let Some((name, value)) = entry else {
-            return self.jump(end).map(|()| true);
+        let entry = cursor.next(self, PropertyPurpose::Foreach)?;
+        let iteration = PropertyIteration {
+            cursor,
+            iterator,
+            key,
+            destination,
         };
+        match entry {
+            IterationStep::End => self.jump(end)?,
+            IterationStep::Entry(name, value) => {
+                self.finish_hooked_iteration(iteration, name, value)
+            }
+            IterationStep::Getter(function, name, property) => {
+                let receiver = iteration.cursor.object.clone();
+                self.suspend_for_hook(
+                    function,
+                    receiver,
+                    None,
+                    HookContinuation::Iteration(IterationGetter {
+                        iteration,
+                        name,
+                        property,
+                    }),
+                )
+                .await?;
+            }
+        }
+        Ok(true)
+    }
+
+    pub(crate) fn resume_hooked_iteration(
+        &mut self,
+        getter: IterationGetter,
+        value: Value,
+    ) -> Result<(), NativeError> {
+        if getter.iteration.cursor.binding == Binding::ByReference
+            && !value.is_reference()
+            && !value.is_object()
+        {
+            return Err(crate::classes::property_hooks::indirect_error(
+                &getter.iteration.cursor.object,
+                &getter.property,
+            ));
+        }
+        self.finish_hooked_iteration(getter.iteration, getter.name, value);
+        Ok(())
+    }
+
+    fn finish_hooked_iteration(
+        &mut self,
+        iteration: PropertyIteration,
+        name: ArrayKey,
+        value: Value,
+    ) {
+        let PropertyIteration {
+            cursor,
+            iterator,
+            key,
+            destination,
+        } = iteration;
         if let Some(key) = key {
             let name = match name {
                 ArrayKey::String(name) => Value::String(name),
@@ -220,7 +313,6 @@ impl Vm {
         {
             state.property_hooks = Some(cursor);
         }
-        Ok(true)
     }
 
     pub(crate) async fn enumerate_hooked_native(
@@ -250,10 +342,18 @@ impl Vm {
     ) -> Result<PhpArray, NativeError> {
         let mut cursor = HookedPropertyIterator::new(object, class, Binding::ByValue);
         let mut properties = PhpArray::new();
-        while let Some((key, value)) = cursor.next(self, purpose).await? {
-            properties.insert(key, value);
+        loop {
+            match cursor.next(self, purpose)? {
+                IterationStep::End => return Ok(properties),
+                IterationStep::Entry(key, value) => properties.insert(key, value),
+                IterationStep::Getter(function, key, _) => {
+                    let value = self
+                        .invoke_declared_hook(function, cursor.object.clone(), None)
+                        .await?;
+                    properties.insert(key, value)
+                }
+            };
         }
-        Ok(properties)
     }
 }
 

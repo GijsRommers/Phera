@@ -3,28 +3,95 @@
 
 use std::{cell::RefCell, rc::Rc};
 
-use phera_bytecode::Step;
+use phera_bytecode::{Reg, Step};
 use phera_extension_api::{NativeError, NativeResult};
-use phera_value::Value;
+use phera_value::{Object, Value};
 
 use crate::access_mode::{Creation, Missing, Mutation};
+use crate::classes::property_hooks::HookRead;
+use crate::code_table::FunctionIndex;
 use crate::inline_stack::InlineStack;
 use crate::magic_properties::{PropertyHook, PropertyRead};
 use crate::path_update::PathKey;
 use crate::{AccessPath, Vm};
 
+pub(crate) struct ReferencePath {
+    place: AccessPath,
+    register: Reg,
+    next: usize,
+    cursor: Value,
+    detached: Option<Value>,
+    keys: InlineStack<PathKey>,
+}
+
+pub(crate) enum ReferenceStep {
+    Complete(Value),
+    Hook(FunctionIndex, ReferenceGetter),
+}
+
+pub(crate) struct ReferenceGetter {
+    pub(crate) object: Rc<Object>,
+    name: String,
+    last: bool,
+}
+
+impl ReferencePath {
+    pub(crate) fn resume(
+        &mut self,
+        getter: ReferenceGetter,
+        value: Value,
+    ) -> Result<Option<Value>, NativeError> {
+        if !value.is_reference() && !value.is_object() {
+            return Err(crate::classes::property_hooks::indirect_error(
+                &getter.object,
+                &getter.name,
+            ));
+        }
+        Ok(self.retain_getter_value(value, getter.last))
+    }
+
+    fn retain_getter_value(&mut self, value: Value, last: bool) -> Option<Value> {
+        if last {
+            return Some(match value {
+                Value::Reference(_) => value,
+                _ => Value::Reference(Rc::new(RefCell::new(value))),
+            });
+        }
+        self.cursor = value.clone();
+        self.detached = Some(value);
+        self.keys = InlineStack::new();
+        None
+    }
+}
+
 impl Vm {
     /// The alias returned by &__get points to the getter's own storage.
-    pub(crate) async fn magic_reference(&mut self, place: &AccessPath) -> NativeResult {
+    pub(crate) fn start_magic_reference(
+        &mut self,
+        place: AccessPath,
+    ) -> Result<ReferencePath, NativeError> {
         let register = self
-            .base_register(place, Creation::Create, Missing::Silent)?
+            .base_register(&place, Creation::Create, Missing::Silent)?
             .ok_or_else(|| internal_error!("missing reference place"))?;
-        let mut cursor = self.raw_local(register);
-        let mut detached = None;
-        let mut keys = InlineStack::new();
-        let mut steps = place.steps()?.peekable();
+        Ok(ReferencePath {
+            place,
+            register,
+            next: 0,
+            cursor: self.raw_local(register),
+            detached: None,
+            keys: InlineStack::new(),
+        })
+    }
+
+    pub(crate) async fn advance_magic_reference(
+        &mut self,
+        path: &mut ReferencePath,
+    ) -> Result<ReferenceStep, NativeError> {
+        let place = path.place.clone();
+        let mut steps = place.steps()?.skip(path.next).peekable();
         while let Some(step) = steps.next() {
-            let current = cursor.deref().clone();
+            path.next += 1;
+            let current = path.cursor.deref().clone();
             if let Step::Index(index) = step
                 && let Value::Object(object) = &current
                 && crate::dimensions::has_dimension(object)
@@ -35,7 +102,8 @@ impl Vm {
                         offset: self.get(index),
                         suffix: steps.collect(),
                     })
-                    .await;
+                    .await
+                    .map(ReferenceStep::Complete);
             }
             let key = if let Step::Index(index) = step {
                 PathKey::Index(Some(self.write_index_key(&current, index)?))
@@ -59,20 +127,27 @@ impl Vm {
                             .as_ref()
                             .and_then(|key| crate::classes::property_hooks::for_key(&class, key))
                             && let Some(hooks) = &property.hooks
-                            && let Some(value) = self
-                                .read_declared_hook(&object, property, hooks, true)
-                                .await?
                         {
-                            if steps.peek().is_none() {
-                                return Ok(match value {
-                                    Value::Reference(_) => value,
-                                    _ => Value::Reference(Rc::new(RefCell::new(value))),
-                                });
+                            let last = steps.peek().is_none();
+                            match self.declared_hook_read(&object, property, hooks, true)? {
+                                HookRead::Storage => {}
+                                HookRead::Value(value) => {
+                                    if let Some(value) = path.retain_getter_value(value, last) {
+                                        return Ok(ReferenceStep::Complete(value));
+                                    }
+                                    continue;
+                                }
+                                HookRead::Getter(function) => {
+                                    return Ok(ReferenceStep::Hook(
+                                        function,
+                                        ReferenceGetter {
+                                            object,
+                                            name: display,
+                                            last,
+                                        },
+                                    ));
+                                }
                             }
-                            cursor = value.clone();
-                            detached = Some(value);
-                            keys = InlineStack::new();
-                            continue;
                         }
                         if stored.is_none()
                             && !slot.as_ref().is_some_and(|key| {
@@ -90,15 +165,11 @@ impl Vm {
                                 )
                                 .await?;
                             self.warn_indirect_magic_property(&object, &display, &value);
-                            if steps.peek().is_none() {
-                                return Ok(match value {
-                                    Value::Reference(_) => value,
-                                    _ => Value::Reference(Rc::new(RefCell::new(value))),
-                                });
+                            if let Some(value) =
+                                path.retain_getter_value(value, steps.peek().is_none())
+                            {
+                                return Ok(ReferenceStep::Complete(value));
                             }
-                            cursor = value.clone();
-                            detached = Some(value);
-                            keys = InlineStack::new();
                             continue;
                         }
                         let key = match slot {
@@ -124,14 +195,16 @@ impl Vm {
                 }
                 (_, key) => (key, Value::Null),
             };
-            cursor = next;
-            keys.push(key);
+            path.cursor = next;
+            path.keys.push(key);
         }
-        if let Some(root) = detached {
-            self.reference_from_magic(root, &keys, cursor)
+        let value = if let Some(root) = path.detached.take() {
+            self.reference_from_magic(root, &path.keys, std::mem::take(&mut path.cursor))
         } else {
-            self.reference_resolved(place, register, keys)
-        }
+            let keys = std::mem::replace(&mut path.keys, InlineStack::new());
+            self.reference_resolved(&place, path.register, keys)
+        }?;
+        Ok(ReferenceStep::Complete(value))
     }
 
     fn reference_from_magic(

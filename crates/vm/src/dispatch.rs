@@ -26,7 +26,9 @@ impl Vm {
         stop: usize,
     ) -> Result<DispatchResult, NativeError> {
         use crate::magic_mutations::{PropertyMutation, WriteValue};
-        use crate::property_hook_continuation::ReadCompletion;
+        use crate::property_hook_continuation::{
+            ReadCompletion, ReferenceCompletion, WriteCompletion,
+        };
 
         if self.pending_dimension.is_some() {
             return self.dispatch_object_operation(instruction).await;
@@ -108,32 +110,26 @@ impl Vm {
                     return Ok(DispatchResult::Continue);
                 }
                 let static_cast = self.cast_static_property_value(&place, &value).await?;
-                let written = self
-                    .mutate_magic_place(
-                        &place,
-                        PropertyMutation::Write(
-                            WriteValue::evaluated(static_cast.clone().unwrap_or(value)),
-                            crate::access_mode::Binding::ByValue,
-                        ),
-                    )
-                    .await?;
-                if let Some(value) = written.or(static_cast) {
-                    self.set_cast_assignment_result(src, value);
-                }
+                self.mutate_property_path(
+                    place,
+                    PropertyMutation::Write(
+                        WriteValue::evaluated(static_cast.clone().unwrap_or(value)),
+                        crate::access_mode::Binding::ByValue,
+                    ),
+                    WriteCompletion::Cast(src, static_cast),
+                )
+                .await?;
             }
             Instruction::AssignPathFromLocal { path, src, dst } => {
-                if let Some(value) = self
-                    .mutate_magic_place(
-                        &self.path(path)?,
-                        PropertyMutation::Write(
-                            WriteValue::local(src, dst),
-                            crate::access_mode::Binding::ByValue,
-                        ),
-                    )
-                    .await?
-                {
-                    self.set(dst, value);
-                }
+                self.mutate_property_path(
+                    self.path(path)?,
+                    PropertyMutation::Write(
+                        WriteValue::local(src, dst),
+                        crate::access_mode::Binding::ByValue,
+                    ),
+                    WriteCompletion::Local(dst),
+                )
+                .await?;
             }
             Instruction::AssignOpPath { op, dst, path, src } => {
                 self.read_property_path(
@@ -152,23 +148,28 @@ impl Vm {
                 .await?
             }
             Instruction::MakeReference { dst, path } => {
-                let value = self.magic_reference(&self.path(path)?).await?;
-                self.set(dst, value);
+                self.reference_property_path(self.path(path)?, ReferenceCompletion::Fetch(dst))
+                    .await?;
             }
             Instruction::BindReference { path, src } => {
                 let value = self.raw_local(src);
-                self.mutate_magic_place(
-                    &self.path(path)?,
+                self.mutate_property_path(
+                    self.path(path)?,
                     PropertyMutation::Write(
                         WriteValue::evaluated(value),
                         crate::access_mode::Binding::ByReference,
                     ),
+                    WriteCompletion::Discard,
                 )
                 .await?;
             }
             Instruction::UnsetPath { path } => {
-                self.mutate_magic_place(&self.path(path)?, PropertyMutation::Unset)
-                    .await?;
+                self.mutate_property_path(
+                    self.path(path)?,
+                    PropertyMutation::Unset,
+                    WriteCompletion::Discard,
+                )
+                .await?;
             }
             Instruction::Clone { dst, src, with } => self.clone_instruction(dst, src, with).await?,
             Instruction::Exit { src: source } => {

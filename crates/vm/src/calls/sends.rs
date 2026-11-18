@@ -75,8 +75,11 @@ impl Vm {
             .is_some_and(|parameter| parameters.by_reference(parameter))
             || (index == 0 && view.is_extract());
         if reference {
-            let value = self.magic_reference(place).await?;
-            self.store_sent_value(index, value)
+            self.reference_property_path(
+                place.clone(),
+                crate::property_hook_continuation::ReferenceCompletion::Argument(index),
+            )
+            .await
         } else {
             self.read_property_path(
                 place.clone(),

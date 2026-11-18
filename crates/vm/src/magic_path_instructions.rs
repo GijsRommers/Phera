@@ -8,6 +8,7 @@ use phera_value::Value;
 use crate::access_mode::{Binding, Mutation};
 use crate::magic_mutations::{PropertyMutation, WriteValue};
 use crate::magic_places::{ReadPlace, UpdateTarget};
+use crate::property_hook_continuation::{HookContinuation, WriteCompletion};
 use crate::{AccessPath, Vm};
 
 impl Vm {
@@ -22,10 +23,13 @@ impl Vm {
         let value = self
             .binary_with_strings(operator, left.value, self.get(source))
             .await?;
-        self.finish_path_update(place, left.target, value.clone())
-            .await?;
-        self.set(destination, value);
-        Ok(())
+        self.finish_path_update(
+            place,
+            left.target,
+            value.clone(),
+            WriteCompletion::Update(destination, value),
+        )
+        .await
     }
 
     pub(crate) async fn finish_magic_inc_dec(
@@ -47,16 +51,17 @@ impl Vm {
                 }
             }
         };
-        self.finish_path_update(place, target.target, value.clone())
-            .await?;
-        self.set(
-            destination,
-            match mode {
-                IncDec::PostIncrement | IncDec::PostDecrement => old,
-                IncDec::PreIncrement | IncDec::PreDecrement => value,
-            },
-        );
-        Ok(())
+        let result = match mode {
+            IncDec::PostIncrement | IncDec::PostDecrement => old,
+            IncDec::PreIncrement | IncDec::PreDecrement => value.clone(),
+        };
+        self.finish_path_update(
+            place,
+            target.target,
+            value,
+            WriteCompletion::Update(destination, result),
+        )
+        .await
     }
 
     /// An indirect update writes through the original __get result, including
@@ -66,6 +71,7 @@ impl Vm {
         place: &AccessPath,
         target: Option<UpdateTarget>,
         value: Value,
+        completion: WriteCompletion,
     ) -> Result<(), NativeError> {
         match target {
             Some(UpdateTarget::Resolved { register, keys }) => {
@@ -74,25 +80,43 @@ impl Vm {
                 if !self.validate_property_mutation(current, &keys, &mut value, Mutation::Assign)? {
                     self.write_resolved_place(place, register, *keys, value, Binding::ByValue)?;
                 }
-                Ok(())
             }
-            Some(UpdateTarget::Indirect { root, keys }) => self
-                .write_detached_place(root, &keys, value, Mutation::Assign)
-                .await
-                .map(|_| ()),
+            Some(UpdateTarget::Indirect { root, keys }) => {
+                self.write_detached_place(root, &keys, value, Mutation::Assign)
+                    .await?;
+            }
             Some(UpdateTarget::Dimension(object, offset)) => {
-                self.dimension_set(object, offset, value).await
+                self.dimension_set(object, offset, value).await?;
             }
             Some(UpdateTarget::Property { object, key }) => {
-                self.assign_selected_property(object, key, value).await
+                if let Some(setter) = self
+                    .plan_selected_property_write(object, key, value)
+                    .await?
+                {
+                    return self
+                        .suspend_for_hook(
+                            setter.function,
+                            setter.object,
+                            Some(setter.argument),
+                            HookContinuation::Written {
+                                local: None,
+                                completion,
+                            },
+                        )
+                        .await;
+                }
             }
-            None => self
-                .mutate_magic_place(
-                    place,
-                    PropertyMutation::Write(WriteValue::evaluated(value), Binding::ByValue),
-                )
-                .await
-                .map(|_| ()),
+            None => {
+                return self
+                    .mutate_property_path(
+                        place.clone(),
+                        PropertyMutation::Write(WriteValue::evaluated(value), Binding::ByValue),
+                        completion,
+                    )
+                    .await;
+            }
         }
+        completion.finish(self, None);
+        Ok(())
     }
 }
