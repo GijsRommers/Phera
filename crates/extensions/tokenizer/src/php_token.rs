@@ -4,17 +4,17 @@ use std::rc::Rc;
 
 use phera_extension_api::{
     ArrayKey, ClassEntry, ConstantValue, Context, MethodEntry, NativeError, NativeResult, Object,
-    Param, ParamType, PhpArray, PropertyEntry, Registry, Value, Visibility, args,
+    Param, ParamType, PhpArray, PropertyEntry, PropertyType, Registry, Value, Visibility, args,
 };
 
 use crate::{names, stream, token};
 
 const CLASS: &str = "PhpToken";
 const PROPERTIES: &[PropertyEntry] = &[
-    PropertyEntry::new("id", ConstantValue::Null, Visibility::Public),
-    PropertyEntry::new("text", ConstantValue::Null, Visibility::Public),
-    PropertyEntry::new("line", ConstantValue::Null, Visibility::Public),
-    PropertyEntry::new("pos", ConstantValue::Null, Visibility::Public),
+    PropertyEntry::typed("id", PropertyType::Int, Visibility::Public),
+    PropertyEntry::typed("text", PropertyType::String, Visibility::Public),
+    PropertyEntry::typed("line", PropertyType::Int, Visibility::Public),
+    PropertyEntry::typed("pos", PropertyType::Int, Visibility::Public),
 ];
 
 const METHODS: &[MethodEntry] = &[
@@ -24,8 +24,8 @@ const METHODS: &[MethodEntry] = &[
         &[
             Param::new("id", ParamType::Int),
             Param::new("text", ParamType::String),
-            Param::new("line", ParamType::Int).optional(),
-            Param::new("pos", ParamType::Int).optional(),
+            Param::new("line", ParamType::Int).with_default(ConstantValue::Int(-1)),
+            Param::new("pos", ParamType::Int).with_default(ConstantValue::Int(-1)),
         ],
         construct,
     )
@@ -46,13 +46,15 @@ pub(crate) fn register(registry: &mut Registry) {
 }
 
 fn tokenize(context: &mut dyn Context, _: Option<&Rc<Object>>, args: &[Value]) -> NativeResult {
+    let class = context.called_class().unwrap_or(CLASS).to_owned();
+    context.ensure_instantiable(&class)?;
     stream::tokenize(
         context,
         args::bytes(args, 0),
         args::int(args, 1).unwrap_or_default(),
         |context, token| {
             context.create_object(
-                CLASS,
+                &class,
                 properties(
                     token.id,
                     Value::from(token.text),
@@ -78,9 +80,9 @@ fn properties(id: i64, text: Value, line: i64, pos: i64) -> PhpArray {
 }
 
 fn construct(_: &mut dyn Context, this: Option<&Rc<Object>>, args: &[Value]) -> NativeResult {
-    let this = this.expect("instance method");
+    let this = receiver(this)?;
     let values = properties(
-        args::int(args, 0).expect("required integer"),
+        args::int(args, 0).ok_or_else(|| NativeError::error("Missing PhpToken ID"))?,
         args::value(args, 1).clone(),
         args::int(args, 2).unwrap_or(-1),
         args::int(args, 3).unwrap_or(-1),
@@ -111,11 +113,11 @@ fn id(this: &Object) -> Result<i64, NativeError> {
 }
 
 fn to_string(_: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
-    property(this.expect("instance method"), "text").map(|value| value.deref().clone())
+    property(receiver(this)?, "text").map(|value| value.deref().clone())
 }
 
 fn get_token_name(_: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
-    let id = id(this.expect("instance method"))?;
+    let id = id(receiver(this)?)?;
     Ok(if id < 256 {
         Value::from(&[id as u8][..])
     } else {
@@ -124,13 +126,11 @@ fn get_token_name(_: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value]) -
 }
 
 fn is_ignorable(_: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
-    Ok(Value::Bool(token::ignorable(id(
-        this.expect("instance method")
-    )?)))
+    Ok(Value::Bool(token::ignorable(id(receiver(this)?)?)))
 }
 
 fn is(_: &mut dyn Context, this: Option<&Rc<Object>>, args: &[Value]) -> NativeResult {
-    let this = this.expect("instance method");
+    let this = receiver(this)?;
     let kind = args::value(args, 0).deref();
     if let Value::Array(kinds) = &*kind {
         for kind in kinds.values() {
@@ -166,4 +166,9 @@ fn matches_kind(this: &Object, kind: &Value, array_entry: bool) -> Result<bool, 
             )))
         }
     }
+}
+
+fn receiver<'a>(this: Option<&'a Rc<Object>>) -> Result<&'a Object, NativeError> {
+    this.map(Rc::as_ref)
+        .ok_or_else(|| NativeError::error("Missing PhpToken receiver"))
 }

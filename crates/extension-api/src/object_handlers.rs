@@ -71,7 +71,10 @@ pub type NativeCount = fn(&mut dyn Context, &Object) -> Result<i64, NativeError>
 pub struct ClassHooks {
     pub clone: Option<NativeClone>,
     pub compare: Option<NativeCompare>,
+    /// Whole-object enumeration, with the consuming operation supplied as a purpose.
     pub properties: Option<PropertyProjection>,
+    /// Direct read, mutation or presence check for one virtual property.
+    pub property_access: Option<&'static crate::NativePropertyAccess>,
     pub iterator: Option<IteratorFactory>,
     pub dimensions: Option<NativeDimensions>,
     pub count: Option<NativeCount>,
@@ -82,6 +85,7 @@ impl ClassHooks {
         clone: None,
         compare: None,
         properties: None,
+        property_access: None,
         iterator: None,
         dimensions: None,
         count: None,

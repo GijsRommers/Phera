@@ -67,26 +67,7 @@ impl Context for Vm {
 
     /// Native decoders construct linked objects without running PHP constructors.
     fn create_object(&mut self, name: &str, properties: phera_value::PhpArray) -> NativeResult {
-        let class = self.classes.get(name).ok_or_else(|| {
-            phera_extension_api::NativeError::error(format!("Class \"{name}\" not found"))
-        })?;
-        if class.origin == crate::classes::class::ClassOrigin::Closure {
-            return Err(phera_extension_api::NativeError::error(
-                "Instantiation of class Closure is not allowed",
-            ));
-        }
-        if class.kind == phera_bytecode::ClassKind::Interface {
-            return Err(phera_extension_api::NativeError::error(format!(
-                "Cannot instantiate interface {}",
-                class.name
-            )));
-        }
-        if class.is_abstract {
-            return Err(phera_extension_api::NativeError::error(format!(
-                "Cannot instantiate abstract class {}",
-                class.name
-            )));
-        }
+        let class = self.factory_class(name)?;
         let object = self.classes.allocate(class.clone());
         for property in &class.defaults {
             if property.initialized {
@@ -209,6 +190,10 @@ impl Context for Vm {
         Ok(value)
     }
 
+    fn ensure_instantiable(&self, name: &str) -> Result<(), phera_extension_api::NativeError> {
+        self.factory_class(name).map(drop)
+    }
+
     fn state(&mut self) -> &mut RequestState {
         &mut self.state
     }
@@ -233,6 +218,33 @@ impl Context for Vm {
 }
 
 impl Vm {
+    fn factory_class(
+        &self,
+        name: &str,
+    ) -> Result<std::rc::Rc<crate::classes::Class>, phera_extension_api::NativeError> {
+        let class = self.classes.get(name).ok_or_else(|| {
+            phera_extension_api::NativeError::error(format!("Class \"{name}\" not found"))
+        })?;
+        if class.origin == crate::classes::class::ClassOrigin::Closure {
+            return Err(phera_extension_api::NativeError::error(
+                "Instantiation of class Closure is not allowed",
+            ));
+        }
+        if class.kind == phera_bytecode::ClassKind::Interface {
+            return Err(phera_extension_api::NativeError::error(format!(
+                "Cannot instantiate interface {}",
+                class.name
+            )));
+        }
+        if class.is_abstract {
+            return Err(phera_extension_api::NativeError::error(format!(
+                "Cannot instantiate abstract class {}",
+                class.name
+            )));
+        }
+        Ok(class)
+    }
+
     /// Native values are consumed directly into the same slots as PHP Send instructions.
     pub(crate) fn invoke_resolved_callable(
         &mut self,

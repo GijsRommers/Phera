@@ -112,6 +112,11 @@ impl Vm {
             let value = self.registers.window_mut(slots.slot(index), 1)[0].take();
             let value = value.unwrap_or_else(|| match callee.target {
                 CallTarget::Intrinsic(intrinsic) => intrinsic.named_default(index),
+                CallTarget::Native(entry) => named_default(entry.params, index),
+                CallTarget::Method { ref method, .. } => match method.body {
+                    MethodBody::Native(entry) => named_default(entry.params, index),
+                    _ => Value::Null,
+                },
                 _ => Value::Null,
             });
             arguments.push(value);
@@ -120,7 +125,12 @@ impl Vm {
         let origin = callee.argument_binding.origin(self.argument_origin);
         let named = &details.extra_named;
         match &callee.target {
-            CallTarget::Native(entry) => self.native_entry_origin(*entry, arguments, origin).await,
+            CallTarget::Native(entry) => {
+                let previous = self.native_called_class.take();
+                let result = self.native_entry_origin(*entry, arguments, origin).await;
+                self.native_called_class = previous;
+                result
+            }
             CallTarget::Intrinsic(intrinsic) => {
                 // Boxed: an intrinsic such as `eval` runs code, and its future
                 // must not make the future of every ordinary native call larger.
@@ -237,4 +247,13 @@ impl Vm {
         let start = named.first().map_or(0, |(index, _)| *index);
         Box::pin(self.closure_method_named(operation, receiver, arguments, start, names, origin))
     }
+}
+
+// Omitted optional tail arguments still use the handler's usual defaults.
+fn named_default(parameters: &[phera_extension_api::Param], index: usize) -> Value {
+    parameters
+        .get(index)
+        .and_then(|parameter| parameter.default)
+        .map(|default| default.to_value())
+        .unwrap_or_default()
 }

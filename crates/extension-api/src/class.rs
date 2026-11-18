@@ -3,12 +3,20 @@
 //! An extension describes a class as data. The VM turns the description into
 //! one of its own classes at startup, so PHP code can extend it, catch it and
 //! call its methods exactly as with a class written in PHP.
+//!
+//! ```php
+//! $date->format('Y-m-d'); // a native method
+//! var_dump($date);       // a native property view
+//! ```
+//!
+//! [`ClassEntry`] declares members, [`MethodEntry`] describes call preparation,
+//! and [`ClassHooks`] groups optional object operations inherited by subclasses.
 
 use std::rc::Rc;
 
 use phera_value::{Object, Value};
 
-use crate::{ConstantValue, Context, LocalFuture, NativeError, NativeResult, Param};
+use crate::{ClassHooks, ConstantValue, Context, LocalFuture, NativeError, NativeResult, Param};
 
 /// An extension can preserve legacy parsing behavior while keeping its reflected signature.
 /// Most methods use Default; Prepared means the hook already checked and coerced arguments.
@@ -63,6 +71,7 @@ pub struct MethodEntry {
     pub name: &'static str,
     pub params: &'static [Param],
     pub handler: NativeMethod,
+    /// Optional argument handling before the ordinary native signature check.
     pub preparation: Option<PrepareMethod>,
     pub visibility: Visibility,
     pub is_static: bool,
@@ -157,6 +166,7 @@ pub enum PropertyType {
     Array,
     Object,
     Mixed,
+    NullableClass(&'static str),
 }
 
 /// A property every instance starts with.
@@ -247,11 +257,12 @@ pub struct ClassEntry {
     /// Linked immediately so `PDO::FETCH_ASSOC` also works in defaults.
     /// For example, PHP may declare `function rows($mode = PDO::FETCH_ASSOC) {}`.
     pub constants: &'static [(&'static str, ConstantValue)],
+    /// Names and PHP diagnostic messages, alongside the constants' declared values.
     pub deprecated_constants: &'static [(&'static str, &'static str)],
     pub properties: &'static [PropertyEntry],
-    pub property_access: Option<&'static NativePropertyAccess>,
     pub methods: &'static [MethodEntry],
-    pub hooks: Option<&'static crate::ClassHooks>,
+    /// Operations for state held outside ordinary PHP properties.
+    pub hooks: Option<&'static ClassHooks>,
 }
 
 impl ClassEntry {
@@ -267,7 +278,6 @@ impl ClassEntry {
             constants: &[],
             deprecated_constants: &[],
             properties: &[],
-            property_access: None,
             methods: &[],
             hooks: None,
         }

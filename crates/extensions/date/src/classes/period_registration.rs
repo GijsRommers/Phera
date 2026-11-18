@@ -15,7 +15,14 @@ pub fn register(registry: &mut Registry) {
             ("INCLUDE_END_DATE", ConstantValue::Int(period::INCLUDE_END)),
         ],
         properties: PROPERTIES,
-        property_access: Some(&period_properties::ACCESS),
+        hooks: Some(
+            const {
+                &phera_extension_api::ClassHooks {
+                    property_access: Some(&period_properties::ACCESS),
+                    ..phera_extension_api::ClassHooks::EMPTY
+                }
+            },
+        ),
         methods: METHODS,
         ..ClassEntry::class(period::CLASS)
     });

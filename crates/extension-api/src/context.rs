@@ -120,6 +120,11 @@ pub trait Context {
         ))
     }
 
+    /// Checks a factory target even when there will be no objects in the result.
+    fn ensure_instantiable(&self, _class: &str) -> Result<(), NativeError> {
+        Ok(())
+    }
+
     /// Creates an object of the named class with these properties, without
     /// calling its constructor. This is how `json_decode` and `(object)`
     /// make a `stdClass`: classes belong to the VM, so native code asks for

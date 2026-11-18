@@ -10,7 +10,14 @@ pub const INTERVAL: Param = Param::new("interval", ParamType::Class(interval::CL
 
 pub fn register(registry: &mut Registry) {
     registry.class(ClassEntry {
-        property_access: Some(&interval_properties::ACCESS),
+        hooks: Some(
+            const {
+                &phera_extension_api::ClassHooks {
+                    property_access: Some(&interval_properties::ACCESS),
+                    ..phera_extension_api::ClassHooks::EMPTY
+                }
+            },
+        ),
         methods: METHODS,
         ..ClassEntry::class(interval::CLASS)
     });

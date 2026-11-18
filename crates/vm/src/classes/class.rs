@@ -35,7 +35,6 @@ pub(crate) struct Class {
     pub(crate) is_final: bool,
     pub(crate) is_readonly: bool,
     pub(crate) allows_dynamic_properties: bool,
-    pub(crate) property_access: Option<&'static phera_extension_api::NativePropertyAccess>,
     pub(crate) methods: HashMap<String, Rc<Method>>,
     /// The same methods by name key, built on first use by a fast call.
     pub(crate) method_table: std::cell::OnceCell<super::method_table::MethodTable>,
@@ -130,6 +129,12 @@ impl ClassHandle for Class {
 }
 
 impl Class {
+    pub(crate) fn property_access(
+        &self,
+    ) -> Option<&'static phera_extension_api::NativePropertyAccess> {
+        self.hooks.as_ref()?.property_access
+    }
+
     /// Traverse ancestry iteratively so user inheritance never grows the Rust stack.
     pub(crate) fn is_a(&self, name: &str) -> bool {
         if self.name.eq_ignore_ascii_case(name) {
