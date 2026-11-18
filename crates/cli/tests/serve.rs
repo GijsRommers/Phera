@@ -4,6 +4,7 @@
 mod scenarios {
     mod compression;
     mod environment;
+    mod request_headers;
     mod static_files;
 }
 
@@ -80,30 +81,53 @@ impl Served {
         extra_headers: &str,
         body: &str,
     ) -> (u16, String) {
-        let mut stream = TcpStream::connect(&self.address).expect("connect");
-        write!(
-            stream,
-            "{method} {target} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\
-             Content-Length: {}\r\n{extra_headers}\r\n{body}",
-            self.address,
-            body.len()
-        )
-        .expect("send request");
-        let mut response = String::new();
-        stream.read_to_string(&mut response).expect("read response");
-
-        let (head, body) = response.split_once("\r\n\r\n").unwrap_or((&response, ""));
-        let status = head
-            .split_whitespace()
-            .nth(1)
-            .and_then(|code| code.parse().ok())
-            .unwrap_or_else(|| panic!("no status in {head:?}"));
-        (status, body.to_string())
+        send_request(&self.address, method, target, extra_headers, body)
     }
 
     fn get(&self, target: &str) -> (u16, String) {
         self.request("GET", target, "", "")
     }
+}
+
+/// Sends one request to the server at `address` (ours, or real PHP's) and
+/// returns the status code and the body.
+fn send_request(
+    address: &str,
+    method: &str,
+    target: &str,
+    extra_headers: &str,
+    body: &str,
+) -> (u16, String) {
+    let response = raw_response(address, method, target, extra_headers, body)
+        .unwrap_or_else(|| panic!("no answer from {address} to {method} {target}"));
+    let (head, body) = response.split_once("\r\n\r\n").unwrap_or((&response, ""));
+    let status = head
+        .split_whitespace()
+        .nth(1)
+        .and_then(|code| code.parse().ok())
+        .unwrap_or_else(|| panic!("no status in {head:?}"));
+    (status, body.to_string())
+}
+
+/// Everything the server at `address` sent back for one request, or `None`
+/// when it refused, reset or closed the connection without answering.
+fn raw_response(
+    address: &str,
+    method: &str,
+    target: &str,
+    extra_headers: &str,
+    body: &str,
+) -> Option<String> {
+    let request = format!(
+        "{method} {target} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\
+         Content-Length: {}\r\n{extra_headers}\r\n{body}",
+        body.len()
+    );
+    let mut stream = TcpStream::connect(address).ok()?;
+    stream.write_all(request.as_bytes()).ok()?;
+    let mut response = String::new();
+    stream.read_to_string(&mut response).ok()?;
+    (!response.is_empty()).then_some(response)
 }
 
 impl Drop for Served {
