@@ -190,52 +190,71 @@ const MB_DECODE_MIMEHEADER: &[Param] = &[Param::new("string", ParamType::String)
 /// words dropped.
 fn mb_decode_mimeheader(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     let target = ctx.state().get_or_default::<Settings>().internal;
-    let source = args::bytes(a, 0);
-    let mut unfolded = Vec::with_capacity(source.len());
-    let mut index = 0;
-    while index < source.len() {
-        if matches!(source[index], b'\r' | b'\n') {
-            while index < source.len() && source[index].is_ascii_whitespace() {
-                index += 1;
-            }
-            if index < source.len() {
-                unfolded.push(b' ');
-            }
-        } else {
-            unfolded.push(source[index]);
-            index += 1;
-        }
-    }
-    let points = decode_words(&unfolded);
+    let points = decode_header(args::bytes(a, 0));
     Ok(Value::from(encode_result(ctx, &points, target)))
 }
 
-/// The code points of a header, decoding each encoded word in its charset
-/// and leaving everything else as bytes.
-fn decode_words(bytes: &[u8]) -> Vec<u32> {
-    let mut points = Vec::new();
+fn is_line_break(byte: u8) -> bool {
+    matches!(byte, b'\r' | b'\n')
+}
+
+fn is_whitespace(byte: u8) -> bool {
+    matches!(byte, b'\r' | b'\n' | b'\t' | b' ')
+}
+
+/// The code points of a header, as PHP's `mb_mime_header_decode` reads it:
+///
+/// - after an encoded word, a run of whitespace and line breaks becomes one
+///   space, written only if something other than another encoded word
+///   follows;
+/// - plain text runs to the next `=` or line break, as ASCII, so a byte from
+///   0x80 on is `?`;
+/// - a run of line breaks and whitespace becomes one space, except at the
+///   very end.
+fn decode_header(bytes: &[u8]) -> Vec<u32> {
+    let mut points = Vec::with_capacity(bytes.len());
     let mut index = 0;
-    let mut after_word = false;
+    let mut space_pending = false;
+    let whitespace_from = |index: usize| {
+        bytes[index..]
+            .iter()
+            .take_while(|&&byte| is_whitespace(byte))
+            .count()
+    };
     while index < bytes.len() {
         if let Some((decoded, length)) = encoded_word(&bytes[index..]) {
             points.extend(decoded);
             index += length;
-            after_word = true;
+            let run = whitespace_from(index);
+            space_pending = run > 0;
+            index += run;
             continue;
         }
-        if after_word && bytes[index].is_ascii_whitespace() {
-            let end = bytes[index..]
+        if space_pending {
+            points.push(u32::from(b' '));
+            space_pending = false;
+        }
+        if !is_line_break(bytes[index]) {
+            let run = 1 + bytes[index + 1..]
                 .iter()
-                .position(|byte| !byte.is_ascii_whitespace())
-                .map_or(bytes.len(), |offset| index + offset);
-            if bytes[end..].starts_with(b"=?") {
-                index = end;
-                continue;
+                .take_while(|&&byte| byte != b'=' && !is_line_break(byte))
+                .count();
+            let plain = &bytes[index..index + run];
+            points.extend(plain.iter().map(|&byte| {
+                if byte < 0x80 {
+                    u32::from(byte)
+                } else {
+                    u32::from(b'?')
+                }
+            }));
+            index += run;
+        }
+        if index < bytes.len() && is_line_break(bytes[index]) {
+            index += whitespace_from(index);
+            if index < bytes.len() {
+                points.push(u32::from(b' '));
             }
         }
-        points.push(u32::from(bytes[index]));
-        index += 1;
-        after_word = false;
     }
     points
 }

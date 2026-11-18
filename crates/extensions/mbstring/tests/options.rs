@@ -143,6 +143,13 @@ fn option_matrix() {
         "X: a\r\n\t b\r\nY: =?UTF-8?B?w6k=?=",
         "=?UTF-8?B?w6k=?=",
         "=?UTF-8?B?w6k=?=\r\n",
+        // Whitespace at the end, after words and around folds.
+        "=?UTF-8?B?w6k=?= ",
+        "=?UTF-8?B?w6k=?=\t ",
+        "a ",
+        "x =?UTF-8?B?w6k=?= y ",
+        "=?UTF-8?B?w6k=?= \r\n z",
+        "a  \r\n  b \r\n =?UTF-8?B?w6k=?= \r\n c\r\n ",
     ] {
         m.case("mb_decode_mimeheader", vec![Value::from(input)]);
         for mode in [0, 1, 2, 3, 4] {
@@ -160,6 +167,11 @@ fn option_matrix() {
             vec![Value::from("Subject"), Value::from(input)],
         );
     }
+    // mb_decode_mimeheader reads plain text as ASCII: a byte from 0x80 is `?`.
+    m.case(
+        "mb_decode_mimeheader",
+        vec![Value::from("caf\u{e9} =?UTF-8?B?w6k=?= x\u{e9}")],
+    );
     // Encoded words are folded with `$newline` as given, bytes and all.
     for newline in [b"\n".to_vec(), b"\xFF\r\n".to_vec(), b"\r\n\t".to_vec()] {
         for scheme in ["B", "Q"] {

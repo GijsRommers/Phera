@@ -193,36 +193,6 @@ fn fields(headers: &[u8]) -> Vec<&[u8]> {
     fields.into_iter().map(|range| &headers[range]).collect()
 }
 
-/// Joins folded lines: a line break followed by spaces or tabs becomes one
-/// space, and a line break without them ends the header. Also says whether
-/// the header ran to the end of the input, without such a line break.
-fn unfold(bytes: &[u8]) -> (Vec<u8>, bool) {
-    let mut unfolded = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    while index < bytes.len() {
-        if !matches!(bytes[index], b'\r' | b'\n') {
-            unfolded.push(bytes[index]);
-            index += 1;
-            continue;
-        }
-        if bytes[index] == b'\r' && bytes.get(index + 1) == Some(&b'\n') {
-            index += 1;
-        }
-        index += 1;
-        if !matches!(bytes.get(index), Some(b' ' | b'\t')) {
-            return (unfolded, false);
-        }
-        while matches!(bytes.get(index), Some(b' ' | b'\t')) {
-            index += 1;
-        }
-        while matches!(unfolded.last(), Some(b' ' | b'\t')) {
-            unfolded.pop();
-        }
-        unfolded.push(b' ');
-    }
-    (unfolded, true)
-}
-
 /// An encoded word at the start of the input.
 struct Word<'a> {
     /// Without RFC 2231's `*language`.
@@ -248,8 +218,57 @@ fn word(bytes: &[u8]) -> Option<Word<'_>> {
     })
 }
 
+/// A run of spaces, tabs and folded line breaks, and what it means.
+struct Gap {
+    end: usize,
+    /// It contains a line break followed by a space or tab.
+    folded: bool,
+    /// It ends the header: a line break not followed by a space or tab, or
+    /// the end of the input.
+    ends_header: bool,
+}
+
+fn gap(input: &[u8], start: usize) -> Gap {
+    let mut index = start;
+    let mut folded = false;
+    loop {
+        match input.get(index) {
+            Some(b' ' | b'\t') => index += 1,
+            Some(b'\r') if input.get(index + 1) == Some(&b'\n') => {
+                if !matches!(input.get(index + 2), Some(b' ' | b'\t')) {
+                    break;
+                }
+                folded = true;
+                index += 2;
+            }
+            Some(b'\n') => {
+                if !matches!(input.get(index + 1), Some(b' ' | b'\t')) {
+                    break;
+                }
+                folded = true;
+                index += 1;
+            }
+            _ => break,
+        }
+    }
+    let ends_header =
+        matches!(input.get(index), None | Some(b'\n')) || input[index..].starts_with(b"\r\n");
+    Gap {
+        end: index,
+        folded,
+        ends_header,
+    }
+}
+
 /// The header with its encoded words converted to `target`, and the rest
-/// converted from ASCII.
+/// converted from ASCII, following PHP's `_php_iconv_mime_decode`:
+///
+/// - spaces and tabs are held back, and written only when plain text
+///   follows, or an encoded word after plain text; at the end of the header
+///   they are dropped;
+/// - a folded line break, with the spaces around it, becomes one space, or
+///   nothing right after an encoded word;
+/// - a line break that is not folded ends the header.
 fn decode(
     ctx: &mut dyn Context,
     input: &[u8],
@@ -257,10 +276,11 @@ fn decode(
     mode: &Mode,
     function: &str,
 ) -> Option<Vec<u8>> {
-    let (input, ends_input) = unfold(input);
     let mut decoded = Vec::new();
     let mut index = 0;
     let mut after_word = false;
+    let ascii =
+        |ctx: &mut dyn Context, bytes: &[u8]| convert(ctx, bytes, "ASCII", target, function);
     while index < input.len() {
         if let Some(word) = word(&input[index..]) {
             let end = index + word.length;
@@ -275,9 +295,7 @@ fn decode(
                     Err(failure) if mode.continue_on_error => {
                         // PHP drops the last byte of an invalid word that
                         // ends the input, but not one before a line break.
-                        let at_end = ends_input
-                            && end == input.len()
-                            && failure != Failure::UnknownConversion;
+                        let at_end = end == input.len() && failure != Failure::UnknownConversion;
                         decoded.extend_from_slice(&input[index..end - usize::from(at_end)]);
                         after_word = false;
                     }
@@ -297,24 +315,28 @@ fn decode(
                 continue;
             }
         }
-        // Whitespace between two encoded words is dropped.
-        if after_word && input[index].is_ascii_whitespace() {
-            let next = input[index..]
-                .iter()
-                .position(|byte| !byte.is_ascii_whitespace())
-                .map_or(input.len(), |offset| index + offset);
-            if word(&input[next..]).is_some() {
-                index = next;
-                continue;
+        // A bare carriage return is plain text, as in PHP.
+        let starts_gap =
+            matches!(input[index], b' ' | b'\t' | b'\n') || input[index..].starts_with(b"\r\n");
+        if starts_gap {
+            let gap = gap(input, index);
+            if gap.folded {
+                if !after_word {
+                    decoded.extend(ascii(ctx, b" ")?);
+                }
+            } else if !gap.ends_header {
+                let before_word = word(&input[gap.end..]).is_some();
+                if !(before_word && after_word) {
+                    decoded.extend(ascii(ctx, &input[index..gap.end])?);
+                }
             }
+            if gap.ends_header {
+                break;
+            }
+            index = gap.end;
+            continue;
         }
-        decoded.extend(convert(
-            ctx,
-            &input[index..index + 1],
-            "ASCII",
-            target,
-            function,
-        )?);
+        decoded.extend(ascii(ctx, &input[index..index + 1])?);
         index += 1;
         after_word = false;
     }
