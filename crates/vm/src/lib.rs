@@ -103,6 +103,7 @@ mod properties;
 mod property_mutation;
 mod property_sites;
 mod property_storage;
+mod property_strings;
 mod property_targets;
 mod reference_holders;
 mod references;

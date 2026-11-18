@@ -8,7 +8,10 @@ pub mod oracle;
 pub use classes::{call_method, instantiate};
 pub use exceptions::materialize_exception;
 
-use std::rc::Rc;
+use std::{
+    rc::Rc,
+    task::{Context as TaskContext, Poll, Waker},
+};
 
 use phera_value::{CollectDiagnostics, Diagnostics, Object, PhpArray, Value};
 
@@ -59,11 +62,8 @@ impl Context for TestContext {
     }
 }
 
-/// Calls a sync native function the way the VM does: arguments are prepared
-/// against the signature first, then the body runs.
-///
-/// Fails for a name that is not registered and for async functions, which
-/// need a runtime to await them.
+/// Prepare arguments and run a native handler in the standalone test context.
+/// A handler can use ready context futures, but may not require a runtime to suspend.
 pub fn call(
     registry: &Registry,
     context: &mut TestContext,
@@ -76,8 +76,16 @@ pub fn call(
     crate::prepare_arguments(entry, &mut arguments, context)?;
     match entry.handler {
         NativeFn::Sync(function) => function(context, &arguments),
-        NativeFn::Async(_) => Err(NativeError::error(format!(
-            "{name}() is async and cannot be called from testing::call"
-        ))),
+        NativeFn::Async(function) => {
+            match function(context, arguments)
+                .as_mut()
+                .poll(&mut TaskContext::from_waker(Waker::noop()))
+            {
+                Poll::Ready(result) => result,
+                Poll::Pending => Err(NativeError::error(format!(
+                    "{name}() suspended without a test runtime"
+                ))),
+            }
+        }
     }
 }

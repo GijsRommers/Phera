@@ -96,10 +96,23 @@ impl Vm {
         }
         let hook = class.magic.as_ref().and_then(|magic| magic.clone.clone());
         if let Some(method) = &hook {
-            self.check_method_visibility(method)?;
+            self.check_clone_visibility(method)?;
         }
         let cloned = self.classes.allocate(class.clone());
-        cloned.update(|properties| *properties = original.to_array());
+        cloned.update(|properties| {
+            let mut copied = original.to_array();
+            if copied.values().any(|value| matches!(value, Value::Reference(cell) if Rc::strong_count(cell) == 1 && !value.is_object())) {
+                for (_, value) in copied.iter_mut() {
+                    if let Value::Reference(cell) = value
+                        && Rc::strong_count(cell) == 2 && !cell.borrow().is_object()
+                    {
+                        let detached = cell.borrow().clone();
+                        *value = detached;
+                    }
+                }
+            }
+            *properties = copied;
+        });
         self.copy_unset_properties(&original, &cloned);
         self.track_object_property_references(&cloned)?;
         if let Some(method) = hook {
@@ -117,6 +130,35 @@ impl Vm {
             result?;
         }
         Ok(Value::Object(cloned))
+    }
+
+    fn check_clone_visibility(&self, method: &super::Method) -> Result<(), NativeError> {
+        let result = self.check_method_visibility(method);
+        if result.is_ok() || method.visibility != phera_bytecode::Visibility::Protected {
+            return result;
+        }
+        let caller = self.current().and_then(|frame| frame.scope());
+        let mut class = self
+            .classes
+            .get(&method.declaring)
+            .and_then(|class| class.parent.clone());
+        while let Some(ancestor) = class {
+            let Some(prototype) = ancestor
+                .magic
+                .as_ref()
+                .and_then(|magic| magic.clone.as_ref())
+            else {
+                break;
+            };
+            if prototype.visibility == phera_bytecode::Visibility::Private {
+                break;
+            }
+            if caller.is_some_and(|caller| caller.is_a(&prototype.declaring)) {
+                return Ok(());
+            }
+            class = ancestor.parent.clone();
+        }
+        result
     }
 
     fn begin_clone_updates(&mut self, object: &Object) {
@@ -192,9 +234,11 @@ impl Vm {
                 continue;
             }
             let key = self.property_key(object, &name)?;
+            let mut value = self
+                .property_string(object, &key, value.deref().clone())
+                .await?;
             let mut keys = InlineStack::new();
             keys.push(PathKey::Property(key));
-            let mut value = value.deref().clone();
             let mut root = Value::Object(object.clone());
             self.validate_property_mutation(root.clone(), &keys, &mut value, Mutation::Assign)?;
             let value = self.check_path_reference_assignment(&root, &keys, value)?;

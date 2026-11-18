@@ -20,7 +20,7 @@ pub(crate) enum PropertyMutation {
 enum OverloadedMutation {
     Ordinary,
     Handled,
-    Detached(Value, InlineStack<PathKey>),
+    Detached(Value, Box<InlineStack<PathKey>>),
 }
 
 impl Vm {
@@ -40,6 +40,13 @@ impl Vm {
                     PropertyMutation::Write(value, binding) => (value, binding.into()),
                     PropertyMutation::Unset => (Value::Null, Mutation::Unset),
                 };
+                if mutation == Mutation::Assign
+                    && let Value::Object(object) = root.deref().clone()
+                    && let Some(PathKey::Property(key)) = keys.iter().next()
+                    && keys.iter().nth(1).is_none()
+                {
+                    value = self.property_string(&object, key, value).await?;
+                }
                 self.validate_property_mutation(root.deref().clone(), &keys, &mut value, mutation)?;
                 if mutation == Mutation::Assign {
                     value = self.check_path_reference_assignment(&root, &keys, value)?;
@@ -79,14 +86,18 @@ impl Vm {
         let mut cursor = self.read_root(register, Missing::Silent);
         let mut detached = None;
         let mut resolved = InlineStack::new();
-        let keys = self.keys(place)?;
-        let mut steps = keys.iter().peekable();
-        while let Some(key) = steps.next() {
+        let mut steps = place.steps()?.peekable();
+        while let Some(step) = steps.next() {
+            let (key, converted_name) = self.magic_path_key(step).await?;
             let current = cursor.deref().clone();
-            if let (PathKey::Property(name), Value::Object(object)) = (key, &current) {
+            if converted_name {
+                detached = Some(cursor.clone());
+                resolved = InlineStack::new();
+            }
+            if let (PathKey::Property(name), Value::Object(object)) = (&key, &current) {
                 let class = self
                     .classes
-                    .for_object(&object)
+                    .for_object(object)
                     .ok_or_else(|| internal_error!("property class"))?;
                 let display = crate::path_update::property_name(name);
                 let (stored, slot) = self.property_slot(object, &display);
@@ -98,7 +109,7 @@ impl Vm {
                         .is_some_and(|magic| magic.has_properties())
                     && !slot
                         .as_ref()
-                        .is_some_and(|key| self.typed_property_uninitialized(&class, &object, key))
+                        .is_some_and(|key| self.typed_property_uninitialized(&class, object, key))
                 {
                     let (hook, argument) = match (last, operation) {
                         (true, PropertyMutation::Write(value, Binding::ByValue)) => {
@@ -107,7 +118,7 @@ impl Vm {
                         (true, PropertyMutation::Unset) => (PropertyHook::Unset, None),
                         _ => (PropertyHook::Get, None),
                     };
-                    if let Some(method) = self.property_hook(&class, &object, name, hook) {
+                    if let Some(method) = self.property_hook(&class, object, name, hook) {
                         let value = self
                             .invoke_property_hook(
                                 class,
@@ -121,7 +132,7 @@ impl Vm {
                         if hook != PropertyHook::Get {
                             return Ok(OverloadedMutation::Handled);
                         }
-                        self.warn_indirect_magic_property(&object, &display, &value);
+                        self.warn_indirect_magic_property(object, &display, &value);
                         if last {
                             return Err(NativeError::error(
                                 "Cannot assign by reference to overloaded object",
@@ -135,22 +146,29 @@ impl Vm {
                 }
                 let key = match slot {
                     Some(key) => key,
-                    None => self.property_key(&object, &display)?,
+                    None => self.property_key(object, &display)?,
                 };
+                if last
+                    && let PropertyMutation::Write(value, Binding::ByValue) = operation
+                    && self.property_needs_string(object, &key, value)
+                {
+                    detached = Some(current.clone());
+                    resolved = InlineStack::new();
+                }
                 cursor = stored.unwrap_or_default();
                 resolved.push(PathKey::Property(key));
             } else {
-                cursor = match (key, &current) {
+                cursor = match (&key, &current) {
                     (PathKey::Index(Some(key)), Value::Array(array)) => {
                         array.get(key).cloned().unwrap_or_default()
                     }
                     _ => Value::Null,
                 };
-                resolved.push(key.clone());
+                resolved.push(key);
             }
         }
         Ok(match detached {
-            Some(value) => OverloadedMutation::Detached(value, resolved),
+            Some(value) => OverloadedMutation::Detached(value, Box::new(resolved)),
             None => OverloadedMutation::Ordinary,
         })
     }

@@ -50,11 +50,20 @@ impl Vm {
         mut arguments: Vec<Value>,
         origin: crate::calls::callback_binding::ArgumentOrigin,
     ) -> NativeResult {
-        self.coerce_native_strings(entry.name, entry.params, &mut arguments, origin)
-            .await?;
-        let previous = std::mem::replace(&mut self.argument_origin, origin);
-        let prepared = self.prepare_call_with_trace(entry.name, entry.params, &mut arguments);
-        self.argument_origin = previous;
+        let mut prepared = self.with_argument_origin(origin, |vm| {
+            vm.prepare_call_with_trace(entry.name, entry.params, &mut arguments)
+        });
+        if prepared.is_err() && self.native_strings_needed(entry.params, &arguments, origin) {
+            prepared = match self
+                .coerce_native_strings(entry.name, entry.params, &mut arguments, origin)
+                .await
+            {
+                Ok(()) => self.with_argument_origin(origin, |vm| {
+                    vm.prepare_call_with_trace(entry.name, entry.params, &mut arguments)
+                }),
+                Err(error) => Err(error),
+            };
+        }
         if let Err(error) = prepared {
             if !matches!(
                 entry.name,
@@ -155,12 +164,20 @@ impl Vm {
                 .await
             }
             MethodBody::Native(entry) => {
-                let name = method.signature(&self.code).name.clone();
-                self.coerce_native_strings(&name, entry.params, &mut arguments, origin)
-                    .await?;
-                self.with_argument_origin(origin, |vm| {
+                let mut prepared = self.with_argument_origin(origin, |vm| {
                     vm.prepare_native_method_arguments(method, entry.params, &mut arguments)
-                })?;
+                });
+                if prepared.is_err() && self.native_strings_needed(entry.params, &arguments, origin)
+                {
+                    let name = method.signature(&self.code).name.clone();
+                    self.failed_native = None;
+                    self.coerce_native_strings(&name, entry.params, &mut arguments, origin)
+                        .await?;
+                    prepared = self.with_argument_origin(origin, |vm| {
+                        vm.prepare_native_method_arguments(method, entry.params, &mut arguments)
+                    });
+                }
+                prepared?;
                 match entry.handler {
                     phera_extension_api::NativeMethod::Sync(handler) => {
                         let result = handler(self, context.receiver.as_ref(), &arguments);

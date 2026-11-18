@@ -22,6 +22,22 @@ pub(crate) struct MagicMethods {
 }
 
 impl MagicMethods {
+    pub(super) fn is_linked_magic(name: &str) -> bool {
+        matches!(
+            name.to_ascii_lowercase().as_str(),
+            "__call"
+                | "__callstatic"
+                | "__clone"
+                | "__get"
+                | "__set"
+                | "__isset"
+                | "__unset"
+                | "__tostring"
+                | "__debuginfo"
+                | "__invoke"
+        )
+    }
+
     pub(crate) fn has_properties(&self) -> bool {
         self.get.is_some() || self.set.is_some() || self.isset.is_some() || self.unset.is_some()
     }

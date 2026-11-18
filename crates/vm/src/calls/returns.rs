@@ -49,6 +49,27 @@ impl Vm {
         })
     }
 
+    pub(crate) fn missing_magic_return(&self) -> NativeError {
+        let Some(frame) = self.current() else {
+            return internal_error!("missing magic return frame");
+        };
+        let function = frame.function();
+        let declared = function
+            .return_type
+            .and_then(|id| frame.unit().types.get(id.index()));
+        if declared.is_some_and(|ty| ty.mask.intersects(phera_bytecode::TypeMask::NEVER)) {
+            NativeError::type_error(format!(
+                "{}(): never-returning method must not implicitly return",
+                function.name
+            ))
+        } else {
+            NativeError::type_error(format!(
+                "{}(): Return value must be of type string, none returned",
+                function.name
+            ))
+        }
+    }
+
     /// Coercion precedes finally, allowing a surrounding catch to handle an invalid return.
     pub(crate) fn check_return_value(&mut self, value: Value) -> Result<Value, NativeError> {
         if let Some(declaration) = self.current().and_then(|frame| {

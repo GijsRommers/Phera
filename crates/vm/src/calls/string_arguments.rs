@@ -10,13 +10,21 @@ use crate::calls::callback_binding::ArgumentOrigin;
 use crate::calls::prepared_call::{CallFlags, PreparedCallee};
 
 impl Vm {
+    #[inline]
     pub(crate) fn call_needs_string_coercion(&self, origin: ArgumentOrigin) -> bool {
+        self.call_stack.last_call().is_some_and(|call| {
+            matches!(call.callee, PreparedCallee::Php(_))
+                && call.flags.contains(CallFlags::DEFERRED_CHECKS)
+                && self.deferred_string_coercion(origin)
+        })
+    }
+
+    #[cold]
+    fn deferred_string_coercion(&self, origin: ArgumentOrigin) -> bool {
         let Ok(view) = CallView::top(&self.code, &self.call_stack) else {
             return false;
         };
-        if !view.call.flags.contains(CallFlags::DEFERRED_CHECKS)
-            || self.call_is_strict(origin, view.call.flags)
-        {
+        if self.call_is_strict(origin, view.call.flags) {
             return false;
         }
         let parameters = view.parameters();
@@ -83,8 +91,22 @@ impl Vm {
                 .is_some_and(|frame| frame.function().strict_types)
     }
 
-    /// Native argument parsing normally never enters PHP. Only a weak string
-    /// position containing a stringable object takes the asynchronous path.
+    /// Check the value kind before even examining the declared native parameter.
+    #[inline]
+    pub(crate) fn native_strings_needed(
+        &self,
+        parameters: &[Param],
+        arguments: &[Value],
+        origin: ArgumentOrigin,
+    ) -> bool {
+        arguments.iter().enumerate().any(|(index, value)| {
+            value.is_object()
+                && native_string_param(parameters, index)
+                && Self::has_string_conversion(value)
+        }) && !self.call_is_strict(origin, CallFlags::default())
+    }
+
+    #[cold]
     pub(crate) async fn coerce_native_strings(
         &mut self,
         name: &str,
@@ -92,14 +114,6 @@ impl Vm {
         arguments: &mut [Value],
         origin: ArgumentOrigin,
     ) -> Result<(), NativeError> {
-        if self.call_is_strict(origin, CallFlags::default()) {
-            return Ok(());
-        }
-        if !arguments.iter().enumerate().any(|(index, value)| {
-            native_string_param(parameters, index) && Self::has_string_conversion(value)
-        }) {
-            return Ok(());
-        }
         let required = parameters
             .iter()
             .filter(|parameter| !parameter.optional)
@@ -110,24 +124,15 @@ impl Vm {
         {
             return Ok(());
         }
-        for index in 0..arguments.len() {
-            if native_string_param(parameters, index)
-                && Self::has_string_conversion(&arguments[index])
-            {
-                let value = self.coerce_stringable(arguments[index].clone()).await?;
-                arguments[index] = value;
+        for (index, argument) in arguments.iter_mut().enumerate() {
+            if native_string_param(parameters, index) && Self::has_string_conversion(argument) {
+                *argument = self.coerce_stringable(argument.clone()).await?;
             } else {
                 let Some(param) = parameters.get(index).or(parameters.last()) else {
                     break;
                 };
                 self.with_argument_origin(origin, |vm| {
-                    phera_extension_api::prepare_single_argument(
-                        name,
-                        index,
-                        param,
-                        &mut arguments[index],
-                        vm,
-                    )
+                    phera_extension_api::prepare_single_argument(name, index, param, argument, vm)
                 })?;
             }
         }

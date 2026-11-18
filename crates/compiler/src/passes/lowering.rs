@@ -34,6 +34,7 @@ impl Tables {
                 binding,
             },
             Old::CheckReturn { source } => Instruction::CheckReturn { source },
+            Old::ReturnMissing => Instruction::ReturnMissing,
             Old::ReturnChecked { source } => Instruction::ReturnChecked { source },
             Old::FinallyCall {
                 state,

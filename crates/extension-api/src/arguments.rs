@@ -44,13 +44,14 @@ pub fn prepare_call(
     context: &mut dyn Context,
 ) -> Result<(), NativeError> {
     check_count(name, params, arguments.len())?;
+    let strict = context.strict_types();
     for (index, argument) in arguments.iter_mut().enumerate() {
         // Arguments past the declared list belong to the variadic parameter.
         // `check_count` has already rejected them when there is none.
         let Some(param) = params.get(index).or(params.last()) else {
             break;
         };
-        prepare_single_argument(name, index, param, argument, context)?;
+        prepare_argument(name, index, param, argument, strict, context)?;
     }
     Ok(())
 }
@@ -63,7 +64,25 @@ pub fn prepare_single_argument(
     argument: &mut Value,
     context: &mut dyn Context,
 ) -> Result<(), NativeError> {
-    let strict = context.strict_types();
+    prepare_argument(
+        name,
+        index,
+        param,
+        argument,
+        context.strict_types(),
+        context,
+    )
+}
+
+#[inline]
+fn prepare_argument(
+    name: &str,
+    index: usize,
+    param: &Param,
+    argument: &mut Value,
+    strict: bool,
+    context: &mut dyn Context,
+) -> Result<(), NativeError> {
     let site = Site {
         function: name,
         number: index + 1,

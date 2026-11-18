@@ -20,6 +20,16 @@ pub(super) enum MethodSyntax {
 }
 
 impl Vm {
+    pub(crate) fn prepare_class_callback(
+        &mut self,
+        class: Rc<Class>,
+        receiver: Option<Rc<Object>>,
+        name: &str,
+    ) -> Result<(), NativeError> {
+        let resolved = self.find_method(&class, name, Invocation::Method);
+        self.prepare_method_lookup(class, receiver, name, MethodSyntax::Static, resolved)
+    }
+
     /// Normal resolution gets the first chance, including its lexical private lookup.
     pub(super) fn prepare_method_lookup(
         &mut self,
@@ -38,6 +48,13 @@ impl Vm {
         };
         let instance = receiver
             .as_ref()
+            .filter(|_| {
+                syntax == MethodSyntax::Instance
+                    || class
+                        .magic
+                        .as_ref()
+                        .is_some_and(|magic| magic.call.is_some())
+            })
             .and_then(|object| self.classes.for_object(object))
             .and_then(|class| {
                 let method = class.magic.as_ref()?.call.clone()?;
@@ -67,6 +84,7 @@ impl Vm {
             called,
             invocation: Invocation::Method,
         };
+        let written = name.split_once('\0').map_or(name, |(prefix, _)| prefix);
         self.prepare_call(Callee {
             argument_binding: ArgumentBinding::Caller,
             name: format!("{}::{name}", class.name).into(),
@@ -77,7 +95,11 @@ impl Vm {
                 variadic: true,
             }]
             .into(),
-            target: CallTarget::Magic(Rc::new(MagicCall { method, context })),
+            target: CallTarget::Magic(Rc::new(MagicCall {
+                written: written.into(),
+                method,
+                context,
+            })),
         })
     }
 }

@@ -239,6 +239,11 @@ impl Vm {
         object: &phera_value::Object,
         name: &str,
     ) -> Result<ArrayKey, NativeError> {
+        if name.starts_with('\0') {
+            return Err(NativeError::error(
+                "Cannot access property starting with \"\\0\"",
+            ));
+        }
         let class = object
             .class
             .as_any()

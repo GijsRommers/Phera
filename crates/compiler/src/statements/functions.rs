@@ -51,11 +51,20 @@ impl<'ast> Compiler<'ast> {
             .as_ref()
             .map(|declared_type| self.declaration_type(declared_type));
         builder.block(&declaration.body, DeclarationTiming::AtExecution)?;
-        let register = builder.literal(Constant::Null, line)?;
-        let implicit_return = if declaration.by_reference {
-            Instruction::ReturnReference(register)
+        let implicit_return = if declaration
+            .name
+            .name
+            .rsplit_once("::")
+            .is_some_and(|(_, method)| method.eq_ignore_ascii_case("__toString"))
+        {
+            Instruction::ReturnMissing
         } else {
-            Instruction::Return(register)
+            let register = builder.literal(Constant::Null, line)?;
+            if declaration.by_reference {
+                Instruction::ReturnReference(register)
+            } else {
+                Instruction::Return(register)
+            }
         };
         builder.emit(implicit_return, line);
         if !builder.classes.is_empty() {

@@ -90,13 +90,7 @@ impl Vm {
         &mut self,
         place: &AccessPath,
     ) -> Result<Option<Value>, NativeError> {
-        let target = self.property_target(place, PropertyShape::Single)?;
-        let target = if target.is_some() {
-            target
-        } else {
-            self.indexed_property_target(place)?
-        };
-        let Some(PropertyTarget { object, name }) = target else {
+        let Some(PropertyTarget { object, name }) = self.read_property_target(place)? else {
             return Ok(None);
         };
         let entry = match self.property_entry(&object, name) {

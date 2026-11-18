@@ -45,6 +45,26 @@ impl Vm {
         self.store_sent_value(index, value)
     }
 
+    /// Borrow the cached ordinary property before entering the magic send path.
+    pub(crate) fn send_path(&mut self, place: AccessPath) -> Result<bool, NativeError> {
+        if !place.has_properties()? {
+            self.send(SentArgument::Path(place))?;
+            return Ok(true);
+        }
+        let view = CallView::top(&self.code, &self.call_stack)?;
+        let index = view.argument_index()?;
+        let parameters = view.parameters();
+        let reference = parameters
+            .receiving(index)
+            .is_some_and(|parameter| parameters.by_reference(parameter))
+            || (index == 0 && view.is_extract());
+        if !reference && let Some(value) = self.read_property_site(&place)? {
+            self.store_sent_value(index, value)?;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
     /// A property send can run __get, retaining its return reference if needed.
     pub(crate) async fn send_magic_place(&mut self, place: &AccessPath) -> Result<(), NativeError> {
         let view = CallView::top(&self.code, &self.call_stack)?;

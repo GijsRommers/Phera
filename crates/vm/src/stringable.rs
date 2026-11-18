@@ -88,26 +88,8 @@ impl Vm {
         }
     }
 
-    pub(crate) fn string_binary_needed(&self, op: BinaryOp, left: Reg, right: Reg) -> bool {
-        match op {
-            BinaryOp::Concat => {
-                let left = self.operand(left);
-                let right = self.operand(right);
-                left.is_object() || right.is_object()
-            }
-            BinaryOp::Equal
-            | BinaryOp::NotEqual
-            | BinaryOp::Less
-            | BinaryOp::LessEqual
-            | BinaryOp::Greater
-            | BinaryOp::GreaterEqual
-            | BinaryOp::Spaceship => {
-                let left = self.operand(left);
-                let right = self.operand(right);
-                mixed_string_comparison(&left, &right)
-            }
-            _ => false,
-        }
+    pub(crate) fn concat_uses_object(&self, left: Reg, right: Reg) -> bool {
+        self.operand(left).is_object() || self.operand(right).is_object()
     }
 
     pub(crate) async fn binary_with_strings(
@@ -121,7 +103,7 @@ impl Vm {
             let rhs = self.stringify_value(&right).await?;
             left = Value::String(lhs);
             right = Value::String(rhs);
-        } else if mixed_string_comparison(&left, &right) {
+        } else if is_loose_comparison(op) && mixed_string_comparison(&left, &right) {
             if left.is_object() {
                 left = self.coerce_stringable(left).await?;
             } else {
@@ -138,9 +120,33 @@ impl Vm {
     }
 }
 
+#[inline]
+pub(crate) fn needs_binary_cast(op: BinaryOp, left: &Value, right: &Value) -> bool {
+    match (left, right) {
+        (Value::Object(_), Value::String(_)) | (Value::String(_), Value::Object(_)) => {
+            op == BinaryOp::Concat || is_loose_comparison(op)
+        }
+        (Value::Object(_), _) | (_, Value::Object(_)) => op == BinaryOp::Concat,
+        _ => false,
+    }
+}
+
 fn mixed_string_comparison(left: &Value, right: &Value) -> bool {
     matches!(
         (&*left.deref(), &*right.deref()),
         (Value::Object(_), Value::String(_)) | (Value::String(_), Value::Object(_))
+    )
+}
+
+fn is_loose_comparison(op: BinaryOp) -> bool {
+    matches!(
+        op,
+        BinaryOp::Equal
+            | BinaryOp::NotEqual
+            | BinaryOp::Less
+            | BinaryOp::LessEqual
+            | BinaryOp::Greater
+            | BinaryOp::GreaterEqual
+            | BinaryOp::Spaceship
     )
 }

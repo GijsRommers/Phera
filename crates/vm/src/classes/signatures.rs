@@ -252,7 +252,12 @@ impl Vm {
                 .iter()
                 .find(|class| class.name.eq_ignore_ascii_case(&name))
             {
-                if target == "object" {
+                if target == "object"
+                    || (target.eq_ignore_ascii_case("Stringable")
+                        && class.methods.iter().any(|method| {
+                            unit.names[method.name.index()].eq_ignore_ascii_case("__toString")
+                        }))
+                {
                     return true;
                 }
                 pending.extend(

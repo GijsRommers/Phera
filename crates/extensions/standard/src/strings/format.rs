@@ -6,7 +6,7 @@
 use std::borrow::Cow;
 
 use phera_extension_api::{
-    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Value, args,
+    Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, Value, args,
 };
 
 use super::buffer;
@@ -38,7 +38,7 @@ enum Destination {
 /// sprintf('%2$s %1$s', "world", "hello");  // "hello world"
 /// sprintf("%d %d", 1);                     // ArgumentCountError
 /// ```
-const SPRINTF: FunctionEntry = FunctionEntry::sync(
+const SPRINTF: FunctionEntry = FunctionEntry::asynchronous(
     "sprintf",
     &[
         Param::new("format", ParamType::String),
@@ -47,19 +47,19 @@ const SPRINTF: FunctionEntry = FunctionEntry::sync(
     sprintf,
 );
 
-fn sprintf(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    format(
+fn sprintf(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(format(
         context,
         arguments,
         "sprintf",
         Values::Arguments,
         Destination::Return,
-    )
+    ))
 }
 
 /// `printf(string $format, mixed ...$values): int`, which writes the
 /// result and returns its length.
-const PRINTF: FunctionEntry = FunctionEntry::sync(
+const PRINTF: FunctionEntry = FunctionEntry::asynchronous(
     "printf",
     &[
         Param::new("format", ParamType::String),
@@ -68,14 +68,14 @@ const PRINTF: FunctionEntry = FunctionEntry::sync(
     printf,
 );
 
-fn printf(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    format(
+fn printf(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(format(
         context,
         arguments,
         "printf",
         Values::Arguments,
         Destination::Output,
-    )
+    ))
 }
 
 /// `vsprintf(string $format, array $values): string`, taking the values in
@@ -84,7 +84,7 @@ fn printf(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
 /// ```php
 /// vsprintf("%s-%s", ["b" => 1, "a" => 2]); // "1-2"
 /// ```
-const VSPRINTF: FunctionEntry = FunctionEntry::sync(
+const VSPRINTF: FunctionEntry = FunctionEntry::asynchronous(
     "vsprintf",
     &[
         Param::new("format", ParamType::String),
@@ -93,18 +93,18 @@ const VSPRINTF: FunctionEntry = FunctionEntry::sync(
     vsprintf,
 );
 
-fn vsprintf(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    format(
+fn vsprintf(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(format(
         context,
         arguments,
         "vsprintf",
         Values::Array,
         Destination::Return,
-    )
+    ))
 }
 
 /// `vprintf(string $format, array $values): int`
-const VPRINTF: FunctionEntry = FunctionEntry::sync(
+const VPRINTF: FunctionEntry = FunctionEntry::asynchronous(
     "vprintf",
     &[
         Param::new("format", ParamType::String),
@@ -113,23 +113,24 @@ const VPRINTF: FunctionEntry = FunctionEntry::sync(
     vprintf,
 );
 
-fn vprintf(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    format(
+fn vprintf(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(format(
         context,
         arguments,
         "vprintf",
         Values::Array,
         Destination::Output,
-    )
+    ))
 }
 
-fn format(
+async fn format(
     context: &mut dyn Context,
-    arguments: &[Value],
+    arguments: Vec<Value>,
     function: &str,
     source: Values,
     destination: Destination,
 ) -> NativeResult {
+    let arguments = &arguments;
     let values: Cow<[Value]> = match source {
         Values::Arguments => Cow::Borrowed(&arguments[1..]),
         Values::Array => Cow::Owned(
@@ -145,7 +146,8 @@ fn format(
         &values,
         function,
         source,
-    )?;
+    )
+    .await?;
     match destination {
         Destination::Return => Ok(Value::from(result)),
         Destination::Output => {
@@ -157,7 +159,7 @@ fn format(
 
 /// The whole result is built before anything is written, so `printf`
 /// writes nothing when a later specifier fails.
-fn render(
+async fn render(
     context: &mut dyn Context,
     format: &[u8],
     values: &[Value],
@@ -180,7 +182,10 @@ fn render(
         let Some((specifier, value)) = parser.specifier()? else {
             continue;
         };
-        let Some(text) = specifier.convert(context, value, function, &mut result)? else {
+        let Some(text) = specifier
+            .convert(context, value, function, &mut result)
+            .await?
+        else {
             continue;
         };
         specifier.append(&mut result, text)?;

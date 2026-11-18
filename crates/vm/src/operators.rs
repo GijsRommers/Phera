@@ -2,7 +2,8 @@
 
 use std::rc::Rc;
 
-use phera_bytecode::{BinaryOp, CastKind, IncDec, Reg, UnaryOp};
+use crate::calls::execution_loop::BatchExit;
+use phera_bytecode::{BinaryOp, CastKind, IncDec, Instruction, Reg, UnaryOp};
 use phera_extension_api::NativeError;
 use phera_value::{Value, to_php_string};
 
@@ -36,35 +37,44 @@ impl Vm {
         &mut self,
         operator: BinaryOp,
         destination: Reg,
-        left: Reg,
-        right: Reg,
-    ) -> Result<(), NativeError> {
+        lhs: Reg,
+        rhs: Reg,
+    ) -> Result<Option<BatchExit>, NativeError> {
         let frame = self
             .current()
             .ok_or_else(|| internal_error!("operator frame"))?;
         let left = frame
             .slots(&self.registers)
-            .get(left.index())
+            .get(lhs.index())
             .and_then(Option::as_ref);
         let right = frame
             .slots(&self.registers)
-            .get(right.index())
+            .get(rhs.index())
             .and_then(Option::as_ref);
         let null = Value::Null;
         let left = left.unwrap_or(&null).deref();
         let right = right.unwrap_or(&null).deref();
-        let result = fast_binary(operator, &left, &right)
-            .map(Ok)
-            .unwrap_or_else(|| {
+        let result = match fast_binary(operator, &left, &right) {
+            Some(value) => Ok(value),
+            None => {
+                if crate::stringable::needs_binary_cast(operator, &left, &right) {
+                    return Ok(Some(BatchExit::Instruction(Instruction::Binary {
+                        dst: destination,
+                        op: operator,
+                        lhs,
+                        rhs,
+                    })));
+                }
                 ops::binary(operator, &left, &right, self.diagnostic_reporter.operator())
-            });
+            }
+        };
         drop(left);
         drop(right);
         if self.diagnostic_reporter.has_pending() {
             self.flush_operator_diagnostics();
         }
         self.set(destination, result?);
-        Ok(())
+        Ok(None)
     }
 
     /// Append directly to strings, including referenced strings, to retain amortized growth.
@@ -249,7 +259,7 @@ impl Vm {
         operator: BinaryOp,
         local: Reg,
         source: Reg,
-    ) -> Result<(), NativeError> {
+    ) -> Result<Option<BatchExit>, NativeError> {
         // A compiler-elided local snapshot must retain its undefined-variable notice.
         if self
             .current()
@@ -264,11 +274,19 @@ impl Vm {
             .and_then(Option::as_ref)
             .is_some_and(Value::is_reference);
         if operator != phera_bytecode::BinaryOp::Concat && !reference {
-            self.execute_binary(operator, local, local, source)?;
-            return Ok(());
+            return self.execute_binary(operator, local, local, source);
         }
-        if operator == phera_bytecode::BinaryOp::Concat && self.assign_concat(local, source)? {
-            return Ok(());
+        if operator == BinaryOp::Concat {
+            if self.concat_uses_object(local, source) {
+                return Ok(Some(BatchExit::Instruction(Instruction::AssignOp {
+                    op: operator,
+                    local,
+                    src: source,
+                })));
+            }
+            if self.assign_concat(local, source)? {
+                return Ok(None);
+            }
         }
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let value = ops::binary(
@@ -279,7 +297,7 @@ impl Vm {
         );
         drop(diagnostics);
         self.assign_local(local, value?)?;
-        Ok(())
+        Ok(None)
     }
 
     /// Implements PHP Unary semantics outside the dispatch loop.

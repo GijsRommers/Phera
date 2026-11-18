@@ -249,7 +249,10 @@ impl Instruction {
                 *value = map(*value)
             }
             Instruction::MatchError { subject } => *subject = map(*subject),
-            Instruction::Jump(_) | Instruction::Suppress(_) | Instruction::Declare(_) => {}
+            Instruction::Jump(_)
+            | Instruction::Suppress(_)
+            | Instruction::Declare(_)
+            | Instruction::ReturnMissing => {}
         }
     }
 }

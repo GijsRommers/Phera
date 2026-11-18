@@ -36,6 +36,7 @@ impl Vm {
             } => return self.call_direct_general(function, args, count, dst, work),
             I::Return { src } => return self.return_local(src, instruction, stop),
             I::ReturnNull => return self.return_null(stop),
+            I::ReturnMissing => return Err(self.missing_magic_return()),
             I::ReturnChecked { .. } | I::ReturnReference { .. } => {
                 return Ok(Some(BatchExit::Instruction(instruction)));
             }
@@ -63,11 +64,9 @@ impl Vm {
             I::SendValue { src } => self.send(SentArgument::Value(src))?,
             I::SendLocal { local } => self.send(SentArgument::Local(local))?,
             I::SendPath { path } => {
-                let place = self.path(path)?;
-                if place.has_properties()? {
+                if !self.send_path(self.path(path)?)? {
                     return Ok(Some(BatchExit::Instruction(instruction)));
                 }
-                self.send(SentArgument::Path(place))?;
             }
             I::SendSpread { src } => self.spread(src)?,
             I::NameArgument { name } => self.name_argument(name)?,
@@ -82,12 +81,7 @@ impl Vm {
             I::Move { dst, src } => self.move_local(dst, src)?,
             I::Clear { reg } | I::UnsetLocal { local: reg } => self.clear_local(reg)?,
             I::Assign { local, src } => self.execute_assign(local, src)?,
-            I::AssignOp { op, local, src } => {
-                if self.string_binary_needed(op, local, src) {
-                    return Ok(Some(BatchExit::Instruction(instruction)));
-                }
-                self.execute_assign_op(op, local, src)?;
-            }
+            I::AssignOp { op, local, src } => return self.execute_assign_op(op, local, src),
             I::CheckType { local, ty } => self.check_local_type(local, ty)?,
             I::IncDecLocal { mode, dst, local } => self.execute_inc_dec(mode, dst, local)?,
 
@@ -98,12 +92,7 @@ impl Vm {
                 target,
             } => self.binary_int_branch(op, lhs, rhs, target)?,
             I::BinaryInt { op, dst, lhs, rhs } => self.execute_binary_int(op, dst, lhs, rhs)?,
-            I::Binary { dst, op, lhs, rhs } => {
-                if self.string_binary_needed(op, lhs, rhs) {
-                    return Ok(Some(BatchExit::Instruction(instruction)));
-                }
-                self.execute_binary(op, dst, lhs, rhs)?;
-            }
+            I::Binary { dst, op, lhs, rhs } => return self.execute_binary(op, dst, lhs, rhs),
             I::Unary { dst, op, src } => self.execute_unary(dst, op, src)?,
             I::Cast { to, dst, src } => {
                 if to == phera_bytecode::CastKind::String && self.operand(src).is_object() {
@@ -116,25 +105,17 @@ impl Vm {
             | I::FetchIndex {
                 dst, path, mode, ..
             } => {
-                if !self.fetch_path(dst, path, mode)? {
-                    return Ok(Some(BatchExit::Instruction(instruction)));
-                }
+                return self.fetch_path(dst, path, mode);
             }
             I::AssignOpPath { op, dst, path, src } => {
-                if !self.assign_op_path(op, dst, path, src)? {
-                    return Ok(Some(BatchExit::Instruction(instruction)));
-                }
+                return self.assign_op_path(op, dst, path, src);
             }
             I::IncDecPath { mode, dst, path } => {
-                if !self.inc_dec_path(mode, dst, path)? {
-                    return Ok(Some(BatchExit::Instruction(instruction)));
-                }
+                return self.inc_dec_path(mode, dst, path);
             }
             I::AppendLocal { local, src } => self.append_local(local, src)?,
             I::AssignPath { path, src } => {
-                if !self.assign_path(path, src)? {
-                    return Ok(Some(BatchExit::Instruction(instruction)));
-                }
+                return self.assign_path(path, src);
             }
             I::MakeReference { dst, path } => {
                 if self.path(path)?.has_properties()? {

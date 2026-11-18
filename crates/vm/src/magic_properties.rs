@@ -6,7 +6,7 @@ use std::{
     rc::{Rc, Weak},
 };
 
-use phera_extension_api::{NativeError, NativeResult};
+use phera_extension_api::NativeResult;
 use phera_value::{ArrayKey, Object, Value, to_bool};
 
 use crate::Vm;
@@ -187,11 +187,6 @@ impl Vm {
             .is_some_and(|slot| self.typed_property_uninitialized(&class, object, slot))
         {
             return self.read_property(value, key, missing);
-        }
-        if name.starts_with('\0') {
-            return Err(NativeError::error(
-                "Cannot access property starting with \"\\0\"",
-            ));
         }
         if mode != PropertyRead::Read {
             if let Some(method) = self.property_hook(&class, object, &key, PropertyHook::Isset) {

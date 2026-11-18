@@ -432,6 +432,8 @@ pub enum Instruction {
         src: Reg,
     },
     ReturnNull,
+    /// A typed magic method fell off the end without returning a value.
+    ReturnMissing,
 
     // ----- Declarations and constants -------------------------------------
     /// Declares a function when execution reaches this point. Functions

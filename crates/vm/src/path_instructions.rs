@@ -1,6 +1,7 @@
 //! PHP path instructions instruction handlers, separate from dispatch.
 
-use phera_bytecode::{BinaryOp, FetchMode, IncDec, PathId, Reg};
+use crate::calls::execution_loop::BatchExit;
+use phera_bytecode::{BinaryOp, FetchMode, IncDec, Instruction, PathId, Reg};
 use phera_extension_api::NativeError;
 
 use crate::{Vm, ops};
@@ -22,16 +23,20 @@ impl Vm {
         destination: Reg,
         path: PathId,
         mode: FetchMode,
-    ) -> Result<bool, NativeError> {
+    ) -> Result<Option<BatchExit>, NativeError> {
         let place = self.path(path)?;
         if mode == FetchMode::Read
             && let Some(value) = self.read_property_site(&place)?
         {
             self.set(destination, value);
-            return Ok(true);
+            return Ok(None);
         }
         if place.has_properties()? && mode != FetchMode::Destructure {
-            return Ok(false);
+            return Ok(Some(BatchExit::Instruction(Instruction::Fetch {
+                dst: destination,
+                path,
+                mode,
+            })));
         }
         if mode == FetchMode::Destructure {
             let root = self.read_place(
@@ -46,7 +51,7 @@ impl Vm {
                     self.warn(format!("Cannot use {} as array", root.type_name()));
                 }
                 self.set(destination, phera_value::Value::Null);
-                return Ok(true);
+                return Ok(None);
             }
         }
         let value = self.read_place(
@@ -58,7 +63,7 @@ impl Vm {
             },
         )?;
         self.set(destination, value);
-        Ok(true)
+        Ok(None)
     }
 
     /// Implements PHP AssignOpPath semantics outside the dispatch loop.
@@ -68,10 +73,15 @@ impl Vm {
         destination: Reg,
         path: PathId,
         source: Reg,
-    ) -> Result<bool, NativeError> {
+    ) -> Result<Option<BatchExit>, NativeError> {
         let place = self.path(path)?;
         if place.has_properties()? {
-            return Ok(false);
+            return Ok(Some(BatchExit::Instruction(Instruction::AssignOpPath {
+                op: operator,
+                dst: destination,
+                path,
+                src: source,
+            })));
         }
         let left = self.read_place(&place, crate::access_mode::Missing::Warn)?;
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
@@ -85,7 +95,7 @@ impl Vm {
         let value = value?;
         self.write_place(&place, value.clone(), crate::access_mode::Binding::ByValue)?;
         self.set(destination, value);
-        Ok(true)
+        Ok(None)
     }
 
     /// Implements PHP IncDecPath semantics outside the dispatch loop.
@@ -94,14 +104,18 @@ impl Vm {
         mode: IncDec,
         destination: Reg,
         path: PathId,
-    ) -> Result<bool, NativeError> {
+    ) -> Result<Option<BatchExit>, NativeError> {
         let place = self.path(path)?;
         if let Some(value) = self.increment_property_site(&place, mode)? {
             self.set(destination, value);
-            return Ok(true);
+            return Ok(None);
         }
         if place.has_properties()? {
-            return Ok(false);
+            return Ok(Some(BatchExit::Instruction(Instruction::IncDecPath {
+                mode,
+                dst: destination,
+                path,
+            })));
         }
         let old = self.read_place(&place, crate::access_mode::Missing::Warn)?;
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
@@ -121,15 +135,19 @@ impl Vm {
                 value
             },
         );
-        Ok(true)
+        Ok(None)
     }
 
     /// Implements PHP AssignPath semantics outside the dispatch loop.
-    pub(crate) fn assign_path(&mut self, path: PathId, source: Reg) -> Result<bool, NativeError> {
+    pub(crate) fn assign_path(
+        &mut self,
+        path: PathId,
+        source: Reg,
+    ) -> Result<Option<BatchExit>, NativeError> {
         let value = self.read_local(source);
         let place = self.path(path)?;
         if self.assign_property_site(&place, &value)? {
-            return Ok(true);
+            return Ok(None);
         }
         if place.steps()?.next().is_none()
             && let phera_bytecode::PathBase::Register(register) = place.base()?
@@ -137,10 +155,13 @@ impl Vm {
             self.restart_subject_iterators(register);
         }
         if place.has_properties()? {
-            return Ok(false);
+            return Ok(Some(BatchExit::Instruction(Instruction::AssignPath {
+                path,
+                src: source,
+            })));
         }
         self.write_place(&place, value, crate::access_mode::Binding::ByValue)?;
-        Ok(true)
+        Ok(None)
     }
 
     /// Implements PHP MakeReference semantics outside the dispatch loop.
