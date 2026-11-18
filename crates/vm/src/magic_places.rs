@@ -144,6 +144,7 @@ impl Vm {
             value = match key {
                 PathKey::Property(key) => {
                     let read = match (mode, steps.peek()) {
+                        _ if purpose == ReadPurpose::Update => PropertyRead::Update,
                         (FetchMode::Isset, None) => PropertyRead::Isset,
                         (FetchMode::Empty, None) => PropertyRead::Empty,
                         _ if quiet => PropertyRead::Coalesce,

@@ -43,7 +43,7 @@ struct SerializationSlots {
     count: usize,
 }
 
-pub async fn serialize(context: &mut dyn Context, arguments: Vec<Value>) -> NativeResult {
+pub async fn serialize(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let Some(value) = arguments.first() else {
         return Err(NativeError::argument_count_error(
             "serialize() expects exactly 1 argument, 0 given",

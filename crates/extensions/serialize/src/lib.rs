@@ -37,12 +37,26 @@ impl Extension for Serialize {
         registry.function(FunctionEntry::asynchronous(
             "serialize",
             SERIALIZE_PARAMS,
-            |context, arguments| Box::pin(encode::serialize(context, arguments)),
+            |context, arguments| {
+                Box::pin(async move {
+                    encode::serialize(context, &arguments)
+                        .await
+                        .map_err(|error| context.native_call_error("serialize", &arguments, error))
+                })
+            },
         ));
         registry.function(FunctionEntry::asynchronous(
             "unserialize",
             UNSERIALIZE_PARAMS,
-            |context, arguments| Box::pin(decode::unserialize(context, arguments)),
+            |context, arguments| {
+                Box::pin(async move {
+                    decode::unserialize(context, &arguments)
+                        .await
+                        .map_err(|error| {
+                            context.native_call_error("unserialize", &arguments, error)
+                        })
+                })
+            },
         ));
         registry.class(SERIALIZABLE);
         registry.class(incomplete::CLASS);

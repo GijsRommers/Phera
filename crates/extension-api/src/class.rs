@@ -230,6 +230,7 @@ impl PropertyEntry {
 /// Instance access for native properties whose values live outside ordinary storage.
 pub enum NativePropertyRead {
     Read,
+    Update,
     Quiet,
     Isset,
     Exists,
