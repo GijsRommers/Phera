@@ -24,8 +24,10 @@ pub(crate) enum ClassFunction {
     ClassMethods,
     ClassParents,
     ClassImplements,
+    ClassUses,
     DeclaredClasses,
     DeclaredInterfaces,
+    DeclaredTraits,
 }
 
 impl ClassFunction {
@@ -49,8 +51,10 @@ impl ClassFunction {
         Self::ClassMethods,
         Self::ClassParents,
         Self::ClassImplements,
+        Self::ClassUses,
         Self::DeclaredClasses,
         Self::DeclaredInterfaces,
+        Self::DeclaredTraits,
     ];
 
     pub(crate) fn resolve(name: &str) -> Option<Self> {
@@ -81,8 +85,10 @@ impl ClassFunction {
             Self::ClassMethods => "get_class_methods",
             Self::ClassParents => "class_parents",
             Self::ClassImplements => "class_implements",
+            Self::ClassUses => "class_uses",
             Self::DeclaredClasses => "get_declared_classes",
             Self::DeclaredInterfaces => "get_declared_interfaces",
+            Self::DeclaredTraits => "get_declared_traits",
         }
     }
 
@@ -106,7 +112,9 @@ impl ClassFunction {
             Self::ClassAlias => {
                 const { &[CLASS, Param::new("alias", ParamType::String), AUTOLOAD] }
             }
-            Self::ClassParents | Self::ClassImplements => const { &[OBJECT_OR_CLASS, AUTOLOAD] },
+            Self::ClassParents | Self::ClassImplements | Self::ClassUses => {
+                const { &[OBJECT_OR_CLASS, AUTOLOAD] }
+            }
             Self::PropertyExists => {
                 const { &[OBJECT_OR_CLASS, Param::new("property", ParamType::String)] }
             }
@@ -122,7 +130,10 @@ impl ClassFunction {
                     ]
                 }
             }
-            Self::GetCalledClass | Self::DeclaredClasses | Self::DeclaredInterfaces => &[],
+            Self::GetCalledClass
+            | Self::DeclaredClasses
+            | Self::DeclaredInterfaces
+            | Self::DeclaredTraits => &[],
         }
     }
 }

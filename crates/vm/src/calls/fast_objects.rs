@@ -59,8 +59,7 @@ impl Machine<'_> {
             },
         };
         let template = template.clone();
-        let object = self.classes.allocate(class);
-        object.update(|properties| *properties = template);
+        let object = self.classes.allocate_with_properties(class, template);
         let parts = (&mut *self.stack, &mut *self.registers);
         match constructor {
             Some(function) => {

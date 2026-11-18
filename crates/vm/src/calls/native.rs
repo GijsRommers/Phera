@@ -215,6 +215,35 @@ impl Vm {
         origin: crate::calls::callback_binding::ArgumentOrigin,
     ) -> Result<Value, NativeError> {
         let result = match &method.body {
+            MethodBody::Enum(operation) => {
+                let name = format!("{}::{}", method.declaring, method.name);
+                let result = loop {
+                    let result = self.with_argument_origin(origin, |vm| {
+                        vm.call_enum_method(*operation, &name, &context.scope, &mut arguments)
+                    });
+                    let Err(error) = result else {
+                        break result;
+                    };
+                    let miss = match crate::autoload::ClassMiss::take(error) {
+                        Ok(miss) => miss,
+                        Err(error) => break Err(error),
+                    };
+                    match self
+                        .lookup_class_from(&miss.name, Some((&name, &arguments)))
+                        .await
+                    {
+                        Ok(Some(_)) => {}
+                        Ok(None) => break Err(miss.error()),
+                        Err(error) => break Err(error),
+                    }
+                };
+                if result.is_err() {
+                    self.failed_native =
+                        Some(crate::error_traces::NativeTrace::new(&name, &arguments));
+                }
+                self.call_stack.recycle_native_arguments(arguments);
+                result
+            }
             MethodBody::Closure(operation) => {
                 self.closure_window(
                     *operation,

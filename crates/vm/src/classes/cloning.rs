@@ -70,7 +70,10 @@ impl Vm {
             .for_object(&original)
             .ok_or_else(|| internal_error!("clone class"))?;
         let policy = class.hooks.as_ref().and_then(|hooks| hooks.clone);
-        if class.is_throwable || matches!(policy, Some(NativeClone::Forbidden)) {
+        if class.kind == phera_bytecode::ClassKind::Enum
+            || class.is_throwable
+            || matches!(policy, Some(NativeClone::Forbidden))
+        {
             return Err(NativeError::error(format!(
                 "Trying to clone an uncloneable object of class {}",
                 class.name

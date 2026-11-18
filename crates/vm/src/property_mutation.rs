@@ -98,10 +98,10 @@ impl Vm {
     ) -> Result<(), NativeError> {
         let name = &property.name;
         let key = &property.key;
+        let declaring = phera_value::class_display_name(&property.declaring);
         if indirect || mutation == Mutation::Bind {
             return Err(NativeError::error(format!(
-                "Cannot indirectly modify readonly property {}::${name}",
-                property.declaring
+                "Cannot indirectly modify readonly property {declaring}::${name}"
             )));
         }
         let scope = self.current().and_then(|frame| frame.scope());
@@ -114,8 +114,7 @@ impl Vm {
                 "modify"
             };
             return Err(NativeError::error(format!(
-                "Cannot {action} readonly property {}::${name}",
-                property.declaring
+                "Cannot {action} readonly property {declaring}::${name}"
             )));
         }
         if scope.is_none_or(|scope| !scope.is_a(&property.declaring)) {
@@ -125,11 +124,10 @@ impl Vm {
                 "modify"
             };
             let from = scope
-                .map(|scope| format!("scope {}", scope.name))
+                .map(|scope| format!("scope {}", phera_value::class_display_name(&scope.name)))
                 .unwrap_or_else(|| "global scope".into());
             return Err(NativeError::error(format!(
-                "Cannot {action} protected(set) readonly property {}::${name} from {from}",
-                property.declaring
+                "Cannot {action} protected(set) readonly property {declaring}::${name} from {from}"
             )));
         }
         Ok(())
@@ -212,11 +210,12 @@ impl Vm {
                         && mutation != Mutation::Unset
                     {
                         if class.is_readonly
+                            || class.kind == phera_bytecode::ClassKind::Enum
                             || class.origin == crate::classes::class::ClassOrigin::Closure
                         {
                             return Err(NativeError::error(format!(
                                 "Cannot create dynamic property {}::${name}",
-                                class.name
+                                phera_value::class_display_name(&class.name)
                             )));
                         }
                         if !class.allows_dynamic_properties {

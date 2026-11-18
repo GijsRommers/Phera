@@ -67,6 +67,17 @@ pub(crate) trait Style {
     /// Anything that is not an array or object.
     fn scalar(&mut self, out: &mut Vec<u8>, value: &Value, place: Place, context: &mut dyn Context);
 
+    /// A case can be printed as one value or as a container of its readonly properties.
+    fn enum_case(
+        &mut self,
+        _: &mut Vec<u8>,
+        _: &Object,
+        _: &phera_extension_api::PhpString,
+        _: Place,
+    ) -> bool {
+        false
+    }
+
     /// The start of an array or object with `len` entries.
     fn open(&mut self, out: &mut Vec<u8>, container: &Container, len: usize, place: Place);
 
@@ -181,6 +192,13 @@ async fn enter(
     };
     let container = match &*value.deref() {
         Value::Array(array) => Container::Array(array.clone()),
+        Value::Object(object)
+            if object.class.is_enum()
+                && let Some(Value::String(name)) = object.get(&ArrayKey::str("name"))
+                && style.enum_case(out, object, &name, place) =>
+        {
+            return Ok(None);
+        }
         Value::Object(object) => Container::Object(object.clone()),
         scalar => {
             style.scalar(out, scalar, place, context);

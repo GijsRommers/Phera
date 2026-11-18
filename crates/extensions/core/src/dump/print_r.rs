@@ -42,7 +42,18 @@ impl PrintR<'_> {
     fn head(container: &Container) -> String {
         match container {
             Container::Array(_) => "Array\n".to_string(),
-            Container::Object(object) => format!("{} Object\n", object.class.name()),
+            Container::Object(object) if object.class.is_enum() => {
+                let backing = match object.get(&ArrayKey::str("value")) {
+                    Some(Value::String(_)) => ":string",
+                    Some(Value::Int(_)) => ":int",
+                    _ => "",
+                };
+                format!("{} Enum{backing}\n", object.class.name())
+            }
+            Container::Object(object) => format!(
+                "{} Object\n",
+                phera_extension_api::value::class_display_name(object.class.name())
+            ),
         }
     }
 }
@@ -90,7 +101,9 @@ impl Style for PrintR<'_> {
                     PropertyScope::Protected => out.extend_from_slice(b":protected"),
                     PropertyScope::Private(class) => {
                         out.push(b':');
-                        out.extend_from_slice(class);
+                        out.extend_from_slice(
+                            class.split(|byte| *byte == 0).next().unwrap_or(class),
+                        );
                         out.extend_from_slice(b":private");
                     }
                 }

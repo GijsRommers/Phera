@@ -49,10 +49,8 @@ pub(crate) fn retag(tokens: &mut [SourceToken<'_>]) {
             && (matches!(previous, LeftBrace | Semicolon) && matches!(next, As | InsteadOf)
                 || previous == As
                     && !matches!(before_previous, LeftBrace | Semicolon)
-                    && !matches!(kind, Public | Protected | Private | Final)
-                || before_previous == As
-                    && matches!(previous, Public | Protected | Private | Final)
-                    && next == Semicolon);
+                    && !is_trait_modifier(kind)
+                || before_previous == As && is_trait_modifier(previous) && next == Semicolon);
         let constant_name = constant_depth == Some(delimiter_depth) && next == Assign;
         let after_function = previous == Function
             || (matches!(previous, Ampersand | AmpersandBeforeVariable)
@@ -102,6 +100,14 @@ pub(crate) fn retag(tokens: &mut [SourceToken<'_>]) {
         before_previous = previous;
         previous = if is_name { Identifier } else { kind };
     }
+}
+
+fn is_trait_modifier(kind: TokenKind) -> bool {
+    use TokenKind::*;
+    matches!(
+        kind,
+        Public | Protected | Private | Final | Abstract | Static | Readonly
+    )
 }
 
 fn is_keyword(token: &SourceToken<'_>) -> bool {

@@ -166,6 +166,7 @@ fn add_traits(
                 method,
                 alias,
                 visibility,
+                ..
             } => MemberAdaptation::Alias {
                 source: trait_name
                     .as_ref()

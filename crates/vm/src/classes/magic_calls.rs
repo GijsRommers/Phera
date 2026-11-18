@@ -3,6 +3,7 @@
 
 use std::rc::Rc;
 
+use phera_bytecode::ClassKind;
 use phera_extension_api::NativeError;
 use phera_value::Object;
 
@@ -87,6 +88,9 @@ impl Vm {
                 .as_ref()
                 .and_then(|magic| magic.call_static.clone())
         {
+            if class.kind == ClassKind::Trait {
+                self.deprecate_static_trait_method(&class, name);
+            }
             (class.clone(), method, None)
         } else {
             return Err(
