@@ -16,6 +16,23 @@ use crate::{ConstId, FunctionId, IterId, NameId, PathId, Reg, StaticId, SymbolId
 ///   it never leaves `dst` half written.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Instruction {
+    /// Detach the frame after binding arguments and evaluating defaults.
+    GeneratorStart,
+    /// Publish a key and value. Resuming supplies the expression result in dst.
+    Yield {
+        dst: Reg,
+        key: Option<Reg>,
+        value: Option<Reg>,
+    },
+    /// Suspend on a delegate until its iteration has finished.
+    YieldFrom {
+        dst: Reg,
+        src: Reg,
+    },
+    /// Finish a generator with a return value independent of its declared type.
+    GeneratorReturn {
+        src: Reg,
+    },
     /// Validate and coerce a pending return before calling finally; retain reference cells.
     CheckReturn {
         source: Reg,
@@ -537,25 +554,6 @@ pub enum Instruction {
     Eval {
         dst: Reg,
         source: Reg,
-    },
-
-    // ----- Generators ------------------------------------------------------
-    /// Detach the frame after binding arguments and evaluating defaults.
-    GeneratorStart,
-    /// Publish a key and value. Resuming supplies the expression result in dst.
-    Yield {
-        dst: Reg,
-        key: Option<Reg>,
-        value: Option<Reg>,
-    },
-    /// Suspend on a delegate until its iteration has finished.
-    YieldFrom {
-        dst: Reg,
-        src: Reg,
-    },
-    /// Finish a generator with a return value independent of its declared type.
-    GeneratorReturn {
-        src: Reg,
     },
 }
 

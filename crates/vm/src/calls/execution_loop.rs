@@ -44,12 +44,12 @@ pub(crate) enum BatchExit {
     NativeCall(Reg),
     /// The frame that native code called has returned this value.
     Returned(Value),
+    /// A PHP yield published a suspension for the generator driver.
+    GeneratorSuspended,
     /// The work budget is spent; other tasks get a turn.
     Yield,
     /// A warning queued a user error handler, which must run now.
     Handlers,
-    /// A PHP yield published a suspension for the generator driver.
-    GeneratorSuspended,
 }
 
 /// Why the loop stopped. Small enough to be returned in registers.
@@ -84,23 +84,10 @@ pub(super) struct Position {
 }
 
 impl Vm {
-    /// Select release tracking only after this request has created a generator.
-    #[inline]
-    pub(crate) fn run_batch(
-        &mut self,
-        stop: usize,
-        work: &mut usize,
-    ) -> Result<BatchExit, NativeError> {
-        if self.generator_releases.is_some() {
-            self.run_batch_loop::<true>(stop, work)
-        } else {
-            self.run_batch_loop::<false>(stop, work)
-        }
-    }
-
-    /// Run frames until the interpreter shell has work or the active call returns.
+    /// Run frames until an instruction needs the async shell, the work budget
+    /// is spent, or the frame at depth `stop` has returned.
     #[inline(never)]
-    fn run_batch_loop<const TRACK_GENERATORS: bool>(
+    pub(crate) fn run_batch(
         &mut self,
         stop: usize,
         work: &mut usize,
@@ -127,9 +114,7 @@ impl Vm {
             if let Some(exit) = self.execute(instruction, stop, work)? {
                 return Ok(exit);
             }
-            if !self.error_handlers.pending.is_empty()
-                || (TRACK_GENERATORS && self.generator_releases_pending())
-            {
+            if !self.error_handlers.pending.is_empty() || self.generator_releases_pending() {
                 return Ok(BatchExit::Handlers);
             }
             if *work >= YIELD_AFTER_STEPS {

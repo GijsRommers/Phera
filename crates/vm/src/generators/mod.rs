@@ -18,7 +18,7 @@ pub(crate) mod trace;
 
 use std::rc::Rc;
 
-use phera_bytecode::Reg;
+use phera_bytecode::{Instruction, Reg};
 use phera_extension_api::NativeError;
 use phera_value::{Object, Value};
 
@@ -64,13 +64,41 @@ pub(crate) enum Suspension {
 }
 
 impl Vm {
+    #[cold]
+    pub(crate) fn execute_generator(
+        &mut self,
+        instruction: Instruction,
+        stop: usize,
+    ) -> Result<Option<BatchExit>, NativeError> {
+        match instruction {
+            Instruction::GeneratorStart => self.start_generator(stop),
+            Instruction::Yield { .. } if self.force_closing_generator() => Err(NativeError::error(
+                "Cannot yield from finally in a force-closed generator",
+            )),
+            Instruction::YieldFrom { .. } if self.force_closing_generator() => Err(
+                NativeError::error("Cannot use \"yield from\" in a force-closed generator"),
+            ),
+            Instruction::Yield { dst, key, value } => {
+                Ok(Some(self.generator_yield(dst, key, value)))
+            }
+            Instruction::YieldFrom { dst, src } => Ok(Some(self.generator_delegate(dst, src))),
+            Instruction::GeneratorReturn { src } => {
+                let Some(value) = self.read_defined_local(src) else {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                };
+                self.finish_return_value(value, stop)
+                    .map(|value| value.map(BatchExit::Returned))
+            }
+            _ => Err(internal_error!("generator instruction")),
+        }
+    }
+
     /// This is the first instruction after the call's argument prologue.
     #[cold]
     pub(crate) fn start_generator(
         &mut self,
         stop: usize,
     ) -> Result<Option<BatchExit>, NativeError> {
-        let first_generator = self.generator_releases.is_none();
         let class = self
             .classes
             .get("Generator")
@@ -99,8 +127,7 @@ impl Vm {
         if let Some(destination) = destination {
             self.set(destination, value);
         }
-        // A plain interpreter batch must re-enter with release tracking enabled.
-        Ok(first_generator.then_some(BatchExit::Handlers))
+        Ok(None)
     }
 
     #[cold]

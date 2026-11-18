@@ -44,26 +44,11 @@ impl Vm {
                 count,
                 dst,
             } => return self.call_direct_general(function, args, count, dst, work),
-            I::GeneratorStart => return self.start_generator(stop),
-            I::Yield { .. } if self.force_closing_generator() => {
-                return Err(NativeError::error(
-                    "Cannot yield from finally in a force-closed generator",
-                ));
-            }
-            I::YieldFrom { .. } if self.force_closing_generator() => {
-                return Err(NativeError::error(
-                    "Cannot use \"yield from\" in a force-closed generator",
-                ));
-            }
-            I::Yield { dst, key, value } => return Ok(Some(self.generator_yield(dst, key, value))),
-            I::YieldFrom { dst, src } => return Ok(Some(self.generator_delegate(dst, src))),
-            I::GeneratorReturn { src } => {
-                let Some(value) = self.read_defined_local(src) else {
-                    return Ok(Some(BatchExit::Instruction(instruction)));
-                };
-                return Ok(self
-                    .finish_return_value(value, stop)?
-                    .map(BatchExit::Returned));
+            I::GeneratorStart
+            | I::Yield { .. }
+            | I::YieldFrom { .. }
+            | I::GeneratorReturn { .. } => {
+                return self.execute_generator(instruction, stop);
             }
             I::Return { src } => return self.return_local(src, instruction, stop),
             I::ReturnNull => return self.return_null(stop),

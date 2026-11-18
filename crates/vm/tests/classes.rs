@@ -22,7 +22,6 @@ fn later_milestones_remain_compile_errors() {
         "<?php trait Example {}",
         "<?php enum Example {}",
         "<?php new class {};",
-        "<?php function generator() { yield 1; }",
         "<?php goto target; target:",
         "<?php class Example {static function method(){}} Example::method(...);",
         "<?php class Example {function method(){}} (new Example)->method(...);",
@@ -51,6 +50,17 @@ fn later_milestones_remain_compile_errors() {
             "{source}: {error}"
         );
     }
+}
+
+#[test]
+fn generator_body_starts_with_a_suspension_boundary() {
+    let unit = phera_compiler::compile("<?php function generator() { yield 1; }", "generator.php")
+        .unwrap();
+    assert!(matches!(
+        unit.functions.as_slice(),
+        [function] if function.is_generator
+            && matches!(function.instructions.first(), Some(phera_bytecode::Instruction::GeneratorStart))
+    ));
 }
 
 #[test]

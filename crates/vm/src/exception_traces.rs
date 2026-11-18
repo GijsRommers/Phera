@@ -19,6 +19,17 @@ impl Vm {
 
     /// Frame entries point at the caller's call instruction and omit the main frame.
     pub(crate) fn throwable_trace(&mut self, origin: crate::exceptions::TraceOrigin) -> Value {
+        if self.generator_traces.is_empty() {
+            self.trace_frames::<false>(origin)
+        } else {
+            self.trace_frames::<true>(origin)
+        }
+    }
+
+    fn trace_frames<const INCLUDE_GENERATORS: bool>(
+        &mut self,
+        origin: crate::exceptions::TraceOrigin,
+    ) -> Value {
         let mut trace = PhpArray::new();
         if let Some(native) = matches!(origin, crate::exceptions::TraceOrigin::Engine)
             .then(|| self.failed_native.take())
@@ -99,10 +110,11 @@ impl Vm {
                 .peekable();
             let via_callback =
                 warning.is_some() || autoload.is_some() || callbacks.peek().is_some();
-            if let Some(site) = self
-                .generator_traces
-                .iter()
-                .rfind(|site| site.boundary == callee_index)
+            if INCLUDE_GENERATORS
+                && let Some(site) = self
+                    .generator_traces
+                    .iter()
+                    .rfind(|site| site.boundary == callee_index)
             {
                 self.append_generator_trace(
                     site,
