@@ -23,6 +23,7 @@ impl Extension for Date {
     }
 
     fn register(&self, registry: &mut Registry) {
+        registry.deprecated_constant("DATE_RFC7231", classes::RFC7231_FORMAT);
         register::functions(registry);
         classes::register(registry);
         registry.function(FunctionEntry::sync(

@@ -6,6 +6,30 @@ use std::path::Path;
 use std::process::Command;
 
 #[test]
+fn omitted_items_have_one_level_zero_diagnostic_each() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../analyzer/tests/corpus/not_supported_calls.php");
+    let output = Command::new(env!("CARGO_BIN_EXE_phera"))
+        .args(["check", "--no-progress", "--level", "0"])
+        .arg(fixture)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let text = String::from_utf8(output.stdout).unwrap();
+    let diagnostics: Vec<_> = text.lines().filter(|line| line.contains("  [")).collect();
+    assert_eq!(diagnostics.len(), 7, "{text}");
+    assert!(
+        diagnostics
+            .iter()
+            .all(|line| line.contains("[phera.notSupported]")),
+        "{text}"
+    );
+    assert!(text.contains(
+        "strftime() is not supported by Phera: deprecated since PHP 8.1, use IntlDateFormatter::format() instead"
+    ));
+}
+
+#[test]
 fn corpus_lines_at_each_level() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../analyzer/tests/corpus");
     let mut files: Vec<_> = std::fs::read_dir(root)

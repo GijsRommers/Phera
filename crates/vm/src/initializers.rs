@@ -80,7 +80,7 @@ impl Vm {
                     )
                 }
                 Instruction::FetchConstant { dst, constant } => {
-                    (dst, self.constants.fetch(unit.clone(), constant)?)
+                    (dst, self.fetch_global_constant(unit.clone(), constant)?)
                 }
                 Instruction::Binary {
                     dst,

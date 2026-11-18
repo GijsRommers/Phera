@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
+phera-source.workspace = true
 phera-extension-api.workspace = true
 tz-rs.workspace = true
 jiff-tzdb.workspace = true

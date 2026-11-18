@@ -36,6 +36,7 @@ mod loops;
 mod match_expression;
 mod member_expressions;
 mod members;
+mod not_supported;
 mod refine;
 mod reporting;
 mod short_circuit;
@@ -160,6 +161,10 @@ impl<'a> Analyzer<'a> {
         if let Some(class) = &resolved
             && self.index.class(class).is_none()
             && !self
+                .index
+                .builtin_classes
+                .contains(&class.to_ascii_lowercase())
+            && !self
                 .context
                 .known
                 .contains(&Symbol::Class(class.to_ascii_lowercase()))
@@ -175,6 +180,10 @@ impl<'a> Analyzer<'a> {
             let class = self.class_name(name, false);
             if let Some(class) = &class
                 && self.index.class(class).is_none()
+                && !self
+                    .index
+                    .builtin_classes
+                    .contains(&class.to_ascii_lowercase())
                 && !scope
                     .known
                     .contains(&Symbol::Class(class.to_ascii_lowercase()))

@@ -1994,11 +1994,8 @@ ext/pcre/tests/study.phpt
 ext/pcre/tests/ungreedy.phpt
 ext/random/tests/01_functions/bug46587.phpt
 ext/random/tests/01_functions/bug75170.phpt
-ext/random/tests/01_functions/lcg_value_basic.phpt
-ext/random/tests/01_functions/lcg_value_deprecation.phpt
 ext/random/tests/01_functions/mt_getrandmax_basic.phpt
 ext/random/tests/01_functions/mt_rand_basic.phpt
-ext/random/tests/01_functions/mt_srand_unknown_mode.phpt
 ext/random/tests/01_functions/rand_basic.phpt
 ext/random/tests/01_functions/rand_inverted_order.phpt
 ext/random/tests/01_functions/random_bytes.phpt
