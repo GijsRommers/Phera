@@ -1,4 +1,5 @@
-//! Decimal conversion following php-src Zend/zend_strtod.c (zend_dtoa)
+//! The decimal digits of a double for `%f`, `%e`, `%g` and `number_format`,
+//! following php-src Zend/zend_strtod.c (zend_dtoa)
 //! and main/snprintf.c (php_conv_fp and php_gcvt), using decimal integer arithmetic.
 
 #[derive(Clone, Copy, PartialEq, Eq)]

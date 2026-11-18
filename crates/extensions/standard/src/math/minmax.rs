@@ -1,8 +1,12 @@
-//! Minimum and maximum selection with PHP's sticky numeric fast path.
+//! `max` and `min`, of several values or of one array.
 
 use phera_extension_api::{
-    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Registry, Value, value,
+    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Value, value,
 };
+
+use crate::arguments::given_type;
+
+pub(super) const FUNCTIONS: &[FunctionEntry] = &[MAX, MIN];
 
 #[derive(Clone, Copy)]
 enum Extremum {
@@ -11,98 +15,124 @@ enum Extremum {
 }
 
 impl Extremum {
-    fn name(self) -> &'static str {
+    fn function(self) -> &'static str {
         match self {
             Self::Minimum => "min",
             Self::Maximum => "max",
         }
     }
 
-    /// Native comparisons preserve PHP's special handling of NaN in variadic calls.
-    fn prefers<T: PartialOrd>(self, candidate: T, current: T) -> bool {
+    /// Whether `candidate` replaces `best`. Comparing with `<` or `>`
+    /// rather than an `Ordering` keeps PHP's answers for NAN, with which
+    /// both are false.
+    fn prefers<T: PartialOrd>(self, candidate: T, best: T) -> bool {
         match self {
-            Self::Minimum => candidate < current,
-            Self::Maximum => candidate > current,
+            Self::Minimum => candidate < best,
+            Self::Maximum => candidate > best,
         }
     }
 }
 
-enum ComparisonPath {
+/// `max(mixed $value, mixed ...$values): mixed`, or `max(array $value)`.
+///
+/// Values are compared as with `<` and `>`; of equal ones, the first wins.
+///
+/// ```php
+/// max(1, "5", 3.5); // "5"
+/// max([1, 7, 3]);   // 7
+/// max([]);          // ValueError
+/// ```
+const MAX: FunctionEntry = FunctionEntry::sync(
+    "max",
+    &[
+        Param::new("value", ParamType::Mixed),
+        Param::new("values", ParamType::Mixed).variadic(),
+    ],
+    max,
+);
+
+fn max(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    extremum(context, arguments, Extremum::Maximum)
+}
+
+/// `min(mixed $value, mixed ...$values): mixed`, or `min(array $value)`.
+///
+/// ```php
+/// min(2, 8, -1); // -1
+/// ```
+const MIN: FunctionEntry = FunctionEntry::sync(
+    "min",
+    &[
+        Param::new("value", ParamType::Mixed),
+        Param::new("values", ParamType::Mixed).variadic(),
+    ],
+    min,
+);
+
+fn min(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    extremum(context, arguments, Extremum::Minimum)
+}
+
+fn extremum(context: &mut dyn Context, arguments: &[Value], extremum: Extremum) -> NativeResult {
+    let function = extremum.function();
+    if let [only] = arguments {
+        let Value::Array(array) = only else {
+            return Err(NativeError::type_error(format!(
+                "{function}(): Argument #1 ($value) must be of type array, {} given",
+                given_type(only)
+            )));
+        };
+        return select(context, array.values(), extremum, Path::Array);
+    }
+    // php-src's min() and max() compare ints and floats directly as long
+    // as every value so far was one, before falling back to the generic
+    // comparison; the array form always compares generically.
+    select(context, arguments.iter(), extremum, Path::Numeric)
+}
+
+/// How the next comparison is made. Once a value is neither int nor float,
+/// PHP stays on the generic comparison for the rest.
+#[derive(Clone, Copy)]
+enum Path {
     Numeric,
     Variadic,
     Array,
 }
 
-const MINMAX_PARAMS: &[Param] = &[
-    Param::new("value", ParamType::Mixed),
-    Param::new("values", ParamType::Mixed).variadic(),
-];
-
-pub(crate) fn register(registry: &mut Registry) {
-    registry.function(FunctionEntry::sync("max", MINMAX_PARAMS, max));
-    registry.function(FunctionEntry::sync("min", MINMAX_PARAMS, min));
-}
-
-fn max(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    select(context, arguments, Extremum::Maximum)
-}
-
-fn min(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    select(context, arguments, Extremum::Minimum)
-}
-
-/// The one-argument overload requires an array; variadic calls accept any values.
-fn candidates<'a>(arguments: &'a [Value], name: &str) -> Result<Vec<&'a Value>, NativeError> {
-    if arguments.len() != 1 {
-        return Ok(arguments.iter().collect());
-    }
-    match arguments.first() {
-        Some(Value::Array(array)) => Ok(array.values().collect()),
-        Some(value) => Err(NativeError::type_error(format!(
-            "{name}(): Argument #1 ($value) must be of type array, {} given",
-            crate::argument_type_name(value)
-        ))),
-        None => Ok(Vec::new()),
-    }
-}
-
-/// Once a nonnumeric value appears, PHP never returns to native numeric comparison.
-fn select(context: &mut dyn Context, arguments: &[Value], extremum: Extremum) -> NativeResult {
-    let name = extremum.name();
-    let mut candidates = candidates(arguments, name)?.into_iter();
+fn select<'a>(
+    context: &mut dyn Context,
+    mut candidates: impl Iterator<Item = &'a Value>,
+    extremum: Extremum,
+    mut path: Path,
+) -> NativeResult {
     let Some(mut best) = candidates.next() else {
         return Err(NativeError::value_error(format!(
-            "{name}(): Argument #1 ($value) must contain at least one element"
+            "{}(): Argument #1 ($value) must contain at least one element",
+            extremum.function()
         )));
     };
-    let mut path = if arguments.len() == 1 {
-        ComparisonPath::Array
-    } else {
-        ComparisonPath::Numeric
-    };
     for candidate in candidates {
-        let numeric = match (&path, best, candidate) {
-            (ComparisonPath::Numeric, Value::Int(current), Value::Int(candidate)) => {
-                Some(extremum.prefers(candidate, current))
+        let numeric = match (path, best, candidate) {
+            (Path::Numeric, Value::Int(best), Value::Int(candidate)) => {
+                Some(extremum.prefers(candidate, best))
             }
-            (ComparisonPath::Numeric, _, _) => exact_number(best)
-                .zip(exact_number(candidate))
-                .map(|(current, candidate)| extremum.prefers(candidate, current)),
-            _ => None,
+            (Path::Numeric, _, _) => exact_float(best)
+                .zip(exact_float(candidate))
+                .map(|(best, candidate)| extremum.prefers(candidate, best)),
+            (Path::Array | Path::Variadic, _, _) => None,
         };
-        let replace = if let Some(result) = numeric {
-            result
-        } else {
-            match path {
-                ComparisonPath::Array => {
-                    // PHP's array overload compares the current winner on the left.
+        let replace = match numeric {
+            Some(replace) => replace,
+            None => match path {
+                // The array overload puts the current winner on the left.
+                Path::Array => {
                     extremum.prefers(0, value::compare(best, candidate, context.diagnostics())?)
                 }
-                ComparisonPath::Numeric | ComparisonPath::Variadic => {
-                    path = ComparisonPath::Variadic;
+                Path::Numeric | Path::Variadic => {
+                    path = Path::Variadic;
                     extremum.prefers(value::compare(candidate, best, context.diagnostics())?, 0)
                 }
-            }
+            },
         };
         if replace {
             best = candidate;
@@ -111,8 +141,9 @@ fn select(context: &mut dyn Context, arguments: &[Value], extremum: Extremum) ->
     Ok(best.try_deref()?.clone())
 }
 
-/// Avoid rounding an integer before comparison with another exact integer.
-fn exact_number(value: &Value) -> Option<f64> {
+/// The value as a float, for an int only if the float is exactly the int
+/// (so two large ints are never rounded to equal floats).
+fn exact_float(value: &Value) -> Option<f64> {
     match value {
         Value::Float(number) => Some(*number),
         Value::Int(integer) if (*integer as f64) as i128 == i128::from(*integer) => {
