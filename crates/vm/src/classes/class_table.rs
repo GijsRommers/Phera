@@ -140,6 +140,11 @@ impl ClassTable {
 impl Drop for ClassTable {
     /// Break request-local object cycles without retaining objects during normal execution.
     fn drop(&mut self) {
+        // A request that ended without its destructor phase (stopped by the
+        // server's timeout) frees its objects without destructors. Closing
+        // the pool first matters: an object queued for its destructor holds
+        // the pool, which holds the queue, so an unclosed queue would leak.
+        drop(self.ids.close());
         for object in self.objects.iter().filter_map(Weak::upgrade) {
             object.update(|properties| *properties = phera_value::PhpArray::new());
             if let Ok(mut native) = object.native.try_borrow_mut() {

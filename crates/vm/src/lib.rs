@@ -41,6 +41,8 @@ mod closure_initializers;
 mod closure_methods;
 #[cfg(test)]
 mod closure_tests;
+#[cfg(test)]
+mod destructor_tests;
 mod closure_types;
 mod closures;
 mod code_table;
