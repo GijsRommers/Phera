@@ -23,7 +23,6 @@ fn later_milestones_remain_compile_errors() {
         "<?php enum Example {}",
         "<?php new class {};",
         "<?php function generator() { yield 1; }",
-        "<?php goto target; target:",
         "<?php class Example {static function method(){}} Example::method(...);",
         "<?php class Example {function method(){}} (new Example)->method(...);",
         "<?php class Example {public int $value {get => 1;}}",
@@ -51,6 +50,15 @@ fn later_milestones_remain_compile_errors() {
             "{source}: {error}"
         );
     }
+}
+
+#[test]
+fn goto_uses_an_existing_jump_instruction() {
+    let unit = phera_compiler::compile("<?php goto target; target:", "goto.php").unwrap();
+    assert!(matches!(
+        unit.main.instructions.first(),
+        Some(phera_bytecode::Instruction::Jump { target }) if target.index() == 1
+    ));
 }
 
 #[test]

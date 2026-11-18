@@ -25,7 +25,10 @@ pub(crate) fn translate(
     let current = error_at.map(|index| &tokens[index]);
     let eof_line = 1 + newlines(code);
     let mut line = current.map_or(eof_line, |token| token.line);
-    let message = if error.message.starts_with("invalid numeric literal") {
+    let message = if error.message.starts_with("syntax error, ") {
+        // The parser already supplied the PHP token name and expectation.
+        error.message
+    } else if error.message.starts_with("invalid numeric literal") {
         "Invalid numeric literal".to_owned()
     } else if let Some(suffix) = error
         .message
