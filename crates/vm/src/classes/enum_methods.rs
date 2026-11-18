@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use phera_bytecode::EnumBacking;
 use phera_extension_api::{Context, NativeError, NativeResult, Param, ParamType};
-use phera_value::{ArrayKey, NumVal, PhpArray, Value};
+use phera_value::{ArrayKey, PhpArray, Value};
 
 use super::{Class, enum_cases::case_lookup, enums::EnumMethod};
 use crate::{Vm, initializer_tasks::InitializerTask};
@@ -34,14 +34,14 @@ impl Vm {
             return Err(internal_error!("enum lookup without backing"));
         };
         let strict = Context::strict_types(self);
-        let ty = match backing {
-            EnumBacking::Int => ParamType::Int,
-            EnumBacking::String if strict => ParamType::String,
-            EnumBacking::String => ParamType::IntOrString,
+        // PHP's weak null deprecation names the public union even for int
+        // backing. The native argument parser converts it to integer zero.
+        let weak_null = !strict && matches!(arguments, [argument] if argument.deref().is_null());
+        let ty = match (backing, strict, weak_null) {
+            (EnumBacking::Int, _, false) => ParamType::Int,
+            (EnumBacking::String, true, _) => ParamType::String,
+            _ => ParamType::IntOrString,
         };
-        if !strict && let [argument] = &*arguments {
-            reject_deprecated_lookup_argument(name, ty, &argument.deref())?;
-        }
         self.prepare_call_with_trace(name, &[Param::new("value", ty)], arguments)?;
         let argument = arguments
             .first()
@@ -75,37 +75,4 @@ impl Vm {
             class.name
         )))
     }
-}
-
-/// Legacy null and lossy float coercion produce a clear error in Phera.
-fn reject_deprecated_lookup_argument(
-    name: &str,
-    ty: ParamType,
-    argument: &Value,
-) -> Result<(), NativeError> {
-    if argument.is_null() {
-        return Err(crate::function_introspection::deprecated(
-            &format!("Passing null to {name}()"),
-            "8.1",
-        ));
-    }
-    let float = match argument {
-        Value::Float(value) => Some(*value),
-        Value::String(value) if ty == ParamType::Int => {
-            let parsed = phera_value::parse_numeric(value.as_bytes());
-            match parsed.value {
-                Some(NumVal::Float(value)) if parsed.exact => Some(value),
-                _ => None,
-            }
-        }
-        _ => None,
-    };
-    const LIMIT: f64 = 9_223_372_036_854_775_808.0;
-    if float.is_some_and(|float| (-LIMIT..LIMIT).contains(&float) && float.fract() != 0.0) {
-        return Err(crate::function_introspection::deprecated(
-            &format!("Implicit conversion to int in {name}() that loses precision"),
-            "8.1",
-        ));
-    }
-    Ok(())
 }

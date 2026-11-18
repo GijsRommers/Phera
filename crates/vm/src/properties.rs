@@ -73,12 +73,6 @@ impl Vm {
                     class.name
                 ))
             })?;
-        if class.kind == phera_bytecode::ClassKind::Trait {
-            return Err(crate::classes::trait_methods::deprecated_direct_access(
-                "property",
-                &format!("{}::${name}", class.name),
-            ));
-        }
         let scope = self.current().and_then(|frame| frame.scope());
         let allowed = match property.visibility {
             Visibility::Public => true,
@@ -101,6 +95,15 @@ impl Vm {
                 "Cannot access {visibility} property {}::${name}",
                 property.declaring
             )));
+        }
+        if class.kind == phera_bytecode::ClassKind::Trait {
+            self.diagnostic(
+                "Deprecated",
+                format!(
+                    "Accessing static trait property {}::${name} is deprecated, it should only be accessed on a class using the trait",
+                    class.name,
+                ),
+            );
         }
         if !property.static_initialized.get() {
             if let Some(initializer) = &property.initializer {

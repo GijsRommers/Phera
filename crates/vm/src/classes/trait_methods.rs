@@ -225,12 +225,3 @@ fn copy_method(
 pub(super) fn display(class: &str) -> &str {
     class.split('\0').next().unwrap_or(class)
 }
-
-pub(crate) fn deprecated_direct_access(kind: &str, member: &str) -> NativeError {
-    NativeError::throw(
-        "Phera\\NotSupportedException",
-        format!(
-            "Direct access to static trait {kind} {member} is not supported by Phera: deprecated since PHP 8.1"
-        ),
-    )
-}

@@ -53,10 +53,13 @@ impl Vm {
         };
         self.check_invocation_visibility(&method, invocation)?;
         if class.kind == ClassKind::Trait && method.is_static {
-            return Err(super::trait_methods::deprecated_direct_access(
-                "method",
-                &format!("{}::{}()", class.name, method.name),
-            ));
+            self.diagnostic(
+                "Deprecated",
+                format!(
+                    "Calling static trait method {}::{} is deprecated, it should only be called on a class using the trait",
+                    class.name, method.name,
+                ),
+            );
         }
         let scope = declaring_class(class, &method)
             .or_else(|| self.classes.get(&method.declaring))
