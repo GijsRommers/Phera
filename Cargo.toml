@@ -56,6 +56,7 @@ phera-phpt = { path = "crates/phpt" }
 phera-extension-api = { path = "crates/extension-api" }
 phera-ext-core = { path = "crates/extensions/core" }
 phera-ext-ctype = { path = "crates/extensions/ctype" }
+phera-ext-filter = { path = "crates/extensions/filter" }
 phera-ext-hash = { path = "crates/extensions/hash" }
 phera-ext-http = { path = "crates/extensions/http" }
 phera-ext-json = { path = "crates/extensions/json" }
@@ -67,6 +68,7 @@ phera-ext-pdo = { path = "crates/extensions/pdo" }
 phera-ext-random = { path = "crates/extensions/random" }
 phera-ext-standard = { path = "crates/extensions/standard" }
 tempfile = "3"
+phera-ext-tokenizer = { path = "crates/extensions/tokenizer" }
 digest = "0.10"
 md2 = "0.10"
 md4 = "0.10"
@@ -91,6 +93,8 @@ socket2 = { version = "0.6", features = ["all"] }
 tokio = { version = "1", features = [
     "rt", "rt-multi-thread", "net", "time", "sync", "signal", "macros",
 ] }
+fluent-uri = "0.4.1"
+url = "2.5"
 foldhash = "0.2"
 hashbrown = { version = "0.17", default-features = false }
 mimalloc = { version = "0.1", default-features = false }

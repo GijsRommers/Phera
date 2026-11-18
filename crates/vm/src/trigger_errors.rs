@@ -39,6 +39,7 @@ impl Vm {
             kind: kind.into(),
             message,
             location: self.location(),
+            trace_location: None,
             native: Some(crate::error_traces::NativeTrace::new(
                 "trigger_error",
                 arguments,

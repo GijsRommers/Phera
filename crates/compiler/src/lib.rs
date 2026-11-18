@@ -23,6 +23,14 @@ use helpers::{binary, constant, type_name, writable};
 
 /// Compile PHP source on a bounded dedicated stack, keeping tiny callers safe.
 pub fn compile(source: &str, file: &str) -> Result<phera_bytecode::CompiledUnit, CompileError> {
+    compile_bytes(source.as_bytes(), file)
+}
+
+/// Compile a file without transcoding its source bytes.
+pub fn compile_bytes(
+    source: &[u8],
+    file: &str,
+) -> Result<phera_bytecode::CompiledUnit, CompileError> {
     std::thread::scope(|scope| {
         std::thread::Builder::new()
             .name("phera-compiler".into())
@@ -33,6 +41,7 @@ pub fn compile(source: &str, file: &str) -> Result<phera_bytecode::CompiledUnit,
                 file: file.into(),
                 line: 1,
                 parse: false,
+                scanner_diagnostics: Vec::new(),
             })?
             .join()
             .unwrap_or_else(|_| {
@@ -41,6 +50,7 @@ pub fn compile(source: &str, file: &str) -> Result<phera_bytecode::CompiledUnit,
                     file: file.into(),
                     line: 1,
                     parse: false,
+                    scanner_diagnostics: Vec::new(),
                 })
             })
     })

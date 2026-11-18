@@ -98,7 +98,16 @@ pub const Z_COUNT: MethodEntry = MethodEntry::public_async(
         Param::new("end", ParamType::IntOrString),
     ],
     |c, o, a| dispatch("zcount", c, o, a),
-);
+)
+.with_preparation(|c, _, a| arguments::parse_as("Redis::zCount", Z_COUNT_PARSED, c, a));
+
+/// phpredis declares the bounds `int|string` but reads them as strings, so
+/// `zCount('z', 1, 2.5)` counts up to 2.5 instead of truncating it to 2.
+const Z_COUNT_PARSED: &[Param] = &[
+    Param::new("key", ParamType::String),
+    Param::new("start", ParamType::String),
+    Param::new("end", ParamType::String),
+];
 
 /// `$redis->zIncrBy(string $key, float $value, mixed $member)`
 pub const Z_INCR_BY: MethodEntry = MethodEntry::public_async(

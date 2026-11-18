@@ -103,7 +103,9 @@ jobs:
         run: cargo test --workspace --no-fail-fast
 
   pdo-end-to-end:
-    name: PDO, SQLite and Redis end to end
+    name: PDO end to end
+    # The name is a required check in the branch protection, so it stays as it
+    # is although the job now runs the SQLite and Redis comparisons too.
     # Runs the comparison scripts of PDO, SQLite3 and Redis through the release
     # binary; every one of them must match real PHP.
     runs-on: ubuntu-latest

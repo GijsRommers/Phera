@@ -225,15 +225,22 @@ pub fn find_php() -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
+/// Source path that PHP reports for a diagnostic raised in the oracle script.
+pub fn script_path(name: &str) -> PathBuf {
+    let tmp = std::env::temp_dir();
+    let directory = tmp.canonicalize().unwrap_or(tmp).join("phera-oracle");
+    directory.join(format!("{name}.php"))
+}
+
 /// Runs `script` (which must start with `<?php`) and returns its output
 /// lines, or `None` when no `php` binary is installed, in which case the
 /// caller skips its test. `name` keeps the script files of different tests
 /// apart.
 pub fn run_php(name: &str, script: &str) -> Option<Vec<String>> {
     let php = find_php()?;
-    let directory = std::env::temp_dir().join("phera-oracle");
-    std::fs::create_dir_all(&directory).expect("create oracle directory");
-    let file = directory.join(format!("{name}.php"));
+    let file = script_path(name);
+    std::fs::create_dir_all(file.parent().expect("oracle directory"))
+        .expect("create oracle directory");
     std::fs::write(&file, script).expect("write oracle script");
     let output = Command::new(&php)
         .args(["-n", "-d", "error_reporting=-1", "-d", "memory_limit=1G"])
