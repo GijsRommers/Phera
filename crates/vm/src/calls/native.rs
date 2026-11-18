@@ -180,7 +180,7 @@ impl Vm {
                 let previous = self.native_called_class.take();
                 let result = self.native_entry_origin(*entry, arguments, origin).await;
                 self.native_called_class = previous;
-                if result.is_ok() && self.output_writer.buffers.pending.is_some() {
+                if self.output_writer.buffers.pending.is_some() && result.is_ok() {
                     Box::pin(self.drain_output_from(Some(entry.name))).await?;
                 }
                 result

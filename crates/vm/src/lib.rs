@@ -182,6 +182,8 @@ pub struct Vm {
     pub frame_limit: usize,
     status: i32,
     error_handlers: error_handlers::ErrorHandlers,
+    /// Whether output or a diagnostic needs to invoke a PHP callback.
+    pending_callbacks: bool,
     failed_native: Option<error_traces::NativeTrace>,
     /// What extensions remember during this request (response headers, ...).
     state: RequestState,
@@ -235,6 +237,7 @@ impl Vm {
             frame_limit: DEFAULT_FRAME_LIMIT,
             status: 0,
             error_handlers: error_handlers::ErrorHandlers::default(),
+            pending_callbacks: false,
             failed_native: None,
             state: RequestState::default(),
         }

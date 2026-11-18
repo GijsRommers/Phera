@@ -101,7 +101,11 @@ impl Vm {
     }
 
     pub(crate) fn out_below(&mut self, depth: usize, bytes: &[u8]) {
-        if bytes.is_empty() || (depth != 0 && self.output_writer.buffers.write(depth, bytes)) {
+        if bytes.is_empty() {
+            return;
+        }
+        if depth != 0 && self.output_writer.buffers.write(depth, bytes) {
+            self.pending_callbacks |= self.output_writer.buffers.pending.is_some();
             return;
         }
         if self.output_writer.origin.is_none() {
@@ -116,6 +120,7 @@ impl Vm {
         if self.request_callbacks.headers.is_some() {
             if self.output_writer.queued_origin.is_none() {
                 self.output_writer.queued_origin = Some(self.location());
+                self.pending_callbacks = true;
             }
             self.output_writer.queued.extend_from_slice(bytes);
         } else {
@@ -152,6 +157,7 @@ impl Vm {
     pub(crate) async fn finish_headers(&mut self) -> Result<(), NativeError> {
         self.prepare_response_headers();
         let origin = self.output_writer.queued_origin.take();
+        self.refresh_pending_callbacks();
         let bytes = std::mem::take(&mut self.output_writer.queued);
         let result = match self.request_callbacks.headers.take() {
             Some(callback) => self

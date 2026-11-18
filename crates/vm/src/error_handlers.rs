@@ -142,6 +142,7 @@ impl Vm {
     /// Return false only from the user handler requests PHP's built-in diagnostic.
     pub(crate) async fn drain_error_handlers(&mut self) -> Result<(), NativeError> {
         let pending = std::mem::take(&mut self.error_handlers.pending);
+        self.refresh_pending_callbacks();
         for event in pending {
             let handler = self.error_handlers.error.clone();
             let handled = if let Some(handler) = handler.filter(|handler| {
@@ -193,6 +194,11 @@ impl Vm {
         Ok(())
     }
 
+    pub(crate) fn enqueue_diagnostic(&mut self, event: DiagnosticEvent) {
+        self.error_handlers.pending.push(event);
+        self.pending_callbacks = true;
+    }
+
     /// Queuing is required even under @ or error_reporting(0): PHP still calls handlers.
     pub(crate) fn queue_diagnostic(&mut self, kind: &str, message: &str) -> bool {
         let level = match kind {
@@ -202,7 +208,7 @@ impl Vm {
             _ => 0,
         };
         if self.handles_diagnostic(level) {
-            self.error_handlers.pending.push(DiagnosticEvent {
+            self.enqueue_diagnostic(DiagnosticEvent {
                 level,
                 kind: kind.into(),
                 message: message.into(),

@@ -112,7 +112,7 @@ impl Vm {
             if let Some(exit) = self.execute(instruction, stop, work)? {
                 return Ok(exit);
             }
-            if !self.error_handlers.pending.is_empty() || self.output_pending() {
+            if self.pending_callbacks {
                 return Ok(BatchExit::Handlers);
             }
             if *work >= YIELD_AFTER_STEPS {

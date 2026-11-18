@@ -72,7 +72,7 @@ impl Context for Vm {
         // queued a callback, publish later warnings only if that callback returns.
         if calls_handler || (!self.error_handlers.active && !self.error_handlers.pending.is_empty())
         {
-            self.error_handlers.pending.push(event);
+            self.enqueue_diagnostic(event);
         } else {
             self.report_event(&event);
         }

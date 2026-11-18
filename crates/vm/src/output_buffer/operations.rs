@@ -151,6 +151,7 @@ impl Vm {
         caller: Option<&'static str>,
     ) -> Result<(), NativeError> {
         while let Some(index) = self.output_writer.buffers.pending.take() {
+            self.refresh_pending_callbacks();
             self.apply_buffer(index, Operation::Chunk(caller)).await?;
         }
         if self.headers_pending() {
