@@ -59,6 +59,35 @@ fn file(src: &str) -> Program {
     parse(src).unwrap_or_else(|e| panic!("parse error in {src:?}: {e}"))
 }
 
+#[test]
+fn trait_final_modifier_does_not_become_an_alias() {
+    let statement = stmt("class C { use T { T::f as protected final; } }");
+    let StatementKind::Class(class) = &statement.kind else {
+        panic!("expected a class");
+    };
+    let ClassMemberKind::TraitUse { adaptations, .. } = &class.members[0].kind else {
+        panic!("expected a trait use");
+    };
+    assert!(matches!(
+        adaptations.as_slice(),
+        [TraitAdaptation::Alias {
+            alias: None,
+            visibility: Some(Visibility::Protected),
+            is_final: true,
+            ..
+        }]
+    ));
+}
+
+#[test]
+fn traits_cannot_declare_interfaces() {
+    assert!(
+        err("trait T implements I {}")
+            .message
+            .contains("unexpected token \"implements\"")
+    );
+}
+
 /// The parse error for `<?php ...` source.
 fn err(src: &str) -> ParseError {
     parse(&format!("<?php\n{src}")).expect_err(&format!("expected a parse error in {src:?}"))
@@ -695,6 +724,7 @@ fn sexp_member_kind(member: &ClassMember) -> String {
                         method,
                         alias,
                         visibility,
+                        ..
                     } => format!(
                         "(alias {}::{} as={} vis={:?})",
                         trait_name.as_ref().map_or("none".into(), sexp_name),

@@ -43,6 +43,7 @@ impl Compiler<'_> {
                     method,
                     alias,
                     visibility,
+                    ..
                 } => TraitAdaptation::Alias {
                     trait_name: trait_name.as_ref().map(resolve),
                     method: method.name.clone(),

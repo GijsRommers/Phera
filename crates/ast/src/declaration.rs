@@ -150,6 +150,9 @@ pub enum TraitAdaptation {
         method: Identifier,
         alias: Option<Identifier>,
         visibility: Option<Visibility>,
+        is_final: bool,
+        /// Disallowed modifiers are diagnosed during compilation.
+        invalid_modifier: Option<Identifier>,
     },
 }
 

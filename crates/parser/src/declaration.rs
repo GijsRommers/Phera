@@ -171,13 +171,14 @@ impl Parser<'_> {
         };
 
         // Only classes and interfaces can extend; traits and enums cannot.
-        let extends = if self.eat(TokenKind::Extends)? {
+        let extends = if self.at(TokenKind::Extends) {
             if !matches!(kind, ClassKind::Class | ClassKind::Interface) {
                 return Err(self.error_at(
                     self.peek_span(),
-                    "syntax error: unexpected token \"extends\"",
+                    "syntax error, unexpected token \"extends\", expecting \"{\"",
                 ));
             }
+            self.bump()?;
             let mut names = vec![self.parse_class_name()?];
             // Interfaces extend a list; classes take a single name.
             if kind == ClassKind::Interface {
@@ -190,6 +191,12 @@ impl Parser<'_> {
             Vec::new()
         };
 
+        if self.at(TokenKind::Implements) && matches!(kind, ClassKind::Trait | ClassKind::Interface)
+        {
+            return Err(
+                self.error("syntax error, unexpected token \"implements\", expecting \"{\"")
+            );
+        }
         let implements = if self.eat(TokenKind::Implements)? {
             let mut names = vec![self.parse_class_name()?];
             while self.eat(TokenKind::Comma)? {
@@ -482,22 +489,34 @@ impl Parser<'_> {
             self.expect(TokenKind::As, "'as' or 'insteadof'")?;
             // `as alias`, `as visibility`, `as visibility alias`
             let mut visibility = None;
-            let mut alias = None;
-            if let Some((modifier, _)) = member_modifier(self.kind()) {
-                self.bump()?;
-                visibility = Some(modifier);
-                if is_word_token(self.kind()) && self.kind() != TokenKind::As {
-                    alias = Some(self.parse_identifier()?);
+            let mut is_final = false;
+            let mut invalid_modifier = None;
+            loop {
+                match self.kind() {
+                    TokenKind::Public => visibility = Some(Visibility::Public),
+                    TokenKind::Protected => visibility = Some(Visibility::Protected),
+                    TokenKind::Private => visibility = Some(Visibility::Private),
+                    TokenKind::Final => is_final = true,
+                    TokenKind::Abstract | TokenKind::Static | TokenKind::Readonly => {
+                        let modifier = self.parse_identifier()?;
+                        invalid_modifier.get_or_insert(modifier);
+                        continue;
+                    }
+                    _ => break,
                 }
-            } else if is_word_token(self.kind()) {
-                alias = Some(self.parse_identifier()?);
+                self.bump()?;
             }
+            let alias = is_word_token(self.kind())
+                .then(|| self.parse_identifier())
+                .transpose()?;
             self.expect(TokenKind::Semicolon, "';'")?;
             Ok(TraitAdaptation::Alias {
                 trait_name,
                 method,
                 alias,
                 visibility,
+                is_final,
+                invalid_modifier,
             })
         }
     }
