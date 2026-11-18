@@ -61,7 +61,7 @@ fn file(src: &str) -> Program {
 
 #[test]
 fn trait_final_modifier_does_not_become_an_alias() {
-    let statement = stmt("class C { use T { T::f as protected final; } }");
+    let statement = stmt("class C { use T { T::f as final; T::f as protected final; } }");
     let StatementKind::Class(class) = &statement.kind else {
         panic!("expected a class");
     };
@@ -70,12 +70,20 @@ fn trait_final_modifier_does_not_become_an_alias() {
     };
     assert!(matches!(
         adaptations.as_slice(),
-        [TraitAdaptation::Alias {
-            alias: None,
-            visibility: Some(Visibility::Protected),
-            is_final: true,
-            ..
-        }]
+        [
+            TraitAdaptation::Alias {
+                alias: None,
+                visibility: None,
+                is_final: true,
+                ..
+            },
+            TraitAdaptation::Alias {
+                alias: Some(alias),
+                visibility: Some(Visibility::Protected),
+                is_final: false,
+                ..
+            }
+        ] if alias.name == "final"
     ));
 }
 

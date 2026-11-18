@@ -503,23 +503,21 @@ impl Parser<'_> {
             })
         } else {
             self.expect(TokenKind::As, "'as' or 'insteadof'")?;
-            // `as alias`, `as visibility`, `as visibility alias`
+            // An adaptation has at most one modifier. A second keyword is the alias.
             let mut visibility = None;
             let mut is_final = false;
             let mut invalid_modifier = None;
-            loop {
-                match self.kind() {
-                    TokenKind::Public => visibility = Some(Visibility::Public),
-                    TokenKind::Protected => visibility = Some(Visibility::Protected),
-                    TokenKind::Private => visibility = Some(Visibility::Private),
-                    TokenKind::Final => is_final = true,
-                    TokenKind::Abstract | TokenKind::Static | TokenKind::Readonly => {
-                        let modifier = self.parse_identifier()?;
-                        invalid_modifier.get_or_insert(modifier);
-                        continue;
-                    }
-                    _ => break,
+            match self.kind() {
+                TokenKind::Public => visibility = Some(Visibility::Public),
+                TokenKind::Protected => visibility = Some(Visibility::Protected),
+                TokenKind::Private => visibility = Some(Visibility::Private),
+                TokenKind::Final => is_final = true,
+                TokenKind::Abstract | TokenKind::Static | TokenKind::Readonly => {
+                    invalid_modifier = Some(self.parse_identifier()?);
                 }
+                _ => {}
+            }
+            if visibility.is_some() || is_final {
                 self.bump()?;
             }
             let alias = is_word_token(self.kind())
