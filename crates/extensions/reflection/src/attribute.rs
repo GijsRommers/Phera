@@ -10,7 +10,7 @@ use phera_extension_api::{
     NativeResult, Object, Param, ParamType, PhpArray, Registry, Value, Visibility, args,
 };
 
-use crate::{UNCLONEABLE, allocate, engine, load, values};
+use crate::{UNCLONEABLE, allocate, engine, load};
 
 pub(crate) const FILTER: &[Param] = const {
     &[
@@ -118,26 +118,31 @@ pub(crate) async fn list(
             "{reflector}::getAttributes(): Argument #2 ($flags) must be a valid attribute filter flag"
         )));
     }
-    let name = args::string(args, 0).map(|name| name.to_string_lossy());
-    if flags == INSTANCEOF
-        && let Some(name) = &name
-    {
-        lookup(context, name, format!("Class \"{name}\" not found")).await?;
+    let name = args::string(args, 0);
+    let instance_of = if flags == INSTANCEOF {
+        name.map(|name| name.to_string_lossy())
+    } else {
+        None
+    };
+    if let Some(name) = &instance_of {
+        lookup(context, name, || format!("Class \"{name}\" not found")).await?;
     }
-    let mut result = Vec::new();
+    let mut result = PhpArray::with_capacity(attributes.len());
     for info in attributes {
-        let matches = match &name {
-            None => true,
-            Some(name) if flags == 0 => name.eq_ignore_ascii_case(&info.name),
-            Some(name) => is_instance_of(context, &info.name, name).await?,
+        let matches = match &instance_of {
+            Some(target) => is_instance_of(context, &info.name, target).await?,
+            None => {
+                name.is_none_or(|name| name.as_bytes().eq_ignore_ascii_case(info.name.as_bytes()))
+            }
         };
         if matches {
-            let repeated = attributes
-                .iter()
-                .filter(|item| info.name.eq_ignore_ascii_case(&item.name))
-                .take(2)
-                .count()
-                > 1;
+            let repeated = attributes.len() > 1
+                && attributes
+                    .iter()
+                    .filter(|item| info.name.eq_ignore_ascii_case(&item.name))
+                    .take(2)
+                    .count()
+                    > 1;
             let state = ReflectedAttribute {
                 info: Rc::clone(info),
                 repeated,
@@ -147,10 +152,10 @@ pub(crate) async fn list(
                 "ReflectionAttribute",
                 Some(&info.name),
                 state,
-            )?);
+            )?)?;
         }
     }
-    values(result)
+    Ok(result.into())
 }
 
 async fn is_instance_of(
@@ -188,11 +193,9 @@ fn instantiate(
     Box::pin(async move {
         let attr = attribute(this.as_ref())?;
         let name = &attr.info.name;
-        let class = lookup(
-            context,
-            name,
-            format!("Attribute class \"{name}\" not found"),
-        )
+        let class = lookup(context, name, || {
+            format!("Attribute class \"{name}\" not found")
+        })
         .await?;
         let marker = class
             .attributes
@@ -269,7 +272,7 @@ async fn arguments(
     context: &mut dyn Context,
     attribute: &AttributeInfo,
 ) -> Result<PhpArray, NativeError> {
-    let mut result = PhpArray::new();
+    let mut result = PhpArray::with_capacity(attribute.arguments.len());
     for (name, argument) in &attribute.arguments {
         let value = argument_value(context, argument).await?;
         match name {
@@ -292,11 +295,11 @@ fn missing_class(error: &NativeError) -> bool {
 async fn lookup(
     context: &mut dyn Context,
     name: &str,
-    missing: String,
+    missing: impl FnOnce() -> String,
 ) -> Result<Rc<phera_extension_api::reflection::ClassInfo>, NativeError> {
     engine(context)?.reflect_class(name).await.map_err(|error| {
         if missing_class(&error) {
-            NativeError::error(missing)
+            NativeError::error(missing())
         } else {
             error
         }

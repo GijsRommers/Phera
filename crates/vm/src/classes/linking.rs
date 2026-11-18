@@ -211,12 +211,12 @@ impl Vm {
                     )),
                 ));
             }
-            if let Some(inherited) = methods.get(&method_name.to_ascii_lowercase()) {
+            if let Some(inherited) = methods.get(&key) {
                 super::inheritance_checks::check_override(name, inherited, &linked)
                     .map_err(|error| self.magic_override_error(&linked, error))?;
                 self.check_method_contract(inherited, &linked, &unit)?;
             }
-            methods.insert(method_name.to_ascii_lowercase(), linked);
+            methods.insert(key, linked);
         }
         if let Some(method) = methods.get("__tostring") {
             if method.visibility != Visibility::Public

@@ -45,7 +45,7 @@ impl Vm {
                     .resolve_callee(name)
                     .map_err(|_| exception(format!("Function {name}() does not exist")))?;
                 reflected.name = callee.name.to_string();
-                self.reflect_callee(&mut reflected, &callee.target);
+                self.reflect_callee(&mut reflected, &callee.target, None);
             }
             FunctionTarget::Method { class, name } => {
                 let (class, method) = self.reflection_method(class, name)?;
@@ -74,7 +74,14 @@ impl Vm {
                     .and_then(|state| state.downcast_ref::<ClosureState>())
                     .ok_or_else(|| exception("Closure is uninitialized"))?;
                 reflected.name = closure.callee.name.to_string();
-                self.reflect_callee(&mut reflected, &closure.callee.target);
+                self.reflect_callee(
+                    &mut reflected,
+                    &closure.callee.target,
+                    closure
+                        .context
+                        .as_ref()
+                        .map(|context| context.scope.name.as_str()),
+                );
                 if matches!(target, FunctionTarget::ClosureInvoke(_)) {
                     reflected.name = "__invoke".into();
                     reflected.member = Some(MemberInfo {
@@ -107,9 +114,16 @@ impl Vm {
         Ok(reflected)
     }
 
-    fn reflect_callee(&self, reflected: &mut FunctionInfo, target: &CallTarget) {
+    fn reflect_callee(
+        &self,
+        reflected: &mut FunctionInfo,
+        target: &CallTarget,
+        scope: Option<&str>,
+    ) {
         match target {
-            CallTarget::User(function) => self.reflect_user_signature(reflected, *function, None),
+            CallTarget::User(function) => {
+                self.reflect_user_signature(reflected, *function, scope, AttributeTarget::Function);
+            }
             CallTarget::Native(entry) => {
                 reflected.parameters = native_parameters(entry.params);
                 reflected.extension = self.registry.function_module(entry.name).map(str::to_owned);
@@ -155,7 +169,12 @@ impl Vm {
         reflected.is_static = method.is_static;
         match method.body {
             MethodBody::User(function) => {
-                self.reflect_user_signature(reflected, function, Some(&method.declaring));
+                self.reflect_user_signature(
+                    reflected,
+                    function,
+                    Some(&method.declaring),
+                    AttributeTarget::Method,
+                );
             }
             MethodBody::Native(entry) => {
                 reflected.parameters = native_parameters(entry.params);
@@ -183,6 +202,7 @@ impl Vm {
         reflected: &mut FunctionInfo,
         function: FunctionIndex,
         scope: Option<&str>,
+        target: AttributeTarget,
     ) {
         let unit = self.code.unit(function);
         let body = self.code.function(function);
@@ -201,11 +221,6 @@ impl Vm {
             |metadata| source_info(&unit.file, &metadata.declaration),
         ));
         if let Some(metadata) = metadata {
-            let target = if scope.is_some() {
-                AttributeTarget::Method
-            } else {
-                AttributeTarget::Function
-            };
             reflected.attributes = self.reflection_attributes(
                 function,
                 &metadata.declaration.attributes,
