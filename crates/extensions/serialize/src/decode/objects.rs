@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use phera_extension_api::serialization::{INCOMPLETE_CLASS, INCOMPLETE_CLASS_NAME};
+use phera_extension_api::serialization::{EnumCaseLookup, INCOMPLETE_CLASS, INCOMPLETE_CLASS_NAME};
 use phera_extension_api::{ArrayKey, Context, NativeError, Object, Value};
 
 use super::{BuildResult, Container, Decoder, Failure, emit_diagnostic, graph::Place};
@@ -46,6 +46,9 @@ impl Decoder<'_> {
                 let payload = self.reader.custom_data();
                 emit_diagnostic(context, &mut self.reader);
                 let payload = payload?;
+                if !custom {
+                    context.warning(format!("Class {name} has no unserializer"));
+                }
                 let object = allocate(context, name)?;
                 self.graph.value(place, Value::Object(object.clone()));
                 if custom {
@@ -56,11 +59,8 @@ impl Decoder<'_> {
                             vec![Value::from(payload)],
                         )
                         .await?;
-                } else {
-                    context.warning(format!("Class {name} has no unserializer"));
-                    if info.is_none() {
-                        object.set(ArrayKey::str(INCOMPLETE_CLASS_NAME), Value::from(class));
-                    }
+                } else if info.is_none() {
+                    object.set(ArrayKey::str(INCOMPLETE_CLASS_NAME), Value::from(class));
                 }
             }
             ObjectFormat::Properties => {
@@ -105,21 +105,33 @@ impl Decoder<'_> {
         if !crate::wire::valid_class(class) {
             return Err(Failure::At(start));
         }
-        let info = if let Ok(class) = std::str::from_utf8(class) {
-            context.serialization_class(class).await?
-        } else {
-            None
+        let case = &name[colon + 1..];
+        let lookup = match (std::str::from_utf8(class), std::str::from_utf8(case)) {
+            (Ok(class), Ok(case)) => context.unserialize_enum_case(class, case).await?,
+            (Ok(class), Err(_)) => match context.unserialize_enum_case(class, "").await? {
+                EnumCaseLookup::MissingClass => EnumCaseLookup::MissingClass,
+                EnumCaseLookup::NotEnum => EnumCaseLookup::NotEnum,
+                _ => EnumCaseLookup::MissingCase,
+            },
+            _ => EnumCaseLookup::MissingClass,
         };
-        let reason = if info.is_some() {
-            "is not an enum"
-        } else {
-            "not found"
+        let class = diagnostic_name(class);
+        let case = diagnostic_name(case);
+        let (warning, offset) = match lookup {
+            EnumCaseLookup::Found(value) => return Ok(value),
+            EnumCaseLookup::MissingClass => (format!("Class '{class}' not found"), start),
+            EnumCaseLookup::NotEnum => (format!("Class '{class}' is not an enum"), start),
+            EnumCaseLookup::MissingCase => (
+                format!("Undefined constant {class}::{case}"),
+                self.reader.offset(),
+            ),
+            EnumCaseLookup::NotCase => (
+                format!("{class}::{case} is not an enum case"),
+                self.reader.offset(),
+            ),
         };
-        context.warning(format!(
-            "unserialize(): Class '{}' {reason}",
-            diagnostic_name(class)
-        ));
-        Err(Failure::At(start))
+        context.warning(format!("unserialize(): {warning}"));
+        Err(Failure::At(offset))
     }
 }
 

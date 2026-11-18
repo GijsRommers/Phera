@@ -42,7 +42,8 @@ impl Options {
                 }
                 other => {
                     return Err(NativeError::type_error(format!(
-                        "unserialize(): Option \"allowed_classes\" must be of type array|bool, {} given",
+                        "unserialize(): Option \"allowed_classes\" must be of type \
+                         array|bool, {} given",
                         option_type(&other)
                     )));
                 }
@@ -85,7 +86,8 @@ async fn read_class_list(
             Value::Object(_) => context.stringify(&value).await?,
             _ => {
                 return Err(NativeError::type_error(format!(
-                    "unserialize(): Option \"allowed_classes\" must be an array of class names, {} given",
+                    "unserialize(): Option \"allowed_classes\" must be an array of class \
+                     names, {} given",
                     option_type(&value)
                 )));
             }
@@ -97,7 +99,8 @@ async fn read_class_list(
                 .next()
                 .unwrap_or_default();
             return Err(NativeError::value_error(format!(
-                "unserialize(): Option \"allowed_classes\" must be an array of class names, \"{}\" given",
+                "unserialize(): Option \"allowed_classes\" must be an array of class \
+                 names, \"{}\" given",
                 String::from_utf8_lossy(name)
             )));
         }

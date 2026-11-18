@@ -1,6 +1,7 @@
 //! PHP's `serialize($object)` can enter a linked `__serialize()` method.
 
 mod declarations;
+mod enums;
 mod properties;
 mod property_index;
 pub(crate) mod settings;
@@ -27,9 +28,13 @@ impl Vm {
         else {
             return Ok(None);
         };
-        let callee = self.resolve_callable(&Value::from(callback.as_str())).map_err(|_| NativeError::error(format!(
-            "Invalid callback {callback}, function \"{callback}\" not found or invalid function name"
-        )))?;
+        let callback_value = Value::from(callback.as_str());
+        let callee = self.resolve_callable(&callback_value).map_err(|_| {
+            NativeError::error(format!(
+                "Invalid callback {callback}, function \"{callback}\" not found or invalid \
+                 function name"
+            ))
+        })?;
         self.invoke_resolved_callable(callee, vec![Value::from(name)])
             .await?;
         let result = self
@@ -55,7 +60,8 @@ impl Vm {
     }
 
     pub(crate) fn class_forbids_serialization(class: &Class) -> bool {
-        if class.origin == crate::classes::class::ClassOrigin::Closure {
+        if class.origin == crate::classes::class::ClassOrigin::Closure || class.name.contains('\0')
+        {
             return true;
         }
         let mut current = Some(class);

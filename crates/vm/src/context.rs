@@ -261,6 +261,15 @@ impl Context for Vm {
         Box::pin(self.run_unserialize_class_callback(name))
     }
 
+    fn unserialize_enum_case<'a>(
+        &'a mut self,
+        class: &'a str,
+        case: &'a str,
+    ) -> LocalFuture<'a, Result<phera_extension_api::serialization::EnumCaseLookup, NativeError>>
+    {
+        Box::pin(self.lookup_unserialized_enum(class, case))
+    }
+
     fn serialization_forbidden(&self, object: &phera_value::Object) -> bool {
         self.classes
             .for_object(object)
@@ -455,6 +464,16 @@ impl Vm {
         if class.kind == phera_bytecode::ClassKind::Interface {
             return Err(phera_extension_api::NativeError::error(format!(
                 "Cannot instantiate interface {}",
+                class.name
+            )));
+        }
+        if matches!(
+            class.kind,
+            phera_bytecode::ClassKind::Enum | phera_bytecode::ClassKind::Trait
+        ) {
+            return Err(NativeError::error(format!(
+                "Cannot instantiate {} {}",
+                class.kind.description().to_ascii_lowercase(),
                 class.name
             )));
         }

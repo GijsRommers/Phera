@@ -8,7 +8,7 @@ use crate::diagnostics::SourceLocation;
 
 impl Vm {
     pub(crate) fn deprecate_legacy_serializable(&mut self, class: &Class, file: &str, line: usize) {
-        if class.kind == ClassKind::Class
+        if matches!(class.kind, ClassKind::Class | ClassKind::Enum)
             && !class.is_abstract
             && class.is_a("Serializable")
             && (Self::serialization_method(class, "__serialize").is_none()

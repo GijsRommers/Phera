@@ -377,6 +377,11 @@ impl Vm {
             declaration: declaration_location,
         });
         self.deprecate_legacy_serializable(&class, &unit.file, declaration.line as usize);
+        if class.kind == ClassKind::Enum && class.is_a("Serializable") {
+            return Err(NativeError::error(format!(
+                "Enum {name} cannot implement the Serializable interface"
+            )));
+        }
         self.classes.insert(name.to_ascii_lowercase(), class);
         Ok(())
     }

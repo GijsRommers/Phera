@@ -39,8 +39,8 @@ pub fn incomplete_object_message(object: &crate::Object, action: &str) -> String
         _ => "unknown".into(),
     };
     format!(
-        "The script tried to {action} an incomplete object. Please ensure that the class definition \
-         \"{name}\" of the object you are trying to operate on was loaded _before_ unserialize() \
+        "The script tried to {action} an incomplete object. Please ensure that the \
+         class definition \"{name}\" of the object you are trying to operate on was loaded _before_ unserialize() \
          gets called or provide an autoloader to load the class definition"
     )
 }
@@ -51,4 +51,13 @@ pub fn precision(context: &mut dyn crate::Context) -> i32 {
         .state()
         .get::<SerializationSettings>()
         .map_or(-1, |settings| settings.precision_digits)
+}
+
+/// Resolve the class and constant in a serialized `E:` token.
+pub enum EnumCaseLookup {
+    MissingClass,
+    NotEnum,
+    MissingCase,
+    NotCase,
+    Found(crate::Value),
 }

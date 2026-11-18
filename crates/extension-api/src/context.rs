@@ -162,6 +162,17 @@ pub trait Context {
         Box::pin(std::future::ready(Ok(None)))
     }
 
+    /// Resolve an enum case through the runtime's canonical case table.
+    fn unserialize_enum_case<'a>(
+        &'a mut self,
+        _class: &'a str,
+        _case: &'a str,
+    ) -> LocalFuture<'a, Result<crate::serialization::EnumCaseLookup, NativeError>> {
+        Box::pin(std::future::ready(Ok(
+            crate::serialization::EnumCaseLookup::MissingClass,
+        )))
+    }
+
     /// Read serialization metadata from an object's linked class.
     fn serialization_forbidden(&self, _object: &Object) -> bool {
         false

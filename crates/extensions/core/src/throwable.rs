@@ -58,11 +58,11 @@ const PROPERTIES: &[PropertyEntry] = &[
     .with_default(ConstantValue::Null),
 ];
 
-const SEVERITY: &[PropertyEntry] = &[PropertyEntry::new(
-    "severity",
-    ConstantValue::Int(1),
-    Visibility::Protected,
-)];
+const SEVERITY: &[PropertyEntry] =
+    &[
+        PropertyEntry::typed("severity", PropertyType::Int, Visibility::Protected)
+            .with_default(ConstantValue::Int(1)),
+    ];
 
 const THROWABLE_METHODS: &[MethodEntry] = &[
     MethodEntry::required("getMessage", NO_PARAMS),

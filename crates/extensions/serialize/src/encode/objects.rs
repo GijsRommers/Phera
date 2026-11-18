@@ -17,8 +17,18 @@ impl Encoder {
         if context.serialization_forbidden(&object) {
             return Err(NativeError::throw(
                 "Exception",
-                format!("Serialization of '{name}' is not allowed"),
+                format!(
+                    "Serialization of '{}' is not allowed",
+                    phera_extension_api::value::class_display_name(name)
+                ),
             ));
+        }
+        if object.class.is_enum() {
+            let Some(Value::String(case)) = object.get(&ArrayKey::str("name")) else {
+                return Err(NativeError::error("Enum case has no name"));
+            };
+            self.output.enum_case(name.as_bytes(), case.as_bytes());
+            return Ok(());
         }
         if context.has_serialization_method(&object, "__serialize") {
             let value = context
