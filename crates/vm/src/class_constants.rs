@@ -70,13 +70,13 @@ impl Vm {
             spelling,
         } = &lookup;
         let (linked, constant) = self.resolve_class_constant(class, name)?;
-        if let Some(linked) = &linked {
-            if self.needs_enum_backing(linked) {
-                return Ok(Progress::Await(
-                    InitializerTask::ValidateEnum(linked.clone()),
-                    Continuation::AfterValidation(lookup, self.initializer_scope.clone()),
-                ));
-            }
+        if let Some(linked) = &linked
+            && self.needs_enum_backing(linked)
+        {
+            return Ok(Progress::Await(
+                InitializerTask::ValidateEnum(linked.clone()),
+                Continuation::AfterValidation(lookup, self.initializer_scope.clone()),
+            ));
         }
         self.check_constant_access(&constant, name)?;
         match &constant.initializer {
@@ -133,12 +133,12 @@ impl Vm {
             .get(name)
             .cloned()
             .ok_or_else(|| NativeError::error(format!("Undefined constant {display}::{name}")))?;
-        if let Some(linked) = &linked {
-            if linked.kind == ClassKind::Trait {
-                return Err(NativeError::error(format!(
-                    "Cannot access trait constant {display}::{name} directly"
-                )));
-            }
+        if let Some(linked) = &linked
+            && linked.kind == ClassKind::Trait
+        {
+            return Err(NativeError::error(format!(
+                "Cannot access trait constant {display}::{name} directly"
+            )));
         }
         Ok((linked, constant))
     }
