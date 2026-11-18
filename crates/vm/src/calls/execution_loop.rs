@@ -267,7 +267,7 @@ impl Machine<'_> {
             }
             Instruction::Return { src } => self.leave_plain(Some(src)),
             Instruction::ReturnNull => self.leave_plain(None),
-            _ => Step::Slow,
+            _ => self.release_and_step(instruction, position),
         }
     }
 
@@ -299,8 +299,10 @@ pub(super) enum Step {
     Switched(Position),
     /// Needs the VM.
     Slow,
-    /// Returned to the caller and released an object whose destructor is
-    /// due. Simple instructions never release one (see `crate::fast`), and
-    /// the other steps write only registers that hold nothing to release.
+    /// Released an object whose destructor is due; the frame that runs
+    /// next has its position published. Only returns and the stores of
+    /// `release_and_step` release one: simple instructions never do (see
+    /// `crate::fast`), and the other steps write registers that hold
+    /// nothing to release.
     Destructors,
 }

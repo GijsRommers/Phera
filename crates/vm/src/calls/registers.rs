@@ -143,8 +143,15 @@ impl Registers {
     /// destructor of a local runs before the destructor of `$this`.
     #[inline]
     pub(crate) fn release_frame(&mut self, start: usize, base: usize) {
-        self.truncate(base);
+        let prefix = [start, start + 1].map(|slot| {
+            if slot < base {
+                self.slots.get_mut(slot).and_then(Option::take)
+            } else {
+                None
+            }
+        });
         self.truncate(start);
+        drop(prefix);
     }
 
     /// Move a value from one slot to another, leaving the first empty.

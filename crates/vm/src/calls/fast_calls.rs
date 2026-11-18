@@ -11,7 +11,7 @@
 //! [`Step::Slow`] without having changed anything, so that `Vm::execute`
 //! runs the instruction with every PHP rule.
 
-use phera_bytecode::{FunctionId, Reg};
+use phera_bytecode::{FunctionId, Instruction, Reg};
 use phera_value::Value;
 
 use crate::calls::call_state::CallTarget;
@@ -129,27 +129,18 @@ impl Machine<'_> {
             (_, None) => Value::Null,
         };
         // An unused temporary result goes before the frame's variables
-        // (see `discarded_results`).
+        // (see `discarded_results`); only a value that can own an object
+        // is worth the look.
         let value = if may_own_objects(&value)
-            && let (CallKind::Function | CallKind::Method | CallKind::Closure, Some(source)) =
-                (kind, source)
-            && source.index() >= self.code.function(frame.function).locals.len()
-            && result_discarded(
-                self.code.instructions(caller.function),
-                caller.ip(),
-                destination,
-            ) {
+            && self.discards_result(frame, caller, source, destination)
+        {
             drop(value);
             None
         } else {
             Some(value)
         };
         self.stack.pop();
-        // PHP releases the variables first, then `$this` or the closure.
-        if kind != CallKind::Function {
-            self.registers.truncate(frame.base());
-        }
-        self.registers.truncate(start);
+        self.registers.release_frame(start, frame.base());
         if let Some(value) = value {
             self.registers
                 .put(caller.base() + destination.index(), value);
@@ -161,6 +152,51 @@ impl Machine<'_> {
             frame: caller,
             ip: caller.ip(),
         })
+    }
+}
+
+impl Machine<'_> {
+    /// Whether the caller throws away the temporary that `frame` returns.
+    #[inline(never)]
+    fn discards_result(
+        &self,
+        frame: Frame,
+        caller: Frame,
+        source: Option<Reg>,
+        destination: Reg,
+    ) -> bool {
+        matches!(
+            frame.kind(),
+            CallKind::Function | CallKind::Method | CallKind::Closure
+        ) && source
+            .is_some_and(|source| source.index() >= self.code.function(frame.function).locals.len())
+            && result_discarded(
+                self.code.instructions(caller.function),
+                caller.ip(),
+                destination,
+            )
+    }
+
+    /// A simple instruction that fell back only because the register it
+    /// writes holds an array or an object: do it here, release the old
+    /// value, and stop for its destructor if one is due (see `crate::fast`).
+    #[inline(never)]
+    pub(super) fn release_and_step(
+        &mut self,
+        instruction: Instruction,
+        position: Position,
+    ) -> Step {
+        let slots = self.registers.tail_mut(position.frame.base());
+        let mut ip = position.ip;
+        let Some(released) = crate::fast::releasing_step(instruction, slots, &mut ip) else {
+            return Step::Slow;
+        };
+        drop(released);
+        if self.classes.ids().has_doomed() {
+            self.publish(ip);
+            return Step::Destructors;
+        }
+        Step::Done(ip)
     }
 }
 

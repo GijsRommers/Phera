@@ -4,10 +4,11 @@
 //! frame IP is published before diagnostics, calls, returns, or suspension.
 //!
 //! A simple instruction never frees an object: a write over a register that
-//! holds an array, an object or a PHP reference falls back to the general
-//! handler, after which the interpreter runs any destructor the release made
-//! due (see `crate::destructors`). So the simple loop itself never tests
-//! for due destructors.
+//! holds an array, an object or a PHP reference falls back. The loop's next
+//! tier ([`releasing_step`]) then does the write with the old value taken
+//! out, drops it and tests for a due destructor (see `crate::destructors`);
+//! a PHP reference goes on to the general handler, which writes through it.
+//! So the simple loop itself never tests for due destructors.
 
 use phera_bytecode::{BinaryOp, IncDec, Instruction, Reg};
 use phera_value::{Value, to_bool};
@@ -262,10 +263,14 @@ pub(crate) fn scalar_step(
                 IncDec::PostIncrement | IncDec::PostDecrement => old,
                 IncDec::PreIncrement | IncDec::PreDecrement => new,
             };
-            if store_integer(slots, local, new) == ScalarStep::Fallback {
+            // The result first: it is the store that can fall back (when
+            // `dst` holds an array or object), and nothing may have changed
+            // when it does. The variable holds an integer, so its store
+            // cannot.
+            if store_integer(slots, dst, result) == ScalarStep::Fallback {
                 return ScalarStep::Fallback;
             }
-            store_integer(slots, dst, result)
+            store_integer(slots, local, new)
         }
         Instruction::Jump { target } => {
             *ip = target.index();
@@ -341,4 +346,58 @@ pub(crate) fn array_index_step(
     }
     *target = Some(value);
     ScalarStep::Complete
+}
+
+/// The register a simple instruction overwrites.
+fn overwritten(instruction: Instruction) -> Option<Reg> {
+    match instruction {
+        Instruction::LoadInt { dst, .. }
+        | Instruction::LoadNull { dst }
+        | Instruction::LoadBool { dst, .. }
+        | Instruction::Move { dst, .. }
+        | Instruction::BinaryInt { dst, .. }
+        | Instruction::Binary { dst, .. }
+        | Instruction::IncDecLocal { dst, .. }
+        | Instruction::FetchIndex { dst, .. }
+        | Instruction::Cast {
+            to: phera_bytecode::CastKind::Bool,
+            dst,
+            ..
+        } => Some(dst),
+        Instruction::Assign { local, .. } => Some(local),
+        Instruction::Clear { reg } | Instruction::UnsetLocal { local: reg } => Some(reg),
+        _ => None,
+    }
+}
+
+/// Runs a simple instruction that fell back only because the register it
+/// writes holds an array or an object: the old value is taken out first and
+/// returned, for the caller to drop and then look for a due destructor.
+/// `None` when the instruction falls back for another reason too; the
+/// register then holds its old value again.
+pub(crate) fn releasing_step(
+    instruction: Instruction,
+    slots: &mut [Option<Value>],
+    ip: &mut usize,
+) -> Option<Value> {
+    let register = overwritten(instruction)?;
+    let slot = slots.get_mut(register.index())?;
+    if !matches!(slot, Some(Value::Array(_) | Value::Object(_))) {
+        return None;
+    }
+    let old = slot.take();
+    let step = match instruction {
+        Instruction::FetchIndex {
+            dst, base, index, ..
+        } => array_index_step(dst, base, index, slots),
+        _ => scalar_step(instruction, slots, ip),
+    };
+    if step == ScalarStep::Complete {
+        old
+    } else {
+        if let Some(slot) = slots.get_mut(register.index()) {
+            *slot = old;
+        }
+        None
+    }
 }
