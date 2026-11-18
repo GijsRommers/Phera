@@ -36,3 +36,5 @@ impl Extension for Standard {
 /// Exposes PHP comparison traversal for adversarial comparator regression tests.
 #[doc(hidden)]
 pub use arrays::zend_sort::order as php_sort_order;
+
+pub use strings::format::{Values as FormatValues, render as render_format};

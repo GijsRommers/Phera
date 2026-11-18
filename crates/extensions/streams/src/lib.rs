@@ -8,9 +8,11 @@
 
 mod context_options;
 mod copy;
+mod csv;
 mod directory;
 mod errors;
 mod file_attributes;
+mod formatted;
 mod glob;
 mod handles;
 mod include_path;
@@ -23,6 +25,8 @@ mod path_text;
 mod pattern;
 mod request;
 mod resource;
+mod scan;
+mod scan_format;
 mod stream;
 mod stream_copy;
 mod stream_options;
@@ -50,8 +54,10 @@ impl Extension for Streams {
     fn register(&self, registry: &mut Registry) {
         context_options::register(registry);
         copy::register(registry);
+        csv::register(registry);
         directory::register(registry);
         file_attributes::register(registry);
+        formatted::register(registry);
         glob::register(registry);
         handles::register(registry);
         include_path::register(registry);
@@ -61,6 +67,7 @@ impl Extension for Streams {
         path_text::register(registry);
         pattern::register(registry);
         resource::register(registry);
+        scan::register(registry);
         stream_copy::register(registry);
         stream_options::register(registry);
         temporary::register(registry);
