@@ -17,8 +17,8 @@ use std::{
 use indexmap::IndexMap;
 use phera_extension_api::{
     ArrayKey, ClassEntry, ClassHooks, ClassKind, Context, MethodEntry as Method, NativeClone,
-    NativeDimensions, NativeError, NativeResult, Object, Param, ParamType, PhpArray,
-    PropertyPurpose, Registry, Value, args,
+    NativeDimensions, NativeError, NativePropertyAccess, NativePropertyMutation, NativeResult,
+    Object, Param, ParamType, PhpArray, PropertyPurpose, Registry, Value, args,
 };
 
 use crate::{This, make, read_state, receiver, store, update_state};
@@ -228,9 +228,21 @@ const KEY: Param = Param::new("object", ParamType::Mixed);
 const VALUE: Param = Param::new("value", ParamType::Mixed);
 const TARGET: Param = Param::new("object", ParamType::Object);
 
+const NO_DYNAMIC_PROPERTIES: NativePropertyAccess = NativePropertyAccess {
+    read: |_, _, _, _| Ok(None),
+    mutate: |_, object, name, mutation| match mutation {
+        NativePropertyMutation::Unset => Ok(false),
+        _ => Err(NativeError::error(format!(
+            "Cannot create dynamic property {}::${name}",
+            object.class.name(),
+        ))),
+    },
+};
+
 const MAP_HOOKS: ClassHooks = ClassHooks {
     clone: Some(NativeClone::Copy(clone_map)),
     properties: Some(view),
+    property_access: Some(&NO_DYNAMIC_PROPERTIES),
     iterator: Some(cursor::by_value),
     iterator_by_reference: Some(cursor::by_reference),
     dimensions: Some(NativeDimensions {
@@ -250,6 +262,7 @@ const MAP_HOOKS: ClassHooks = ClassHooks {
 const REFERENCE_HOOKS: ClassHooks = ClassHooks {
     clone: Some(NativeClone::Forbidden),
     properties: Some(reference_view),
+    property_access: Some(&NO_DYNAMIC_PROPERTIES),
     ..ClassHooks::EMPTY
 };
 
