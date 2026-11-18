@@ -254,7 +254,7 @@ pub(crate) fn snapshot_step(
         return false;
     }
     let Some(array) = &state.snapshot else {
-        return false;
+        return native_step(state, None, destination, slots);
     };
     let position = if state.started {
         state
@@ -277,6 +277,42 @@ pub(crate) fn snapshot_step(
         None => *ip = end.index(),
     }
     true
+}
+
+pub(crate) fn native_step(
+    state: &mut frame::IteratorState,
+    key: Option<Reg>,
+    destination: Reg,
+    slots: &mut [Option<Value>],
+) -> bool {
+    if state.traversal_by_reference {
+        return false;
+    }
+    let Some((value, index)) = state
+        .traversal
+        .as_mut()
+        .and_then(|cursor| cursor.next_entry(key.is_some()))
+    else {
+        return false;
+    };
+    state.started = true;
+    if let Some((key, index)) = key.zip(index)
+        && let Some(slot) = slots.get_mut(key.index())
+    {
+        *slot = Some(owned_value(index));
+    }
+    if let Some(slot) = slots.get_mut(destination.index()) {
+        *slot = Some(owned_value(value));
+    }
+    true
+}
+
+fn owned_value(value: Value) -> Value {
+    if value.is_reference() {
+        value.deref().clone()
+    } else {
+        value
+    }
 }
 
 impl Vm {

@@ -12,6 +12,7 @@ use super::{CLASS, read, update};
 use crate::{This, receiver};
 
 pub(super) const OPERATIONS: NativeDimensions = NativeDimensions {
+    direct: None,
     reference: None,
     bind: None,
     fallback_if_overridden: &[],

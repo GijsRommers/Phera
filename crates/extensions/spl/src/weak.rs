@@ -264,6 +264,7 @@ const MAP_HOOKS: ClassHooks = ClassHooks {
     properties: Some(view),
     iterator: Some(cursor),
     dimensions: Some(NativeDimensions {
+        direct: None,
         reference: None,
         bind: None,
         fallback_if_overridden: &[],

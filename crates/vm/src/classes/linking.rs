@@ -389,6 +389,7 @@ impl Vm {
             self.code.set_declaring_class(function, index);
         }
         let declaration_location = Some((self.code.index_in(&unit, None), declaration.line));
+        let operations = operations.with_native_dimensions(hooks.as_deref(), &methods);
         self.classes.insert(
             name.to_ascii_lowercase(),
             Rc::new_cyclic(|identity| Class {

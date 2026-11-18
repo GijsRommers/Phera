@@ -148,6 +148,7 @@ pub(super) fn create(
     Ok(Box::new(Cursor {
         object,
         mode: CursorMode::Value,
+        started: false,
     }))
 }
 
@@ -158,6 +159,7 @@ pub(super) fn create_by_reference(
     Ok(Box::new(Cursor {
         object,
         mode: CursorMode::Reference,
+        started: false,
     }))
 }
 
@@ -169,6 +171,7 @@ enum CursorMode {
 struct Cursor {
     object: Rc<Object>,
     mode: CursorMode,
+    started: bool,
 }
 
 fn current_reference(object: &Object) -> NativeResult {
@@ -185,6 +188,7 @@ fn current_reference(object: &Object) -> NativeResult {
 
 impl NativeIterator for Cursor {
     fn rewind(&mut self, _: &mut dyn Context) -> Result<(), NativeError> {
+        self.started = false;
         move_cursor(&self.object, Position::Initial)
     }
 
@@ -197,6 +201,7 @@ impl NativeIterator for Cursor {
     }
 
     fn current(&mut self, _: &mut dyn Context) -> NativeResult {
+        self.started = true;
         match self.mode {
             CursorMode::Value => current_value(&self.object),
             CursorMode::Reference => current_reference(&self.object),
@@ -205,6 +210,50 @@ impl NativeIterator for Cursor {
 
     fn key(&mut self, _: &mut dyn Context) -> NativeResult {
         current_key(&self.object)
+    }
+
+    fn next_entry(&mut self, with_key: bool) -> Option<(Value, Option<Value>)> {
+        if matches!(self.mode, CursorMode::Reference) {
+            return None;
+        }
+        let result = state::update(&self.object, |state| {
+            let position = state.position;
+            let entry = match &state.storage {
+                state::Storage::Array(array) => self.entry(array, position, with_key),
+                state::Storage::Alias(alias) => state::read(alias, |owner| {
+                    let state::Storage::Array(array) = &owner.storage else {
+                        return None;
+                    };
+                    self.entry(array, position, with_key)
+                })?,
+                _ => None,
+            };
+            Ok(entry.map(|(position, row)| {
+                if self.started {
+                    state.position = Position::Slot(position);
+                }
+                row
+            }))
+        })
+        .ok()??;
+        self.started = true;
+        Some(result)
+    }
+}
+
+impl Cursor {
+    fn entry(
+        &self,
+        array: &PhpArray,
+        position: Position,
+        with_key: bool,
+    ) -> Option<(usize, (Value, Option<Value>))> {
+        let mut slot = index(array, position, false)?;
+        if self.started {
+            slot = array.next_position(slot)?;
+        }
+        let (key, value) = array.entry_at(slot)?;
+        Some((slot, (value.deref().clone(), with_key.then(|| key.into()))))
     }
 }
 

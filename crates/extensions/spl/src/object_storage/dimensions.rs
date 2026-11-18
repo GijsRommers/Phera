@@ -14,6 +14,26 @@ use super::{CLASS, Key, attach, detach, hash, read};
 use crate::receiver;
 
 pub(super) const HANDLERS: NativeDimensions = NativeDimensions {
+    direct: Some(phera_extension_api::DirectDimensions {
+        read: |storage, offset| {
+            let Value::Object(object) = offset else {
+                return None;
+            };
+            lookup(storage, &Key::Handle(object.id)).ok()
+        },
+        write: |storage, offset, info| {
+            let Value::Object(object) = offset else {
+                return false;
+            };
+            attach(
+                storage,
+                Key::Handle(object.id),
+                object.clone(),
+                info.deref().clone(),
+            )
+            .is_ok()
+        },
+    }),
     reference: None,
     bind: None,
     fallback_if_overridden: &["gethash"],

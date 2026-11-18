@@ -19,6 +19,11 @@ pub enum IteratorStep {
 /// A request-local iterator. Values and keys are fetched separately so each language
 /// operation calls only the methods PHP calls, in the same order.
 pub trait Traversal {
+    /// Combined foreach entry from a cursor which can run without the VM.
+    fn next_entry(&mut self, _with_key: bool) -> Option<(Value, Option<Value>)> {
+        None
+    }
+
     /// Native cursors can complete a step without allocating a future.
     fn step_native(
         &mut self,

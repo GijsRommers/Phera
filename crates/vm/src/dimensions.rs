@@ -16,7 +16,10 @@ use phera_value::{ArrayKey, Object, Value, to_bool};
 use crate::{
     Vm,
     access_mode::Missing,
-    classes::{Class, operations::ClassOperations},
+    classes::{
+        Class,
+        operations::{ClassOperations, NativeDimension},
+    },
 };
 
 pub(crate) struct DimensionPath {
@@ -89,7 +92,7 @@ impl Vm {
         object: Rc<Object>,
         offset: Value,
     ) -> NativeResult {
-        if let Some(native) = native(&object, "offsetget") {
+        if let Some(native) = native(&object, NativeDimension::Get) {
             (native.get)(self, &object, offset)
         } else {
             self.call_method(object, "offsetGet", vec![offset]).await
@@ -102,7 +105,7 @@ impl Vm {
         offset: Value,
         mode: DimensionReferenceMode,
     ) -> Option<NativeResult> {
-        let reference = native(object, "offsetget")?.reference?;
+        let reference = native(object, NativeDimension::Get)?.reference?;
         Some(reference(self, object, offset, mode))
     }
 
@@ -112,7 +115,7 @@ impl Vm {
         offset: Value,
         value: Value,
     ) -> Option<Result<(), NativeError>> {
-        let bind = native(object, "offsetset")?.bind?;
+        let bind = native(object, NativeDimension::Set)?.bind?;
         Some(bind(self, object, offset, value))
     }
 
@@ -121,7 +124,7 @@ impl Vm {
         object: Rc<Object>,
         offset: Value,
     ) -> Result<bool, NativeError> {
-        if let Some(native) = native(&object, "offsetexists") {
+        if let Some(native) = native(&object, NativeDimension::Exists) {
             (native.exists)(self, &object, offset)
         } else {
             Ok(to_bool(
@@ -138,7 +141,7 @@ impl Vm {
         offset: Value,
         value: Value,
     ) -> Result<(), NativeError> {
-        if let Some(native) = native(&object, "offsetset") {
+        if let Some(native) = native(&object, NativeDimension::Set) {
             (native.set)(self, &object, offset, value)
         } else {
             self.call_method(object, "offsetSet", vec![offset, value])
@@ -152,7 +155,7 @@ impl Vm {
         object: Rc<Object>,
         offset: Value,
     ) -> Result<(), NativeError> {
-        if let Some(native) = native(&object, "offsetunset") {
+        if let Some(native) = native(&object, NativeDimension::Unset) {
             (native.unset)(self, &object, offset)
         } else {
             self.call_method(object, "offsetUnset", vec![offset])
@@ -259,27 +262,12 @@ impl Vm {
     }
 }
 
-fn native<'a>(object: &'a Object, method: &str) -> Option<&'a NativeDimensions> {
+pub(crate) fn native(object: &Object, method: NativeDimension) -> Option<&NativeDimensions> {
     let class = object.class.as_any().downcast_ref::<Class>()?;
-    let handler = class.hooks.as_ref()?.dimensions.as_ref()?;
-    if class.origin == crate::classes::class::ClassOrigin::Native {
-        return Some(handler);
-    }
-    let overridden = |method| {
-        class
-            .methods
-            .get(method)
-            .is_some_and(|method| matches!(method.body, crate::classes::MethodBody::User(_)))
-    };
-    if overridden(method)
-        || handler
-            .fallback_if_overridden
-            .iter()
-            .any(|name| overridden(name))
-    {
+    if !class.operations.has(method.bit()) {
         return None;
     }
-    Some(handler)
+    class.hooks.as_ref()?.dimensions.as_ref()
 }
 
 fn has_dimension(object: &Object) -> bool {

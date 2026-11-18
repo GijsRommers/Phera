@@ -220,6 +220,30 @@ impl Machine<'_> {
                     false => Step::Slow,
                 }
             }
+            Instruction::IterNextKeyed {
+                iter, key, value, ..
+            } if position.frame.has_extras() => {
+                let iterators = &mut self.stack.current_extras_mut().iterators;
+                let slots = self.registers.tail_mut(base);
+                if iterators.get_mut(iter.0).is_some_and(|state| {
+                    crate::iteration::native_step(state, Some(key), value, slots)
+                }) {
+                    Step::Done(ip)
+                } else {
+                    Step::Slow
+                }
+            }
+            Instruction::FetchIndex {
+                dst,
+                base,
+                index,
+                mode: phera_bytecode::FetchMode::Read,
+                ..
+            } => self.fetch_native_dimension(position, dst, base, index),
+            Instruction::AppendLocal { local, src } => {
+                self.write_native_dimension(position, local, None, src)
+            }
+            Instruction::AssignPath { path, src } => self.write_dimension_path(position, path, src),
             Instruction::CallDirect {
                 function,
                 args,

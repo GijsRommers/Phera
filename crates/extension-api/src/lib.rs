@@ -30,9 +30,9 @@ pub use context::{Context, LocalFuture};
 pub use error::{NativeError, NativeResult, Unwind};
 pub use function::{AsyncFn, FunctionEntry, NativeFn, Param, ParamType, SyncFn};
 pub use object_handlers::{
-    ClassHooks, DimensionReferenceMode, IteratorFactory, NativeClone, NativeCompare,
-    NativeComparison, NativeCount, NativeDimensions, NativeIterator, PropertyProjection,
-    PropertyPurpose,
+    ClassHooks, DimensionReferenceMode, DirectDimensions, IteratorFactory, NativeClone,
+    NativeCompare, NativeComparison, NativeCount, NativeDimensions, NativeIterator,
+    PropertyProjection, PropertyPurpose,
 };
 pub use registry::{ConstantValue, Registry};
 pub use state::RequestState;

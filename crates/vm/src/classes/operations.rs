@@ -6,17 +6,43 @@
 //! ```
 
 use super::Class;
-use std::rc::Rc;
+use std::{collections::HashMap, rc::Rc};
 
 #[derive(Clone, Copy, Default)]
-pub(crate) struct ClassOperations(u8);
+pub(crate) struct ClassOperations(u16);
+
+/// Linked once, so a dimension access does not search a subclass method table.
+#[derive(Clone, Copy)]
+pub(crate) enum NativeDimension {
+    Get = 1 << 5,
+    Exists = 1 << 6,
+    Set = 1 << 7,
+    Unset = 1 << 8,
+}
+
+impl NativeDimension {
+    const ALL: [Self; 4] = [Self::Get, Self::Exists, Self::Set, Self::Unset];
+
+    fn method(self) -> &'static str {
+        match self {
+            Self::Get => "offsetget",
+            Self::Exists => "offsetexists",
+            Self::Set => "offsetset",
+            Self::Unset => "offsetunset",
+        }
+    }
+
+    pub(crate) fn bit(self) -> u16 {
+        self as u16
+    }
+}
 
 impl ClassOperations {
-    pub(crate) const TRAVERSABLE: u8 = 1;
-    pub(crate) const ITERATOR: u8 = 2;
-    pub(crate) const AGGREGATE: u8 = 4;
-    pub(crate) const ARRAY_ACCESS: u8 = 8;
-    pub(crate) const COUNTABLE: u8 = 16;
+    pub(crate) const TRAVERSABLE: u16 = 1;
+    pub(crate) const ITERATOR: u16 = 2;
+    pub(crate) const AGGREGATE: u16 = 4;
+    pub(crate) const ARRAY_ACCESS: u16 = 8;
+    pub(crate) const COUNTABLE: u16 = 16;
 
     pub(crate) fn link(name: &str, parent: Option<&Class>, interfaces: &[Rc<Class>]) -> Self {
         let mut flags = match name {
@@ -36,7 +62,37 @@ impl ClassOperations {
         Self(flags)
     }
 
-    pub(crate) fn has(self, flag: u8) -> bool {
+    pub(crate) fn with_native_dimensions(
+        mut self,
+        hooks: Option<&phera_extension_api::ClassHooks>,
+        methods: &HashMap<String, Rc<super::Method>>,
+    ) -> Self {
+        for kind in NativeDimension::ALL {
+            self.0 &= !kind.bit();
+        }
+        let Some(dimensions) = hooks.and_then(|hooks| hooks.dimensions.as_ref()) else {
+            return self;
+        };
+        let overridden = |name| {
+            methods
+                .get(name)
+                .is_some_and(|method| matches!(method.body, super::MethodBody::User(_)))
+        };
+        if !dimensions
+            .fallback_if_overridden
+            .iter()
+            .any(|name| overridden(*name))
+        {
+            for kind in NativeDimension::ALL {
+                if !overridden(kind.method()) {
+                    self.0 |= kind.bit();
+                }
+            }
+        }
+        self
+    }
+
+    pub(crate) fn has(self, flag: u16) -> bool {
         self.0 & flag != 0
     }
 }

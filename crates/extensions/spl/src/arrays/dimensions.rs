@@ -8,14 +8,18 @@
 use std::{cell::RefCell, rc::Rc};
 
 use phera_extension_api::{
-    ArrayKey, Context, DimensionReferenceMode, NativeDimensions, NativeError, NativeResult, Object,
-    Value,
+    ArrayKey, Context, DimensionReferenceMode, DirectDimensions, NativeDimensions, NativeError,
+    NativeResult, Object, Value,
 };
 
 use super::state::{self, Target};
 use crate::{This, receiver};
 
 pub(super) const HANDLERS: NativeDimensions = NativeDimensions {
+    direct: Some(DirectDimensions {
+        read: direct_get,
+        write: direct_set,
+    }),
     fallback_if_overridden: &[],
     get,
     exists,
@@ -24,6 +28,55 @@ pub(super) const HANDLERS: NativeDimensions = NativeDimensions {
     reference: Some(reference),
     bind: Some(bind),
 };
+
+fn direct_get(object: &Object, offset: &Value) -> Option<Value> {
+    let key = direct_key(offset)?;
+    state::read(object, |state| {
+        let state::Storage::Array(array) = &state.storage else {
+            return None;
+        };
+        array.get(&key).map(|value| value.deref().clone())
+    })
+    .ok()?
+}
+
+fn direct_set(object: &Object, offset: &Value, value: &Value) -> bool {
+    let key = match offset {
+        Value::Null => None,
+        _ => {
+            let Some(key) = direct_key(offset) else {
+                return false;
+            };
+            Some(key)
+        }
+    };
+    state::update(object, |state| {
+        if state.sorting {
+            return Ok(false);
+        }
+        let state::Storage::Array(array) = &mut state.storage else {
+            return Ok(false);
+        };
+        let array = Rc::make_mut(array);
+        let value = value.deref().clone();
+        if let Some(key) = key {
+            array.insert(key, value);
+        } else {
+            // This operation has the same silent overflow behavior as offsetSet.
+            let _ = array.push(value);
+        }
+        Ok(true)
+    })
+    .unwrap_or(false)
+}
+
+fn direct_key(value: &Value) -> Option<ArrayKey> {
+    match value {
+        Value::Int(index) => Some(ArrayKey::Int(*index)),
+        Value::String(_) => ArrayKey::from_value(value).ok(),
+        _ => None,
+    }
+}
 
 enum Access {
     Read,

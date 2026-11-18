@@ -20,6 +20,13 @@ enum Cursor {
 }
 
 impl Traversal for Cursor {
+    fn next_entry(&mut self, with_key: bool) -> Option<(Value, Option<Value>)> {
+        match self {
+            Self::Native(iterator) => iterator.next_entry(with_key),
+            Self::Php(_) => None,
+        }
+    }
+
     fn step_native(
         &mut self,
         context: &mut dyn Context,

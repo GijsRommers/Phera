@@ -44,6 +44,12 @@ pub trait NativeIterator {
     fn valid(&mut self, context: &mut dyn Context) -> Result<bool, NativeError>;
     fn current(&mut self, context: &mut dyn Context) -> NativeResult;
     fn key(&mut self, context: &mut dyn Context) -> NativeResult;
+
+    /// Read a foreach entry synchronously, advancing first after the first successful read.
+    /// Returning None leaves the cursor untouched so the VM can run the ordinary steps.
+    fn next_entry(&mut self, _with_key: bool) -> Option<(Value, Option<Value>)> {
+        None
+    }
 }
 
 pub type IteratorFactory =
@@ -61,6 +67,14 @@ pub type DimensionReference =
     fn(&mut dyn Context, &Object, Value, DimensionReferenceMode) -> NativeResult;
 pub type BindDimension = fn(&mut dyn Context, &Object, Value, Value) -> Result<(), NativeError>;
 
+/// Direct accesses can borrow register operands and complete without a context.
+/// A declined access leaves state untouched and uses the ordinary handlers.
+#[derive(Clone, Copy)]
+pub struct DirectDimensions {
+    pub read: fn(&Object, &Value) -> Option<Value>,
+    pub write: fn(&Object, &Value, &Value) -> bool,
+}
+
 /// ArrayAccess's four methods can be serviced directly by native state.
 #[derive(Clone, Copy)]
 pub struct NativeDimensions {
@@ -74,6 +88,7 @@ pub struct NativeDimensions {
     pub reference: Option<DimensionReference>,
     /// Makes an existing reference cell the backing storage for one element.
     pub bind: Option<BindDimension>,
+    pub direct: Option<DirectDimensions>,
 }
 
 pub type NativeCompare = fn(

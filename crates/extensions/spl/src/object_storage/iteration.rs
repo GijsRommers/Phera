@@ -49,26 +49,49 @@ pub(super) fn create(
     _: &mut dyn Context,
     object: Rc<Object>,
 ) -> Result<Box<dyn NativeIterator>, NativeError> {
-    Ok(Box::new(Cursor(object)))
+    Ok(Box::new(Cursor {
+        object,
+        started: false,
+    }))
 }
 
-struct Cursor(Rc<Object>);
+struct Cursor {
+    object: Rc<Object>,
+    started: bool,
+}
 
 impl NativeIterator for Cursor {
     fn rewind(&mut self, _: &mut dyn Context) -> Result<(), NativeError> {
-        rewind_cursor(&self.0)
+        self.started = false;
+        rewind_cursor(&self.object)
     }
     fn advance(&mut self, _: &mut dyn Context) -> Result<(), NativeError> {
-        advance_cursor(&self.0)
+        advance_cursor(&self.object)
     }
     fn valid(&mut self, _: &mut dyn Context) -> Result<bool, NativeError> {
-        is_valid(&self.0)
+        is_valid(&self.object)
     }
     fn current(&mut self, _: &mut dyn Context) -> NativeResult {
-        current_object(&self.0)
+        self.started = true;
+        current_object(&self.object)
     }
     fn key(&mut self, _: &mut dyn Context) -> NativeResult {
-        current_key(&self.0)
+        current_key(&self.object)
+    }
+
+    fn next_entry(&mut self, with_key: bool) -> Option<(Value, Option<Value>)> {
+        let result = update(&self.object, |storage| {
+            let slot = storage.slot.saturating_add(usize::from(self.started));
+            let (_, entry) = storage.entries.get_index(slot)?;
+            let value = entry.object.clone();
+            storage.slot = slot;
+            storage.index = storage.index.saturating_add(i64::from(self.started));
+            let key = with_key.then_some(Value::Int(storage.index));
+            Some((value, key))
+        })
+        .ok()??;
+        self.started = true;
+        Some(result)
     }
 }
 

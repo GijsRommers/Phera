@@ -14,6 +14,7 @@ use super::{CLASS, cache, change};
 use crate::{This, receiver};
 
 pub(super) const DIMENSIONS: NativeDimensions = NativeDimensions {
+    direct: None,
     reference: None,
     bind: None,
     fallback_if_overridden: &[],
