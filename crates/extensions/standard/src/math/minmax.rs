@@ -82,7 +82,7 @@ fn extremum(context: &mut dyn Context, arguments: &[Value], extremum: Extremum) 
                 given_type(only)
             )));
         };
-        return select(context, array.values(), extremum, Path::Generic);
+        return select(context, array.values(), extremum, Path::Array);
     }
     // php-src's min() and max() compare ints and floats directly as long
     // as every value so far was one, before falling back to the generic
@@ -95,7 +95,8 @@ fn extremum(context: &mut dyn Context, arguments: &[Value], extremum: Extremum) 
 #[derive(Clone, Copy)]
 enum Path {
     Numeric,
-    Generic,
+    Variadic,
+    Array,
 }
 
 fn select<'a>(
@@ -118,20 +119,26 @@ fn select<'a>(
             (Path::Numeric, _, _) => exact_float(best)
                 .zip(exact_float(candidate))
                 .map(|(best, candidate)| extremum.prefers(candidate, best)),
-            (Path::Generic, _, _) => None,
+            (Path::Array | Path::Variadic, _, _) => None,
         };
         let replace = match numeric {
             Some(replace) => replace,
-            None => {
-                path = Path::Generic;
-                extremum.prefers(value::compare(candidate, best, context.diagnostics())?, 0)
-            }
+            None => match path {
+                // The array overload puts the current winner on the left.
+                Path::Array => {
+                    extremum.prefers(0, value::compare(best, candidate, context.diagnostics())?)
+                }
+                Path::Numeric | Path::Variadic => {
+                    path = Path::Variadic;
+                    extremum.prefers(value::compare(candidate, best, context.diagnostics())?, 0)
+                }
+            },
         };
         if replace {
             best = candidate;
         }
     }
-    Ok(best.clone())
+    Ok(best.try_deref()?.clone())
 }
 
 /// The value as a float, for an int only if the float is exactly the int
