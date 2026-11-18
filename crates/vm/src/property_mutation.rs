@@ -1,7 +1,7 @@
 //! Property writes enforce declaration types and readonly state before modifying storage.
 
 use crate::{Vm, access_mode::Mutation, inline_stack::InlineStack, path_update::PathKey};
-use phera_extension_api::NativeError;
+use phera_extension_api::{NativeError, NativePropertyMutation};
 use phera_value::Value;
 
 impl Vm {
@@ -84,7 +84,7 @@ impl Vm {
         keys: &InlineStack<PathKey>,
         value: &mut Value,
         mutation: Mutation,
-    ) -> Result<(), NativeError> {
+    ) -> Result<bool, NativeError> {
         let mut steps = keys.iter().peekable();
         while let Some(key) = steps.next() {
             match (&current, key) {
@@ -96,6 +96,22 @@ impl Vm {
                         .ok_or_else(|| internal_error!("property class"))?;
                     let property = class.defaults.iter().find(|property| property.key == *key);
                     let name = crate::path_update::property_name(key);
+                    if let Some(access) = class.property_access {
+                        let change = if steps.peek().is_some() {
+                            NativePropertyMutation::Indirect
+                        } else {
+                            match mutation {
+                                Mutation::Assign => NativePropertyMutation::Assign(value),
+                                Mutation::Bind => NativePropertyMutation::Bind,
+                                Mutation::Unset => NativePropertyMutation::Unset,
+                            }
+                        };
+                        if (access.mutate)(self, object, &name, change)? {
+                            return Ok(true);
+                        }
+                        // A virtual name can bypass visibility only while its handler owns access.
+                        self.property_key(object, &name)?;
+                    }
                     self.notice_static_instance_access(class, &name);
                     if let Some(property) = property {
                         if property.is_readonly
@@ -109,10 +125,7 @@ impl Vm {
                                     property.declaring
                                 )));
                             }
-                            let scope = self
-                                .current()
-                                .and_then(|frame| frame.method.as_ref())
-                                .map(|context| &context.scope);
+                            let scope = self.current().and_then(|frame| frame.scope());
                             if crate::property_storage::read(object, key).is_some()
                                 || steps.peek().is_some()
                             {
@@ -189,7 +202,7 @@ impl Vm {
                 _ => current = Value::Null,
             }
         }
-        Ok(())
+        Ok(false)
     }
 }
 
@@ -205,8 +218,8 @@ impl Vm {
         }
         let scope = self
             .current()
-            .and_then(|frame| frame.method.as_ref())
-            .map(|context| context.scope.name.as_str());
+            .and_then(|frame| frame.scope())
+            .map(|scope| scope.name.as_str());
         if class.defaults.iter().any(|property| {
             property.name == name
                 && (property.visibility != phera_bytecode::Visibility::Private

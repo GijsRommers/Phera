@@ -1,67 +1,104 @@
-//! Internal array cursors move independently of key numbering.
+//! The internal array pointer: `current`, `key`, `next`, `prev`, `reset`
+//! and `end`.
+//!
+//! Every array has a position of its own, separate from `foreach`. A new
+//! array, and one that was just sorted, points at its first entry; moving
+//! past either end leaves the pointer nowhere, and `current()` is then
+//! `false`.
+//!
+//! ```php
+//! $a = [1, 2];
+//! next($a);     // 2
+//! next($a);     // false
+//! reset($a);    // 1
+//! ```
 
 use phera_extension_api::{
-    Context, FunctionEntry, NativeResult, Param, ParamType, PhpArray, Registry, Value, args,
+    Context, FunctionEntry, NativeResult, Param, ParamType, PhpArray, Value,
 };
 
-use super::key_value;
+use super::change_array_argument;
+use crate::arguments::required_array;
 
-const ARRAY_READ_PARAMS: &[Param] = &[Param::new("array", ParamType::Array)];
+pub(super) const FUNCTIONS: &[FunctionEntry] = &[CURRENT, POS, KEY, NEXT, PREV, RESET, END];
 
-const ARRAY_WRITE_PARAMS: &[Param] = &[Param::new("array", ParamType::Array).by_ref()];
-
-pub(crate) fn register(registry: &mut Registry) {
-    registry.function(FunctionEntry::sync("current", ARRAY_READ_PARAMS, current));
-    registry.function(FunctionEntry::sync("pos", ARRAY_READ_PARAMS, current));
-    registry.function(FunctionEntry::sync("key", ARRAY_READ_PARAMS, key));
-    registry.function(FunctionEntry::sync("next", ARRAY_WRITE_PARAMS, next));
-    registry.function(FunctionEntry::sync("prev", ARRAY_WRITE_PARAMS, prev));
-    registry.function(FunctionEntry::sync("reset", ARRAY_WRITE_PARAMS, reset));
-    registry.function(FunctionEntry::sync("end", ARRAY_WRITE_PARAMS, end));
+/// Copy the entry itself so a self-reference can be resolved after mutation.
+fn pointed_entry(array: &PhpArray) -> Value {
+    array.current().cloned().unwrap_or(Value::Bool(false))
 }
 
-fn current(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(args::array(arguments, 0)
-        .and_then(|array| array.current())
-        .map_or(Value::Bool(false), |value| value.deref().clone()))
+/// `current(array|object $array): mixed`, the value at the pointer.
+const CURRENT: FunctionEntry =
+    FunctionEntry::sync("current", &[Param::new("array", ParamType::Array)], current);
+
+/// `pos()`, another name for `current()`.
+const POS: FunctionEntry =
+    FunctionEntry::sync("pos", &[Param::new("array", ParamType::Array)], current);
+
+fn current(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let entry = pointed_entry(required_array(arguments, 0));
+    Ok(entry.try_deref()?.clone())
 }
 
-fn key(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(args::array(arguments, 0)
-        .and_then(|array| array.key())
-        .map_or(Value::Null, |key| key_value(&key)))
+/// `key(array|object $array): int|string|null`, the key at the pointer.
+const KEY: FunctionEntry =
+    FunctionEntry::sync("key", &[Param::new("array", ParamType::Array)], key);
+
+fn key(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let key = required_array(arguments, 0).key();
+    Ok(key.map_or(Value::Null, Value::from))
 }
 
-/// Copy-on-write also isolates the cursor; a borrowed caller cell is a PHP Error.
-fn move_pointer(arguments: &[Value], operation: fn(&mut PhpArray)) -> NativeResult {
-    super::stack::mutate_with_errors(
-        arguments,
-        |array| {
-            operation(array);
-            Ok(array
-                .current()
-                .map_or(Value::Bool(false), |value| value.deref().clone()))
-        },
-        [
-            "Array argument must be passed by reference",
-            "Cannot modify borrowed reference",
-            "Expected prepared array argument",
-        ],
-    )
-}
+/// `next(array|object &$array): mixed`, moving the pointer forward and
+/// returning the value there.
+const NEXT: FunctionEntry = FunctionEntry::sync(
+    "next",
+    &[Param::new("array", ParamType::Array).by_ref()],
+    next,
+);
 
-fn next(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn next(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     move_pointer(arguments, PhpArray::advance)
 }
 
-fn prev(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+/// `prev(array|object &$array): mixed`, moving the pointer back.
+const PREV: FunctionEntry = FunctionEntry::sync(
+    "prev",
+    &[Param::new("array", ParamType::Array).by_ref()],
+    prev,
+);
+
+fn prev(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     move_pointer(arguments, PhpArray::rewind_back)
 }
 
-fn reset(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+/// `reset(array|object &$array): mixed`, the pointer to the first entry.
+const RESET: FunctionEntry = FunctionEntry::sync(
+    "reset",
+    &[Param::new("array", ParamType::Array).by_ref()],
+    reset,
+);
+
+fn reset(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     move_pointer(arguments, PhpArray::reset)
 }
 
-fn end(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+/// `end(array|object &$array): mixed`, the pointer to the last entry.
+const END: FunctionEntry = FunctionEntry::sync(
+    "end",
+    &[Param::new("array", ParamType::Array).by_ref()],
+    end,
+);
+
+fn end(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     move_pointer(arguments, PhpArray::end)
+}
+
+/// Moves the pointer of the caller's array and returns the value there.
+fn move_pointer(arguments: &[Value], movement: fn(&mut PhpArray)) -> NativeResult {
+    let entry = change_array_argument(arguments, |array| {
+        movement(array);
+        Ok(pointed_entry(array))
+    })?;
+    Ok(entry.try_deref()?.clone())
 }

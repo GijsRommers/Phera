@@ -26,15 +26,8 @@ impl Vm {
         let mut steps = place.steps()?;
         if matches!(steps.next(), Some(Step::Append))
             && steps.next().is_none()
-            && let Some(Value::Array(array)) = self
-                .call_stack
-                .current_mut()
-                .and_then(|frame| {
-                    frame
-                        .slots_mut(&mut self.registers)
-                        .get_mut(register.index())
-                })
-                .and_then(Option::as_mut)
+            && let Some(Value::Array(array)) =
+                self.current_slot_mut(register).and_then(Option::as_mut)
         {
             Rc::make_mut(array).push(value)?;
             return Ok(());
@@ -58,17 +51,13 @@ impl Vm {
         } else {
             let root_value = self.read_root(register, Missing::Silent);
             let keys = self.property_keys(place, root_value.clone())?;
-            self.validate_property_mutation(root_value, &keys, &mut value, binding.into())?;
+            if self.validate_property_mutation(root_value, &keys, &mut value, binding.into())? {
+                return Ok(());
+            }
             keys
         };
         let mut root = self
-            .call_stack
-            .current_mut()
-            .and_then(|frame| {
-                frame
-                    .slots_mut(&mut self.registers)
-                    .get_mut(register.0 as usize)
-            })
+            .current_slot_mut(register)
             .and_then(Option::take)
             .unwrap_or_default();
         if binding == Binding::ByValue {
@@ -130,13 +119,25 @@ impl Vm {
             .flatten()
             .unwrap_or_default();
         let keys = self.property_keys(place, raw.deref().clone())?;
-        for key in keys.iter().cloned() {
+        let mut steps = keys.iter().cloned().peekable();
+        while let Some(key) = steps.next() {
             let plain = raw.deref().clone();
             raw = match (plain, key) {
                 (Value::Array(array), PathKey::Index(Some(key))) => {
                     array.get(&key).cloned().unwrap_or_default()
                 }
                 (Value::Object(object), PathKey::Property(key)) => {
+                    if steps.peek().is_none()
+                        && let Some(access) = crate::properties::native_property_access(&object)
+                        && (access.mutate)(
+                            self,
+                            &object,
+                            &crate::path_update::property_name(&key),
+                            phera_extension_api::NativePropertyMutation::Reference,
+                        )?
+                    {
+                        return Ok(Value::Reference(Rc::new(RefCell::new(value))));
+                    }
                     crate::property_storage::read(&object, &key).unwrap_or_default()
                 }
                 _ => Value::Null,
@@ -165,8 +166,13 @@ impl Vm {
             && place.steps()?.next().is_none()
         {
             let (class, name) = self.static_property_names(class, name)?;
+            let class = self
+                .classes
+                .get(&class)
+                .ok_or_else(|| Self::class_miss(&class, "Class"))?;
             return Err(NativeError::error(format!(
-                "Attempt to unset static property {class}::${name}"
+                "Attempt to unset static property {}::${name}",
+                class.name
             )));
         }
         let Some(register) = self.base_register(place, Creation::Existing, Missing::Silent)? else {
@@ -184,15 +190,11 @@ impl Vm {
         }
         let root_value = self.read_root(register, Missing::Silent);
         let keys = self.property_keys(place, root_value.clone())?;
-        self.validate_property_mutation(root_value, &keys, &mut Value::Null, Mutation::Unset)?;
+        if self.validate_property_mutation(root_value, &keys, &mut Value::Null, Mutation::Unset)? {
+            return Ok(());
+        }
         let mut root = self
-            .call_stack
-            .current_mut()
-            .and_then(|frame| {
-                frame
-                    .slots_mut(&mut self.registers)
-                    .get_mut(register.0 as usize)
-            })
+            .current_slot_mut(register)
             .and_then(Option::take)
             .unwrap_or_default();
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);

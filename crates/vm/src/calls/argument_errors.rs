@@ -67,7 +67,7 @@ impl Vm {
         }
         let frame = self
             .current()
-            .filter(|frame| frame.function_id.is_some())
+            .filter(|frame| frame.function_id().is_some())
             .ok_or_else(|| {
                 NativeError::error(match function {
                     ArgumentFunction::Count => {
@@ -82,15 +82,15 @@ impl Vm {
                 })
             })?;
         match function {
-            ArgumentFunction::Count => Ok(Value::Int(frame.argument_count as i64)),
+            ArgumentFunction::Count => Ok(Value::Int(frame.argument_count() as i64)),
             ArgumentFunction::All => {
                 let mut result = PhpArray::new();
-                for index in 0..frame.argument_count {
+                for index in 0..frame.argument_count() {
                     result.push(frame.argument(&self.registers, index))?;
                 }
                 Ok(Value::Array(Rc::new(result)))
             }
-            ArgumentFunction::One => (position < frame.argument_count as i64)
+            ArgumentFunction::One => (position < frame.argument_count() as i64)
                 .then(|| frame.argument(&self.registers, position as usize))
                 .ok_or_else(|| {
                     NativeError::value_error(
@@ -139,6 +139,16 @@ impl Vm {
         let Some(Value::String(name)) = arguments.first() else {
             return Ok(Value::from("1"));
         };
+        if name.as_bytes() == b"include_path" {
+            let previous = if matches!(intrinsic, crate::intrinsics::Intrinsic::IniSet) {
+                let value = arguments.get(1).cloned().unwrap_or_default();
+                let text = phera_value::to_php_string(&value, &mut phera_value::NoDiagnostics)?;
+                self.set_include_path(text.to_string_lossy())
+            } else {
+                self.include_path().to_owned()
+            };
+            return Ok(Value::from(previous));
+        }
         if name.as_bytes() != b"zend.exception_string_param_max_len" {
             return Ok(Value::from("1"));
         }

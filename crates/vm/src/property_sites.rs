@@ -29,11 +29,11 @@ impl Vm {
         &mut self,
         object: &Object,
         name: NameId,
-    ) -> Result<Rc<PropertyEntry>, NativeError> {
+    ) -> Result<Option<Rc<PropertyEntry>>, NativeError> {
         let frame = self
             .current()
             .ok_or_else(|| internal_error!("property site"))?;
-        let scope = frame.method.as_ref().map(|context| &context.scope);
+        let scope = frame.scope();
         if let Some(slot) = frame.site_cache()
             && let crate::unit_caches::CachedSite::Property(entry) = &*slot.borrow()
             && Rc::ptr_eq(&entry.class, &object.class)
@@ -43,10 +43,13 @@ impl Vm {
                 _ => false,
             }
         {
-            return Ok(entry.clone());
+            return Ok(Some(entry.clone()));
+        }
+        if crate::properties::native_property_access(object).is_some() {
+            return Ok(None);
         }
         let scope = scope.cloned();
-        let unit = frame.unit.clone();
+        let unit = frame.unit().clone();
         let name = unit
             .names
             .get(name.index())
@@ -81,7 +84,7 @@ impl Vm {
         if let Some(slot) = self.current().and_then(|frame| frame.site_cache()) {
             *slot.borrow_mut() = crate::unit_caches::CachedSite::Property(entry.clone());
         }
-        Ok(entry)
+        Ok(Some(entry))
     }
 
     /// Mirrors read_place/read_property for an existing single property. Missing
@@ -99,7 +102,9 @@ impl Vm {
         let Some(PropertyTarget { object, name }) = target else {
             return Ok(None);
         };
-        let entry = self.property_entry(&object, name)?;
+        let Some(entry) = self.property_entry(&object, name)? else {
+            return Ok(None);
+        };
         let class = object
             .class
             .as_any()
@@ -129,7 +134,9 @@ impl Vm {
         else {
             return Ok(None);
         };
-        let entry = self.property_entry(&object, name)?;
+        let Some(entry) = self.property_entry(&object, name)? else {
+            return Ok(None);
+        };
         if !entry.write_rule.allows(TypeMask::INT) {
             return Ok(None);
         }
@@ -194,7 +201,9 @@ impl Vm {
         else {
             return Ok(false);
         };
-        let entry = self.property_entry(&object, name)?;
+        let Some(entry) = self.property_entry(&object, name)? else {
+            return Ok(false);
+        };
         // `public float $x` assigned an int stores the float, as PHP does.
         let widened = match entry.write_rule {
             WriteRule::Typed(declared) => crate::types::widen_int_to_float(value, declared),
@@ -227,7 +236,9 @@ impl Vm {
         else {
             return Ok(false);
         };
-        let entry = self.property_entry(&object, name)?;
+        let Some(entry) = self.property_entry(&object, name)? else {
+            return Ok(false);
+        };
         if !entry.write_rule.allows(TypeMask::ARRAY) {
             return Ok(false);
         }

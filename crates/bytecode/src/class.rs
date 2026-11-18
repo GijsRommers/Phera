@@ -28,6 +28,7 @@ pub enum Initializer {
 /// One source declaration, before parents or interfaces are resolved.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClassDeclaration {
+    pub line: u32,
     pub name: String,
     pub parent: Option<SymbolId>,
     pub interfaces: Vec<SymbolId>,

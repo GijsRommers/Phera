@@ -16,23 +16,27 @@ pub use expectf::expectf_matches;
 #[derive(Debug, Clone)]
 pub struct Phpt {
     pub path: PathBuf,
-    sections: Vec<(String, String)>,
+    sections: Vec<(String, Vec<u8>)>,
 }
 
 impl Phpt {
     pub fn parse_file(path: &Path) -> io::Result<Self> {
         let bytes = fs::read(path)?;
-        Ok(Self::parse(path, &String::from_utf8_lossy(&bytes)))
+        Ok(Self::parse_bytes(path, &bytes))
     }
 
     pub fn parse(path: &Path, contents: &str) -> Self {
-        let mut sections: Vec<(String, String)> = Vec::new();
+        Self::parse_bytes(path, contents.as_bytes())
+    }
 
-        for line in contents.split_inclusive('\n') {
-            if let Some(name) = section_header(line) {
-                sections.push((name.to_string(), String::new()));
+    pub fn parse_bytes(path: &Path, contents: &[u8]) -> Self {
+        let mut sections: Vec<(String, Vec<u8>)> = Vec::new();
+
+        for line in contents.split_inclusive(|&byte| byte == b'\n') {
+            if let Some(name) = std::str::from_utf8(line).ok().and_then(section_header) {
+                sections.push((name.to_string(), Vec::new()));
             } else if let Some((_, body)) = sections.last_mut() {
-                body.push_str(line);
+                body.extend_from_slice(line);
             }
         }
 
@@ -47,11 +51,17 @@ impl Phpt {
         self.section("TEST").map_or("", str::trim)
     }
 
+    /// Text sections include instructions such as TEST, SKIPIF and EXPECTF.
     pub fn section(&self, name: &str) -> Option<&str> {
+        std::str::from_utf8(self.section_bytes(name)?).ok()
+    }
+
+    /// FILE and EXPECT may themselves contain arbitrary bytes.
+    pub fn section_bytes(&self, name: &str) -> Option<&[u8]> {
         self.sections
             .iter()
             .find(|(n, _)| n == name)
-            .map(|(_, body)| body.as_str())
+            .map(|(_, body)| body.as_slice())
     }
 
     pub fn section_names(&self) -> impl Iterator<Item = &str> {
@@ -67,9 +77,14 @@ fn section_header(line: &str) -> Option<&str> {
     valid.then_some(name)
 }
 
-/// The repository's top-level `tests/` directory.
+/// The directory holding `phpt/selected.txt`, `upstream/` and `fixtures/`: the
+/// repository's top-level `tests/`, or the tree `PHERA_PHPT_TESTS_DIR` names.
+/// `tests/phpt/sweep.sh` uses the override to try a whole php-src checkout.
 pub fn tests_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests")
+    match std::env::var_os("PHERA_PHPT_TESTS_DIR") {
+        Some(dir) if !dir.is_empty() => PathBuf::from(dir),
+        _ => Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests"),
+    }
 }
 
 /// Every test Phera should pass: the selected upstream tests, then all fixtures.

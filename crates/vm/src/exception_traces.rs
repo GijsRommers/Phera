@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use phera_value::{ArrayKey, PhpArray, Value};
 
-use crate::{Vm, calls::frame::Frame};
+use crate::{Vm, calls::frame::FrameView};
 
 impl Vm {
     /// Frame entries point at the caller's call instruction and omit the main frame.
@@ -29,28 +29,21 @@ impl Vm {
             let _ = trace.push(Value::Array(Rc::new(entry)));
         }
         for ((_, caller), (callee_index, callee)) in self
-            .call_stack
-            .iter()
+            .frames()
             .enumerate()
             .rev()
             .skip(1)
-            .zip(self.call_stack.iter().enumerate().rev())
+            .zip(self.frames().enumerate().rev())
         {
             let mut entry = PhpArray::new();
-            entry.insert(ArrayKey::str("file"), Value::from(caller.unit.file.clone()));
+            entry.insert(
+                ArrayKey::str("file"),
+                Value::from(caller.unit().file.clone()),
+            );
             entry.insert(ArrayKey::str("line"), Value::Int(caller.line() as i64));
-            if callee.function_id.is_none()
-                && let Some(phera_bytecode::Instruction::Include { kind, .. }) = caller
-                    .function()
-                    .instructions
-                    .get(caller.ip.saturating_sub(1))
+            if callee.function_id().is_none()
+                && let Some(name) = scoped_unit_name(caller)
             {
-                let name = match kind {
-                    phera_bytecode::IncludeKind::Include => "include",
-                    phera_bytecode::IncludeKind::IncludeOnce => "include_once",
-                    phera_bytecode::IncludeKind::Require => "require",
-                    phera_bytecode::IncludeKind::RequireOnce => "require_once",
-                };
                 let arguments = PhpArray::new();
                 entry.insert(ArrayKey::str("function"), Value::from(name));
                 entry.insert(ArrayKey::str("args"), Value::Array(Rc::new(arguments)));
@@ -66,54 +59,45 @@ impl Vm {
             };
             entry.insert(ArrayKey::str("function"), Value::from(name));
             let class = if closure {
-                callee
-                    .method
-                    .as_ref()
-                    .map(|context| context.scope.name.as_str())
+                callee.scope().map(|scope| scope.name.as_str())
             } else {
                 function.split_once("::").map(|(class, _)| class)
             };
             if let Some(class) = class {
                 entry.insert(ArrayKey::str("class"), Value::from(class));
-                let kind = if callee
-                    .method
-                    .as_ref()
-                    .is_some_and(|context| context.receiver.is_some())
-                {
-                    "->"
-                } else {
-                    "::"
-                };
+                let kind = if callee.this().is_some() { "->" } else { "::" };
                 entry.insert(ArrayKey::str("type"), Value::from(kind));
             }
             entry.insert(ArrayKey::str("args"), trace_arguments(self, callee));
-            let native = self
+            let warning = self
                 .error_handlers
                 .warning_site
                 .as_ref()
                 .filter(|site| site.boundary == callee_index);
-            if native.is_some() {
+            let autoload = self
+                .autoload
+                .sites
+                .iter()
+                .rev()
+                .find(|site| site.boundary == callee_index);
+            if warning.is_some() || autoload.is_some() {
                 entry.remove(&ArrayKey::str("file"));
                 entry.remove(&ArrayKey::str("line"));
             }
             let _ = trace.push(Value::Array(Rc::new(entry)));
-            if let Some(site) = native {
-                let mut entry = PhpArray::new();
-                entry.insert(
-                    ArrayKey::str("file"),
-                    Value::from(site.location.file.clone()),
+            if let Some(site) = warning {
+                append_native(
+                    &mut trace,
+                    &site.native,
+                    &site.location.file,
+                    site.location.line,
                 );
-                entry.insert(ArrayKey::str("line"), Value::Int(site.location.line as i64));
-                entry.insert(
-                    ArrayKey::str("function"),
-                    Value::from(site.native.name.clone()),
-                );
-                entry.insert(ArrayKey::str("args"), site.native.arguments.clone());
-                let _ = trace.push(Value::Array(Rc::new(entry)));
+            } else if let Some(site) = autoload {
+                append_native(&mut trace, &site.native, &caller.unit().file, caller.line());
             }
         }
-        if let Some(frame) = self.call_stack.iter().next()
-            && frame.function_id.is_some()
+        if let Some(frame) = self.frames().next()
+            && frame.function_id().is_some()
         {
             let mut entry = PhpArray::new();
             entry.insert(
@@ -128,14 +112,14 @@ impl Vm {
 }
 
 /// PHP snapshots live, coerced parameters and flattens a variadic argument array.
-fn trace_arguments(vm: &Vm, frame: &Frame) -> Value {
+fn trace_arguments(vm: &Vm, frame: FrameView<'_>) -> Value {
     let mut arguments = PhpArray::new();
     for (index, parameter) in frame
         .function()
         .parameters
         .iter()
         .enumerate()
-        .take(frame.supplied_arguments)
+        .take(frame.supplied_arguments())
     {
         let Some(Some(value)) = frame.slots(&vm.registers).get(index) else {
             continue;
@@ -165,7 +149,7 @@ fn trace_arguments(vm: &Vm, frame: &Frame) -> Value {
     {
         for value in vm
             .registers
-            .window(frame.base + frame.count, frame.extra_arguments)
+            .window(frame.base() + frame.count(), frame.extras.arguments.extra)
         {
             let value = value.as_ref().unwrap_or(&Value::Null);
             let _ = arguments.push(value.deref().clone());
@@ -179,4 +163,39 @@ pub(crate) struct WarningSite {
     pub(crate) boundary: usize,
     pub(crate) native: crate::error_traces::NativeTrace,
     pub(crate) location: crate::diagnostics::SourceLocation,
+}
+
+/// A nested unit is shown as the construct that entered it.
+fn scoped_unit_name(frame: FrameView<'_>) -> Option<&'static str> {
+    use phera_bytecode::{IncludeKind, Instruction};
+    Some(
+        match frame
+            .function()
+            .instructions
+            .get(frame.ip().saturating_sub(1))?
+        {
+            Instruction::Eval { .. } => "eval",
+            Instruction::Include { kind, .. } => match kind {
+                IncludeKind::Include => "include",
+                IncludeKind::IncludeOnce => "include_once",
+                IncludeKind::Require => "require",
+                IncludeKind::RequireOnce => "require_once",
+            },
+            _ => return None,
+        },
+    )
+}
+
+fn append_native(
+    trace: &mut PhpArray,
+    native: &crate::error_traces::NativeTrace,
+    file: &str,
+    line: usize,
+) {
+    let mut entry = PhpArray::new();
+    entry.insert(ArrayKey::str("file"), Value::from(file));
+    entry.insert(ArrayKey::str("line"), Value::Int(line as i64));
+    entry.insert(ArrayKey::str("function"), Value::from(native.name.clone()));
+    entry.insert(ArrayKey::str("args"), native.arguments.clone());
+    let _ = trace.push(Value::Array(Rc::new(entry)));
 }

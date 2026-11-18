@@ -1,31 +1,58 @@
-//! A byte scanner retaining PHP's distinct syntax, UTF-8 and UTF-16 failures.
-use crate::{error::Error, flags::Flags};
+//! Splitting a JSON document into tokens.
+//!
+//! ```php
+//! json_decode('"\ud83d\ude00"');   // "😀": a surrogate pair is one character
+//! json_decode('"\ud83d"');          // null, JSON_ERROR_UTF16: half a pair
+//! json_decode("\"a\x01\"");        // null, JSON_ERROR_CTRL_CHAR
+//! json_decode('[1e999]');           // [INF]
+//! ```
+use crate::error::Error;
+use crate::flags::{DecodeFlags, InvalidUtf8};
 use phera_extension_api::Value;
-/// Tokens separate grammar decisions from byte validation.
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Container {
+    Array,
+    Object,
+}
+
 #[derive(Debug)]
 pub(super) enum Token {
+    /// A string, number, `true`, `false` or `null`.
     Value(Value),
-    Open(bool),
-    Close(bool),
+    Open(Container),
+    Close(Container),
     Colon,
     Comma,
+    /// The end of the document.
     End,
 }
-/// Cursor movements are bounded by checked byte reads.
+
 pub(super) struct Scanner<'a> {
-    pub bytes: &'a [u8],
-    pub pos: usize,
-    pub flags: Flags,
+    bytes: &'a [u8],
+    pos: usize,
+    flags: DecodeFlags,
 }
-impl Scanner<'_> {
+
+impl<'a> Scanner<'a> {
+    pub fn new(bytes: &'a [u8], flags: DecodeFlags) -> Self {
+        Self {
+            bytes,
+            pos: 0,
+            flags,
+        }
+    }
+
     fn peek(&self) -> Option<u8> {
         self.bytes.get(self.pos).copied()
     }
+
     fn take(&mut self) -> Option<u8> {
         let byte = self.peek()?;
         self.pos += 1;
         Some(byte)
     }
+
     /// Outside strings PHP accepts only the four JSON whitespace characters.
     pub fn next(&mut self) -> Result<Token, Error> {
         while matches!(self.peek(), Some(b' ' | b'\t' | b'\r' | b'\n')) {
@@ -33,16 +60,16 @@ impl Scanner<'_> {
         }
         Ok(match self.take() {
             None => Token::End,
-            Some(b'[') => Token::Open(false),
-            Some(b'{') => Token::Open(true),
-            Some(b']') => Token::Close(false),
-            Some(b'}') => Token::Close(true),
+            Some(b'[') => Token::Open(Container::Array),
+            Some(b'{') => Token::Open(Container::Object),
+            Some(b']') => Token::Close(Container::Array),
+            Some(b'}') => Token::Close(Container::Object),
             Some(b':') => Token::Colon,
             Some(b',') => Token::Comma,
             Some(b'"') => Token::Value(Value::from(self.string()?)),
-            Some(byte @ (b'-' | b'0'..=b'9')) => {
+            Some(b'-' | b'0'..=b'9') => {
                 self.pos -= 1;
-                Token::Value(self.number(byte)?)
+                Token::Value(self.number()?)
             }
             Some(b'n') => {
                 self.literal(b"ull")?;
@@ -57,6 +84,8 @@ impl Scanner<'_> {
                 Token::Value(Value::Bool(false))
             }
             Some(byte) if byte < 32 => return Err(Error::Control),
+            // Outside a string: invalid UTF-8 is a UTF-8 error, a valid
+            // character a syntax error.
             Some(byte) if byte >= 128 => {
                 self.pos -= 1;
                 self.utf8()?;
@@ -65,6 +94,7 @@ impl Scanner<'_> {
             _ => return Err(Error::Syntax),
         })
     }
+
     fn literal(&mut self, suffix: &[u8]) -> Result<(), Error> {
         for &expected in suffix {
             if self.take() != Some(expected) {
@@ -73,8 +103,10 @@ impl Scanner<'_> {
         }
         Ok(())
     }
-    /// Consume one valid scalar, or exactly one invalid byte (PHP scanner semantics).
-    fn utf8(&mut self) -> Result<Vec<u8>, Error> {
+
+    /// Reads one UTF-8 character, or, when the bytes are not one, skips one
+    /// byte and fails, as PHP's scanner does.
+    fn utf8(&mut self) -> Result<&'a [u8], Error> {
         let first = self.peek().ok_or(Error::Syntax)?;
         let length = match first {
             0..=127 => 1,
@@ -89,12 +121,13 @@ impl Scanner<'_> {
             && std::str::from_utf8(bytes).is_ok()
         {
             self.pos += length;
-            return Ok(bytes.to_vec());
+            return Ok(bytes);
         }
         self.pos += 1;
         Err(Error::Utf8)
     }
-    /// Decode escapes before inserting property names, including embedded NULs.
+
+    /// The bytes of a string, after its opening quote, with escapes decoded.
     fn string(&mut self) -> Result<Vec<u8>, Error> {
         let mut output = Vec::new();
         loop {
@@ -110,14 +143,17 @@ impl Scanner<'_> {
                 }
                 Some(0..=31) => return Err(Error::Control),
                 Some(_) => match self.utf8() {
-                    Ok(bytes) => output.extend(bytes),
-                    Err(_) if self.flags.substitute => output.extend_from_slice("�".as_bytes()),
-                    Err(_) if self.flags.ignore => {}
-                    Err(error) => return Err(error),
+                    Ok(bytes) => output.extend_from_slice(bytes),
+                    Err(error) => match self.flags.invalid_utf8 {
+                        InvalidUtf8::Substitute => output.extend_from_slice("\u{fffd}".as_bytes()),
+                        InvalidUtf8::Ignore => {}
+                        InvalidUtf8::Fail => return Err(error),
+                    },
                 },
             }
         }
     }
+
     fn escape(&mut self, output: &mut Vec<u8>) -> Result<(), Error> {
         let byte = match self.take() {
             Some(b'"') => b'"',
@@ -139,6 +175,7 @@ impl Scanner<'_> {
         output.push(byte);
         Ok(())
     }
+
     fn hex(&mut self) -> Result<u32, Error> {
         let mut number = 0;
         for _ in 0..4 {
@@ -149,7 +186,10 @@ impl Scanner<'_> {
         }
         Ok(number)
     }
-    /// PHP distinguishes malformed escapes from valid but unpaired surrogates.
+
+    /// The character of a `\u` escape, reading the second half of a
+    /// surrogate pair too. A malformed escape is a syntax error, half a
+    /// pair a UTF-16 error.
     fn unicode(&mut self) -> Result<char, Error> {
         let first = self.hex()?;
         let scalar = if (0xd800..=0xdbff).contains(&first) {
@@ -166,8 +206,10 @@ impl Scanner<'_> {
         };
         char::from_u32(scalar).ok_or(Error::Utf16)
     }
-    /// Integer overflow becomes a float unless BIGINT_AS_STRING was requested.
-    fn number(&mut self, _: u8) -> Result<Value, Error> {
+
+    /// An integer too large for an int is a float, or with
+    /// `JSON_BIGINT_AS_STRING` a string of its digits.
+    fn number(&mut self) -> Result<Value, Error> {
         let start = self.pos;
         if self.peek() == Some(b'-') {
             self.pos += 1;
@@ -203,7 +245,7 @@ impl Scanner<'_> {
             if let Ok(number) = text.parse::<i64>() {
                 return Ok(Value::Int(number));
             }
-            if self.flags.bigint {
+            if self.flags.bigint_as_string {
                 return Ok(Value::from(text));
             }
         }
@@ -211,6 +253,7 @@ impl Scanner<'_> {
             .map(Value::Float)
             .map_err(|_| Error::Syntax)
     }
+
     fn digits(&mut self) {
         while self.peek().is_some_and(|byte| byte.is_ascii_digit()) {
             self.pos += 1;

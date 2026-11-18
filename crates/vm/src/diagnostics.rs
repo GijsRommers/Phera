@@ -20,7 +20,7 @@ impl Vm {
         }
         self.current()
             .map(|frame| SourceLocation {
-                file: frame.unit.file.clone(),
+                file: frame.unit().file.clone(),
                 line: frame.line(),
             })
             .unwrap_or(SourceLocation {

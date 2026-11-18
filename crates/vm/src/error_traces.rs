@@ -1,6 +1,6 @@
 //! Render uncaught PHP errors from heap frames, including failed parameter binding.
 
-use crate::{Vm, calls::frame::Frame};
+use crate::{Vm, calls::frame::FrameView};
 use phera_value::Value;
 
 /// Native calls have no bytecode frame, so capture only their cold error path.
@@ -36,7 +36,7 @@ fn argument(value: &Value) -> String {
 }
 
 /// Read user parameter slots after coercion, as PHP's stack traces do.
-fn frame_arguments(vm: &Vm, frame: &Frame) -> String {
+fn frame_arguments(vm: &Vm, frame: FrameView<'_>) -> String {
     let mut arguments = Vec::new();
     for (index, parameter) in frame.function().parameters.iter().enumerate() {
         let Some(Some(value)) = frame.slots(&vm.registers).get(index) else {
@@ -72,7 +72,7 @@ impl Vm {
     ) -> String {
         let binding_failure = self
             .current()
-            .is_some_and(|frame| frame.ip == 0 && frame.function_id.is_some());
+            .is_some_and(|frame| frame.ip() == 0 && frame.function_id().is_some());
         let connective = if binding_failure {
             "and defined in"
         } else {
@@ -94,22 +94,12 @@ impl Vm {
             ));
             number += 1;
         }
-        for (parent, child) in self
-            .call_stack
-            .iter()
-            .rev()
-            .skip(1)
-            .zip(self.call_stack.iter().rev())
-        {
+        for (parent, child) in self.frames().rev().skip(1).zip(self.frames().rev()) {
             text.push_str(&format!(
                 "#{number} {}({}): {}({})\n",
-                parent.unit.file,
+                parent.unit().file,
                 parent.line(),
-                if child
-                    .method
-                    .as_ref()
-                    .is_some_and(|context| context.receiver.is_some())
-                {
+                if child.this().is_some() {
                     child.function().name.replacen("::", "->", 1)
                 } else {
                     child.function().name.clone()

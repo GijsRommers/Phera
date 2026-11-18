@@ -85,6 +85,25 @@ impl Compiler<'_> {
         Ok(dst)
     }
 
+    /// An evaluated string can observe and modify any caller variable.
+    pub(crate) fn compile_eval(
+        &mut self,
+        code: &ast::Expression,
+        line: usize,
+    ) -> Result<Reg, CompileError> {
+        self.function.dynamic_scope = true;
+        let source = self.compile_expression(code)?;
+        let destination = self.allocate_register()?;
+        self.emit(
+            Instruction::Eval {
+                destination,
+                source,
+            },
+            line,
+        );
+        Ok(destination)
+    }
+
     /// Includes need dynamic scope because included code sees local variables.
     pub(crate) fn compile_include(
         &mut self,

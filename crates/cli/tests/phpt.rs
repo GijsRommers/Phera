@@ -32,7 +32,15 @@ const IGNORED_SECTIONS: &[&str] = &[
 ];
 
 /// Sections the runner understands.
-const SUPPORTED_SECTIONS: &[&str] = &["FILE", "EXPECT", "EXPECTF", "ARGS", "SKIPIF", "XFAIL"];
+const SUPPORTED_SECTIONS: &[&str] = &[
+    "FILE",
+    "EXPECT",
+    "EXPECTF",
+    "ARGS",
+    "SKIPIF",
+    "EXTENSIONS",
+    "XFAIL",
+];
 
 enum Outcome {
     Pass,
@@ -130,7 +138,7 @@ fn run_test(binary: &[String], path: &Path) -> Outcome {
         return Outcome::Skip(format!("--{section}-- is not supported"));
     }
 
-    let Some(file) = phpt.section("FILE") else {
+    let Some(file) = phpt.section_bytes("FILE") else {
         return Outcome::Skip("no --FILE-- section".into());
     };
 
@@ -139,19 +147,15 @@ fn run_test(binary: &[String], path: &Path) -> Outcome {
         .map(|a| a.split_whitespace().collect())
         .unwrap_or_default();
 
-    if let Some(skipif) = phpt.section("SKIPIF") {
-        match run_php(binary, path, "skip.php", skipif, &[]) {
-            Ok(run)
-                if run
-                    .stdout
-                    .trim_start()
-                    .to_ascii_lowercase()
-                    .starts_with("skip") =>
-            {
-                return Outcome::Skip(run.stdout.trim().to_string());
-            }
-            Ok(_) => {}
-            Err(error) => return Outcome::Fail(format!("--SKIPIF-- failed: {error}")),
+    let probes = [
+        phpt.section("EXTENSIONS").map(extension_probe),
+        phpt.section("SKIPIF").map(str::to_owned),
+    ];
+    for probe in probes.into_iter().flatten() {
+        match skip_reason(binary, path, &probe) {
+            Ok(Some(reason)) => return Outcome::Skip(reason),
+            Ok(None) => {}
+            Err(error) => return Outcome::Fail(format!("skip check failed: {error}")),
         }
     }
 
@@ -168,13 +172,38 @@ fn run_test(binary: &[String], path: &Path) -> Outcome {
     }
 }
 
-fn check_output(phpt: &Phpt, run: &Run) -> Outcome {
-    let actual = run.stdout.replace("\r\n", "\n");
+/// Runs a script that decides whether the test applies. It says no by
+/// printing a line that starts with "skip", as in php-src's `run-tests.php`.
+fn skip_reason(binary: &[String], test: &Path, code: &str) -> Result<Option<String>, String> {
+    let run = run_php(binary, test, "skip.php", code.as_bytes(), &[])?;
+    let text = String::from_utf8_lossy(&run.stdout);
+    let output = text.trim();
+    let skips = output.to_ascii_lowercase().starts_with("skip");
+    Ok(skips.then(|| output.to_owned()))
+}
 
-    let matched = if let Some(expect) = phpt.section("EXPECT") {
-        expect.replace("\r\n", "\n").trim() == actual.trim()
+/// A skip script for `--EXTENSIONS--`, which lists one extension per line:
+/// the test applies only when the binary has every one of them.
+fn extension_probe(section: &str) -> String {
+    let names: Vec<String> = section
+        .split_whitespace()
+        .map(|name| format!("'{}'", name.replace('\'', "")))
+        .collect();
+    format!(
+        "<?php foreach ([{}] as $extension) {{ if (!extension_loaded($extension)) {{ \
+         die(\"skip the $extension extension is not loaded\"); }} }}",
+        names.join(", ")
+    )
+}
+
+fn check_output(phpt: &Phpt, run: &Run) -> Outcome {
+    let actual = normalize_output(&run.stdout);
+
+    let matched = if let Some(expect) = phpt.section_bytes("EXPECT") {
+        let expected = normalize_output(expect);
+        trim_output(&expected) == trim_output(&actual)
     } else if let Some(pattern) = phpt.section("EXPECTF") {
-        match expectf_matches(pattern, &actual) {
+        match expectf_matches(pattern, &String::from_utf8_lossy(&actual)) {
             Ok(matched) => matched,
             Err(reason) => return Outcome::Skip(reason),
         }
@@ -187,9 +216,12 @@ fn check_output(phpt: &Phpt, run: &Run) -> Outcome {
     }
 
     let expected = phpt
-        .section("EXPECT")
-        .or(phpt.section("EXPECTF"))
+        .section_bytes("EXPECT")
+        .or(phpt.section_bytes("EXPECTF"))
         .unwrap_or_default();
+    let expected = String::from_utf8_lossy(expected);
+    let actual = String::from_utf8_lossy(&actual);
+    let stderr = String::from_utf8_lossy(&run.stderr);
 
     let mut details = format!(
         "expected:\n{}\n\nactual:\n{}",
@@ -197,14 +229,31 @@ fn check_output(phpt: &Phpt, run: &Run) -> Outcome {
         indent(actual.trim())
     );
 
-    if !run.stderr.trim().is_empty() {
-        details.push_str(&format!("\n\nstderr:\n{}", indent(run.stderr.trim())));
+    if !stderr.trim().is_empty() {
+        details.push_str(&format!("\n\nstderr:\n{}", indent(stderr.trim())));
     }
     if let Some(status) = &run.status {
         details.push_str(&format!("\n\nexit status: {status}"));
     }
 
     Outcome::Fail(details)
+}
+
+fn normalize_output(bytes: &[u8]) -> Vec<u8> {
+    let mut normalized = Vec::with_capacity(bytes.len());
+    for (index, &byte) in bytes.iter().enumerate() {
+        if byte != b'\r' || bytes.get(index + 1) != Some(&b'\n') {
+            normalized.push(byte);
+        }
+    }
+    normalized
+}
+
+fn trim_output(bytes: &[u8]) -> &[u8] {
+    match std::str::from_utf8(bytes) {
+        Ok(text) => text.trim().as_bytes(),
+        Err(_) => bytes.trim_ascii(),
+    }
 }
 
 fn indent(text: &str) -> String {
@@ -219,8 +268,8 @@ fn indent(text: &str) -> String {
 }
 
 struct Run {
-    stdout: String,
-    stderr: String,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
     /// Set when the process didn't exit successfully.
     status: Option<String>,
 }
@@ -231,7 +280,7 @@ fn run_php(
     binary: &[String],
     test: &Path,
     extension: &str,
-    code: &str,
+    code: &[u8],
     args: &[&str],
 ) -> Result<Run, String> {
     let source_root = phera_phpt::tests_dir()
@@ -310,13 +359,13 @@ fn shell_quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', r"'\''"))
 }
 
-fn read_in_background(pipe: Option<impl Read + Send + 'static>) -> thread::JoinHandle<String> {
+fn read_in_background(pipe: Option<impl Read + Send + 'static>) -> thread::JoinHandle<Vec<u8>> {
     thread::spawn(move || {
         let mut bytes = Vec::new();
         if let Some(mut pipe) = pipe {
             let _ = pipe.read_to_end(&mut bytes);
         }
-        String::from_utf8_lossy(&bytes).into_owned()
+        bytes
     })
 }
 
@@ -324,7 +373,7 @@ fn read_in_background(pipe: Option<impl Read + Send + 'static>) -> thread::JoinH
 struct TempScript(PathBuf);
 
 impl TempScript {
-    fn new(path: PathBuf, code: &str) -> std::io::Result<Self> {
+    fn new(path: PathBuf, code: &[u8]) -> std::io::Result<Self> {
         fs::write(&path, code)?;
         Ok(Self(path))
     }

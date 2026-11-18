@@ -90,7 +90,7 @@ impl Vm {
                 .classes
                 .get(&method.declaring)
                 .ok_or_else(|| internal_error!("invokable scope"))?;
-            let resolved = crate::classes::method_cache::ResolvedMethod { method, scope };
+            let resolved = crate::classes::method_lookup::ResolvedMethod { method, scope };
             self.prepare_resolved_method(
                 class,
                 Some(object.clone()),
@@ -148,11 +148,24 @@ impl Vm {
         self.take_resolved_callable()
     }
 
-    /// Method preparation snapshots its scope in the existing pending-call representation.
+    /// Take back the call that resolving a method prepared, as a callee.
     pub(crate) fn take_resolved_callable(&mut self) -> Result<Callee, NativeError> {
-        let call = self.call_stack.take_pending()?;
-        self.registers.truncate(call.window.base);
-        Ok(call.callee)
+        self.take_prepared_callee()
+    }
+
+    /// Abandon the innermost prepared call and return its callee: `f(...)`
+    /// makes a closure of it instead of calling it.
+    pub(crate) fn take_prepared_callee(&mut self) -> Result<Callee, NativeError> {
+        let (call, details) = self.call_stack.pop_call()?;
+        let callee = match (call.callee, details.and_then(|details| details.callee)) {
+            (crate::calls::prepared_call::PreparedCallee::Php(function), _) => {
+                self.php_callee(function, &call)
+            }
+            (_, Some(callee)) => Ok(callee),
+            (_, None) => Err(internal_error!("prepared callee")),
+        };
+        self.registers.truncate(call.start());
+        callee
     }
 }
 

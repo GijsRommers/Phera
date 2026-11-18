@@ -144,6 +144,29 @@ objects and references, lazily where possible. Rules that make this safe:
 - Static properties and globals are part of the fork, so no request can see
   another's changes.
 
+### 5.1 Limits on a request
+
+Many requests share a worker thread, and many workers share a process, so a
+request that runs away takes others with it. Hostile-client testing showed
+what is missing (docs/security/http-findings.md, F3, F4, F5, F7). The limits,
+each with a default that a `[server]` section in `phera.toml` or a flag can
+change:
+
+| Limit | Default | Where it is enforced |
+| --- | --- | --- |
+| Running time of a script (`max_execution_time`, `set_time_limit()`) | 30 s under `serve`, none on the command line | at the interpreter's hand-over points (every 65,536 loop rounds or calls), which already exist; the check is one clock read there, and the request ends with PHP's "Maximum execution time of N seconds exceeded" |
+| Whole request, waiting included | 60 s | a timer around the request's task; the client gets 504 |
+| Time to send the request head | 10 s | hyper's header read timeout |
+| Idle time between body chunks, and of a kept-alive connection | 30 s and 5 s | a timer on the body stream and on the connection |
+| Size of a request body (`post_max_size`) | 8 MiB | while reading; 413 beyond it |
+| Open connections per worker | 10,000 | at accept; beyond it connections wait in the listen queue |
+| Memory of one request (`memory_limit`) | 128 MiB | to be decided: see the options weighed in pull request `fix/deep-source-and-class-chains` |
+| Buffered response | 64 KiB, then it streams | output is handed to the connection in chunks once the buffer passes the threshold, and the script waits while the client is slow (so a slow reader costs a suspended task, not memory) |
+
+Errors: under `serve`, an uncaught error answers 500 with a generic body and
+writes the message, file and line to the log; `display_errors=1` shows them in
+the response, as PHP does, and is the default only on the command line.
+
 ## 6. Scope
 
 In: the PHP that Symfony and Laravel and their dependencies run in production.
@@ -173,6 +196,74 @@ drivers. **Later:** openssl, curl, dom and xml, intl, fileinfo, iconv.
 Functions are added on demand, driven by what failing tests and real framework
 boots call, not by walking PHP's function list.
 
+### 6.1 The yardstick: modern PHP 8.5, as one real application uses it
+
+"Everything PHP does" is not the goal. The goal is modern PHP 8.5: what a
+current application and its dependencies use. One reference application
+decides what that means in practice: a Symfony 7.4 application with Doctrine
+ORM 3 and Twig 3, tested with PHPUnit 12 and checked with PHPStan 2, about
+2,700 PHP files of its own and 55,000 in `vendor/` (237 packages).
+
+A scan of those files (PHP's own tokenizer, counting calls to built-in
+functions and uses of built-in classes and syntax) gives the order of work.
+State in November 2026:
+
+| What the reference application uses | Used | Phera has |
+| --- | --- | --- |
+| Built-in functions (distinct) | 898 | 263 |
+| Calls to built-in functions (sites) | 127,869 | 79,811 (62%) |
+| Built-in classes and interfaces (distinct) | 231 | 28 |
+| Uses of built-in classes (sites) | 32,890 | 15,112 (46%) |
+
+What it needs most that Phera lacks, in order of use:
+
+- **Language:** namespaces and `use` (every file), attributes (7,800 uses),
+  `readonly` (5,000), generators (1,450 `yield`, 113 `yield from`), traits
+  (415 declarations), enums (147), `match`, `?->`, first-class callables,
+  asymmetric visibility. `goto` (35 uses) and `eval` (25) occur in
+  dependencies, so they are in scope after all; `${expr}` interpolation
+  does not occur and stays out.
+- **Classes:** `JsonSerializable`, `ArrayAccess`, `Traversable`, `Iterator`,
+  `IteratorAggregate`, `Countable` (engine interfaces); `DateTimeImmutable`
+  and the date classes; `Generator`; the Reflection classes; `Redis`; the SPL
+  containers and iterators; DOM and `XMLWriter`; the Intl formatters;
+  `WeakMap`; `Fiber`.
+- **Functions:** `class_alias`, `assert`, the file system and streams
+  (`file_get_contents`, `fopen`, `is_dir`, ...), `extension_loaded`,
+  `getenv`, `filter_var`, the `mb_*` and `hash*` families, `pack` and
+  `unpack`, `random_bytes`, `serialize`, `parse_url`, `iterator_to_array`,
+  `debug_backtrace`, output buffering, curl and sodium.
+- **Packages:** only the autoload kinds `psr-4`, `classmap`, `files` and
+  `exclude-from-classmap` occur. No package uses PSR-0, `target-dir` or
+  `include-path`.
+
+The scan is repeated when planning; a deprecated feature stays only if the
+scan finds it in use.
+
+### 6.2 Not supported means an error that says so
+
+Deprecated and legacy things are not maintained. What Phera leaves out on
+purpose must fail loudly and name the reason, never behave differently in
+silence:
+
+- **A function or class PHP 8.5 has and Phera leaves out** (for example
+  `strftime()`, deprecated since PHP 8.1): calling it throws
+  `Phera\NotSupportedException` (a `LogicException`) with the message
+  "strftime() is not supported by Phera: deprecated since PHP 8.1".
+  `function_exists()` and `class_exists()` answer false for these, so code
+  that checks first takes its fallback. The list comes from the
+  `#[\Deprecated]` attributes in PHP 8.5's own stub files, not from memory.
+- **Syntax** (backticks, `${expr}` interpolation, the `(real)` cast): a
+  compile error, "... is not supported by Phera", with file and line.
+- **Legacy package layouts** (PSR-0 autoloading, `target-dir`,
+  `include-path`, PEAR-style trees): `phera install` stops and names the
+  package and the field. Nothing is installed half.
+- **`php.ini` settings** outside the honoured set: `ini_set()` returns false,
+  as PHP does for an unknown setting.
+
+Something merely not built yet is different: it keeps PHP's own error
+("Call to undefined function ...") until it exists.
+
 ## 7. Testing
 
 Real PHP is the oracle at every layer.
@@ -184,6 +275,25 @@ Real PHP is the oracle at every layer.
 | Values | Operator and conversion results equal real PHP over a generated matrix |
 | VM and stdlib | `.phpt` tests: php-src's own, plus fixtures in `tests/fixtures/` |
 | Server | HTTP integration tests against a running worker pool |
+
+### 7.1 Taking tests from the PHP source
+
+php-src has about 23,700 `.phpt` tests. `tests/phpt/sweep.sh` runs whole
+directories of them, from the PHP 8.5.12 tag, with real PHP and with Phera,
+and copies every test that passes on both into `tests/upstream/`, where it
+becomes part of `make phpt` and so of every pull request's checks. A test
+that real PHP 8.5.12 does not pass under the runner (it needs a section the
+runner does not implement, or an extension that is not loaded) is never
+taken. The list only grows: a selected test that stops passing is a
+regression.
+
+The same run is a measure of how far the engine is. Result on 17 November
+2026 for `Zend/tests`, `tests`, `ext/standard/tests`, `ext/json/tests`,
+`ext/pcre/tests` and `ext/ctype/tests` (10,488 tests): see the table in
+`tests/upstream/README.md`, which the sweep rewrites. What fails is grouped by
+its first line of output, which names the missing feature; those groups,
+weighed by the usage scan in 6.1, are the worklist. Tests about deprecated
+behaviour are not on it.
 
 ## 8. Milestones
 
@@ -547,6 +657,113 @@ to 1.4 times PHP, tight integer loops at 1.2 to 1.5, arrays and short
 strings at or near PHP. Beyond that only a JIT helps, and only for numeric
 loops.
 
+### 10.7 Item 1, calls: state after the first pass
+
+Done on the branch `engine/calls` (pull request #9):
+
+- A frame is `{ function, base, ip, destination, flags }`, 16 bytes in a
+  `Vec`. What only some frames need (dynamic names, `foreach` state,
+  argument facts, a closure, a class context) is in a side table by depth.
+- One flat code table per request; functions, methods, closures and
+  class initializers refer to code by `FunctionIndex`.
+- One `match` executes an instruction. The interpreter loop borrows the
+  code table, the call stack and the registers, and handles itself: simple
+  instructions, `CallDirect`, plain returns (also of methods, closures and
+  constructors), `InitMethodCall`, `InitStaticCall`, by-value `Send`s and
+  `Call` when the case is the plain one.
+- `CallDirect` replaces `InitCall`/`Send`/`Call` for calls to a file's own
+  top-level functions (compiler pass `passes/direct_calls.rs`).
+- Each class has a method table keyed by interned name. The per-site
+  method cache and the static-site caches are deleted.
+
+Measured on 17 November 2026 after merging `main` into the branch, in
+instructions retired and cycles, each net of start-up (an empty script),
+minimum of five runs, against `php -n` (load average 14 to 20, so cycles
+are rough):
+
+| script | start of the work | head before the merge | after the merge |
+| --- | --- | --- | --- |
+| fib | 8.0x (10.1x cycles) | 3.0x (3.1x) | 3.0x (3.0x) |
+| hierarchy | 5.9x (7.0x) | 3.9x (4.6x) | 3.9x (4.5x) |
+| methods | 7.0x (7.8x) | 5.7x (6.2x) | 5.7x (6.2x) |
+| objects | 7.2x (10.9x) | 6.3x (9.0x) | 6.1x (8.3x) |
+| closures | 7.4x (7.7x) | 7.2x (7.7x) | 7.1x (7.5x) |
+| exceptions | 7.1x (8.1x) | 5.4x (5.8x) | 5.4x (5.5x) |
+| calls | 13.5x (16.6x) | 12.3x (14.7x) | 12.6x (14.8x) |
+
+No script is more than 2 percent worse than at the start in instructions
+(typed-objects +1.0%, object-sort +1.2%, function-objects +1.6%); the
+array scripts gained 4 to 10 percent from main's array storage.
+
+Not reached: methods, hierarchy and objects at 3x and closures at 4x.
+What remains in a method call is the general call record (an 88-byte
+callee with two reference-counted signature parts and a 176-byte pending
+call, built and dropped per call), the method context's three reference
+counts (receiver, scope, called class as `Rc<Class>` rather than
+indexes), `$this` kept in the side table rather than in register 0, and
+about 35 machine instructions per simple bytecode instruction. Property
+access in `objects` still leaves the loop (objects as slots, item 3).
+
+### 10.8 Item 1, calls: the second pass
+
+Done on the branch `engine/calls-2` (pull request #20):
+
+- A call being prepared is a `PreparedCall`: which callee, where its
+  window starts, how many arguments were sent and counted, its kind and a
+  few flags. A call to PHP code (function, method, constructor, closure)
+  carries nothing else; parameter names, by-reference flags, types and
+  where a surplus argument goes are read from the callee's bytecode when
+  the general path needs them. Only native callees and named arguments
+  use a side entry (`CallDetails`).
+- A call's kind says what its window holds below the first parameter:
+  `$this` for a method, the closure object and its bound `$this` for a
+  closure, whose captured values follow the parameters. Classes are
+  numbered (`ClassIndex`) and the code table records each method's
+  declaring class, so the class scope and the called class are derived:
+  scope from the method (or the closure's binding), called class from
+  `$this`, stored only for a static call whose called class is not the
+  scope. A method call touches one reference count, the receiver's.
+- In the loop: `new` (template allocation and the constructor), closure
+  calls, `$this`, by-value and by-reference sends, defaults
+  (`ReceiveDefault`, `LoadConst`, `CheckType`) and the call count of a call
+  with defaults, kept in the frame's flags.
+
+Measured on 17 November 2026 in instructions retired net of start-up
+(cycles beside, minimum of five runs, load average 9 to 14), against
+`php -n`:
+
+| script | head of `engine/calls` | now | target |
+| --- | --- | --- | --- |
+| methods | 5.65x (6.6x) | 5.12x (5.1x) | 3x |
+| hierarchy | 3.87x (4.6x) | 3.37x (3.7x) | 3x |
+| closures | 6.94x (8.8x) | 6.43x (8.0x) | 4x |
+| objects | 6.10x (9.1x) | 5.60x (8.4x) | 4.5x |
+| fib | 2.98x (3.3x) | 3.09x (3.6x) | 2.5x |
+| calls | 12.37x (16.0x) | 10.80x (14.2x) | 8x |
+
+No target is reached, and `fib` is 3.7 percent worse in instructions than
+at the head of `engine/calls` (the limit was 3). Every other script is
+within 1 percent or better.
+
+Why, from a line-level profile of `$x = $o->m()` in a loop (1,151 machine
+instructions per round against PHP's 212): about 40 percent is the
+simple-instruction loop (`scalar_step`; the compiler emits two to three
+times PHP's instructions per statement, and each costs about 46 machine
+instructions against PHP's 25 to 30), the rest is spread over preparing
+the window, the frame push and pop, emptying the callee's registers and
+the visibility checks, with no single hot spot. The code generated for the
+loop is sensitive to layout: moving rarely used steps out of line, or
+restructuring the method preparation, changed scripts that never run that
+code by 5 to 10 percent in either direction. In `objects`, property access
+(which still leaves the loop until objects are slots) is 2,918 of 6,458
+machine instructions per round; without it the script would be about
+3.9x.
+
+What remains, in order of expected gain: the destination-driven compiler
+(10.6 item 4) for fewer instructions per statement; objects as slots (item
+3) for `objects` and `calls`; native calls in the loop (item 2) for
+`closures`, whose `array_map` part calls back from native code.
+
 ## 11. Tools built into the runtime
 
 Two tools that PHP projects today get from separate packages written in PHP
@@ -712,9 +929,104 @@ that a project can use either tool.
   reason for each difference. Timings are measured cold and warm against
   Composer.
 
+Legacy layouts are not installed (6.2): a package that declares PSR-0
+autoloading, `target-dir` or `include-path` stops the install with an error
+naming the package and the field.
+
 The runtime side: when a script runs under Phera, autoloading reads the same
 metadata natively instead of executing the generated PHP autoloader, which
 needs namespaces and autoloading in the engine (11.3, item 3).
+
+### 11.6 Phera views: a native template renderer
+
+Frameworks return HTML through a template layer: plain `.php` views in
+CodeIgniter, Blade in Laravel, Twig in Symfony. Blade and Twig are compilers
+written in PHP that turn templates into PHP classes; they escape for HTML
+text by default and leave every other context (an attribute, a URL, a script
+block) to the author. A runtime can do this job itself, and do three things
+better: choose the escaping from where the value lands, forbid side effects
+in a view, and write the page without building strings.
+
+Working name: a view is a file ending in `.phview`.
+
+```php
+<?php /** @var list<Product> $products */ ?>
+<ul class="<?= $listClass ?>">
+<?php foreach ($products as $product): ?>
+  <li><a href="/p/<?= $product->slug ?>"><?= $product->name ?></a></li>
+<?php endforeach ?>
+</ul>
+<script>const count = <?= count($products) ?>;</script>
+```
+
+- **The syntax is PHP's own template syntax** (`<?= ?>`, `foreach:` /
+  `endforeach`), so nothing new has to be learned and the existing parser
+  reads it. What differs is what the compiler does with it.
+- **Escaping by context, decided at compile time.** The compiler runs an HTML
+  tokenizer over the literal text, so it knows that the first `<?= ?>` above
+  is inside a quoted attribute, the second inside a URL path, the third in
+  text and the fourth inside a script. Each gets the escaper for its place
+  (the model of Go's `html/template`). A value in a place that cannot be
+  escaped safely (an unquoted attribute, a tag name, an event-handler
+  attribute) is a compile error. Output that must not be escaped has to be a
+  `Phera\View\Html` value, which only a view or an explicit
+  `Phera\View\trusted()` call produces, so every bypass is greppable.
+- **A view cannot do anything but render.** It reads the variables it was
+  given, calls pure built-ins (string, array, number and date formatting) and
+  helpers the application registered, includes other views and fills slots of
+  a layout. Assignments to anything but its own locals, `include` of code,
+  database, file and network functions, `eval` and superglobals are compile
+  errors. This is checked on the syntax tree, so it costs nothing at run time,
+  and it makes a view safe to hand to a designer.
+- **No string building.** A view compiles to the same bytecode as any
+  function. Its literal text is static bytes that are written to the response
+  as they are; values are escaped straight into the output buffer. The page
+  is streamed, so the browser has the `<head>` while the body is still being
+  produced. Compiled views are shared by all workers, like any compiled file.
+- **From PHP:** `Phera\View\render('products/list', ['products' => $p])`
+  writes to the response; `Phera\View\capture(...)` returns the `Html`
+  value. A Twig or Blade application keeps working without it: those engines
+  are PHP code and run as such.
+- **`phera check` reads views too**: the `@var` line declares what a view
+  expects, and a controller passing the wrong shape is a finding.
+
+Order: the engine comes first (6.1). The parts that do not depend on it, the
+HTML context tokenizer and the escapers, can be built and tested before that.
+
+### 11.7 Files and streams
+
+The largest family of functions still missing: `file_get_contents`,
+`file_exists`, `fopen` and its relatives are called 4,000 times in the
+reference application's code and packages, and 600 php-src tests that real
+PHP passes stop at them.
+
+- **One stream type.** A stream is a Rust object behind a PHP resource:
+  `file://` (plain files), `php://memory` and `php://temp`, `php://stdin`,
+  `stdout`, `stderr`, `php://input` and `php://output`, `data:`. `http://` and
+  `https://` come with the HTTP client; user wrappers
+  (`stream_wrapper_register`) after that. Everything else in PHP's wrapper
+  list is left out (6.2).
+- **What may wait runs off the worker thread.** A worker thread serves many
+  requests, so a call that can take long must not hold it: reading or writing
+  more than 64 KiB, directory scans, `flock` that has to wait, pipes, terminals
+  and sockets go through Tokio's file and blocking facilities, and the script
+  is suspended meanwhile.
+- **What cannot wait stays on the thread.** `file_exists`, `is_file`, `stat`,
+  `filemtime`, `realpath` and small reads of local files answer in about a
+  microsecond; a hop to another thread and back costs twenty times that, and
+  an autoloader makes thousands of these calls per request. They run where
+  they are called, as in PHP. A setting sends them through the pool as well,
+  for projects on network file systems.
+- **No stat cache.** PHP caches the last `stat` result and has
+  `clearstatcache()`; frameworks call it defensively. Phera asks the
+  operating system every time, and `clearstatcache()` does nothing.
+- **Per request.** Open streams belong to the request and are closed when it
+  ends. The working directory (`chdir`, `getcwd`) and `umask` are per request
+  too, kept as values and applied to each path, because the process's own are
+  shared by every request.
+- **Confinement.** Under `serve`, an optional list of directories outside
+  which no file function reads or writes (PHP's `open_basedir`, checked on the
+  resolved path).
 
 ## 12. What to take from Hack and HHVM, and what not
 

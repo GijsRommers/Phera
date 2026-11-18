@@ -44,7 +44,9 @@ impl Vm {
         method: Reg,
         binding: ClassBinding,
     ) -> Result<(), NativeError> {
-        self.prepare_static_site(class, method, binding)
+        let class = self.class_target(class)?;
+        let method = self.method_name(method)?;
+        self.prepare_static_style(&class, &method, binding)
     }
 
     /// Resolve lookup scope separately from the late-bound scope saved on the pending call.
@@ -57,30 +59,21 @@ impl Vm {
         let class = self
             .classes
             .get(name)
-            .ok_or_else(|| NativeError::error(format!("Class \"{name}\" not found")))?;
-        let context = self
-            .current()
-            .and_then(|frame| frame.method.as_ref())
-            .cloned();
+            .ok_or_else(|| Self::class_miss(name, "Class"))?;
+        let context = self.current().and_then(|frame| frame.method());
         let receiver = context
             .as_ref()
             .and_then(|context| context.receiver.clone())
             .filter(|object| {
                 self.classes
                     .for_object(object)
-                    .is_some_and(|receiver_class| receiver_class.is_a(name))
+                    .is_some_and(|receiver_class| self.class_matches(&receiver_class, name))
             });
         self.prepare_method(class, receiver, method, Invocation::Method)?;
         if binding == ClassBinding::Forward
             && let Some(context) = context
         {
-            let pending = self.call_stack.pending_mut()?;
-            if let crate::calls::call_state::CallTarget::Method {
-                context: target, ..
-            } = &mut pending.callee.target
-            {
-                target.called = context.called.clone();
-            }
+            self.forward_callback_class(context.called.clone())?;
         }
         Ok(())
     }
@@ -99,7 +92,7 @@ impl Vm {
             Value::Object(object) => self
                 .classes
                 .for_object(&object)
-                .is_some_and(|class| class.is_a(&name)),
+                .is_some_and(|class| self.class_matches(&class, &name)),
             _ => false,
         };
         self.set(destination, Value::Bool(matches));

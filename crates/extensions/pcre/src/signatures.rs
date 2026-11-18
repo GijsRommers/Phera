@@ -1,4 +1,5 @@
-//! Signatures preserve references: `preg_match('/a/', 'a', $matches)` writes `$matches`.
+//! The parameters of each `preg_*` function, which the VM checks and
+//! converts before the call. `$matches` and `$count` are by reference.
 
 use crate::{callbacks, errors, grep, matching, quote, replace, split};
 use phera_extension_api::{FunctionEntry, Param, ParamType, Registry};
@@ -11,6 +12,7 @@ pub(crate) fn register(registry: &mut Registry) {
         Param::new("flags", ParamType::Int).optional(),
         Param::new("offset", ParamType::Int).optional(),
     ];
+
     const REPLACE: &[Param] = &[
         Param::new("pattern", ParamType::ArrayOrString),
         Param::new("replacement", ParamType::ArrayOrString),
@@ -18,6 +20,7 @@ pub(crate) fn register(registry: &mut Registry) {
         Param::new("limit", ParamType::Int).optional(),
         Param::new("count", ParamType::Mixed).by_ref().optional(),
     ];
+
     const CALLBACK: &[Param] = &[
         Param::new("pattern", ParamType::ArrayOrString),
         Param::new("callback", ParamType::Callable),
@@ -26,6 +29,7 @@ pub(crate) fn register(registry: &mut Registry) {
         Param::new("count", ParamType::Mixed).by_ref().optional(),
         Param::new("flags", ParamType::Int).optional(),
     ];
+
     const CALLBACK_ARRAY: &[Param] = &[
         Param::new("pattern", ParamType::Array),
         Param::new("subject", ParamType::ArrayOrString),
@@ -33,18 +37,21 @@ pub(crate) fn register(registry: &mut Registry) {
         Param::new("count", ParamType::Mixed).by_ref().optional(),
         Param::new("flags", ParamType::Int).optional(),
     ];
+
     const SPLIT: &[Param] = &[
         Param::new("pattern", ParamType::String),
         Param::new("subject", ParamType::String),
         Param::new("limit", ParamType::Int).optional(),
         Param::new("flags", ParamType::Int).optional(),
     ];
+
     const QUOTE: &[Param] = &[
         Param::new("str", ParamType::String),
         Param::new("delimiter", ParamType::String)
             .nullable()
             .optional(),
     ];
+
     const GREP: &[Param] = &[
         Param::new("pattern", ParamType::String),
         Param::new("array", ParamType::Array),

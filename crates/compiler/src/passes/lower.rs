@@ -16,6 +16,8 @@ use crate::ir;
 #[derive(Default)]
 pub(crate) struct Tables {
     unit: CompiledUnit,
+    /// The file's top-level functions, which calls reach with `CallDirect`.
+    callees: crate::passes::direct_calls::DirectCallees,
 }
 
 impl Tables {
@@ -238,14 +240,46 @@ impl Tables {
                         }),
                     _ => false,
                 });
+        let areas =
+            crate::passes::direct_calls::rewrite(&mut function, &self.unit.symbols, &self.callees);
         crate::passes::optimize::optimize(&mut function);
+        if let Some(areas) = areas
+            && crate::passes::direct_calls::write_arguments_in_place(&mut function, areas)
+        {
+            // Removes the moves that became `Nop`.
+            crate::passes::optimize::optimize(&mut function);
+        }
         function
     }
 }
 
+/// The functions a file declares at its top level, which exist before any of
+/// its code runs, with what a direct call to them needs to know.
+fn direct_callees(source: &ir::CompiledUnit) -> crate::passes::direct_calls::DirectCallees {
+    source
+        .hoisted
+        .iter()
+        .filter_map(|&index| {
+            let function = source.functions.get(index)?;
+            let callee = crate::passes::direct_calls::DirectCallee {
+                function: FunctionId(index as u32),
+                parameters: function.parameters.len(),
+                needs_general_call: function
+                    .parameters
+                    .iter()
+                    .any(|parameter| parameter.variadic || parameter.by_reference),
+            };
+            Some((function.name.to_ascii_lowercase(), callee))
+        })
+        .collect()
+}
+
 /// Intern all file tables once compilation has completed.
 pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
-    let mut tables = Tables::default();
+    let mut tables = Tables {
+        callees: direct_callees(&source),
+        ..Tables::default()
+    };
     tables.unit.file = source.file;
     tables.unit.declaration_warnings = source.declaration_warnings;
     tables.unit.main = tables.function(source.main);
@@ -263,6 +297,7 @@ pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
         .classes
         .into_iter()
         .map(|declaration| phera_bytecode::ClassDeclaration {
+            line: declaration.line,
             name: declaration.name,
             parent: declaration
                 .parent

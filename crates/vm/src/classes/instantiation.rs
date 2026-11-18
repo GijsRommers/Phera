@@ -12,10 +12,10 @@ impl Vm {
     pub(crate) fn class_symbol(&self, symbol: SymbolId) -> Result<String, NativeError> {
         let name = self
             .current()
-            .and_then(|frame| frame.unit.symbols.get(symbol.index()))
+            .and_then(|frame| frame.unit().symbols.get(symbol.index()))
             .map(|symbol| symbol.written.clone())
             .ok_or_else(|| internal_error!("class symbol"))?;
-        let context = self.current().and_then(|frame| frame.method.as_ref());
+        let context = self.current().and_then(|frame| frame.method());
         match name.as_str() {
             "self" | "static" => {
                 let context = context.ok_or_else(|| {
@@ -30,7 +30,7 @@ impl Vm {
                 })
             }
             "parent" => context
-                .and_then(|context| context.scope.parent.as_ref())
+                .and_then(|context| context.scope.parent.clone())
                 .map(|parent| parent.name.clone())
                 .ok_or_else(|| {
                     NativeError::error(
@@ -41,6 +41,24 @@ impl Vm {
         }
     }
 
+    /// Remember which class a named class symbol of the running file means.
+    /// Relative names (`self`, `parent`, `static`) depend on the frame and
+    /// are never linked. A declared class cannot go away, so the link holds
+    /// for the rest of the request.
+    pub(crate) fn link_class_symbol(&self, symbol: SymbolId, class: &Rc<super::Class>) {
+        let Some(frame) = self.current() else {
+            return;
+        };
+        let relative = frame
+            .unit()
+            .symbols
+            .get(symbol.index())
+            .is_none_or(|symbol| matches!(symbol.written.as_str(), "self" | "parent" | "static"));
+        if !relative && let Some(slot) = frame.cache().classes.get(symbol.index()) {
+            *slot.borrow_mut() = Some(class.clone());
+        }
+    }
+
     /// Literal class cache is keyed by unit/symbol, filled after successful lookup.
     /// Relative keywords bypass it. Linked classes cannot be replaced in a request,
     /// and the unit/class owners keep identities alive until request teardown.
@@ -48,7 +66,7 @@ impl Vm {
     pub(crate) fn new_object(&mut self, symbol: SymbolId) -> Result<(), NativeError> {
         let frame = self.current().ok_or_else(|| internal_error!("new site"))?;
         let written = &frame
-            .unit
+            .unit()
             .symbols
             .get(symbol.index())
             .ok_or_else(|| internal_error!("new symbol"))?
@@ -58,7 +76,7 @@ impl Vm {
             return self.new_named_object(&name);
         }
         let cached = frame
-            .cache
+            .cache()
             .classes
             .get(symbol.index())
             .and_then(|slot| slot.borrow().clone());
@@ -68,10 +86,10 @@ impl Vm {
             let class = self
                 .classes
                 .get(written)
-                .ok_or_else(|| NativeError::error(format!("Class \"{written}\" not found")))?;
+                .ok_or_else(|| Self::class_miss(written, "Class"))?;
             if let Some(slot) = self
                 .current()
-                .and_then(|frame| frame.cache.classes.get(symbol.index()))
+                .and_then(|frame| frame.cache().classes.get(symbol.index()))
             {
                 *slot.borrow_mut() = Some(class.clone());
             }
@@ -85,7 +103,7 @@ impl Vm {
         let class = self
             .classes
             .get(name)
-            .ok_or_else(|| NativeError::error(format!("Class \"{name}\" not found")))?;
+            .ok_or_else(|| Self::class_miss(name, "Class"))?;
         self.new_linked_object(class)
     }
 
@@ -127,8 +145,19 @@ impl Vm {
         if class.is_throwable {
             self.initialize_throwable(&object, crate::exceptions::TraceOrigin::Construction);
         }
-        if class.constructor.is_none() {
-            return self.prepare_constructed_object(&class, object);
+        let Some(constructor) = class.constructor.clone() else {
+            self.prepare_constructed_object(object);
+            return Ok(());
+        };
+        if constructor.visibility == phera_bytecode::Visibility::Public
+            && let Some(scope) = super::method_lookup::declaring_class(&class, &constructor)
+        {
+            let resolved = super::method_lookup::ResolvedMethod {
+                method: constructor,
+                scope,
+            };
+            let invocation = super::Invocation::Constructor;
+            return self.prepare_resolved_method(class, Some(object), resolved, invocation);
         }
         self.prepare_method(
             class,
@@ -186,7 +215,7 @@ impl Vm {
             Value::Object(object) => self
                 .classes
                 .get(object.class.name())
-                .is_some_and(|class| class.is_a(&name)),
+                .is_some_and(|class| self.class_matches(&class, &name)),
             _ => false,
         };
         self.set(destination, Value::Bool(matches));
@@ -197,8 +226,7 @@ impl Vm {
     pub(crate) fn fetch_this(&mut self, destination: Reg) -> Result<(), NativeError> {
         let receiver = self
             .current()
-            .and_then(|frame| frame.method.as_ref())
-            .and_then(|context| context.receiver.clone())
+            .and_then(|frame| frame.this().cloned())
             .ok_or_else(|| NativeError::error("Using $this when not in object context"))?;
         self.set(destination, Value::Object(receiver));
         Ok(())
@@ -212,19 +240,18 @@ impl Vm {
             .current()
             .ok_or_else(|| internal_error!("class name frame"))?;
         let name = &frame
-            .unit
+            .unit()
             .symbols
             .get(symbol.index())
             .ok_or_else(|| internal_error!("class name symbol"))?
             .written;
-        let context = frame.method.as_ref();
         let class = match name.as_str() {
-            "self" => context.map(|context| &context.scope),
-            "static" => context.map(|context| &context.called),
-            "parent" => context.and_then(|context| context.scope.parent.as_ref()),
+            "self" => frame.scope().cloned(),
+            "static" => frame.called(),
+            "parent" => frame.scope().and_then(|scope| scope.parent.clone()),
             _ => {
                 return frame
-                    .cache
+                    .cache()
                     .class_names
                     .get(symbol.index())
                     .cloned()

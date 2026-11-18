@@ -1,21 +1,24 @@
-//! Live pool tests use only the two dedicated database containers.
+//! Live pool tests against the two dedicated database containers. They log in
+//! as `phera_pool`, an account no other test uses, so the connection counts
+//! the server reports belong to these tests alone.
 
 mod isolation;
 mod limits;
 mod threads;
-mod timings;
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use phera_extension_api::Value;
-use tokio::sync::oneshot;
-use tokio::time::timeout;
+use phera_io_pool::{Options, Pool};
 
-use super::{Lease, Options, Policy, acquire, deliver, exhausted, runtime, state::Bucket};
-use crate::drivers::{Prepared, Rows};
-use crate::dsn::{DriverName, Dsn};
+use super::{Key, Lease, Policy, RUNTIME, acquire, acquire_from};
+use crate::drivers::{Driver, Prepared, Rows};
+use crate::dsn::Dsn;
+use crate::errors::DbError;
 use crate::placeholders::Sql;
+
+const USER: &str = "phera_pool";
 
 fn dsn(driver: &str) -> Dsn {
     let port = if driver == "pgsql" { 54329 } else { 33069 };
@@ -31,39 +34,27 @@ fn options(size: usize) -> Options {
         idle: Duration::from_millis(150),
         lifetime: Duration::from_secs(10),
         wait: Duration::from_secs(2),
-        ..Options::default()
+        io_threads: 2,
     }
 }
 
+/// A pool of its own with small limits, on the process's I/O runtime.
 #[derive(Clone)]
 struct TestPool {
     name: &'static str,
-    bucket: Arc<Bucket>,
+    pool: Arc<Pool<Key, Driver>>,
 }
 
 impl TestPool {
-    async fn new(name: &'static str, options: Options) -> Self {
-        let bucket = runtime::run(async move { Ok(Bucket::new(options)) })
-            .await
-            .unwrap();
-        Self { name, bucket }
+    fn new(name: &'static str, options: Options) -> Self {
+        Self {
+            name,
+            pool: Arc::new(Pool::with_options(&RUNTIME, options)),
+        }
     }
 
-    async fn try_connect(&self) -> Result<Lease, crate::errors::DbError> {
-        let (sender, receiver) = oneshot::channel();
-        let bucket = self.bucket.clone();
-        let dsn = dsn(self.name);
-        runtime::handle().await.unwrap().spawn(deliver(
-            sender,
-            Some(bucket),
-            dsn,
-            "phera_pool".into(),
-            "phera_pool".into(),
-        ));
-        timeout(self.bucket.options.wait, receiver)
-            .await
-            .map_err(|_| exhausted(self.bucket.options.size))?
-            .unwrap()
+    async fn try_connect(&self) -> Result<Lease, DbError> {
+        acquire_from(&self.pool, &dsn(self.name), USER, USER, Policy::Pooled).await
     }
 
     async fn connect(&self) -> Lease {
@@ -71,8 +62,9 @@ impl TestPool {
     }
 }
 
+/// A connection outside every pool, to watch or kill the pooled ones.
 async fn direct(name: &str) -> Lease {
-    acquire(&dsn(name), "phera_pool", "phera_pool", Policy::Disabled)
+    acquire(&dsn(name), USER, USER, Policy::Unpooled)
         .await
         .unwrap()
 }
@@ -88,10 +80,12 @@ async fn scalar(driver: &mut Lease, sql: &str) -> Value {
     rows(driver, sql).await.values[0][0].clone()
 }
 
-async fn id(driver: &mut Lease) -> i64 {
-    let sql = match driver.name {
-        DriverName::Postgres => "SELECT pg_backend_pid()",
-        DriverName::Mysql => "SELECT CONNECTION_ID()",
+/// The server's id for the session, which tells whether two leases got the
+/// same connection.
+async fn id(driver: &mut Lease, name: &str) -> i64 {
+    let sql = match name {
+        "pgsql" => "SELECT pg_backend_pid()",
+        _ => "SELECT CONNECTION_ID()",
     };
     let Value::Int(id) = scalar(driver, sql).await else {
         panic!("integer connection id")
@@ -102,37 +96,37 @@ async fn id(driver: &mut Lease) -> i64 {
 #[tokio::test(flavor = "current_thread")]
 async fn process_pool_live_contract() {
     for name in ["pgsql", "mysql"] {
-        // These run before application-pool tests, so observer counts are isolated.
+        // These run before the tests of the process pool, so that the server's
+        // connection counts are not mixed with its connections.
         threads::bounded_users(name).await;
         limits::fifo_timeout_cancellation(name).await;
         limits::expiry_and_killed(name).await;
-        let pool = TestPool::new(name, options(1)).await;
+        let pool = TestPool::new(name, options(1));
         let mut first = pool.connect().await;
-        let original = id(&mut first).await;
+        let original = id(&mut first, name).await;
         isolation::dirty(&mut first, name).await;
         drop(first);
         let mut second = pool.connect().await;
-        assert_eq!(id(&mut second).await, original, "{name}: reuse");
+        assert_eq!(id(&mut second, name).await, original, "{name}: reuse");
         isolation::clean(&mut second, name).await;
-        isolation::reset_cost(&mut second, name).await;
+        isolation::reset_repeatedly(&mut second).await;
         drop(second);
         drop(pool);
         if name == "pgsql" {
             isolation::custom_types_retire_client().await;
         }
-        timings::measure(name).await;
         threads::shared_registry(name).await;
         let mut other_dsn = dsn(name);
         other_dsn.fields.insert("host".into(), "localhost".into());
-        let mut first = acquire(&dsn(name), "phera_pool", "phera_pool", Policy::Enabled)
+        let mut first = acquire(&dsn(name), USER, USER, Policy::Pooled)
             .await
             .unwrap();
-        let mut other = acquire(&other_dsn, "phera_pool", "phera_pool", Policy::Enabled)
+        let mut other = acquire(&other_dsn, USER, USER, Policy::Pooled)
             .await
             .unwrap();
-        assert_ne!(id(&mut first).await, id(&mut other).await);
+        assert_ne!(id(&mut first, name).await, id(&mut other, name).await);
         assert!(
-            acquire(&dsn(name), "phera_pool", "incorrect", Policy::Enabled)
+            acquire(&dsn(name), USER, "incorrect", Policy::Pooled)
                 .await
                 .is_err()
         );

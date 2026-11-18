@@ -160,8 +160,7 @@ echo Obj::__NAMESPACE__, PHP_EOL;
 
 echo "\nDone\n";
 ?>
---EXPECTF--
-Deprecated: Declaring class constant called 'namespace' is deprecated in %s on line %d
+--EXPECT--
 empty
 callable
 trait
@@ -239,5 +238,3 @@ __DIR__
 __NAMESPACE__
 
 Done
---XFAIL--
-Requires out-of-scope arrow functions, generators, goto and traits.

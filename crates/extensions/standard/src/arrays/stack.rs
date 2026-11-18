@@ -1,109 +1,111 @@
-//! By-reference stack, queue, and splice operations with copy-on-write arrays.
+//! Changing an array in place: `array_push`, `array_pop`, `array_shift`,
+//! `array_unshift` and `array_splice`.
 
-use std::rc::Rc;
-
+use phera_extension_api::value::to_array;
 use phera_extension_api::{
-    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, PhpArray, Registry, Value,
-    args,
+    Context, FunctionEntry, NativeResult, Param, ParamType, PhpArray, Value, args,
 };
 
-const ARRAY_ONE_PARAMS: &[Param] = &[Param::new("array", ParamType::Array).by_ref()];
+use super::{IntegerKeys, append_entry, change_array_argument};
+use crate::offsets::clamped_range;
 
-const ARRAY_PUSH_PARAMS: &[Param] = &[
-    Param::new("array", ParamType::Array).by_ref(),
-    Param::new("values", ParamType::Mixed).variadic(),
+pub(super) const FUNCTIONS: &[FunctionEntry] = &[
+    ARRAY_PUSH,
+    ARRAY_POP,
+    ARRAY_SHIFT,
+    ARRAY_UNSHIFT,
+    ARRAY_SPLICE,
 ];
 
-const ARRAY_SPLICE_PARAMS: &[Param] = &[
-    Param::new("array", ParamType::Array).by_ref(),
-    Param::new("offset", ParamType::Int),
-    Param::new("length", ParamType::Int).nullable().optional(),
-    Param::new("replacement", ParamType::Mixed).optional(),
-];
-
-pub(crate) fn register(registry: &mut Registry) {
-    for (name, params, body) in [
-        (
-            "array_push",
-            ARRAY_PUSH_PARAMS,
-            array_push as phera_extension_api::SyncFn,
-        ),
-        ("array_pop", ARRAY_ONE_PARAMS, array_pop),
-        ("array_shift", ARRAY_ONE_PARAMS, array_shift),
-        ("array_unshift", ARRAY_PUSH_PARAMS, array_unshift),
-        ("array_splice", ARRAY_SPLICE_PARAMS, array_splice),
-    ] {
-        registry.function(FunctionEntry::sync(name, params, body));
-    }
-}
-
-/// Reference cells may be borrowed already; report an Error instead of panicking.
-pub(super) fn mutate(
-    arguments: &[Value],
-    operation: impl FnOnce(&mut PhpArray) -> NativeResult,
-) -> NativeResult {
-    mutate_with_errors(
-        arguments,
-        operation,
-        [
-            "Expected array reference",
-            "Array is already being modified",
-            "Expected array",
-        ],
-    )
-}
-
-/// Borrow conflicts become PHP errors; callers retain their own diagnostic wording.
-pub(super) fn mutate_with_errors(
-    arguments: &[Value],
-    operation: impl FnOnce(&mut PhpArray) -> NativeResult,
-    [missing_reference, borrowed, wrong_type]: [&str; 3],
-) -> NativeResult {
-    let cell =
-        args::reference(arguments, 0).ok_or_else(|| NativeError::error(missing_reference))?;
-    let mut value = cell
-        .try_borrow_mut()
-        .map_err(|_| NativeError::error(borrowed))?;
-    let Value::Array(array) = &mut *value else {
-        return Err(NativeError::error(wrong_type));
-    };
-    operation(Rc::make_mut(array))
-}
+/// `array_push(array &$array, mixed ...$values): int`, the new length.
+///
+/// ```php
+/// $a = [1];
+/// array_push($a, 2, 3); // 3, and $a is [1, 2, 3]
+/// ```
+const ARRAY_PUSH: FunctionEntry = FunctionEntry::sync(
+    "array_push",
+    &[
+        Param::new("array", ParamType::Array).by_ref(),
+        Param::new("values", ParamType::Mixed).variadic(),
+    ],
+    array_push,
+);
 
 fn array_push(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    mutate(arguments, |array| {
-        for value in arguments.iter().skip(1) {
+    change_array_argument(arguments, |array| {
+        for value in &arguments[1..] {
             array.push(value.clone())?;
         }
         Ok(Value::Int(array.len() as i64))
     })
 }
 
-/// Popping resets the internal cursor and returns the dereferenced removed value.
+/// `array_pop(array &$array): mixed`, the last value removed, or null; the
+/// pointer goes back to the start.
+///
+/// ```php
+/// $a = [1, 2];
+/// array_pop($a); // 2, and $a is [1]
+/// ```
+const ARRAY_POP: FunctionEntry = FunctionEntry::sync(
+    "array_pop",
+    &[Param::new("array", ParamType::Array).by_ref()],
+    array_pop,
+);
+
 fn array_pop(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    mutate(arguments, |array| {
-        let result = array.pop().unwrap_or(Value::Null);
+    let last = change_array_argument(arguments, |array| {
+        let last = array.pop().unwrap_or(Value::Null);
         array.reset();
-        Ok(result.deref().clone())
-    })
+        Ok(last)
+    })?;
+    // A removed self-reference points to the array after the removal.
+    Ok(last.try_deref()?.clone())
 }
 
-/// Shifting renumbers integer keys and returns null for an empty array.
+/// `array_shift(array &$array): mixed`, the first value removed, or null;
+/// integer keys are numbered again from 0.
+///
+/// ```php
+/// $a = [5 => "a", 9 => "b"];
+/// array_shift($a); // "a", and $a is [0 => "b"]
+/// ```
+const ARRAY_SHIFT: FunctionEntry = FunctionEntry::sync(
+    "array_shift",
+    &[Param::new("array", ParamType::Array).by_ref()],
+    array_shift,
+);
+
 fn array_shift(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    mutate(arguments, |array| {
-        Ok(array.shift().unwrap_or(Value::Null).deref().clone())
-    })
+    let first = change_array_argument(arguments, |array| Ok(array.shift().unwrap_or(Value::Null)))?;
+    Ok(first.try_deref()?.clone())
 }
 
-/// Prepended values get new positions while existing string keys retain their identity.
+/// `array_unshift(array &$array, mixed ...$values): int`, the values put in
+/// front; integer keys are numbered again, string keys stay.
+///
+/// ```php
+/// $a = ["x" => 1, 5 => 2];
+/// array_unshift($a, 0); // 3, and $a is [0 => 0, "x" => 1, 1 => 2]
+/// ```
+const ARRAY_UNSHIFT: FunctionEntry = FunctionEntry::sync(
+    "array_unshift",
+    &[
+        Param::new("array", ParamType::Array).by_ref(),
+        Param::new("values", ParamType::Mixed).variadic(),
+    ],
+    array_unshift,
+);
+
 fn array_unshift(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    mutate(arguments, |array| {
+    change_array_argument(arguments, |array| {
         let mut result = PhpArray::new();
-        for value in arguments.iter().skip(1) {
+        for value in &arguments[1..] {
             result.push(value.clone())?;
         }
         for (key, value) in array.iter() {
-            super::slice::insert(&mut result, &key, value, super::Keys::Renumber)?;
+            append_entry(&mut result, key, value, IntegerKeys::Renumber)?;
         }
         result.reset();
         *array = result;
@@ -111,47 +113,52 @@ fn array_unshift(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     })
 }
 
-/// Splice retains string keys of survivors and removed entries, but drops replacement keys.
+/// `array_splice(array &$array, int $offset, ?int $length = null, mixed
+/// $replacement = []): array`, the entries that `$offset` and `$length`
+/// select (as in `array_slice`) replaced and returned.
+///
+/// Integer keys are numbered again, in the array and in the result; the
+/// replacement's keys are dropped; a replacement that is no array is
+/// one value.
+///
+/// ```php
+/// $a = ["a", "b", "c", "d"];
+/// array_splice($a, 1, 2, "X"); // ["b", "c"], and $a is ["a", "X", "d"]
+/// ```
+const ARRAY_SPLICE: FunctionEntry = FunctionEntry::sync(
+    "array_splice",
+    &[
+        Param::new("array", ParamType::Array).by_ref(),
+        Param::new("offset", ParamType::Int),
+        Param::new("length", ParamType::Int).nullable().optional(),
+        Param::new("replacement", ParamType::Mixed).optional(),
+    ],
+    array_splice,
+);
+
 fn array_splice(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let replacement =
-        phera_extension_api::value::to_array(args::value(arguments, 3), context.diagnostics());
-    mutate(arguments, |array| {
+    let replacement = to_array(args::value(arguments, 3), context.diagnostics());
+    change_array_argument(arguments, |array| {
         let offset = args::int(arguments, 1).unwrap_or_default();
-        let start = if offset < 0 {
-            array.len().saturating_sub(offset.unsigned_abs() as usize)
-        } else {
-            (offset as usize).min(array.len())
-        };
-        let end = match args::int(arguments, 2) {
-            None => array.len(),
-            Some(length) if length < 0 => array
-                .len()
-                .saturating_sub(length.unsigned_abs() as usize)
-                .max(start),
-            Some(length) => start.saturating_add(length as usize).min(array.len()),
-        };
+        let removed_range = clamped_range(array.len(), offset, args::int(arguments, 2));
         let mut removed = PhpArray::new();
-        let mut result = PhpArray::new();
-        for (key, value) in array.iter().take(start) {
-            super::slice::insert(&mut result, &key, value, super::Keys::Renumber)?;
+        let mut kept = PhpArray::new();
+        for (key, value) in array.iter().take(removed_range.start) {
+            append_entry(&mut kept, key, value, IntegerKeys::Renumber)?;
         }
         for value in replacement.values() {
-            result.push(value.clone())?;
+            kept.push(value.clone())?;
         }
-        for (index, (key, value)) in array.iter().enumerate().skip(start) {
-            super::slice::insert(
-                if index < end {
-                    &mut removed
-                } else {
-                    &mut result
-                },
-                &key,
-                value,
-                super::Keys::Renumber,
-            )?;
+        for (index, (key, value)) in array.iter().enumerate().skip(removed_range.start) {
+            let target = if index < removed_range.end {
+                &mut removed
+            } else {
+                &mut kept
+            };
+            append_entry(target, key, value, IntegerKeys::Renumber)?;
         }
-        result.reset();
-        *array = result;
+        kept.reset();
+        *array = kept;
         Ok(Value::from(removed))
     })
 }

@@ -1,0 +1,19 @@
+[package]
+name = "phera-ext-filter"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+fluent-uri.workspace = true
+pcre2.workspace = true
+url.workspace = true
+phera-extension-api.workspace = true
+phera-ext-pcre.workspace = true
+
+[dev-dependencies]
+phera-runtime.workspace = true
+
+[lints]
+workspace = true

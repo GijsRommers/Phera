@@ -2,12 +2,17 @@
 
 use phera_extension_api::{Extension, Registry};
 
+mod arguments;
 mod arrays;
 mod constants;
+pub mod environment;
 mod math;
 mod natural;
+mod offsets;
+mod path_metadata;
 mod strings;
 mod time;
+mod version_compare;
 
 pub struct Standard;
 
@@ -17,24 +22,21 @@ impl Extension for Standard {
     }
 
     fn register(&self, registry: &mut Registry) {
+        registry.function(version_compare::ENTRY);
+        for entry in path_metadata::FUNCTIONS {
+            registry.function(*entry);
+        }
         strings::register(registry);
         math::register(registry);
         arrays::register(registry);
-        natural::register(registry);
         constants::register(registry);
-        time::register(registry);
+        for entry in natural::FUNCTIONS.iter().chain(time::FUNCTIONS) {
+            registry.function(*entry);
+        }
+        environment::register(registry);
     }
 }
 
 /// Exposes PHP comparison traversal for adversarial comparator regression tests.
 #[doc(hidden)]
-pub use arrays::sort_order::order as php_sort_order;
-
-/// PHP argument errors name boolean literals rather than the general bool type.
-pub(crate) fn argument_type_name(value: &phera_extension_api::Value) -> String {
-    match value {
-        phera_extension_api::Value::Bool(false) => "false".into(),
-        phera_extension_api::Value::Bool(true) => "true".into(),
-        _ => value.type_name(),
-    }
-}
+pub use arrays::zend_sort::order as php_sort_order;

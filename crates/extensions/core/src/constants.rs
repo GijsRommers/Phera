@@ -2,10 +2,6 @@
 
 use phera_extension_api::Registry;
 
-/// The PHP version Phera reports. Code checks this to decide which language
-/// features it may use.
-const VERSION: (i64, i64, i64) = (8, 5, 0);
-
 const OS: &str = if cfg!(target_os = "macos") {
     "Darwin"
 } else if cfg!(target_os = "windows") {
@@ -47,8 +43,13 @@ const ERROR_LEVELS: &[(&str, i64)] = &[
 ];
 
 pub(crate) fn register(registry: &mut Registry) {
-    let (major, minor, release) = VERSION;
-    registry.constant("PHP_VERSION", "8.5.0");
+    let mut version = phera_extension_api::PHP_VERSION
+        .split('.')
+        .map(|part| part.parse::<i64>().unwrap_or_default());
+    let major = version.next().unwrap_or_default();
+    let minor = version.next().unwrap_or_default();
+    let release = version.next().unwrap_or_default();
+    registry.constant("PHP_VERSION", phera_extension_api::PHP_VERSION);
     registry.constant("PHP_MAJOR_VERSION", major);
     registry.constant("PHP_MINOR_VERSION", minor);
     registry.constant("PHP_RELEASE_VERSION", release);
