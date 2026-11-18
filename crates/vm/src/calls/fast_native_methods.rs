@@ -20,6 +20,7 @@ use crate::classes::{Method, MethodBody, MethodContext};
 
 impl Machine<'_> {
     /// Retain the ordinary call details for named, missing or unhandled arguments.
+    #[inline(never)]
     pub(super) fn prepare_direct_method(
         &mut self,
         position: Position,
@@ -50,6 +51,7 @@ impl Machine<'_> {
         Step::Done(position.ip)
     }
 
+    #[inline(never)]
     pub(super) fn finish_direct_method(
         &mut self,
         position: Position,

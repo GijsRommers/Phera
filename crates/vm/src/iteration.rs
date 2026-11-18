@@ -279,6 +279,7 @@ pub(crate) fn snapshot_step(
     true
 }
 
+#[inline(never)]
 pub(crate) fn native_step(
     state: &mut frame::IteratorState,
     key: Option<Reg>,
