@@ -1,0 +1,24 @@
+# Security fuzzing tools for the Phera engine. Deliberately outside the main
+# workspace (see the empty [workspace] table) so it never becomes a workspace
+# member and never inherits the workspace's `unsafe_code = "forbid"` lint --
+# though this crate is safe Rust only anyway.
+[workspace]
+
+[package]
+name = "phera-security-fuzz"
+version = "0.1.0"
+edition = "2021"
+description = "Defensive security fuzzing harness for the Phera PHP runtime: mutation fuzzer, structure-aware generator and hostile-argument campaigns."
+license = "MIT OR Apache-2.0"
+
+[[bin]]
+name = "phera-fuzz"
+path = "src/main.rs"
+
+[profile.release]
+panic = "abort"
+
+[dependencies]
+phera-parser = { path = "../../crates/parser" }
+phera-lexer = { path = "../../crates/lexer" }
+phera-compiler = { path = "../../crates/compiler" }
