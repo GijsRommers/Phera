@@ -139,18 +139,14 @@ fn array_diff_assoc(context: &mut dyn Context, arguments: &[Value]) -> NativeRes
 /// ```php
 /// array_intersect(["a" => 1, "b" => 2], [2, 3]); // ["b" => 2]
 /// ```
-const ARRAY_INTERSECT: FunctionEntry = FunctionEntry::sync(
+const ARRAY_INTERSECT: FunctionEntry = FunctionEntry::asynchronous(
     "array_intersect",
     &[
         Param::new("array", ParamType::Array),
         Param::new("arrays", ParamType::Array).variadic(),
     ],
-    array_intersect,
+    super::callback_sets::intersect_strings,
 );
-
-fn array_intersect(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    keep_entries(context, arguments, Keep::InAll, Match::Value)
-}
 
 /// `array_intersect_key(array $array, array ...$arrays): array`, the
 /// entries whose key is in every other array.
@@ -195,7 +191,6 @@ enum Keep {
 #[derive(Clone, Copy)]
 enum Match {
     Key,
-    Value,
     KeyAndValue,
 }
 
@@ -237,14 +232,6 @@ fn contains(
             Some(other_value) => equal_strings(context, other_value),
             None => Ok(false),
         },
-        Match::Value => {
-            for other_value in other.values() {
-                if equal_strings(context, other_value)? {
-                    return Ok(true);
-                }
-            }
-            Ok(false)
-        }
     }
 }
 

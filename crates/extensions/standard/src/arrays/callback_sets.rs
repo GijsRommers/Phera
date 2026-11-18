@@ -330,7 +330,28 @@ fn array_intersect_uassoc(
     Box::pin(run(context, arguments, variant))
 }
 
+pub(super) fn intersect_strings(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    let variant = Variant {
+        function: "array_intersect",
+        result: SetResult::Intersection,
+        values: Values::Strings,
+        keys: Keys::Ignored,
+    };
+    Box::pin(async move {
+        run_set(context, &arguments, variant)
+            .await
+            .map_err(|error| context.native_call_error(variant.function, &arguments, error))
+    })
+}
+
 async fn run(context: &mut dyn Context, arguments: Vec<Value>, variant: Variant) -> NativeResult {
+    run_set(context, &arguments, variant).await
+}
+
+async fn run_set(context: &mut dyn Context, arguments: &[Value], variant: Variant) -> NativeResult {
     let name = variant.function;
     let user_data = variant.values == Values::Callback;
     let user_keys = variant.keys == Keys::Callback;
