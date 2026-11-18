@@ -9,12 +9,14 @@ pub fn dispatch<'a>(
     this: Option<Rc<Object>>,
     arguments: Vec<Value>,
 ) -> LocalFuture<'a, NativeResult> {
+    if let Some(result) = local(name, context, this.as_ref(), &arguments) {
+        return Box::pin(std::future::ready(result));
+    }
     Box::pin(async move {
         let object = this.ok_or_else(|| exception("Redis object is missing"))?;
         let session = session(&object);
         let a = &arguments;
         match name {
-            "__construct" => return crate::constructor::construct(context, &session, a),
             "connect" | "open" | "pconnect" | "popen" => {
                 return crate::connection::connect(name, &session, a).await;
             }
@@ -30,13 +32,6 @@ pub fn dispatch<'a>(
                 }
                 return Ok(Value::Null);
             }
-            "close" => {
-                let connected = session.lease.borrow().is_some();
-                session.lease.borrow_mut().take();
-                session.batch.borrow_mut().take();
-                return Ok(Value::Bool(connected));
-            }
-            "isconnected" => return Ok(Value::Bool(session.lease.borrow().is_some())),
             "gethost" | "getport" | "getpersistentid" | "gettimeout" => {
                 session.ensure().await?;
                 let endpoint = session.endpoint.borrow();
@@ -68,44 +63,6 @@ pub fn dispatch<'a>(
                 session.ensure().await?;
                 return Ok(Value::Int(session.database.get()));
             }
-            "getauth" => return Ok(session.auth.borrow().clone()),
-            "getreadtimeout" => return Ok(Value::Float(session.options.borrow().read_timeout)),
-            "getlasterror" => {
-                return Ok(session
-                    .error
-                    .borrow()
-                    .as_ref()
-                    .map_or(Value::Null, |s| Value::from(s.clone())));
-            }
-            "clearlasterror" => {
-                session.error.borrow_mut().take();
-                return Ok(Value::Bool(true));
-            }
-            "setoption" => {
-                return crate::options::set(
-                    context,
-                    &session,
-                    number(a.first(), 0.0) as i64,
-                    &a[1],
-                );
-            }
-            "getoption" => return crate::options::get(&session, number(a.first(), 0.0) as i64),
-            "getmode" => {
-                return Ok(Value::Int(
-                    session
-                        .batch
-                        .borrow()
-                        .as_ref()
-                        .map_or(0, |b| if b.transaction { 1 } else { 2 }),
-                ));
-            }
-            "_prefix" => {
-                let mut bytes = session.options.borrow().prefix.clone();
-                if let Value::String(value) = &a[0] {
-                    bytes.extend_from_slice(value.as_bytes());
-                }
-                return Ok(Value::from(bytes));
-            }
             "_serialize" | "_pack" => {
                 let options = session.options.borrow().clone();
                 return Ok(Value::from(
@@ -123,7 +80,6 @@ pub fn dispatch<'a>(
                     .await;
                 }
             }
-            "_compress" | "_uncompress" => return Ok(a[0].clone()),
             "auth" | "select" => {
                 let value = if name == "auth" {
                     let Some(value) = crate::auth::credentials(context, &a[0], "auth")? else {
@@ -214,4 +170,59 @@ pub fn dispatch<'a>(
         }
         crate::reply::convert(context, &options, &plan.shape, reply).await
     })
+}
+
+/// The methods that only read or change the object's own state. They answer
+/// at once, without allocating the much larger future of a command; `None`
+/// for every other method.
+fn local(
+    name: &str,
+    context: &mut dyn Context,
+    this: Option<&Rc<Object>>,
+    a: &[Value],
+) -> Option<NativeResult> {
+    let Some(object) = this else {
+        return Some(Err(exception("Redis object is missing")));
+    };
+    let session = session(object);
+    let result = match name {
+        "__construct" => crate::constructor::construct(context, &session, a),
+        "close" => {
+            let connected = session.lease.borrow().is_some();
+            session.lease.borrow_mut().take();
+            session.batch.borrow_mut().take();
+            Ok(Value::Bool(connected))
+        }
+        "isconnected" => Ok(Value::Bool(session.lease.borrow().is_some())),
+        "getauth" => Ok(session.auth.borrow().clone()),
+        "getreadtimeout" => Ok(Value::Float(session.options.borrow().read_timeout)),
+        "getlasterror" => Ok(session
+            .error
+            .borrow()
+            .as_ref()
+            .map_or(Value::Null, |error| Value::from(error.clone()))),
+        "clearlasterror" => {
+            session.error.borrow_mut().take();
+            Ok(Value::Bool(true))
+        }
+        "setoption" => crate::options::set(context, &session, number(a.first(), 0.0) as i64, &a[1]),
+        "getoption" => crate::options::get(&session, number(a.first(), 0.0) as i64),
+        "getmode" => Ok(Value::Int(
+            session
+                .batch
+                .borrow()
+                .as_ref()
+                .map_or(0, |batch| if batch.transaction { 1 } else { 2 }),
+        )),
+        "_prefix" => {
+            let mut bytes = session.options.borrow().prefix.clone();
+            if let Value::String(value) = &a[0] {
+                bytes.extend_from_slice(value.as_bytes());
+            }
+            Ok(Value::from(bytes))
+        }
+        "_compress" | "_uncompress" => Ok(a[0].clone()),
+        _ => return None,
+    };
+    Some(result)
 }
