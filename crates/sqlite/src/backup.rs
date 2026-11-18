@@ -9,7 +9,10 @@ struct Snapshot(Option<tempfile::NamedTempFile>);
 impl Snapshot {
     /// `None` only once `Drop` has taken the file away.
     fn path(&self) -> Result<&std::path::Path, Error> {
-        self.0.as_ref().map(|file| file.path()).ok_or_else(Error::closed)
+        self.0
+            .as_ref()
+            .map(|file| file.path())
+            .ok_or_else(Error::closed)
     }
 }
 
