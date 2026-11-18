@@ -21,13 +21,17 @@ mod access_mode;
 mod array_map;
 mod array_slots;
 mod arrays;
+mod autoload;
 mod callable_classes;
 mod callable_introspection;
 mod callables;
 mod callback_errors;
 mod calls;
+mod class_alias;
 mod class_constants;
+mod class_function;
 mod class_intrinsics;
+mod class_listings;
 mod class_types;
 mod classes;
 mod closure_binding;
@@ -45,6 +49,7 @@ mod constants;
 mod context;
 mod control_flow;
 mod declaration_diagnostics;
+mod default_autoload;
 mod diagnostic_reporter;
 mod diagnostics;
 mod dispatch;
@@ -54,6 +59,7 @@ mod error_handlers;
 mod error_traces;
 mod error_values;
 mod errors;
+mod eval;
 mod exception_rendering;
 #[cfg(test)]
 mod exception_tests;
@@ -64,6 +70,7 @@ mod extract;
 mod fast;
 mod finally;
 mod function_facts;
+mod function_introspection;
 mod function_table;
 mod global_instructions;
 mod global_paths;
@@ -101,6 +108,7 @@ mod property_targets;
 mod reference_holders;
 mod references;
 mod scope_intrinsics;
+mod spl_autoload;
 mod static_variables;
 mod string_offsets;
 mod trigger_errors;
@@ -166,6 +174,8 @@ pub struct Vm {
     /// What extensions remember during this request (response headers, ...).
     state: RequestState,
     property_references: std::rc::Rc<std::cell::RefCell<reference_holders::ReferenceHolders>>,
+    autoload: autoload::Autoloaders,
+    include_path: Option<String>,
 }
 
 impl Vm {
@@ -178,6 +188,8 @@ impl Vm {
         Self {
             enum_cases: classes::enums::EnumCases::default(),
             classes: classes::ClassTable::native(&registry),
+            autoload: Default::default(),
+            include_path: None,
             property_references: Default::default(),
             closure_captures: Vec::new(),
             initializer_scope: None,

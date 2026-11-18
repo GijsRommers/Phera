@@ -24,6 +24,21 @@ pub enum ClassKind {
     Enum,
 }
 
+impl ClassKind {
+    pub fn is_class(self) -> bool {
+        matches!(self, Self::Class | Self::Anonymous | Self::Enum)
+    }
+
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::Class | Self::Anonymous => "Class",
+            Self::Interface => "Interface",
+            Self::Enum => "Enum",
+            Self::Trait => "Trait",
+        }
+    }
+}
+
 /// `enum Status: int` and `enum Status: string` use different lookup keys.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EnumBacking {
@@ -70,6 +85,7 @@ pub enum Initializer {
 /// One source declaration, before parents or interfaces are resolved.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClassDeclaration {
+    pub line: u32,
     pub name: String,
     pub parent: Option<SymbolId>,
     pub interfaces: Vec<SymbolId>,

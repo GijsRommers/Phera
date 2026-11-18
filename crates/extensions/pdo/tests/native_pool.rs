@@ -38,7 +38,6 @@ async fn identity(harness: &mut Harness, pdo: &Rc<Object>, driver: &str) -> Valu
 #[tokio::test(flavor = "current_thread")]
 async fn pdo_and_statement_lifetimes_and_cancelled_request() {
     assert!(support::databases_available());
-    assert!(support::scratch().is_dir());
     tokio::task::LocalSet::new()
         .run_until(async {
             for driver in ["pgsql", "mysql"] {

@@ -1,6 +1,9 @@
 //! Native extensions use Context; callbacks are bounded independently of PHP frames.
 
-use phera_extension_api::{Context, LocalFuture, NativeResult, RequestState};
+use phera_extension_api::{
+    CompileDiagnostic, CompileDiagnosticKind, CompileDiagnosticSite, Context, LocalFuture,
+    NativeResult, RequestState,
+};
 use phera_value::{Diagnostics, Value};
 
 use crate::Vm;
@@ -26,6 +29,40 @@ impl Context for Vm {
 
     fn diagnostics(&mut self) -> &mut dyn Diagnostics {
         self
+    }
+
+    fn compile_diagnostic(
+        &mut self,
+        diagnostic: &CompileDiagnostic,
+        site: CompileDiagnosticSite<'_>,
+    ) {
+        let caller = self.location();
+        let location = match site {
+            CompileDiagnosticSite::Caller => caller.clone(),
+            CompileDiagnosticSite::Source(file) => crate::diagnostics::SourceLocation {
+                file: file.to_owned(),
+                line: diagnostic.line,
+            },
+        };
+        let level = diagnostic.kind.error_level();
+        let calls_handler =
+            diagnostic.kind == CompileDiagnosticKind::Deprecated && self.handles_diagnostic(level);
+        let event = crate::error_handlers::DiagnosticEvent {
+            level,
+            kind: diagnostic.kind.label().into(),
+            message: diagnostic.message.clone(),
+            location,
+            native: self.error_handlers.native_site.clone(),
+            trace_location: Some(caller),
+        };
+        // Compile warnings bypass the PHP handler. If an earlier deprecation
+        // queued a callback, publish later warnings only if that callback returns.
+        if calls_handler || (!self.error_handlers.active && !self.error_handlers.pending.is_empty())
+        {
+            self.error_handlers.pending.push(event);
+        } else {
+            self.report_event(&event);
+        }
     }
 
     /// Native decoders construct linked objects without running PHP constructors.
@@ -88,10 +125,11 @@ impl Context for Vm {
         callable: &'a Value,
         arguments: Vec<Value>,
     ) -> LocalFuture<'a, NativeResult> {
-        match self.resolve_callable(callable) {
-            Ok(callee) => self.invoke_resolved_callable(callee, arguments),
-            Err(error) => Box::pin(std::future::ready(Err(error))),
-        }
+        Box::pin(async move {
+            self.autoload_callable(callable).await?;
+            let callee = self.resolve_callable(callable)?;
+            self.invoke_resolved_callable(callee, arguments).await
+        })
     }
 }
 

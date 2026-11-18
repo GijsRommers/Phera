@@ -80,6 +80,7 @@ impl<'ast> Compiler<'ast> {
             file: self.file.into(),
             line,
             parse: false,
+            scanner_diagnostics: Vec::new(),
         }
     }
 

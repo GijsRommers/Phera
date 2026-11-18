@@ -50,6 +50,12 @@ impl Vm {
         mut arguments: Vec<Value>,
         origin: crate::calls::callback_binding::ArgumentOrigin,
     ) -> NativeResult {
+        // Asked here, not inside the call: without a registered loader a
+        // native call must not even build the future that would look.
+        if !self.autoload.callbacks.is_empty() {
+            self.autoload_native_parameters(entry.params, &arguments)
+                .await?;
+        }
         let previous = std::mem::replace(&mut self.argument_origin, origin);
         let prepared = self.prepare_call_with_trace(entry.name, entry.params, &mut arguments);
         self.argument_origin = previous;
@@ -104,16 +110,10 @@ impl Vm {
         arguments.reserve(call.sent as usize);
         for index in 0..call.sent as usize {
             let value = self.registers.window_mut(slots.slot(index), 1)[0].take();
-            let value = if index == 1
-                && value.is_none()
-                && matches!(
-                    callee.target,
-                    CallTarget::Intrinsic(crate::intrinsics::Intrinsic::IsCallable)
-                ) {
-                Value::Bool(false)
-            } else {
-                value.unwrap_or_default()
-            };
+            let value = value.unwrap_or_else(|| match callee.target {
+                CallTarget::Intrinsic(intrinsic) => intrinsic.named_default(index),
+                _ => Value::Null,
+            });
             arguments.push(value);
         }
         self.registers.truncate(slots.base);
@@ -122,6 +122,8 @@ impl Vm {
         match &callee.target {
             CallTarget::Native(entry) => self.native_entry_origin(*entry, arguments, origin).await,
             CallTarget::Intrinsic(intrinsic) => {
+                // Boxed: an intrinsic such as `eval` runs code, and its future
+                // must not make the future of every ordinary native call larger.
                 Box::pin(self.intrinsic_origin(*intrinsic, arguments, origin)).await
             }
             CallTarget::Method { method, context } => {
@@ -165,12 +167,43 @@ impl Vm {
                 .await
             }
             MethodBody::Native(entry) => {
-                self.with_argument_origin(origin, |vm| {
-                    vm.prepare_native_method_arguments(method, entry.params, &mut arguments)
-                })?;
+                if !self.autoload.callbacks.is_empty() {
+                    self.autoload_native_parameters(entry.params, &arguments)
+                        .await?;
+                }
+                let preparation =
+                    self.with_argument_origin(origin, |vm| match entry.preparation {
+                        Some(prepare) => prepare(vm, entry.params, &mut arguments),
+                        None => Ok(phera_extension_api::MethodPreparation::Default),
+                    })?;
+                if matches!(preparation, phera_extension_api::MethodPreparation::Default) {
+                    self.with_argument_origin(origin, |vm| {
+                        vm.prepare_native_method_arguments(method, entry.params, &mut arguments)
+                    })?;
+                }
+                if let phera_extension_api::MethodPreparation::Return(value) = preparation {
+                    self.call_stack.recycle_native_arguments(arguments);
+                    return Ok(value);
+                }
                 match entry.handler {
                     phera_extension_api::NativeMethod::Sync(handler) => {
+                        let track =
+                            self.error_handlers.error.is_some() && !self.error_handlers.active;
+                        let previous = if track {
+                            let operator = if method.is_static { "::" } else { "->" };
+                            self.error_handlers.native_site.replace(
+                                crate::error_traces::NativeTrace::new(
+                                    &format!("{}{operator}{}", method.declaring, method.name),
+                                    &arguments,
+                                ),
+                            )
+                        } else {
+                            None
+                        };
                         let result = handler(self, context.receiver.as_ref(), &arguments);
+                        if track {
+                            self.error_handlers.native_site = previous;
+                        }
                         self.call_stack.recycle_native_arguments(arguments);
                         result
                     }

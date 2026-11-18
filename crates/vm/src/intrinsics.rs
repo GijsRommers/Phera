@@ -11,12 +11,12 @@ pub(crate) enum Intrinsic {
     Basename,
     /// Linked class introspection needs VM metadata.
     Class(crate::class_intrinsics::ClassFunction),
-    /// Visibility-aware instance properties.
-    GetObjectVars,
-    /// Visibility-aware default instance and static properties.
-    GetClassVars,
-    /// Declaration and dynamic-property existence, independent of visibility.
-    PropertyExists,
+    /// SPL loaders belong to the current request.
+    SplAutoload(crate::spl_autoload::SplAutoload),
+    /// Runtime extension and function listings.
+    Runtime(crate::function_introspection::RuntimeFunction),
+    GetIncludePath,
+    SetIncludePath,
     /// PHP `is_callable()` runtime service.
     IsCallable,
     /// PHP `call_user_func()` runtime service.
@@ -70,9 +70,6 @@ impl Intrinsic {
             }
             "array_map" => Self::ArrayMap,
             "basename" => Self::Basename,
-            "get_object_vars" => Self::GetObjectVars,
-            "get_class_vars" => Self::GetClassVars,
-            "property_exists" => Self::PropertyExists,
             "is_callable" => Self::IsCallable,
             "call_user_func" => Self::CallUserFunc,
             "call_user_func_array" => Self::CallUserFuncArray,
@@ -89,9 +86,19 @@ impl Intrinsic {
             "error_reporting" => Self::ErrorReporting,
             "ini_set" => Self::IniSet,
             "ini_get" => Self::IniGet,
-            _ => Self::Class(crate::class_intrinsics::ClassFunction::resolve(
-                &name.to_ascii_lowercase(),
-            )?),
+            "get_include_path" => Self::GetIncludePath,
+            "set_include_path" => Self::SetIncludePath,
+            name => {
+                if let Some(function) = crate::class_intrinsics::ClassFunction::resolve(name) {
+                    Self::Class(function)
+                } else if let Some(function) = crate::spl_autoload::SplAutoload::resolve(name) {
+                    Self::SplAutoload(function)
+                } else {
+                    Self::Runtime(crate::function_introspection::RuntimeFunction::resolve(
+                        name,
+                    )?)
+                }
+            }
         })
     }
 }
@@ -111,7 +118,81 @@ impl Intrinsic {
             Self::CallUserFuncArray => &["callback", "args"],
             Self::ArrayMap => &["callback", "array", "arrays"],
             Self::Basename => &["path", "suffix"],
+            Self::FunctionExists => &["function"],
+            Self::Defined => &["constant_name"],
+            Self::Constant => &["name"],
+            Self::SetIncludePath => &["include_path"],
+            Self::IniGet => &["option"],
+            Self::IniSet => &["option", "value"],
             _ => &[],
+        }
+    }
+}
+
+impl Intrinsic {
+    pub(crate) fn parameters(self) -> Option<&'static [phera_extension_api::Param]> {
+        match self {
+            Self::Class(function) => Some(function.parameters()),
+            Self::SplAutoload(function) => Some(function.parameters()),
+            Self::Runtime(function) => Some(function.parameters()),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn names() -> impl Iterator<Item = &'static str> {
+        [
+            "array_map",
+            "basename",
+            "is_callable",
+            "call_user_func",
+            "call_user_func_array",
+            "get_defined_vars",
+            "compact",
+            "extract",
+            "define",
+            "defined",
+            "constant",
+            "function_exists",
+            "func_num_args",
+            "func_get_args",
+            "func_get_arg",
+            "error_reporting",
+            "ini_set",
+            "ini_get",
+            "get_include_path",
+            "set_include_path",
+            "set_error_handler",
+            "restore_error_handler",
+            "set_exception_handler",
+            "restore_exception_handler",
+            "trigger_error",
+            "user_error",
+        ]
+        .into_iter()
+        .chain(
+            crate::class_intrinsics::ClassFunction::ALL
+                .iter()
+                .map(|function| function.name()),
+        )
+        .chain(
+            crate::spl_autoload::SplAutoload::ALL
+                .iter()
+                .map(|function| function.name()),
+        )
+        .chain(
+            crate::function_introspection::RuntimeFunction::ALL
+                .iter()
+                .map(|function| function.name()),
+        )
+    }
+
+    /// Named argument gaps differ from an explicitly passed null.
+    pub(crate) fn named_default(self, position: usize) -> phera_value::Value {
+        use phera_value::Value;
+        match (self, position) {
+            (Self::IsCallable, 1) => Value::Bool(false),
+            (Self::SplAutoload(crate::spl_autoload::SplAutoload::Register), 1) => Value::Bool(true),
+            _ => Value::Null,
         }
     }
 }

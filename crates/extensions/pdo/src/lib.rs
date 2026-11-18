@@ -25,7 +25,7 @@ pub struct Pdo;
 
 impl Extension for Pdo {
     fn name(&self) -> &'static str {
-        "pdo"
+        "PDO"
     }
     fn register(&self, registry: &mut Registry) {
         registration::register(registry);

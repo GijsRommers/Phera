@@ -10,151 +10,170 @@
 //! * [`float_repr`] uses the shortest round-tripping digits
 //!   (`serialize_precision` = -1; var_dump, var_export, json_encode).
 
+use std::fmt;
+use std::io::{Cursor, Write};
+
+/// A decimal number fits in 32 bytes: at most 17 significant digits,
+/// a decimal point, a sign, and a four-character signed exponent after E.
+#[derive(Default)]
+pub(crate) struct NumberText {
+    bytes: [u8; 32],
+    len: usize,
+}
+
+impl NumberText {
+    fn formatted(arguments: fmt::Arguments<'_>) -> Self {
+        let mut text = Self::default();
+        let mut cursor = Cursor::new(text.bytes.as_mut_slice());
+        cursor.write_fmt(arguments).expect("decimal text fits");
+        text.len = cursor.position() as usize;
+        text
+    }
+
+    pub(crate) fn integer(value: i64) -> Self {
+        Self::formatted(format_args!("{value}"))
+    }
+
+    pub(crate) fn as_bytes(&self) -> &[u8] {
+        &self.bytes[..self.len]
+    }
+
+    fn as_str(&self) -> &str {
+        std::str::from_utf8(self.as_bytes()).expect("decimal text is ASCII")
+    }
+
+    fn push(&mut self, byte: u8) {
+        self.extend(&[byte]);
+    }
+
+    fn extend(&mut self, bytes: &[u8]) {
+        let end = self.len + bytes.len();
+        self.bytes[self.len..end].copy_from_slice(bytes);
+        self.len = end;
+    }
+}
+
 /// Decimal digits and point position, as `zend_dtoa` would report them:
-/// the value is `0.digits * 10^decpt` (with the first digit non-zero), i.e.
-/// `decpt` is one plus the 10-exponent.
+/// the value is `0.digits * 10^decpt` (with the first digit non-zero).
 struct Digits {
-    digits: Vec<u8>,
+    bytes: [u8; 17],
+    len: usize,
     decpt: i32,
     negative: bool,
 }
 
-/// Shortest round-tripping digits (dtoa mode 0). Rust's LowerExp is a
-/// shortest round-trip form too, but where two same-length candidates
-/// round-trip (a decimal tie, e.g. 1000000000000000.25) Rust and David
-/// Gay's dtoa can pick different ones, so grow the digit count until the
-/// *ties-even rounded* form reads back to the same double.
-fn shortest_digits(v: f64) -> Digits {
-    let neg = v.is_sign_negative();
-    for k in 1..=17u32 {
-        let nd = (k - 1) as usize;
-        let s = format!("{:.nd$e}", v.abs());
-        // s is like "3.0000000000000004e-1"
-        let (mantissa, exp) = s.split_once('e').unwrap();
-        let exp: i32 = exp.parse().unwrap();
-        let digits: Vec<u8> = mantissa.bytes().filter(|b| *b != b'.').collect();
-        let d = Digits {
-            digits,
-            decpt: exp + 1,
-            negative: neg,
-        };
-        // Round-trip check via the fully formatted string.
-        let text = gcvt_layout(&d, 17);
-        if text.parse::<f64>() == Ok(v) {
-            return d;
+/// Rust's exact LowerExp formatting rounds as zend_dtoa does.
+fn scientific_digits(value: f64, count: usize) -> Digits {
+    let places = count - 1;
+    let text = NumberText::formatted(format_args!("{:.places$e}", value.abs()));
+    let (mantissa, exponent) = text.as_str().split_once('e').expect("scientific notation");
+    let mut digits = Digits {
+        bytes: [0; 17],
+        len: count,
+        decpt: exponent.parse::<i32>().expect("decimal exponent") + 1,
+        negative: value.is_sign_negative(),
+    };
+    for (index, digit) in mantissa.bytes().filter(|&byte| byte != b'.').enumerate() {
+        digits.bytes[index] = digit;
+    }
+    digits
+}
+
+/// Shortest round-tripping digits (dtoa mode 0). At a decimal tie, Rust
+/// and David Gay's dtoa can pick different shortest forms, so grow the
+/// digit count until the ties-even rounded form reads back to the input.
+fn shortest_digits(value: f64) -> Digits {
+    for count in 1..17 {
+        let digits = scientific_digits(value, count);
+        if gcvt_layout(&digits, 17).as_str().parse::<f64>() == Ok(value) {
+            return digits;
         }
     }
-    unreachable!("17 digits always round-trip for finite doubles");
+    scientific_digits(value, 17)
 }
 
-/// Digits rounded to `ndigit` significant digits with trailing zeros
-/// stripped (dtoa mode 2). Rust's exact LowerExp formatting is correctly
-/// rounded, like `zend_dtoa`.
-fn rounded_digits(v: f64, ndigit: u32) -> Digits {
-    let neg = v.is_sign_negative();
-    let s = format!("{:.*e}", ndigit as usize - 1, v.abs());
-    let (mantissa, exp) = s.split_once('e').unwrap();
-    let exp: i32 = exp.parse().unwrap();
-    let digits: Vec<u8> = mantissa.bytes().filter(|b| *b != b'.').collect();
-    // Strip trailing zeros; keep at least one digit, as dtoa does.
-    let mut digits = digits;
-    while digits.len() > 1 && *digits.last().unwrap() == b'0' {
-        digits.pop();
+/// Digits rounded to `count` significant digits with trailing zeros
+/// stripped (dtoa mode 2).
+fn rounded_digits(value: f64, count: usize) -> Digits {
+    let mut digits = scientific_digits(value, count);
+    while digits.len > 1 && digits.bytes[digits.len - 1] == b'0' {
+        digits.len -= 1;
     }
-    Digits {
-        digits,
-        decpt: exp + 1,
-        negative: neg,
-    }
+    digits
 }
 
-/// Port of `zend_gcvt`'s layout logic (buf writing aside).
-fn gcvt_layout(d: &Digits, ndigit: i32) -> String {
-    let mut out = String::with_capacity(d.digits.len() + 8);
+/// Port of `zend_gcvt`'s layout logic.
+fn gcvt_layout(d: &Digits, ndigit: i32) -> NumberText {
+    let mut out = NumberText::default();
     if d.negative {
-        out.push('-');
+        out.push(b'-');
     }
-    let digits = &d.digits;
+    let digits = &d.bytes[..d.len];
     let decpt = d.decpt;
-    if (decpt >= 0 && decpt > ndigit) || decpt < -3 {
-        // Exponential: one digit, point, rest, E, sign, exponent (no pads).
-        out.push(digits[0] as char);
-        out.push('.');
+    if decpt > ndigit || decpt < -3 {
+        out.push(digits[0]);
+        out.push(b'.');
         if digits.len() == 1 {
-            out.push('0');
+            out.push(b'0');
         } else {
-            out.extend(digits[1..].iter().map(|&b| b as char));
+            out.extend(&digits[1..]);
         }
-        out.push('E');
-        let mut exp = decpt - 1;
-        if exp < 0 {
-            out.push('-');
-            exp = -exp;
-        } else {
-            out.push('+');
-        }
-        out.push_str(&exp.to_string());
-    } else if decpt < 0 {
-        // 0.000ddd
-        out.push('0');
-        out.push('.');
+        let exponent = NumberText::formatted(format_args!("E{:+}", decpt - 1));
+        out.extend(exponent.as_bytes());
+    } else if decpt <= 0 {
+        out.extend(b"0.");
         for _ in 0..-decpt {
-            out.push('0');
+            out.push(b'0');
         }
-        out.extend(digits.iter().map(|&b| b as char));
+        out.extend(digits);
     } else {
-        // ddd.ddd with zero padding beyond the digits.
-        for i in 0..decpt as usize {
-            out.push(if i < digits.len() {
-                digits[i] as char
-            } else {
-                '0'
-            });
+        let decpt = decpt as usize;
+        for i in 0..decpt {
+            out.push(digits.get(i).copied().unwrap_or(b'0'));
         }
-        if digits.len() as i64 > decpt as i64 {
-            if decpt == 0 {
-                out.push('0'); // zero before the decimal point
-            }
-            out.push('.');
-            out.extend(digits[decpt as usize..].iter().map(|&b| b as char));
+        if decpt < digits.len() {
+            out.push(b'.');
+            out.extend(&digits[decpt..]);
         }
     }
     out
 }
 
-/// Shared pre-checks of `zend_gcvt`: infinity and NaN.
-fn gcvt(value: f64, ndigit: i32) -> String {
-    if value.is_nan() {
-        return "NAN".to_string();
-    }
-    if value.is_infinite() {
-        return if value > 0.0 {
-            "INF".to_string()
-        } else {
-            "-INF".to_string()
-        };
-    }
-    let d = if ndigit >= 0 {
-        rounded_digits(value, ndigit as u32)
+/// Shared pre-checks of `zend_gcvt` for infinity and NaN.
+fn gcvt(value: f64, ndigit: i32) -> NumberText {
+    let special: &[u8] = if value.is_nan() {
+        b"NAN"
+    } else if value == f64::INFINITY {
+        b"INF"
+    } else if value == f64::NEG_INFINITY {
+        b"-INF"
+    } else if ndigit >= 0 {
+        return gcvt_layout(&rounded_digits(value, ndigit as usize), ndigit);
     } else {
-        shortest_digits(value)
+        return gcvt_layout(&shortest_digits(value), 17);
     };
-    // For layout, mode 0 uses ndigit = 17.
-    gcvt_layout(&d, if ndigit >= 0 { ndigit } else { 17 })
+    let mut text = NumberText::default();
+    text.extend(special);
+    text
+}
+
+/// PHP's default float text for loose comparisons with nonnumeric strings.
+pub(crate) fn float_text_precision14(value: f64) -> NumberText {
+    gcvt(value, 14)
 }
 
 /// String conversion with PHP's default `precision = 14` (echo, casts,
 /// concatenation). `0.1 + 0.2` gives `0.3`, `1.0` gives `1`,
 /// `1e25` gives `1.0E+25`, `-0.0` gives `-0`.
 pub fn float_to_string_precision14(v: f64) -> String {
-    gcvt(v, 14)
+    float_text_precision14(v).as_str().to_owned()
 }
 
 /// Shortest round-tripping representation (PHP's `serialize_precision = -1`:
 /// var_dump, var_export, json_encode). `0.1 + 0.2` gives
 /// `0.30000000000000004`, `1.0` gives `1`, `1e25` gives `1.0E+25`.
 pub fn float_repr(v: f64) -> String {
-    gcvt(v, -1)
+    gcvt(v, -1).as_str().to_owned()
 }
 
 #[cfg(test)]

@@ -19,13 +19,10 @@ impl Vm {
         declaration: &ClassDeclaration,
     ) -> Result<Vec<Rc<Class>>, NativeError> {
         let mut traits = Vec::new();
-        let mut names = HashSet::new();
+        let mut seen = HashSet::new();
         for name in declaration.traits.iter().flat_map(|usage| &usage.names) {
-            if !names.insert(name.to_ascii_lowercase()) {
-                continue;
-            }
             let Some(trait_class) = self.classes.get(name) else {
-                return Err(NativeError::error(format!("Trait \"{name}\" not found")));
+                return Err(Self::class_miss(name, "Trait"));
             };
             if trait_class.kind != ClassKind::Trait {
                 let class = display(&declaration.name);
@@ -33,7 +30,9 @@ impl Vm {
                     "{class} cannot use {name} - it is not a trait"
                 )));
             }
-            traits.push(trait_class);
+            if seen.insert(trait_class.index) {
+                traits.push(trait_class);
+            }
         }
         Ok(traits)
     }

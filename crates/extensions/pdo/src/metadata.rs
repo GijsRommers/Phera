@@ -6,18 +6,26 @@ use phera_extension_api::{
     ArrayKey, Context, LocalFuture, NativeError, NativeResult, Object, PhpArray, Value, args,
 };
 
+use tokio_postgres::types::Type;
+
+use crate::constants::{PARAM_BOOL, PARAM_INT, PARAM_LOB, PARAM_STR};
 use crate::drivers::Column;
 use crate::statement::state;
 
 #[derive(Clone, Debug)]
 pub enum Metadata {
-    Postgres {
-        oid: u32,
-        table_oid: u32,
-        modifier: i32,
-        native_type: String,
-    },
+    Postgres(PostgresColumn),
     Mysql(mysql_async::Column),
+    Sqlite(phera_sqlite::Column, i64),
+}
+
+/// What tokio-postgres tells about a result column.
+#[derive(Clone, Debug)]
+pub struct PostgresColumn {
+    pub oid: u32,
+    pub table_oid: u32,
+    pub modifier: i32,
+    pub native_type: String,
 }
 
 pub fn get<'a>(
@@ -33,6 +41,13 @@ pub fn get<'a>(
             )
         })?;
         let statement = state(this.as_ref())?;
+        if matches!(
+            statement.borrow().prepared,
+            crate::drivers::Prepared::Sqlite(_)
+        ) && !statement.borrow().sqlite_executed
+        {
+            return Ok(Value::Bool(false));
+        }
         let (connection, column) = {
             let statement = statement.borrow();
             (
@@ -41,6 +56,26 @@ pub fn get<'a>(
             )
         };
         let Some(column) = column else {
+            if connection.name == crate::dsn::DriverName::Sqlite {
+                let active = match &statement.borrow().prepared {
+                    crate::drivers::Prepared::Sqlite(handle) => handle.busy(),
+                    _ => false,
+                };
+                return connection.fail(
+                    context,
+                    crate::errors::DbError {
+                        state: "HY000".into(),
+                        code: Some(if active { 100 } else { 25 }),
+                        detail: if active {
+                            "another row available"
+                        } else {
+                            "column index out of range"
+                        }
+                        .into(),
+                    },
+                    "PDOStatement::getColumnMeta",
+                );
+            }
             return Ok(Value::Bool(false));
         };
         let result = connection.driver.lock().await.metadata(&column).await;
@@ -64,8 +99,8 @@ pub fn mysql(column: &mysql_async::Column) -> PhpArray {
         | ColumnType::MYSQL_TYPE_LONGLONG
         | ColumnType::MYSQL_TYPE_INT24
         | ColumnType::MYSQL_TYPE_YEAR
-        | ColumnType::MYSQL_TYPE_BIT => 1,
-        _ => 2,
+        | ColumnType::MYSQL_TYPE_BIT => PARAM_INT,
+        _ => PARAM_STR,
     };
     let mut values = PhpArray::new();
     insert(&mut values, "native_type", Value::from(native));
@@ -109,12 +144,12 @@ pub fn mysql(column: &mysql_async::Column) -> PhpArray {
 pub fn postgres(column: &tokio_postgres::Column) -> Column {
     Column {
         name: column.name().into(),
-        metadata: Metadata::Postgres {
+        metadata: Metadata::Postgres(PostgresColumn {
             oid: column.type_().oid(),
             table_oid: column.table_oid().unwrap_or(0),
             modifier: column.type_modifier(),
             native_type: column.type_().name().into(),
-        },
+        }),
     }
 }
 
@@ -122,16 +157,20 @@ pub fn insert(array: &mut PhpArray, name: &str, value: Value) {
     array.insert(ArrayKey::str(name), value);
 }
 
-pub fn postgres_values(column: &Column, length: i16, table: Option<String>) -> PhpArray {
-    let Metadata::Postgres {
+/// `getColumnMeta()` for PostgreSQL, with the type length and table name
+/// the catalog lookup found.
+pub fn postgres_values(
+    name: &str,
+    column: &PostgresColumn,
+    length: i16,
+    table: Option<String>,
+) -> PhpArray {
+    let PostgresColumn {
         oid,
         table_oid,
         modifier,
         native_type,
-    } = &column.metadata
-    else {
-        unreachable!("PostgreSQL metadata only")
-    };
+    } = column;
     let mut values = PhpArray::new();
     insert(&mut values, "pgsql:oid", Value::Int(i64::from(*oid)));
     insert(
@@ -143,14 +182,14 @@ pub fn postgres_values(column: &Column, length: i16, table: Option<String>) -> P
         insert(&mut values, "table", Value::from(table));
     }
     insert(&mut values, "native_type", Value::from(native_type.clone()));
-    let pdo_type = match *oid {
-        16 => 5,
-        20 | 21 | 23 | 26 => 1,
-        17 => 3,
-        _ => 2,
+    let pdo_type = match Type::from_oid(*oid) {
+        Some(Type::BOOL) => PARAM_BOOL,
+        Some(Type::INT8 | Type::INT2 | Type::INT4 | Type::OID) => PARAM_INT,
+        Some(Type::BYTEA) => PARAM_LOB,
+        _ => PARAM_STR,
     };
     insert(&mut values, "pdo_type", Value::Int(pdo_type));
-    insert(&mut values, "name", Value::from(column.name.clone()));
+    insert(&mut values, "name", Value::from(name));
     insert(&mut values, "len", Value::Int(i64::from(length)));
     insert(&mut values, "precision", Value::Int(i64::from(*modifier)));
     values

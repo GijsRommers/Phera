@@ -19,11 +19,28 @@ impl Vm {
     /// (a native function calling back into PHP), and a recursive `async fn`
     /// needs a known size.
     pub(crate) fn interpret(&mut self, stop: usize) -> LocalFuture<'_, NativeResult> {
+        self.continue_execution(stop, 0, None)
+    }
+
+    /// A caller that already ran a synchronous batch can hand its suspension to the async shell.
+    pub(crate) fn continue_execution(
+        &mut self,
+        stop: usize,
+        mut work: usize,
+        mut pending: Option<Result<BatchExit, NativeError>>,
+    ) -> LocalFuture<'_, NativeResult> {
         Box::pin(async move {
             loop {
-                match self.interpret_frames(stop).await {
+                match self.interpret_frames(stop, &mut work, pending.take()).await {
                     Ok(value) => return Ok(value),
                     Err(error) => {
+                        let error = match crate::autoload::ClassMiss::take(error) {
+                            Ok(miss) => match Box::pin(self.resume_class_fetch(miss)).await {
+                                Ok(()) => continue,
+                                Err(error) => error,
+                            },
+                            Err(error) => error,
+                        };
                         let error = if self.error_handlers.pending.is_empty() {
                             error
                         } else {
@@ -42,10 +59,18 @@ impl Vm {
 
 impl Vm {
     /// Await cold operations while the synchronous loop owns ordinary calls and scalar work.
-    pub(crate) async fn interpret_frames(&mut self, stop: usize) -> NativeResult {
-        let mut work = 0;
+    async fn interpret_frames(
+        &mut self,
+        stop: usize,
+        work: &mut usize,
+        mut pending: Option<Result<BatchExit, NativeError>>,
+    ) -> NativeResult {
         loop {
-            match self.run_batch(stop, &mut work)? {
+            let exit = match pending.take() {
+                Some(exit) => exit?,
+                None => self.run_batch(stop, work)?,
+            };
+            match exit {
                 BatchExit::Returned(value) => return Ok(value),
                 BatchExit::Yield => tokio::task::yield_now().await,
                 BatchExit::Handlers => self.drain_error_handlers().await?,
@@ -55,7 +80,7 @@ impl Vm {
                 }
                 BatchExit::Instruction(instruction) => {
                     if let DispatchResult::Returned(value) =
-                        self.dispatch(instruction, stop).await?
+                        Box::pin(self.dispatch(instruction, stop)).await?
                     {
                         return Ok(value);
                     }

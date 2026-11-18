@@ -5,11 +5,14 @@ use phera_extension_api::{Extension, Registry};
 mod arguments;
 mod arrays;
 mod constants;
+pub mod environment;
 mod math;
 mod natural;
 mod offsets;
+mod path_metadata;
 mod strings;
 mod time;
+mod version_compare;
 
 pub struct Standard;
 
@@ -19,6 +22,10 @@ impl Extension for Standard {
     }
 
     fn register(&self, registry: &mut Registry) {
+        registry.function(version_compare::ENTRY);
+        for entry in path_metadata::FUNCTIONS {
+            registry.function(*entry);
+        }
         strings::register(registry);
         math::register(registry);
         arrays::register(registry);
@@ -26,6 +33,7 @@ impl Extension for Standard {
         for entry in natural::FUNCTIONS.iter().chain(time::FUNCTIONS) {
             registry.function(*entry);
         }
+        environment::register(registry);
     }
 }
 

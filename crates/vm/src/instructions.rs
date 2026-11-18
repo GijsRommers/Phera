@@ -39,7 +39,7 @@ impl Vm {
             I::ReturnChecked { .. } | I::ReturnReference { .. } => {
                 return Ok(Some(BatchExit::Instruction(instruction)));
             }
-            I::Exit { .. } | I::Include { .. } => {
+            I::Exit { .. } | I::Include { .. } | I::Eval { .. } => {
                 return Ok(Some(BatchExit::Instruction(instruction)));
             }
             I::InitCall { function } => self.init_call(function)?,
@@ -253,8 +253,8 @@ impl Vm {
             let value = self.read_local(class);
             let Value::Object(object) = value else {
                 return Err(NativeError::error(format!(
-                    "Cannot use \"::class\" on value of type {}",
-                    value.type_name(),
+                    "Cannot use \"::class\" on {}",
+                    value.type_name()
                 )));
             };
             self.set(destination, Value::from(object.class.name()));

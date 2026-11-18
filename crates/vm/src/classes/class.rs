@@ -35,6 +35,7 @@ pub(crate) struct Class {
     pub(crate) is_final: bool,
     pub(crate) is_readonly: bool,
     pub(crate) allows_dynamic_properties: bool,
+    pub(crate) property_access: Option<&'static phera_extension_api::NativePropertyAccess>,
     pub(crate) methods: HashMap<String, Rc<Method>>,
     /// The same methods by name key, built on first use by a fast call.
     pub(crate) method_table: std::cell::OnceCell<super::method_table::MethodTable>,
@@ -46,6 +47,7 @@ pub(crate) struct Class {
     pub(crate) property_template: Option<phera_value::PhpArray>,
     pub(crate) static_properties: Vec<PropertyDefault>,
     pub(crate) constants: HashMap<String, Rc<LinkedConstant>>,
+    pub(crate) declaration: Option<(crate::code_table::FunctionIndex, u32)>,
 }
 
 /// Defaults retain their mangled keys so private ancestors do not collide.
@@ -107,6 +109,10 @@ pub(crate) struct MethodContext {
 }
 
 impl ClassHandle for Class {
+    fn is_instance_of(&self, name: &str) -> bool {
+        self.is_a(name)
+    }
+
     fn name(&self) -> &str {
         &self.name
     }
@@ -141,6 +147,7 @@ pub(crate) enum Invocation {
 
 /// Lazy constants retain declaring scope and detect recursive initializers before borrowing values.
 pub(crate) struct LinkedConstant {
+    pub(crate) deprecated: Option<&'static str>,
     pub(crate) declaring: String,
     pub(crate) visibility: Visibility,
     pub(crate) is_final: bool,

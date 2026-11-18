@@ -160,6 +160,7 @@ impl Vm {
                 constants.insert(
                     name.clone(),
                     Rc::new(LinkedConstant {
+                        deprecated: None,
                         declaring: class.clone(),
                         visibility: constant.visibility,
                         is_final: constant.is_final,

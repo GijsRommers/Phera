@@ -58,15 +58,6 @@ impl<'ast> Compiler<'ast> {
             Instruction::Return(register)
         };
         builder.emit(implicit_return, line);
-        if builder.classes.iter().any(|class| {
-            class.traits.is_empty()
-                && matches!(
-                    class.kind,
-                    phera_bytecode::ClassKind::Class | phera_bytecode::ClassKind::Interface
-                )
-        }) {
-            return Err(self.error("Nested class declarations not supported yet", line));
-        }
         self.append_function(builder, timing, line);
         Ok(())
     }

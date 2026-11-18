@@ -1,25 +1,23 @@
-//! Forty `SELECT pg_sleep(0.3)` requests must overlap on one Phera worker thread.
+//! Forty requests that each wait 0.3 s for the database overlap on one
+//! `phera serve` worker thread: together they take well under two seconds.
 
-use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
-use tokio::task::JoinSet;
+use phera_extension_api::testing::serve::Server;
 
 mod support;
 
-struct Server {
-    process: Child,
-    address: String,
-    root: PathBuf,
-}
-
-impl Server {
-    fn start(binary: &str, driver: &str) -> Self {
-        let root = support::scratch().join(format!("serve-{driver}"));
+#[test]
+fn forty_database_waits_overlap_on_one_worker() {
+    let Some(binary) = std::env::var_os("PHERA_BIN") else {
+        eprintln!("SKIP: set PHERA_BIN for the single-worker concurrency proof");
+        return;
+    };
+    if !support::databases_available() {
+        return;
+    }
+    for driver in ["pgsql", "mysql"] {
+        let root = std::env::temp_dir().join(format!("phera-pdo-serve-{driver}"));
         std::fs::create_dir_all(&root).unwrap();
         let query = match driver {
             "pgsql" => "SELECT pg_sleep(0.3)",
@@ -30,86 +28,20 @@ impl Server {
             support::dsn(driver)
         );
         std::fs::write(root.join("index.php"), script).unwrap();
-        let mut process = Command::new(binary)
-            .args(["serve", "--listen", "127.0.0.1:0", "--workers", "1"])
-            .arg(&root)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let mut banner = String::new();
-        BufReader::new(process.stdout.take().unwrap())
-            .read_line(&mut banner)
-            .unwrap();
-        let address = banner
-            .split("http://")
-            .nth(1)
-            .and_then(|rest| rest.split_whitespace().next())
-            .expect("server listen banner");
-        Self {
-            process,
-            address: address.to_owned(),
-            root,
-        }
-    }
-}
-
-impl Drop for Server {
-    fn drop(&mut self) {
-        let _ = self.process.kill();
-        let _ = self.process.wait();
-        let _ = std::fs::remove_dir_all(&self.root);
-    }
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn forty_database_waits_overlap_on_one_worker() {
-    let Ok(binary) = std::env::var("PHERA_BIN") else {
-        eprintln!("SKIP: set PHERA_BIN for the single-worker concurrency proof");
-        return;
-    };
-    if !support::databases_available() {
-        return;
-    }
-    let mut failures = Vec::new();
-    for driver in ["pgsql", "mysql"] {
-        let server = Server::start(&binary, driver);
+        let server = Server::start(binary.as_ref(), &root, 1, &[]);
         let started = Instant::now();
-        let mut requests = JoinSet::new();
-        for _ in 0..40 {
-            let address = server.address.clone();
-            requests.spawn(async move {
-                let mut stream = TcpStream::connect(address).await.unwrap();
-                stream
-                    .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
-                    .await
-                    .unwrap();
-                let mut response = String::new();
-                stream.read_to_string(&mut response).await.unwrap();
-                response
-            });
-        }
-        let responses = tokio::time::timeout(Duration::from_secs(10), async {
-            let mut responses = Vec::new();
-            while let Some(response) = requests.join_next().await {
-                responses.push(response.unwrap());
-            }
-            responses
-        })
-        .await
-        .expect("database requests timed out");
+        let responses = server.get_all((0..40).map(|_| "/".to_owned()));
         let elapsed = started.elapsed();
-        if let Some(response) = responses
-            .iter()
-            .find(|response| !response.starts_with("HTTP/1.1 200") || !response.contains("done"))
-        {
-            failures.push(format!("{driver}: {response}"));
-            continue;
+        for response in &responses {
+            assert!(
+                response.starts_with("HTTP/1.1 200") && response.contains("done"),
+                "{driver}: {response}"
+            );
         }
         eprintln!("{driver}: 40 waits on one worker completed in {elapsed:?}");
-        if elapsed >= Duration::from_secs(2) {
-            failures.push(format!("{driver}: elapsed {elapsed:?}"));
-        }
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "{driver}: elapsed {elapsed:?}"
+        );
     }
-    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

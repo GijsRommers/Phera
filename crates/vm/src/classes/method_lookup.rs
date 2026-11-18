@@ -51,7 +51,7 @@ impl Vm {
         let Some(method) = private.or_else(|| class.methods.get(lower)).cloned() else {
             return Ok(None);
         };
-        self.check_method_visibility(&method)?;
+        self.check_invocation_visibility(&method, invocation)?;
         if class.kind == ClassKind::Trait && method.is_static {
             return Err(super::trait_methods::deprecated_direct_access(
                 "method",

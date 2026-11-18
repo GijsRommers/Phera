@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use phera_extension_api::value::{to_bool, to_int, to_php_string};
 use phera_extension_api::{ArrayKey, Context, NativeError, Value};
 
+use crate::constants::{PARAM_BOOL, PARAM_INT, PARAM_LOB, PARAM_NULL, PARAM_STR};
 use crate::errors::{DbError, unsupported};
 use crate::placeholders::{Parameter, Sql};
 
@@ -13,16 +14,19 @@ pub enum ParameterType {
     Null,
     Int,
     String,
+    /// `PARAM_LOB`: bytes, which SQLite stores as a BLOB, not as text.
+    Blob,
     Bool,
 }
 
 impl ParameterType {
     pub fn parse(value: i64) -> Result<Self, NativeError> {
         match value {
-            0 => Ok(Self::Null),
-            1 => Ok(Self::Int),
-            2 => Ok(Self::String),
-            5 => Ok(Self::Bool),
+            PARAM_NULL => Ok(Self::Null),
+            PARAM_INT => Ok(Self::Int),
+            PARAM_STR => Ok(Self::String),
+            PARAM_LOB => Ok(Self::Blob),
+            PARAM_BOOL => Ok(Self::Bool),
             _ => Err(unsupported("This PDO parameter type")),
         }
     }
@@ -39,6 +43,7 @@ pub enum BoundValue {
     Null,
     Int(i64),
     String(Vec<u8>),
+    Blob(Vec<u8>),
     Bool(bool),
 }
 
@@ -52,6 +57,11 @@ impl Binding {
             ParameterType::Null => Ok(BoundValue::Null),
             ParameterType::Int => Ok(BoundValue::Int(to_int(&value, context.diagnostics())?)),
             ParameterType::Bool => Ok(BoundValue::Bool(to_bool(&value))),
+            ParameterType::Blob => Ok(BoundValue::Blob(
+                to_php_string(&value, context.diagnostics())?
+                    .as_bytes()
+                    .to_vec(),
+            )),
             ParameterType::String => Ok(BoundValue::String(
                 to_php_string(&value, context.diagnostics())?
                     .as_bytes()
@@ -161,7 +171,7 @@ pub fn literal(value: &BoundValue, mysql: bool) -> String {
             (false, false) => "false",
         }
         .into(),
-        BoundValue::String(bytes) => quote(bytes, mysql),
+        BoundValue::String(bytes) | BoundValue::Blob(bytes) => quote(bytes, mysql),
     }
 }
 

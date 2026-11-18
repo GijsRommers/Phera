@@ -56,6 +56,11 @@ impl Tables {
                 method: self.symbol(&method, None, crate::policies::NameKind::Function),
                 binding,
             },
+            Old::DynamicClassConstant {
+                destination: dst,
+                class,
+                name,
+            } => Instruction::FetchDynamicClassConstant { dst, class, name },
             Old::ClassConstant {
                 destination,
                 class,
@@ -64,15 +69,6 @@ impl Tables {
                 dst: destination,
                 class,
                 name: self.name(&name),
-            },
-            Old::DynamicClassConstant {
-                destination,
-                class,
-                name,
-            } => Instruction::FetchDynamicClassConstant {
-                dst: destination,
-                class,
-                name,
             },
             Old::NewDynamic { class } => Instruction::NewDynamic { class },
             Old::DynamicMethodCall { receiver, method } => {
@@ -339,6 +335,10 @@ impl Tables {
                 local,
                 name: self.name(&name),
             },
+            Old::Eval {
+                destination: dst,
+                source,
+            } => Instruction::Eval { dst, source },
             Old::Include {
                 destination: dst,
                 path,

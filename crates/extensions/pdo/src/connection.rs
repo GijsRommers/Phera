@@ -9,6 +9,7 @@ use phera_extension_api::{
 use tokio::sync::Mutex;
 
 use crate::attributes::Attributes;
+use crate::constants::{PARAM_BOOL, PARAM_INT, PARAM_NULL, PARAM_STR};
 use crate::dsn::{DriverName, Dsn};
 use crate::errors::{DbError, ErrorState, unsupported};
 use crate::pool::{self, Lease, Policy};
@@ -25,7 +26,15 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn fail(&self, context: &mut dyn Context, error: DbError, method: &str) -> NativeResult {
+    pub fn fail(
+        &self,
+        context: &mut dyn Context,
+        mut error: DbError,
+        method: &str,
+    ) -> NativeResult {
+        if self.name == DriverName::Sqlite {
+            crate::drivers::sqlite::normalize(&mut error, self.attributes.borrow().extended);
+        }
         *self.last_error.borrow_mut() = Some(error.clone());
         *self.error.borrow_mut() = ErrorState::Failed(error.clone());
         let mode = self.attributes.borrow().errors;
@@ -61,23 +70,31 @@ pub fn construct<'a>(
         let dsn_text = args::string(&arguments, 0)
             .map(|s| s.to_string_lossy())
             .unwrap_or_default();
-        let dsn = Dsn::parse(&dsn_text)?;
+        let mut dsn = Dsn::parse(&dsn_text)?;
         let username = args::string(&arguments, 1)
             .map(|s| s.to_string_lossy())
             .unwrap_or_else(|| dsn.get("user", "").to_owned());
         let password = args::string(&arguments, 2)
             .map(|s| s.to_string_lossy())
             .unwrap_or_else(|| dsn.get("password", "").to_owned());
-        let policy = Policy::parse(context, args::array(&arguments, 3).map(Rc::as_ref))?;
+        let policy = Policy::from_options(args::array(&arguments, 3).map(Rc::as_ref));
         let mut attributes = Attributes::new(dsn.driver);
         if let Some(options) = args::array(&arguments, 3) {
             for (key, value) in options.iter() {
                 if let ArrayKey::Int(attribute) = key
-                    && !pool::is_pool_attribute(attribute)
+                    && attribute != pool::PHERA_ATTR_POOL
+                    && crate::attributes::constructor_accepts(dsn.driver, attribute)
                 {
                     attributes.set(context, attribute, value)?;
                 }
             }
+        }
+        if dsn.driver == DriverName::Sqlite {
+            // The driver opens the file with the options' flags and timeout.
+            dsn.fields
+                .insert("flags".into(), attributes.sqlite_flags.to_string());
+            dsn.fields
+                .insert("timeout".into(), attributes.timeout.to_string());
         }
         let driver = match pool::acquire(&dsn, &username, &password, policy).await {
             Ok(driver) => driver,
@@ -109,6 +126,7 @@ pub fn available(_: &mut dyn Context, _: Option<&Rc<Object>>, _: &[Value]) -> Na
     let mut drivers = PhpArray::new();
     drivers.push(Value::from("mysql"))?;
     drivers.push(Value::from("pgsql"))?;
+    drivers.push(Value::from("sqlite"))?;
     Ok(Value::from(drivers))
 }
 
@@ -159,7 +177,12 @@ pub fn quote<'a>(
 ) -> LocalFuture<'a, NativeResult> {
     Box::pin(async move {
         let session = session(this.as_ref())?;
-        if !matches!(args::int(&arguments, 1).unwrap_or(2), 0 | 1 | 2 | 5) {
+        if session.name == DriverName::Sqlite {
+            let bytes = args::string(&arguments, 0).map_or(&b""[..], |s| s.as_bytes());
+            return Ok(Value::from(crate::drivers::sqlite::quote(bytes)));
+        }
+        let kind = args::int(&arguments, 1).unwrap_or(PARAM_STR);
+        if !matches!(kind, PARAM_NULL | PARAM_INT | PARAM_STR | PARAM_BOOL) {
             return Err(unsupported("LOB quoting"));
         }
         let bytes = args::string(&arguments, 0).map_or(&b""[..], |s| s.as_bytes());
@@ -217,6 +240,7 @@ pub fn connect<'a>(
         let class = match Dsn::parse_named(&dsn, "PDO::connect")?.driver {
             DriverName::Postgres => "Pdo\\Pgsql",
             DriverName::Mysql => "Pdo\\Mysql",
+            DriverName::Sqlite => "Pdo\\Sqlite",
         };
         let object = context.create_object(class, PhpArray::new())?;
         let Value::Object(instance) = &object else {

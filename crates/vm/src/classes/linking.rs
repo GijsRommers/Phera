@@ -11,39 +11,27 @@ use crate::Vm;
 impl Vm {
     /// Hoist only declarations whose dependencies are available; deferred ones execute normally.
     pub(crate) fn hoist_classes(&mut self, unit: &Arc<CompiledUnit>) -> Result<(), NativeError> {
-        let mut pending = unit.hoisted_classes.clone();
-        loop {
-            let before = pending.len();
-            let mut deferred = Vec::new();
-            for index in pending {
-                let declaration = &unit.classes[index.index()];
-                if declaration
-                    .parent
-                    .iter()
-                    .chain(&declaration.interfaces)
-                    .all(|symbol| {
-                        self.classes
-                            .get(&unit.symbols[symbol.index()].name)
-                            .is_some()
-                    })
-                    && declaration
-                        .traits
-                        .iter()
-                        .flat_map(|usage| &usage.names)
-                        .all(|name| self.classes.get(name).is_some())
-                {
-                    self.link_class(unit.clone(), index)?;
-                    self.prelinked_classes
-                        .insert((Arc::as_ptr(unit) as usize, index.index()));
-                } else {
-                    deferred.push(index);
+        for &index in &unit.hoisted_classes {
+            let declaration = &unit.classes[index.index()];
+            if declaration.interfaces.is_empty()
+                && declaration.parent.is_none_or(|parent| {
+                    self.classes
+                        .get(&unit.symbols[parent.index()].written)
+                        .is_some()
+                })
+                && self.classes.get(&declaration.name).is_none()
+            {
+                if let Err(error) = self.link_class(unit.clone(), index) {
+                    if crate::autoload::ClassMiss::is(&error) {
+                        continue;
+                    }
+                    return Err(error);
                 }
+                self.prelinked_classes
+                    .insert((Arc::as_ptr(unit) as usize, index.index()));
             }
-            if deferred.len() == before || deferred.is_empty() {
-                return Ok(());
-            }
-            pending = deferred;
         }
+        Ok(())
     }
 
     /// Runtime declarations are not idempotent; only the exact prelinked instruction is skipped.
@@ -77,9 +65,9 @@ impl Vm {
     fn link_class_body(
         &mut self,
         unit: Arc<CompiledUnit>,
-        index: ClassId,
+        declaration_index: ClassId,
     ) -> Result<(), NativeError> {
-        let declaration = &unit.classes[index.index()];
+        let declaration = &unit.classes[declaration_index.index()];
         let name = &declaration.name;
         if let Some(existing) = self.classes.get(name) {
             return Err(NativeError::error(format!(
@@ -93,7 +81,7 @@ impl Vm {
                 let parent_name = &unit.symbols[symbol.index()].written;
                 self.classes
                     .get(parent_name)
-                    .ok_or_else(|| NativeError::error(format!("Class \"{parent_name}\" not found")))
+                    .ok_or_else(|| Self::class_miss(parent_name, "Class"))
             })
             .transpose()?;
         if let Some(parent) = &parent {
@@ -139,9 +127,10 @@ impl Vm {
             .iter()
             .map(|symbol| {
                 let interface_name = &unit.symbols[symbol.index()].written;
-                let interface = self.classes.get(interface_name).ok_or_else(|| {
-                    NativeError::error(format!("Interface \"{interface_name}\" not found"))
-                })?;
+                let interface = self
+                    .classes
+                    .get(interface_name)
+                    .ok_or_else(|| Self::class_miss(interface_name, "Interface"))?;
                 if interface.kind != ClassKind::Interface {
                     return Err(NativeError::error(format!(
                         "{name} cannot implement {interface_name} - it is not an interface"
@@ -150,6 +139,17 @@ impl Vm {
                 Ok(interface)
             })
             .collect::<Result<Vec<_>, NativeError>>()?;
+        let mut seen = std::collections::HashSet::new();
+        if let Some(duplicate) = interfaces
+            .iter()
+            .find(|interface| !seen.insert(interface.index))
+        {
+            let kind = declaration.kind.description();
+            return Err(NativeError::error(format!(
+                "{kind} {name} cannot implement previously implemented interface {}",
+                duplicate.name
+            )));
+        }
         self.link_enum_interfaces(declaration, &mut interfaces)?;
         if declaration.kind != ClassKind::Interface
             && interfaces
@@ -252,6 +252,7 @@ impl Vm {
             || parent
                 .as_ref()
                 .is_some_and(|parent| parent.allows_dynamic_properties);
+        let property_access = parent.as_ref().and_then(|parent| parent.property_access);
         let is_throwable = parent.as_ref().is_some_and(|parent| parent.is_throwable)
             || interfaces.iter().any(|interface| interface.is_throwable);
         self.classes.order.push(name.clone());
@@ -260,6 +261,7 @@ impl Vm {
             let function = self.code.index_in(&unit, Some(method.function.index()));
             self.code.set_declaring_class(function, index);
         }
+        let declaration_location = Some((self.code.index_in(&unit, None), declaration.line));
         self.classes.insert(
             name.to_ascii_lowercase(),
             Rc::new_cyclic(|identity| Class {
@@ -283,6 +285,7 @@ impl Vm {
                 is_final: declaration.is_final,
                 is_readonly: declaration.is_readonly,
                 allows_dynamic_properties,
+                property_access,
                 constructor: methods.get("__construct").cloned(),
                 methods,
                 method_table: std::cell::OnceCell::new(),
@@ -290,6 +293,7 @@ impl Vm {
                 defaults,
                 static_properties,
                 constants,
+                declaration: declaration_location,
             }),
         );
         Ok(())

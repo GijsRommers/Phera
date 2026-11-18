@@ -5,6 +5,7 @@ use std::rc::Rc;
 use phera_extension_api::{Context, LocalFuture, NativeResult, Object, Value};
 
 use crate::connection::session;
+use crate::constants::{SQLITE_TRANSACTION_MODE_EXCLUSIVE, SQLITE_TRANSACTION_MODE_IMMEDIATE};
 
 #[derive(Clone, Copy)]
 enum Operation {
@@ -34,7 +35,16 @@ fn run<'a>(
                         0,
                     ));
                 }
-                ("BEGIN", "PDO::beginTransaction", true)
+                (
+                    match session.attributes.borrow().transaction_mode {
+                        // Pdo\Sqlite::ATTR_TRANSACTION_MODE; 0 for every other driver.
+                        SQLITE_TRANSACTION_MODE_IMMEDIATE => "BEGIN IMMEDIATE",
+                        SQLITE_TRANSACTION_MODE_EXCLUSIVE => "BEGIN EXCLUSIVE",
+                        _ => "BEGIN",
+                    },
+                    "PDO::beginTransaction",
+                    true,
+                )
             }
             Operation::Commit | Operation::Rollback => {
                 if !active {
@@ -50,7 +60,7 @@ fn run<'a>(
                 }
             }
         };
-        let result = driver.direct(sql).await;
+        let result = driver.run_unprepared(sql).await;
         match result {
             Ok(_) => {
                 session.transaction.set(next);

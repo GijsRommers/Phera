@@ -15,7 +15,7 @@ impl Compiler<'_> {
         timing: DeclarationTiming,
         line: usize,
     ) -> Result<String, CompileError> {
-        if declaration.name.is_some() && self.function.name.contains("::") {
+        if declaration.name.is_some() && self.class_scope.is_some() {
             return Err(self.error("Class declarations may not be nested", line));
         }
         let name = match &declaration.name {
@@ -257,6 +257,7 @@ impl Compiler<'_> {
             && traits.is_empty();
         let index = self.classes.len();
         self.classes.push(ClassDeclaration {
+            line: line as u32,
             name: name.clone(),
             parent: declaration
                 .extends

@@ -26,6 +26,19 @@ impl Vm {
         }
     }
 
+    pub(crate) fn fetch_dynamic_class_constant(
+        &mut self,
+        destination: Reg,
+        class: Reg,
+        name: Reg,
+    ) -> Result<(), NativeError> {
+        let class = self.class_target(class)?;
+        let name = self.read_local(name);
+        let value = self.dynamic_class_constant(&class, &name)?;
+        self.set(destination, value);
+        Ok(())
+    }
+
     /// Resolve inherited constants while retaining the scope of their original declaration.
     pub(crate) fn class_constant(&mut self, class: &str, name: &str) -> NativeResult {
         self.class_constant_written(class, name, None)
@@ -47,7 +60,7 @@ impl Vm {
         {
             (&pending.name, &pending.constants)
         } else {
-            return Err(NativeError::error(format!("Class \"{class}\" not found")));
+            return Err(Self::class_miss(class, "Class"));
         };
         let constant = constants
             .get(name)
@@ -63,19 +76,7 @@ impl Vm {
                 self.validate_enum_backing(linked)?;
             }
         }
-        let scope = self
-            .initializer_scope
-            .as_ref()
-            .and_then(|name| self.classes.get(name))
-            .or_else(|| self.current().and_then(|frame| frame.scope().cloned()));
-        let same_scope = self.initializer_scope.as_deref() == Some(constant.declaring.as_str());
-        let allowed = same_scope
-            || match constant.visibility {
-                Visibility::Public => true,
-                Visibility::Private => scope.is_some_and(|scope| scope.name == constant.declaring),
-                Visibility::Protected => scope.is_some_and(|scope| scope.is_a(&constant.declaring)),
-            };
-        if !allowed {
+        if !self.can_read_class_constant(&constant) {
             let visibility = if constant.visibility == Visibility::Private {
                 "private"
             } else {
@@ -86,14 +87,57 @@ impl Vm {
                 constant.declaring
             )));
         }
+        if let Some(message) = constant.deprecated {
+            self.diagnostic("Deprecated", message.into());
+        }
+        if let crate::classes::class::ConstantInitializer::EnumCase { name, backing } =
+            &constant.initializer
+        {
+            let class = linked
+                .as_ref()
+                .ok_or_else(|| internal_error!("unlinked enum"))?;
+            return self
+                .enum_case(class, name, *backing, spelling)
+                .map(Value::Object);
+        }
+        self.evaluate_class_constant(&constant, name)
+    }
+
+    pub(crate) fn can_read_class_constant(
+        &self,
+        constant: &crate::classes::LinkedConstant,
+    ) -> bool {
+        if self.initializer_scope.as_deref() == Some(constant.declaring.as_str()) {
+            return true;
+        }
+        let scope = self
+            .initializer_scope
+            .as_ref()
+            .and_then(|name| self.classes.get(name))
+            .or_else(|| self.current().and_then(|frame| frame.scope().cloned()));
+        match constant.visibility {
+            Visibility::Public => true,
+            Visibility::Private => scope.is_some_and(|scope| scope.name == constant.declaring),
+            Visibility::Protected => scope.is_some_and(|scope| {
+                scope.is_a(&constant.declaring)
+                    || self
+                        .classes
+                        .get(&constant.declaring)
+                        .is_some_and(|declaring| declaring.is_a(&scope.name))
+            }),
+        }
+    }
+
+    fn evaluate_class_constant(
+        &mut self,
+        constant: &crate::classes::LinkedConstant,
+        name: &str,
+    ) -> NativeResult {
         let (initializer, state) = match &constant.initializer {
-            crate::classes::class::ConstantInitializer::EnumCase { name, backing } => {
-                let class = linked
-                    .as_ref()
-                    .ok_or_else(|| internal_error!("unlinked enum"))?;
-                return self
-                    .enum_case(class, name, *backing, spelling)
-                    .map(Value::Object);
+            crate::classes::class::ConstantInitializer::EnumCase { .. } => {
+                return Err(internal_error!(
+                    "enum case reached ordinary constant evaluation"
+                ));
             }
             crate::classes::class::ConstantInitializer::Value(value) => return Ok(value.clone()),
             crate::classes::class::ConstantInitializer::Compiled { function, state } => {

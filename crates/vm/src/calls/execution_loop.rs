@@ -84,6 +84,7 @@ pub(super) struct Position {
 impl Vm {
     /// Run frames until an instruction needs the async shell, the work budget
     /// is spent, or the frame at depth `stop` has returned.
+    #[inline(never)]
     pub(crate) fn run_batch(
         &mut self,
         stop: usize,

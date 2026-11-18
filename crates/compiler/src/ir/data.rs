@@ -136,6 +136,7 @@ pub struct CompiledUnit {
 /// Owned class names are interned only after method functions have their final indices.
 #[derive(Debug, Clone)]
 pub struct ClassDeclaration {
+    pub line: u32,
     pub name: String,
     pub parent: Option<String>,
     pub interfaces: Vec<String>,

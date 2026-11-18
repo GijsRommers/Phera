@@ -297,6 +297,7 @@ pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
         .classes
         .into_iter()
         .map(|declaration| phera_bytecode::ClassDeclaration {
+            line: declaration.line,
             name: declaration.name,
             parent: declaration
                 .parent
