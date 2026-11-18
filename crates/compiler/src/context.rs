@@ -2,7 +2,11 @@
 //!
 //! AST nodes lower to compiler IR here; final interning belongs to `lower`.
 
-use std::{cell::RefCell, collections::HashMap};
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    rc::Rc,
+};
 
 use phera_ast as ast;
 use phera_bytecode::Reg;
@@ -20,6 +24,8 @@ pub(super) struct Loop {
 /// Mutable AST-to-IR state for one PHP function, sharing source locations.
 pub(super) struct Compiler<'ast> {
     pub(super) file: &'ast str,
+    /// The text being compiled. `assert()` quotes its condition from it.
+    pub(super) source: &'ast [u8],
     pub(super) declaration_warnings: Vec<phera_bytecode::DeclarationWarning>,
     pub(super) compile_diagnostics: &'ast RefCell<Vec<CompileDiagnostic>>,
     pub(super) lines: &'ast LineTable,
@@ -28,6 +34,7 @@ pub(super) struct Compiler<'ast> {
     pub(super) hoisted: Vec<usize>,
     pub(super) classes: Vec<crate::ir::ClassDeclaration>,
     pub(super) hoisted_classes: Vec<usize>,
+    pub(super) anonymous_classes: Rc<Cell<u64>>,
     pub(super) next: usize,
     pub(super) peak: usize,
     pub(super) locals: HashMap<String, Reg>,
@@ -37,12 +44,14 @@ pub(super) struct Compiler<'ast> {
     pub(super) namespace: String,
     /// __CLASS__ is lexical and does not change when a closure is rebound.
     pub(super) class_scope: Option<String>,
+    pub(super) trait_scope: Option<String>,
     pub(super) imports: HashMap<(NameKind, String), String>,
 }
 impl<'ast> Compiler<'ast> {
     /// Start an independent function builder in the current namespace.
     pub(super) fn new(
         file: &'ast str,
+        source: &'ast [u8],
         lines: &'ast LineTable,
         name: &str,
         namespace: &str,
@@ -50,6 +59,7 @@ impl<'ast> Compiler<'ast> {
     ) -> Self {
         Self {
             file,
+            source,
             declaration_warnings: Vec::new(),
             compile_diagnostics,
             lines,
@@ -61,6 +71,7 @@ impl<'ast> Compiler<'ast> {
             hoisted: vec![],
             classes: vec![],
             hoisted_classes: vec![],
+            anonymous_classes: Rc::default(),
             next: 0,
             peak: 0,
             locals: HashMap::new(),
@@ -68,6 +79,7 @@ impl<'ast> Compiler<'ast> {
             finalies: vec![],
             namespace: namespace.into(),
             class_scope: None,
+            trait_scope: None,
             imports: HashMap::new(),
         }
     }

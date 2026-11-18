@@ -114,9 +114,14 @@ impl Vm {
                 "Instantiation of class Closure is not allowed",
             ));
         }
-        if class.kind == ClassKind::Interface {
+        if matches!(class.kind, ClassKind::Interface | ClassKind::Trait) {
+            let kind = if class.kind == ClassKind::Trait {
+                "trait"
+            } else {
+                "interface"
+            };
             return Err(NativeError::error(format!(
-                "Cannot instantiate interface {}",
+                "Cannot instantiate {kind} {}",
                 class.name
             )));
         }
@@ -126,22 +131,31 @@ impl Vm {
                 class.name
             )));
         }
-        let object = self.classes.allocate(class.clone());
-        // Mirrors the default loop below for classes whose defaults are all literals.
-        if let Some(template) = &class.property_template {
-            object.update(|properties| *properties = template.clone());
+        if class.kind == ClassKind::Enum {
+            return Err(NativeError::error(format!(
+                "Cannot instantiate enum {}",
+                class.name
+            )));
+        }
+        let properties = if let Some(template) = &class.property_template {
+            template.clone()
         } else {
+            let mut properties = phera_value::PhpArray::new();
             for property in &class.defaults {
                 if property.initialized {
                     let value = if let Some(initializer) = &property.initializer {
-                        self.evaluate_initializer(initializer, &property.declaring)?
+                        self.evaluate_property_initializer(initializer, property)?
                     } else {
                         property.value.clone()
                     };
-                    object.set(property.key.clone(), value);
+                    properties.insert(property.key.clone(), value);
                 }
             }
-        }
+            properties
+        };
+        let object = self
+            .classes
+            .allocate_with_properties(class.clone(), properties);
         if class.is_throwable {
             self.initialize_throwable(&object, crate::exceptions::TraceOrigin::Construction);
         }
@@ -210,6 +224,15 @@ impl Vm {
             .ok_or_else(|| internal_error!("class name symbol"))?
             .written;
         let class = match name.as_str() {
+            phera_bytecode::TRAIT_CLASS_NAME => {
+                let function = frame.frame.function;
+                self.code
+                    .facts(function)
+                    .class
+                    .map(|class| self.classes.class(class))
+                    .or_else(|| frame.scope())
+                    .cloned()
+            }
             "self" => frame.scope().cloned(),
             "static" => frame.called(),
             "parent" => frame.scope().and_then(|scope| scope.parent.clone()),

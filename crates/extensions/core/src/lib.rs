@@ -2,6 +2,7 @@
 //! `var_export`), type tests and conversions, `count`, the engine's constants,
 //! and the exception classes.
 
+mod assertions;
 mod constants;
 mod count;
 mod dump;
@@ -27,5 +28,6 @@ impl Extension for Core {
         dump::register(registry);
         throwable::register(registry);
         types::register(registry);
+        assertions::register(registry);
     }
 }

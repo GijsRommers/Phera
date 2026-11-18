@@ -13,13 +13,17 @@ impl Vm {
             self.compile_diagnostic(diagnostic, CompileDiagnosticSite::Source(&unit.file));
         }
         for warning in &unit.declaration_warnings {
-            let location = SourceLocation {
-                file: unit.file.clone(),
-                line: warning.line as usize,
-            };
-            let previous = self.diagnostic_location.replace(location);
-            self.diagnostic("Warning", warning.message.clone());
-            self.diagnostic_location = previous;
+            self.warn_at_declaration(unit, warning.line, warning.message.clone());
         }
+    }
+
+    pub(crate) fn warn_at_declaration(&mut self, unit: &CompiledUnit, line: u32, message: String) {
+        let location = SourceLocation {
+            file: unit.file.clone(),
+            line: line as usize,
+        };
+        let previous = self.diagnostic_location.replace(location);
+        self.warn(message);
+        self.diagnostic_location = previous;
     }
 }

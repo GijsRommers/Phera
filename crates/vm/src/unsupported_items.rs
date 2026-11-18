@@ -46,7 +46,7 @@ pub(crate) fn undefined_method(class: &Class, method: &str) -> NativeError {
     omitted_native_member(ItemKind::Method, class, method).unwrap_or_else(|| {
         NativeError::error(format!(
             "Call to undefined method {}::{method}()",
-            class.name
+            phera_value::class_display_name(&class.name)
         ))
     })
 }

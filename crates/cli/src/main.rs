@@ -1,8 +1,9 @@
-//! The `phera` command: run a PHP script, serve a site, or show the bytecode
-//! of a file.
+//! The `phera` command: run a PHP script, serve a site, check or start a
+//! project, or show the bytecode of a file.
 
 mod arguments;
 mod check;
+mod new;
 mod run;
 mod serve;
 
@@ -28,6 +29,7 @@ fn main() -> ExitCode {
         Ok(Command::Dump { script }) => run::dump(&script),
         Ok(Command::Serve(options)) => serve::serve(options),
         Ok(Command::Check(options)) => check::check(options),
+        Ok(Command::New(options)) => new::project(&options),
         Ok(Command::Version) => {
             println!("Phera {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
