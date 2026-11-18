@@ -12,11 +12,16 @@ fn scripts_match_php() {
         return;
     };
     let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/scripts");
-    let mut scripts = php_scripts(&directory, "");
     let temporary = tempfile::tempdir().expect("create isolated script directories");
-    let generated = temporary.path().join("generated");
-    std::fs::create_dir(&generated).expect("create generated script directory");
-    scripts.extend(script_cases::generate(&generated));
+    let sources = temporary.path().join("scripts");
+    std::fs::create_dir(&sources).expect("create script source directory");
+    let mut scripts = Vec::new();
+    for source in php_scripts(&directory, "") {
+        let target = sources.join(source.file_name().expect("script filename"));
+        std::fs::copy(source, &target).expect("copy script fixture to its temporary directory");
+        scripts.push(target);
+    }
+    scripts.extend(script_cases::generate(&sources));
     assert!(scripts.len() >= 80);
     comparison.compare_all(&scripts, |script, runtime, command| {
         let name = script.file_stem().expect("script name").to_string_lossy();
