@@ -8,12 +8,36 @@
 //! arguments, named arguments, and methods that need to await keep the full
 //! native-method path, including its argument errors.
 
+use phera_bytecode::Reg;
 use phera_extension_api::{NativeError, NativeMethod, ParamType};
 use phera_value::Value;
 
-use crate::{Vm, calls::call_state::CallTarget, classes::MethodBody};
+use crate::{
+    Vm,
+    calls::{call_state::CallTarget, prepared_call::CallFlags},
+    classes::MethodBody,
+};
 
 impl Vm {
+    pub(crate) fn send_window_argument(&mut self, source: Reg) -> Result<bool, NativeError> {
+        let call = *self.call_stack.top_call()?;
+        if !call.flags.contains(CallFlags::WINDOW_ARGUMENT)
+            || call.sent != 0
+            || self
+                .call_stack
+                .top_details()
+                .is_some_and(|details| details.named.is_some())
+        {
+            return Ok(false);
+        }
+        let Some(value) = self.read_defined_local(source) else {
+            return Ok(false);
+        };
+        self.registers.put(call.base(), value);
+        self.call_stack.top_call_mut()?.mark_sent(0, true);
+        Ok(true)
+    }
+
     pub(crate) fn finish_ready_native_window(&mut self) -> Result<Option<Value>, NativeError> {
         let call = *self.call_stack.top_call()?;
         if !call.is_plain() {

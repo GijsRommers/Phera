@@ -78,6 +78,8 @@ impl Vm {
             } => self.static_style_call(class, method, binding)?,
             I::New { class } => self.new_object(class)?,
             I::NewDynamic { class } => self.new_dynamic_object(class)?,
+            I::SendValue { src } if TRACK_GENERATORS && self.send_window_argument(src)? => {}
+            I::SendLocal { local } if TRACK_GENERATORS && self.send_window_argument(local)? => {}
             I::SendValue { src } => self.send(SentArgument::Value(src))?,
             I::SendLocal { local } => self.send(SentArgument::Local(local))?,
             I::SendPath { path } => {
