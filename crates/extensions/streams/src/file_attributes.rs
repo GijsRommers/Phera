@@ -6,7 +6,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use phera_extension_api::{
-    Context, FunctionEntry, LocalFuture, NativeResult, Param, ParamType, Registry, Value, args,
+    Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, Registry,
+    Value, args,
 };
 use rustix::fs::{AtFlags, CWD, Timestamps, UTIME_NOW, chownat, utimensat};
 use rustix::process::{Gid, Uid};
@@ -173,7 +174,14 @@ fn touch(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
         let name = args::bytes(&arguments, 0);
         check_path("touch", "#1 ($filename)", name)?;
         let mtime = args::int(&arguments, 1);
-        let atime = args::int(&arguments, 2).or(mtime);
+        let atime = args::int(&arguments, 2);
+        if mtime.is_none() && atime.is_some() {
+            return Err(NativeError::value_error(concat!(
+                "touch(): Argument #2 ($mtime) cannot be null ",
+                "when argument #3 ($atime) is an integer"
+            )));
+        }
+        let atime = atime.or(mtime);
         let mask = files(context).mask;
         let result = local(context, "touch", name);
         let result = match result {

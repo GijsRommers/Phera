@@ -22,6 +22,11 @@ fn scripts_match_php() {
         let name = script.file_stem().expect("script name").to_string_lossy();
         let directory = temporary.path().join(format!("{name}-{}", runtime.label()));
         std::fs::create_dir(&directory).expect("create script working directory");
+        if name == "stdio" {
+            let input = directory.join("input");
+            std::fs::write(&input, b"stdin\n").expect("write standard input");
+            command.stdin(std::fs::File::open(input).expect("open standard input"));
+        }
         command.current_dir(directory);
     });
 }

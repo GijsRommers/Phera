@@ -15,7 +15,7 @@ pub struct Files {
     pub directory: Option<Rc<Resource>>,
     pub input: Arc<[u8]>,
     pub stream_contexts: HashMap<i64, Rc<Resource>>,
-    pub contexts: Vec<Weak<Resource>>,
+    resources: Vec<Weak<Resource>>,
     next_id: i64,
 }
 
@@ -26,7 +26,7 @@ impl Default for Files {
             directory: None,
             input: Arc::default(),
             stream_contexts: HashMap::new(),
-            contexts: Vec::new(),
+            resources: Vec::new(),
             next_id: 4,
         }
     }
@@ -34,8 +34,9 @@ impl Default for Files {
 
 impl Drop for Files {
     fn drop(&mut self) {
-        // Options can hold arbitrary PHP values, including their own resource.
-        for resource in self.contexts.iter().filter_map(Weak::upgrade) {
+        // Script values can retain resources in cycles. Close those that outlive
+        // ordinary reference counting before the next request runs.
+        for resource in self.resources.iter().filter_map(Weak::upgrade) {
             if let Ok(mut data) = resource.data.try_borrow_mut() {
                 data.take();
             }
@@ -62,7 +63,25 @@ pub fn new_resource(
     let files = state.get_or_default::<Files>();
     let id = files.next_id;
     files.next_id += 1;
-    resource(id, label, data)
+    let value = resource(id, label, data);
+    files.track(&value);
+    value
+}
+
+pub fn track_standard(state: &mut RequestState, value: &Value) {
+    state.get_or_default::<Files>().track(value);
+}
+
+impl Files {
+    fn track(&mut self, value: &Value) {
+        if self.resources.len() >= 256 && self.next_id % 256 == 0 {
+            self.resources
+                .retain(|resource| resource.strong_count() > 0);
+        }
+        if let Value::Resource(resource) = value {
+            self.resources.push(Rc::downgrade(resource));
+        }
+    }
 }
 
 pub fn resource(id: i64, label: &'static str, data: impl std::any::Any) -> Value {

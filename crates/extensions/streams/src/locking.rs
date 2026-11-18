@@ -9,7 +9,7 @@ use rustix::io::Errno;
 
 use crate::handles::STREAM;
 use crate::io_policy::IoPolicy;
-use crate::resource::{operate, stream_arg};
+use crate::resource::{argument_resource, operate, stream_arg};
 use crate::stream::Stream;
 
 pub fn register(registry: &mut Registry) {
@@ -36,7 +36,13 @@ pub fn register(registry: &mut Registry) {
 
 fn flock(_: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
-        let resource = stream_arg(&arguments, "flock")?;
+        let candidate = argument_resource(args::value(&arguments, 0), "flock", "#1 ($stream)")?;
+        let is_directory = crate::directory::is_open(candidate);
+        let resource = if is_directory {
+            candidate
+        } else {
+            stream_arg(&arguments, "flock")?
+        };
         let operation = args::int(&arguments, 1).unwrap_or(0);
         let no_wait = operation & 4 != 0;
         let operation = match (operation & 3, no_wait) {
@@ -55,11 +61,15 @@ fn flock(_: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeRe
             FlockOperation::LockShared | FlockOperation::LockExclusive => IoPolicy::Blocking,
             _ => IoPolicy::Inline,
         };
-        let result = operate(resource, policy, move |stream: &mut Stream| {
-            let file = stream.descriptor().ok_or(Errno::NOTSUP)?;
-            rustix::fs::flock(file, operation)
-        })
-        .await?;
+        let result = if is_directory {
+            Err(Errno::NOTSUP)
+        } else {
+            operate(resource, policy, move |stream: &mut Stream| {
+                let file = stream.descriptor().ok_or(Errno::NOTSUP)?;
+                rustix::fs::flock(file, operation)
+            })
+            .await?
+        };
         if let Some(output) = args::reference(&arguments, 2) {
             *output.borrow_mut() = Value::Int(i64::from(result == Err(Errno::WOULDBLOCK)));
         }

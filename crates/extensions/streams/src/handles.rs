@@ -11,7 +11,7 @@ use crate::context_options::{OPTIONAL_CONTEXT, attach, validate};
 use crate::errors::{check_path, nonnegative, reason};
 use crate::io_policy::{CHUNK, IoPolicy};
 use crate::request::{files, new_resource};
-use crate::resource::{operate, stream_arg, with_stream};
+use crate::resource::{argument_resource, operate, stream_arg, with_stream};
 use crate::stream::Wrapper;
 use crate::wrapper::open;
 
@@ -94,6 +94,13 @@ fn fopen(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
 }
 
 fn fclose(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let candidate = argument_resource(args::value(arguments, 0), "fclose", "#1 ($stream)")?;
+    if crate::directory::is_open(candidate) {
+        context.warning(
+            "fclose(): cannot close the provided stream, as it must not be manually closed".into(),
+        );
+        return Ok(Value::Bool(false));
+    }
     let resource = stream_arg(arguments, "fclose")?;
     resource.data.borrow_mut().take();
     files(context).stream_contexts.remove(&resource.id);
@@ -123,9 +130,17 @@ pub fn seek_from(offset: i64, whence: i64) -> Option<SeekFrom> {
 
 fn fseek(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
-        let resource = stream_arg(&arguments, "fseek")?;
         let offset = args::int(&arguments, 1).unwrap_or(0);
         let whence = args::int(&arguments, 2).unwrap_or(0);
+        let candidate = argument_resource(args::value(&arguments, 0), "fseek", "#1 ($stream)")?;
+        if crate::directory::is_open(candidate) {
+            if offset == 0 && whence == 0 {
+                crate::directory::rewind(candidate).await?;
+                return Ok(Value::Int(0));
+            }
+            return Ok(Value::Int(-1));
+        }
+        let resource = stream_arg(&arguments, "fseek")?;
         let seek = seek_from(offset, whence);
         let success = match seek {
             Some(seek) => operate(resource, IoPolicy::Inline, move |stream| stream.seek(seek))

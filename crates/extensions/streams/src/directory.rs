@@ -215,7 +215,12 @@ fn handle(
         Value::Resource(resource) => resource.clone(),
         Value::Null => {
             context.deprecated(format!(
-                "{function}(): Passing null is deprecated, instead the last opened                  directory stream should be provided"
+                "{}(){}",
+                function,
+                concat!(
+                    ": Passing null is deprecated, instead the last opened ",
+                    "directory stream should be provided"
+                )
             ));
             files(context)
                 .directory
@@ -224,7 +229,8 @@ fn handle(
         }
         other => {
             return Err(NativeError::type_error(format!(
-                "{function}(): Argument #1 ($dir_handle) must be of type resource or null, {} given",
+                "{}(): Argument #1 ($dir_handle) must be of type resource or null, {} given",
+                function,
                 given(other)
             )));
         }
@@ -248,7 +254,7 @@ fn object_handle(object: Option<&Rc<Object>>, action: &str) -> Result<Rc<Resourc
     )))
 }
 
-fn is_open(resource: &Resource) -> bool {
+pub fn is_open(resource: &Resource) -> bool {
     resource
         .data
         .borrow()
@@ -287,7 +293,7 @@ async fn read(resource: &Resource) -> NativeResult {
     .map(|value| value.map_or(Value::Bool(false), Value::from))
 }
 
-async fn rewind(resource: &Resource) -> NativeResult {
+pub async fn rewind(resource: &Resource) -> NativeResult {
     with_directory(resource, Dir::rewind).await?;
     Ok(Value::Null)
 }

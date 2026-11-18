@@ -67,27 +67,18 @@ pub fn attach(context: &mut dyn Context, stream: &Value, options: &Value) {
 fn create(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let mut options = PhpArray::new();
     if let Some(array) = args::array(arguments, 0) {
-        merge(
-            &mut options,
-            array,
-            "stream_context_create",
-            "#1 ($options)",
-        )?;
+        merge(&mut options, array)?;
     }
     if let Some(params) = args::array(arguments, 1)
         && let Some(Value::Array(array)) = params.get(&ArrayKey::str("options"))
     {
-        merge(&mut options, array, "stream_context_create", "#2 ($params)")?;
+        merge(&mut options, array)?;
     }
     Ok(create_options(context, options))
 }
 
 fn create_options(context: &mut dyn Context, options: PhpArray) -> Value {
-    let result = new_resource(context.state(), "stream-context", Options(options));
-    if let Value::Resource(resource) = &result {
-        files(context).contexts.push(Rc::downgrade(resource));
-    }
-    result
+    new_resource(context.state(), "stream-context", Options(options))
 }
 
 fn invalid(function: &str) -> NativeError {
@@ -147,7 +138,7 @@ fn set_option(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         .as_mut()
         .and_then(|data| data.downcast_mut::<Options>())
         .ok_or_else(|| invalid(function))?;
-    if let Some(array) = args::array(arguments, 1) {
+    if arguments.len() == 2 {
         context.deprecated(
             concat!(
                 "Calling stream_context_set_option() with 2 arguments is deprecated, ",
@@ -155,18 +146,27 @@ fn set_option(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
             )
             .into(),
         );
-        merge(&mut options.0, array, function, "#2 ($wrapper_or_options)")?;
+    }
+    if let Some(array) = args::array(arguments, 1) {
+        if args::string(arguments, 2).is_some() {
+            return Err(NativeError::value_error(concat!(
+                "stream_context_set_option(): Argument #3 ($option_name) must be null ",
+                "when argument #2 ($wrapper_or_options) is an array"
+            )));
+        }
+        merge(&mut options.0, array)?;
     } else {
         let Some(name) = args::string(arguments, 2) else {
-            return Err(NativeError::type_error(concat!(
-                "stream_context_set_option(): Argument #3 ($option_name) must be of type string, ",
-                "null given when argument #2 ($wrapper_or_options) is a string"
+            return Err(NativeError::value_error(concat!(
+                "stream_context_set_option(): Argument #3 ($option_name) cannot be null ",
+                "when argument #2 ($wrapper_or_options) is a string"
             )));
         };
         if !args::given(arguments, 3) {
-            return Err(NativeError::argument_count_error(
-                "stream_context_set_option() expects exactly 4 arguments when argument #2 ($wrapper_or_options) is a string",
-            ));
+            return Err(NativeError::value_error(concat!(
+                "stream_context_set_option(): Argument #4 ($value) must be provided ",
+                "when argument #2 ($wrapper_or_options) is a string"
+            )));
         }
         set(
             &mut options.0,
@@ -178,17 +178,12 @@ fn set_option(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(Value::Bool(true))
 }
 
-fn merge(
-    target: &mut PhpArray,
-    source: &PhpArray,
-    function: &str,
-    argument: &str,
-) -> Result<(), NativeError> {
+fn merge(target: &mut PhpArray, source: &PhpArray) -> Result<(), NativeError> {
     for (key, entry) in source.iter() {
         let (ArrayKey::String(_), Value::Array(options)) = (&key, entry) else {
-            return Err(NativeError::value_error(format!(
-                "{function}(): Argument {argument} must have the form [\"wrapper\" => [\"option\" => $value]]"
-            )));
+            return Err(NativeError::value_error(
+                "Options should have the form [\"wrappername\"][\"optionname\"] = $value",
+            ));
         };
         for (option, value) in options.iter() {
             if let ArrayKey::String(_) = option {

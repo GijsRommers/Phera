@@ -9,7 +9,7 @@ use rustix::fs::{OFlags, fcntl_getfl, fcntl_setfl};
 use crate::errors::wrapper_warning;
 use crate::handles::STREAM;
 use crate::io_policy::IoPolicy;
-use crate::resource::{operate, stream_arg, with_stream};
+use crate::resource::{argument_resource, operate, stream_arg, with_stream};
 use crate::stream::{Stream, Wrapper};
 use crate::wrapper::Target;
 
@@ -88,7 +88,25 @@ fn isatty(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
 }
 
 fn get_meta_data(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let stream = stream_arg(arguments, "stream_get_meta_data")?;
+    let name = "stream_get_meta_data";
+    let resource = argument_resource(args::value(arguments, 0), name, "#1 ($stream)")?;
+    if crate::directory::is_open(resource) {
+        let mut data = PhpArray::new();
+        for (key, value) in [
+            ("timed_out", Value::Bool(false)),
+            ("blocked", Value::Bool(true)),
+            ("eof", Value::Bool(false)),
+            ("wrapper_type", Value::from("plainfile")),
+            ("stream_type", Value::from("dir")),
+            ("mode", Value::from("r")),
+            ("unread_bytes", Value::Int(0)),
+            ("seekable", Value::Bool(true)),
+        ] {
+            data.insert(ArrayKey::str(key), value);
+        }
+        return Ok(Value::from(data));
+    }
+    let stream = stream_arg(arguments, name)?;
     with_stream(stream, |stream| Value::from(metadata(stream)))
 }
 
@@ -105,7 +123,9 @@ fn metadata(stream: &Stream) -> PhpArray {
                 insert("mediatype", Value::from(media.to_vec()));
             }
             for field in parts {
-                if let Some(index) = field.iter().position(|byte| *byte == b'=') {
+                if let Some(index) = field.iter().position(|byte| *byte == b'=')
+                    && &field[..index] != b"mediatype"
+                {
                     insert(
                         &String::from_utf8_lossy(&field[..index]),
                         Value::from(field[index + 1..].to_vec()),

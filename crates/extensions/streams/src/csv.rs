@@ -50,7 +50,8 @@ fn dialect(
     let escape = match args::string(args, 4).map(|s| s.as_bytes()) {
         None => {
             context.deprecated(format!(
-                "{function}(): the $escape parameter must be provided as its default value will change"
+                "{}(): the $escape parameter must be provided as its default value will change",
+                function
             ));
             Some(b'\\')
         }

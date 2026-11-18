@@ -116,6 +116,7 @@ impl Runtime {
             environment::cli_server(php_array(self.environment.iter()), path.as_ref(), arguments);
         vm.set_global("_SERVER", Value::from(server));
         for (name, stream) in phera_ext_streams::standard_constants() {
+            phera_ext_streams::track_standard(vm.state_mut(), &stream);
             vm.set_constant(name, stream);
         }
         if let Some(sink) = sink {

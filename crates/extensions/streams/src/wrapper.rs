@@ -282,7 +282,7 @@ fn open_data(data: &[u8], mode: &[u8], uri: &[u8]) -> Result<Stream, &'static st
         .position(|&byte| byte == b',')
         .ok_or("rfc2397: no comma in URL")?;
     let (header, bytes) = (&data[..comma], &data[comma + 1..]);
-    let encoded = header.ends_with(b";base64");
+    let encoded = data_encoding(header)?;
     let bytes = if encoded {
         let input: Vec<_> = bytes
             .iter()
@@ -310,6 +310,28 @@ fn open_data(data: &[u8], mode: &[u8], uri: &[u8]) -> Result<Stream, &'static st
     );
     stream.data_header = Some(header.to_vec());
     Ok(stream)
+}
+
+fn data_encoding(header: &[u8]) -> Result<bool, &'static str> {
+    if header.is_empty() {
+        return Ok(false);
+    }
+    if header == b";base64" {
+        return Ok(true);
+    }
+    let mut fields = header.split(|byte| *byte == b';').peekable();
+    if !fields.next().is_some_and(|media| media.contains(&b'/')) {
+        return Err("rfc2397: illegal media type");
+    }
+    while let Some(field) = fields.next() {
+        if field == b"base64" && fields.peek().is_none() {
+            return Ok(true);
+        }
+        if !field.contains(&b'=') {
+            return Err("rfc2397: illegal parameter");
+        }
+    }
+    Ok(false)
 }
 
 pub fn resolve_file(context: &mut dyn Context, name: &[u8]) -> io::Result<std::path::PathBuf> {

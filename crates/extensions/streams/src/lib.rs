@@ -35,7 +35,7 @@ mod transfer;
 mod whole_file;
 mod wrapper;
 
-pub use request::set_request;
+pub use request::{set_request, track_standard};
 pub use wrapper::standard_constants;
 
 use phera_extension_api::{Extension, Registry};

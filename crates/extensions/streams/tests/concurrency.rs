@@ -35,6 +35,9 @@ fn fifo_waits_without_blocking_the_worker_and_keeps_state_request_local() {
         umask(0077);
         file_put_contents('ready', 'ready');
         $tmp = tmpfile();
+        $leak = [];
+        $leak['self'] =& $leak;
+        $leak['stream'] = $tmp;
         file_put_contents('temporary-path', stream_get_meta_data($tmp)['uri']);
         echo file_get_contents('ready'), ':', fread($pipe, 1), ':', fileperms('ready') & 0777;
     "#,

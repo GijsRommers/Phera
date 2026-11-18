@@ -301,7 +301,8 @@ fn file_put_contents(
             return warn_false(
                 context,
                 format!(
-                    "{function}(): Only {count} of {size} bytes written, possibly out of free disk space"
+                    "{}(): Only {count} of {size} bytes written, possibly out of free disk space",
+                    function
                 ),
             );
         }

@@ -12,7 +12,7 @@ use rustix::fs::{Access, access, statvfs};
 use crate::errors::{check_path, reason, warn_false, wrapper_warning};
 use crate::handles::{FILENAME, STREAM};
 use crate::request::{bytes, canonical, directory, path};
-use crate::resource::{stream_arg, with_stream};
+use crate::resource::{argument_resource, stream_arg, with_stream};
 use crate::wrapper::Target;
 
 pub fn register(registry: &mut Registry) {
@@ -241,6 +241,10 @@ fn stat_array(fields: [i64; 13]) -> NativeResult {
 }
 
 fn fstat(_: &mut dyn Context, args: &[Value]) -> NativeResult {
+    let resource = argument_resource(args::value(args, 0), "fstat", "#1 ($stream)")?;
+    if crate::directory::is_open(resource) {
+        return Ok(Value::Bool(false));
+    }
     let stream = stream_arg(args, "fstat")?;
     let fields = with_stream(stream, |stream| {
         if let Ok(meta) = stream.metadata() {
