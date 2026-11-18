@@ -82,6 +82,16 @@ pub trait Context {
         Box::pin(std::future::ready(Err(NativeError::error(message))))
     }
 
+    /// Invokes an overridable method in a native class's own inheritance scope.
+    fn call_protected_method(
+        &mut self,
+        object: Rc<Object>,
+        name: &str,
+        arguments: Vec<Value>,
+    ) -> LocalFuture<'_, NativeResult> {
+        self.call_method(object, name, arguments)
+    }
+
     /// Countable results are converted to integers even without a declared return type.
     fn count_object(&mut self, object: Rc<Object>) -> LocalFuture<'_, NativeResult> {
         Box::pin(async move {

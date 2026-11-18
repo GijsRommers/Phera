@@ -12,6 +12,7 @@ use std::rc::Rc;
 
 mod arrays;
 mod fixed_array;
+mod heap;
 mod interfaces;
 mod linked_list;
 mod object_storage;
@@ -31,6 +32,7 @@ impl Extension for Spl {
         weak::register(registry);
         linked_list::register(registry);
         fixed_array::register(registry);
+        heap::register(registry);
     }
 }
 

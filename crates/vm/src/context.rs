@@ -128,6 +128,18 @@ impl Context for Vm {
         }
     }
 
+    fn call_protected_method(
+        &mut self,
+        object: std::rc::Rc<phera_value::Object>,
+        name: &str,
+        arguments: Vec<Value>,
+    ) -> LocalFuture<'_, NativeResult> {
+        match self.protocol_method_in_scope(object, name, phera_bytecode::Visibility::Protected) {
+            Ok(callee) => self.invoke_resolved_callable(callee, arguments),
+            Err(error) => Box::pin(std::future::ready(Err(error))),
+        }
+    }
+
     fn lookup_class<'a>(
         &'a mut self,
         name: &'a str,

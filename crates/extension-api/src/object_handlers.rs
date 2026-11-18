@@ -78,6 +78,8 @@ pub struct ClassHooks {
     /// Direct read, mutation or presence check for one virtual property.
     pub property_access: Option<&'static crate::NativePropertyAccess>,
     pub iterator: Option<IteratorFactory>,
+    /// Additional methods a native cursor relies on, beyond the iterator protocol.
+    pub iterator_fallback_if_overridden: &'static [&'static str],
     pub dimensions: Option<NativeDimensions>,
     pub count: Option<NativeCount>,
 }
@@ -89,6 +91,7 @@ impl ClassHooks {
         properties: None,
         property_access: None,
         iterator: None,
+        iterator_fallback_if_overridden: &[],
         dimensions: None,
         count: None,
     };

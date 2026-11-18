@@ -57,6 +57,11 @@ pub(super) fn inherit_hooks(
         properties: own.properties.or(base.properties),
         property_access: own.property_access.or(base.property_access),
         iterator: own.iterator.or(base.iterator),
+        iterator_fallback_if_overridden: if own.iterator.is_some() {
+            own.iterator_fallback_if_overridden
+        } else {
+            base.iterator_fallback_if_overridden
+        },
         dimensions: own.dimensions.or(base.dimensions),
         count: own.count.or(base.count),
     }))
@@ -84,6 +89,7 @@ pub(super) fn user_hooks(
         let name = &unit.names[method.name.index()];
         methods
             .iter()
+            .chain(hooks.iterator_fallback_if_overridden)
             .any(|candidate| name.eq_ignore_ascii_case(candidate))
     }) {
         Some(Rc::new(phera_extension_api::ClassHooks {
