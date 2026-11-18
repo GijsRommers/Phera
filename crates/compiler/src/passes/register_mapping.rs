@@ -247,6 +247,7 @@ impl Instruction {
                     *key_register = map(*key_register)
                 }
             }
+            Instruction::IterEnd { iterator } => *iterator = map(*iterator),
             Instruction::IterInit {
                 iterator: id,
                 source: src,

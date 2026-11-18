@@ -35,10 +35,15 @@ impl Compiler<'_> {
                 self.emit(crate::ir::Instruction::Throw { source }, line);
                 self.allocate_register()
             }
-            ExpressionKind::ClassConstant { .. }
-            | ExpressionKind::New { .. }
+            ExpressionKind::New { .. }
             | ExpressionKind::MethodCall { .. }
-            | ExpressionKind::StaticCall { .. }
+            | ExpressionKind::StaticCall { .. } => {
+                let (first, start) = (self.next, self.position());
+                let result = self.compile_object_expression(expression, line)?;
+                self.release_call_operands(first, start, result, line);
+                Ok(result)
+            }
+            ExpressionKind::ClassConstant { .. }
             | ExpressionKind::Clone { .. }
             | ExpressionKind::InstanceOf { .. } => self.compile_object_expression(expression, line),
             ExpressionKind::Variable(ast::Variable::Named(name)) if name == "this" => {
@@ -100,7 +105,10 @@ impl Compiler<'_> {
             ExpressionKind::Exit(expression) => self.compile_exit(expression, line),
             ExpressionKind::Name(name) => self.compile_constant(name, line),
             ExpressionKind::Call { callee, arguments } => {
-                self.compile_call(callee, arguments, line)
+                let (first, start) = (self.next, self.position());
+                let result = self.compile_call(callee, arguments, line)?;
+                self.release_call_operands(first, start, result, line);
+                Ok(result)
             }
             ExpressionKind::Array(items) => self.compile_array(items, line),
             ExpressionKind::InterpolatedString(parts) => self.compile_interpolation(parts, line),
@@ -162,6 +170,7 @@ pub(crate) mod conditionals;
 pub(crate) mod matching;
 pub(crate) mod nullsafe;
 pub(crate) mod objects;
+pub(crate) mod operand_release;
 pub(crate) mod operators;
 pub(crate) mod paths;
 pub(crate) mod places;

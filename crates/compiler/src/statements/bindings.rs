@@ -40,6 +40,7 @@ impl Compiler<'_> {
     ) -> Result<(), CompileError> {
         let reference_subject = binding == crate::policies::IterationBinding::Reference
             || crate::expressions::places::contains_reference(value);
+        let (first, subject_start) = (self.next, self.position());
         let src = if reference_subject && crate::writable(subject) {
             self.literal(Constant::Null, line)?
         } else {
@@ -124,6 +125,11 @@ impl Compiler<'_> {
         self.emit(Instruction::Jump(Target(start)), line);
         self.patch(jump, self.position());
         self.loop_end(start);
+        self.emit(Instruction::IterEnd { iterator: id }, line);
+        // PHP frees the loop's own copy of the subject and of the last
+        // value when the loop ends (FE_FREE), so an object that only they
+        // held is destroyed here.
+        self.release_temporaries(first, subject_start, line);
 
         Ok(())
     }

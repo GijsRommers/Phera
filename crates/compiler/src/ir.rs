@@ -326,6 +326,10 @@ pub enum Instruction {
         source: Reg,
         place: Option<Place>,
     },
+    /// Release a finished traversal and what it holds; emits IterEnd.
+    IterEnd {
+        iterator: Reg,
+    },
     /// Advance traversal and branch on exhaustion; emits IterNext or IterNextKeyed.
     IterNext {
         iterator: Reg,

@@ -35,8 +35,8 @@ fn integer_at(slots: &[Option<Value>], register: Reg) -> Option<i64> {
 fn store_integer(slots: &mut [Option<Value>], register: Reg, integer: i64) -> ScalarStep {
     match slots.get_mut(register.index()) {
         Some(Some(Value::Int(target))) => *target = integer,
-        Some(slot) => *slot = Some(Value::Int(integer)),
-        None => return ScalarStep::Fallback,
+        Some(slot) if !may_own_objects(slot) => *slot = Some(Value::Int(integer)),
+        _ => return ScalarStep::Fallback,
     }
     ScalarStep::Complete
 }
@@ -45,12 +45,24 @@ fn store_integer(slots: &mut [Option<Value>], register: Reg, integer: i64) -> Sc
 #[inline(always)]
 fn store(slots: &mut [Option<Value>], register: Reg, value: Value) -> ScalarStep {
     match slots.get_mut(register.index()) {
-        Some(slot) => {
+        Some(slot) if !may_own_objects(slot) => {
             *slot = Some(value);
             ScalarStep::Complete
         }
-        None => ScalarStep::Fallback,
+        _ => ScalarStep::Fallback,
     }
+}
+
+/// Whether dropping what a register holds could free an object, and so
+/// make a destructor due. The simple instructions leave such a register to
+/// the general handlers, after which the interpreter runs the destructor;
+/// that keeps the test for due destructors out of the simple loop.
+#[inline(always)]
+fn may_own_objects(slot: &Option<Value>) -> bool {
+    matches!(
+        slot,
+        Some(Value::Array(_) | Value::Object(_) | Value::Reference(_))
+    )
 }
 
 /// `+`, `-`, `*` and `%` on two integers, when the result is an integer.
@@ -272,11 +284,11 @@ pub(crate) fn scalar_step(
         }
         Instruction::Clear { reg: register } | Instruction::UnsetLocal { local: register } => {
             match slots.get_mut(register.index()) {
-                Some(slot) => {
+                Some(slot) if !may_own_objects(slot) => {
                     *slot = None;
                     ScalarStep::Complete
                 }
-                None => ScalarStep::Fallback,
+                _ => ScalarStep::Fallback,
             }
         }
         _ => ScalarStep::Fallback,
@@ -321,6 +333,9 @@ pub(crate) fn array_index_step(
     let Some(target) = slots.get_mut(destination.index()) else {
         return ScalarStep::Fallback;
     };
+    if may_own_objects(target) {
+        return ScalarStep::Fallback;
+    }
     *target = Some(value);
     ScalarStep::Complete
 }

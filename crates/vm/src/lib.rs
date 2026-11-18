@@ -68,6 +68,8 @@ mod exception_rendering;
 #[cfg(test)]
 mod exception_tests;
 mod exception_traces;
+mod destructors;
+mod request_end;
 mod exception_unwind;
 mod exceptions;
 mod extract;
@@ -201,6 +203,7 @@ pub struct Vm {
     property_references: std::rc::Rc<std::cell::RefCell<reference_holders::ReferenceHolders>>,
     autoload: autoload::Autoloaders,
     include_path: Option<phera_value::PhpString>,
+    request_end: request_end::RequestEnd,
 }
 
 impl Vm {
@@ -222,6 +225,7 @@ impl Vm {
             classes: classes::ClassTable::native(&registry),
             autoload: Default::default(),
             include_path: None,
+            request_end: Default::default(),
             native_callback_sites: Vec::new(),
             debug_objects: Vec::new(),
             property_guards: Vec::new(),
@@ -301,6 +305,7 @@ impl Vm {
     /// Run a compiled top-level function on the request heap stack and report its exit status.
     pub async fn run(&mut self, unit: Arc<CompiledUnit>) -> i32 {
         let main = self.code.load(&unit);
+        self.request_end.main = Some(main);
         for id in &unit.hoisted {
             if let Some(function) = unit.functions.get(id.index()) {
                 let index = self.code.declared(main, id.index());
@@ -325,15 +330,26 @@ impl Vm {
         self.publish_declaration_warnings(&unit);
         if let Err(error) = self.hoist_classes(&unit) {
             self.unwind(error);
+            self.finish_request(request_end::ScriptEnd::Fatal).await;
             return self.status;
         }
-        if let Err(error) = self.interpret(0).await {
-            let error = self.materialize_error(error);
-            if self.invoke_exception_handler(&error).await {
-                return self.status;
+        let end = match self.interpret(0).await {
+            Ok(_) => request_end::ScriptEnd::Destructible,
+            Err(error) => {
+                let mut error = self.materialize_error(error);
+                // The frames the error left released their variables; PHP
+                // runs those destructors before it reports the error.
+                if let Err(failure) = self.run_destructors().await {
+                    error = self.materialize_error(failure);
+                }
+                let end = request_end::ScriptEnd::of(&error);
+                if !self.invoke_exception_handler(&error).await {
+                    self.unwind(error);
+                }
+                end
             }
-            self.unwind(error)
-        }
+        };
+        self.finish_request(end).await;
         self.status
     }
 

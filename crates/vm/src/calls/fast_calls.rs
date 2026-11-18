@@ -128,7 +128,7 @@ impl Machine<'_> {
             (_, None) => Value::Null,
         };
         self.stack.pop();
-        self.registers.truncate(start);
+        self.registers.release_frame(start, frame.base());
         self.registers
             .put(caller.base() + destination.index(), value);
         Step::Switched(Position {

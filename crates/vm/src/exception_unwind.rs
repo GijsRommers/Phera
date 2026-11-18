@@ -144,7 +144,7 @@ impl Vm {
         if let Some(frame) = self.call_stack.pop() {
             self.closure_captures
                 .retain(|capture| capture.base < frame.base());
-            self.registers.truncate(frame.start());
+            self.release_frame_registers(&frame);
             self.call_stack.abandon_calls_from(frame.start());
         }
         Ok(())
@@ -174,7 +174,7 @@ impl Vm {
 }
 
 /// Append at the tail, avoiding self-links and cycles as Zend does on replacement throws.
-fn append_previous(object: &Rc<Object>, previous: Rc<Object>) {
+pub(crate) fn append_previous(object: &Rc<Object>, previous: Rc<Object>) {
     let mut ancestor = Some(previous.clone());
     let mut ancestors = Vec::new();
     while let Some(candidate) = ancestor {

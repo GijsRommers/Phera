@@ -21,7 +21,7 @@ impl Compiler<'_> {
             continues: vec![],
         });
         self.block(body, DeclarationTiming::AtExecution)?;
-        let continue_at = self.position();
+        let (first, continue_at) = (self.next, self.position());
         let register = self.compile_expression(condition)?;
         self.emit(
             Instruction::Branch {
@@ -31,6 +31,7 @@ impl Compiler<'_> {
             },
             line,
         );
+        self.release_temporaries(first, continue_at, line);
         self.loop_end(continue_at);
 
         Ok(())
@@ -46,9 +47,11 @@ impl Compiler<'_> {
         line: usize,
     ) -> Result<(), CompileError> {
         for expression in init {
+            let (first, start) = (self.next, self.position());
             self.compile_expression(expression)?;
+            self.release_temporaries(first, start, line);
         }
-        let start = self.position();
+        let (first, start) = (self.next, self.position());
         let mut last = None;
         for expression in condition {
             last = Some(self.compile_expression(expression)?)
@@ -63,6 +66,7 @@ impl Compiler<'_> {
                 line,
             )
         });
+        self.release_temporaries(first, start, line);
         self.loops.push(Loop {
             breaks: vec![],
             continues: vec![],
@@ -70,11 +74,14 @@ impl Compiler<'_> {
         self.block(body, DeclarationTiming::AtExecution)?;
         let continue_at = self.position();
         for expression in step {
+            let (first, step_start) = (self.next, self.position());
             self.compile_expression(expression)?;
+            self.release_temporaries(first, step_start, line);
         }
         self.emit(Instruction::Jump(Target(start)), line);
         if let Some(jump) = end {
-            self.patch(jump, self.position())
+            self.patch(jump, self.position());
+            self.release_temporaries(first, start, line);
         }
         self.loop_end(continue_at);
 

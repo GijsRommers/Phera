@@ -2,7 +2,10 @@
 //!
 //! AST nodes lower to compiler IR here; final interning belongs to `lower`.
 
-use std::{cell::RefCell, collections::HashMap};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+};
 
 use phera_ast as ast;
 use phera_bytecode::Reg;
@@ -40,6 +43,10 @@ pub(super) struct Compiler<'ast> {
     /// __CLASS__ is lexical and does not change when a closure is rebound.
     pub(super) class_scope: Option<String>,
     pub(super) imports: HashMap<(NameKind, String), String>,
+    /// Temporaries cleared right after the call that consumed them (see
+    /// `expressions::operand_release`), which the statement's end need not
+    /// clear again until they are allocated anew.
+    pub(super) released: HashSet<u16>,
 }
 impl<'ast> Compiler<'ast> {
     /// Start an independent function builder in the current namespace.
@@ -73,6 +80,7 @@ impl<'ast> Compiler<'ast> {
             namespace: namespace.into(),
             class_scope: None,
             imports: HashMap::new(),
+            released: HashSet::new(),
         }
     }
 
@@ -96,6 +104,7 @@ impl<'ast> Compiler<'ast> {
             u16::try_from(self.next).map_err(|_| self.error("Phera register limit exceeded", 1))?;
         self.next += 1;
         self.peak = self.peak.max(self.next);
+        self.released.remove(&index);
         Ok(Reg(index))
     }
 

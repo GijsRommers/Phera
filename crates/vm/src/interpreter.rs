@@ -50,6 +50,13 @@ impl Vm {
                             }
                         };
                         self.handle_exception(error, stop)?;
+                        // Unwinding released the locals of the frames it
+                        // left; their destructors run before the catch.
+                        if self.destructors_due()
+                            && let Err(error) = self.run_destructors().await
+                        {
+                            pending = Some(Err(error));
+                        }
                     }
                 }
             }
@@ -74,6 +81,7 @@ impl Vm {
                 BatchExit::Returned(value) => return Ok(value),
                 BatchExit::Yield => tokio::task::yield_now().await,
                 BatchExit::Handlers => self.drain_error_handlers().await?,
+                BatchExit::Destructors => self.run_destructors().await?,
                 BatchExit::Compare(pending) => {
                     let order = self.finish_string_comparison(pending.cast).await?;
                     let value = crate::string_comparison::comparison_value(pending.operator, order);
@@ -100,6 +108,9 @@ impl Vm {
                         return Ok(value);
                     }
                 }
+            }
+            if self.destructors_due() {
+                self.run_destructors().await?;
             }
             if !self.error_handlers.pending.is_empty() {
                 self.drain_error_handlers().await?;

@@ -160,6 +160,9 @@ struct IdState {
     highest: u32,
     /// Ids of freed objects; the last one pushed is reused first.
     free: Vec<u32>,
+    /// PHP stops reusing ids while it destroys the objects left at the end
+    /// of a request.
+    no_reuse: bool,
 }
 
 impl ObjectIds {
@@ -169,7 +172,9 @@ impl ObjectIds {
 
     pub(crate) fn take(&self) -> u32 {
         let mut state = self.state.borrow_mut();
-        if let Some(id) = state.free.pop() {
+        if !state.no_reuse
+            && let Some(id) = state.free.pop()
+        {
             return id;
         }
         state.highest = state.highest.saturating_add(1);
@@ -183,6 +188,11 @@ impl ObjectIds {
         if let Ok(mut state) = self.state.try_borrow_mut() {
             state.free.push(id);
         }
+    }
+
+    /// From now on every object gets a new id.
+    pub fn stop_reuse(&self) {
+        self.state.borrow_mut().no_reuse = true;
     }
 
     /// How many objects are alive.

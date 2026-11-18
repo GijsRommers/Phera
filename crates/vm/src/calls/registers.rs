@@ -137,6 +137,16 @@ impl Registers {
         }
     }
 
+    /// Empty the registers of a frame that ends, from `start` (its window,
+    /// with `$this` or the closure below `base`) up. PHP releases a
+    /// function's variables first, in order, and `$this` after them, so a
+    /// destructor of a local runs before the destructor of `$this`.
+    #[inline]
+    pub(crate) fn release_frame(&mut self, start: usize, base: usize) {
+        self.truncate(base);
+        self.truncate(start);
+    }
+
     /// Move a value from one slot to another, leaving the first empty.
     #[inline]
     pub(crate) fn move_slot(&mut self, from: usize, to: usize) {

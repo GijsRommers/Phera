@@ -24,6 +24,7 @@ impl Compiler<'_> {
         let temporaries: Vec<_> = (first..self.next)
             .map(|index| Reg(index as u16))
             .filter(|register| !self.locals.values().any(|local| local == register))
+            .filter(|register| !self.released.contains(&register.0))
             .collect();
         for register in temporaries {
             self.emit(Instruction::Clear { register }, line);
@@ -66,6 +67,7 @@ impl Compiler<'_> {
         otherwise: &Option<Vec<ast::Statement>>,
         line: usize,
     ) -> Result<(), CompileError> {
+        let (first, start) = (self.next, self.position());
         let register = self.compile_expression(condition)?;
         let jump = self.emit(
             Instruction::Branch {
@@ -75,9 +77,11 @@ impl Compiler<'_> {
             },
             line,
         );
+        self.release_temporaries(first, start, line);
         self.block(then, DeclarationTiming::AtExecution)?;
         let end = self.emit(Instruction::Jump(Target(0)), line);
         self.patch(jump, self.position());
+        self.release_temporaries(first, start, line);
         if let Some(body) = otherwise {
             self.block(body, DeclarationTiming::AtExecution)?
         }
@@ -93,7 +97,7 @@ impl Compiler<'_> {
         body: &[ast::Statement],
         line: usize,
     ) -> Result<(), CompileError> {
-        let start = self.position();
+        let (first, start) = (self.next, self.position());
         let register = self.compile_expression(condition)?;
         let end = self.emit(
             Instruction::Branch {
@@ -103,6 +107,7 @@ impl Compiler<'_> {
             },
             line,
         );
+        self.release_temporaries(first, start, line);
         self.loops.push(Loop {
             breaks: vec![],
             continues: vec![],
@@ -110,6 +115,7 @@ impl Compiler<'_> {
         self.block(body, DeclarationTiming::AtExecution)?;
         self.emit(Instruction::Jump(Target(start)), line);
         self.patch(end, self.position());
+        self.release_temporaries(first, start, line);
         self.loop_end(start);
 
         Ok(())

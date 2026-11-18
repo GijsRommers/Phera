@@ -25,6 +25,21 @@ impl Globals {
         self.values.remove(name);
     }
 
+    /// How many globals exist outside the main script's own variables.
+    pub(crate) fn len(&self) -> usize {
+        self.values.len()
+    }
+
+    /// The globals that hold an object nobody else holds, for the end of
+    /// the request (see `crate::request_end`).
+    pub(crate) fn sole_object_owners(&self) -> Vec<String> {
+        self.values
+            .iter()
+            .filter(|(_, value)| matches!(value, Value::Object(object) if Rc::strong_count(object) == 1))
+            .map(|(name, _)| name.clone())
+            .collect()
+    }
+
     pub(crate) fn iter(&self) -> impl Iterator<Item = (&String, &Value)> {
         self.values.iter()
     }

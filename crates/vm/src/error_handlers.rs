@@ -183,7 +183,7 @@ impl Vm {
                 if event.level == 256 {
                     self.status = 255;
                     return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
-                        (),
+                        crate::request_end::FatalStop,
                     ))));
                 }
             }

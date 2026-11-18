@@ -13,13 +13,18 @@ use std::rc::Rc;
 
 impl PhpArray {
     /// Moves this array's values into `work`, leaving it empty, so that
-    /// dropping it afterwards does nothing more.
+    /// dropping it afterwards does nothing more. They go in last first, so
+    /// that `pop` frees them in order: PHP destroys an array's elements
+    /// first to last, which decides the order of their destructors.
     fn take_values(&mut self, work: &mut Vec<Value>) {
         match std::mem::take(&mut self.storage) {
-            Storage::List(values) => work.extend(values.into_iter().flatten()),
-            Storage::Map(map) => {
-                work.extend(map.entries.into_iter().filter_map(|entry| entry.value))
-            }
+            Storage::List(values) => work.extend(values.into_iter().rev().flatten()),
+            Storage::Map(map) => work.extend(
+                map.entries
+                    .into_iter()
+                    .rev()
+                    .filter_map(|entry| entry.value),
+            ),
         }
     }
 

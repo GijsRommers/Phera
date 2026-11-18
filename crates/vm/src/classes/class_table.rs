@@ -72,16 +72,37 @@ impl ClassTable {
 
     /// Value-owned leases implement PHP's LIFO reuse without inspecting weak handles.
     pub(crate) fn allocate(&mut self, class: Rc<Class>) -> Rc<Object> {
-        let object = Rc::new(Object::allocate(&self.ids, class));
-        // Record the already assigned id only for request-end cycle cleanup.
-        // No weak handle's liveness participates in allocation or id selection.
+        let has_destructor = class
+            .magic
+            .as_ref()
+            .is_some_and(|magic| magic.destruct.is_some());
+        let object = Object::allocate(&self.ids, class);
+        if has_destructor {
+            object.expect_destructor();
+        }
+        let object = Rc::new(object);
+        self.track(&object);
+        object
+    }
+
+    /// Records a live object under its id, for the end of the request: its
+    /// destructor phase and the cleanup of cycles. No weak handle's liveness
+    /// takes part in allocation or id selection.
+    pub(crate) fn track(&mut self, object: &Rc<Object>) {
         let index = object.id.saturating_sub(1) as usize;
         if let Some(slot) = self.objects.get_mut(index) {
-            *slot = Rc::downgrade(&object);
+            *slot = Rc::downgrade(object);
         } else {
-            self.objects.push(Rc::downgrade(&object));
+            self.objects.resize_with(index, Weak::new);
+            self.objects.push(Rc::downgrade(object));
         }
-        object
+    }
+
+    /// The request's object ids, which also hold the objects whose
+    /// destructor is due.
+    #[inline]
+    pub(crate) fn ids(&self) -> &ObjectIds {
+        &self.ids
     }
 }
 

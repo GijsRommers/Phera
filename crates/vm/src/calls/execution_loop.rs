@@ -52,6 +52,9 @@ pub(crate) enum BatchExit {
     Yield,
     /// A warning queued a user error handler, which must run now.
     Handlers,
+    /// An instruction released an object whose destructor must run before
+    /// the next instruction (see `crate::destructors`).
+    Destructors,
 }
 
 /// Why the loop stopped. Small enough to be returned in registers.
@@ -59,6 +62,9 @@ enum LoopExit {
     /// This instruction needs the VM; the frame's position is published.
     Slow(Instruction),
     Yield,
+    /// A step released an object with a destructor; the frame's position
+    /// is published.
+    Destructors,
     /// The instruction pointer left the function's code.
     Invalid,
 }
@@ -111,10 +117,14 @@ impl Vm {
             let instruction = match exit {
                 LoopExit::Slow(instruction) => instruction,
                 LoopExit::Yield => return Ok(BatchExit::Yield),
+                LoopExit::Destructors => return Ok(BatchExit::Destructors),
                 LoopExit::Invalid => return Err(internal_error!("invalid IP")),
             };
             if let Some(exit) = self.execute(instruction, stop, work)? {
                 return Ok(exit);
+            }
+            if self.destructors_due() {
+                return Ok(BatchExit::Destructors);
             }
             if !self.error_handlers.pending.is_empty() {
                 return Ok(BatchExit::Handlers);
@@ -154,6 +164,12 @@ impl Machine<'_> {
                     self.publish(position.ip);
                     return LoopExit::Slow(instruction);
                 }
+            }
+            // Simple instructions never release an object (see
+            // `fast::store`), so only these steps need the test.
+            if self.classes.ids().has_doomed() {
+                self.publish(position.ip);
+                return LoopExit::Destructors;
             }
         }
     }

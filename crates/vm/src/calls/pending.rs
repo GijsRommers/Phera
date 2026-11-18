@@ -255,9 +255,9 @@ impl Vm {
             let text = self.stringify_value(&value).await?;
             self.out(text.as_bytes());
         }
-        self.call_stack.clear();
+        self.release_frames_for_exit();
         Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
-            (),
+            crate::request_end::Exit,
         ))))
     }
 }

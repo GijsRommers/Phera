@@ -23,7 +23,12 @@ impl Drop for ClosureState {
                     pending.extend(array.values().cloned());
                     // Pending owners prevent the array's own drop from freeing native payloads.
                 }
-                Value::Object(object) if Rc::strong_count(&object) == 1 => {
+                // An object with a due destructor is handed to the
+                // interpreter whole when it drops (see `crate::destructors`).
+                Value::Object(object)
+                    if Rc::strong_count(&object) == 1
+                        && object.destruction() != phera_value::Destruction::Due =>
+                {
                     let native = object.native.borrow_mut().take();
                     if let Some(native) = native
                         && let Ok(mut state) = native.downcast::<ClosureState>()

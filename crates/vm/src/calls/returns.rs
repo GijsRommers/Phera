@@ -172,7 +172,7 @@ impl Vm {
             .pop()
             .ok_or_else(|| internal_error!("return without frame"))?;
         self.call_stack.abandon_calls_from(frame.start());
-        self.registers.truncate(frame.start());
+        self.release_frame_registers(&frame);
         if self.call_stack.depth() == stop {
             return Ok(Some(value));
         }
