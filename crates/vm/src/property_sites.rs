@@ -282,13 +282,11 @@ impl Vm {
         if !accepted {
             return self.enter_cached_setter(&entry, object, value, assignment);
         }
-        let existing = crate::property_storage::read_at(&object, &entry.key, entry.slot);
-        if matches!(existing, Some(Value::Reference(_)))
-            || (existing.is_none() && has_magic_properties(&object))
-        {
+        if !crate::property_storage::write_direct_at(&object, &entry.key, entry.slot, value, || {
+            !has_magic_properties(&object)
+        }) {
             return Ok(false);
         }
-        crate::property_storage::write_at(&object, entry.key.clone(), entry.slot, value.clone());
         if let Some((_, result)) = assignment {
             self.set(result, original.clone());
         }

@@ -20,22 +20,6 @@ pub(crate) struct SelectedSetter {
 }
 
 impl Vm {
-    pub(crate) async fn assign_selected_property(
-        &mut self,
-        object: Rc<Object>,
-        name: ArrayKey,
-        value: Value,
-    ) -> Result<(), NativeError> {
-        if let Some(setter) = self
-            .plan_selected_property_write(object, name, value)
-            .await?
-        {
-            self.invoke_declared_hook(setter.function, setter.object, Some(setter.argument))
-                .await?;
-        }
-        Ok(())
-    }
-
     pub(crate) async fn plan_selected_property_write(
         &mut self,
         object: Rc<Object>,

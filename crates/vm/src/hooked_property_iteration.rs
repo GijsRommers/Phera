@@ -5,7 +5,7 @@ use std::{collections::HashSet, rc::Rc};
 
 use phera_bytecode::{IterId, Reg, Target, Visibility};
 use phera_extension_api::{NativeError, PropertyPurpose};
-use phera_value::{ArrayKey, Object, PhpArray, Value};
+use phera_value::{ArrayKey, Object, Value};
 
 use crate::Vm;
 use crate::access_mode::Binding;
@@ -19,7 +19,7 @@ use crate::path_update::property_name;
 use crate::property_hook_continuation::HookContinuation;
 
 pub(crate) struct HookedPropertyIterator {
-    object: Rc<Object>,
+    pub(crate) object: Rc<Object>,
     class: Rc<Class>,
     next_declaration: usize,
     next_dynamic: Option<usize>,
@@ -27,7 +27,7 @@ pub(crate) struct HookedPropertyIterator {
     binding: Binding,
 }
 
-enum IterationStep {
+pub(crate) enum IterationStep {
     End,
     Entry(ArrayKey, Value),
     Getter(FunctionIndex, ArrayKey, String),
@@ -47,7 +47,7 @@ pub(crate) struct IterationGetter {
 }
 
 impl HookedPropertyIterator {
-    fn new(object: Rc<Object>, class: Rc<Class>, binding: Binding) -> Self {
+    pub(crate) fn new(object: Rc<Object>, class: Rc<Class>, binding: Binding) -> Self {
         let declared = class
             .defaults
             .iter()
@@ -63,7 +63,7 @@ impl HookedPropertyIterator {
         }
     }
 
-    fn next(
+    pub(crate) fn next(
         &mut self,
         vm: &mut Vm,
         purpose: PropertyPurpose,
@@ -312,97 +312,6 @@ impl Vm {
             .get_mut(iterator.0)
         {
             state.property_hooks = Some(cursor);
-        }
-    }
-
-    pub(crate) async fn enumerate_hooked_native(
-        &mut self,
-        object: Rc<Object>,
-        class: Rc<Class>,
-        purpose: PropertyPurpose,
-        native: crate::error_traces::NativeTrace,
-    ) -> Result<PhpArray, NativeError> {
-        self.native_callback_sites
-            .push(crate::error_traces::NativeCallbackSite {
-                boundary: self.call_stack.depth(),
-                native,
-            });
-        let result = self
-            .enumerate_hooked_properties(object, class, purpose)
-            .await;
-        self.native_callback_sites.pop();
-        result
-    }
-
-    async fn enumerate_hooked_properties(
-        &mut self,
-        object: Rc<Object>,
-        class: Rc<Class>,
-        purpose: PropertyPurpose,
-    ) -> Result<PhpArray, NativeError> {
-        let mut cursor = HookedPropertyIterator::new(object, class, Binding::ByValue);
-        let mut properties = PhpArray::new();
-        loop {
-            match cursor.next(self, purpose)? {
-                IterationStep::End => return Ok(properties),
-                IterationStep::Entry(key, value) => properties.insert(key, value),
-                IterationStep::Getter(function, key, _) => {
-                    let value = self
-                        .invoke_declared_hook(function, cursor.object.clone(), None)
-                        .await?;
-                    properties.insert(key, value)
-                }
-            };
-        }
-    }
-}
-
-impl Vm {
-    pub(crate) fn raw_hooked_slots(&self, object: &Object, class: &Class) -> PhpArray {
-        let mut slots = PhpArray::new();
-        for property in &class.defaults {
-            if let Some(value) = object.get(&property.key) {
-                slots.insert(property.key.clone(), value);
-            }
-        }
-        for (key, value) in object.to_array().iter() {
-            if !slots.contains_key(&key) {
-                slots.insert(key, value.clone());
-            }
-        }
-        slots
-    }
-
-    pub(crate) fn dump_hooked_slots(
-        &self,
-        object: &Object,
-        class: &Class,
-    ) -> phera_extension_api::PropertyView {
-        let mut slots = PhpArray::new();
-        let mut uninitialized = std::collections::HashMap::new();
-        for property in &class.defaults {
-            if property
-                .hooks
-                .as_ref()
-                .is_some_and(|hooks| hooks.hooks.is_virtual)
-            {
-                continue;
-            }
-            if let Some(value) = object.get(&property.key) {
-                slots.insert(property.key.clone(), value);
-            } else if let Some(ty) = &property.ty {
-                slots.insert(property.key.clone(), Value::Null);
-                uninitialized.insert(property.key.clone(), ty.display.clone());
-            }
-        }
-        for (key, value) in object.to_array().iter() {
-            if !slots.contains_key(&key) {
-                slots.insert(key, value.clone());
-            }
-        }
-        phera_extension_api::PropertyView::DebugSlots {
-            slots: Rc::new(slots),
-            uninitialized,
         }
     }
 }

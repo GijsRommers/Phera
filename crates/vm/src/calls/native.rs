@@ -156,12 +156,22 @@ impl Vm {
 impl Vm {
     /// The extension API owns Vec arguments; only this boundary materializes one.
     pub(crate) async fn finish_native_window(&mut self) -> Result<Value, NativeError> {
+        self.finish_native_window_at(None)
+            .await?
+            .ok_or_else(|| internal_error!("native result destination"))
+    }
+
+    /// An intrinsic with a PHP caller can retain its destination on a suspended hook.
+    pub(crate) async fn finish_native_window_at(
+        &mut self,
+        destination: Option<phera_bytecode::Reg>,
+    ) -> Result<Option<Value>, NativeError> {
         let slots = CallView::top(&self.code, &self.call_stack)?.slots();
         let (call, details) = self.call_stack.pop_call()?;
         if call.callee == PreparedCallee::Constructed {
             let object = self.registers.take(call.base() - 1);
             self.registers.truncate(call.start());
-            return Ok(object);
+            return Ok(Some(object));
         }
         let details = details.unwrap_or_default();
         let callee = details
@@ -208,17 +218,36 @@ impl Vm {
                 if self.output_writer.buffers.pending.is_some() && result.is_ok() {
                     self.output_writer.chunk_caller = Some(entry.name);
                 }
-                result
+                result.map(Some)
+            }
+            CallTarget::Intrinsic(crate::intrinsics::Intrinsic::Clone)
+                if let Some(destination) = destination =>
+            {
+                self.suspend_clone_intrinsic(destination, arguments).await?;
+                Ok(None)
+            }
+            CallTarget::Intrinsic(crate::intrinsics::Intrinsic::Class(
+                crate::class_function::ClassFunction::GetObjectVars,
+            )) if let (Some(destination), [Value::Object(object)]) =
+                (destination, arguments.as_slice())
+                && let Some(class) = self.hooked_property_class(object) =>
+            {
+                self.suspend_object_vars(object.clone(), class, destination)
+                    .await?;
+                self.call_stack.recycle_native_arguments(arguments);
+                Ok(None)
             }
             CallTarget::Intrinsic(intrinsic) => {
                 // Boxed: an intrinsic such as `eval` runs code, and its future
                 // must not make the future of every ordinary native call larger.
-                Box::pin(self.intrinsic_origin(*intrinsic, arguments, origin)).await
-            }
-            CallTarget::Method { method, context } => {
-                self.native_method_window(method, context, arguments, named, origin)
+                Box::pin(self.intrinsic_origin(*intrinsic, arguments, origin))
                     .await
+                    .map(Some)
             }
+            CallTarget::Method { method, context } => self
+                .native_method_window(method, context, arguments, named, origin)
+                .await
+                .map(Some),
             _ => Err(internal_error!("native target")),
         }
     }

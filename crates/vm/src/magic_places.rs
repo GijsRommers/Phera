@@ -55,8 +55,8 @@ pub(crate) struct PathRead {
     register: Option<Reg>,
     next: usize,
     value: Value,
-    indirect: Option<IndirectPath>,
-    resolved: Option<InlineStack<PathKey>>,
+    indirect: Option<Box<IndirectPath>>,
+    resolved: Option<Box<InlineStack<PathKey>>>,
     target: Option<UpdateTarget>,
 }
 
@@ -88,7 +88,7 @@ impl Vm {
             next: 0,
             value,
             indirect: None,
-            resolved: update.then(InlineStack::new),
+            resolved: update.then(|| Box::new(InlineStack::new())),
             target: None,
         })
     }
@@ -211,10 +211,10 @@ impl Vm {
                             }
                             HookRead::Value(hooked) => {
                                 value = hooked.deref().clone();
-                                path.indirect = Some(IndirectPath {
+                                path.indirect = Some(Box::new(IndirectPath {
                                     root: hooked,
                                     keys: InlineStack::new(),
-                                });
+                                }));
                                 continue;
                             }
                             HookRead::Storage => {}
@@ -257,10 +257,10 @@ impl Vm {
                         && let (Some(owner), Some(name)) = (owner, name)
                     {
                         self.warn_indirect_magic_property(&owner, &name, &result.value);
-                        path.indirect = Some(IndirectPath {
+                        path.indirect = Some(Box::new(IndirectPath {
                             root: result.value.clone(),
                             keys: InlineStack::new(),
-                        });
+                        }));
                     }
                     self.read_path_value(result.value)
                 }
@@ -280,10 +280,7 @@ impl Vm {
                     root: path.root,
                     keys: Box::new(path.keys),
                 },
-                None => UpdateTarget::Resolved {
-                    register,
-                    keys: Box::new(keys),
-                },
+                None => UpdateTarget::Resolved { register, keys },
             })
         });
         Ok(PathReadStep::Complete(ReadPlace { value, target }))
@@ -302,10 +299,10 @@ impl Vm {
                 ));
             }
             let read = value.deref().clone();
-            path.indirect = Some(IndirectPath {
+            path.indirect = Some(Box::new(IndirectPath {
                 root: value,
                 keys: InlineStack::new(),
-            });
+            }));
             read
         } else {
             self.read_path_value(value)

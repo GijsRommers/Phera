@@ -84,14 +84,16 @@ impl Vm {
                     if !matches!(
                         self.enter_prepared_call(Some(destination))?,
                         crate::calls::call_execution::CallEntry::Php
-                    ) {
-                        let value = self.finish_native_window().await?;
+                    ) && let Some(value) =
+                        self.finish_native_window_at(Some(destination)).await?
+                    {
                         self.set(destination, value);
                     }
                 }
                 BatchExit::NativeCall(destination) => {
-                    let value = self.finish_native_window().await?;
-                    self.set(destination, value);
+                    if let Some(value) = self.finish_native_window_at(Some(destination)).await? {
+                        self.set(destination, value);
+                    }
                 }
                 BatchExit::Instruction(instruction) => {
                     if let DispatchResult::Returned(value) =

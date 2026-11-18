@@ -89,6 +89,20 @@ pub(crate) enum HookContinuation {
         getter: ReferenceGetter,
     },
     Iteration(IterationGetter),
+    Clone(Reg, crate::classes::cloning::CloneUpdates),
+    ObjectVars(
+        crate::hooked_property_views::ObjectVars,
+        phera_value::ArrayKey,
+    ),
+}
+
+impl HookContinuation {
+    pub(crate) fn native_trace(&self) -> Option<&crate::error_traces::NativeTrace> {
+        match self {
+            Self::ObjectVars(view, _) => Some(&view.native),
+            _ => None,
+        }
+    }
 }
 
 pub(crate) struct MutationGetter {
@@ -166,6 +180,12 @@ impl Vm {
             }
             HookContinuation::Iteration(getter) => {
                 self.resume_hooked_iteration(getter, returned.value)
+            }
+            HookContinuation::Clone(destination, updates) => {
+                self.continue_clone_updates(destination, updates).await
+            }
+            HookContinuation::ObjectVars(view, key) => {
+                self.resume_object_vars(view, key, returned.value).await
             }
         }
     }

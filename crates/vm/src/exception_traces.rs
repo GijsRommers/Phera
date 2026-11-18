@@ -89,13 +89,18 @@ impl Vm {
                 .warning_site
                 .as_ref()
                 .filter(|site| site.boundary == callee_index);
+            let suspended_native = callee
+                .extras
+                .property_hook
+                .as_deref()
+                .and_then(crate::property_hook_continuation::HookContinuation::native_trace);
             let mut callbacks = self
                 .native_callback_sites
                 .iter()
                 .rev()
                 .filter(|site| site.boundary == callee_index)
                 .peekable();
-            if warning.is_some() || callbacks.peek().is_some() {
+            if warning.is_some() || suspended_native.is_some() || callbacks.peek().is_some() {
                 entry.remove(&ArrayKey::str("file"));
                 entry.remove(&ArrayKey::str("line"));
             }
@@ -108,6 +113,9 @@ impl Vm {
                     site.location.line,
                 );
             } else {
+                if let Some(native) = suspended_native {
+                    append_native(&mut trace, native, &caller.unit().file, caller.line());
+                }
                 for site in callbacks {
                     append_native(&mut trace, &site.native, &caller.unit().file, caller.line());
                 }
