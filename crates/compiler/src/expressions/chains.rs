@@ -52,6 +52,13 @@ impl Compiler<'_> {
             .map(|compiled| compiled.register)
     }
 
+    /// Whether `expression` is the operand of the chain step being compiled.
+    pub(crate) fn is_compiled_operand(&self, expression: &ast::Expression) -> bool {
+        self.compiled_operand
+            .as_ref()
+            .is_some_and(|compiled| std::ptr::eq(compiled.operand, expression))
+    }
+
     /// Compiles `expression` with the loop when it starts a long chain;
     /// `None` when it does not, so the caller compiles it the ordinary way.
     pub(crate) fn compile_long_chain(
@@ -169,18 +176,13 @@ fn chain_operand(expression: &ast::Expression) -> Option<&ast::Expression> {
         }
         ExpressionKind::Cast { operand, .. } => Some(operand),
         ExpressionKind::Clone { object, with: None } => Some(object),
-        // `$a->b[0]->c` reads as one access path (see `readable_place`),
-        // whose base is compiled as a value unless it is a variable.
-        ExpressionKind::Index { .. } | ExpressionKind::Property { .. } => {
-            let mut base = expression;
-            while let ExpressionKind::Index { target, .. }
-            | ExpressionKind::Property { target, .. } = &base.kind
-            {
-                base = target;
-            }
-            match base.kind {
+        // `$a[0]` reads its target as the base of an access path (see
+        // `readable_place`), which stops at an operand compiled already. The
+        // first step on a variable is where the chain starts.
+        ExpressionKind::Index { target, .. } | ExpressionKind::Property { target, .. } => {
+            match target.kind {
                 ExpressionKind::Variable(_) | ExpressionKind::StaticProperty { .. } => None,
-                _ => Some(base),
+                _ => Some(target),
             }
         }
         _ => None,

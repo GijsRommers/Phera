@@ -76,6 +76,7 @@ impl Compiler<'_> {
         let dst = self.literal(Constant::Bool(false), line)?;
         let mut ends = vec![];
         for value in values {
+            let mark = self.mark_temporaries();
             let register = self.quiet_access(value, FetchMode::Isset)?;
             ends.push(self.emit(
                 Instruction::BranchNull {
@@ -84,6 +85,7 @@ impl Compiler<'_> {
                 },
                 line,
             ));
+            self.release_temporaries(mark);
         }
         let src = self.literal(Constant::Bool(true), line)?;
         self.emit(

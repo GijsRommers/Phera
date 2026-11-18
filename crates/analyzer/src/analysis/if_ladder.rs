@@ -18,18 +18,14 @@
 use super::*;
 use crate::analysis::statements::Flow;
 
-/// What one rung of the ladder leaves for the combination on the way up.
-enum Rung {
-    /// The condition was known to be false: the rest of the ladder decides.
-    Skipped,
-    /// The condition was not known: the branch ran on `taken`, and the rest
-    /// of the ladder on the scope refined by the condition being false.
-    Split {
-        taken: Scope,
-        flow: Flow,
-        /// The scope before the branch, kept when no path falls through.
-        before: Scope,
-    },
+/// A rung whose condition was not known: its branch ran on `taken`, and the
+/// rest of the ladder on the scope refined by the condition being false. A
+/// rung whose condition was known to be false leaves nothing to combine.
+struct Split {
+    taken: Scope,
+    flow: Flow,
+    /// The scope before the branch, kept when no path falls through.
+    before: Scope,
 }
 
 impl Analyzer<'_> {
@@ -63,14 +59,14 @@ impl Analyzer<'_> {
                     bottom = Some(self.block(body, &mut current));
                     break;
                 }
-                Some(false) => rungs.push(Rung::Skipped),
+                Some(false) => {}
                 None => {
                     let mut taken = current.clone();
                     self.refine(condition, &mut taken, true);
                     let before = current.clone();
                     self.refine(condition, &mut current, false);
                     let flow = self.block(body, &mut taken);
-                    rungs.push(Rung::Split {
+                    rungs.push(Split {
                         taken,
                         flow,
                         before,
@@ -83,14 +79,11 @@ impl Analyzer<'_> {
         self.context.known = outer_known;
 
         for rung in rungs.into_iter().rev() {
-            let Rung::Split {
+            let Split {
                 taken,
                 flow: taken_flow,
                 before,
-            } = rung
-            else {
-                continue;
-            };
+            } = rung;
             let (rest, rest_flow) = (current, flow);
             let mut paths = Vec::new();
             if taken_flow == Flow::Next {

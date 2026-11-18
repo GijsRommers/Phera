@@ -111,7 +111,7 @@ $shapes = [
     'static-arrow-nested' => fn ($n) => '$f = ' . str_repeat('static fn () => ', $n) . '5; echo is_callable($f) ? "y" : "n";',
     'closure-use-list' => fn ($n) => numbered('$u# = #;', $n, ' ') . ' $f = function () use (' . numbered('$u#', $n, ', ') . ') { return $u0 + $u' . ($n - 1) . '; }; echo $f();',
     'parameters-wide' => fn ($n) => 'function f(' . numbered('$p# = #', $n, ', ') . ') { return $p' . ($n - 1) . '; } echo f();',
-    'attributes-wide' => fn ($n) => '#[' . chain('A', ', ', 'A', $n - 1) . '] function f() {} echo count((new ReflectionFunction("f"))->getAttributes());',
+    'attributes-wide' => fn ($n) => '#[' . chain('A', ', ', 'A', $n - 1) . '] function f() { return "ok"; } echo f();',
 
     // Classes.
     'class-methods' => fn ($n) => 'class C { ' . numbered('function m#() { return #; }', $n, ' ') . ' } echo (new C)->m' . ($n - 1) . '();',
