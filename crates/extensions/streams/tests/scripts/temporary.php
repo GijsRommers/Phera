@@ -9,3 +9,4 @@ var_dump(fclose($alias), get_resource_type($f), get_debug_type($f), is_file($uri
 $name = tempnam('.', 'name-');
 var_dump(is_file($name), fileperms($name) & 0777);
 var_dump(unlink($name));
+var_dump(realpath(sys_get_temp_dir()) === realpath('.'));

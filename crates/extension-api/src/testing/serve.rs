@@ -83,6 +83,11 @@ impl Server {
         self.get(path)
     }
 
+    /// The raw response to one POST with a byte body.
+    pub fn post_one(&self, path: &str, body: &[u8]) -> String {
+        self.request("POST", path, body)
+    }
+
     /// Sends a `GET` for every path at the same time, one connection each,
     /// and returns the raw responses in the order of `paths`.
     pub fn get_all(&self, paths: impl IntoIterator<Item = String>) -> Vec<String> {
@@ -100,12 +105,16 @@ impl Server {
     }
 
     fn get(&self, path: &str) -> String {
+        self.request("GET", path, &[])
+    }
+
+    fn request(&self, method: &str, path: &str, body: &[u8]) -> String {
         // macOS queues at most 128 connections a server has not accepted
         // yet (`kern.ipc.somaxconn`), and resets the rest of a burst; PHP's
         // built-in server queues fewer still. A request reset before any of
         // its response arrived is sent again, after a growing pause.
         for attempt in 1..=RESETS_RETRIED {
-            match self.try_get(path) {
+            match self.try_request(method, path, body) {
                 Err(error) if error.kind() == ErrorKind::ConnectionReset => {
                     // Let the server drain its queue before trying again.
                     std::thread::sleep(RESET_PAUSE * attempt);
@@ -116,14 +125,21 @@ impl Server {
         panic!("{path}: the connection was reset {RESETS_RETRIED} times");
     }
 
-    fn try_get(&self, path: &str) -> std::io::Result<String> {
+    fn try_request(&self, method: &str, path: &str, body: &[u8]) -> std::io::Result<String> {
         let mut stream = TcpStream::connect(&self.address)?;
         // A server that hangs fails the test instead of stalling it.
         stream.set_read_timeout(Some(Duration::from_secs(30)))?;
         write!(
             stream,
-            "GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+            concat!(
+                "{} {} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n",
+                "Content-Length: {}\r\n\r\n"
+            ),
+            method,
+            path,
+            body.len()
         )?;
+        stream.write_all(body)?;
         let mut response = String::new();
         match stream.read_to_string(&mut response) {
             Err(error) if !response.is_empty() => {

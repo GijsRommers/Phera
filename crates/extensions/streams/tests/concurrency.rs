@@ -51,6 +51,16 @@ fn fifo_waits_without_blocking_the_worker_and_keeps_state_request_local() {
     "#,
     )
     .expect("write quick PHP route");
+    fs::write(
+        root.join("input.php"),
+        r#"<?php
+        $first = fopen('php://input', 'r');
+        echo bin2hex(fread($first, 2)), ':';
+        echo bin2hex(file_get_contents('php://input')), ':';
+        echo bin2hex(stream_get_contents($first));
+    "#,
+    )
+    .expect("write body-reading route");
     let mut pipe = OpenOptions::new()
         .read(true)
         .write(true)
@@ -88,4 +98,8 @@ fn fifo_waits_without_blocking_the_worker_and_keeps_state_request_local() {
         assert!(response.ends_with("ready:x:384"), "{response}");
         assert!(!std::path::Path::new(&temporary_path).exists());
     });
+    let body = server.post_one("/input.php", &[0, 255, b'c', b'd']);
+    assert!(body.ends_with("00ff:00ff6364:6364"), "{body}");
+    let empty = server.get_one("/input.php");
+    assert!(empty.ends_with("::"), "{empty}");
 }

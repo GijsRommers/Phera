@@ -18,3 +18,10 @@ try {
 } catch (Throwable $error) {
     echo $error->getMessage(), "\n";
 }
+$raw = opendir('d');
+var_dump(readdir($raw));
+rewinddir($raw);
+var_dump(readdir($raw), fstat($raw), stream_get_meta_data($raw));
+$id = get_resource_id($raw);
+closedir($raw);
+var_dump(get_resource_id($raw) === $id, gettype($raw));

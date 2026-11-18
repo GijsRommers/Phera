@@ -21,3 +21,7 @@ foreach (['php://memory', 'php://temp', 'php://input', 'php://output'] as $uri) 
 }
 var_dump(file_get_contents('file://' . __FILE__, length: 5));
 var_dump(is_dir(sys_get_temp_dir()));
+$wrappers = stream_get_wrappers();
+foreach (['file', 'data', 'php'] as $wrapper) {
+    var_dump(in_array($wrapper, $wrappers, true));
+}

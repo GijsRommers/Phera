@@ -27,6 +27,6 @@ fn scripts_match_php() {
             std::fs::write(&input, b"stdin\n").expect("write standard input");
             command.stdin(std::fs::File::open(input).expect("open standard input"));
         }
-        command.current_dir(directory);
+        command.env("TMPDIR", &directory).current_dir(directory);
     });
 }
