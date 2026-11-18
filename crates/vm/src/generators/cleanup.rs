@@ -76,9 +76,6 @@ impl Vm {
 
     /// Preserve the active exception unless releasing a frame raises a replacement.
     pub(crate) async fn unwind_generator_releases(&mut self, error: NativeError) -> NativeError {
-        if !self.generator_releases_pending() {
-            return error;
-        }
         let previous = self.materialize_error(error);
         match self.drain_generator_releases().await {
             Ok(()) => previous,

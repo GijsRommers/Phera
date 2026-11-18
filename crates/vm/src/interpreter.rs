@@ -49,9 +49,17 @@ impl Vm {
                                 Err(handler_error) => handler_error,
                             }
                         };
-                        let error = self.unwind_generator_releases(error).await;
+                        let error = if self.generator_releases_pending() {
+                            self.unwind_generator_releases(error).await
+                        } else {
+                            error
+                        };
                         if let Err(error) = self.handle_exception(error, stop) {
-                            return Err(self.unwind_generator_releases(error).await);
+                            return Err(if self.generator_releases_pending() {
+                                self.unwind_generator_releases(error).await
+                            } else {
+                                error
+                            });
                         }
                     }
                 }

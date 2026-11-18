@@ -148,6 +148,9 @@ impl Registers {
             .get_mut(start..self.top)
             .ok_or_else(|| internal_error!("generator register window"))?;
         registers.extend(window.iter_mut().map(Option::take));
+        if registers.capacity() > 2 * registers.len().max(1) {
+            registers.shrink_to_fit();
+        }
         self.top = start;
         Ok(())
     }

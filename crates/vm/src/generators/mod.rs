@@ -70,6 +70,7 @@ impl Vm {
         &mut self,
         stop: usize,
     ) -> Result<Option<BatchExit>, NativeError> {
+        let first_generator = self.generator_releases.is_none();
         let class = self
             .classes
             .get("Generator")
@@ -98,7 +99,8 @@ impl Vm {
         if let Some(destination) = destination {
             self.set(destination, value);
         }
-        Ok(None)
+        // A plain interpreter batch must re-enter with release tracking enabled.
+        Ok(first_generator.then_some(BatchExit::Handlers))
     }
 
     #[cold]
