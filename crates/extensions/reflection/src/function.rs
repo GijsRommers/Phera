@@ -195,7 +195,7 @@ const ABSTRACT_METHODS: &[MethodEntry] = &[
 ];
 
 pub(crate) fn make(context: &mut dyn Context, target: FunctionTarget) -> NativeResult {
-    let function = Rc::new(engine(context)?.reflect_function(&target)?);
+    let function = engine(context)?.reflect_function(&target)?;
     let name = function.name.clone();
     let class = if function.member.is_some() {
         "ReflectionMethod"
@@ -229,7 +229,7 @@ fn construct(context: &mut dyn Context, this: Option<&Rc<Object>>, args: &[Value
             )));
         }
     };
-    let function = Rc::new(engine(context)?.reflect_function(&target)?);
+    let function = engine(context)?.reflect_function(&target)?;
     let object = receiver(this)?;
     keep_closure(object, &function.target);
     bind(object, Some(&function.name.clone()), function)

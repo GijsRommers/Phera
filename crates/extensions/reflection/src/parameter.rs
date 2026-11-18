@@ -172,7 +172,7 @@ fn construct(
         if let FunctionTarget::Method { class, .. } = &target {
             engine(context)?.reflect_class(class).await?;
         }
-        let function = Rc::new(engine(context)?.reflect_function(&target)?);
+        let function = engine(context)?.reflect_function(&target)?;
         let position = match args.get(1) {
             Some(Value::String(name)) => function
                 .parameters
@@ -295,8 +295,11 @@ fn legacy_class(
             },
             "parent" => {
                 if let Some(member) = &parameter.function.member
-                    && let Some(parent) =
-                        engine(context)?.reflect_class(&member.class).await?.parent
+                    && let Some(parent) = engine(context)?
+                        .reflect_class(&member.class)
+                        .await?
+                        .parent
+                        .clone()
                 {
                     return reflect_class(context, &parent).await;
                 }

@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use phera_extension_api::reflection::{MemberKind, PropertyRead};
+use phera_extension_api::reflection::{ClassSelector, MemberKind, PropertyRead};
 use phera_extension_api::{
     ArrayKey, ClassEntry, ConstantValue, Context, MethodEntry, NativeError, NativeResult, Object,
     Param, ParamType, Registry, Value, args,
@@ -111,7 +111,10 @@ pub(crate) fn register(registry: &mut Registry) {
                             && !object.class.is_instance_of(&member.class)
                         {
                             static_property = engine(c)?
-                                .reflect_members(object.class.name(), MemberKind::Property)
+                                .reflect_members(
+                                    ClassSelector::Name(object.class.name()),
+                                    MemberKind::Property,
+                                )
                                 .iter()
                                 .any(|property| {
                                     property.name == member.name && property.modifiers & 16 != 0

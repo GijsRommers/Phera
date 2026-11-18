@@ -11,8 +11,14 @@ use super::Class;
 
 /// A class's position in the request's class table: a method frame's class
 /// scope and called class are kept as these numbers.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct ClassIndex(u32);
+
+impl ClassIndex {
+    pub(crate) fn number(self) -> u32 {
+        self.0
+    }
+}
 
 /// One request owns the id pool; weak records exist solely for cycle cleanup.
 #[derive(Default)]
@@ -62,6 +68,10 @@ impl ClassTable {
     #[inline]
     pub(crate) fn class(&self, index: ClassIndex) -> &Rc<Class> {
         &self.numbered[index.0 as usize]
+    }
+
+    pub(crate) fn numbered(&self, index: u32) -> Option<Rc<Class>> {
+        self.numbered.get(index as usize).cloned()
     }
 
     /// The built-in Closure class is fixed for a request.

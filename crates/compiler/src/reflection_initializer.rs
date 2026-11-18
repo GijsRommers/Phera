@@ -2,18 +2,24 @@
 
 use std::cell::RefCell;
 
-use phera_ast::StatementKind;
+use phera_ast::{ExpressionKind, MemberName, StatementKind};
 use phera_bytecode::{CompiledUnit, reflection::InitializerSource};
 use phera_source::LineTable;
 
 use crate::{CompileError, Compiler, ir::Instruction};
+
+pub struct CompiledInitializer {
+    pub unit: CompiledUnit,
+    /// A direct class constant read can reuse an immutable native value.
+    pub class_constant: Option<(String, String)>,
+}
 
 /// Compile a fragment using the file and imports from its PHP declaration.
 pub fn compile_reflection_initializer(
     source: &[u8],
     file: &str,
     initializer: &InitializerSource,
-) -> Result<CompiledUnit, CompileError> {
+) -> Result<CompiledInitializer, CompileError> {
     crate::on_compile_stack(file, || compile_on_stack(source, file, initializer))
 }
 
@@ -21,7 +27,7 @@ fn compile_on_stack(
     source: &[u8],
     file: &str,
     initializer: &InitializerSource,
-) -> Result<CompiledUnit, CompileError> {
+) -> Result<CompiledInitializer, CompileError> {
     let error = || CompileError {
         message: "Invalid source for reflection initializer".into(),
         file: file.into(),
@@ -62,8 +68,23 @@ fn compile_on_stack(
     compiler.class_scope.clone_from(&initializer.scope);
     compiler.imports.clone_from(&initializer.imports);
     compiler.function.strict_types = initializer.strict_types;
+    let class_constant = match &expression.kind {
+        ExpressionKind::ClassConstant {
+            class,
+            name: MemberName::Identifier(name),
+        } if !name.name.eq_ignore_ascii_case("class") => compiler
+            .object_class_name(class, initializer.first_line)
+            .ok()
+            .filter(|name| !matches!(name.as_str(), "self" | "parent" | "static"))
+            .map(|class| (class, name.name.clone())),
+        _ => None,
+    };
     let result = compiler.compile_expression(expression)?;
     compiler.function.name = "{reflection initializer}".into();
     compiler.emit(Instruction::Return(result), initializer.first_line);
-    crate::pipeline::finish(compiler, &fragment)
+    let unit = crate::pipeline::finish(compiler, &fragment)?;
+    Ok(CompiledInitializer {
+        unit,
+        class_constant,
+    })
 }

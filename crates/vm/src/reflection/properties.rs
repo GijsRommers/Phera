@@ -2,11 +2,14 @@
 
 use std::rc::Rc;
 
-use phera_extension_api::reflection::{MemberInfo, PropertyRead};
+use phera_extension_api::reflection::{MemberInfo, PropertyRead, PropertySlot};
 use phera_extension_api::{NativeError, NativeResult};
 use phera_value::{Object, Value};
 
-use crate::{Vm, classes::class::PropertyDefault};
+use crate::{
+    Vm,
+    classes::{Class, class::PropertyDefault},
+};
 
 use super::exception;
 
@@ -17,14 +20,15 @@ impl Vm {
         object: Option<Rc<Object>>,
         mode: PropertyRead,
     ) -> NativeResult {
-        let property = self.reflection_property(member)?;
+        let (class, slot) = self.reflected_property_slot(member)?;
+        let property = property_at(&class, slot).ok_or_else(|| missing_property(member))?;
         if matches!(mode, PropertyRead::Default) {
-            return self.reflection_property_default(&property);
+            return self.reflection_property_default(property);
         }
         let value = match &property.static_storage {
             Some(storage) => {
                 if !property.static_initialized.get() {
-                    let initial = self.reflection_property_default(&property)?;
+                    let initial = self.reflection_property_default(property)?;
                     *storage.reference.borrow().borrow_mut() = initial;
                     property.static_initialized.set(true);
                 }
@@ -34,7 +38,7 @@ impl Vm {
                     .then(|| storage.reference.borrow().borrow().clone())
             }
             None => {
-                let object = property_object(&property, object)?;
+                let object = property_object(property, object)?;
                 crate::property_storage::read(&object, &property.key)
             }
         };
@@ -70,10 +74,11 @@ impl Vm {
                 self, object.clone(), &member.name, value,
             );
         }
-        let property = self.reflection_property(member)?;
+        let (class, slot) = self.reflected_property_slot(member)?;
+        let property = property_at(&class, slot).ok_or_else(|| missing_property(member))?;
         let value = value.deref().clone();
         let value = match &property.ty {
-            Some(ty) => self.coerce_reflected_property(value, &property, ty)?,
+            Some(ty) => self.coerce_reflected_property(value, property, ty)?,
             None => value,
         };
         if let Some(storage) = &property.static_storage {
@@ -85,7 +90,7 @@ impl Vm {
             property.static_initialized.set(true);
             property.value_initialized.set(true);
         } else {
-            let object = property_object(&property, object)?;
+            let object = property_object(property, object)?;
             if property.is_readonly && object.has(&property.key) {
                 return Err(NativeError::error(format!(
                     "Cannot modify readonly property {}::${}",
@@ -100,34 +105,44 @@ impl Vm {
                     .try_borrow_mut()
                     .map_err(|_| exception("Property value is already in use"))? = converted;
             } else {
-                crate::property_storage::write(&object, property.key, value);
+                crate::property_storage::write(&object, property.key.clone(), value);
             }
         }
         Ok(Value::Null)
     }
 
-    pub(super) fn reflection_property(
+    fn reflected_property_slot(
         &self,
         member: &MemberInfo,
-    ) -> Result<PropertyDefault, NativeError> {
-        self.classes
+    ) -> Result<(Rc<Class>, PropertySlot), NativeError> {
+        if let Some(handle) = member.property {
+            let class = self
+                .classes
+                .numbered(handle.class)
+                .ok_or_else(|| missing_property(member))?;
+            return Ok((class, handle.slot));
+        }
+        let class = self
+            .classes
             .get(&member.class)
-            .and_then(|class| {
+            .ok_or_else(|| missing_property(member))?;
+        let matches = |property: &PropertyDefault| {
+            property.name == member.name && property.declaring == member.class
+        };
+        let slot = class
+            .defaults
+            .iter()
+            .position(matches)
+            .map(PropertySlot::Instance)
+            .or_else(|| {
                 class
-                    .defaults
+                    .static_properties
                     .iter()
-                    .chain(&class.static_properties)
-                    .find(|property| {
-                        property.name == member.name && property.declaring == member.class
-                    })
-                    .cloned()
+                    .position(matches)
+                    .map(PropertySlot::Static)
             })
-            .ok_or_else(|| {
-                exception(format!(
-                    "Property {}::${} does not exist",
-                    member.class, member.name
-                ))
-            })
+            .ok_or_else(|| missing_property(member))?;
+        Ok((class, slot))
     }
 
     fn reflection_property_default(&mut self, property: &PropertyDefault) -> NativeResult {
@@ -136,6 +151,20 @@ impl Vm {
         }
         Ok(property.value.deref().clone())
     }
+}
+
+fn property_at(class: &Class, slot: PropertySlot) -> Option<&PropertyDefault> {
+    match slot {
+        PropertySlot::Instance(slot) => class.defaults.get(slot),
+        PropertySlot::Static(slot) => class.static_properties.get(slot),
+    }
+}
+
+fn missing_property(member: &MemberInfo) -> NativeError {
+    exception(format!(
+        "Property {}::${} does not exist",
+        member.class, member.name
+    ))
 }
 
 fn property_object(

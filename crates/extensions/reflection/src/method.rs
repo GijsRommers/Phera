@@ -162,7 +162,7 @@ fn construct(
         };
         engine(context)?.reflect_class(&class).await?;
         let function =
-            Rc::new(engine(context)?.reflect_function(&FunctionTarget::Method { class, name })?);
+            engine(context)?.reflect_function(&FunctionTarget::Method { class, name })?;
         set_class(this, method(&function)?);
         bind(this, Some(&function.name.clone()), function)
     })

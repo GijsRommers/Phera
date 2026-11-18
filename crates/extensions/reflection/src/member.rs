@@ -96,7 +96,7 @@ pub(crate) fn construct(
             .first()
             .ok_or_else(|| exception("Missing reflection class name"))?;
         let name = target_class(argument)?;
-        let info = Rc::new(engine(context)?.reflect_class(&name).await?);
+        let info = engine(context)?.reflect_class(&name).await?;
         let object = match argument {
             Value::Object(object) => Some(Rc::downgrade(object)),
             _ => None,
@@ -120,7 +120,7 @@ pub(crate) fn construct(
         })?;
         let name = member.name.clone();
         this.set(ArrayKey::str("class"), Value::from(member.class.as_str()));
-        bind(this, Some(&name), Rc::new(member))
+        bind(this, Some(&name), member)
     })
 }
 

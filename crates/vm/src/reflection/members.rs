@@ -1,7 +1,7 @@
 //! `ReflectionClass::getProperties()` keeps declaration order and omits inherited private members.
 
 use phera_bytecode::Visibility;
-use phera_extension_api::reflection::{AttributeTarget, MemberInfo};
+use phera_extension_api::reflection::{AttributeTarget, MemberInfo, PropertyHandle, PropertySlot};
 
 use crate::{Vm, classes::Class};
 
@@ -45,28 +45,36 @@ impl Vm {
             let mut properties: Vec<_> = class
                 .defaults
                 .iter()
-                .chain(&class.static_properties)
-                .filter(|property| {
+                .enumerate()
+                .map(|(index, property)| (PropertySlot::Instance(index), property))
+                .chain(
+                    class
+                        .static_properties
+                        .iter()
+                        .enumerate()
+                        .map(|(index, property)| (PropertySlot::Static(index), property)),
+                )
+                .filter(|(_, property)| {
                     property.declaring == owner.name
                         && (property.visibility != Visibility::Private || owner.name == class.name)
                 })
                 .collect();
             if let Some((_, unit, declaration)) = declaration {
-                properties.sort_by_key(|property| {
+                properties.sort_by_key(|(_, property)| {
                     declaration
                         .properties
                         .iter()
                         .position(|candidate| unit.names[candidate.name.index()] == property.name)
                 });
             } else if let Some(entry) = self.registry.get_class(&owner.name) {
-                properties.sort_by_key(|property| {
+                properties.sort_by_key(|(_, property)| {
                     entry
                         .properties
                         .iter()
                         .position(|candidate| candidate.name == property.name)
                 });
             }
-            for property in properties {
+            for (slot, property) in properties {
                 let mut info = MemberInfo {
                     name: property.name.clone(),
                     class: property.declaring.clone(),
@@ -79,6 +87,10 @@ impl Vm {
                         | flags(property.set_visibility == Some(Visibility::Private), 4096),
                     declared_type: property.ty.as_ref().map(|ty| ty.display.clone()),
                     has_default: property.initialized,
+                    property: Some(PropertyHandle {
+                        class: class.index.number(),
+                        slot,
+                    }),
                     ..MemberInfo::default()
                 };
                 if let Some((first, unit, declaration)) = declaration

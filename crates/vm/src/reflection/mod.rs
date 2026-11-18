@@ -4,8 +4,9 @@ use std::rc::Rc;
 
 use phera_bytecode::Visibility;
 use phera_extension_api::reflection::{
-    AttributeInfo, AttributeSite, AttributeTarget, ClassInfo, ExtensionInfo, Initializer,
-    MemberInfo, MemberKind, PropertyRead, ReflectedClassKind, ReflectionContext, SourceInfo,
+    AttributeInfo, AttributeSite, AttributeTarget, ClassInfo, ClassSelector, ExtensionInfo,
+    Initializer, MemberInfo, MemberKind, Members, PropertyRead, ReflectedClassKind,
+    ReflectionContext, SourceInfo,
 };
 use phera_extension_api::{LocalFuture, NativeError, NativeResult};
 use phera_value::{Object, PhpArray, Value};
@@ -16,6 +17,7 @@ use crate::calls::callback_binding::ArgumentOrigin;
 use crate::classes::{Class, Invocation, Method, MethodBody, MethodContext};
 use crate::code_table::FunctionIndex;
 
+mod cache;
 mod callables;
 mod constants;
 mod functions;
@@ -63,10 +65,10 @@ impl ReflectionContext for Vm {
     }
 
     fn reflect_function(
-        &self,
+        &mut self,
         target: &phera_extension_api::reflection::FunctionTarget,
-    ) -> Result<phera_extension_api::reflection::FunctionInfo, NativeError> {
-        self.reflection_function(target)
+    ) -> Result<Rc<phera_extension_api::reflection::FunctionInfo>, NativeError> {
+        self.cached_function(target)
     }
 
     fn reflect_invoke(
@@ -165,25 +167,27 @@ impl ReflectionContext for Vm {
         Ok(Value::Null)
     }
 
-    fn reflect_class(&mut self, name: &str) -> LocalFuture<'_, Result<ClassInfo, NativeError>> {
+    fn reflect_class(&mut self, name: &str) -> LocalFuture<'_, Result<Rc<ClassInfo>, NativeError>> {
+        if let Some(class) = self.classes.get(name) {
+            let info = self.cached_class_info(&class);
+            return Box::pin(async move { Ok(info) });
+        }
         let name = name.to_owned();
         Box::pin(async move {
             let class = self
                 .lookup_class(&name)
                 .await?
                 .ok_or_else(|| exception(format!("Class \"{name}\" does not exist")))?;
-            Ok(self.reflection_class_info(&class))
+            Ok(self.cached_class_info(&class))
         })
     }
 
-    fn reflect_members(&self, class: &str, kind: MemberKind) -> Vec<MemberInfo> {
-        self.classes
-            .get(class)
-            .map_or_else(Vec::new, |class| match kind {
-                MemberKind::Method => self.reflection_methods(&class),
-                MemberKind::Property => self.reflection_properties(&class),
-                MemberKind::Constant => self.reflection_constants(&class),
-            })
+    fn reflect_members(&mut self, class: ClassSelector<'_>, kind: MemberKind) -> Members {
+        let class = match class {
+            ClassSelector::Linked(id) => self.classes.numbered(id),
+            ClassSelector::Name(name) => self.classes.get(name),
+        };
+        class.map_or_else(Members::default, |class| self.cached_members(&class, kind))
     }
 
     fn reflect_class_constant(&mut self, class: &str, name: &str) -> NativeResult {
@@ -197,10 +201,10 @@ impl ReflectionContext for Vm {
 
     fn reflect_construct(
         &mut self,
-        class: &str,
+        class: &ClassInfo,
         args: Option<PhpArray>,
     ) -> LocalFuture<'_, NativeResult> {
-        let class = self.classes.get(class);
+        let class = self.classes.numbered(class.id);
         Box::pin(async move {
             let class = class.ok_or_else(|| exception("Class does not exist"))?;
             self.reflection_construct(class, args, Construction::Reflection)
@@ -210,11 +214,11 @@ impl ReflectionContext for Vm {
 
     fn reflect_construct_attribute(
         &mut self,
-        class: &str,
+        class: &ClassInfo,
         args: PhpArray,
         site: Option<AttributeSite>,
     ) -> LocalFuture<'_, NativeResult> {
-        let class = self.classes.get(class);
+        let class = self.classes.numbered(class.id);
         Box::pin(async move {
             let class = class.ok_or_else(|| exception("Class does not exist"))?;
             self.reflection_construct(class, Some(args), Construction::Attribute(site))
@@ -224,7 +228,10 @@ impl ReflectionContext for Vm {
 
     fn reflect_evaluate(&mut self, initializer: Initializer) -> LocalFuture<'_, NativeResult> {
         Box::pin(async move {
-            let function = self.reflection_initializer_code(&initializer).await?;
+            let function = match self.reflection_initializer_code(&initializer).await? {
+                initializers::CompiledInitializer::Function(function) => function,
+                initializers::CompiledInitializer::Literal(value) => return Ok(value),
+            };
             let callee =
                 if let Some(scope) = initializer.scope.and_then(|name| self.classes.get(&name)) {
                     self.code.set_declaring_class(function, scope.index);
@@ -309,6 +316,7 @@ impl Vm {
             }
         }
         ClassInfo {
+            id: class.index.number(),
             name: class.name.clone(),
             kind,
             source,
@@ -348,30 +356,32 @@ impl Vm {
         attributes: &[phera_bytecode::reflection::Attribute],
         target: AttributeTarget,
         class: Option<&str>,
-    ) -> Vec<AttributeInfo> {
+    ) -> Vec<Rc<AttributeInfo>> {
         let first = self.code.facts(unit_function).unit_first;
         let file = &self.code.unit(unit_function).file;
         attributes
             .iter()
-            .map(|attribute| AttributeInfo {
-                validation_error: attribute.validation_error.clone(),
-                site: Some(AttributeSite {
-                    file: file.clone(),
-                    line: attribute.line,
-                    strict_types: attribute.strict_types,
-                }),
-                name: attribute.name.clone(),
-                arguments: attribute
-                    .arguments
-                    .iter()
-                    .map(|argument| {
-                        (
-                            argument.name.clone(),
-                            initializers::reflected_value(&argument.initializer, first, class),
-                        )
-                    })
-                    .collect(),
-                target,
+            .map(|attribute| {
+                Rc::new(AttributeInfo {
+                    validation_error: attribute.validation_error.clone(),
+                    site: Some(AttributeSite {
+                        file: file.clone(),
+                        line: attribute.line,
+                        strict_types: attribute.strict_types,
+                    }),
+                    name: attribute.name.clone(),
+                    arguments: attribute
+                        .arguments
+                        .iter()
+                        .map(|argument| {
+                            (
+                                argument.name.clone(),
+                                initializers::reflected_value(&argument.initializer, first, class),
+                            )
+                        })
+                        .collect(),
+                    target,
+                })
             })
             .collect()
     }
@@ -382,7 +392,6 @@ impl Vm {
         args: Option<PhpArray>,
         construction: Construction,
     ) -> NativeResult {
-        use phera_extension_api::Context;
         let args = match args {
             Some(args) => args,
             None => {
@@ -392,7 +401,8 @@ impl Vm {
                         class.name
                     )));
                 }
-                return self.create_object(&class.name, PhpArray::new());
+                Self::check_factory_class(&class)?;
+                return self.create_linked_object(class, PhpArray::new());
             }
         };
         // Closure exposes a private placeholder for reflection, while Zend's
@@ -402,7 +412,8 @@ impl Vm {
                 "Class Closure does not have a constructor, so you cannot pass any constructor arguments",
             ));
         }
-        let created = self.create_object(&class.name, PhpArray::new())?;
+        Self::check_factory_class(&class)?;
+        let created = self.create_linked_object(class.clone(), PhpArray::new())?;
         let constructor = class.constructor.clone();
         match &constructor {
             Some(method) if method.visibility != Visibility::Public => {

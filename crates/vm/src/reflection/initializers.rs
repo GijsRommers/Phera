@@ -12,7 +12,13 @@ use phera_value::Value;
 use crate::{Vm, code_table::FunctionIndex};
 
 #[derive(Default)]
-struct InitializerCode(HashMap<(u32, usize), FunctionIndex>);
+struct InitializerCode(HashMap<(u32, usize), CompiledInitializer>);
+
+#[derive(Clone)]
+pub(super) enum CompiledInitializer {
+    Function(FunctionIndex),
+    Literal(Value),
+}
 
 pub(super) fn reflected_value(
     source: &SourceValue,
@@ -41,10 +47,10 @@ impl Vm {
     pub(super) async fn reflection_initializer_code(
         &mut self,
         initializer: &Initializer,
-    ) -> Result<FunctionIndex, NativeError> {
+    ) -> Result<CompiledInitializer, NativeError> {
         let key = (initializer.unit, initializer.index);
-        if let Some(&compiled) = self.state.get_or_default::<InitializerCode>().0.get(&key) {
-            return Ok(compiled);
+        if let Some(compiled) = self.state.get_or_default::<InitializerCode>().0.get(&key) {
+            return Ok(compiled.clone());
         }
         let unit = self
             .code
@@ -70,11 +76,35 @@ impl Vm {
             Err(_) => compile(),
         }
         .map_err(NativeError::error)?;
-        let function = self.code.load(&Arc::new(compiled));
+        let literal = compiled.class_constant.and_then(|(class, name)| {
+            let class = self.classes.get(&class)?;
+            let constant = class.constants.get(&name)?;
+            if constant.deprecated.is_none()
+                && constant.visibility == phera_bytecode::Visibility::Public
+                && let crate::classes::class::ConstantInitializer::Value(value) =
+                    &constant.initializer
+                && matches!(
+                    value,
+                    Value::Null
+                        | Value::Bool(_)
+                        | Value::Int(_)
+                        | Value::Float(_)
+                        | Value::String(_)
+                )
+            {
+                Some(value.clone())
+            } else {
+                None
+            }
+        });
+        let compiled = match literal {
+            Some(value) => CompiledInitializer::Literal(value),
+            None => CompiledInitializer::Function(self.code.load(&Arc::new(compiled.unit))),
+        };
         self.state
             .get_or_default::<InitializerCode>()
             .0
-            .insert(key, function);
-        Ok(function)
+            .insert(key, compiled.clone());
+        Ok(compiled)
     }
 }

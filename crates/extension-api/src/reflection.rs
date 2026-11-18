@@ -27,6 +27,7 @@ pub enum ReflectedClassKind {
 
 #[derive(Clone, Debug)]
 pub struct ClassInfo {
+    pub id: u32,
     pub name: String,
     pub kind: ReflectedClassKind,
     pub source: Option<SourceInfo>,
@@ -42,7 +43,7 @@ pub struct ClassInfo {
     pub iterable: bool,
     pub anonymous: bool,
     pub constructor: Option<String>,
-    pub attributes: Vec<AttributeInfo>,
+    pub attributes: Vec<Rc<AttributeInfo>>,
 }
 
 /// A request-local handle to code that evaluates a declaration expression.
@@ -85,11 +86,25 @@ pub struct MemberInfo {
     pub modifiers: i64,
     pub lookup_class: String,
     pub source: Option<SourceInfo>,
-    pub attributes: Vec<AttributeInfo>,
+    pub attributes: Vec<Rc<AttributeInfo>>,
     pub declared_type: Option<String>,
     pub promoted: bool,
     pub has_default: bool,
     pub dynamic: bool,
+    pub property: Option<PropertyHandle>,
+}
+
+/// A property slot in a linked class, valid only for the current PHP request.
+#[derive(Clone, Copy, Debug)]
+pub struct PropertyHandle {
+    pub class: u32,
+    pub slot: PropertySlot,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum PropertySlot {
+    Instance(usize),
+    Static(usize),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -97,6 +112,15 @@ pub enum MemberKind {
     Method,
     Property,
     Constant,
+}
+
+/// Request-local immutable member snapshots shared by distinct reflector objects.
+pub type Members = Rc<Vec<Rc<MemberInfo>>>;
+
+/// A linked class handle avoids looking up its name again on each reflection call.
+pub enum ClassSelector<'a> {
+    Linked(u32),
+    Name(&'a str),
 }
 
 /// Introspection and privileged operations requested by PHP's Reflection extension.
@@ -108,8 +132,10 @@ pub trait ReflectionContext {
     fn reflect_constant_value(&self, name: &str) -> NativeResult;
 
     /// Gets the signature of a resolved function, method, or closure.
-    fn reflect_function(&self, target: &FunctionTarget)
-    -> Result<FunctionInfo, crate::NativeError>;
+    fn reflect_function(
+        &mut self,
+        target: &FunctionTarget,
+    ) -> Result<Rc<FunctionInfo>, crate::NativeError>;
 
     /// Invokes the exact reflected implementation using PHP's internal call rules.
     fn reflect_invoke(
@@ -150,10 +176,10 @@ pub trait ReflectionContext {
     fn reflect_class(
         &mut self,
         name: &str,
-    ) -> LocalFuture<'_, Result<ClassInfo, crate::NativeError>>;
+    ) -> LocalFuture<'_, Result<Rc<ClassInfo>, crate::NativeError>>;
 
     /// Lists visible reflection members in declaration order, including non-public members.
-    fn reflect_members(&self, class: &str, kind: MemberKind) -> Vec<MemberInfo>;
+    fn reflect_members(&mut self, class: ClassSelector<'_>, kind: MemberKind) -> Members;
 
     /// Reads a constant using its declaring scope rather than the caller's scope.
     fn reflect_class_constant(&mut self, class: &str, name: &str) -> NativeResult;
@@ -161,14 +187,14 @@ pub trait ReflectionContext {
     /// Creates an instance, optionally forwarding arguments to its constructor.
     fn reflect_construct(
         &mut self,
-        class: &str,
+        class: &ClassInfo,
         args: Option<PhpArray>,
     ) -> LocalFuture<'_, NativeResult>;
 
     /// Attribute construction applies the declaration's scalar typing and location.
     fn reflect_construct_attribute(
         &mut self,
-        class: &str,
+        class: &ClassInfo,
         args: PhpArray,
         site: Option<AttributeSite>,
     ) -> LocalFuture<'_, NativeResult>;
@@ -231,7 +257,7 @@ pub struct ParameterInfo {
     pub promoted: bool,
     pub default: Option<ParameterDefault>,
     pub default_constant: Option<String>,
-    pub attributes: Vec<AttributeInfo>,
+    pub attributes: Vec<Rc<AttributeInfo>>,
 }
 
 #[derive(Clone)]
@@ -253,7 +279,7 @@ pub struct FunctionInfo {
     pub closure_this: Option<Weak<Object>>,
     pub closure_scope: Option<String>,
     pub closure_called: Option<String>,
-    pub attributes: Vec<AttributeInfo>,
+    pub attributes: Vec<Rc<AttributeInfo>>,
 }
 
 #[derive(Clone)]
@@ -262,5 +288,5 @@ pub struct ConstantInfo {
     pub source: Option<SourceInfo>,
     pub extension: Option<String>,
     pub deprecated: bool,
-    pub attributes: Vec<AttributeInfo>,
+    pub attributes: Vec<Rc<AttributeInfo>>,
 }

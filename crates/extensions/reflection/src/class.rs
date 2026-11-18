@@ -267,12 +267,11 @@ fn construct(
         } else {
             None
         };
-        let name = info.name.clone();
         bind(
             this,
-            Some(&name),
+            Some(&info.name),
             ReflectedClass {
-                info: Rc::new(info),
+                info: info.clone(),
                 object,
             },
         )
@@ -295,13 +294,12 @@ pub(crate) fn reflected_class(
 
 pub(crate) async fn reflect_class(context: &mut dyn Context, name: &str) -> NativeResult {
     let info = engine(context)?.reflect_class(name).await?;
-    let name = info.name.clone();
     allocate(
         context,
         "ReflectionClass",
-        Some(&name),
+        Some(&info.name),
         ReflectedClass {
-            info: Rc::new(info),
+            info: info.clone(),
             object: None,
         },
     )
@@ -387,7 +385,7 @@ fn relationship(
             }
             Some(Value::String(name)) => {
                 let name = name.to_string_lossy();
-                let info = engine(context)?
+                engine(context)?
                     .reflect_class(&name)
                     .await
                     .map_err(|error| match relationship {
@@ -403,8 +401,7 @@ fn relationship(
                             exception(format!("Interface \"{name}\" does not exist"))
                         }
                         _ => error,
-                    })?;
-                Rc::new(info)
+                    })?
             }
             _ => {
                 let actual = args.first().map_or("null".into(), Value::type_name);
@@ -433,7 +430,7 @@ fn relationship(
             if name == other.name {
                 return Ok(Value::Bool(true));
             }
-            parent = engine(context)?.reflect_class(&name).await?.parent;
+            parent = engine(context)?.reflect_class(&name).await?.parent.clone();
         }
         Ok(Value::Bool(false))
     })
@@ -447,7 +444,7 @@ fn instantiate(
     Box::pin(async move {
         let class = reflected_class(this.as_ref())?;
         engine(context)?
-            .reflect_construct(&class.info.name, arguments)
+            .reflect_construct(&class.info, arguments)
             .await
     })
 }

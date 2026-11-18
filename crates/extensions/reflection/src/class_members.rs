@@ -2,14 +2,16 @@
 
 use std::rc::Rc;
 
-use phera_extension_api::reflection::{MemberInfo, MemberKind, PropertyRead};
+use phera_extension_api::reflection::{
+    ClassSelector, MemberInfo, MemberKind, Members, PropertyRead,
+};
 use phera_extension_api::{
     ArrayKey, ConstantValue, Context, MethodEntry, NativeResult, Object, Param, ParamType,
     PhpArray, Value, args,
 };
 
 use crate::class::{ReflectedClass, reflected_class};
-use crate::{allocate, engine, exception, values};
+use crate::{allocate, engine, exception};
 
 const NAME: &[Param] = const { &[Param::new("name", ParamType::String)] };
 const FILTER: &[Param] = const {
@@ -88,8 +90,8 @@ pub(crate) fn members(
     context: &mut dyn Context,
     class: &ReflectedClass,
     kind: MemberKind,
-) -> Result<Vec<MemberInfo>, phera_extension_api::NativeError> {
-    let mut result = engine(context)?.reflect_members(&class.info.name, kind);
+) -> Result<Members, phera_extension_api::NativeError> {
+    let mut result = engine(context)?.reflect_members(ClassSelector::Linked(class.info.id), kind);
     if matches!(kind, MemberKind::Property)
         && let Some(object) = class.object.as_ref().and_then(std::rc::Weak::upgrade)
     {
@@ -100,14 +102,14 @@ pub(crate) fn members(
             }
             let name = key.to_string_lossy();
             if !result.iter().any(|property| property.name == name) {
-                result.push(MemberInfo {
+                Rc::make_mut(&mut result).push(Rc::new(MemberInfo {
                     name,
                     class: class.info.name.clone(),
                     lookup_class: class.info.name.clone(),
                     modifiers: 1,
                     dynamic: true,
                     ..MemberInfo::default()
-                });
+                }));
             }
         }
     }
@@ -169,11 +171,14 @@ fn one(
     }
 }
 
-pub(crate) fn find(members: Vec<MemberInfo>, name: &str, kind: MemberKind) -> Option<MemberInfo> {
-    members.into_iter().find(|member| match kind {
-        MemberKind::Method => member.name.eq_ignore_ascii_case(name),
-        _ => member.name == name,
-    })
+pub(crate) fn find(members: Members, name: &str, kind: MemberKind) -> Option<Rc<MemberInfo>> {
+    members
+        .iter()
+        .find(|member| match kind {
+            MemberKind::Method => member.name.eq_ignore_ascii_case(name),
+            _ => member.name == name,
+        })
+        .cloned()
 }
 
 fn all(
@@ -183,13 +188,14 @@ fn all(
     kind: MemberKind,
 ) -> NativeResult {
     let class = reflected_class(this)?;
-    let mut result = Vec::new();
-    for member in members(context, &class, kind)? {
-        if matches_filter(&member, args) {
-            result.push(member_object(context, member, kind)?);
+    let members = members(context, &class, kind)?;
+    let mut result = PhpArray::with_capacity(members.len());
+    for member in members.iter() {
+        if matches_filter(member, args) {
+            result.push(member_object(context, member.clone(), kind)?)?;
         }
     }
-    values(result)
+    Ok(result.into())
 }
 
 fn matches_filter(member: &MemberInfo, arguments: &[Value]) -> bool {
@@ -199,8 +205,8 @@ fn matches_filter(member: &MemberInfo, arguments: &[Value]) -> bool {
 fn constants(context: &mut dyn Context, this: Option<&Rc<Object>>, args: &[Value]) -> NativeResult {
     let class = reflected_class(this)?;
     let mut result = PhpArray::new();
-    for member in members(context, &class, MemberKind::Constant)? {
-        if matches_filter(&member, args) {
+    for member in members(context, &class, MemberKind::Constant)?.iter() {
+        if matches_filter(member, args) {
             let value = engine(context)?.reflect_class_constant(&member.class, &member.name)?;
             result.insert(ArrayKey::str(member.name.as_str()), value);
         }
@@ -229,29 +235,29 @@ fn constant(context: &mut dyn Context, this: Option<&Rc<Object>>, args: &[Value]
 
 fn constructor(context: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
     let class = reflected_class(this)?;
-    let Some(owner) = &class.info.constructor else {
+    let Some(_) = &class.info.constructor else {
         return Ok(Value::Null);
     };
-    let mut member = engine(context)?
-        .reflect_members(owner, MemberKind::Method)
-        .into_iter()
-        .find(|method| method.name.eq_ignore_ascii_case("__construct"))
-        .ok_or_else(|| exception("Constructor does not exist"))?;
-    member.lookup_class = class.info.name.clone();
-    member_object(context, member, MemberKind::Method)
+    crate::function::make(
+        context,
+        phera_extension_api::reflection::FunctionTarget::Method {
+            class: class.info.name.clone(),
+            name: "__construct".into(),
+        },
+    )
 }
 
 pub(crate) fn member_object(
     context: &mut dyn Context,
-    member: MemberInfo,
+    member: Rc<MemberInfo>,
     kind: MemberKind,
 ) -> NativeResult {
     if matches!(kind, MemberKind::Method) {
         return crate::function::make(
             context,
             phera_extension_api::reflection::FunctionTarget::Method {
-                class: member.lookup_class,
-                name: member.name,
+                class: member.lookup_class.clone(),
+                name: member.name.clone(),
             },
         );
     }
@@ -260,11 +266,9 @@ pub(crate) fn member_object(
         MemberKind::Property => "ReflectionProperty",
         MemberKind::Constant => "ReflectionClassConstant",
     };
-    let name = member.name.clone();
-    let owner = member.class.clone();
-    let value = allocate(context, class, Some(&name), Rc::new(member))?;
+    let value = allocate(context, class, Some(&member.name), member.clone())?;
     if let Value::Object(object) = &value {
-        object.set(ArrayKey::str("class"), Value::from(owner));
+        object.set(ArrayKey::str("class"), Value::from(member.class.as_str()));
     }
     Ok(value)
 }
@@ -277,8 +281,8 @@ fn property_values(
     let class = reflected_class(this)?;
     let mut result = PhpArray::new();
     let mut declared = members(context, &class, MemberKind::Property)?;
-    declared.sort_by_key(|member| member.modifiers & 16 == 0);
-    for member in declared {
+    Rc::make_mut(&mut declared).sort_by_key(|member| member.modifiers & 16 == 0);
+    for member in declared.iter() {
         let is_static = member.modifiers & 16 != 0;
         if member.dynamic
             || matches!(mode, PropertyRead::Value) && !is_static
@@ -288,14 +292,14 @@ fn property_values(
         }
         if matches!(mode, PropertyRead::Value)
             && matches!(
-                engine(context)?.reflect_property_read(&member, None, PropertyRead::Initialized)?,
+                engine(context)?.reflect_property_read(member, None, PropertyRead::Initialized)?,
                 Value::Bool(false)
             )
         {
             continue;
         }
-        let value = engine(context)?.reflect_property_read(&member, None, mode)?;
-        result.insert(ArrayKey::str(member.name), value);
+        let value = engine(context)?.reflect_property_read(member, None, mode)?;
+        result.insert(ArrayKey::str(member.name.as_str()), value);
     }
     Ok(Value::from(result))
 }
@@ -338,7 +342,7 @@ fn static_member(
     context: &mut dyn Context,
     class: &ReflectedClass,
     name: &str,
-) -> Result<Option<MemberInfo>, phera_extension_api::NativeError> {
+) -> Result<Option<Rc<MemberInfo>>, phera_extension_api::NativeError> {
     Ok(find(
         members(context, class, MemberKind::Property)?,
         name,

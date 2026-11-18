@@ -19,7 +19,7 @@ mod statements;
 mod tests;
 
 pub use compile_error::CompileError;
-pub use reflection_initializer::compile_reflection_initializer;
+pub use reflection_initializer::{CompiledInitializer, compile_reflection_initializer};
 
 use context::{Compiler, Loop};
 use helpers::{binary, constant, type_name, writable};
@@ -54,10 +54,10 @@ fn compile_source(
     on_compile_stack(file, || pipeline::compile_on_stack(source, file, kind))
 }
 
-fn on_compile_stack(
+fn on_compile_stack<T: Send>(
     file: &str,
-    compile: impl FnOnce() -> Result<phera_bytecode::CompiledUnit, CompileError> + Send,
-) -> Result<phera_bytecode::CompiledUnit, CompileError> {
+    compile: impl FnOnce() -> Result<T, CompileError> + Send,
+) -> Result<T, CompileError> {
     std::thread::scope(|scope| {
         std::thread::Builder::new()
             .name("phera-compiler".into())

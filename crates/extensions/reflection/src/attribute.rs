@@ -89,7 +89,7 @@ pub(crate) async fn class_attributes(
             target: AttributeTarget::Class,
             arguments: Vec::new(),
         };
-        return list(context, &[marker], args, "ReflectionClass").await;
+        return list(context, &[Rc::new(marker)], args, "ReflectionClass").await;
     }
     if let Some(flags) =
         builtin_flags(&class.name).filter(|_| class.extension.as_deref() == Some("Core"))
@@ -101,14 +101,14 @@ pub(crate) async fn class_attributes(
             target: AttributeTarget::Class,
             arguments: vec![(None, AttributeValue::Literal(Value::Int(flags)))],
         };
-        return list(context, &[marker], args, "ReflectionClass").await;
+        return list(context, &[Rc::new(marker)], args, "ReflectionClass").await;
     }
     list(context, &class.attributes, args, "ReflectionClass").await
 }
 
 pub(crate) async fn list(
     context: &mut dyn Context,
-    attributes: &[AttributeInfo],
+    attributes: &[Rc<AttributeInfo>],
     args: &[Value],
     reflector: &str,
 ) -> NativeResult {
@@ -139,7 +139,7 @@ pub(crate) async fn list(
                 .count()
                 > 1;
             let state = ReflectedAttribute {
-                info: Rc::new(info.clone()),
+                info: Rc::clone(info),
                 repeated,
             };
             result.push(allocate(
@@ -175,7 +175,7 @@ async fn is_instance_of(
         {
             return Ok(true);
         }
-        next = info.parent;
+        next = info.parent.clone();
     }
     Ok(false)
 }
@@ -226,7 +226,7 @@ fn instantiate(
         }
         let values = arguments(context, &attr.info).await?;
         engine(context)?
-            .reflect_construct_attribute(&class.name, values, attr.info.site.clone())
+            .reflect_construct_attribute(&class, values, attr.info.site.clone())
             .await
     })
 }
@@ -293,7 +293,7 @@ async fn lookup(
     context: &mut dyn Context,
     name: &str,
     missing: String,
-) -> Result<phera_extension_api::reflection::ClassInfo, NativeError> {
+) -> Result<Rc<phera_extension_api::reflection::ClassInfo>, NativeError> {
     engine(context)?.reflect_class(name).await.map_err(|error| {
         if missing_class(&error) {
             NativeError::error(missing)
