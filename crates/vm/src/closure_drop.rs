@@ -43,17 +43,23 @@ impl Drop for ClosureState {
 /// Empty a state before dropping it so the next payload's Drop has constant depth.
 fn drain_state(state: &mut ClosureState, pending: &mut Vec<Value>) {
     pending.extend(state.captures.drain(..).flatten());
-    if Rc::strong_count(&state.statics) == 1 {
-        pending.extend(state.statics.borrow_mut().drain().map(|(_, value)| value));
+    if let Some(statics) = &state.statics
+        && Rc::strong_count(statics) == 1
+    {
+        pending.extend(statics.borrow_mut().drain().map(|(_, value)| value));
     }
     if let Some(context) = &mut state.context
         && let Some(receiver) = context.receiver.take()
     {
-        pending.push(Value::Object(receiver));
+        if Rc::strong_count(&receiver) == 1 {
+            pending.push(Value::Object(receiver));
+        }
     }
     if let CallTarget::Method { context, .. } = &mut state.callee.target
         && let Some(receiver) = context.receiver.take()
     {
-        pending.push(Value::Object(receiver));
+        if Rc::strong_count(&receiver) == 1 {
+            pending.push(Value::Object(receiver));
+        }
     }
 }

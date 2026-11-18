@@ -8,6 +8,23 @@ use crate::ir::{Constant, Instruction, Parameter};
 use crate::policies::DeclarationTiming;
 use crate::{CompileError, Compiler};
 
+/// Borrow AST nodes while lowering so long expression trees are never cloned.
+pub(crate) struct FunctionSource<'a> {
+    pub(crate) span: phera_source::Span,
+    pub(crate) doc_comment: Option<phera_source::Span>,
+    pub(crate) attributes: &'a [ast::Attribute],
+    pub(crate) name: &'a str,
+    pub(crate) by_reference: bool,
+    pub(crate) parameters: &'a [ast::Parameter],
+    pub(crate) return_type: Option<&'a ast::Type>,
+    pub(crate) body: FunctionBody<'a>,
+}
+
+pub(crate) enum FunctionBody<'a> {
+    Statements(&'a [ast::Statement]),
+    Arrow(&'a ast::Expression),
+}
+
 impl<'ast> Compiler<'ast> {
     /// Build a separate frame, then relocate declarations nested within its body.
     pub(crate) fn compile_function(
@@ -16,25 +33,39 @@ impl<'ast> Compiler<'ast> {
         timing: DeclarationTiming,
         line: usize,
     ) -> Result<(), CompileError> {
-        self.compile_captured_function(declaration, timing, line, &[])
+        self.compile_captured_function(
+            &FunctionSource {
+                span: declaration.span,
+                doc_comment: declaration.doc_comment,
+                attributes: &declaration.attributes,
+                name: &declaration.name.name,
+                by_reference: declaration.by_reference,
+                parameters: &declaration.parameters,
+                return_type: declaration.return_type.as_ref(),
+                body: FunctionBody::Statements(&declaration.body),
+            },
+            timing,
+            line,
+            &[],
+        )
     }
 
     /// Captures must be allocated before default expressions introduce other locals.
     pub(crate) fn compile_captured_function(
         &mut self,
-        declaration: &ast::FunctionDeclaration,
+        declaration: &FunctionSource<'_>,
         timing: DeclarationTiming,
         line: usize,
         captures: &[String],
     ) -> Result<(), CompileError> {
         self.validate_parameter_features(declaration, line)?;
         let name = if self.namespace.is_empty()
-            || declaration.name.name.contains("::")
-            || declaration.name.name.starts_with("{closure:")
+            || declaration.name.contains("::")
+            || declaration.name.starts_with("{closure:")
         {
-            declaration.name.name.clone()
+            declaration.name.to_owned()
         } else {
-            format!("{}\\{}", self.namespace, declaration.name.name)
+            format!("{}\\{}", self.namespace, declaration.name)
         };
         if timing == DeclarationTiming::Hoisted
             && self
@@ -46,22 +77,20 @@ impl<'ast> Compiler<'ast> {
             return Err(self.error(format!("Cannot redeclare function {name}()"), line));
         }
         let mut builder = self.function_builder(declaration, &name, captures, line)?;
-        if builder.has_builtin(&declaration.attributes, "Deprecated")
-            || builder.has_builtin(&declaration.attributes, "NoDiscard")
+        if builder.has_builtin(declaration.attributes, "Deprecated")
+            || builder.has_builtin(declaration.attributes, "NoDiscard")
         {
             builder.emit(Instruction::AttributeDiagnostics, line);
         }
-        builder.compile_parameter_defaults(&declaration.parameters, line)?;
+        builder.compile_parameter_defaults(declaration.parameters, line)?;
         let scope = builder.class_scope.clone();
         builder.function.metadata.declaration = builder.declaration_metadata(
-            &declaration.attributes,
+            declaration.attributes,
             declaration.span,
             declaration.doc_comment,
             scope.as_deref(),
             AttributePlacement::Declaration(
-                if declaration.name.name.contains("::")
-                    && !declaration.name.name.starts_with("{closure:")
-                {
+                if declaration.name.contains("::") && !declaration.name.starts_with("{closure:") {
                     AttributeTarget::Method
                 } else {
                     AttributeTarget::Function
@@ -69,16 +98,20 @@ impl<'ast> Compiler<'ast> {
             ),
         )?;
         builder.validate_nodiscard(declaration, line)?;
-        for parameter in &declaration.parameters {
+        for parameter in declaration.parameters {
             let metadata = builder.reflected_parameter(parameter, line)?;
             builder.function.metadata.parameters.push(metadata);
         }
-        builder.compile_promoted_properties(&declaration.parameters, line)?;
+        builder.compile_promoted_properties(declaration.parameters, line)?;
         builder.function.return_type = declaration
             .return_type
-            .as_ref()
             .map(|declared_type| self.declaration_type(declared_type));
-        builder.block(&declaration.body, DeclarationTiming::AtExecution)?;
+        match declaration.body {
+            FunctionBody::Statements(body) => {
+                builder.block(body, DeclarationTiming::AtExecution)?
+            }
+            FunctionBody::Arrow(body) => builder.compile_return(Some(body), line)?,
+        }
         let register = builder.literal(Constant::Null, line)?;
         let implicit_return = if declaration.by_reference {
             Instruction::ReturnReference(register)
@@ -146,7 +179,7 @@ impl<'ast> Compiler<'ast> {
     /// Independent builders keep captured locals ahead of ordinary body temporaries.
     fn function_builder(
         &self,
-        declaration: &ast::FunctionDeclaration,
+        declaration: &FunctionSource<'_>,
         name: &str,
         captures: &[String],
         line: usize,
@@ -170,7 +203,7 @@ impl<'ast> Compiler<'ast> {
         builder.function.returns_reference = declaration.by_reference;
         builder.imports = self.imports.clone();
         builder.function.strict_types = self.function.strict_types;
-        for parameter in &declaration.parameters {
+        for parameter in declaration.parameters {
             builder.local(&parameter.name)?;
             builder.function.parameters.push(Parameter {
                 default_display: parameter

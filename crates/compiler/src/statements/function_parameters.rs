@@ -9,16 +9,15 @@ impl Compiler<'_> {
     /// Unsupported declaration metadata must fail before any body is emitted.
     pub(crate) fn validate_parameter_features(
         &self,
-        declaration: &ast::FunctionDeclaration,
+        declaration: &super::functions::FunctionSource<'_>,
         line: usize,
     ) -> Result<(), CompileError> {
-        for parameter in &declaration.parameters {
+        for parameter in declaration.parameters {
             if !parameter.hooks.is_empty() {
                 return Err(self.error("Property hooks not supported yet", line));
             }
             if parameter.modifiers.promotes_property()
                 && !declaration
-                    .name
                     .name
                     .rsplit_once("::")
                     .is_some_and(|(_, method)| method.eq_ignore_ascii_case("__construct"))

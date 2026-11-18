@@ -35,14 +35,14 @@ impl Compiler<'_> {
             format!("{}\\{}", self.namespace, identifier.name)
         };
         self.validate_class_declaration(declaration, &name)?;
-        let metadata = self.declaration_metadata(
+        let mut metadata = self.declaration_metadata(
             &declaration.attributes,
             declaration.span,
             declaration.doc_comment,
             Some(&name),
             AttributePlacement::Declaration(AttributeTarget::Class),
         )?;
-        self.validate_class_attributes(declaration, &name)?;
+        self.validate_class_attributes(declaration, &name, &mut metadata)?;
         let mut methods = Vec::new();
         let mut properties = Vec::new();
         let mut constants = Vec::new();
@@ -338,24 +338,20 @@ impl Compiler<'_> {
         doc_comment: Option<phera_source::Span>,
         line: usize,
     ) -> Result<ClassMethod, CompileError> {
-        let declaration = ast::FunctionDeclaration {
+        use super::functions::{FunctionBody, FunctionSource};
+        let name = format!("{class}::{}", method.name.name);
+        let declaration = FunctionSource {
             span: method.span,
             doc_comment,
-            attributes: method.attributes.clone(),
-            name: ast::Identifier {
-                name: format!("{class}::{}", method.name.name),
-                span: method.name.span,
-            },
+            attributes: &method.attributes,
+            name: &name,
             by_reference: method.by_reference,
-            parameters: method.parameters.clone(),
-            return_type: method.return_type.clone(),
-            body: method.body.clone().unwrap_or_default(),
+            parameters: &method.parameters,
+            return_type: method.return_type.as_ref(),
+            body: FunctionBody::Statements(method.body.as_deref().unwrap_or_default()),
         };
         let index = self.functions.len();
-        // The synthetic name is already fully qualified.
-        let result = self.compile_function(&declaration, DeclarationTiming::Hoisted, line);
-        result?;
-        self.hoisted.retain(|candidate| *candidate != index);
+        self.compile_captured_function(&declaration, DeclarationTiming::Hidden, line, &[])?;
         Ok(ClassMethod {
             name: method.name.name.clone(),
             function: index,

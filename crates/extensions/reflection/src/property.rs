@@ -136,10 +136,11 @@ pub(crate) fn register(registry: &mut Registry) {
                     data(o, |_| Value::from(phera_extension_api::PhpArray::new()))
                 }),
                 MethodEntry::public("getDocComment", &[], |_, o, _| doc(o)),
-                MethodEntry::public("setAccessible", ACCESS, |c, o, _| {
+                MethodEntry::public("setAccessible", ACCESS, |_, o, _| {
                     reflected(o)?;
-                    accessible(c, "ReflectionProperty")
-                }),
+                    Ok(Value::Null)
+                })
+                .with_preparation(|c, _, _| accessible(c, "ReflectionProperty")),
                 MethodEntry::public_async("getDeclaringClass", &[], declaring),
                 MethodEntry::public_async("getAttributes", crate::attribute::FILTER, |c, o, a| {
                     attributes(c, o, a, "ReflectionProperty")

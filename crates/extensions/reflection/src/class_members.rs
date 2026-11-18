@@ -218,7 +218,12 @@ fn constant(context: &mut dyn Context, this: Option<&Rc<Object>>, args: &[Value]
     );
     match member {
         Some(member) => engine(context)?.reflect_class_constant(&member.class, &name),
-        None => Ok(Value::Bool(false)),
+        None => {
+            context.deprecated(
+                "ReflectionClass::getConstant() for a non-existent constant is deprecated, use ReflectionClass::hasConstant() to check if the constant exists".into(),
+            );
+            Ok(Value::Bool(false))
+        }
     }
 }
 

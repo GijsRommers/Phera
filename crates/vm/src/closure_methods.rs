@@ -232,7 +232,7 @@ impl Vm {
             binding,
             origin: ClosureOrigin::Callable,
             captures: Vec::new(),
-            statics: Rc::new(std::cell::RefCell::new(Default::default())),
+            statics: None,
         })
     }
 }

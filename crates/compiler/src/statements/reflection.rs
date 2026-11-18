@@ -76,7 +76,11 @@ impl Compiler<'_> {
                 let name = self
                     .resolve(&attribute.name, crate::policies::NameKind::Class)
                     .0;
-                compiled.push(phera_bytecode::reflection::Attribute { name, arguments });
+                compiled.push(phera_bytecode::reflection::Attribute {
+                    name,
+                    validation_error: None,
+                    arguments,
+                });
             }
         }
         self.validate_attribute_list(attributes, placement)?;

@@ -54,6 +54,7 @@ pub struct Initializer {
 
 #[derive(Clone, Debug)]
 pub struct AttributeInfo {
+    pub validation_error: Option<String>,
     pub name: String,
     pub arguments: Vec<(Option<String>, AttributeValue)>,
     pub target: AttributeTarget,

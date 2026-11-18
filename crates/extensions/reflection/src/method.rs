@@ -78,18 +78,27 @@ pub(crate) fn register(registry: &mut Registry) {
                     ))
                 }),
                 MethodEntry::public("getPrototype", &[], prototype),
-                MethodEntry::public("setAccessible", ACCESS, |c, o, _| {
+                MethodEntry::public("setAccessible", ACCESS, |_, o, _| {
                     reflected(o)?;
-                    accessible(c, "ReflectionMethod")
-                }),
+                    Ok(Value::Null)
+                }).with_preparation(|c, _, _| accessible(c, "ReflectionMethod")),
                 MethodEntry::public(
                     "getClosure",
                     const { &[INSTANCE.with_default(ConstantValue::Null)] },
                     |c, o, a| {
-                        engine(c)?.reflect_closure(
-                            reflected(o)?.target.clone(),
-                            args::object(a, 0).cloned(),
-                        )
+                        let function = reflected(o)?;
+                        let member = method(&function)?;
+                        let object = args::object(a, 0).cloned();
+                        if !function.is_static && object.is_none() {
+                            return Err(phera_extension_api::NativeError::value_error(
+                                "ReflectionMethod::getClosure(): Argument #1 ($object) cannot be null for non-static methods",
+                            ));
+                        }
+                        let target = FunctionTarget::Method {
+                            class: member.class.clone(),
+                            name: member.name.clone(),
+                        };
+                        engine(c)?.reflect_closure(target, object)
                     },
                 ),
                 MethodEntry::public_async("invoke", &[INSTANCE, ARGS], |c, o, a| {

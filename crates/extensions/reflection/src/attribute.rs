@@ -81,10 +81,20 @@ pub(crate) async fn class_attributes(
     class: &phera_extension_api::reflection::ClassInfo,
     args: &[Value],
 ) -> NativeResult {
+    if class.name == "stdClass" {
+        let marker = AttributeInfo {
+            validation_error: None,
+            name: "AllowDynamicProperties".into(),
+            target: AttributeTarget::Class,
+            arguments: Vec::new(),
+        };
+        return list(context, &[marker], args, "ReflectionClass").await;
+    }
     if let Some(flags) =
         builtin_flags(&class.name).filter(|_| class.extension.as_deref() == Some("Core"))
     {
         let marker = AttributeInfo {
+            validation_error: None,
             name: "Attribute".into(),
             target: AttributeTarget::Class,
             arguments: vec![(None, AttributeValue::Integer(flags))],
@@ -227,6 +237,9 @@ fn instantiate(
             return Err(NativeError::error(format!(
                 "Attribute \"{name}\" must not be repeated"
             )));
+        }
+        if let Some(error) = &attr.info.validation_error {
+            return Err(NativeError::error(error.clone()));
         }
         let values = arguments(context, &attr.info).await?;
         engine(context)?

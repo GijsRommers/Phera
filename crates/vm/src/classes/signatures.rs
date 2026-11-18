@@ -178,13 +178,15 @@ impl Vm {
         if base.returns.is_some() {
             let source = child.returns.as_deref();
             let target = base.returns.as_deref();
-            if !self.type_subset(
-                source,
-                &method.declaring,
-                target,
-                &inherited.declaring,
-                unit,
-            ) {
+            if (base.tentative && source.is_none())
+                || !self.type_subset(
+                    source,
+                    &method.declaring,
+                    target,
+                    &inherited.declaring,
+                    unit,
+                )
+            {
                 if base.tentative && compatible {
                     if let MethodBody::User(reference) = method.body
                         && !self

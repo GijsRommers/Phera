@@ -266,7 +266,7 @@ impl Vm {
             extension: self
                 .registry
                 .class_module(&class.name)
-                .or_else(|| (class.origin == ClassOrigin::Closure).then_some("Core"))
+                .or_else(|| matches!(class.name.as_str(), "stdClass" | "Closure").then_some("Core"))
                 .map(str::to_owned),
             parent: class.parent.as_ref().map(|parent| parent.name.clone()),
             interfaces: crate::class_listings::interfaces_in_php_order(class)
@@ -304,6 +304,7 @@ impl Vm {
         attributes
             .iter()
             .map(|attribute| AttributeInfo {
+                validation_error: attribute.validation_error.clone(),
                 name: attribute.name.clone(),
                 arguments: attribute
                     .arguments
@@ -342,9 +343,16 @@ impl Vm {
                 return self.create_object(&class.name, PhpArray::new());
             }
         };
+        let created = self.create_object(&class.name, PhpArray::new())?;
         let constructor = class.constructor.clone();
         match &constructor {
             Some(method) if method.visibility != Visibility::Public => {
+                if method.declaring == class.name || method.visibility == Visibility::Protected {
+                    return Err(exception(format!(
+                        "Access to non-public constructor of class {}",
+                        class.name
+                    )));
+                }
                 let visibility = if method.visibility == Visibility::Private {
                     "private"
                 } else {
@@ -363,7 +371,6 @@ impl Vm {
             }
             _ => {}
         }
-        let created = self.create_object(&class.name, PhpArray::new())?;
         if let (Some(method), Value::Object(object)) = (constructor, &created) {
             let scope = self
                 .classes

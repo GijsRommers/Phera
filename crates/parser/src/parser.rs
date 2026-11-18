@@ -188,7 +188,10 @@ impl<'src> Parser<'src> {
 
     /// Doc comment immediately before this token, if the scanner saw one.
     pub(crate) fn doc_comment(&self) -> Option<Span> {
-        let offset = self.peek_span().start;
+        self.doc_comment_before(self.peek_span().start)
+    }
+
+    pub(crate) fn doc_comment_before(&self, offset: usize) -> Option<Span> {
         let index = self
             .doc_comments
             .binary_search_by_key(&offset, |(start, _)| *start)

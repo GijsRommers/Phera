@@ -122,10 +122,11 @@ impl Vm {
                     let unit = self.code.unit(function);
                     let body = self.code.function(function);
                     values = self.reflection_captures(function, closure);
-                    let statics = closure.statics.borrow();
+                    let statics = closure.statics.as_ref().map(|statics| statics.borrow());
                     for (index, name) in body.statics.iter().enumerate() {
                         let value = statics
-                            .get(&(index as u16))
+                            .as_ref()
+                            .and_then(|statics| statics.get(&(index as u16)))
                             .map_or(Value::Null, |value| value.deref().clone());
                         values.insert(ArrayKey::str(unit.names[name.index()].as_str()), value);
                     }

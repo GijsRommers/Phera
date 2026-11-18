@@ -1,6 +1,6 @@
 //! `#[DelayedTargetValidation]` defers errors on built-in attributes until reflection.
 
-use phera_ast::{Attribute, ClassDeclaration, ClassKind, FunctionDeclaration};
+use phera_ast::{Attribute, ClassDeclaration, ClassKind};
 use phera_source::attributes::{AttributeTarget, builtin_flags, target_names};
 
 use crate::{CompileError, Compiler, policies::NameKind};
@@ -81,11 +81,10 @@ impl Compiler<'_> {
         &self,
         declaration: &ClassDeclaration,
         name: &str,
+        metadata: &mut phera_bytecode::reflection::DeclarationMetadata,
     ) -> Result<(), CompileError> {
         let attrs = &declaration.attributes;
-        if self.has_builtin(attrs, "DelayedTargetValidation") {
-            return Ok(());
-        }
+        let delayed = self.has_builtin(attrs, "DelayedTargetValidation");
         let kind = match declaration.kind {
             ClassKind::Class if declaration.modifiers.is_readonly => "readonly class",
             ClassKind::Class if declaration.modifiers.is_abstract => "abstract class",
@@ -94,8 +93,8 @@ impl Compiler<'_> {
             ClassKind::Trait => "trait",
             ClassKind::Enum => "enum",
         };
-        for attribute in attrs {
-            let resolved = self.resolve(&attribute.name, NameKind::Class).0;
+        for (attribute, compiled) in attrs.iter().zip(&mut metadata.attributes) {
+            let resolved = &compiled.name;
             let invalid = match resolved.to_ascii_lowercase().as_str() {
                 "allowdynamicproperties" => !matches!(kind, "class" | "abstract class"),
                 "attribute" => !matches!(kind, "class" | "readonly class"),
@@ -110,10 +109,12 @@ impl Compiler<'_> {
                 } else {
                     kind
                 };
-                return Err(self.error(
-                    format!("Cannot apply #[\\{resolved}] to {kind} {name}"),
-                    self.lines.line(attribute.span.start),
-                ));
+                let message = format!("Cannot apply #[\\{resolved}] to {kind} {name}");
+                if delayed {
+                    compiled.validation_error = Some(message);
+                } else {
+                    return Err(self.error(message, self.lines.line(attribute.span.start)));
+                }
             }
         }
         Ok(())
@@ -121,28 +122,28 @@ impl Compiler<'_> {
 
     pub(super) fn validate_nodiscard(
         &self,
-        declaration: &FunctionDeclaration,
+        declaration: &super::functions::FunctionSource<'_>,
         line: usize,
     ) -> Result<(), CompileError> {
-        if !self.has_builtin(&declaration.attributes, "NoDiscard") {
+        if !self.has_builtin(declaration.attributes, "NoDiscard") {
             return Ok(());
         }
         let is_method =
-            declaration.name.name.contains("::") && !declaration.name.name.starts_with("{closure:");
+            declaration.name.contains("::") && !declaration.name.starts_with("{closure:");
         if is_method
-            && let Some((_, method)) = declaration.name.name.rsplit_once("::")
+            && let Some((_, method)) = declaration.name.rsplit_once("::")
             && matches!(
                 method.to_ascii_lowercase().as_str(),
                 "__construct" | "__destruct" | "__clone"
             )
         {
             return Err(self.error(
-                format!("Method {} cannot be #[\\NoDiscard]", declaration.name.name),
+                format!("Method {} cannot be #[\\NoDiscard]", declaration.name),
                 line,
             ));
         }
         let kind = if is_method { "method" } else { "function" };
-        if let Some(declared) = &declaration.return_type {
+        if let Some(declared) = declaration.return_type {
             let description = match self.declaration_type(declared).as_str() {
                 "void" => Some("void"),
                 "never" => Some("never returning"),

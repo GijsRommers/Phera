@@ -1257,6 +1257,11 @@ impl Parser<'_> {
         is_static: bool,
         start: Span,
     ) -> Result<Expression, ParseError> {
+        let declaration_start = self.peek_span();
+        let doc_comment = self
+            .doc_comment()
+            .or_else(|| self.doc_comment_before(start.start))
+            .or_else(|| self.declaration_doc_comment(&attributes));
         if self.at(TokenKind::Function) {
             self.bump()?;
             let by_reference = self.eat(TokenKind::Ampersand)?;
@@ -1272,6 +1277,8 @@ impl Parser<'_> {
             self.close_brace()?;
             Ok(Expression {
                 kind: ExpressionKind::Closure(Box::new(Closure {
+                    declaration_span: self.span_since(declaration_start),
+                    doc_comment,
                     attributes,
                     is_static,
                     by_reference,
@@ -1291,6 +1298,8 @@ impl Parser<'_> {
             let body = self.parse_expr(0)?;
             Ok(Expression {
                 kind: ExpressionKind::ArrowFunction(Box::new(ArrowFunction {
+                    declaration_span: self.span_since(declaration_start),
+                    doc_comment,
                     attributes,
                     is_static,
                     by_reference,

@@ -49,7 +49,7 @@ impl Parser<'_> {
         Ok(attributes)
     }
 
-    fn declaration_doc_comment(&self, attributes: &[Attribute]) -> Option<Span> {
+    pub(crate) fn declaration_doc_comment(&self, attributes: &[Attribute]) -> Option<Span> {
         self.doc_comment().or_else(|| {
             attributes
                 .iter()

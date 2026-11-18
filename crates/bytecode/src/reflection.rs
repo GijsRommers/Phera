@@ -6,6 +6,7 @@ use crate::FunctionId;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Attribute {
     pub name: String,
+    pub validation_error: Option<String>,
     pub arguments: Vec<AttributeArgument>,
 }
 
