@@ -86,8 +86,8 @@ fn build(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         let Some((key, value)) = frame.entries.entry_at(position) else {
             continue;
         };
-        if matches!(frame.identity, Identity::Object(_))
-            && matches!(&key, ArrayKey::String(name) if name.as_bytes().starts_with(b"\0"))
+        let is_object = matches!(frame.identity, Identity::Object(_));
+        if is_object && matches!(&key, ArrayKey::String(name) if name.as_bytes().starts_with(b"\0"))
         {
             continue;
         }
@@ -102,7 +102,7 @@ fn build(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         }
         match key {
             ArrayKey::Int(index) => {
-                if !nested {
+                if !nested && !is_object {
                     key_bytes.extend_from_slice(numeric_prefix);
                 }
                 key_bytes.extend_from_slice(index.to_string().as_bytes());

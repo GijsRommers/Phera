@@ -57,8 +57,9 @@ impl Vm {
 
     pub(crate) async fn run_shutdown_callbacks(&mut self) {
         while let Some((callback, arguments)) = self.request_callbacks.shutdown.pop_front() {
-            if let Err(error) = self.invoke_resolved_callable(callback, arguments).await {
-                self.unwind(error);
+            if let Err(error) = self.invoke_resolved_callable(callback, arguments).await
+                && !self.report_uncaught(error).await
+            {
                 break;
             }
         }

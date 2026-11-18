@@ -57,14 +57,19 @@ impl Comparison {
             eprintln!("SKIP: set PHERA_BIN to a release phera executable to compare scripts");
             return None;
         };
+        Some(Self::for_binary(name, Path::new(&phera)))
+    }
+
+    /// Compares scripts using a known executable, for tests that build their own CLI.
+    pub fn for_binary(name: &str, phera: &Path) -> Self {
         let php = find_php().expect("PHP 8.5 is required as the oracle");
         let artifacts = std::env::temp_dir().join("phera-oracle").join(name);
         std::fs::create_dir_all(&artifacts).expect("create the artifact directory");
-        Some(Self {
+        Self {
             php,
-            phera: PathBuf::from(phera),
+            phera: phera.to_path_buf(),
             artifacts,
-        })
+        }
     }
 
     /// The command that runs `script` on `runtime`. Real PHP runs without an

@@ -137,9 +137,7 @@ echo ob_get_clean(), 'ok';
 
 #[test]
 fn cli_sapi_and_logging_match_php() {
-    let Some(compare) = Comparison::from_environment("web-basics") else {
-        return;
-    };
+    let compare = Comparison::for_binary("web-basics", Path::new(env!("CARGO_BIN_EXE_phera")));
     let script = compare.artifacts.join("cli.php");
     std::fs::write(
         &script,
@@ -147,8 +145,21 @@ fn cli_sapi_and_logging_match_php() {
 var_dump(PHP_SAPI, php_sapi_name(), function_exists('getallheaders'));
 var_dump(function_exists('apache_request_headers'));
 var_dump(error_log('type 0'), error_log('type 4', 4));
+var_dump(error_log("first\0", 3, $argv[1]), error_log("second\xff", 3, $argv[1]));
 "#,
     )
     .unwrap();
-    compare.compare(&script, |_, _| {}).unwrap();
+    let mut logs = Vec::new();
+    compare
+        .compare(&script, |runtime, command| {
+            let log = compare
+                .scratch_directory(&script, runtime)
+                .join("error.log");
+            command.arg(&log);
+            logs.push(log);
+        })
+        .unwrap();
+    for log in logs {
+        assert_eq!(std::fs::read(log).unwrap(), b"first\0second\xff");
+    }
 }

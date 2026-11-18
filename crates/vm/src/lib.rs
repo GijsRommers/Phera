@@ -280,9 +280,7 @@ impl Vm {
             self.unwind(error);
         } else if let Err(error) = self.interpret(0).await {
             let error = self.materialize_error(error);
-            if !self.invoke_exception_handler(&error).await {
-                self.unwind(error);
-            }
+            self.report_uncaught(error).await;
         }
         if self.output_pending()
             && let Err(error) = self.drain_output().await

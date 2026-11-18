@@ -153,15 +153,19 @@ impl Vm {
         self.prepare_response_headers();
         let origin = self.output_writer.queued_origin.take();
         let bytes = std::mem::take(&mut self.output_writer.queued);
-        if let Some(callback) = self.request_callbacks.headers.take() {
-            self.invoke_resolved_callable(callback, []).await?;
-        }
-        if self.output_writer.origin.is_none() {
+        let result = match self.request_callbacks.headers.take() {
+            Some(callback) => self
+                .invoke_resolved_callable(callback, [])
+                .await
+                .map(|_| ()),
+            None => Ok(()),
+        };
+        if self.output_writer.origin.is_none() || origin.is_some() {
             self.output_writer.origin = origin.or_else(|| Some(self.location()));
         }
         if !bytes.is_empty() {
             self.output_writer.write(&mut self.output, &bytes);
         }
-        Ok(())
+        result
     }
 }

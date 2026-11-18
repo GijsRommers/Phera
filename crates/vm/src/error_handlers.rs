@@ -239,25 +239,26 @@ impl Vm {
 }
 
 impl Vm {
-    /// The last-resort callback runs once after the PHP stack has unwound completely.
-    pub(crate) async fn invoke_exception_handler(&mut self, error: &NativeError) -> bool {
-        let NativeError::Unwind(payload) = error else {
-            return false;
-        };
-        let Some(thrown) = payload.0.downcast_ref::<crate::exceptions::Thrown>() else {
-            return false;
-        };
-        let Some(callable) = self.error_handlers.exception.take() else {
-            return false;
-        };
-        let object = Value::Object(thrown.object.clone());
-        if let Err(error) = self
-            .invoke_resolved_callable(callable.callee, vec![object])
-            .await
+    /// Let the active exception handler consume a throwable at a request boundary.
+    pub(crate) async fn report_uncaught(&mut self, error: NativeError) -> bool {
+        if let NativeError::Unwind(payload) = &error
+            && let Some(thrown) = payload.0.downcast_ref::<crate::exceptions::Thrown>()
+            && let Some(handler) = self.error_handlers.exception.as_ref()
         {
-            self.unwind(error);
+            let object = Value::Object(thrown.object.clone());
+            return match self
+                .invoke_resolved_callable(handler.callee.clone(), [object])
+                .await
+            {
+                Ok(_) => true,
+                Err(error) => {
+                    self.unwind(error);
+                    false
+                }
+            };
         }
-        true
+        self.unwind(error);
+        false
     }
 }
 

@@ -2,6 +2,8 @@
 //!
 //! `getallheaders()['Host']` reads the request's Host header on the web server.
 
+use std::collections::{HashMap, hash_map::Entry};
+
 use phera_extension_api::{
     ArrayKey, Context, FunctionEntry, NativeResult, PhpArray, Registry, Value,
 };
@@ -43,8 +45,26 @@ pub(super) fn sapi(context: &mut dyn Context) -> Sapi {
 fn request_headers(context: &mut dyn Context, _: &[Value]) -> NativeResult {
     let mut result = PhpArray::new();
     if let Some(headers) = context.state().get::<RequestHeaders>() {
+        let mut values = HashMap::<String, Vec<u8>>::new();
         for (name, value) in &headers.0 {
-            result.insert(ArrayKey::str(name.as_str()), Value::from(value.as_slice()));
+            let lower = name.to_ascii_lowercase();
+            let combined = match values.entry(lower) {
+                Entry::Occupied(entry) => {
+                    let combined = entry.into_mut();
+                    if name.eq_ignore_ascii_case("set-cookie") {
+                        combined.clear();
+                    } else {
+                        combined.extend_from_slice(b", ");
+                    }
+                    combined.extend_from_slice(value);
+                    combined
+                }
+                Entry::Vacant(entry) => entry.insert(value.clone()),
+            };
+            result.insert(
+                ArrayKey::str(name.as_str()),
+                Value::from(combined.as_slice()),
+            );
         }
     }
     Ok(Value::from(result))
