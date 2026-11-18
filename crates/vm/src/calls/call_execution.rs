@@ -26,7 +26,10 @@ impl Vm {
         destination: Option<Reg>,
     ) -> Result<bool, NativeError> {
         if self.call_stack.top_call()?.callee == PreparedCallee::General {
-            return Ok(false);
+            self.expand_magic_call()?;
+            if self.call_stack.top_call()?.callee == PreparedCallee::General {
+                return Ok(false);
+            }
         }
         self.check_frame_limit()?;
         let (call, details) = self.call_stack.pop_call()?;
@@ -60,6 +63,9 @@ impl Vm {
             self.store_sent_value(index, value)?;
         }
         *work += 1;
+        if self.call_needs_string_coercion(self.argument_origin) {
+            return Ok(Some(BatchExit::BindCall(destination)));
+        }
         self.check_frame_limit()?;
         let (call, details) = self.call_stack.pop_call()?;
         self.enter_call(call, details, Some(destination))?;

@@ -110,7 +110,8 @@ impl Vm {
                                 )));
                             }
                             let scope = self.current().and_then(|frame| frame.scope());
-                            if crate::property_storage::read(object, key).is_some()
+                            if (crate::property_storage::read(object, key).is_some()
+                                && !self.clone_can_update(object, key))
                                 || steps.peek().is_some()
                             {
                                 let action = if mutation == Mutation::Unset {
@@ -146,6 +147,20 @@ impl Vm {
                                 self.coerce_property(value.clone(), property, declaration_type)?;
                             if !matches!(value, Value::Reference(_)) {
                                 *value = converted;
+                            }
+                        }
+                        if steps.peek().is_none() {
+                            if property.is_readonly && mutation != Mutation::Unset {
+                                self.clone_updated(object, key);
+                            }
+                            if mutation == Mutation::Unset
+                                && property.ty.is_some()
+                                && class
+                                    .magic
+                                    .as_ref()
+                                    .is_some_and(|magic| magic.has_properties())
+                            {
+                                self.mark_typed_property_unset(object, key.clone());
                             }
                         }
                     } else if !crate::property_storage::read(object, key).is_some()

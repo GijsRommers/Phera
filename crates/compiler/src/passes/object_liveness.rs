@@ -54,9 +54,14 @@ pub(crate) fn effect(
                 Unrelated
             }
         }
-        Instruction::Clone { dst, src } | Instruction::InstanceOf { dst, src, .. } => {
-            read_write(src, dst, register)
+        Instruction::Clone { dst, src, with } => {
+            if with == Some(register) {
+                Read
+            } else {
+                read_write(src, dst, register)
+            }
         }
+        Instruction::InstanceOf { dst, src, .. } => read_write(src, dst, register),
         Instruction::Fetch { dst, path, .. }
         | Instruction::FetchIndex { dst, path, .. }
         | Instruction::MakeReference { dst, path } => {

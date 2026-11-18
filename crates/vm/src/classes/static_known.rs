@@ -1,6 +1,6 @@
 //! Compiler-known static calls avoid materializing class and method PHP strings.
 
-use super::Invocation;
+use super::{Invocation, magic_calls::MethodSyntax};
 use crate::Vm;
 use phera_bytecode::{ClassBinding, SymbolId};
 use phera_extension_api::NativeError;
@@ -47,15 +47,14 @@ impl Vm {
                     .for_object(object)
                     .is_some_and(|class| class.is_a(&name))
             });
-        let resolved = self
-            .find_method_lowercase(&class, &method.name, Invocation::Method)?
-            .ok_or_else(|| {
-                NativeError::error(format!(
-                    "Call to undefined method {}::{}()",
-                    class.name, method.written
-                ))
-            })?;
-        self.prepare_resolved_method(class, receiver, resolved, Invocation::Method)?;
+        let resolved = self.find_method_lowercase(&class, &method.name, Invocation::Method);
+        self.prepare_method_lookup(
+            class,
+            receiver,
+            &method.written,
+            MethodSyntax::Static,
+            resolved,
+        )?;
         if binding == ClassBinding::Forward
             && let Some(context) = context
         {

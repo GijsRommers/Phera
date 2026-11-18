@@ -49,6 +49,13 @@ impl Vm {
                 BatchExit::Returned(value) => return Ok(value),
                 BatchExit::Yield => tokio::task::yield_now().await,
                 BatchExit::Handlers => self.drain_error_handlers().await?,
+                BatchExit::BindCall(destination) => {
+                    self.coerce_call_strings(self.argument_origin).await?;
+                    if !self.enter_prepared_call(Some(destination))? {
+                        let value = self.finish_native_window().await?;
+                        self.set(destination, value);
+                    }
+                }
                 BatchExit::NativeCall(destination) => {
                     let value = self.finish_native_window().await?;
                     self.set(destination, value);

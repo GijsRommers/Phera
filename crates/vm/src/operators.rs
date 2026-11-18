@@ -151,19 +151,6 @@ impl Vm {
         source: Reg,
     ) -> Result<(), NativeError> {
         let value = self.get(source);
-        if to == CastKind::String
-            && let Value::Object(object) = &value
-            && self
-                .classes
-                .for_object(object)
-                .is_some_and(|class| class.is_throwable)
-        {
-            let value = self
-                .throwable_method_result("__toString", object)
-                .unwrap_or_default();
-            self.set(destination, value);
-            return Ok(());
-        }
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let result = match to {
             CastKind::Bool => {

@@ -44,6 +44,7 @@ mod constant_table;
 mod constants;
 mod context;
 mod control_flow;
+mod debug_info;
 mod declaration_diagnostics;
 mod diagnostic_reporter;
 mod diagnostics;
@@ -83,6 +84,11 @@ mod iteration;
 mod iterator_instructions;
 mod iterators;
 mod locals;
+mod magic_method;
+mod magic_mutations;
+mod magic_path_instructions;
+mod magic_places;
+mod magic_properties;
 mod native_diagnostics;
 mod object_iteration;
 mod operators;
@@ -103,6 +109,7 @@ mod references;
 mod scope_intrinsics;
 mod static_variables;
 mod string_offsets;
+mod stringable;
 mod trigger_errors;
 mod typed_references;
 mod types;
@@ -131,6 +138,9 @@ pub const DEFAULT_FRAME_LIMIT: usize = 250_000;
 /// One request interpreter; PHP calls use heap frames rather than Rust recursion.
 pub struct Vm {
     classes: classes::ClassTable,
+    property_guards: Vec<magic_properties::PropertyGuard>,
+    unset_typed_properties: std::collections::HashMap<u32, magic_properties::UnsetProperties>,
+    clone_scopes: Vec<classes::cloning::CloneScope>,
     closure_captures: Vec<closures::PendingCapture>,
     /// Pure defaults retain lexical class scope while running outside a method frame.
     initializer_scope: Option<String>,
@@ -174,6 +184,9 @@ impl Vm {
             .collect();
         Self {
             classes: classes::ClassTable::native(&registry),
+            property_guards: Vec::new(),
+            unset_typed_properties: Default::default(),
+            clone_scopes: Vec::new(),
             property_references: Default::default(),
             closure_captures: Vec::new(),
             initializer_scope: None,

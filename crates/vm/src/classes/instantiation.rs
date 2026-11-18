@@ -167,42 +167,6 @@ impl Vm {
         )
     }
 
-    /// Clone bypasses constructors and copies only the property table, not nested objects.
-    pub(crate) fn clone_object(
-        &mut self,
-        destination: Reg,
-        source: Reg,
-    ) -> Result<(), NativeError> {
-        let Value::Object(original) = self.read_local(source) else {
-            return Err(NativeError::error("__clone method called on non-object"));
-        };
-        let class = self
-            .classes
-            .get(original.class.name())
-            .ok_or_else(|| internal_error!("clone class"))?;
-        if class.is_throwable {
-            return Err(NativeError::error(format!(
-                "Trying to clone an uncloneable object of class {}",
-                class.name
-            )));
-        }
-        if class.origin == crate::classes::class::ClassOrigin::Closure {
-            let native = original.native.borrow();
-            let state = native
-                .as_ref()
-                .and_then(|state| state.downcast_ref::<crate::closures::ClosureState>())
-                .ok_or_else(|| internal_error!("clone closure"))?;
-            let cloned = self.allocate_closure(state.duplicate())?;
-            self.set(destination, Value::Object(cloned));
-            return Ok(());
-        }
-        let cloned = self.classes.allocate(class);
-        cloned.update(|properties| *properties = original.to_array());
-        self.track_object_property_references(&cloned)?;
-        self.set(destination, Value::Object(cloned));
-        Ok(())
-    }
-
     /// Unknown names simply fail membership tests rather than raising a missing-class error.
     pub(crate) fn instance_of(
         &mut self,

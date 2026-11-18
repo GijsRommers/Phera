@@ -16,7 +16,7 @@ pub mod testing;
 pub use phera_value as value;
 pub use phera_value::{ArrayKey, Diagnostics, Object, PhpArray, PhpString, Value};
 
-pub use arguments::{args, prepare_arguments, prepare_call};
+pub use arguments::{args, prepare_arguments, prepare_call, prepare_single_argument};
 pub use class::{
     AsyncMethod, ClassEntry, ClassKind, MethodEntry, NativeMethod, PropertyEntry, SyncMethod,
     Visibility,

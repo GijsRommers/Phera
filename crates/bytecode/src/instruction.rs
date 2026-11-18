@@ -76,6 +76,7 @@ pub enum Instruction {
     Clone {
         dst: Reg,
         src: Reg,
+        with: Option<Reg>,
     },
     /// Test a resolved class or interface name without invoking autoloaders.
     InstanceOf {
@@ -595,8 +596,12 @@ pub enum IncDec {
 pub enum FetchMode {
     /// An ordinary read: missing variables, keys and offsets warn.
     Read,
-    /// For `??`, `isset` and `empty`: missing things are null, silently.
+    /// For `??`: missing things are null, silently.
     Quiet,
+    /// Only the existence of the last property is required.
+    Isset,
+    /// The last property is read only after its existence check succeeds.
+    Empty,
     /// For `[$a, $b] = $value`: missing keys warn; null yields null silently,
     /// while other non-array values warn and yield null in PHP 8.5.
     Destructure,

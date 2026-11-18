@@ -105,9 +105,11 @@ impl Tables {
             Old::Clone {
                 destination,
                 source,
+                with,
             } => Instruction::Clone {
                 dst: destination,
                 src: source,
+                with,
             },
             Old::InstanceOf {
                 destination,

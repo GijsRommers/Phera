@@ -60,10 +60,10 @@ impl Vm {
             return Ok(());
         }
         let details = self.call_stack.top_details_mut()?;
-        if let Some(CallTarget::Method { context, .. }) =
-            details.callee.as_mut().map(|callee| &mut callee.target)
-        {
-            context.called = class;
+        match details.callee.as_mut().map(|callee| &mut callee.target) {
+            Some(CallTarget::Method { context, .. }) => context.called = class,
+            Some(CallTarget::Magic(magic)) => Rc::make_mut(magic).context.called = class,
+            _ => {}
         }
         Ok(())
     }

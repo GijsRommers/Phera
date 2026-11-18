@@ -71,6 +71,14 @@ impl Compiler<'_> {
 
     /// Read variables and indexes without undefined-value warnings; evaluate other expressions normally.
     pub(crate) fn quiet(&mut self, expression: &ast::Expression) -> Result<Reg, CompileError> {
+        self.quiet_mode(expression, phera_bytecode::FetchMode::Quiet)
+    }
+
+    pub(super) fn quiet_mode(
+        &mut self,
+        expression: &ast::Expression,
+        mode: phera_bytecode::FetchMode,
+    ) -> Result<Reg, CompileError> {
         if matches!(&expression.kind, ast::ExpressionKind::Variable(ast::Variable::Named(name))
             if name == "this")
         {
@@ -104,7 +112,7 @@ impl Compiler<'_> {
                 Instruction::Read {
                     destination: dst,
                     place,
-                    mode: phera_bytecode::FetchMode::Quiet,
+                    mode,
                 },
                 self.lines.line(expression.span.start),
             );

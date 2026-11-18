@@ -28,6 +28,45 @@ impl Context for Vm {
         self
     }
 
+    fn stringify<'a>(
+        &'a mut self,
+        value: &'a Value,
+    ) -> LocalFuture<'a, Result<phera_value::PhpString, phera_extension_api::NativeError>> {
+        Box::pin(self.stringify_value(value))
+    }
+
+    fn compare<'a>(
+        &'a mut self,
+        left: &'a Value,
+        right: &'a Value,
+    ) -> LocalFuture<'a, Result<i8, phera_extension_api::NativeError>> {
+        Box::pin(async move {
+            let value = self
+                .binary_with_strings(
+                    phera_bytecode::BinaryOp::Spaceship,
+                    left.deref().clone(),
+                    right.deref().clone(),
+                )
+                .await?;
+            match value {
+                Value::Int(order) => Ok(order.signum() as i8),
+                _ => Err(internal_error!("comparison result")),
+            }
+        })
+    }
+
+    fn has_debug_info(&self, object: &phera_value::Object) -> bool {
+        Vm::has_debug_info(self, object)
+    }
+
+    fn debug_properties(
+        &mut self,
+        object: std::rc::Rc<phera_value::Object>,
+    ) -> LocalFuture<'_, Result<std::rc::Rc<phera_value::PhpArray>, phera_extension_api::NativeError>>
+    {
+        Box::pin(Vm::debug_properties(self, object))
+    }
+
     /// Native decoders construct linked objects without running PHP constructors.
     fn create_object(&mut self, name: &str, properties: phera_value::PhpArray) -> NativeResult {
         let class = self.classes.get(name).ok_or_else(|| {

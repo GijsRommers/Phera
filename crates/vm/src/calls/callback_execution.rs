@@ -62,6 +62,9 @@ impl Vm {
             self.drain_error_handlers().await?;
         }
         let stop = self.call_stack.depth();
+        if self.call_needs_string_coercion(origin) {
+            self.coerce_call_strings(origin).await?;
+        }
         let entered = self.with_argument_origin(origin, |vm| vm.enter_prepared_call(None));
         match entered {
             Ok(true) => self.interpret(stop).await,

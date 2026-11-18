@@ -37,6 +37,18 @@ impl Vm {
         self.finish_return_value(value, stop)
     }
 
+    pub(crate) fn return_string_coercion_needed(&self, value: &Value) -> bool {
+        self.current().is_some_and(|frame| {
+            let function = frame.function();
+            function
+                .return_type
+                .and_then(|ty| frame.unit().types.get(ty.index()))
+                .is_some_and(|ty| {
+                    self.needs_string_coercion(value, ty, function.strict_types.into())
+                })
+        })
+    }
+
     /// Coercion precedes finally, allowing a surrounding catch to handle an invalid return.
     pub(crate) fn check_return_value(&mut self, value: Value) -> Result<Value, NativeError> {
         if let Some(declaration) = self.current().and_then(|frame| {
@@ -187,6 +199,11 @@ impl Vm {
                 self.finish_return_value(value, stop)
                     .map(DispatchResult::from_return)
             } else {
+                let value = if self.return_string_coercion_needed(&value) {
+                    self.coerce_stringable(value).await?
+                } else {
+                    value
+                };
                 self.return_value(value, stop)
                     .map(DispatchResult::from_return)
             }

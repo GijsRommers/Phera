@@ -45,6 +45,24 @@ impl Vm {
         self.store_sent_value(index, value)
     }
 
+    /// A property send can run __get, retaining its return reference if needed.
+    pub(crate) async fn send_magic_place(&mut self, place: &AccessPath) -> Result<(), NativeError> {
+        let view = CallView::top(&self.code, &self.call_stack)?;
+        let index = view.argument_index()?;
+        let parameters = view.parameters();
+        let reference = parameters
+            .receiving(index)
+            .is_some_and(|parameter| parameters.by_reference(parameter))
+            || (index == 0 && view.is_extract());
+        let value = if reference {
+            self.magic_reference(place).await?
+        } else {
+            self.read_magic_place(place, phera_bytecode::FetchMode::Read)
+                .await?
+        };
+        self.store_sent_value(index, value)
+    }
+
     /// Put an argument at position `index` of the innermost prepared call,
     /// after the checks a named argument needs. A value its parameter's type
     /// does not accept as it is waits for `Call` to be checked.

@@ -85,7 +85,11 @@ pub enum Instruction {
     /// Fetch the receiver from the current method frame.
     This { destination: Reg },
     /// Shallow-copy an object's property table.
-    Clone { destination: Reg, source: Reg },
+    Clone {
+        destination: Reg,
+        source: Reg,
+        with: Option<Reg>,
+    },
     /// Test membership in a resolved class or interface.
     InstanceOf {
         destination: Reg,

@@ -1,7 +1,8 @@
 use std::future::Future;
 use std::pin::Pin;
+use std::rc::Rc;
 
-use phera_value::{Diagnostics, PhpArray, Value};
+use phera_value::{Diagnostics, Object, PhpArray, PhpString, Value};
 
 use crate::{NativeError, NativeResult, RequestState};
 
@@ -38,6 +39,38 @@ pub trait Context {
         callable: &'a Value,
         arguments: Vec<Value>,
     ) -> LocalFuture<'a, NativeResult>;
+
+    /// Convert a value to a PHP string. A VM context may run __toString.
+    fn stringify<'a>(
+        &'a mut self,
+        value: &'a Value,
+    ) -> LocalFuture<'a, Result<PhpString, NativeError>> {
+        let result = phera_value::to_php_string(value, self.diagnostics()).map_err(Into::into);
+        Box::pin(std::future::ready(result))
+    }
+
+    /// Loose comparisons may invoke __toString on mixed string/object pairs.
+    fn compare<'a>(
+        &'a mut self,
+        left: &'a Value,
+        right: &'a Value,
+    ) -> LocalFuture<'a, Result<i8, NativeError>> {
+        let result = phera_value::compare(left, right, self.diagnostics()).map_err(Into::into);
+        Box::pin(std::future::ready(result))
+    }
+
+    /// Whether inspecting this object can run PHP code.
+    fn has_debug_info(&self, _object: &Object) -> bool {
+        false
+    }
+
+    /// Fetch inspection properties with the object's debug hook, if present.
+    fn debug_properties(
+        &mut self,
+        object: Rc<Object>,
+    ) -> LocalFuture<'_, Result<Rc<PhpArray>, NativeError>> {
+        Box::pin(std::future::ready(Ok(Rc::new(object.to_array()))))
+    }
 
     /// Creates an object of the named class with these properties, without
     /// calling its constructor. This is how `json_decode` and `(object)`

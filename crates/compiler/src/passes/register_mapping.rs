@@ -74,8 +74,13 @@ impl Instruction {
             Instruction::Clone {
                 destination,
                 source,
+                with,
+            } => {
+                *destination = map(*destination);
+                *source = map(*source);
+                *with = with.map(map);
             }
-            | Instruction::InstanceOf {
+            Instruction::InstanceOf {
                 destination,
                 source,
                 ..

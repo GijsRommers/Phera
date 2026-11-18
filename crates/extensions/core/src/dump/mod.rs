@@ -13,7 +13,7 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use phera_extension_api::value::Object;
-use phera_extension_api::{ArrayKey, Context, PhpArray, Registry, Value};
+use phera_extension_api::{ArrayKey, Context, NativeError, PhpArray, Registry, Value};
 
 pub(crate) fn register(registry: &mut Registry) {
     var_dump::register(registry);
@@ -46,11 +46,18 @@ pub(crate) struct Place {
     pub depth: usize,
     /// Whether it is a PHP reference that something else still shares.
     pub is_reference: bool,
+    pub leading_written: bool,
 }
 
 /// What differs between the three functions. The walker calls these in
 /// document order.
 pub(crate) trait Style {
+    fn properties(&self) -> PropertyView {
+        PropertyView::Debug
+    }
+
+    fn before_debug(&mut self, _out: &mut Vec<u8>, _place: Place, _context: &mut dyn Context) {}
+
     /// Anything that is not an array or object.
     fn scalar(&mut self, out: &mut Vec<u8>, value: &Value, place: Place);
 
@@ -76,6 +83,13 @@ pub(crate) trait Style {
     );
 }
 
+/// Export uses raw properties. The other styles use inspection hooks.
+#[derive(PartialEq, Eq)]
+pub(crate) enum PropertyView {
+    Raw,
+    Debug,
+}
+
 /// A container whose entries are partly printed.
 struct Frame {
     container: Container,
@@ -85,15 +99,15 @@ struct Frame {
     next: Option<usize>,
 }
 
-pub(crate) fn walk(
+pub(crate) async fn walk(
     style: &mut dyn Style,
     out: &mut Vec<u8>,
     value: &Value,
     context: &mut dyn Context,
-) {
+) -> Result<(), NativeError> {
     let mut frames: Vec<Frame> = Vec::new();
     let mut active: HashSet<usize> = HashSet::new();
-    frames.extend(enter(style, out, value, 0, &mut active, context));
+    frames.extend(enter(style, out, value, 0, &mut active, context).await?);
 
     loop {
         let depth = frames.len();
@@ -107,7 +121,7 @@ pub(crate) fn walk(
             Some((position, (key, item))) => {
                 frame.next = frame.entries.next_position(position);
                 style.key(out, &key, &frame.container, depth);
-                match enter(style, out, item, depth, &mut active, context) {
+                match enter(style, out, item, depth, &mut active, context).await? {
                     Some(child) => frames.push(child),
                     None => style.after_entry(out),
                 }
@@ -122,46 +136,56 @@ pub(crate) fn walk(
             }
         }
     }
+    Ok(())
 }
 
 /// Prints a scalar, or the start of a container. Returns the frame to walk
 /// when the value has entries to print.
-fn enter(
+async fn enter(
     style: &mut dyn Style,
     out: &mut Vec<u8>,
     value: &Value,
     depth: usize,
     active: &mut HashSet<usize>,
     context: &mut dyn Context,
-) -> Option<Frame> {
+) -> Result<Option<Frame>, NativeError> {
     // PHP marks a reference only while a second holder exists. A variable
     // that was the last one bound to it prints like a plain value.
     let is_reference = matches!(value, Value::Reference(cell) if Rc::strong_count(cell) > 1);
-    let place = Place {
+    let mut place = Place {
         depth,
         is_reference,
+        leading_written: false,
     };
-    let (container, entries) = match &*value.deref() {
-        Value::Array(array) => (Container::Array(array.clone()), array.clone()),
-        Value::Object(object) => (
-            Container::Object(object.clone()),
-            Rc::new(object.to_array()),
-        ),
+    let container = match &*value.deref() {
+        Value::Array(array) => Container::Array(array.clone()),
+        Value::Object(object) => Container::Object(object.clone()),
         scalar => {
             style.scalar(out, scalar, place);
-            return None;
+            return Ok(None);
         }
     };
     if !active.insert(container.identity()) {
         style.recursion(out, &container, place, context);
-        return None;
+        return Ok(None);
     }
+    let entries = match &container {
+        Container::Array(array) => array.clone(),
+        Container::Object(object)
+            if style.properties() == PropertyView::Debug && context.has_debug_info(object) =>
+        {
+            style.before_debug(out, place, context);
+            place.leading_written = true;
+            context.debug_properties(object.clone()).await?
+        }
+        Container::Object(object) => Rc::new(object.to_array()),
+    };
     style.open(out, &container, entries.len(), place);
-    Some(Frame {
+    Ok(Some(Frame {
         container,
         next: entries.first_position(),
         entries,
-    })
+    }))
 }
 
 pub(crate) fn spaces(out: &mut Vec<u8>, count: usize) {
@@ -229,12 +253,20 @@ mod tests {
             value = Value::from(array);
         }
         let mut tally = Tally::default();
-        walk(
-            &mut tally,
-            &mut Vec::new(),
-            &value,
-            &mut TestContext::default(),
-        );
+        {
+            use std::{
+                future::Future,
+                task::{Context as TaskContext, Poll, Waker},
+            };
+            let mut out = Vec::new();
+            let mut context = TestContext::default();
+            let mut walk = std::pin::pin!(walk(&mut tally, &mut out, &value, &mut context));
+            assert!(matches!(
+                walk.as_mut()
+                    .poll(&mut TaskContext::from_waker(Waker::noop())),
+                Poll::Ready(Ok(()))
+            ));
+        }
         assert_eq!(
             (tally.opened, tally.closed, tally.scalars),
             (200_000, 200_000, 1)

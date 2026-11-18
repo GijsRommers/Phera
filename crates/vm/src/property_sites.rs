@@ -99,7 +99,11 @@ impl Vm {
         let Some(PropertyTarget { object, name }) = target else {
             return Ok(None);
         };
-        let entry = self.property_entry(&object, name)?;
+        let entry = match self.property_entry(&object, name) {
+            Ok(entry) => entry,
+            Err(_) if has_magic_properties(&object) => return Ok(None),
+            Err(error) => return Err(error),
+        };
         let class = object
             .class
             .as_any()
@@ -129,7 +133,11 @@ impl Vm {
         else {
             return Ok(None);
         };
-        let entry = self.property_entry(&object, name)?;
+        let entry = match self.property_entry(&object, name) {
+            Ok(entry) => entry,
+            Err(_) if has_magic_properties(&object) => return Ok(None),
+            Err(error) => return Err(error),
+        };
         if !entry.write_rule.allows(TypeMask::INT) {
             return Ok(None);
         }
@@ -194,7 +202,11 @@ impl Vm {
         else {
             return Ok(false);
         };
-        let entry = self.property_entry(&object, name)?;
+        let entry = match self.property_entry(&object, name) {
+            Ok(entry) => entry,
+            Err(_) if has_magic_properties(&object) => return Ok(false),
+            Err(error) => return Err(error),
+        };
         // `public float $x` assigned an int stores the float, as PHP does.
         let widened = match entry.write_rule {
             WriteRule::Typed(declared) => crate::types::widen_int_to_float(value, declared),
@@ -203,11 +215,12 @@ impl Vm {
         let value = widened.as_ref().unwrap_or(value);
         let accepted = !matches!(value, Value::Reference(_))
             && entry.write_rule.allows(crate::types::own_type(value));
-        if !accepted
-            || matches!(
-                crate::property_storage::read_at(&object, &entry.key, entry.slot),
-                Some(Value::Reference(_))
-            )
+        if !accepted {
+            return Ok(false);
+        }
+        let existing = crate::property_storage::read_at(&object, &entry.key, entry.slot);
+        if matches!(existing, Some(Value::Reference(_)))
+            || (existing.is_none() && has_magic_properties(&object))
         {
             return Ok(false);
         }
@@ -227,7 +240,11 @@ impl Vm {
         else {
             return Ok(false);
         };
-        let entry = self.property_entry(&object, name)?;
+        let entry = match self.property_entry(&object, name) {
+            Ok(entry) => entry,
+            Err(_) if has_magic_properties(&object) => return Ok(false),
+            Err(error) => return Err(error),
+        };
         if !entry.write_rule.allows(TypeMask::ARRAY) {
             return Ok(false);
         }
@@ -253,4 +270,13 @@ impl Vm {
         }
         Ok(self.write_property_site(place, value)? || self.append_property_site(place, value)?)
     }
+}
+
+fn has_magic_properties(object: &Object) -> bool {
+    object
+        .class
+        .as_any()
+        .downcast_ref::<crate::classes::Class>()
+        .and_then(|class| class.magic.as_ref())
+        .is_some_and(|hooks| hooks.has_properties())
 }

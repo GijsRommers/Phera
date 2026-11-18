@@ -1,12 +1,10 @@
 //! Asking what a value is, and converting it: `gettype`, the `is_*` family,
 //! `intval` and friends, `settype`.
 
-use phera_extension_api::value::{
-    cast_to_bool, is_numeric, to_array, to_float, to_int, to_php_string,
-};
+use phera_extension_api::value::{cast_to_bool, is_numeric, to_array, to_float, to_int};
 use phera_extension_api::{
-    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Registry, SyncFn, Value,
-    args,
+    Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, Registry,
+    SyncFn, Value, args,
 };
 
 pub(crate) fn register(registry: &mut Registry) {
@@ -40,14 +38,14 @@ pub(crate) fn register(registry: &mut Registry) {
         ("is_countable", is_countable),
         ("floatval", floatval),
         ("doubleval", floatval),
-        ("strval", strval),
         ("boolval", boolval),
     ];
     for &(name, function) in one_value {
         registry.function(FunctionEntry::sync(name, VALUE, function));
     }
     registry.function(FunctionEntry::sync("intval", INTVAL, intval));
-    registry.function(FunctionEntry::sync("settype", SETTYPE, settype));
+    registry.function(FunctionEntry::asynchronous("strval", VALUE, strval));
+    registry.function(FunctionEntry::asynchronous("settype", SETTYPE, settype));
 }
 
 fn gettype(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
@@ -199,9 +197,11 @@ fn floatval(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(Value::Float(float))
 }
 
-fn strval(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let string = to_php_string(args::value(arguments, 0), context.diagnostics())?;
-    Ok(Value::String(string))
+fn strval(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        let string = context.stringify(args::value(&arguments, 0)).await?;
+        Ok(Value::String(string))
+    })
 }
 
 fn boolval(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
@@ -209,7 +209,12 @@ fn boolval(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(Value::Bool(flag))
 }
 
-fn settype(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn settype(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(convert_type(context, arguments))
+}
+
+async fn convert_type(context: &mut dyn Context, arguments: Vec<Value>) -> NativeResult {
+    let arguments = &arguments;
     let Some(variable) = args::reference(arguments, 0) else {
         return Err(NativeError::error(
             "settype(): Argument #1 ($var) could not be passed by reference",
@@ -220,7 +225,7 @@ fn settype(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let converted = match name.as_slice() {
         b"int" | b"integer" => Value::Int(to_int(&current, context.diagnostics())?),
         b"float" | b"double" => Value::Float(to_float(&current, context.diagnostics())?),
-        b"string" => Value::String(to_php_string(&current, context.diagnostics())?),
+        b"string" => Value::String(context.stringify(&current).await?),
         b"array" => Value::from(to_array(&current, context.diagnostics())),
         b"bool" | b"boolean" => Value::Bool(cast_to_bool(&current, context.diagnostics())),
         b"null" => {

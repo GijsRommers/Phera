@@ -102,7 +102,7 @@ impl Vm {
                 )));
             }
         }
-        let interfaces = declaration
+        let mut interfaces = declaration
             .interfaces
             .iter()
             .map(|symbol| {
@@ -152,6 +152,24 @@ impl Vm {
                 self.check_method_contract(inherited, &linked, &unit)?;
             }
             methods.insert(method_name.to_ascii_lowercase(), linked);
+        }
+        if let Some(method) = methods.get("__tostring") {
+            if method.visibility != Visibility::Public {
+                return Err(NativeError::error(format!(
+                    "Access level to {}::{}() must be public (as in class Stringable)",
+                    method.declaring, method.name
+                )));
+            }
+            if !interfaces
+                .iter()
+                .any(|interface| interface.is_a("Stringable"))
+                && !parent
+                    .as_ref()
+                    .is_some_and(|parent| parent.is_a("Stringable"))
+                && let Some(stringable) = self.classes.get("Stringable")
+            {
+                interfaces.push(stringable);
+            }
         }
         for interface in &interfaces {
             for (name, method) in &interface.methods {
@@ -358,6 +376,7 @@ impl Vm {
                 is_readonly: declaration.is_readonly,
                 allows_dynamic_properties,
                 constructor: methods.get("__construct").cloned(),
+                magic: super::magic::MagicMethods::link(&methods),
                 methods,
                 method_table: std::cell::OnceCell::new(),
                 property_template: super::class::property_template(&defaults),

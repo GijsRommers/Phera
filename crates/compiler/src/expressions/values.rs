@@ -48,7 +48,7 @@ impl Compiler<'_> {
         value: &ast::Expression,
         line: usize,
     ) -> Result<Reg, CompileError> {
-        let src = self.quiet(value)?;
+        let src = self.quiet_mode(value, phera_bytecode::FetchMode::Empty)?;
         let dst = self.allocate_register()?;
         self.emit(
             Instruction::Unary {
@@ -70,7 +70,7 @@ impl Compiler<'_> {
         let dst = self.literal(Constant::Bool(false), line)?;
         let mut ends = vec![];
         for value in values {
-            let register = self.quiet(value)?;
+            let register = self.quiet_mode(value, phera_bytecode::FetchMode::Isset)?;
             ends.push(self.emit(
                 Instruction::BranchNull {
                     value: register,

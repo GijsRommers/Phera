@@ -80,13 +80,18 @@ impl Compiler<'_> {
                 };
                 self.compile_arguments(arguments, line)
             }
-            ast::ExpressionKind::Clone { object, with: None } => {
+            ast::ExpressionKind::Clone { object, with } => {
                 let source = self.compile_expression(object)?;
+                let with = with
+                    .as_ref()
+                    .map(|with| self.compile_expression(with))
+                    .transpose()?;
                 let destination = self.allocate_register()?;
                 self.emit(
                     Instruction::Clone {
                         destination,
                         source,
+                        with,
                     },
                     line,
                 );

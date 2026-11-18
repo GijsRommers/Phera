@@ -3,8 +3,8 @@
 
 use phera_extension_api::value::{loose_equals, strict_equals};
 use phera_extension_api::{
-    ArrayKey, Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, PhpArray,
-    PhpString, Value, args,
+    ArrayKey, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType,
+    PhpArray, PhpString, Value, args,
 };
 
 use super::list;
@@ -49,7 +49,7 @@ fn array_values(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
 /// array_keys(["a" => 1, "b" => "1", "c" => 2], 1);       // ["a", "b"]
 /// array_keys(["a" => 1, "b" => "1", "c" => 2], 1, true); // ["a"]
 /// ```
-const ARRAY_KEYS: FunctionEntry = FunctionEntry::sync(
+const ARRAY_KEYS: FunctionEntry = FunctionEntry::asynchronous(
     "array_keys",
     &[
         Param::new("array", ParamType::Array),
@@ -59,7 +59,12 @@ const ARRAY_KEYS: FunctionEntry = FunctionEntry::sync(
     array_keys,
 );
 
-fn array_keys(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn array_keys(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(collect_keys(context, arguments))
+}
+
+async fn collect_keys(context: &mut dyn Context, arguments: Vec<Value>) -> NativeResult {
+    let arguments = &arguments;
     let array = required_array(arguments, 0);
     let Some(filter) = arguments.get(1) else {
         return Ok(Value::from(list(array.keys().map(Value::from))));
@@ -67,7 +72,7 @@ fn array_keys(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let equality = Equality::from_strict_argument(arguments);
     let mut result = PhpArray::new();
     for (key, value) in array.iter() {
-        if equality.equal(context, value, filter)? {
+        if equality.equal(context, value, filter).await? {
             result.push(Value::from(key))?;
         }
     }
@@ -167,7 +172,7 @@ impl Equality {
         }
     }
 
-    fn equal(
+    async fn equal(
         self,
         context: &mut dyn Context,
         left: &Value,
@@ -175,6 +180,12 @@ impl Equality {
     ) -> Result<bool, NativeError> {
         let result = match self {
             Self::Strict => strict_equals(left, right, context.diagnostics())?,
+            Self::Loose
+                if (left.is_object() && right.is_string())
+                    || (left.is_string() && right.is_object()) =>
+            {
+                Value::Bool(context.compare(left, right).await? == 0)
+            }
             Self::Loose => loose_equals(left, right, context.diagnostics())?,
         };
         Ok(matches!(result, Value::Bool(true)))
@@ -187,7 +198,7 @@ impl Equality {
 /// in_array("1e1", [10]);       // true: "1e1" == 10
 /// in_array("1e1", [10], true); // false
 /// ```
-const IN_ARRAY: FunctionEntry = FunctionEntry::sync(
+const IN_ARRAY: FunctionEntry = FunctionEntry::asynchronous(
     "in_array",
     &[
         Param::new("needle", ParamType::Mixed),
@@ -197,8 +208,8 @@ const IN_ARRAY: FunctionEntry = FunctionEntry::sync(
     in_array,
 );
 
-fn in_array(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(Value::Bool(search(context, arguments)?.is_some()))
+fn in_array(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move { Ok(Value::Bool(search(context, &arguments).await?.is_some())) })
 }
 
 /// `array_search(mixed $needle, array $haystack, bool $strict = false):
@@ -208,7 +219,7 @@ fn in_array(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
 /// array_search("b", ["x" => "a", "y" => "b"]); // "y"
 /// array_search("c", ["a"]);                    // false
 /// ```
-const ARRAY_SEARCH: FunctionEntry = FunctionEntry::sync(
+const ARRAY_SEARCH: FunctionEntry = FunctionEntry::asynchronous(
     "array_search",
     &[
         Param::new("needle", ParamType::Mixed),
@@ -218,17 +229,22 @@ const ARRAY_SEARCH: FunctionEntry = FunctionEntry::sync(
     array_search,
 );
 
-fn array_search(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let found = search(context, arguments)?;
-    Ok(found.map_or(Value::Bool(false), Value::from))
+fn array_search(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        let found = search(context, &arguments).await?;
+        Ok(found.map_or(Value::Bool(false), Value::from))
+    })
 }
 
 /// The first key of `$haystack` whose value equals `$needle`.
-fn search(context: &mut dyn Context, arguments: &[Value]) -> Result<Option<ArrayKey>, NativeError> {
+async fn search(
+    context: &mut dyn Context,
+    arguments: &[Value],
+) -> Result<Option<ArrayKey>, NativeError> {
     let needle = &arguments[0];
     let equality = Equality::from_strict_argument(arguments);
     for (key, value) in required_array(arguments, 1).iter() {
-        if equality.equal(context, needle, value)? {
+        if equality.equal(context, needle, value).await? {
             return Ok(Some(key));
         }
     }
