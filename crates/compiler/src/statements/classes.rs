@@ -39,6 +39,9 @@ impl Compiler<'_> {
             return Err(self.error("Attributes not supported yet", line));
         }
         let mut methods = Vec::new();
+        // Lowercased, to find a redeclared method without comparing it with
+        // every earlier one: a generated class can have 100,000 methods.
+        let mut method_names = std::collections::HashSet::new();
         let mut properties = Vec::new();
         let mut constants = Vec::new();
         for member in &declaration.members {
@@ -142,10 +145,7 @@ impl Compiler<'_> {
             let ast::ClassMemberKind::Method(method) = &member.kind else {
                 return Err(self.error("Class properties and constants not supported yet", line));
             };
-            if methods
-                .iter()
-                .any(|entry: &ClassMethod| entry.name.eq_ignore_ascii_case(&method.name.name))
-            {
+            if !method_names.insert(method.name.name.to_ascii_lowercase()) {
                 return Err(self.error(
                     format!("Cannot redeclare {name}::{}()", method.name.name),
                     self.lines.line(method.name.span.start),
