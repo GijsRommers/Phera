@@ -1029,21 +1029,39 @@ impl Parser<'_> {
         };
 
         let mut modifiers = Modifiers::default();
+        let mut anonymous_modifier = None;
         loop {
-            if self.eat(TokenKind::Abstract)? {
-                modifiers.is_abstract = true;
-            } else if self.eat(TokenKind::Final)? {
-                modifiers.is_final = true;
-            } else if self.eat(TokenKind::Readonly)? {
-                modifiers.is_readonly = true;
-            } else {
-                break;
-            }
+            let modifier = match self.kind() {
+                TokenKind::Abstract => {
+                    modifiers.is_abstract = true;
+                    "abstract"
+                }
+                TokenKind::Final => {
+                    modifiers.is_final = true;
+                    "final"
+                }
+                TokenKind::Readonly => {
+                    self.bump()?;
+                    modifiers.is_readonly = true;
+                    continue;
+                }
+                _ => break,
+            };
+            let span = self.bump()?.span;
+            anonymous_modifier.get_or_insert(phera_ast::Identifier {
+                name: modifier.into(),
+                span,
+            });
         }
 
         if self.at(TokenKind::Class) {
             let mut arguments = Arguments::List(vec![]);
-            let class = self.parse_anonymous_class(attributes, modifiers, &mut arguments)?;
+            let class = self.parse_anonymous_class(
+                attributes,
+                modifiers,
+                anonymous_modifier,
+                &mut arguments,
+            )?;
             return Ok(Expression {
                 kind: ExpressionKind::New {
                     class: NewTarget::Anonymous(Box::new(class)),

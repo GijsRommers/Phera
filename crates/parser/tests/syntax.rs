@@ -88,6 +88,32 @@ fn traits_cannot_declare_interfaces() {
     );
 }
 
+#[test]
+fn class_modifiers_are_rejected_on_traits_and_enums() {
+    for declaration in [
+        "final trait T {}",
+        "abstract enum E {}",
+        "readonly trait R {}",
+    ] {
+        assert!(err(declaration).message.contains("expecting \"abstract\""));
+    }
+}
+
+#[test]
+fn anonymous_class_keeps_illegal_modifier_location() {
+    let expression = expr("new\nabstract\nclass {}");
+    let ExpressionKind::New {
+        class: NewTarget::Anonymous(declaration),
+        ..
+    } = &expression.kind
+    else {
+        panic!("expected an anonymous class");
+    };
+    let modifier = declaration.anonymous_modifier.as_ref().unwrap();
+    assert_eq!(modifier.name, "abstract");
+    assert_eq!(modifier.span.start - expression.span.start, "new\n".len());
+}
+
 /// The parse error for `<?php ...` source.
 fn err(src: &str) -> ParseError {
     parse(&format!("<?php\n{src}")).expect_err(&format!("expected a parse error in {src:?}"))

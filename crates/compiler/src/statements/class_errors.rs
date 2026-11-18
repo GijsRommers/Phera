@@ -30,20 +30,14 @@ impl Compiler<'_> {
                 self.lines.line(identifier.span.start),
             ));
         }
-        if declaration.name.is_none() {
-            let modifier = if declaration.modifiers.is_abstract {
-                Some("abstract")
-            } else if declaration.modifiers.is_final {
-                Some("final")
-            } else {
-                None
-            };
-            if let Some(modifier) = modifier {
-                return Err(self.error(
-                    format!("Cannot use the {modifier} modifier on an anonymous class"),
-                    self.lines.line(declaration.span.start),
-                ));
-            }
+        if let Some(modifier) = &declaration.anonymous_modifier {
+            return Err(self.error(
+                format!(
+                    "Cannot use the {} modifier on an anonymous class",
+                    modifier.name
+                ),
+                self.lines.line(modifier.span.start),
+            ));
         }
         if let Some(identifier) = &declaration.name
             && matches!(

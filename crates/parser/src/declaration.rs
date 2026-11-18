@@ -160,6 +160,19 @@ impl Parser<'_> {
                 )));
             }
         };
+        if kind != ClassKind::Class
+            && (modifiers.is_abstract || modifiers.is_final || modifiers.is_readonly)
+        {
+            let token = match kind {
+                ClassKind::Trait => "trait",
+                ClassKind::Enum => "enum",
+                ClassKind::Interface => "interface",
+                ClassKind::Class => "class",
+            };
+            return Err(self.error(format!(
+                "syntax error, unexpected token \"{token}\", expecting \"abstract\" or \"final\" or \"readonly\" or \"class\""
+            )));
+        }
         self.bump()?;
 
         let name = Some(self.parse_strict_identifier()?);
@@ -215,6 +228,7 @@ impl Parser<'_> {
             attributes,
             kind,
             modifiers,
+            anonymous_modifier: None,
             name,
             extends,
             implements,
@@ -231,6 +245,7 @@ impl Parser<'_> {
         &mut self,
         attributes: Vec<Attribute>,
         modifiers: Modifiers,
+        anonymous_modifier: Option<Identifier>,
         arguments: &mut phera_ast::Arguments,
     ) -> Result<ClassDeclaration, ParseError> {
         let start = self.expect(TokenKind::Class, "'class'")?.span;
@@ -261,6 +276,7 @@ impl Parser<'_> {
             attributes,
             kind: ClassKind::Class,
             modifiers,
+            anonymous_modifier,
             name: None,
             extends,
             implements,
