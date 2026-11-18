@@ -4,4 +4,4 @@ anonymous-classes: missing interface method
 <?php
 interface I { function x(); } new class implements I {};
 --EXPECTF--
-Fatal error: Class I@anonymous must implement 1 abstract method (I::x) in /private%s on line 2
+Fatal error: Class I@anonymous must implement 1 abstract method (I::x) in %s on line 2

@@ -4,4 +4,4 @@ enums: duplicate case
 <?php
 enum E{case A;case A;}
 --EXPECTF--
-Fatal error: Cannot redefine class constant E::A in /private%s on line 2
+Fatal error: Cannot redefine class constant E::A in %s on line 2

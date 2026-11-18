@@ -4,4 +4,4 @@ enums: cannot declare from method
 <?php
 enum E: int{static function from($value){}}
 --EXPECTF--
-Fatal error: Cannot redeclare E::from() in /private%s on line 2
+Fatal error: Cannot redeclare E::from() in %s on line 2

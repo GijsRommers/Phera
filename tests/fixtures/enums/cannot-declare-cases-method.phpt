@@ -4,4 +4,4 @@ enums: cannot declare cases method
 <?php
 enum E{static function cases(){}}
 --EXPECTF--
-Fatal error: Cannot redeclare E::cases() in /private%s on line 2
+Fatal error: Cannot redeclare E::cases() in %s on line 2

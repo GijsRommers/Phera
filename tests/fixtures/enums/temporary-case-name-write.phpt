@@ -4,4 +4,4 @@ enums: temporary case name write
 <?php
 enum E{case A;} E::A->name="X";
 --EXPECTF--
-Fatal error: Cannot use temporary expression in write context in /private%s on line 2
+Fatal error: Cannot use temporary expression in write context in %s on line 2

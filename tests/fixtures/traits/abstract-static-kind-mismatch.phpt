@@ -4,4 +4,4 @@ traits: abstract static kind mismatch
 <?php
 trait T{abstract static function m();} class C{use T;function m(){}}
 --EXPECTF--
-Fatal error: Cannot make static method T::m() non static in class C in /private%s on line 2
+Fatal error: Cannot make static method T::m() non static in class C in %s on line 2

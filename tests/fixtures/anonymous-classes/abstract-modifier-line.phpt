@@ -6,4 +6,4 @@ new
 abstract
 class {};
 --EXPECTF--
-Fatal error: Cannot use the abstract modifier on an anonymous class in /private%s on line 3
+Fatal error: Cannot use the abstract modifier on an anonymous class in %s on line 3

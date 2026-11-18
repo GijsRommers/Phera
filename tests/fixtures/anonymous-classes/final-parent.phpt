@@ -4,4 +4,4 @@ anonymous-classes: final parent
 <?php
 final class P {} new class extends P {};
 --EXPECTF--
-Fatal error: Class P@anonymous cannot extend final class P in /private%s on line 2
+Fatal error: Class P@anonymous cannot extend final class P in %s on line 2

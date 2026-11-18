@@ -4,4 +4,4 @@ enums: explicitly implements unit enum
 <?php
 enum E implements UnitEnum{case A;}
 --EXPECTF--
-Fatal error: Enum E cannot implement previously implemented interface UnitEnum in /private%s on line 2
+Fatal error: Enum E cannot implement previously implemented interface UnitEnum in %s on line 2

@@ -4,4 +4,4 @@ enums: enum constructor forbidden
 <?php
 enum E{function __construct(){}}
 --EXPECTF--
-Fatal error: Enum E cannot include magic method __construct in /private%s on line 2
+Fatal error: Enum E cannot include magic method __construct in %s on line 2

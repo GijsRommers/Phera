@@ -4,4 +4,4 @@ traits: alias missing
 <?php
 trait T{} class C{use T {missing as n;}}
 --EXPECTF--
-Fatal error: An alias (n) was defined for method missing(), but this method does not exist in /private%s on line 2
+Fatal error: An alias (n) was defined for method missing(), but this method does not exist in %s on line 2

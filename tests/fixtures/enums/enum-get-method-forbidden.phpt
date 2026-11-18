@@ -4,4 +4,4 @@ enums: enum get method forbidden
 <?php
 enum E{function __get($p){}}
 --EXPECTF--
-Fatal error: Enum E cannot include magic method __get in /private%s on line 2
+Fatal error: Enum E cannot include magic method __get in %s on line 2

@@ -4,4 +4,4 @@ enums: enum promoted property forbidden
 <?php
 enum E {function __construct(public int $a) {}}
 --EXPECTF--
-Fatal error: Enum E cannot include properties in /private%s on line 2
+Fatal error: Enum E cannot include properties in %s on line 2

@@ -4,4 +4,4 @@ anonymous-classes: readonly untyped property
 <?php
 new readonly class { public $value; };
 --EXPECTF--
-Fatal error: Readonly property class@anonymous::$value must have type in /private%s on line 2
+Fatal error: Readonly property class@anonymous::$value must have type in %s on line 2

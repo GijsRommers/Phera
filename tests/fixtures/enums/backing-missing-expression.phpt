@@ -4,4 +4,4 @@ enums: backing missing expression
 <?php
 enum E: int{case A;}
 --EXPECTF--
-Fatal error: Case A of backed enum E must have a value in /private%s on line 2
+Fatal error: Case A of backed enum E must have a value in %s on line 2

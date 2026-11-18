@@ -6,4 +6,4 @@ class C {
     case A;
 }
 --EXPECTF--
-Fatal error: Case can only be used in enums in /private%s on line 3
+Fatal error: Case can only be used in enums in %s on line 3

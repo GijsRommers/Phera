@@ -4,4 +4,4 @@ traits: final adaptation forbids override
 <?php
 trait T { function m() {} } class C { use T { m as final; } } class D extends C { function m() {} }
 --EXPECTF--
-Fatal error: Cannot override final method C::m() in /private%s on line 2
+Fatal error: Cannot override final method C::m() in %s on line 2

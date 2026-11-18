@@ -4,4 +4,4 @@ traits: trait rejects final header
 <?php
 final trait T {}
 --EXPECTF--
-Parse error: syntax error, unexpected token "trait", expecting "abstract" or "final" or "readonly" or "class" in /private%s on line 2
+Parse error: syntax error, unexpected token "trait", expecting "abstract" or "final" or "readonly" or "class" in %s on line 2

@@ -9,4 +9,4 @@ class C {
     }
 }
 --EXPECTF--
-Fatal error: Cannot use "static" as method modifier in trait alias in /private%s on line 4
+Fatal error: Cannot use "static" as method modifier in trait alias in %s on line 4

@@ -4,4 +4,4 @@ traits: different property visibility
 <?php
 trait T {public $p;} class C{use T;protected $p;}
 --EXPECTF--
-Fatal error: C and T define the same property ($p) in the composition of C. However, the definition differs and is considered incompatible. Class was composed in /private%s on line 2
+Fatal error: C and T define the same property ($p) in the composition of C. However, the definition differs and is considered incompatible. Class was composed in %s on line 2

@@ -4,4 +4,4 @@ enums: invalid backing type
 <?php
 enum E: bool{case A=true;}
 --EXPECTF--
-Fatal error: Enum backing type must be int or string, bool given in /private%s on line 2
+Fatal error: Enum backing type must be int or string, bool given in %s on line 2

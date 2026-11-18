@@ -4,4 +4,4 @@ enums: temporary case increment
 <?php
 enum E: int{case A=1;} E::A->value++;
 --EXPECTF--
-Fatal error: Cannot use temporary expression in write context in /private%s on line 2
+Fatal error: Cannot use temporary expression in write context in %s on line 2

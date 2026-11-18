@@ -4,4 +4,4 @@ anonymous-classes: final modifier
 <?php
 new final class {};
 --EXPECTF--
-Fatal error: Cannot use the final modifier on an anonymous class in /private%s on line 2
+Fatal error: Cannot use the final modifier on an anonymous class in %s on line 2

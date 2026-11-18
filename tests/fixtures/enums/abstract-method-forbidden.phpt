@@ -4,4 +4,4 @@ enums: abstract method forbidden
 <?php
 enum E{abstract function x();}
 --EXPECTF--
-Fatal error: Enum method E::x() must not be abstract in /private%s on line 2
+Fatal error: Enum method E::x() must not be abstract in %s on line 2
