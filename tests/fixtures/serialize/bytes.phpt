@@ -1,0 +1,10 @@
+--TEST--
+PHP serializes bytes and scalar types, preserving array key order
+--FILE--
+<?php
+$value = [2 => "é\x00\xff", '08' => null, -2 => true, 4 => false, 5 => -0.0,
+    "\x00" => [INF, -INF, NAN, PHP_INT_MIN, PHP_INT_MAX]];
+echo bin2hex(serialize($value)), "\n";
+?>
+--EXPECT--
+613a363a7b693a323b733a343a22c3a900ff223b733a323a223038223b4e3b693a2d323b623a313b693a343b623a303b693a353b643a2d303b733a313a2200223b613a353a7b693a303b643a494e463b693a313b643a2d494e463b693a323b643a4e414e3b693a333b693a2d393232333337323033363835343737353830383b693a343b693a393232333337323033363835343737353830373b7d7d

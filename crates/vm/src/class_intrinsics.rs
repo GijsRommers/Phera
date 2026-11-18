@@ -211,7 +211,8 @@ impl Vm {
                 }
                 Ok(Value::Bool(class.is_some_and(|class| {
                     if matches!(function, Operation::PropertyExists) {
-                        self.class_property_exists(&value, &class, &name)
+                        class.name != phera_extension_api::serialization::INCOMPLETE_CLASS
+                            && self.class_property_exists(&value, &class, &name)
                     } else {
                         class
                             .methods

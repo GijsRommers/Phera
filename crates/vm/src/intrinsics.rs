@@ -68,6 +68,10 @@ impl Intrinsic {
             "restore_error_handler" => {
                 Self::Handler(crate::error_handlers::HandlerFunction::RestoreError)
             }
+            "get_exception_handler" => {
+                Self::Handler(crate::error_handlers::HandlerFunction::GetException)
+            }
+            "get_error_handler" => Self::Handler(crate::error_handlers::HandlerFunction::GetError),
             "trigger_error" | "user_error" => {
                 Self::Handler(crate::error_handlers::HandlerFunction::TriggerError)
             }
@@ -173,6 +177,8 @@ impl Intrinsic {
             "restore_error_handler",
             "set_exception_handler",
             "restore_exception_handler",
+            "get_error_handler",
+            "get_exception_handler",
             "trigger_error",
             "user_error",
         ]

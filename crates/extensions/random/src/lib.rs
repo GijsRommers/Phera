@@ -16,6 +16,7 @@ mod floats;
 mod mt19937;
 mod procedural;
 mod randomizer;
+mod serialization;
 
 use phera_extension_api::{ClassEntry, Extension, Registry, Value};
 
