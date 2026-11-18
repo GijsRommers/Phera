@@ -17,24 +17,21 @@
 use std::rc::Rc;
 
 use phera_bytecode::{ClassBinding, NameId, Reg, SymbolId, Visibility};
-use phera_extension_api::{NativeMethod, ParamType};
 use phera_value::{Object, Value};
 
-use crate::calls::call_state::{CallTarget, Callee};
 use crate::calls::execution_loop::{Machine, Position, Step};
-use crate::calls::pending::prepare_general;
 use crate::calls::php_windows::push_php_call;
-use crate::calls::prepared_call::{CallFlags, CallKind};
+use crate::calls::prepared_call::CallKind;
 use crate::calls::window_context::WindowContext;
 use crate::classes::method_table::{FoundMethod, MethodTable};
-use crate::classes::{Class, ClassIndex, Invocation, MethodBody, MethodContext};
+use crate::classes::{Class, ClassIndex, MethodBody};
 use crate::code_table::NameKey;
 
 impl Machine<'_> {
     /// `InitMethodCall` of a public instance method written in PHP: reserve
     /// the method's window with the receiver in its first register.
     #[inline(always)]
-    pub(super) fn prepare_method<const TRACK_GENERATORS: bool>(
+    pub(super) fn prepare_method(
         &mut self,
         position: Position,
         receiver: Reg,
@@ -59,63 +56,7 @@ impl Machine<'_> {
         {
             return Step::Slow;
         }
-        if TRACK_GENERATORS
-            && let MethodBody::Native(entry) = found.method.body
-            && matches!(entry.handler, NativeMethod::Window(_))
-        {
-            return self.prepare_found_window(found, object, &class, position, receiver);
-        }
         self.prepare_found(found, Some(object), None, position.ip)
-    }
-
-    /// The linked method table has already resolved this native window.
-    #[inline(never)]
-    fn prepare_found_window(
-        &mut self,
-        found: FoundMethod<'_>,
-        receiver: Rc<Object>,
-        called: &Rc<Class>,
-        position: Position,
-        receiver_register: Reg,
-    ) -> Step {
-        let MethodBody::Native(entry) = found.method.body else {
-            return Step::Slow;
-        };
-        let Some(scope) = found.scope.upgrade() else {
-            return Step::Slow;
-        };
-        let signature = found.method.signature(self.code);
-        let slot = position.frame.base() + receiver_register.index();
-        if receiver_register.index() >= self.code.function(position.frame.function).locals.len() {
-            self.registers.take(slot);
-        }
-        prepare_general(
-            self.stack,
-            self.registers,
-            Callee {
-                argument_binding: crate::calls::callback_binding::ArgumentBinding::Caller,
-                name: signature.name.clone(),
-                parameters: signature.parameters.clone(),
-                target: CallTarget::Method {
-                    method: found.method.clone(),
-                    context: MethodContext {
-                        receiver: Some(receiver),
-                        scope,
-                        called: called.clone(),
-                        invocation: Invocation::Method,
-                    },
-                },
-            },
-        );
-        if let [parameter] = entry.params
-            && matches!(parameter.ty, ParamType::Mixed)
-            && !parameter.by_ref
-            && !parameter.variadic
-            && let Some(call) = self.stack.last_call_mut()
-        {
-            call.flags.insert(CallFlags::WINDOW_ARGUMENT);
-        }
-        Step::Done(position.ip)
     }
 
     /// `InitStaticCall` of `self::`, `parent::`, `static::` or a named class,

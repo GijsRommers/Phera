@@ -121,7 +121,7 @@ impl Vm {
                 stop,
                 frame_limit: self.frame_limit,
             };
-            let exit = machine.run::<TRACK_GENERATORS>();
+            let exit = machine.run();
             *work = machine.work;
             self.executed_instructions += machine.executed;
             let instruction = match exit {
@@ -148,7 +148,7 @@ impl Vm {
 impl Machine<'_> {
     /// The loop itself. Simple instructions run in [`Machine::run_simple`];
     /// this loop takes the others and switches frames on calls and returns.
-    fn run<const TRACK_GENERATORS: bool>(&mut self) -> LoopExit {
+    fn run(&mut self) -> LoopExit {
         let Some(frame) = self.stack.current().copied() else {
             return LoopExit::Invalid;
         };
@@ -162,7 +162,7 @@ impl Machine<'_> {
                 Ok(instruction) => instruction,
                 Err(exit) => return exit,
             };
-            match self.step::<TRACK_GENERATORS>(instruction, position) {
+            match self.step(instruction, position) {
                 Step::Done(ip) => position.ip = ip,
                 Step::Switched(next) => {
                     position = next;
@@ -230,11 +230,7 @@ impl Machine<'_> {
     /// The instructions that are not simple but need only the borrowed
     /// state: `foreach` over a snapshot, direct calls and plain returns.
     #[inline(always)]
-    fn step<const TRACK_GENERATORS: bool>(
-        &mut self,
-        instruction: Instruction,
-        position: Position,
-    ) -> Step {
+    fn step(&mut self, instruction: Instruction, position: Position) -> Step {
         let base = position.frame.base();
         let mut ip = position.ip;
         match instruction {
@@ -253,7 +249,7 @@ impl Machine<'_> {
                 dst,
             } => self.enter_direct(position, function, (args, count), dst),
             Instruction::InitMethodCall { receiver, method } => {
-                self.prepare_method::<TRACK_GENERATORS>(position, receiver, method)
+                self.prepare_method(position, receiver, method)
             }
             Instruction::InitStaticCall {
                 class,

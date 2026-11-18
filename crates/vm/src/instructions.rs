@@ -62,6 +62,8 @@ impl Vm {
             }
             I::InitCall { function } => self.init_call(function)?,
             I::InitDynamicCall { callee } => self.init_dynamic_call(callee)?,
+            I::InitMethodCall { receiver, method }
+                if TRACK_GENERATORS && self.prepare_ready_native_method(receiver, method) => {}
             I::InitMethodCall { receiver, method } => {
                 self.init_method_call::<TRACK_GENERATORS>(receiver, method)?
             }
