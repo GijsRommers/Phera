@@ -148,6 +148,7 @@ impl PropertyEntry {
 pub enum NativePropertyRead {
     Read,
     Quiet,
+    Isset,
     Exists,
 }
 

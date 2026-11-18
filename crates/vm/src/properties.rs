@@ -144,6 +144,7 @@ impl Vm {
             let mode = match missing {
                 Missing::Warn => NativePropertyRead::Read,
                 Missing::Silent => NativePropertyRead::Quiet,
+                Missing::Isset => NativePropertyRead::Isset,
             };
             if let Some(value) = (access.read)(self, &object, &name, mode)? {
                 return Ok(value);
@@ -151,7 +152,7 @@ impl Vm {
         }
         let key = match self.property_key(&object, &name) {
             Ok(key) => key,
-            Err(_) if missing == Missing::Silent => return Ok(Value::Null),
+            Err(_) if missing != Missing::Warn => return Ok(Value::Null),
             Err(error) => return Err(error),
         };
         if missing == Missing::Warn
