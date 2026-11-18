@@ -75,6 +75,15 @@ impl Object {
     /// when the object is freed, so the pool never has to look for dead
     /// objects.
     pub fn allocate(ids: &Rc<ObjectIds>, class: Rc<dyn ClassHandle>) -> Self {
+        Self::allocate_with_properties(ids, class, PhpArray::new())
+    }
+
+    /// Install the property table before publishing the object.
+    pub fn allocate_with_properties(
+        ids: &Rc<ObjectIds>,
+        class: Rc<dyn ClassHandle>,
+        properties: PhpArray,
+    ) -> Self {
         let lease = IdLease {
             id: ids.take(),
             pool: ids.clone(),
@@ -82,7 +91,7 @@ impl Object {
         Object {
             id: lease.id,
             class,
-            properties: RefCell::new(PhpArray::new()),
+            properties: RefCell::new(properties),
             native: RefCell::new(None),
             _lease: Some(lease),
         }

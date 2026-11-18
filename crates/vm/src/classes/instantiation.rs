@@ -153,8 +153,9 @@ impl Vm {
             }
             properties
         };
-        let object = self.classes.allocate(class.clone());
-        object.update(|storage| *storage = properties);
+        let object = self
+            .classes
+            .allocate_with_properties(class.clone(), properties);
         if class.is_throwable {
             self.initialize_throwable(&object, crate::exceptions::TraceOrigin::Construction);
         }
