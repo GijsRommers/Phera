@@ -3,6 +3,8 @@ resolver = "3"
 
 members = [
     "crates/cli",
+    "crates/dotenv",
+    "crates/analyzer",
     "crates/lexer",
     "crates/parser",
     "crates/ast",
@@ -30,6 +32,10 @@ license = "MIT OR Apache-2.0"
 unsafe_code = "forbid"
 
 [workspace.dependencies]
+phera-dotenv = { path = "crates/dotenv" }
+indexmap = "2"
+regex = "1"
+phera-analyzer = { path = "crates/analyzer" }
 phera-lexer = { path = "crates/lexer" }
 phera-parser = { path = "crates/parser" }
 phera-ast = { path = "crates/ast" }
@@ -44,6 +50,7 @@ phera-phpt = { path = "crates/phpt" }
 phera-extension-api = { path = "crates/extension-api" }
 phera-ext-core = { path = "crates/extensions/core" }
 phera-ext-ctype = { path = "crates/extensions/ctype" }
+phera-ext-filter = { path = "crates/extensions/filter" }
 phera-ext-hash = { path = "crates/extensions/hash" }
 phera-ext-http = { path = "crates/extensions/http" }
 phera-ext-json = { path = "crates/extensions/json" }
@@ -75,6 +82,8 @@ socket2 = { version = "0.6", features = ["all"] }
 tokio = { version = "1", features = [
     "rt", "rt-multi-thread", "net", "time", "sync", "signal", "macros",
 ] }
+fluent-uri = "0.4.1"
+url = "2.5"
 foldhash = "0.2"
 hashbrown = { version = "0.17", default-features = false }
 mimalloc = { version = "0.1", default-features = false }
