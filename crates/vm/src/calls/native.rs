@@ -59,7 +59,11 @@ impl Vm {
         let previous = std::mem::replace(&mut self.argument_origin, origin);
         let prepared = self.prepare_call_with_trace(entry.name, entry.params, &mut arguments);
         self.argument_origin = previous;
-        if let Err(error) = prepared {
+        if let Err(error) = prepared
+            && let Err(error) = self
+                .retry_native_strings(entry, &mut arguments, origin, error)
+                .await
+        {
             if !matches!(
                 entry.name,
                 "strlen" | "count" | "sizeof" | "array_key_exists"
@@ -100,6 +104,28 @@ impl Vm {
         }
     }
 
+    /// The successful native call keeps the synchronous argument parser. Only
+    /// a failed parse can request an interpreter call for a string conversion.
+    #[cold]
+    fn retry_native_strings<'a>(
+        &'a mut self,
+        entry: phera_extension_api::FunctionEntry,
+        arguments: &'a mut [Value],
+        origin: crate::calls::callback_binding::ArgumentOrigin,
+        original_error: NativeError,
+    ) -> phera_extension_api::LocalFuture<'a, Result<(), NativeError>> {
+        Box::pin(async move {
+            if !self.native_strings_needed(entry.params, arguments, origin) {
+                return Err(original_error);
+            }
+            self.coerce_native_strings(entry.name, entry.params, arguments, origin)
+                .await?;
+            self.with_argument_origin(origin, |vm| {
+                vm.prepare_call_with_trace(entry.name, entry.params, arguments)
+            })
+        })
+    }
+
     /// Publish the native frame while PHP callbacks are active, for Throwable::getTrace().
     fn native_callback_frame(
         &mut self,
@@ -109,14 +135,13 @@ impl Vm {
     ) -> phera_extension_api::LocalFuture<'_, NativeResult> {
         let native = crate::error_traces::NativeTrace::new(name, &arguments);
         Box::pin(async move {
-            self.error_handlers
-                .callback_sites
-                .push(crate::exception_traces::NativeCallbackSite {
+            self.native_callback_sites
+                .push(crate::error_traces::NativeCallbackSite {
                     boundary: self.call_stack.frames().len(),
                     native,
                 });
             let result = handler(self, arguments).await;
-            let site = self.error_handlers.callback_sites.pop();
+            let site = self.native_callback_sites.pop();
             if let Err(error) = &result
                 && !matches!(error, NativeError::Unwind(_))
                 && self.failed_native.is_none()
@@ -240,9 +265,21 @@ impl Vm {
                         None => Ok(phera_extension_api::MethodPreparation::Default),
                     })?;
                 if matches!(preparation, phera_extension_api::MethodPreparation::Default) {
-                    self.with_argument_origin(origin, |vm| {
+                    let mut prepared = self.with_argument_origin(origin, |vm| {
                         vm.prepare_native_method_arguments(method, entry.params, &mut arguments)
-                    })?;
+                    });
+                    if prepared.is_err()
+                        && self.native_strings_needed(entry.params, &arguments, origin)
+                    {
+                        let name = method.signature(&self.code).name.clone();
+                        self.failed_native = None;
+                        self.coerce_native_strings(&name, entry.params, &mut arguments, origin)
+                            .await?;
+                        prepared = self.with_argument_origin(origin, |vm| {
+                            vm.prepare_native_method_arguments(method, entry.params, &mut arguments)
+                        });
+                    }
+                    prepared?;
                 }
                 if let phera_extension_api::MethodPreparation::Return(value) = preparation {
                     self.call_stack.recycle_native_arguments(arguments);

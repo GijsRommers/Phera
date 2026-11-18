@@ -112,11 +112,7 @@ impl Compiler<'_> {
             Some(format!(
                 "Anonymous class method {name}() must not be abstract"
             ))
-        } else if matches!(
-            name.to_ascii_lowercase().as_str(),
-            "__construct" | "__invoke"
-        ) && method.modifiers.is_static
-        {
+        } else if name.eq_ignore_ascii_case("__construct") && method.modifiers.is_static {
             Some(format!("Method {class}::{name}() cannot be static"))
         } else if !is_interface && method.body.is_none() && !method.modifiers.is_abstract {
             Some(format!(

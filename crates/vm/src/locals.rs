@@ -1,9 +1,11 @@
 //! PHP locals instruction handlers, separate from dispatch.
 
-use phera_bytecode::{Reg, TypeId};
+use phera_bytecode::{Instruction, Reg, TypeId};
 use phera_extension_api::NativeError;
+use phera_value::Value;
 
 use crate::Vm;
+use crate::calls::execution_loop::BatchExit;
 
 impl Vm {
     /// Implements PHP Move semantics outside the dispatch loop.
@@ -25,11 +27,32 @@ impl Vm {
     }
 
     /// Implements PHP Assign semantics outside the dispatch loop.
-    pub(crate) fn execute_assign(&mut self, local: Reg, source: Reg) -> Result<(), NativeError> {
+    pub(crate) fn execute_assign(
+        &mut self,
+        local: Reg,
+        source: Reg,
+    ) -> Result<Option<BatchExit>, NativeError> {
         let value = self.get(source);
+        if matches!(value, Value::Object(_)) && self.local_reference_needs_string(local, &value) {
+            return Ok(Some(BatchExit::Instruction(Instruction::Assign {
+                local,
+                src: source,
+            })));
+        }
         self.restart_subject_iterators(local);
         self.assign_local(local, value)?;
-        Ok(())
+        Ok(None)
+    }
+
+    /// The compiler uses the evaluated operand as the expression's result.
+    /// A dead operand can be folded into a named local, which remains unchanged.
+    pub(crate) fn set_cast_assignment_result(&mut self, source: Reg, value: phera_value::Value) {
+        if self
+            .current()
+            .is_some_and(|frame| source.index() >= frame.function().locals.len())
+        {
+            self.set(source, value);
+        }
     }
 
     /// Implements PHP CheckType semantics outside the dispatch loop.

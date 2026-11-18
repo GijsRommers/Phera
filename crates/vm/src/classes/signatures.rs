@@ -80,6 +80,14 @@ impl Contract {
 
     /// PHP lists declaration modifiers before names, then optional defaults and return types.
     fn display(&self, method: &Method, type_name: impl Fn(&str) -> String) -> String {
+        let declared = |name: &str| {
+            let name = type_name(name);
+            if super::magic::MagicMethods::is_linked_magic(&method.name) {
+                ordered_magic_union(&name)
+            } else {
+                name
+            }
+        };
         let parameters = self
             .parameters
             .iter()
@@ -89,7 +97,7 @@ impl Contract {
                     parameter
                         .declaration
                         .as_ref()
-                        .map(|name| format!("{} ", type_name(name)))
+                        .map(|name| format!("{} ", declared(name)))
                         .unwrap_or_default(),
                     if parameter.by_reference { "&" } else { "" },
                     if parameter.variadic { "..." } else { "" },
@@ -110,7 +118,7 @@ impl Contract {
             method.name,
             self.returns
                 .as_ref()
-                .map(|name| format!(": {}", type_name(name)))
+                .map(|name| format!(": {}", declared(name)))
                 .unwrap_or_default()
         )
     }
@@ -390,7 +398,12 @@ impl Vm {
                 .iter()
                 .find(|class| class.name.eq_ignore_ascii_case(&name))
             {
-                if target == "object" {
+                if target == "object"
+                    || (target.eq_ignore_ascii_case("Stringable")
+                        && class.methods.iter().any(|method| {
+                            unit.names[method.name.index()].eq_ignore_ascii_case("__toString")
+                        }))
+                {
                     return true;
                 }
                 pending.extend(
@@ -454,4 +467,26 @@ fn is_class_type_name(name: &str) -> bool {
             | "parent"
             | "static"
     )
+}
+
+/// PHP's declaration diagnostics list nominal members first and builtins
+/// in a fixed order, independent of the written union order.
+fn ordered_magic_union(ty: &str) -> String {
+    if !ty.contains('|') {
+        return ty.into();
+    }
+    let mut members: Vec<_> = ty.split('|').collect();
+    members.sort_by_key(|member| match *member {
+        "static" => 1,
+        "callable" => 2,
+        "object" => 3,
+        "array" => 4,
+        "string" => 5,
+        "int" => 6,
+        "float" => 7,
+        "bool" | "true" | "false" => 8,
+        "null" => 9,
+        _ => 0,
+    });
+    members.join("|")
 }

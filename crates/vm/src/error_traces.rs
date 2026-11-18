@@ -119,3 +119,9 @@ pub(crate) struct DeclarationFailure {
     pub(crate) file: String,
     pub(crate) line: usize,
 }
+
+/// Native operations that enter PHP record the caller without allocating a PHP frame.
+pub(crate) struct NativeCallbackSite {
+    pub(crate) boundary: usize,
+    pub(crate) native: NativeTrace,
+}

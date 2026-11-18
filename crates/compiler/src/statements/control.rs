@@ -16,6 +16,11 @@ impl Compiler<'_> {
     ) -> Result<(), CompileError> {
         let first = self.next;
         self.compile_expression(expression)?;
+        self.clear_expression_temporaries(first, line);
+        Ok(())
+    }
+
+    fn clear_expression_temporaries(&mut self, first: usize, line: usize) {
         let temporaries: Vec<_> = (first..self.next)
             .map(|index| Reg(index as u16))
             .filter(|register| !self.locals.values().any(|local| local == register))
@@ -23,8 +28,6 @@ impl Compiler<'_> {
         for register in temporaries {
             self.emit(Instruction::Clear { register }, line);
         }
-
-        Ok(())
     }
 
     /// Evaluate and print each argument in source order.
@@ -34,8 +37,10 @@ impl Compiler<'_> {
         line: usize,
     ) -> Result<(), CompileError> {
         for expression in expressions {
+            let first = self.next;
             let register = self.compile_expression(expression)?;
             self.emit(Instruction::Echo(register), line);
+            self.clear_expression_temporaries(first, line);
         }
 
         Ok(())

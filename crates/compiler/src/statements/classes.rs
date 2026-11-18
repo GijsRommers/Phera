@@ -223,21 +223,7 @@ impl Compiler<'_> {
                     self.lines.line(method.name.span.start),
                 ));
             }
-            if method.name.name.eq_ignore_ascii_case("__invoke")
-                && matches!(
-                    method.modifiers.visibility,
-                    Some(ast::Visibility::Private | ast::Visibility::Protected)
-                )
-            {
-                self.declaration_warnings
-                    .push(phera_bytecode::DeclarationWarning {
-                        message: format!(
-                            "The magic method {name}::{}() must have public visibility",
-                            method.name.name
-                        ),
-                        line: self.lines.line(method.name.span.start) as u32,
-                    });
-            }
+            self.validate_magic_method(display, method)?;
             for parameter in &method.parameters {
                 if parameter.is_promoted() {
                     if !method.name.name.eq_ignore_ascii_case("__construct") {

@@ -14,7 +14,7 @@ use std::rc::Rc;
 
 use phera_extension_api::value::Object;
 use phera_extension_api::{
-    ArrayKey, Context, NativeError, PhpArray, PropertyPurpose, Registry, Value,
+    ArrayKey, Context, NativeError, PhpArray, PropertyPurpose, PropertyView, Registry, Value,
 };
 
 pub(crate) fn register(registry: &mut Registry) {
@@ -48,11 +48,18 @@ pub(crate) struct Place {
     pub depth: usize,
     /// Whether it is a PHP reference that something else still shares.
     pub is_reference: bool,
+    pub leading_written: bool,
 }
 
 /// What differs between the three functions. The walker calls these in
 /// document order.
 pub(crate) trait Style {
+    fn call_site(&self) -> (&'static str, &[Value]) {
+        ("", &[])
+    }
+
+    fn before_debug(&mut self, _out: &mut Vec<u8>, _place: Place, _context: &mut dyn Context) {}
+
     fn property_purpose(&self) -> PropertyPurpose {
         PropertyPurpose::Debug
     }
@@ -99,10 +106,30 @@ struct Frame {
     /// The entries: the array itself, or a copy of an object's properties so
     /// no borrow of the object is held while printing.
     entries: Rc<PhpArray>,
+    source: EntrySource,
     next: Option<usize>,
 }
 
-pub(crate) fn walk(
+#[derive(Clone, Copy)]
+enum EntrySource {
+    Live,
+    PropertySnapshot,
+}
+
+impl Frame {
+    /// Copying an object's property table adds a Rust owner, not a PHP alias.
+    fn duplicate_owner(&self, key: &ArrayKey, value: &Value) -> usize {
+        if let (EntrySource::PropertySnapshot, Container::Object(object), Value::Reference(cell)) =
+            (self.source, &self.container, value)
+            && let Some(Value::Reference(original)) = object.get(key)
+        {
+            return usize::from(Rc::ptr_eq(&original, cell));
+        }
+        0
+    }
+}
+
+pub(crate) async fn walk(
     style: &mut dyn Style,
     out: &mut Vec<u8>,
     value: &Value,
@@ -110,7 +137,7 @@ pub(crate) fn walk(
 ) -> Result<(), NativeError> {
     let mut frames: Vec<Frame> = Vec::new();
     let mut active: HashSet<usize> = HashSet::new();
-    frames.extend(enter(style, out, value, 0, &mut active, context)?);
+    frames.extend(enter(style, out, value, 0, 0, &mut active, context).await?);
 
     loop {
         let depth = frames.len();
@@ -124,7 +151,8 @@ pub(crate) fn walk(
             Some((position, (key, item))) => {
                 frame.next = frame.entries.next_position(position);
                 style.key(out, &key, &frame.container, depth);
-                match enter(style, out, item, depth, &mut active, context)? {
+                let duplicate = frame.duplicate_owner(&key, item);
+                match enter(style, out, item, depth, duplicate, &mut active, context).await? {
                     Some(child) => frames.push(child),
                     None => style.after_entry(out),
                 }
@@ -144,23 +172,26 @@ pub(crate) fn walk(
 
 /// Prints a scalar, or the start of a container. Returns the frame to walk
 /// when the value has entries to print.
-fn enter(
+async fn enter(
     style: &mut dyn Style,
     out: &mut Vec<u8>,
     value: &Value,
     depth: usize,
+    duplicate_owner: usize,
     active: &mut HashSet<usize>,
     context: &mut dyn Context,
 ) -> Result<Option<Frame>, NativeError> {
     // PHP marks a reference only while a second holder exists. A variable
     // that was the last one bound to it prints like a plain value.
-    let is_reference = matches!(value, Value::Reference(cell) if Rc::strong_count(cell) > 1);
-    let place = Place {
+    let is_reference =
+        matches!(value, Value::Reference(cell) if Rc::strong_count(cell) > 1 + duplicate_owner);
+    let mut place = Place {
         depth,
         is_reference,
+        leading_written: false,
     };
-    let (container, entries) = match &*value.deref() {
-        Value::Array(array) => (Container::Array(array.clone()), array.clone()),
+    let container = match &*value.deref() {
+        Value::Array(array) => Container::Array(array.clone()),
         Value::Object(object)
             if object.class.is_enum()
                 && let Some(Value::String(name)) = object.get(&ArrayKey::str("name"))
@@ -168,10 +199,7 @@ fn enter(
         {
             return Ok(None);
         }
-        Value::Object(object) => (
-            Container::Object(object.clone()),
-            Rc::new(context.object_properties(object, style.property_purpose())?),
-        ),
+        Value::Object(object) => Container::Object(object.clone()),
         scalar => {
             style.scalar(out, scalar, place);
             return Ok(None);
@@ -181,11 +209,35 @@ fn enter(
         style.recursion(out, &container, place, context);
         return Ok(None);
     }
+    let (entries, source) = match &container {
+        Container::Array(array) => (array.clone(), EntrySource::Live),
+        Container::Object(object) => {
+            let purpose = style.property_purpose();
+            if context.property_view_runs_code(object, purpose) {
+                style.before_debug(out, place, context);
+                place.leading_written = true;
+            }
+            let (function, arguments) = style.call_site();
+            match context
+                .property_view(object.clone(), purpose, function, arguments)
+                .await?
+            {
+                PropertyView::Snapshot(properties) => (properties, EntrySource::PropertySnapshot),
+                PropertyView::DebugInfo(properties) => (properties, EntrySource::Live),
+                PropertyView::Recursive => {
+                    style.recursion(out, &container, place, context);
+                    active.remove(&container.identity());
+                    return Ok(None);
+                }
+            }
+        }
+    };
     style.open(out, &container, entries.len(), place);
     Ok(Some(Frame {
         container,
         next: entries.first_position(),
         entries,
+        source,
     }))
 }
 
@@ -254,13 +306,20 @@ mod tests {
             value = Value::from(array);
         }
         let mut tally = Tally::default();
-        walk(
-            &mut tally,
-            &mut Vec::new(),
-            &value,
-            &mut TestContext::default(),
-        )
-        .unwrap();
+        {
+            use std::{
+                future::Future,
+                task::{Context as TaskContext, Poll, Waker},
+            };
+            let mut out = Vec::new();
+            let mut context = TestContext::default();
+            let mut walk = std::pin::pin!(walk(&mut tally, &mut out, &value, &mut context));
+            assert!(matches!(
+                walk.as_mut()
+                    .poll(&mut TaskContext::from_waker(Waker::noop())),
+                Poll::Ready(Ok(()))
+            ));
+        }
         assert_eq!(
             (tally.opened, tally.closed, tally.scalars),
             (200_000, 200_000, 1)

@@ -12,7 +12,10 @@ pub mod serve;
 pub use classes::{call_method, instantiate};
 pub use exceptions::materialize_exception;
 
-use std::rc::Rc;
+use std::{
+    rc::Rc,
+    task::{Context as TaskContext, Poll, Waker},
+};
 
 use phera_value::{CollectDiagnostics, Diagnostics, Object, PhpArray, Value};
 
@@ -108,12 +111,13 @@ pub fn call(
     match handler {
         NativeFn::Sync(function) => function(context, &arguments),
         NativeFn::Async(function) => {
-            let mut future = function(context, arguments);
-            let mut task = std::task::Context::from_waker(std::task::Waker::noop());
-            match future.as_mut().poll(&mut task) {
-                std::task::Poll::Ready(result) => result,
-                std::task::Poll::Pending => Err(NativeError::error(format!(
-                    "{name}() is waiting for a runtime"
+            match function(context, arguments)
+                .as_mut()
+                .poll(&mut TaskContext::from_waker(Waker::noop()))
+            {
+                Poll::Ready(result) => result,
+                Poll::Pending => Err(NativeError::error(format!(
+                    "{name}() suspended without a test runtime"
                 ))),
             }
         }

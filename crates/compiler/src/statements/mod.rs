@@ -99,6 +99,7 @@ mod enums;
 mod function_parameters;
 pub(crate) mod functions;
 pub(crate) mod loops;
+mod magic_methods;
 pub(crate) mod switching;
 mod traits;
 

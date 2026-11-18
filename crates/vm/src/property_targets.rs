@@ -1,9 +1,6 @@
 //! Resolve guarded property receivers without constructing PHP property-name strings.
 
-use crate::{
-    AccessPath, Vm,
-    access_mode::{Creation, Missing},
-};
+use crate::{AccessPath, Vm, access_mode::Missing};
 use phera_bytecode::{NameId, PathBase, Step};
 use phera_extension_api::NativeError;
 use phera_value::{Object, Value};
@@ -38,48 +35,73 @@ impl Vm {
         if steps.next().is_some() {
             return Ok(None);
         }
-        if !matches!(place.base()?, PathBase::Register(_) | PathBase::This { .. }) {
-            return Ok(None);
-        }
-        let Some(register) = self.base_register(place, Creation::Existing, Missing::Silent)? else {
-            return Ok(None);
-        };
-        let Value::Object(object) = self.read_root(register, Missing::Silent) else {
-            return Ok(None);
+        self.literal_property_target(place.base()?, name)
+    }
+
+    /// This fast path reads the receiver directly, leaving the compiler's
+    /// temporary register for the general path that actually needs it.
+    fn literal_property_target(
+        &mut self,
+        base: PathBase,
+        name: NameId,
+    ) -> Result<Option<PropertyTarget>, NativeError> {
+        let object = match base {
+            PathBase::Register(register) => match self.read_root(register, Missing::Silent) {
+                Value::Object(object) => object,
+                _ => return Ok(None),
+            },
+            PathBase::This { .. } => self
+                .current()
+                .and_then(|frame| frame.this().cloned())
+                .ok_or_else(|| NativeError::error("Using $this when not in object context"))?,
+            _ => return Ok(None),
         };
         Ok(Some(PropertyTarget { object, name }))
     }
 
-    /// Mirrors read_place for an existing object at one integer array index.
-    /// No key conversion can warn on this path; every other shape/value falls back.
-    pub(crate) fn indexed_property_target(
+    /// Parse either cached read shape in one pass over the access plan.
+    pub(crate) fn read_property_target(
         &mut self,
         place: &AccessPath,
     ) -> Result<Option<PropertyTarget>, NativeError> {
         let mut steps = place.steps()?;
-        let (Some(Step::Index(index)), Some(Step::Property(name)), None) =
-            (steps.next(), steps.next(), steps.next())
-        else {
-            return Ok(None);
+        match (steps.next(), steps.next(), steps.next()) {
+            (Some(Step::Property(name)), None, _) => {
+                self.literal_property_target(place.base()?, name)
+            }
+            (Some(Step::Index(index)), Some(Step::Property(name)), None) => {
+                let PathBase::Register(root) = place.base()? else {
+                    return Ok(None);
+                };
+                Ok(self.indexed_property_target(root, index, name))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    /// Mirrors read_place for an existing object at one integer array index.
+    /// No key conversion can warn on this path; every other shape/value falls back.
+    fn indexed_property_target(
+        &self,
+        root: phera_bytecode::Reg,
+        index: phera_bytecode::Reg,
+        name: NameId,
+    ) -> Option<PropertyTarget> {
+        let index = self.operand(index);
+        let Value::Int(index) = &*index else {
+            return None;
         };
-        let PathBase::Register(root) = place.base()? else {
-            return Ok(None);
+        let root = self.operand(root);
+        let Value::Array(array) = &*root else {
+            return None;
         };
-        let Value::Int(index) = self.get(index) else {
-            return Ok(None);
-        };
-        let Value::Array(array) = self.get(root) else {
-            return Ok(None);
-        };
-        let Some(value) = crate::array_slots::read_integer(&array, index) else {
-            return Ok(None);
-        };
+        let value = crate::array_slots::read_integer(array, *index)?;
         let Value::Object(object) = &*value.deref() else {
-            return Ok(None);
+            return None;
         };
-        Ok(Some(PropertyTarget {
+        Some(PropertyTarget {
             object: object.clone(),
             name,
-        }))
+        })
     }
 }

@@ -177,7 +177,12 @@ impl Vm {
             } else {
                 &mut defaults
             };
-            if let Some(inherited) = target.iter_mut().find(|entry| entry.key == key) {
+            if let Some(inherited) = target.iter_mut().find(|entry| {
+                entry.key == key
+                    || (entry.name == *property_name
+                        && entry.visibility != Visibility::Private
+                        && property.visibility != Visibility::Private)
+            }) {
                 *inherited = linked;
             } else {
                 target.push(linked);

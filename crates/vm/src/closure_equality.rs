@@ -58,5 +58,6 @@ fn implementation(target: &crate::calls::call_state::CallTarget) -> Option<Imple
             | crate::classes::MethodBody::Enum(_) => Some(Implementation::Internal),
         },
         CallTarget::Closure(_) => None,
+        CallTarget::Magic(_) => Some(Implementation::Php),
     }
 }

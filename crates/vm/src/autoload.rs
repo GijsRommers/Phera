@@ -12,13 +12,6 @@ pub(crate) struct Autoloaders {
     pub(crate) callbacks: Vec<Option<RegisteredLoader>>,
     pub(crate) extensions: Option<String>,
     active: HashSet<String>,
-    pub(crate) sites: Vec<AutoloadSite>,
-}
-
-/// A native call that triggered an autoloader stays visible in a thrown trace.
-pub(crate) struct AutoloadSite {
-    pub(crate) boundary: usize,
-    pub(crate) native: NativeTrace,
 }
 
 #[derive(Clone)]
@@ -152,14 +145,15 @@ impl Vm {
         origin: Option<(&str, &[Value])>,
     ) -> Result<(), NativeError> {
         if let Some((function, arguments)) = origin {
-            self.autoload.sites.push(AutoloadSite {
-                boundary: self.call_stack.depth(),
-                native: NativeTrace::new(function, arguments),
-            });
+            self.native_callback_sites
+                .push(crate::error_traces::NativeCallbackSite {
+                    boundary: self.call_stack.depth(),
+                    native: NativeTrace::new(function, arguments),
+                });
         }
         let result = self.call_autoloaders_in_order(name).await;
         if origin.is_some() {
-            self.autoload.sites.pop();
+            self.native_callback_sites.pop();
         }
         result
     }

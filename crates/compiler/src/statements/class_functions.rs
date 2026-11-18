@@ -89,7 +89,20 @@ impl Compiler<'_> {
             },
             by_reference: method.by_reference,
             parameters: method.parameters.clone(),
-            return_type: method.return_type.clone(),
+            return_type: method.return_type.clone().or_else(|| {
+                method
+                    .name
+                    .name
+                    .eq_ignore_ascii_case("__toString")
+                    .then(|| ast::Type {
+                        kind: ast::TypeKind::Named(ast::Name {
+                            kind: ast::NameKind::Unqualified,
+                            text: "string".into(),
+                            span: method.name.span,
+                        }),
+                        span: method.name.span,
+                    })
+            }),
             body: method.body.clone().unwrap_or_default(),
         };
         let index = self.functions.len();

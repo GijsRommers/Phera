@@ -1,6 +1,6 @@
 //! Converting one value for its specifier, and padding it to the width.
 
-use phera_extension_api::value::{float_repr, to_float, to_int, to_php_string};
+use phera_extension_api::value::{float_repr, to_float, to_int};
 use phera_extension_api::{Context, NativeError, Value};
 
 use super::super::{decimal, reserve};
@@ -36,7 +36,7 @@ pub(super) struct Specifier {
 
 impl Specifier {
     /// Characters, percent signs and non-finite floats bypass PHP field padding.
-    pub(super) fn convert(
+    pub(super) async fn convert(
         &self,
         context: &mut dyn Context,
         value: &Value,
@@ -51,9 +51,7 @@ impl Specifier {
         } = *self;
         let text = match conversion {
             b's' => {
-                let mut text = to_php_string(value, context.diagnostics())?
-                    .as_bytes()
-                    .to_vec();
+                let mut text = context.stringify(value).await?.as_bytes().to_vec();
                 if explicit == PrecisionSource::Explicit {
                     text.truncate(precision.unwrap_or(0) as usize);
                 }
