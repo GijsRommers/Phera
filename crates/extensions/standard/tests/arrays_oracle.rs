@@ -1,35 +1,15 @@
 //! Array and natural-order functions compared with the real PHP interpreter.
+
+mod oracle_table;
+
+use oracle_table::OracleTable;
 use phera_ext_standard::Standard;
-use phera_extension_api::testing::{TestContext, call, oracle};
+use phera_extension_api::testing::{TestContext, call};
 use phera_extension_api::{Extension, Registry, Value};
 
 #[test]
 fn arrays_match_php() {
-    let mut registry = Registry::new();
-    Standard.register(&mut registry);
-    let mut script = format!("<?php\n{}", oracle::PHP_PREAMBLE);
-    let mut labels = Vec::new();
-    let mut rust = Vec::new();
-    let mut check = |name: &str, arguments: Vec<Value>| {
-        let expression = format!(
-            "{name}({})",
-            arguments
-                .iter()
-                .map(oracle::php_literal)
-                .collect::<Vec<_>>()
-                .join(",")
-        );
-        script.push_str(&format!("run('{name}', fn() => {expression});\n"));
-        labels.push(expression);
-        let mut context = TestContext::default();
-        let result = call(&registry, &mut context, name, arguments);
-        rust.push(oracle::encode_case(
-            name,
-            &result,
-            &context.output,
-            &context.diagnostics,
-        ));
-    };
+    let mut table = OracleTable::new();
     let mut strings = vec![
         "".to_string(),
         " ".into(),
@@ -45,7 +25,7 @@ fn arrays_match_php() {
     for name in ["strnatcmp", "strnatcasecmp"] {
         for left in &strings {
             for right in &strings {
-                check(
+                table.check(
                     name,
                     vec![Value::from(left.as_str()), Value::from(right.as_str())],
                 );
@@ -118,20 +98,20 @@ fn arrays_match_php() {
         for a in &arrays {
             for b in &arrays {
                 for c in &arrays {
-                    check(name, vec![a.clone(), b.clone(), c.clone()]);
+                    table.check(name, vec![a.clone(), b.clone(), c.clone()]);
                 }
             }
         }
     }
 
     for array in &arrays {
-        check("array_flip", vec![array.clone()]);
-        check("array_fill_keys", vec![array.clone(), Value::Null]);
+        table.check("array_flip", vec![array.clone()]);
+        table.check("array_fill_keys", vec![array.clone(), Value::Null]);
         for other in &arrays {
-            check("array_combine", vec![array.clone(), other.clone()]);
+            table.check("array_combine", vec![array.clone(), other.clone()]);
         }
         for length in [-5, 0, 5] {
-            check(
+            table.check(
                 "array_pad",
                 vec![array.clone(), Value::Int(length), Value::Null],
             );
@@ -139,7 +119,7 @@ fn arrays_match_php() {
     }
     for start in [-5, 0, 5, i64::MAX] {
         for count in [-1, 0, 1, 3, 2147483648] {
-            check(
+            table.check(
                 "array_fill",
                 vec![Value::Int(start), Value::Int(count), Value::Null],
             );
@@ -165,7 +145,7 @@ fn arrays_match_php() {
     for start in &endpoints {
         for end in &endpoints {
             for step in [-2.0, 0.0, 0.5, 1.0, 3.0] {
-                check(
+                table.check(
                     "range",
                     vec![start.clone(), end.clone(), Value::Float(step)],
                 );
@@ -174,20 +154,20 @@ fn arrays_match_php() {
     }
 
     for array in &arrays {
-        check("array_count_values", vec![array.clone()]);
+        table.check("array_count_values", vec![array.clone()]);
         for key in [Value::Null, Value::Int(0), Value::from("x")] {
-            check("array_column", vec![array.clone(), key]);
+            table.check("array_column", vec![array.clone(), key]);
         }
         for length in [-1, 0, 1, 2, 10] {
             for preserve in [false, true] {
-                check(
+                table.check(
                     "array_chunk",
                     vec![array.clone(), Value::Int(length), Value::Bool(preserve)],
                 );
             }
         }
         for flag in [0, 1, 2, 5, 6, 8, 10, 14, 99] {
-            check("array_unique", vec![array.clone(), Value::Int(flag)]);
+            table.check("array_unique", vec![array.clone(), Value::Int(flag)]);
         }
         for other in &arrays {
             for name in [
@@ -212,7 +192,7 @@ fn arrays_match_php() {
                 {
                     continue;
                 }
-                check(name, vec![array.clone(), other.clone()]);
+                table.check(name, vec![array.clone(), other.clone()]);
             }
         }
     }
@@ -240,9 +220,9 @@ fn arrays_match_php() {
         "strnatcmp",
         "strnatcasecmp",
     ] {
-        check(name, vec![]);
-        check(name, vec![Value::Null]);
-        check(name, vec![Value::Bool(false), Value::from("invalid")]);
+        table.check(name, vec![]);
+        table.check(name, vec![Value::Null]);
+        table.check(name, vec![Value::Bool(false), Value::from("invalid")]);
     }
     for index in [
         Value::Null,
@@ -269,13 +249,13 @@ fn arrays_match_php() {
                 .collect::<phera_extension_api::PhpArray>(),
         );
         for column in [Value::from("v"), Value::Null, Value::from("missing")] {
-            check("array_column", vec![rows.clone(), column, Value::from("k")]);
+            table.check("array_column", vec![rows.clone(), column, Value::from("k")]);
         }
     }
     for start in [-1.1, -0.3, -0.1, -0.0, 0.1, 0.2, 0.3, 0.7, 1.1] {
         for end in [-1.1, -0.3, -0.1, -0.0, 0.1, 0.2, 0.3, 0.7, 1.1] {
             for step in [0.1, 0.2, 0.3, 0.7, -0.1] {
-                check(
+                table.check(
                     "range",
                     vec![Value::Float(start), Value::Float(end), Value::Float(step)],
                 );
@@ -298,7 +278,7 @@ fn arrays_match_php() {
                 Value::from("2"),
                 Value::from("invalid"),
             ] {
-                check("range", vec![start.clone(), end.clone(), step]);
+                table.check("range", vec![start.clone(), end.clone(), step]);
             }
         }
     }
@@ -323,7 +303,7 @@ fn arrays_match_php() {
                 };
                 array.insert(phera_extension_api::ArrayKey::Int(index - 4), value);
             }
-            check("array_unique", vec![Value::from(array), Value::Int(flags)]);
+            table.check("array_unique", vec![Value::from(array), Value::Int(flags)]);
         }
     }
     for start in [i64::MIN, i64::MAX] {
@@ -333,7 +313,7 @@ fn arrays_match_php() {
             Value::Float(f64::NAN),
             Value::Float(f64::INFINITY),
         ] {
-            check("range", vec![Value::Int(start), Value::Int(0), step]);
+            table.check("range", vec![Value::Int(start), Value::Int(0), step]);
         }
     }
     for arguments in [
@@ -341,7 +321,7 @@ fn arrays_match_php() {
         vec![Value::Float(0.0), Value::Float(2147483648.0)],
         vec![Value::Int(i64::MIN), Value::Int(i64::MAX)],
     ] {
-        check("range", arguments);
+        table.check("range", arguments);
     }
     for name in [
         "array_push",
@@ -379,37 +359,9 @@ fn arrays_match_php() {
                 vec![vec![]]
             };
             for tail in tails {
-                let expression = format!(
-                    "{name}($v{})",
-                    tail.iter()
-                        .map(|v| format!(",{}", oracle::php_literal(v)))
-                        .collect::<String>()
-                );
-                script.push_str(&format!(
-                    "run('{name}',function() {{$v={};$r={expression};return [$r,$v];}});\n",
-                    oracle::php_literal(array)
-                ));
-                labels.push(format!("{expression} on {}", oracle::php_literal(array)));
-                let cell = std::rc::Rc::new(std::cell::RefCell::new(array.clone()));
-                let mut arguments = vec![Value::Reference(cell.clone())];
+                let mut arguments = vec![array.clone()];
                 arguments.extend(tail);
-                let mut context = TestContext::default();
-                let result = call(&registry, &mut context, name, arguments).map(|value| {
-                    Value::from(
-                        [
-                            (phera_extension_api::ArrayKey::Int(0), value),
-                            (phera_extension_api::ArrayKey::Int(1), cell.borrow().clone()),
-                        ]
-                        .into_iter()
-                        .collect::<phera_extension_api::PhpArray>(),
-                    )
-                });
-                rust.push(oracle::encode_case(
-                    name,
-                    &result,
-                    &context.output,
-                    &context.diagnostics,
-                ));
+                table.check_by_reference(name, arguments, 0);
             }
         }
     }
@@ -452,48 +404,16 @@ fn arrays_match_php() {
                         },
                     );
                 }
-                let value = Value::from(array);
-                let mut arguments = vec![];
-                let tail = if name.starts_with("nat") {
-                    String::new()
-                } else {
+                let mut arguments = vec![Value::from(array)];
+                if !name.starts_with("nat") {
                     arguments.push(Value::Int(flag));
-                    format!(",{flag}")
-                };
-                let expression = format!("{name}($v{tail})");
-                script.push_str(&format!(
-                    "run('{name}',function() {{$v={};$r={expression};return [$r,$v];}});\n",
-                    oracle::php_literal(&value)
-                ));
-                labels.push(format!("{expression} on {}", oracle::php_literal(&value)));
-                let cell = std::rc::Rc::new(std::cell::RefCell::new(value));
-                arguments.insert(0, Value::Reference(cell.clone()));
-                let mut context = TestContext::default();
-                let result = call(&registry, &mut context, name, arguments).map(|value| {
-                    Value::from(
-                        [
-                            (phera_extension_api::ArrayKey::Int(0), value),
-                            (phera_extension_api::ArrayKey::Int(1), cell.borrow().clone()),
-                        ]
-                        .into_iter()
-                        .collect::<phera_extension_api::PhpArray>(),
-                    )
-                });
-                rust.push(oracle::encode_case(
-                    name,
-                    &result,
-                    &context.output,
-                    &context.diagnostics,
-                ));
+                }
+                table.check_by_reference(name, arguments, 0);
             }
         }
     }
-    // Recursion must fail without mutating the referenced input.
+    // Recursion must fail without changing the input.
     for name in ["array_merge_recursive", "array_replace_recursive"] {
-        script.push_str(&format!(
-            "run('{name}',function() {{$a=[];$a['x']=&$a;return {name}($a,$a);}});\n"
-        ));
-        labels.push(format!("{name}($a,$a), $a['x']=&$a"));
         let cell = std::rc::Rc::new(std::cell::RefCell::new(Value::Null));
         let value = Value::from(
             [(
@@ -504,29 +424,13 @@ fn arrays_match_php() {
             .collect::<phera_extension_api::PhpArray>(),
         );
         *cell.borrow_mut() = value.clone();
-        let mut context = TestContext::default();
-        let result = call(&registry, &mut context, name, vec![value.clone(), value]);
-        rust.push(oracle::encode_case(
-            name,
-            &result,
-            &context.output,
-            &context.diagnostics,
-        ));
+        let closure = format!("function() {{ $a = []; $a['x'] = &$a; return {name}($a, $a); }}");
+        let label = format!("{name}($a, $a) with $a['x'] = &$a");
+        table.check_custom(name, &closure, label, vec![value.clone(), value]);
+        // Break the cycle so the test does not leak it.
         *cell.borrow_mut() = Value::Null;
     }
-    let Some(php) = oracle::run_php("standard-arrays", &script) else {
-        panic!("PHP oracle required");
-    };
-    let mut counts = std::collections::BTreeMap::new();
-    for label in &labels {
-        if let Some((name, _)) = label.split_once('(') {
-            *counts.entry(name).or_insert(0_usize) += 1;
-        }
-    }
-    for (name, count) in counts {
-        println!("{name}: {count} cases");
-    }
-    oracle::compare("arrays", &labels, &php, &rust);
+    table.finish("arrays", str::to_owned);
 }
 
 /// The task's explicit depth limit must use a PHP Error rather than a Rust stack overflow.

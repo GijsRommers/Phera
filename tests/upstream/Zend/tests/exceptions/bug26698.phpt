@@ -24,9 +24,9 @@ class Proxy
             $res = new ObjectOne();
             $this->three($res->getNone());
         }
-        catch(Throwable $e)
+        catch(Exception $e)
         {
-            echo $e::class, ': ', $e->getMessage(), "\n";
+            echo 'Caught: '.$e->getMessage()."\n";
         }
     }
 
@@ -37,9 +37,9 @@ class Proxy
             $res = new ObjectOne();
             $this->three(1, $res->getNone());
         }
-        catch(Throwable $e)
+        catch(Exception $e)
         {
-            echo $e::class, ': ', $e->getMessage(), "\n";
+            echo 'Caught: '.$e->getMessage()."\n";
         }
     }
 
@@ -50,9 +50,9 @@ class Proxy
             $res = new ObjectOne();
             $this->three(1, 2, $res->getNone());
         }
-        catch(Throwable $e)
+        catch(Exception $e)
         {
-            echo $e::class, ': ', $e->getMessage(), "\n";
+            echo 'Caught: '.$e->getMessage()."\n";
         }
     }
 }
@@ -64,6 +64,6 @@ $p->callTwo();
 $p->callThree();
 ?>
 --EXPECT--
-Exception: NONE
-Exception: NONE
-Exception: NONE
+Caught: NONE
+Caught: NONE
+Caught: NONE

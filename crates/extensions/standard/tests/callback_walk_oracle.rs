@@ -157,3 +157,39 @@ fn callbacks_can_suspend_without_holding_array_borrows() {
         assert!(pending > 0);
     }
 }
+
+/// `usort` and friends rewind the internal pointer, so `current()` and
+/// `key()` see the first entry after the sort, as after `sort()`.
+#[test]
+fn callback_sorts_rewind_the_internal_pointer() {
+    let mut script = format!("<?php\n{}\n{PHP_CALLBACKS}", oracle::PHP_PREAMBLE);
+    let mut labels = Vec::new();
+    let mut rust = Vec::new();
+    for name in ["usort", "uasort", "uksort"] {
+        let target = Value::Reference(Rc::new(RefCell::new(list([
+            Value::Int(3),
+            Value::Int(1),
+            Value::Int(2),
+        ]))));
+        let mut context = Harness::default();
+        let sorted =
+            ready(context.invoke(name, vec![target.clone(), Value::from("probe_compare")]));
+        assert_eq!(sorted.expect("sort"), Value::Bool(true));
+        let array = target.deref().clone();
+        let current = ready(context.invoke("current", vec![array.clone()])).expect("current");
+        let key = ready(context.invoke("key", vec![array])).expect("key");
+        rust.push(oracle::encode_case(
+            name,
+            &Ok(list([current, key])),
+            &context.base.output,
+            &context.base.diagnostics,
+        ));
+        labels.push(format!("{name} then current() and key()"));
+        script.push_str(&format!(
+            "run('{name}', function() {{$a=[3,1,2];{name}($a,fn($x,$y)=>$x<=>$y);\
+             return [current($a),key($a)];}});\n"
+        ));
+    }
+    let php = oracle::run_php("callback_sort_pointer", &script).expect("PHP required");
+    oracle::compare("callback sort pointer", &labels, &php, &rust);
+}

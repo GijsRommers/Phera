@@ -32,7 +32,15 @@ const IGNORED_SECTIONS: &[&str] = &[
 ];
 
 /// Sections the runner understands.
-const SUPPORTED_SECTIONS: &[&str] = &["FILE", "EXPECT", "EXPECTF", "ARGS", "SKIPIF", "XFAIL"];
+const SUPPORTED_SECTIONS: &[&str] = &[
+    "FILE",
+    "EXPECT",
+    "EXPECTF",
+    "ARGS",
+    "SKIPIF",
+    "EXTENSIONS",
+    "XFAIL",
+];
 
 enum Outcome {
     Pass,
@@ -139,19 +147,15 @@ fn run_test(binary: &[String], path: &Path) -> Outcome {
         .map(|a| a.split_whitespace().collect())
         .unwrap_or_default();
 
-    if let Some(skipif) = phpt.section("SKIPIF") {
-        match run_php(binary, path, "skip.php", skipif, &[]) {
-            Ok(run)
-                if run
-                    .stdout
-                    .trim_start()
-                    .to_ascii_lowercase()
-                    .starts_with("skip") =>
-            {
-                return Outcome::Skip(run.stdout.trim().to_string());
-            }
-            Ok(_) => {}
-            Err(error) => return Outcome::Fail(format!("--SKIPIF-- failed: {error}")),
+    let probes = [
+        phpt.section("EXTENSIONS").map(extension_probe),
+        phpt.section("SKIPIF").map(str::to_owned),
+    ];
+    for probe in probes.into_iter().flatten() {
+        match skip_reason(binary, path, &probe) {
+            Ok(Some(reason)) => return Outcome::Skip(reason),
+            Ok(None) => {}
+            Err(error) => return Outcome::Fail(format!("skip check failed: {error}")),
         }
     }
 
@@ -166,6 +170,29 @@ fn run_test(binary: &[String], path: &Path) -> Outcome {
         }
         outcome => outcome,
     }
+}
+
+/// Runs a script that decides whether the test applies. It says no by
+/// printing a line that starts with "skip", as in php-src's `run-tests.php`.
+fn skip_reason(binary: &[String], test: &Path, code: &str) -> Result<Option<String>, String> {
+    let run = run_php(binary, test, "skip.php", code, &[])?;
+    let output = run.stdout.trim();
+    let skips = output.to_ascii_lowercase().starts_with("skip");
+    Ok(skips.then(|| output.to_owned()))
+}
+
+/// A skip script for `--EXTENSIONS--`, which lists one extension per line:
+/// the test applies only when the binary has every one of them.
+fn extension_probe(section: &str) -> String {
+    let names: Vec<String> = section
+        .split_whitespace()
+        .map(|name| format!("'{}'", name.replace('\'', "")))
+        .collect();
+    format!(
+        "<?php foreach ([{}] as $extension) {{ if (!extension_loaded($extension)) {{ \
+         die(\"skip the $extension extension is not loaded\"); }} }}",
+        names.join(", ")
+    )
 }
 
 fn check_output(phpt: &Phpt, run: &Run) -> Outcome {

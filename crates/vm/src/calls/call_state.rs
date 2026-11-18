@@ -1,4 +1,14 @@
-//! Resolved signatures and pending arguments describe a PHP call before it executes.
+//! The full description of a callee: its name, its parameters and what runs.
+//!
+//! ```php
+//! array_map('strtoupper', $words);   // a native function
+//! $f = $point->move(...);            // a method, kept in a closure
+//! ```
+//!
+//! Calls to PHP code are prepared without it (see `prepared_call`); a
+//! [`Callee`] is made for everything the general path handles: native
+//! functions, intrinsics, methods, callables resolved from values, and the
+//! function a closure object wraps.
 
 use std::rc::Rc;
 
@@ -31,86 +41,11 @@ pub(crate) enum CallTarget {
         method: Rc<crate::classes::Method>,
         context: crate::classes::MethodContext,
     },
-    /// A class without a constructor still consumes sends and returns the allocated handle.
-    Constructed(Rc<phera_value::Object>),
     Closure(Rc<phera_value::Object>),
     /// A declared PHP function.
     User(crate::code_table::FunctionIndex),
     Native(FunctionEntry),
     Intrinsic(crate::intrinsics::Intrinsic),
-}
-
-/// A failed fast type test must wait for Call, after all argument side effects.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TypeChecks {
-    Complete,
-    Deferred,
-}
-
-/// Once a named argument is seen, further unpacked integer keys are illegal.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ArgumentOrder {
-    Positional,
-    Named,
-}
-
-/// One unfinished call pairs its resolved target with its reserved value window.
-pub(crate) struct PendingCall {
-    pub(crate) owner: Option<Rc<phera_value::Object>>,
-    pub(crate) callee: Callee,
-    pub(crate) window: CallWindow,
-}
-
-/// The register layout survives target ownership moving into an executing frame.
-pub(crate) struct CallWindow {
-    pub(crate) base: usize,
-    pub(crate) registers: usize,
-    pub(crate) parameters: usize,
-    pub(crate) supplied: usize,
-    /// Named variadic entries do not contribute to func_num_args.
-    pub(crate) argument_count: usize,
-    pub(crate) checks: TypeChecks,
-    pub(crate) named: Option<phera_value::PhpString>,
-    pub(crate) order: ArgumentOrder,
-    pub(crate) extra_named: Vec<(usize, phera_value::PhpString)>,
-}
-
-impl CallWindow {
-    /// Surplus arguments live beyond locals, so they cannot overwrite the callee's code slots.
-    pub(crate) fn slot(&self, index: usize) -> usize {
-        self.base
-            + if index < self.parameters {
-                index
-            } else {
-                self.registers + index - self.parameters
-            }
-    }
-}
-
-impl PendingCall {
-    /// Positional sends follow the high-water parameter index; names select declaration slots.
-    pub(crate) fn argument_index(&self) -> Result<usize, phera_extension_api::NativeError> {
-        let Some(name) = &self.window.named else {
-            return Ok(self.window.supplied);
-        };
-        if let Some(index) = self.callee.parameters.iter().position(|parameter| {
-            parameter.name.as_bytes() == name.as_bytes() && !parameter.variadic
-        }) {
-            return Ok(index);
-        }
-        if let Some(index) = self
-            .callee
-            .parameters
-            .iter()
-            .position(|parameter| parameter.variadic)
-        {
-            return Ok(self.window.supplied.max(index));
-        }
-        Err(phera_extension_api::NativeError::error(format!(
-            "Unknown named parameter ${}",
-            name.to_string_lossy()
-        )))
-    }
 }
 
 impl ParameterSpec {

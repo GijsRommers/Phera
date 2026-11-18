@@ -120,6 +120,6 @@ fn implementation(target: &crate::calls::call_state::CallTarget) -> Option<Imple
                 Some(Implementation::Internal)
             }
         },
-        CallTarget::Constructed(_) | CallTarget::Closure(_) => None,
+        CallTarget::Closure(_) => None,
     }
 }

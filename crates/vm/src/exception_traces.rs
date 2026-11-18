@@ -68,20 +68,13 @@ impl Vm {
             };
             entry.insert(ArrayKey::str("function"), Value::from(name));
             let class = if closure {
-                callee.method().map(|context| context.scope.name.as_str())
+                callee.scope().map(|scope| scope.name.as_str())
             } else {
                 function.split_once("::").map(|(class, _)| class)
             };
             if let Some(class) = class {
                 entry.insert(ArrayKey::str("class"), Value::from(class));
-                let kind = if callee
-                    .method()
-                    .is_some_and(|context| context.receiver.is_some())
-                {
-                    "->"
-                } else {
-                    "::"
-                };
+                let kind = if callee.this().is_some() { "->" } else { "::" };
                 entry.insert(ArrayKey::str("type"), Value::from(kind));
             }
             entry.insert(ArrayKey::str("args"), trace_arguments(self, callee));
