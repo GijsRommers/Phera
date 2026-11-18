@@ -18,6 +18,7 @@ pub fn register(registry: &mut Registry) {
     for (class, methods) in [(MUTABLE, MUTABLE_METHODS), (IMMUTABLE, IMMUTABLE_METHODS)] {
         registry.class(ClassEntry {
             interfaces: &[INTERFACE],
+            hooks: Some(&super::object_hooks::DATETIME),
             methods,
             ..ClassEntry::class(class)
         });
@@ -52,7 +53,8 @@ pub(super) const MODIFIER: Param = Param::new("modifier", ParamType::String);
 pub(super) const TIMESTAMP: Param = Param::new("timestamp", ParamType::Int);
 pub(super) const HOUR: Param = Param::new("hour", ParamType::Int);
 pub(super) const MINUTE: Param = Param::new("minute", ParamType::Int);
-pub(super) const SECOND: Param = Param::new("second", ParamType::Int).optional();
+pub(super) const SECOND: Param =
+    Param::new("second", ParamType::Int).with_default(ConstantValue::Int(0));
 const MICROS_REQUIRED: Param = Param::new("microsecond", ParamType::Int);
 pub(super) const MICROS: Param = MICROS_REQUIRED.optional();
 pub(super) const YEAR: Param = Param::new("year", ParamType::Int);
@@ -61,7 +63,7 @@ pub(super) const DAY: Param = Param::new("day", ParamType::Int);
 pub(super) const WEEK: Param = Param::new("week", ParamType::Int);
 pub(super) const WEEKDAY: Param = Param::new("dayOfWeek", ParamType::Int).optional();
 pub(super) const CONSTRUCT: &[Param] = &[
-    Param::new("datetime", ParamType::String).optional(),
+    Param::new("datetime", ParamType::String).with_default(ConstantValue::String("now")),
     ZONE.nullable().optional(),
 ];
 pub(super) const FROM_FORMAT: &[Param] = &[
@@ -160,27 +162,30 @@ const IMMUTABLE_METHODS: &[MethodEntry] = &date_methods([
 ]);
 
 fn mutable_format(context: &mut dyn Context, _: This<'_>, arguments: &[Value]) -> NativeResult {
+    let class = context.called_class().unwrap_or(MUTABLE).to_owned();
     factory::create(
         context,
         arguments,
-        MUTABLE,
+        &class,
         "DateTime::createFromFormat",
         true,
     )
 }
 
 fn immutable_format(context: &mut dyn Context, _: This<'_>, arguments: &[Value]) -> NativeResult {
+    let class = context.called_class().unwrap_or(IMMUTABLE).to_owned();
     factory::create(
         context,
         arguments,
-        IMMUTABLE,
+        &class,
         "DateTimeImmutable::createFromFormat",
         true,
     )
 }
 
 fn mutable_timestamp(context: &mut dyn Context, _: This<'_>, arguments: &[Value]) -> NativeResult {
-    factory::from_timestamp(context, arguments, MUTABLE)
+    let class = context.called_class().unwrap_or(MUTABLE).to_owned();
+    factory::from_timestamp(context, arguments, &class, MUTABLE)
 }
 
 fn immutable_timestamp(
@@ -188,13 +193,16 @@ fn immutable_timestamp(
     _: This<'_>,
     arguments: &[Value],
 ) -> NativeResult {
-    factory::from_timestamp(context, arguments, IMMUTABLE)
+    let class = context.called_class().unwrap_or(IMMUTABLE).to_owned();
+    factory::from_timestamp(context, arguments, &class, IMMUTABLE)
 }
 
 fn mutable_object(context: &mut dyn Context, _: This<'_>, arguments: &[Value]) -> NativeResult {
-    factory::from_object(context, arguments, MUTABLE)
+    let class = context.called_class().unwrap_or(MUTABLE).to_owned();
+    factory::from_object(context, arguments, &class)
 }
 
 fn immutable_object(context: &mut dyn Context, _: This<'_>, arguments: &[Value]) -> NativeResult {
-    factory::from_object(context, arguments, IMMUTABLE)
+    let class = context.called_class().unwrap_or(IMMUTABLE).to_owned();
+    factory::from_object(context, arguments, &class)
 }

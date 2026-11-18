@@ -69,7 +69,13 @@ impl Vm {
             end,
             continuation,
         });
-        self.jump(target)
+        // Finding the matching return above already proved the entry target is in this frame.
+        let current = self
+            .call_stack
+            .current_mut()
+            .ok_or_else(|| internal_error!("finally frame"))?;
+        current.set_ip(target.index());
+        Ok(())
     }
 
     /// Remove the continuation before rethrowing so it cannot chain to itself.

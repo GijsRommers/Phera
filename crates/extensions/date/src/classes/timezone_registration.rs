@@ -24,6 +24,7 @@ pub fn register(registry: &mut Registry) {
             ("PER_COUNTRY", ConstantValue::Int(catalog::PER_COUNTRY)),
         ],
         methods: METHODS,
+        hooks: Some(&super::object_hooks::ZONE),
         ..ClassEntry::class("DateTimeZone")
     });
     for entry in [
@@ -47,17 +48,18 @@ pub fn register(registry: &mut Registry) {
 const ZONE_INPUT: &[Param] = &[Param::new("timezone", ParamType::String)];
 const ZONE_OBJECT: Param = Param::new("object", ParamType::Class("DateTimeZone"));
 const DATE_OBJECT: Param = Param::new("datetime", ParamType::Class("DateTimeInterface"));
-const BEGIN: Param = Param::new("timestampBegin", ParamType::Int).optional();
+const BEGIN: Param =
+    Param::new("timestampBegin", ParamType::Int).with_default(ConstantValue::Int(i64::MIN));
 const END: Param = Param::new("timestampEnd", ParamType::Int).optional();
 const IDENTIFIERS: &[Param] = &[
-    Param::new("timezoneGroup", ParamType::Int).optional(),
+    Param::new("timezoneGroup", ParamType::Int).with_default(ConstantValue::Int(catalog::ALL)),
     Param::new("countryCode", ParamType::String)
         .nullable()
         .optional(),
 ];
 const REVERSE: &[Param] = &[
     Param::new("abbr", ParamType::String),
-    Param::new("utcOffset", ParamType::Int).optional(),
+    Param::new("utcOffset", ParamType::Int).with_default(ConstantValue::Int(-1)),
     Param::new("isDST", ParamType::Int).optional(),
 ];
 const METHODS: &[MethodEntry] = &[

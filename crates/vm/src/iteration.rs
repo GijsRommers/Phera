@@ -13,10 +13,18 @@ impl Vm {
         iterator: IterId,
         source: Reg,
         place: Option<AccessPath>,
-    ) -> Result<(), NativeError> {
+    ) -> Result<bool, NativeError> {
         let element = self.get(source);
+        if let Value::Object(object) = &element
+            && object.class.is_traversable()
+        {
+            return Ok(false);
+        }
         let object_snapshot = if let Value::Object(object) = &element {
-            Some(std::rc::Rc::new(self.visible_properties(object)))
+            Some(std::rc::Rc::new(self.visible_properties(
+                object,
+                phera_extension_api::PropertyPurpose::Foreach,
+            )?))
         } else {
             None
         };
@@ -44,13 +52,14 @@ impl Vm {
                 } else {
                     None
                 },
+                traversal: None,
                 source: if object_iteration { None } else { place },
                 position: None,
                 started: false,
             },
         );
 
-        Ok(())
+        Ok(true)
     }
 
     /// By-reference foreach follows a live place instead of an array snapshot.
@@ -74,6 +83,7 @@ impl Vm {
             iterator.0,
             frame::IteratorState {
                 snapshot: None,
+                traversal: None,
                 source: Some(place),
                 position: None,
                 started: false,
@@ -98,17 +108,21 @@ impl Vm {
         key: Option<Reg>,
         value: Reg,
         end: Target,
-    ) -> Result<(), NativeError> {
+    ) -> Result<bool, NativeError> {
         let mut state = self
             .call_stack
             .current_extras_mut()
             .iterators
             .remove(&iterator.0)
             .ok_or_else(|| internal_error!("missing iterator"))?;
+        if state.snapshot.is_none() && state.traversal.is_some() {
+            self.keep_iterator(iterator, state);
+            return Ok(false);
+        }
         if state.source.is_none() {
             self.next_snapshot(&mut state, key, value, end)?;
             self.keep_iterator(iterator, state);
-            return Ok(());
+            return Ok(true);
         }
         let array = if let Some(position) = &state.source {
             match self.read_place(position, crate::access_mode::Missing::Silent)? {
@@ -116,7 +130,7 @@ impl Vm {
                 Value::Object(object) => {
                     self.next_object_reference(&mut state, &object, key, value, end)?;
                     self.keep_iterator(iterator, state);
-                    return Ok(());
+                    return Ok(true);
                 }
                 _ => None,
             }
@@ -146,7 +160,7 @@ impl Vm {
             self.jump(end)?;
         }
         self.keep_iterator(iterator, state);
-        Ok(())
+        Ok(true)
     }
 }
 

@@ -145,30 +145,44 @@ impl Vm {
                 return Err(internal_error!("path key"));
             };
             let key = key.ok_or_else(|| NativeError::error("Cannot use [] for reading"))?;
-            value = match value {
-                Value::Array(array) => {
-                    if let Some(value) = array.get(&key) {
-                        value.deref().clone()
-                    } else {
-                        if missing == Missing::Warn {
-                            self.warn(format!("Undefined array key {}", display_key(&key)))
-                        }
-                        Value::Null
-                    }
-                }
-                Value::String(string) => self.read_string_offset(&string, key, missing)?,
-                other => {
+            value = self.read_index(value, key, missing)?;
+        }
+        Ok(value)
+    }
+    pub(crate) fn read_index(
+        &mut self,
+        value: Value,
+        key: ArrayKey,
+        missing: Missing,
+    ) -> NativeResult {
+        Ok(match value {
+            Value::Array(array) => {
+                if let Some(value) = array.get(&key) {
+                    value.deref().clone()
+                } else {
                     if missing == Missing::Warn {
-                        self.warn(format!(
-                            "Trying to access array offset on {}",
-                            other.type_name()
-                        ))
+                        self.warn(format!("Undefined array key {}", display_key(&key)))
                     }
                     Value::Null
                 }
-            };
-        }
-        Ok(value)
+            }
+            Value::String(string) => self.read_string_offset(&string, key, missing)?,
+            Value::Object(object) => {
+                return Err(NativeError::error(format!(
+                    "Cannot use object of type {} as array",
+                    object.class.name()
+                )));
+            }
+            other => {
+                if missing == Missing::Warn {
+                    self.warn(format!(
+                        "Trying to access array offset on {}",
+                        other.type_name()
+                    ))
+                }
+                Value::Null
+            }
+        })
     }
 }
 

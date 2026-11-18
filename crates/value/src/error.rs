@@ -11,6 +11,7 @@ pub enum ErrorKind {
     ValueError,
     ArithmeticError,
     DivisionByZeroError,
+    Native(&'static str),
 }
 
 impl ErrorKind {
@@ -22,6 +23,7 @@ impl ErrorKind {
             ErrorKind::ValueError => "ValueError",
             ErrorKind::ArithmeticError => "ArithmeticError",
             ErrorKind::DivisionByZeroError => "DivisionByZeroError",
+            ErrorKind::Native(class) => class,
         }
     }
 }

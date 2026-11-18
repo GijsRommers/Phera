@@ -39,18 +39,12 @@ Static identifier references also work for non-UTF-8 names. Byte-exact
 dynamic references, name introspection and diagnostics containing arbitrary
 identifier bytes require byte strings in the VM’s name and exception tables.
 
-## Engine-dependent behavior
+## PhpToken engine integration
 
-- **Called class in a native static call.** `ChildToken::tokenize()` must
-  construct `ChildToken` objects, populate its default properties, and
-  validate abstract classes. php-src’s `PhpToken_extension.phpt` and
-  `PhpToken_extension_errors.phpt` exercise this.
-- **Typed uninitialized native properties.** Native property declarations
-  need a PHP type and an initially uninitialized state. A regression should
-  assert that `$token = new PhpToken(T_STRING, 'a'); $token->id = [];` raises a
-  `TypeError`, and that `unset($token->text); $token->text` raises the typed
-  property initialization error. PHP object writes and direct reads own both
-  checks.
+`ChildToken::tokenize()` uses the called class, keeps subclass property
+defaults and rejects abstract classes. The VM enforces `PhpToken`'s declared
+property types and reports an uninitialized property after `unset`.
+
 - **Implicit object string conversion.** The VM must dispatch `__toString()`
   for casts and string-consuming operations such as `implode()`. Use
   php-src’s `PhpToken_toString.phpt` for this behavior.

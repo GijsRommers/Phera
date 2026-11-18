@@ -5,7 +5,7 @@ use std::{collections::HashMap, rc::Rc};
 use phera_bytecode::{ClassKind, Visibility};
 use phera_extension_api::NativeError;
 
-use super::{Class, Method};
+use super::{Method, MethodBody};
 
 /// Private methods occupy independent scopes; public/protected overrides must preserve contracts.
 pub(crate) fn check_override(
@@ -63,7 +63,7 @@ pub(crate) fn check_abstract(
     kind: ClassKind,
     is_abstract: bool,
     methods: &HashMap<String, Rc<Method>>,
-    interfaces: &[Rc<Class>],
+    registry: &phera_extension_api::Registry,
 ) -> Result<(), NativeError> {
     if is_abstract || kind == ClassKind::Interface {
         return Ok(());
@@ -71,24 +71,40 @@ pub(crate) fn check_abstract(
     let mut missing: Vec<_> = methods
         .values()
         .filter(|method| method.is_abstract)
-        .map(|method| format!("{}::{}", method.declaring, method.name))
         .collect();
-    for interface in interfaces {
-        for (name, method) in &interface.methods {
-            if methods.get(name).is_none_or(|method| method.is_abstract) {
-                missing.push(format!("{}::{}", method.declaring, method.name));
-            }
-        }
-    }
-    missing.sort();
-    missing.dedup();
+    missing.sort_by_key(|method| {
+        let name = method.declaring.as_str();
+        let native_order = registry.get_class(name).and_then(|class| {
+            class
+                .methods
+                .iter()
+                .position(|other| other.name == method.name)
+        });
+        let source_order = match &method.body {
+            MethodBody::User(function) => function.index(),
+            _ => usize::MAX,
+        };
+        (
+            name,
+            native_order.unwrap_or(source_order),
+            method.name.as_str(),
+        )
+    });
     if missing.is_empty() {
         return Ok(());
     }
     let count = missing.len();
     let plural = if count == 1 { "" } else { "s" };
+    let mut remaining: Vec<_> = missing
+        .into_iter()
+        .take(3)
+        .map(|method| format!("{}::{}", method.declaring, method.name))
+        .collect();
+    if count > 3 {
+        remaining.push("...".into());
+    }
     Err(NativeError::error(format!(
         "Class {class} contains {count} abstract method{plural} and must therefore be declared abstract or implement the remaining methods ({})",
-        missing.join(", ")
+        remaining.join(", ")
     )))
 }

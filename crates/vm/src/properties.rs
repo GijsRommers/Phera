@@ -126,16 +126,19 @@ impl Vm {
         if let Some(value) = crate::property_storage::read(&object, &key) {
             return Ok(value.deref().clone());
         }
-        let declared = self.classes.get(object.class.name()).is_some_and(|class| {
-            class
+        if missing == Missing::Warn
+            && let Some(class) = object
+                .class
+                .as_any()
+                .downcast_ref::<crate::classes::Class>()
+            && let Some(property) = class
                 .defaults
                 .iter()
-                .any(|property| property.key == key && property.ty.is_some())
-        });
-        if declared && missing == Missing::Warn {
+                .find(|property| property.key == key && property.ty.is_some())
+        {
             return Err(NativeError::error(format!(
                 "Typed property {}::${name} must not be accessed before initialization",
-                object.class.name()
+                property.declaring
             )));
         }
         if missing == Missing::Warn {
@@ -151,11 +154,19 @@ impl Vm {
     pub(crate) fn property_keys(
         &mut self,
         place: &crate::AccessPath,
+        current: Value,
+    ) -> Result<crate::inline_stack::InlineStack<crate::path_update::PathKey>, NativeError> {
+        self.property_keys_for(place.steps()?, current)
+    }
+
+    pub(crate) fn property_keys_for(
+        &mut self,
+        steps: impl Iterator<Item = phera_bytecode::Step>,
         mut current: Value,
     ) -> Result<crate::inline_stack::InlineStack<crate::path_update::PathKey>, NativeError> {
         use crate::path_update::PathKey;
         let mut keys = crate::inline_stack::InlineStack::new();
-        for step in place.steps()? {
+        for step in steps {
             let key = match step {
                 phera_bytecode::Step::Index(register) => {
                     let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);

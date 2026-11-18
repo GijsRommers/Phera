@@ -23,6 +23,24 @@ pub(crate) fn link_failure(unit: &CompiledUnit, index: ClassId, error: NativeErr
     }
 }
 
+/// A signature or visibility error names the method's declaration line.
+pub(super) fn method_failure(
+    code: &crate::code_table::CodeTable,
+    method: &super::Method,
+    error: NativeError,
+) -> NativeError {
+    match (&method.body, error) {
+        (super::MethodBody::User(reference), NativeError::Throw { message, .. }) => {
+            NativeError::Unwind(Unwind(Box::new(crate::error_traces::DeclarationFailure {
+                message,
+                file: code.unit(*reference).file.clone(),
+                line: code.function(*reference).definition_line as usize,
+            })))
+        }
+        (_, error) => error,
+    }
+}
+
 /// An explicit class constant resolves interface ambiguity before its initializer runs.
 pub(crate) fn merge_interface_constants(
     declaration: &ClassDeclaration,
