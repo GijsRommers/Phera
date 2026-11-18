@@ -46,6 +46,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
+      redis:
+        image: redis:8.4.0
+        ports: ['16399:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
       postgres:
         image: postgres:17
         env:
@@ -78,13 +84,18 @@ jobs:
       - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
         with:
           php-version: '8.5'
-          extensions: json, pcre, ctype, pdo, pdo_pgsql, mysqlnd, pdo_mysql, mbstring, tokenizer
+          extensions: json, pcre, ctype, pdo, pdo_pgsql, mysqlnd, pdo_mysql, mbstring, tokenizer, redis-phpredis/phpredis@6.3.0
           coverage: none
+        env:
+          REDIS_PATH: .
+          REDIS_CONFIGURE_OPTS: >-
+            --enable-redis --disable-redis-igbinary --disable-redis-msgpack
+            --disable-redis-lzf --disable-redis-zstd --disable-redis-lz4
       - name: Export PHP oracle
         run: |
           echo "PHERA_PHP_REAL=$(command -v php)" >> "$GITHUB_ENV"
           echo "PHERA_PHP=$GITHUB_WORKSPACE/.github/scripts/php-oracle.sh" >> "$GITHUB_ENV"
-          echo "PHERA_PHP_SHARED_EXTENSIONS=$(php -n -r 'foreach (["json", "pcre", "ctype", "pdo", "pdo_pgsql", "mysqlnd", "pdo_mysql", "mbstring", "tokenizer"] as $e) { if (!extension_loaded($e)) echo "$e "; }')" >> "$GITHUB_ENV"
+          echo "PHERA_PHP_SHARED_EXTENSIONS=$(php -n -r 'foreach (["json", "pcre", "ctype", "pdo", "pdo_pgsql", "mysqlnd", "pdo_mysql", "mbstring", "tokenizer", "redis"] as $e) { if (!extension_loaded($e)) echo "$e "; }')" >> "$GITHUB_ENV"
       # Fail on missing prerequisites instead of silently skipping the PDO suites.
       - name: Verify PHP version, extensions and database connections
         run: make ci-prerequisites
@@ -93,12 +104,20 @@ jobs:
 
   pdo-end-to-end:
     name: PDO end to end
+    # The name is a required check in the branch protection, so it stays as it
+    # is although the job now runs the Redis comparisons too.
     # Runs the 110 PHP comparison scripts through the release binary against
     # both databases. All of them match real PHP since native class constants
     # and exception codes landed, so this job is part of the gate.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
+      redis:
+        image: redis:8.4.0
+        ports: ['16399:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
       postgres:
         image: postgres:17
         env:
@@ -131,20 +150,25 @@ jobs:
       - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
         with:
           php-version: '8.5'
-          extensions: json, pcre, ctype, pdo, pdo_pgsql, mysqlnd, pdo_mysql, mbstring, tokenizer
+          extensions: json, pcre, ctype, pdo, pdo_pgsql, mysqlnd, pdo_mysql, mbstring, tokenizer, redis-phpredis/phpredis@6.3.0
           coverage: none
+        env:
+          REDIS_PATH: .
+          REDIS_CONFIGURE_OPTS: >-
+            --enable-redis --disable-redis-igbinary --disable-redis-msgpack
+            --disable-redis-lzf --disable-redis-zstd --disable-redis-lz4
       - name: Export PHP oracle
         run: |
           echo "PHERA_PHP_REAL=$(command -v php)" >> "$GITHUB_ENV"
           echo "PHERA_PHP=$GITHUB_WORKSPACE/.github/scripts/php-oracle.sh" >> "$GITHUB_ENV"
-          echo "PHERA_PHP_SHARED_EXTENSIONS=$(php -n -r 'foreach (["json", "pcre", "ctype", "pdo", "pdo_pgsql", "mysqlnd", "pdo_mysql", "mbstring", "tokenizer"] as $e) { if (!extension_loaded($e)) echo "$e "; }')" >> "$GITHUB_ENV"
+          echo "PHERA_PHP_SHARED_EXTENSIONS=$(php -n -r 'foreach (["json", "pcre", "ctype", "pdo", "pdo_pgsql", "mysqlnd", "pdo_mysql", "mbstring", "tokenizer", "redis"] as $e) { if (!extension_loaded($e)) echo "$e "; }')" >> "$GITHUB_ENV"
       # Fail on missing prerequisites instead of silently skipping the PDO suites.
       - name: Verify PHP version, extensions and database connections
         run: make ci-prerequisites
-      - name: Build end-to-end PDO binary
+      - name: Build end-to-end binary
         run: make ci-build
-      - name: Run the PDO tests through the release binary
-        run: cargo test -p phera-ext-pdo --no-fail-fast
+      - name: Run PDO and Redis tests through the release binary
+        run: cargo test -p phera-ext-pdo -p phera-ext-redis --no-fail-fast
         env:
           PHERA_BIN: ${{ github.workspace }}/target/release/phera
 

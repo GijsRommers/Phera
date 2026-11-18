@@ -8,6 +8,9 @@ use phera_extension_api::{
 };
 
 use crate::attributes::{Attributes, ColumnCase};
+use crate::constants::{
+    FETCH_ASSOC, FETCH_BOTH, FETCH_COLUMN, FETCH_DEFAULT, FETCH_KEY_PAIR, FETCH_NUM, FETCH_OBJ,
+};
 use crate::drivers::Column;
 use crate::errors::unsupported;
 use crate::statement::state;
@@ -25,24 +28,24 @@ pub enum FetchMode {
 impl FetchMode {
     pub fn parse(number: i64, default: Self) -> Result<Self, NativeError> {
         match number {
-            0 => Ok(default),
-            2 => Ok(Self::Assoc),
-            3 => Ok(Self::Num),
-            4 => Ok(Self::Both),
-            5 => Ok(Self::Object),
-            7 => Ok(Self::Column),
-            12 => Ok(Self::KeyPair),
+            FETCH_DEFAULT => Ok(default),
+            FETCH_ASSOC => Ok(Self::Assoc),
+            FETCH_NUM => Ok(Self::Num),
+            FETCH_BOTH => Ok(Self::Both),
+            FETCH_OBJ => Ok(Self::Object),
+            FETCH_COLUMN => Ok(Self::Column),
+            FETCH_KEY_PAIR => Ok(Self::KeyPair),
             _ => Err(unsupported("This PDO fetch mode")),
         }
     }
     pub fn number(self) -> i64 {
         match self {
-            Self::Assoc => 2,
-            Self::Num => 3,
-            Self::Both => 4,
-            Self::Object => 5,
-            Self::Column => 7,
-            Self::KeyPair => 12,
+            Self::Assoc => FETCH_ASSOC,
+            Self::Num => FETCH_NUM,
+            Self::Both => FETCH_BOTH,
+            Self::Object => FETCH_OBJ,
+            Self::Column => FETCH_COLUMN,
+            Self::KeyPair => FETCH_KEY_PAIR,
         }
     }
 }
@@ -190,5 +193,5 @@ pub fn object(
     {
         return Err(unsupported("Fetching into a custom class"));
     }
-    fetch(context, this, &[Value::Int(5)])
+    fetch(context, this, &[Value::Int(FETCH_OBJ)])
 }
