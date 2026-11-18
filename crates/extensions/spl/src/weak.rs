@@ -6,6 +6,9 @@
 //! var_dump($reference->get()); // null
 //! ```
 
+mod cursor;
+mod references;
+
 use std::{
     collections::HashMap,
     rc::{Rc, Weak},
@@ -14,8 +17,8 @@ use std::{
 use indexmap::IndexMap;
 use phera_extension_api::{
     ArrayKey, ClassEntry, ClassHooks, ClassKind, Context, MethodEntry as Method, NativeClone,
-    NativeDimensions, NativeError, NativeIterator, NativeResult, Object, Param, ParamType,
-    PhpArray, PropertyPurpose, Registry, Value, args,
+    NativeDimensions, NativeError, NativeResult, Object, Param, ParamType, PhpArray,
+    PropertyPurpose, Registry, Value, args,
 };
 
 use crate::{This, make, read_state, receiver, store, update_state};
@@ -95,13 +98,15 @@ fn get(_: &mut dyn Context, map: &Object, offset: Value) -> NativeResult {
             .filter(|(weak, _)| weak.as_ptr() == Rc::as_ptr(&key))
             .map(|(_, value)| value.deref().clone())
     })?;
-    result.ok_or_else(|| {
-        NativeError::error(format!(
-            "Object {}#{} not contained in WeakMap",
-            key.class.name(),
-            key.id,
-        ))
-    })
+    result.ok_or_else(|| missing_key(&key))
+}
+
+fn missing_key(key: &Object) -> NativeError {
+    NativeError::error(format!(
+        "Object {}#{} not contained in WeakMap",
+        key.class.name(),
+        key.id,
+    ))
 }
 
 fn exists(_: &mut dyn Context, map: &Object, offset: Value) -> Result<bool, NativeError> {
@@ -180,60 +185,6 @@ fn count(context: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult
     native_count(context, receiver(this)?).map(Value::Int)
 }
 
-fn cursor(_: &mut dyn Context, map: Rc<Object>) -> Result<Box<dyn NativeIterator>, NativeError> {
-    Ok(Box::new(Cursor { map, index: 0 }))
-}
-
-fn get_iterator(context: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
-    let iterator = cursor(context, receiver(this)?.clone())?;
-    context.create_iterator(iterator)
-}
-
-struct Cursor {
-    map: Rc<Object>,
-    index: usize,
-}
-
-impl Cursor {
-    fn entry(&self) -> Result<Option<(Rc<Object>, Value)>, NativeError> {
-        read_state(&self.map, |state: &Map| {
-            state
-                .0
-                .get_index(self.index)
-                .and_then(|(_, (key, value))| Some((key.upgrade()?, value.clone())))
-        })
-    }
-}
-
-impl NativeIterator for Cursor {
-    fn rewind(&mut self, _: &mut dyn Context) -> Result<(), NativeError> {
-        self.index = 0;
-        Ok(())
-    }
-    fn advance(&mut self, _: &mut dyn Context) -> Result<(), NativeError> {
-        self.index = self.index.saturating_add(1);
-        Ok(())
-    }
-    fn valid(&mut self, _: &mut dyn Context) -> Result<bool, NativeError> {
-        let len = read_state(&self.map, |state: &Map| state.0.len())?;
-        while self.index < len {
-            if self.entry()?.is_some() {
-                return Ok(true);
-            }
-            self.index += 1;
-        }
-        Ok(false)
-    }
-    fn current(&mut self, _: &mut dyn Context) -> NativeResult {
-        Ok(self.entry()?.map_or(Value::Null, |(_, value)| value))
-    }
-    fn key(&mut self, _: &mut dyn Context) -> NativeResult {
-        Ok(self
-            .entry()?
-            .map_or(Value::Null, |(object, _)| Value::Object(object)))
-    }
-}
-
 fn clone_map(original: &Rc<Object>, copy: &Object) -> Result<(), NativeError> {
     store(copy, read_state(original, Map::clone)?)
 }
@@ -280,11 +231,12 @@ const TARGET: Param = Param::new("object", ParamType::Object);
 const MAP_HOOKS: ClassHooks = ClassHooks {
     clone: Some(NativeClone::Copy(clone_map)),
     properties: Some(view),
-    iterator: Some(cursor),
+    iterator: Some(cursor::by_value),
+    iterator_by_reference: Some(cursor::by_reference),
     dimensions: Some(NativeDimensions {
         direct: None,
-        reference: None,
-        bind: None,
+        reference: Some(references::reference),
+        bind: Some(references::bind),
         fallback_if_overridden: &[],
         get,
         exists,
@@ -327,7 +279,7 @@ pub(crate) fn register(registry: &mut Registry) {
                 Method::public("offsetSet", &[KEY, VALUE], offset_set).returning("void"),
                 Method::public("offsetUnset", &[KEY], offset_unset).returning("void"),
                 Method::public("count", &[], count).returning("int"),
-                Method::public("getIterator", &[], get_iterator).returning("Iterator"),
+                Method::public("getIterator", &[], cursor::get_iterator).returning("Iterator"),
             ]
         },
         ..ClassEntry::class("WeakMap")
