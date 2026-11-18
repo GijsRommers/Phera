@@ -57,16 +57,12 @@ impl Vm {
             file: unit.file.clone(),
             line,
         };
-        if let Some(name) = self.unresolved_contract_type(
-            property_type(property),
-            Some(&parameter_type.display),
-            unit,
-        ) {
-            return Err(crate::autoload::ClassMiss::signature(name, failure));
-        }
-        Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
-            failure,
-        ))))
+        let missing = self
+            .unresolved_contract_types(property_type(property), Some(&parameter_type.display), unit)
+            .map(str::to_owned);
+        Err(crate::autoload::ClassMiss::property_signature(
+            missing, failure,
+        ))
     }
 
     pub(super) fn inherit_property_hooks(

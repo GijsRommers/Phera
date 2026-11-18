@@ -283,12 +283,21 @@ impl Vm {
     }
 
     /// Linking a method signature can require class identities even though passing arguments does not.
-    pub(super) fn unresolved_contract_type<'a>(
+    fn unresolved_contract_type<'a>(
         &self,
         source: Option<&'a str>,
         target: Option<&'a str>,
         unit: &phera_bytecode::CompiledUnit,
     ) -> Option<&'a str> {
+        self.unresolved_contract_types(source, target, unit).next()
+    }
+
+    pub(super) fn unresolved_contract_types<'a, 'vm>(
+        &'vm self,
+        source: Option<&'a str>,
+        target: Option<&'a str>,
+        unit: &'vm phera_bytecode::CompiledUnit,
+    ) -> impl Iterator<Item = &'a str> + use<'a, 'vm> {
         let members = |ty: &'a str| ty.split(['?', '|', '&', '(', ')']);
         let may_have_ancestry = |ty: Option<&str>| {
             ty.is_some_and(|ty| {
@@ -296,15 +305,14 @@ impl Vm {
                     .any(|name| name == "iterable" || name == "object" || is_class_type_name(name))
             })
         };
-        if !may_have_ancestry(source) || !may_have_ancestry(target) {
-            return None;
-        }
+        let comparable = may_have_ancestry(source) && may_have_ancestry(target);
         [source, target]
             .into_iter()
             .flatten()
             .flat_map(members)
-            .find(|name| {
-                is_class_type_name(name)
+            .filter(move |name| {
+                comparable
+                    && is_class_type_name(name)
                     && self.classes.get(name).is_none()
                     && !unit
                         .classes
