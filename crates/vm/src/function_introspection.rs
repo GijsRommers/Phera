@@ -1,13 +1,16 @@
 //! `function_exists('strlen')` sees native functions and declarations already made in this request.
 
 use phera_extension_api::{NativeError, NativeResult, Param, ParamType};
+use phera_source::deprecations::ItemKind;
 use phera_value::{ArrayKey, PhpArray, Value};
 
+use crate::class_constants::ConstantAccess;
 use crate::{Vm, calls::callback_binding::ArgumentOrigin};
 
 #[derive(Clone, Copy)]
 pub(crate) enum RuntimeFunction {
     DefinedFunctions,
+    DefinedConstants,
     ExtensionLoaded,
     LoadedExtensions,
     PhpVersion,
@@ -16,6 +19,7 @@ pub(crate) enum RuntimeFunction {
 impl RuntimeFunction {
     pub(crate) const ALL: &[Self] = &[
         Self::DefinedFunctions,
+        Self::DefinedConstants,
         Self::ExtensionLoaded,
         Self::LoadedExtensions,
         Self::PhpVersion,
@@ -24,6 +28,7 @@ impl RuntimeFunction {
     pub(crate) const fn name(self) -> &'static str {
         match self {
             Self::DefinedFunctions => "get_defined_functions",
+            Self::DefinedConstants => "get_defined_constants",
             Self::ExtensionLoaded => "extension_loaded",
             Self::LoadedExtensions => "get_loaded_extensions",
             Self::PhpVersion => "phpversion",
@@ -42,6 +47,9 @@ impl RuntimeFunction {
             Self::DefinedFunctions => {
                 const { &[Param::new("exclude_disabled", ParamType::Bool).optional()] }
             }
+            Self::DefinedConstants => {
+                const { &[Param::new("categorize", ParamType::Bool).optional()] }
+            }
             Self::ExtensionLoaded => const { &[Param::new("extension", ParamType::String)] },
             Self::LoadedExtensions => {
                 const { &[Param::new("zend_extensions", ParamType::Bool).optional()] }
@@ -59,7 +67,7 @@ impl RuntimeFunction {
 
 pub(crate) fn deprecated(name: &str, since: &str) -> NativeError {
     NativeError::throw(
-        "Phera\\NotSupportedException",
+        crate::unsupported_items::EXCEPTION,
         format!("{name} is not supported by Phera: deprecated since PHP {since}"),
     )
 }
@@ -114,12 +122,12 @@ impl Vm {
             }
             RuntimeFunction::DefinedFunctions => {
                 if !arguments.is_empty() {
-                    return Err(deprecated(
-                        "get_defined_functions() with $exclude_disabled",
-                        "8.0",
-                    ));
+                    self.diagnostic("Deprecated", "get_defined_functions(): The $exclude_disabled parameter has no effect since PHP 8.0".into());
                 }
                 self.defined_functions()?
+            }
+            RuntimeFunction::DefinedConstants => {
+                self.defined_constants(arguments.first().is_some_and(phera_value::to_bool))
             }
         })
     }
@@ -173,6 +181,7 @@ impl Vm {
                 self.exists(name.strip_prefix('\\').unwrap_or(&name)),
             ));
         }
+        let name = name.strip_prefix('\\').unwrap_or(&name);
         let predicate = matches!(intrinsic, Intrinsic::Defined);
         if let Some((class, constant)) = name.rsplit_once("::") {
             let written = class;
@@ -184,7 +193,12 @@ impl Vm {
                 return if predicate {
                     Ok(Value::Bool(false))
                 } else {
-                    Err(NativeError::error(format!("Class \"{class}\" not found")))
+                    Err(crate::unsupported_items::omitted_member(
+                        ItemKind::ClassConstant,
+                        &class,
+                        constant,
+                    )
+                    .unwrap_or_else(|| NativeError::error(format!("Class \"{class}\" not found"))))
                 };
             };
             let accessible = entry
@@ -195,12 +209,22 @@ impl Vm {
                 return Ok(Value::Bool(false));
             }
             if !entry.constants.contains_key(constant) {
-                return Err(NativeError::error(format!(
-                    "Undefined constant {written}::{constant}"
-                )));
+                return Err(crate::unsupported_items::omitted_native_member(
+                    ItemKind::ClassConstant,
+                    &entry,
+                    constant,
+                )
+                .unwrap_or_else(|| {
+                    NativeError::error(format!("Undefined constant {written}::{constant}"))
+                }));
             }
+            let access = if predicate {
+                ConstantAccess::Defined
+            } else {
+                ConstantAccess::Read
+            };
             loop {
-                match self.class_constant(&class, constant) {
+                match self.class_constant_with_access(&class, constant, access) {
                     Ok(value) => return Ok(if predicate { Value::Bool(true) } else { value }),
                     Err(error) => {
                         let miss = crate::autoload::ClassMiss::take(error)?;
@@ -221,12 +245,13 @@ impl Vm {
             return Ok(if predicate { Value::Bool(true) } else { value });
         }
         if predicate {
-            Ok(Value::Bool(self.constants.contains_key(&name)))
+            Ok(Value::Bool(self.constants.contains_key(name)))
         } else {
-            self.constants
-                .get(&name)
-                .cloned()
-                .ok_or_else(|| NativeError::error(format!("Undefined constant \"{name}\"")))
+            let constant = self.constants.get(name).cloned().ok_or_else(|| {
+                crate::unsupported_items::omitted_item(ItemKind::Constant, name)
+                    .unwrap_or_else(|| NativeError::error(format!("Undefined constant \"{name}\"")))
+            })?;
+            Ok(self.report_global_constant(constant))
         }
     }
 

@@ -135,12 +135,9 @@ impl Vm {
     #[cold]
     #[inline(never)]
     pub(crate) fn initialize_throwable(&mut self, object: &Rc<Object>, origin: TraceOrigin) {
-        let location = self.location();
-        object.set(Object::protected_key("file"), Value::from(location.file));
-        object.set(
-            Object::protected_key("line"),
-            Value::Int(location.line as i64),
-        );
+        let (file, line) = self.exception_location();
+        object.set(Object::protected_key("file"), file);
+        object.set(Object::protected_key("line"), Value::Int(line as i64));
         let trace = self.throwable_trace(origin);
         object.set(Object::private_key(throwable_root(object), "trace"), trace);
     }

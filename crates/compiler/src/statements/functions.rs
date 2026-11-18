@@ -117,7 +117,13 @@ impl<'ast> Compiler<'ast> {
         captures: &[String],
         line: usize,
     ) -> Result<Compiler<'ast>, CompileError> {
-        let mut builder = Compiler::new(self.file, self.lines, name, &self.namespace);
+        let mut builder = Compiler::new(
+            self.file,
+            self.lines,
+            name,
+            &self.namespace,
+            self.compile_diagnostics,
+        );
         builder.class_scope = if !name.starts_with("{closure:") {
             name.split_once("::")
                 .map(|(class, _)| class.to_owned())
