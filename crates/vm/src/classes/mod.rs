@@ -13,6 +13,9 @@ mod native;
 mod signatures;
 mod static_calls;
 mod static_known;
+mod trait_adaptations;
+mod trait_members;
+pub(crate) mod trait_methods;
 
 pub(crate) use class::{
     Class, ConstantState, Invocation, LinkedConstant, Method, MethodBody, MethodContext,

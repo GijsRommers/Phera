@@ -137,6 +137,9 @@ impl<'ast> Compiler<'ast> {
     ) -> Result<Compiler<'ast>, CompileError> {
         let mut builder = Compiler::new(self.file, self.lines, name, &self.namespace);
         builder.anonymous_classes = self.anonymous_classes.clone();
+        if name.starts_with("{closure:") || name.contains("::") {
+            builder.trait_scope = self.trait_scope.clone();
+        }
         builder.class_scope = if !name.starts_with("{closure:") {
             name.split_once("::")
                 .map(|(class, _)| class.to_owned())

@@ -65,7 +65,7 @@ pub(crate) fn check_abstract(
     methods: &HashMap<String, Rc<Method>>,
     interfaces: &[Rc<Class>],
 ) -> Result<(), NativeError> {
-    if is_abstract || kind == ClassKind::Interface {
+    if is_abstract || matches!(kind, ClassKind::Interface | ClassKind::Trait) {
         return Ok(());
     }
     let mut missing: Vec<_> = methods
@@ -95,7 +95,7 @@ pub(crate) fn check_abstract(
         )));
     }
     Err(NativeError::error(format!(
-        "Class {class} contains {count} abstract method{plural} and must therefore be declared abstract or implement the remaining methods ({})",
+        "Class {class} contains {count} abstract method{plural} and must therefore be declared abstract or implement the remaining method{plural} ({})",
         missing.join(", ")
     )))
 }

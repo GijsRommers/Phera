@@ -98,7 +98,7 @@ impl Vm {
         method: &Method,
         unit: &phera_bytecode::CompiledUnit,
     ) -> Result<(), NativeError> {
-        if inherited.visibility == phera_bytecode::Visibility::Private
+        if (inherited.visibility == phera_bytecode::Visibility::Private && !inherited.is_abstract)
             || (method.name.eq_ignore_ascii_case("__construct") && !inherited.is_abstract)
         {
             return Ok(());

@@ -37,6 +37,7 @@ pub(super) struct Compiler<'ast> {
     pub(super) namespace: String,
     /// __CLASS__ is lexical and does not change when a closure is rebound.
     pub(super) class_scope: Option<String>,
+    pub(super) trait_scope: Option<String>,
     pub(super) imports: HashMap<(NameKind, String), String>,
 }
 impl<'ast> Compiler<'ast> {
@@ -67,6 +68,7 @@ impl<'ast> Compiler<'ast> {
             finalies: vec![],
             namespace: namespace.into(),
             class_scope: None,
+            trait_scope: None,
             imports: HashMap::new(),
         }
     }

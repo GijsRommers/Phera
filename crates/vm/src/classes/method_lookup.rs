@@ -9,7 +9,7 @@
 
 use super::{Class, Invocation, Method};
 use crate::Vm;
-use phera_bytecode::Visibility;
+use phera_bytecode::{ClassKind, Visibility};
 use phera_extension_api::NativeError;
 use std::rc::Rc;
 
@@ -52,6 +52,12 @@ impl Vm {
             return Ok(None);
         };
         self.check_method_visibility(&method)?;
+        if class.kind == ClassKind::Trait && method.is_static {
+            return Err(super::trait_methods::deprecated_direct_access(
+                "method",
+                &format!("{}::{}()", class.name, method.name),
+            ));
+        }
         let scope = declaring_class(class, &method)
             .or_else(|| self.classes.get(&method.declaring))
             .ok_or_else(|| internal_error!("method scope"))?;

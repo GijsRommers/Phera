@@ -16,6 +16,7 @@ use crate::code_table::{FunctionIndex, UnitIndex};
 
 /// What a call needs to know about the function it enters, read on every
 /// call, so it is kept small and next to nothing else.
+#[derive(Clone)]
 pub(crate) struct FunctionFacts {
     pub(crate) unit: UnitIndex,
     /// `None` for a file's top-level code, else its number within the file.

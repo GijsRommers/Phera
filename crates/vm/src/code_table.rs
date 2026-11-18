@@ -25,7 +25,7 @@ pub(crate) use crate::function_facts::{FunctionFacts, FunctionShape};
 use crate::unit_caches::UnitCache;
 
 /// A function's position in the request's code table.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub(crate) struct FunctionIndex(pub(crate) u32);
 
 /// A name, lowercased, as one number for the whole request: every file that
@@ -177,6 +177,27 @@ impl CodeTable {
         class: crate::classes::ClassIndex,
     ) {
         self.functions[function.index()].class = Some(class);
+    }
+
+    /// Flattened methods share immutable instructions and own their scope and static cells.
+    pub(crate) fn import_trait_body(
+        &mut self,
+        source: FunctionIndex,
+        scope: crate::classes::ClassIndex,
+    ) -> FunctionIndex {
+        let mut facts = self.facts(source).clone();
+        facts.class = Some(scope);
+        let function = FunctionIndex(self.functions.len() as u32);
+        self.functions.push(facts);
+        function
+    }
+
+    /// Composed methods reached through multiple traits can share the original body.
+    pub(crate) fn original_function(&self, source: FunctionIndex) -> FunctionIndex {
+        let facts = self.facts(source);
+        facts.local.map_or(facts.unit_first, |local| {
+            self.declared(facts.unit_first, local as usize)
+        })
     }
 
     #[inline]

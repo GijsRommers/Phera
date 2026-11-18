@@ -120,12 +120,14 @@ impl Compiler<'_> {
             ))
         } else if method.modifiers.is_abstract
             && method.modifiers.visibility == Some(ast::Visibility::Private)
+            && declaration.kind != ast::ClassKind::Trait
         {
             Some(format!(
                 "Abstract function {class}::{name}() cannot be declared private"
             ))
         } else if method.modifiers.is_abstract
             && !is_interface
+            && declaration.kind != ast::ClassKind::Trait
             && !declaration.modifiers.is_abstract
         {
             Some(format!(

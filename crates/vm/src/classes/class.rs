@@ -26,6 +26,7 @@ pub(crate) struct Class {
     pub(crate) ancestors: std::collections::HashSet<String>,
     pub(crate) parent: Option<Rc<Class>>,
     pub(crate) interfaces: Vec<Rc<Class>>,
+    pub(crate) traits: Vec<Rc<Class>>,
     pub(crate) kind: ClassKind,
     pub(crate) is_abstract: bool,
     /// Immutable Throwable membership avoids ancestry allocation on every ordinary new.
@@ -86,6 +87,7 @@ pub(crate) enum ClassOrigin {
 }
 
 /// Native and user methods share argument sends but execute through different handlers.
+#[derive(Clone)]
 pub(crate) enum MethodBody {
     Closure(crate::closure_methods::ClosureMethod),
     User(crate::code_table::FunctionIndex),

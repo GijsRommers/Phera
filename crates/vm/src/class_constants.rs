@@ -1,7 +1,7 @@
 //! Class constants evaluate once in their declaring scope and reject dependency cycles.
 
 use crate::{Vm, classes::ConstantState};
-use phera_bytecode::{Reg, Visibility};
+use phera_bytecode::{ClassKind, Reg, Visibility};
 use phera_extension_api::{NativeError, NativeResult};
 use phera_value::Value;
 
@@ -29,6 +29,12 @@ impl Vm {
         let constant = class.constants.get(name).cloned().ok_or_else(|| {
             NativeError::error(format!("Undefined constant {}::{name}", class.name))
         })?;
+        if class.kind == ClassKind::Trait {
+            return Err(NativeError::error(format!(
+                "Cannot access trait constant {}::{name} directly",
+                class.name
+            )));
+        }
         let scope = self
             .initializer_scope
             .as_ref()

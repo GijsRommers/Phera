@@ -37,7 +37,6 @@ impl Vm {
             .classes
             .get(&name)
             .ok_or_else(|| NativeError::error(format!("Class \"{name}\" not found")))?;
-        self.link_class_symbol(symbol, &class);
         let context = self.current().and_then(|frame| frame.method());
         let receiver = context
             .as_ref()
@@ -55,6 +54,7 @@ impl Vm {
                     class.name, method.written
                 ))
             })?;
+        self.link_class_symbol(symbol, &class);
         self.prepare_resolved_method(class, receiver, resolved, Invocation::Method)?;
         if binding == ClassBinding::Forward
             && let Some(context) = context

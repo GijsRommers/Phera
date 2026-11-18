@@ -25,6 +25,7 @@ impl ClassTable {
                 name: "stdClass".into(),
                 parent: None,
                 interfaces: Vec::new(),
+                traits: Vec::new(),
                 kind: ClassKind::Class,
                 is_abstract: false,
                 is_throwable: false,
@@ -44,7 +45,11 @@ impl ClassTable {
             kind: NativeKind::FinalClass,
             ..phera_extension_api::ClassEntry::class("Closure")
         };
-        for entry in registry.classes().chain(std::iter::once(&closure)) {
+        let unsupported = phera_extension_api::ClassEntry {
+            parent: Some("LogicException"),
+            ..phera_extension_api::ClassEntry::class("Phera\\NotSupportedException")
+        };
+        for entry in registry.classes().chain([&closure, &unsupported]) {
             let parent = entry.parent.and_then(|name| table.get(name));
             let mut methods = parent
                 .as_ref()
@@ -164,6 +169,7 @@ impl ClassTable {
                     name: entry.name.into(),
                     parent,
                     interfaces,
+                    traits: Vec::new(),
                     kind: if entry.kind == NativeKind::Interface {
                         ClassKind::Interface
                     } else {

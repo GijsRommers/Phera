@@ -28,6 +28,11 @@ impl Vm {
                             .get(&unit.symbols[symbol.index()].name)
                             .is_some()
                     })
+                    && declaration
+                        .traits
+                        .iter()
+                        .flat_map(|usage| &usage.names)
+                        .all(|name| self.classes.get(name).is_some())
                 {
                     self.link_class(unit.clone(), index)?;
                     self.prelinked_classes
@@ -107,6 +112,12 @@ impl Vm {
                     parent.name
                 )));
             }
+            if parent.kind == ClassKind::Trait {
+                return Err(NativeError::error(format!(
+                    "Class {display} cannot extend trait {}",
+                    parent.name
+                )));
+            }
             if declaration.is_readonly != parent.is_readonly {
                 let (child, inherited) = if declaration.is_readonly {
                     ("Readonly", "non-readonly")
@@ -169,6 +180,10 @@ impl Vm {
                 self.check_method_contract(inherited, &linked, &unit)?;
             }
             methods.insert(method_name.to_ascii_lowercase(), linked);
+        }
+        let traits = self.resolve_traits(declaration)?;
+        if !traits.is_empty() {
+            self.compose_trait_methods(declaration, &unit, &traits, &mut methods)?;
         }
         for interface in &interfaces {
             for (name, method) in &interface.methods {
@@ -315,7 +330,8 @@ impl Vm {
             {
                 if property.is_static {
                     if let Some(storage) = &linked.static_storage {
-                        *storage.reference.borrow().borrow_mut() = value;
+                        *storage.reference.borrow().borrow_mut() = value.clone();
+                        linked.value = value;
                     }
                 } else {
                     linked.value = value;
@@ -344,6 +360,15 @@ impl Vm {
                 target.push(linked);
             }
         }
+        if !traits.is_empty() {
+            self.compose_trait_members(
+                declaration,
+                &traits,
+                &mut defaults,
+                &mut static_properties,
+                &mut constants,
+            )?;
+        }
         let allows_dynamic_properties = declaration.allows_dynamic_properties
             || parent
                 .as_ref()
@@ -368,6 +393,7 @@ impl Vm {
                 name: name.clone(),
                 parent,
                 interfaces,
+                traits,
                 kind: declaration.kind,
                 is_abstract: declaration.is_abstract,
                 is_throwable,

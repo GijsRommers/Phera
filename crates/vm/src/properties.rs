@@ -90,6 +90,12 @@ impl Vm {
                     class.name
                 ))
             })?;
+        if class.kind == phera_bytecode::ClassKind::Trait {
+            return Err(crate::classes::trait_methods::deprecated_direct_access(
+                "property",
+                &format!("{}::${name}", class.name),
+            ));
+        }
         let scope = self.current().and_then(|frame| frame.scope());
         let allowed = match property.visibility {
             Visibility::Public => true,

@@ -15,6 +15,7 @@ pub(crate) enum ClassFunction {
     MethodExists,
     ClassExists,
     InterfaceExists,
+    TraitExists,
     IsA,
     IsSubclassOf,
     ObjectId,
@@ -23,6 +24,8 @@ pub(crate) enum ClassFunction {
     ClassParents,
     ClassImplements,
     DeclaredClasses,
+    DeclaredTraits,
+    ClassUses,
 }
 
 impl ClassFunction {
@@ -35,6 +38,7 @@ impl ClassFunction {
             "method_exists" => Self::MethodExists,
             "class_exists" => Self::ClassExists,
             "interface_exists" => Self::InterfaceExists,
+            "trait_exists" => Self::TraitExists,
             "is_a" => Self::IsA,
             "is_subclass_of" => Self::IsSubclassOf,
             "spl_object_id" => Self::ObjectId,
@@ -43,6 +47,8 @@ impl ClassFunction {
             "class_parents" => Self::ClassParents,
             "class_implements" => Self::ClassImplements,
             "get_declared_classes" => Self::DeclaredClasses,
+            "get_declared_traits" => Self::DeclaredTraits,
+            "class_uses" => Self::ClassUses,
             _ => return None,
         })
     }
@@ -109,14 +115,32 @@ impl Vm {
                 .ok_or_else(|| {
                     NativeError::error("get_called_class() must be called from within a class")
                 }),
-            Function::ClassExists | Function::InterfaceExists => {
-                Ok(Value::Bool(class.is_some_and(|class| {
-                    if matches!(function, Function::InterfaceExists) {
-                        class.kind == ClassKind::Interface
+            Function::ClassExists => Ok(Value::Bool(class.is_some_and(|class| {
+                matches!(class.kind, ClassKind::Class | ClassKind::Anonymous)
+            }))),
+            Function::InterfaceExists => Ok(Value::Bool(
+                class.is_some_and(|class| class.kind == ClassKind::Interface),
+            )),
+            Function::TraitExists => Ok(Value::Bool(
+                class.is_some_and(|class| class.kind == ClassKind::Trait),
+            )),
+            Function::ClassUses if class.is_none() => {
+                if let Some(name) = name {
+                    let qualification = if arguments.get(1).is_none_or(phera_value::to_bool) {
+                        " and could not be loaded"
                     } else {
-                        class.kind != ClassKind::Interface
-                    }
-                })))
+                        ""
+                    };
+                    self.diagnostic(
+                        "Warning",
+                        format!("class_uses(): Class {name} does not exist{qualification}"),
+                    );
+                    return Ok(Value::Bool(false));
+                }
+                Err(NativeError::type_error(format!(
+                    "class_uses(): Argument #1 ($object_or_class) must be of type object|string, {} given",
+                    value.type_name()
+                )))
             }
             Function::MethodExists => {
                 let method = arguments
@@ -176,13 +200,15 @@ impl Vm {
     ) -> NativeResult {
         use ClassFunction as Function;
         let mut result = PhpArray::new();
-        if matches!(function, Function::DeclaredClasses) {
+        if matches!(
+            function,
+            Function::DeclaredClasses | Function::DeclaredTraits
+        ) {
             for name in &self.classes.order {
-                if self
-                    .classes
-                    .get(name)
-                    .is_some_and(|class| class.kind != ClassKind::Interface)
-                {
+                if self.classes.get(name).is_some_and(|class| match function {
+                    Function::DeclaredTraits => class.kind == ClassKind::Trait,
+                    _ => matches!(class.kind, ClassKind::Class | ClassKind::Anonymous),
+                }) {
                     result.push(Value::from(name.clone()))?;
                 }
             }
@@ -192,6 +218,14 @@ impl Vm {
             return Ok(Value::Bool(false));
         };
         match function {
+            Function::ClassUses => {
+                for used_trait in &class.traits {
+                    result.insert(
+                        ArrayKey::str(used_trait.name.as_str()),
+                        used_trait.name_value.clone(),
+                    );
+                }
+            }
             Function::ClassMethods => {
                 let mut methods: Vec<_> = class.methods.values().collect();
                 methods.sort_by_key(|method| self.method_listing_order(&class, method));

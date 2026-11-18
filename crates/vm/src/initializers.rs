@@ -58,7 +58,7 @@ impl Vm {
                 Instruction::FetchClassName { dst, class } => {
                     let name = &unit.symbols[class.index()].written;
                     let name = match name.as_str() {
-                        "self" | "static" => scope.to_owned(),
+                        "self" | "static" | phera_bytecode::TRAIT_CLASS_NAME => scope.to_owned(),
                         "parent" => self
                             .classes
                             .get(scope)

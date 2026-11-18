@@ -114,9 +114,14 @@ impl Vm {
                 "Instantiation of class Closure is not allowed",
             ));
         }
-        if class.kind == ClassKind::Interface {
+        if matches!(class.kind, ClassKind::Interface | ClassKind::Trait) {
+            let kind = if class.kind == ClassKind::Trait {
+                "trait"
+            } else {
+                "interface"
+            };
             return Err(NativeError::error(format!(
-                "Cannot instantiate interface {}",
+                "Cannot instantiate {kind} {}",
                 class.name
             )));
         }
@@ -246,6 +251,15 @@ impl Vm {
             .ok_or_else(|| internal_error!("class name symbol"))?
             .written;
         let class = match name.as_str() {
+            phera_bytecode::TRAIT_CLASS_NAME => {
+                let function = frame.frame.function;
+                self.code
+                    .facts(function)
+                    .class
+                    .map(|class| self.classes.class(class))
+                    .or_else(|| frame.scope())
+                    .cloned()
+            }
             "self" => frame.scope().cloned(),
             "static" => frame.called(),
             "parent" => frame.scope().and_then(|scope| scope.parent.clone()),

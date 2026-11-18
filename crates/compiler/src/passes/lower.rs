@@ -311,6 +311,7 @@ pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
             is_final: declaration.is_final,
             is_readonly: declaration.is_readonly,
             allows_dynamic_properties: declaration.allows_dynamic_properties,
+            traits: declaration.traits,
             constants: declaration
                 .constants
                 .into_iter()

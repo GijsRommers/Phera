@@ -99,6 +99,7 @@ mod function_parameters;
 pub(crate) mod functions;
 pub(crate) mod loops;
 pub(crate) mod switching;
+mod traits;
 
 pub(crate) mod exceptions;
 

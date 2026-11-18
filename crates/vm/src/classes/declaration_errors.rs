@@ -14,7 +14,7 @@ pub(crate) fn link_failure(unit: &CompiledUnit, index: ClassId, error: NativeErr
             class: "Error",
             message,
             ..
-        } if !message.ends_with("not found") => {
+        } if !message.ends_with("not found") && !message.ends_with(" - it is not a trait") => {
             let line = std::iter::once(&unit.main).chain(&unit.functions).find_map(|function| {
                 function.instructions.iter().position(|instruction| matches!(instruction, Instruction::DeclareClass { class } if *class == index))
                     .and_then(|position| function.lines.get(position).copied())

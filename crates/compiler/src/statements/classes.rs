@@ -18,11 +18,8 @@ impl Compiler<'_> {
         if declaration.name.is_some() && self.function.name.contains("::") {
             return Err(self.error("Class declarations may not be nested", line));
         }
-        if !matches!(
-            declaration.kind,
-            ast::ClassKind::Class | ast::ClassKind::Interface
-        ) {
-            return Err(self.error("Traits and enums not supported yet", line));
+        if declaration.kind == ast::ClassKind::Enum {
+            return Err(self.error("Enums not supported yet", line));
         }
         let name = match &declaration.name {
             Some(identifier) if self.namespace.is_empty() => identifier.name.clone(),
@@ -39,7 +36,23 @@ impl Compiler<'_> {
         let mut methods = Vec::new();
         let mut properties = Vec::new();
         let mut constants = Vec::new();
+        let mut traits = Vec::new();
+        let trait_scope = (declaration.kind == ast::ClassKind::Trait).then_some(name.as_str());
         for member in &declaration.members {
+            if let ast::ClassMemberKind::TraitUse {
+                traits: names,
+                adaptations,
+            } = &member.kind
+            {
+                traits.push(self.compile_trait_use(
+                    declaration.kind,
+                    display,
+                    names,
+                    adaptations,
+                    member.span,
+                )?);
+                continue;
+            }
             if let ast::ClassMemberKind::Constant {
                 modifiers,
                 ty,
@@ -55,7 +68,12 @@ impl Compiler<'_> {
                         name: constant.name.name.clone(),
                         visibility: member_visibility(modifiers),
                         is_final: modifiers.is_final,
-                        initializer: self.compile_initializer(&constant.value, line)?,
+                        initializer: self.compile_initializer(
+                            &constant.value,
+                            &name,
+                            trait_scope,
+                            line,
+                        )?,
                         ty: ty
                             .as_ref()
                             .map(|declared_type| self.declaration_type(declared_type)),
@@ -118,7 +136,7 @@ impl Compiler<'_> {
                     let default = property
                         .default
                         .as_ref()
-                        .map(|value| self.compile_initializer(value, line))
+                        .map(|value| self.compile_initializer(value, &name, trait_scope, line))
                         .transpose()?;
                     properties.push(ClassProperty {
                         name: property.name.clone(),
@@ -182,6 +200,7 @@ impl Compiler<'_> {
             }
             methods.push(self.compile_method(
                 &name,
+                trait_scope,
                 method,
                 self.lines.line(method.name.span.start),
             )?);
@@ -208,6 +227,7 @@ impl Compiler<'_> {
                 .collect(),
             kind: match (declaration.kind, &declaration.name) {
                 (ast::ClassKind::Interface, _) => ClassKind::Interface,
+                (ast::ClassKind::Trait, _) => ClassKind::Trait,
                 (_, None) => ClassKind::Anonymous,
                 _ => ClassKind::Class,
             },
@@ -221,6 +241,7 @@ impl Compiler<'_> {
             constants,
             properties,
             methods,
+            traits,
         });
         if timing == DeclarationTiming::Hoisted {
             self.hoisted_classes.push(index);
@@ -247,6 +268,8 @@ impl Compiler<'_> {
     fn compile_initializer(
         &mut self,
         expression: &ast::Expression,
+        class: &str,
+        trait_scope: Option<&str>,
         line: usize,
     ) -> Result<usize, CompileError> {
         if let Some(message) = crate::constant_callables::callable_constant_error(expression) {
@@ -256,6 +279,8 @@ impl Compiler<'_> {
             return Err(self.error("Constant expression contains invalid operations", line));
         }
         let mut builder = Compiler::new(self.file, self.lines, "{initializer}", &self.namespace);
+        builder.class_scope = Some(class.to_owned());
+        builder.trait_scope = trait_scope.map(str::to_owned);
         builder.imports = self.imports.clone();
         let result = builder.compile_expression(expression)?;
         builder.emit(Instruction::Return(result), line);
@@ -266,6 +291,7 @@ impl Compiler<'_> {
     fn compile_method(
         &mut self,
         class: &str,
+        trait_scope: Option<&str>,
         method: &ast::Method,
         line: usize,
     ) -> Result<ClassMethod, CompileError> {
@@ -282,7 +308,9 @@ impl Compiler<'_> {
         };
         let index = self.functions.len();
         // The synthetic name is already fully qualified.
+        let previous = std::mem::replace(&mut self.trait_scope, trait_scope.map(str::to_owned));
         let result = self.compile_function(&declaration, DeclarationTiming::Hoisted, line);
+        self.trait_scope = previous;
         result?;
         self.hoisted.retain(|candidate| *candidate != index);
         Ok(ClassMethod {
