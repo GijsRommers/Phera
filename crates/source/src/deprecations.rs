@@ -31,6 +31,10 @@ pub struct Deprecation {
 }
 
 impl Deprecation {
+    pub fn kind(&self) -> ItemKind {
+        self.kind
+    }
+
     pub fn unsupported_message(&self) -> String {
         let parentheses = match self.kind {
             ItemKind::Function | ItemKind::Method => "()",
@@ -78,42 +82,48 @@ fn key(kind: ItemKind, name: &str) -> String {
     }
 }
 
+fn inventory() -> &'static Deprecations {
+    ITEMS.get_or_init(|| {
+        DATA.lines()
+            .filter_map(|line| {
+                let mut fields = line.split('\t');
+                let kind = match fields.next()? {
+                    "function" => ItemKind::Function,
+                    "constant" => ItemKind::Constant,
+                    "method" => ItemKind::Method,
+                    "class-constant" => ItemKind::ClassConstant,
+                    _ => return None,
+                };
+                let name = fields.next()?;
+                let since = fields.next()?;
+                let message = fields.next()?;
+                let policy = match fields.next()? {
+                    "keep" => Policy::Keep,
+                    "omit" => Policy::Omit,
+                    _ => return None,
+                };
+                Some((
+                    (kind, key(kind, name)),
+                    Deprecation {
+                        name,
+                        since,
+                        message,
+                        policy,
+                        kind,
+                        constant_notice: OnceLock::new(),
+                    },
+                ))
+            })
+            .collect()
+    })
+}
+
+pub fn items() -> impl Iterator<Item = &'static Deprecation> {
+    inventory().values()
+}
+
 pub fn find(kind: ItemKind, name: &str) -> Option<&'static Deprecation> {
-    ITEMS
-        .get_or_init(|| {
-            DATA.lines()
-                .filter_map(|line| {
-                    let mut fields = line.split('\t');
-                    let kind = match fields.next()? {
-                        "function" => ItemKind::Function,
-                        "constant" => ItemKind::Constant,
-                        "method" => ItemKind::Method,
-                        "class-constant" => ItemKind::ClassConstant,
-                        _ => return None,
-                    };
-                    let name = fields.next()?;
-                    let since = fields.next()?;
-                    let message = fields.next()?;
-                    let policy = match fields.next()? {
-                        "keep" => Policy::Keep,
-                        "omit" => Policy::Omit,
-                        _ => return None,
-                    };
-                    Some((
-                        (kind, key(kind, name)),
-                        Deprecation {
-                            name,
-                            since,
-                            message,
-                            policy,
-                            kind,
-                            constant_notice: OnceLock::new(),
-                        },
-                    ))
-                })
-                .collect()
-        })
-        .get(&(kind, key(kind, name.trim_start_matches('\\'))))
+    inventory().get(&(kind, key(kind, name.trim_start_matches('\\'))))
 }
 
 pub fn omitted(kind: ItemKind, name: &str) -> Option<&'static Deprecation> {
