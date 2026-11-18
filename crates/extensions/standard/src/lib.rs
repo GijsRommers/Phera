@@ -31,6 +31,7 @@ impl Extension for Standard {
         math::register(registry);
         arrays::register(registry);
         registry.function(packing::PACK);
+        registry.function(packing::UNPACK);
         constants::register(registry);
         for entry in natural::FUNCTIONS.iter().chain(time::FUNCTIONS) {
             registry.function(*entry);

@@ -2,5 +2,7 @@
 
 mod format;
 mod pack;
+mod unpack;
 
 pub use pack::PACK;
+pub use unpack::UNPACK;
