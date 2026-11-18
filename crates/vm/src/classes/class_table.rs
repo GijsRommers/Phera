@@ -11,7 +11,7 @@ use super::Class;
 
 /// A class's position in the request's class table: a method frame's class
 /// scope and called class are kept as these numbers.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub(crate) struct ClassIndex(u32);
 
 /// One request owns the id pool; weak records exist solely for cycle cleanup.

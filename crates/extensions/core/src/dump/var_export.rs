@@ -54,6 +54,24 @@ fn float_source(float: f64) -> String {
 }
 
 impl Style for VarExport {
+    fn enum_case(
+        &mut self,
+        out: &mut Vec<u8>,
+        object: &phera_extension_api::Object,
+        name: &phera_extension_api::PhpString,
+        place: Place,
+    ) -> bool {
+        if place.depth > 0 {
+            out.push(b'\n');
+            spaces(out, 2 * place.depth);
+        }
+        out.push(b'\\');
+        out.extend_from_slice(object.class.name().as_bytes());
+        out.extend_from_slice(b"::");
+        out.extend_from_slice(name.as_bytes());
+        true
+    }
+
     fn scalar(&mut self, out: &mut Vec<u8>, value: &Value, _place: Place) {
         match value {
             Value::Bool(flag) => out.extend_from_slice(flag.to_string().as_bytes()),

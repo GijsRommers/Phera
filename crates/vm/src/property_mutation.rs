@@ -152,6 +152,7 @@ impl Vm {
                         && mutation != Mutation::Unset
                     {
                         if class.is_readonly
+                            || class.kind == phera_bytecode::ClassKind::Enum
                             || class.origin == crate::classes::class::ClassOrigin::Closure
                         {
                             return Err(NativeError::error(format!(

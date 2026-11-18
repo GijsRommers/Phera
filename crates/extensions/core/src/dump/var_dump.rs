@@ -35,6 +35,22 @@ impl VarDump {
 }
 
 impl Style for VarDump {
+    fn enum_case(
+        &mut self,
+        out: &mut Vec<u8>,
+        object: &phera_extension_api::Object,
+        name: &phera_extension_api::PhpString,
+        place: Place,
+    ) -> bool {
+        Self::lead(out, place);
+        out.extend_from_slice(b"enum(");
+        out.extend_from_slice(object.class.name().as_bytes());
+        out.extend_from_slice(b"::");
+        out.extend_from_slice(name.as_bytes());
+        out.extend_from_slice(b")\n");
+        true
+    }
+
     fn scalar(&mut self, out: &mut Vec<u8>, value: &Value, place: Place) {
         Self::lead(out, place);
         match value {

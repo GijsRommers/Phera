@@ -7,8 +7,7 @@
 //! json_last_error_msg();                  // "No error"
 //! ```
 //!
-//! Not done yet: `JsonSerializable`, which needs method calls from native
-//! code, and enums, which Phera does not have.
+//! Backed enum cases encode as their backing value.
 
 mod decode;
 mod encode;
@@ -112,7 +111,5 @@ const CONSTANTS: &[(&str, i64)] = &[
     ("JSON_ERROR_UNSUPPORTED_TYPE", Error::Unsupported as i64),
     ("JSON_ERROR_INVALID_PROPERTY_NAME", Error::Property as i64),
     ("JSON_ERROR_UTF16", Error::Utf16 as i64),
-    // Encoding an enum case that has no backing value. Phera has no enums
-    // yet, so no Error variant produces this one.
-    ("JSON_ERROR_NON_BACKED_ENUM", 11),
+    ("JSON_ERROR_NON_BACKED_ENUM", Error::NonBackedEnum as i64),
 ];

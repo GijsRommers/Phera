@@ -21,6 +21,20 @@ pub enum ClassKind {
     Interface,
     Anonymous,
     Trait,
+    Enum,
+}
+
+/// `enum Status: int` and `enum Status: string` use different lookup keys.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnumBacking {
+    Int,
+    String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnumCase {
+    pub name: NameId,
+    pub backing: Option<FunctionId>,
 }
 
 /// Resolved names and source-order rules for `use T, U { T::m insteadof U; }`.
@@ -68,6 +82,8 @@ pub struct ClassDeclaration {
     pub properties: Vec<PropertyDeclaration>,
     pub methods: Vec<MethodDeclaration>,
     pub traits: Vec<TraitUse>,
+    pub enum_backing: Option<EnumBacking>,
+    pub enum_cases: Vec<EnumCase>,
 }
 
 /// A class constant computes its value on first access in the declaring scope.

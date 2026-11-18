@@ -111,7 +111,7 @@ fn compare_resolved(a: &Value, b: &Value, d: &mut dyn Diagnostics) -> Result<i8,
                     if Rc::ptr_eq(x, y) {
                         return Ok(0);
                     }
-                    if x.class.name() != y.class.name() {
+                    if x.class.name() != y.class.name() || x.class.is_enum() {
                         return Ok(1);
                     }
                     return compare_arrays(&x.to_array(), &y.to_array(), d);
@@ -155,6 +155,9 @@ fn compare_resolved(a: &Value, b: &Value, d: &mut dyn Diagnostics) -> Result<i8,
                         }
                     }
                 });
+            }
+            if matches!(obj, Value::Object(object) if object.class.is_enum()) {
+                return Ok(1);
             }
             match other {
                 Value::Int(_) | Value::Float(_) => {

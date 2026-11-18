@@ -100,6 +100,12 @@ impl Vm {
             .transpose()?;
         if let Some(parent) = &parent {
             let display = name.split('\0').next().unwrap_or(name);
+            if parent.kind == ClassKind::Enum {
+                return Err(NativeError::error(format!(
+                    "Class {display} cannot extend enum {}",
+                    parent.name
+                )));
+            }
             if parent.is_final {
                 return Err(NativeError::error(format!(
                     "Class {display} cannot extend final class {}",
@@ -130,7 +136,7 @@ impl Vm {
                 )));
             }
         }
-        let interfaces = declaration
+        let mut interfaces = declaration
             .interfaces
             .iter()
             .map(|symbol| {
@@ -146,6 +152,7 @@ impl Vm {
                 Ok(interface)
             })
             .collect::<Result<Vec<_>, NativeError>>()?;
+        self.link_enum_interfaces(declaration, &mut interfaces)?;
         if declaration.kind != ClassKind::Interface
             && interfaces
                 .iter()
@@ -181,9 +188,13 @@ impl Vm {
             }
             methods.insert(method_name.to_ascii_lowercase(), linked);
         }
+        let mut enum_info = self.install_enum_methods(declaration, &mut methods)?;
         let traits = self.resolve_traits(declaration)?;
         if !traits.is_empty() {
             self.compose_trait_methods(declaration, &unit, &traits, &mut methods)?;
+        }
+        if enum_info.is_some() {
+            super::enums::check_magic_methods(name, &methods)?;
         }
         for interface in &interfaces {
             for (name, method) in &interface.methods {
@@ -369,6 +380,16 @@ impl Vm {
                 &mut constants,
             )?;
         }
+        if let Some(enum_info) = &mut enum_info {
+            self.link_enum_members(
+                declaration,
+                &unit,
+                enum_info,
+                &mut defaults,
+                &mut static_properties,
+                &mut constants,
+            )?;
+        }
         let allows_dynamic_properties = declaration.allows_dynamic_properties
             || parent
                 .as_ref()
@@ -394,6 +415,7 @@ impl Vm {
                 parent,
                 interfaces,
                 traits,
+                enum_info,
                 kind: declaration.kind,
                 is_abstract: declaration.is_abstract,
                 is_throwable,

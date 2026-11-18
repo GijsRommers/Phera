@@ -95,6 +95,7 @@ pub(crate) mod bindings;
 pub(crate) mod classes;
 pub(crate) mod control;
 pub(crate) mod declarations;
+mod enums;
 mod function_parameters;
 pub(crate) mod functions;
 pub(crate) mod loops;

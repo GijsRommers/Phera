@@ -35,6 +35,9 @@ impl Vm {
                 class.name
             )));
         }
+        if class.kind == ClassKind::Enum {
+            self.validate_enum_backing(&class)?;
+        }
         let scope = self
             .initializer_scope
             .as_ref()
@@ -57,6 +60,9 @@ impl Vm {
             )));
         }
         let (initializer, state) = match &constant.initializer {
+            crate::classes::class::ConstantInitializer::EnumCase { name, backing } => {
+                return self.enum_case(&class, name, *backing).map(Value::Object);
+            }
             crate::classes::class::ConstantInitializer::Value(value) => return Ok(value.clone()),
             crate::classes::class::ConstantInitializer::Compiled { function, state } => {
                 (function, state)

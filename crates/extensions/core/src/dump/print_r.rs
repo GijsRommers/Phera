@@ -30,6 +30,14 @@ impl PrintR {
     fn head(container: &Container) -> String {
         match container {
             Container::Array(_) => "Array\n".to_string(),
+            Container::Object(object) if object.class.is_enum() => {
+                let backing = match object.get(&ArrayKey::str("value")) {
+                    Some(Value::String(_)) => ":string",
+                    Some(Value::Int(_)) => ":int",
+                    _ => "",
+                };
+                format!("{} Enum{backing}\n", object.class.name())
+            }
             Container::Object(object) => format!("{} Object\n", object.class.name()),
         }
     }

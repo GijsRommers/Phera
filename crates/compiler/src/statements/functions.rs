@@ -58,11 +58,12 @@ impl<'ast> Compiler<'ast> {
             Instruction::Return(register)
         };
         builder.emit(implicit_return, line);
-        if builder
-            .classes
-            .iter()
-            .any(|class| class.kind != phera_bytecode::ClassKind::Anonymous)
-        {
+        if builder.classes.iter().any(|class| {
+            matches!(
+                class.kind,
+                phera_bytecode::ClassKind::Class | phera_bytecode::ClassKind::Interface
+            )
+        }) {
             return Err(self.error("Nested class declarations not supported yet", line));
         }
         self.append_function(builder, timing, line);
@@ -116,6 +117,11 @@ impl<'ast> Compiler<'ast> {
             for property in &mut class.properties {
                 if let Some(default) = &mut property.default {
                     *default += id + 1;
+                }
+            }
+            for (_, backing) in &mut class.enum_cases {
+                if let Some(initializer) = backing {
+                    *initializer += id + 1;
                 }
             }
         }

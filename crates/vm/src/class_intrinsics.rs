@@ -16,6 +16,7 @@ pub(crate) enum ClassFunction {
     ClassExists,
     InterfaceExists,
     TraitExists,
+    EnumExists,
     IsA,
     IsSubclassOf,
     ObjectId,
@@ -39,6 +40,7 @@ impl ClassFunction {
             "class_exists" => Self::ClassExists,
             "interface_exists" => Self::InterfaceExists,
             "trait_exists" => Self::TraitExists,
+            "enum_exists" => Self::EnumExists,
             "is_a" => Self::IsA,
             "is_subclass_of" => Self::IsSubclassOf,
             "spl_object_id" => Self::ObjectId,
@@ -116,13 +118,19 @@ impl Vm {
                     NativeError::error("get_called_class() must be called from within a class")
                 }),
             Function::ClassExists => Ok(Value::Bool(class.is_some_and(|class| {
-                matches!(class.kind, ClassKind::Class | ClassKind::Anonymous)
+                matches!(
+                    class.kind,
+                    ClassKind::Class | ClassKind::Anonymous | ClassKind::Enum
+                )
             }))),
             Function::InterfaceExists => Ok(Value::Bool(
                 class.is_some_and(|class| class.kind == ClassKind::Interface),
             )),
             Function::TraitExists => Ok(Value::Bool(
                 class.is_some_and(|class| class.kind == ClassKind::Trait),
+            )),
+            Function::EnumExists => Ok(Value::Bool(
+                class.is_some_and(|class| class.kind == ClassKind::Enum),
             )),
             Function::ClassUses if class.is_none() => {
                 if let Some(name) = name {
@@ -207,7 +215,10 @@ impl Vm {
             for name in &self.classes.order {
                 if self.classes.get(name).is_some_and(|class| match function {
                     Function::DeclaredTraits => class.kind == ClassKind::Trait,
-                    _ => matches!(class.kind, ClassKind::Class | ClassKind::Anonymous),
+                    _ => matches!(
+                        class.kind,
+                        ClassKind::Class | ClassKind::Anonymous | ClassKind::Enum
+                    ),
                 }) {
                     result.push(Value::from(name.clone()))?;
                 }
@@ -291,6 +302,11 @@ impl Vm {
         }
         let declaration = match &method.body {
             crate::classes::MethodBody::User(reference) => reference.index(),
+            crate::classes::MethodBody::Enum(operation) => match operation {
+                crate::classes::enums::EnumMethod::Cases => usize::MAX - 2,
+                crate::classes::enums::EnumMethod::From => usize::MAX - 1,
+                crate::classes::enums::EnumMethod::TryFrom => usize::MAX,
+            },
             crate::classes::MethodBody::Closure(operation) => {
                 crate::closure_methods::ClosureMethod::entries()
                     .iter()

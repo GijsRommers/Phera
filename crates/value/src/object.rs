@@ -11,6 +11,9 @@ use crate::value::Value;
 pub trait ClassHandle: Any {
     fn name(&self) -> &str;
     fn as_any(&self) -> &dyn Any;
+    fn is_enum(&self) -> bool {
+        false
+    }
 }
 
 /// A PHP object. Cloning the surrounding `Rc<Object>` shares the instance;

@@ -18,15 +18,13 @@ impl Compiler<'_> {
         if declaration.name.is_some() && self.function.name.contains("::") {
             return Err(self.error("Class declarations may not be nested", line));
         }
-        if declaration.kind == ast::ClassKind::Enum {
-            return Err(self.error("Enums not supported yet", line));
-        }
         let name = match &declaration.name {
             Some(identifier) if self.namespace.is_empty() => identifier.name.clone(),
             Some(identifier) => format!("{}\\{}", self.namespace, identifier.name),
             None => self.anonymous_class_name(declaration),
         };
         let display = name.split('\0').next().unwrap_or(&name);
+        let enum_backing = self.validate_enum(declaration, display)?;
         self.validate_class_declaration(declaration, display)?;
         if declaration.attributes.iter().any(|attribute| {
             attribute.name.text.trim_start_matches('\\') != "AllowDynamicProperties"
@@ -37,8 +35,33 @@ impl Compiler<'_> {
         let mut properties = Vec::new();
         let mut constants = Vec::new();
         let mut traits = Vec::new();
+        let mut enum_cases = Vec::new();
         let trait_scope = (declaration.kind == ast::ClassKind::Trait).then_some(name.as_str());
         for member in &declaration.members {
+            if let ast::ClassMemberKind::EnumCase {
+                name: case,
+                value,
+                attributes,
+            } = &member.kind
+            {
+                let case_line = self.lines.line(case.span.start);
+                if !attributes.is_empty() {
+                    return Err(self.error("Attributes not supported yet", case_line));
+                }
+                let value = value
+                    .as_ref()
+                    .map(|value| {
+                        self.compile_initializer(
+                            value,
+                            &name,
+                            None,
+                            self.lines.line(value.span.start),
+                        )
+                    })
+                    .transpose()?;
+                enum_cases.push((case.name.clone(), value));
+                continue;
+            }
             if let ast::ClassMemberKind::TraitUse {
                 traits: names,
                 adaptations,
@@ -205,6 +228,9 @@ impl Compiler<'_> {
                 self.lines.line(method.name.span.start),
             )?);
         }
+        let can_hoist = timing == DeclarationTiming::Hoisted
+            && declaration.kind != ast::ClassKind::Enum
+            && traits.is_empty();
         let index = self.classes.len();
         self.classes.push(ClassDeclaration {
             name: name.clone(),
@@ -228,11 +254,12 @@ impl Compiler<'_> {
             kind: match (declaration.kind, &declaration.name) {
                 (ast::ClassKind::Interface, _) => ClassKind::Interface,
                 (ast::ClassKind::Trait, _) => ClassKind::Trait,
+                (ast::ClassKind::Enum, _) => ClassKind::Enum,
                 (_, None) => ClassKind::Anonymous,
                 _ => ClassKind::Class,
             },
             is_abstract: declaration.modifiers.is_abstract,
-            is_final: declaration.modifiers.is_final,
+            is_final: declaration.modifiers.is_final || declaration.kind == ast::ClassKind::Enum,
             is_readonly: declaration.modifiers.is_readonly,
             allows_dynamic_properties: declaration
                 .attributes
@@ -242,8 +269,10 @@ impl Compiler<'_> {
             properties,
             methods,
             traits,
+            enum_backing,
+            enum_cases,
         });
-        if timing == DeclarationTiming::Hoisted {
+        if can_hoist {
             self.hoisted_classes.push(index);
         }
         self.emit(Instruction::DeclareClass(index), line);

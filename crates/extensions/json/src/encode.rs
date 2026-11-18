@@ -121,11 +121,12 @@ impl Encoder {
     /// 0 for a float that is not finite, null for anything else.
     fn failure(&mut self, error: Error) {
         self.error = error;
-        self.output.push_str(if error == Error::Infinite {
-            "0"
-        } else {
-            "null"
-        });
+        self.output
+            .push_str(if matches!(error, Error::Infinite | Error::NonBackedEnum) {
+                "0"
+            } else {
+                "null"
+            });
     }
 
     fn indent(&mut self, level: usize) {
@@ -191,6 +192,14 @@ impl Encoder {
                 self.container(Rc::as_ptr(&array) as usize, entries, object, level);
             }
             Value::Object(object) => {
+                if object.class.is_enum() {
+                    if let Some(value) = object.get(&ArrayKey::str("value")) {
+                        self.work.push(Work::Value { value, level });
+                    } else {
+                        self.failure(Error::NonBackedEnum);
+                    }
+                    return;
+                }
                 // Only public properties are encoded.
                 let entries = object
                     .to_array()

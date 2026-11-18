@@ -131,6 +131,12 @@ impl Vm {
                 class.name
             )));
         }
+        if class.kind == ClassKind::Enum {
+            return Err(NativeError::error(format!(
+                "Cannot instantiate enum {}",
+                class.name
+            )));
+        }
         let object = self.classes.allocate(class.clone());
         // Mirrors the default loop below for classes whose defaults are all literals.
         if let Some(template) = &class.property_template {
@@ -185,7 +191,7 @@ impl Vm {
             .classes
             .get(original.class.name())
             .ok_or_else(|| internal_error!("clone class"))?;
-        if class.is_throwable {
+        if class.is_throwable || class.kind == ClassKind::Enum {
             return Err(NativeError::error(format!(
                 "Trying to clone an uncloneable object of class {}",
                 class.name

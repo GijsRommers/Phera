@@ -131,6 +131,7 @@ pub const DEFAULT_FRAME_LIMIT: usize = 250_000;
 /// One request interpreter; PHP calls use heap frames rather than Rust recursion.
 pub struct Vm {
     classes: classes::ClassTable,
+    enum_cases: classes::enums::EnumCases,
     closure_captures: Vec<closures::PendingCapture>,
     /// Pure defaults retain lexical class scope while running outside a method frame.
     initializer_scope: Option<String>,
@@ -173,6 +174,7 @@ impl Vm {
             .map(|(name, value)| (name.to_owned(), value.to_value()))
             .collect();
         Self {
+            enum_cases: classes::enums::EnumCases::default(),
             classes: classes::ClassTable::native(&registry),
             property_references: Default::default(),
             closure_captures: Vec::new(),

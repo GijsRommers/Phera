@@ -26,6 +26,7 @@ impl ClassTable {
                 parent: None,
                 interfaces: Vec::new(),
                 traits: Vec::new(),
+                enum_info: None,
                 kind: ClassKind::Class,
                 is_abstract: false,
                 is_throwable: false,
@@ -49,7 +50,11 @@ impl ClassTable {
             parent: Some("LogicException"),
             ..phera_extension_api::ClassEntry::class("Phera\\NotSupportedException")
         };
-        for entry in registry.classes().chain([&closure, &unsupported]) {
+        for entry in registry
+            .classes()
+            .chain([&closure, &unsupported])
+            .chain(super::enums::INTERFACES)
+        {
             let parent = entry.parent.and_then(|name| table.get(name));
             let mut methods = parent
                 .as_ref()
@@ -170,6 +175,7 @@ impl ClassTable {
                     parent,
                     interfaces,
                     traits: Vec::new(),
+                    enum_info: None,
                     kind: if entry.kind == NativeKind::Interface {
                         ClassKind::Interface
                     } else {

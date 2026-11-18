@@ -101,6 +101,9 @@ impl Vm {
                 }
                 let initializer = match &constant.initializer {
                     ConstantInitializer::Value(value) => ConstantInitializer::Value(value.clone()),
+                    ConstantInitializer::EnumCase { .. } => {
+                        return Err(internal_error!("enum case in trait"));
+                    }
                     ConstantInitializer::Compiled { function, .. } => {
                         ConstantInitializer::Compiled {
                             function: *function,
@@ -175,6 +178,7 @@ impl Vm {
                 })
             }
             ConstantInitializer::Value(value) => Some(value.clone()),
+            ConstantInitializer::EnumCase { .. } => None,
         }
     }
 }

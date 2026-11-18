@@ -116,9 +116,9 @@ fn implementation(target: &crate::calls::call_state::CallTarget) -> Option<Imple
         CallTarget::Native(_) | CallTarget::Intrinsic(_) => Some(Implementation::Internal),
         CallTarget::Method { method, .. } => match method.body {
             crate::classes::MethodBody::User(_) => Some(Implementation::Php),
-            crate::classes::MethodBody::Native(_) | crate::classes::MethodBody::Closure(_) => {
-                Some(Implementation::Internal)
-            }
+            crate::classes::MethodBody::Native(_)
+            | crate::classes::MethodBody::Closure(_)
+            | crate::classes::MethodBody::Enum(_) => Some(Implementation::Internal),
         },
         CallTarget::Closure(_) => None,
     }
