@@ -42,8 +42,9 @@ mod instruction;
 mod unit;
 
 pub use class::{
-    ClassConstant, ClassDeclaration, ClassKind, Initializer, MethodDeclaration,
-    PropertyDeclaration, Visibility,
+    ClassConstant, ClassDeclaration, ClassKind, EnumBacking, EnumCase, Initializer,
+    MethodDeclaration, PropertyDeclaration, TRAIT_CLASS_NAME, TraitAdaptation, TraitUse,
+    Visibility,
 };
 pub use function::{ArgumentLayout, Function, Handler, Parameter, Path, PathBase, Step};
 pub use ids::{

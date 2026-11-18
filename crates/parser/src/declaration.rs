@@ -160,6 +160,19 @@ impl Parser<'_> {
                 )));
             }
         };
+        if kind != ClassKind::Class
+            && (modifiers.is_abstract || modifiers.is_final || modifiers.is_readonly)
+        {
+            let token = match kind {
+                ClassKind::Trait => "trait",
+                ClassKind::Enum => "enum",
+                ClassKind::Interface => "interface",
+                ClassKind::Class => "class",
+            };
+            return Err(self.error(format!(
+                "syntax error, unexpected token \"{token}\", expecting \"abstract\" or \"final\" or \"readonly\" or \"class\""
+            )));
+        }
         self.bump()?;
 
         let name = Some(self.parse_strict_identifier()?);
@@ -171,13 +184,14 @@ impl Parser<'_> {
         };
 
         // Only classes and interfaces can extend; traits and enums cannot.
-        let extends = if self.eat(TokenKind::Extends)? {
+        let extends = if self.at(TokenKind::Extends) {
             if !matches!(kind, ClassKind::Class | ClassKind::Interface) {
                 return Err(self.error_at(
                     self.peek_span(),
-                    "syntax error: unexpected token \"extends\"",
+                    "syntax error, unexpected token \"extends\", expecting \"{\"",
                 ));
             }
+            self.bump()?;
             let mut names = vec![self.parse_class_name()?];
             // Interfaces extend a list; classes take a single name.
             if kind == ClassKind::Interface {
@@ -190,6 +204,12 @@ impl Parser<'_> {
             Vec::new()
         };
 
+        if self.at(TokenKind::Implements) && matches!(kind, ClassKind::Trait | ClassKind::Interface)
+        {
+            return Err(
+                self.error("syntax error, unexpected token \"implements\", expecting \"{\"")
+            );
+        }
         let implements = if self.eat(TokenKind::Implements)? {
             let mut names = vec![self.parse_class_name()?];
             while self.eat(TokenKind::Comma)? {
@@ -222,12 +242,11 @@ impl Parser<'_> {
     /// attached by the caller's `new`.
     pub(crate) fn parse_anonymous_class(
         &mut self,
-        start: Span,
         attributes: Vec<Attribute>,
         modifiers: Modifiers,
         arguments: &mut phera_ast::Arguments,
     ) -> Result<ClassDeclaration, ParseError> {
-        self.expect(TokenKind::Class, "'class'")?;
+        let start = self.expect(TokenKind::Class, "'class'")?.span;
         *arguments = if self.at(TokenKind::LeftParen) {
             self.parse_argument_list()?
         } else {
@@ -481,24 +500,40 @@ impl Parser<'_> {
             })
         } else {
             self.expect(TokenKind::As, "'as' or 'insteadof'")?;
-            // `as alias`, `as visibility`, `as visibility alias`
+            // An adaptation has at most one modifier. A second keyword is the alias.
             let mut visibility = None;
-            let mut alias = None;
-            if let Some((modifier, _)) = member_modifier(self.kind()) {
-                self.bump()?;
-                visibility = Some(modifier);
-                if is_word_token(self.kind()) && self.kind() != TokenKind::As {
-                    alias = Some(self.parse_identifier()?);
+            let mut is_final = false;
+            let mut invalid_modifier = None;
+            match self.kind() {
+                TokenKind::Public => visibility = Some(Visibility::Public),
+                TokenKind::Protected => visibility = Some(Visibility::Protected),
+                TokenKind::Private => visibility = Some(Visibility::Private),
+                TokenKind::Final => is_final = true,
+                TokenKind::Abstract | TokenKind::Static => {
+                    invalid_modifier = Some(self.parse_identifier()?);
                 }
-            } else if is_word_token(self.kind()) {
-                alias = Some(self.parse_identifier()?);
+                TokenKind::Readonly => {
+                    return Err(ParseError::compile(
+                        "Cannot use the readonly modifier on a method",
+                        self.peek_span(),
+                    ));
+                }
+                _ => {}
             }
+            if visibility.is_some() || is_final {
+                self.bump()?;
+            }
+            let alias = is_word_token(self.kind())
+                .then(|| self.parse_identifier())
+                .transpose()?;
             self.expect_end()?;
             Ok(TraitAdaptation::Alias {
                 trait_name,
                 method,
                 alias,
                 visibility,
+                is_final,
+                invalid_modifier,
             })
         }
     }

@@ -156,7 +156,10 @@ impl Vm {
                     || self
                         .classes
                         .get(&method.declaring)
-                        .is_some_and(|declaring| declaring.is_a(&scope.name))
+                        .is_some_and(|declaring| {
+                            declaring.is_a(&scope.name)
+                                || protected_prototype_applies(scope, declaring, method)
+                        })
             }),
         };
         if allowed {
@@ -168,7 +171,7 @@ impl Vm {
             "protected"
         };
         let from = scope
-            .map(|scope| format!("scope {}", scope.name))
+            .map(|scope| format!("scope {}", phera_value::class_display_name(&scope.name)))
             .unwrap_or_else(|| "global scope".into());
         let kind = if invocation == Invocation::Constructor {
             ""
@@ -177,9 +180,28 @@ impl Vm {
         };
         Err(NativeError::error(format!(
             "Call to {visibility} {kind}{}::{}() from {from}",
-            method.declaring, method.name
+            phera_value::class_display_name(&method.declaring),
+            method.name
         )))
     }
+}
+
+/// A protected override keeps the visibility of its ancestor's prototype.
+fn protected_prototype_applies(scope: &Class, declaring: Rc<Class>, method: &Method) -> bool {
+    let name = method.name.to_ascii_lowercase();
+    let mut ancestor = declaring.parent.as_ref();
+    while let Some(class) = ancestor {
+        if scope.is_a(&class.name)
+            && class
+                .methods
+                .get(&name)
+                .is_some_and(|method| method.visibility == Visibility::Protected)
+        {
+            return true;
+        }
+        ancestor = class.parent.as_ref();
+    }
+    false
 }
 
 impl Vm {

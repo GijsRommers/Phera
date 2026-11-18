@@ -40,8 +40,17 @@ pub fn compile_eval(
     source: &[u8],
     file: &str,
 ) -> Result<phera_bytecode::CompiledUnit, CompileError> {
+    compile_eval_with_seed(source, file, 0)
+}
+
+/// Repeated evals at the same source location declare distinct anonymous classes.
+pub fn compile_eval_with_seed(
+    source: &[u8],
+    file: &str,
+    anonymous_seed: u64,
+) -> Result<phera_bytecode::CompiledUnit, CompileError> {
     let code = [b"<?php ".as_slice(), source].concat();
-    compile_source(&code, file, pipeline::SourceKind::Eval)
+    compile_source(&code, file, pipeline::SourceKind::Eval { anonymous_seed })
 }
 
 fn compile_source(
