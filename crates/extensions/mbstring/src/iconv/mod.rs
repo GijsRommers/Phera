@@ -19,17 +19,17 @@
 //! `iconv_strlen` and `iconv_substr` convert large strings on Tokio's
 //! blocking threads instead of the request's worker.
 
+mod convert;
 mod mime;
 mod settings;
 
-use iconv_native::ConvertError;
 use phera_extension_api::{
     Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, Registry,
     Value, args,
 };
 
+use self::convert::{code_points, convert_text, points_of_ucs4};
 use self::settings::encoding_argument;
-use crate::encoding::read_u32;
 use crate::text::bounds;
 
 pub fn register(registry: &mut Registry) {
@@ -61,126 +61,6 @@ pub fn register(registry: &mut Registry) {
         "ICONV_MIME_DECODE_CONTINUE_ON_ERROR",
         mime::DECODE_CONTINUE_ON_ERROR,
     );
-}
-
-/// `EINVAL`, which is 22 on Linux and macOS: iconv stopped at an
-/// incomplete character at the end of the input, rather than an invalid one
-/// (`EILSEQ`).
-const EINVAL: i32 = 22;
-
-/// Whether the iconv call that just failed stopped at an incomplete
-/// character. `iconv-native` returns right after `iconv()` fails; all it
-/// does in between is shrink its buffer and close the converter, which do
-/// not set `errno` when they succeed.
-fn stopped_at_incomplete_character() -> bool {
-    std::io::Error::last_os_error().raw_os_error() == Some(EINVAL)
-}
-
-/// Why a conversion failed.
-#[derive(Clone, Copy)]
-enum Failure {
-    UnknownConversion,
-    IncompleteCharacter,
-    IllegalCharacter,
-}
-
-/// Converts the way PHP does, without reporting: the work that may run on
-/// another thread. `errno` is read here, on the thread that called iconv.
-fn try_convert(bytes: &[u8], from: &str, to: &str) -> Result<Vec<u8>, Failure> {
-    let result = if to.to_ascii_uppercase().contains("//IGNORE") {
-        // PHP returns what was converted unless the input ends in an
-        // incomplete character. The probe must use the real target: glibc
-        // reports EILSEQ instead of EINVAL once it has skipped a character
-        // the target cannot hold, and PHP then returns the string.
-        let probe = iconv_native::convert(bytes, from, to);
-        if matches!(probe, Err(ConvertError::InvalidInput)) && stopped_at_incomplete_character() {
-            probe
-        } else {
-            iconv_native::convert_lossy(bytes, from, to).map_err(Into::into)
-        }
-    } else {
-        iconv_native::convert(bytes, from, to)
-    };
-    result.map_err(|error| match error {
-        ConvertError::UnknownConversion => Failure::UnknownConversion,
-        ConvertError::InvalidInput if stopped_at_incomplete_character() => {
-            Failure::IncompleteCharacter
-        }
-        ConvertError::InvalidInput => Failure::IllegalCharacter,
-    })
-}
-
-/// PHP's warning for an unknown encoding, its notice for bad input.
-fn report(ctx: &mut dyn Context, failure: Failure, from: &str, to: &str, function: &str) {
-    match failure {
-        Failure::UnknownConversion => ctx.warning(format!(
-            "{function}(): Wrong encoding, conversion from \"{from}\" to \"{to}\" is not allowed"
-        )),
-        Failure::IncompleteCharacter => ctx.notice(format!(
-            "{function}(): Detected an incomplete multibyte character in input string"
-        )),
-        Failure::IllegalCharacter => ctx.notice(format!(
-            "{function}(): Detected an illegal character in input string"
-        )),
-    }
-}
-
-/// Converts with PHP's diagnostics, and `None` after one.
-fn convert(
-    ctx: &mut dyn Context,
-    bytes: &[u8],
-    from: &str,
-    to: &str,
-    function: &str,
-) -> Option<Vec<u8>> {
-    try_convert(bytes, from, to)
-        .map_err(|failure| report(ctx, failure, from, to, function))
-        .ok()
-}
-
-/// From this size on, a conversion runs on a blocking thread: copying the
-/// input and handing it over costs microseconds, converting it about a
-/// millisecond or more.
-const OFF_THREAD_BYTES: usize = 64 * 1024;
-
-/// [`convert`] for a string that may be large.
-async fn convert_text(
-    ctx: &mut dyn Context,
-    bytes: &[u8],
-    from: &str,
-    to: &str,
-    function: &str,
-) -> Result<Option<Vec<u8>>, NativeError> {
-    if bytes.len() < OFF_THREAD_BYTES {
-        return Ok(convert(ctx, bytes, from, to, function));
-    }
-    // PHP strings cannot leave the thread, so the work takes copies.
-    let (input, source, target) = (bytes.to_vec(), from.to_owned(), to.to_owned());
-    let result = tokio::task::spawn_blocking(move || try_convert(&input, &source, &target))
-        .await
-        .map_err(|_| NativeError::error(format!("{function}(): The conversion did not finish")))?;
-    Ok(result
-        .map_err(|failure| report(ctx, failure, from, to, function))
-        .ok())
-}
-
-/// The code points of `bytes`, through UCS-4LE.
-fn code_points(
-    ctx: &mut dyn Context,
-    bytes: &[u8],
-    encoding: &str,
-    function: &str,
-) -> Option<Vec<u32>> {
-    let ucs4 = convert(ctx, bytes, encoding, "UCS-4LE", function)?;
-    Some(points_of_ucs4(&ucs4))
-}
-
-fn points_of_ucs4(ucs4: &[u8]) -> Vec<u32> {
-    ucs4.as_chunks::<4>()
-        .0
-        .iter()
-        .map(|point| read_u32(point))
-        .collect()
 }
 
 const ENCODING: Param = crate::ENCODING;

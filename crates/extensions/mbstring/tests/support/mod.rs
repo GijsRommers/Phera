@@ -32,7 +32,18 @@ enum Comparison {
     ///   conversions made before, so on macOS an ASCII string and "Detected
     ///   an illegal character" count as the same.
     Transliteration,
+    /// iconv's `//IGNORE` on a long string under glibc: PHP's own result
+    /// loses valid bytes. glibc stops after each internal buffer in which it
+    /// skipped something; PHP then steps one input byte forward and calls
+    /// again, dropping the first byte of whatever comes next. Only the kind
+    /// of result and the diagnostics must agree; tests/large.rs checks
+    /// Phera's bytes against a clean conversion of its own.
+    IgnoreOnGlibc,
 }
+
+/// From this length, glibc's `//IGNORE` has stopped at internal buffers and
+/// PHP's result has gaps; the shorter strings of the matrices fit in one.
+const LONG_FOR_GLIBC: usize = 64 * 1024;
 
 pub struct Matrix {
     pub registry: Registry,
@@ -61,12 +72,14 @@ impl Matrix {
     }
 
     /// Compares `function(...arguments)` with PHP: exactly, except for the
-    /// two cases where PHP and Phera cannot agree byte for byte.
+    /// cases where PHP and Phera cannot agree byte for byte.
     ///
     /// - `mb_list_encodings()`: Phera supports 48 of PHP's 79 encodings, so
     ///   PHP's list is compared restricted to Phera's names. Every listed
     ///   name must be in PHP's list, in PHP's order.
     /// - `iconv()` to a `//TRANSLIT` target; see [`Comparison::Transliteration`].
+    /// - `iconv()` of a long string to `//IGNORE` on glibc; see
+    ///   [`Comparison::IgnoreOnGlibc`].
     pub fn case(&mut self, function: &str, arguments: Vec<Value>) {
         let literals: Vec<String> = arguments.iter().map(oracle::php_literal).collect();
         let mut expression = format!("{function}({})", literals.join(","));
@@ -76,8 +89,15 @@ impl Matrix {
         let transliterating = function == "iconv"
             && matches!(arguments.get(1), Some(Value::String(target))
                 if target.as_bytes().to_ascii_uppercase().ends_with(b"//TRANSLIT"));
+        let ignoring_long_on_glibc = cfg!(target_env = "gnu")
+            && function == "iconv"
+            && matches!(arguments.get(1), Some(Value::String(target))
+                if target.as_bytes().to_ascii_uppercase().ends_with(b"//IGNORE"))
+            && matches!(arguments.get(2), Some(Value::String(text)) if text.len() >= LONG_FOR_GLIBC);
         let comparison = if transliterating {
             Comparison::Transliteration
+        } else if ignoring_long_on_glibc {
+            Comparison::IgnoreOnGlibc
         } else {
             Comparison::Exact
         };
@@ -127,7 +147,7 @@ impl Matrix {
     /// at the call site, before the function's arguments are checked
     /// (`crates/vm/src/calls/sends.rs`). `testing::call` starts after that
     /// step, so it is taken here.
-    fn call(&mut self, function: &str, mut arguments: Vec<Value>) -> NativeResult {
+    pub fn call(&mut self, function: &str, mut arguments: Vec<Value>) -> NativeResult {
         let Some(entry) = self.registry.get_function(function) else {
             return call(&self.registry, &mut self.context, function, arguments);
         };
@@ -167,6 +187,7 @@ impl Matrix {
                 .map(|(line, comparison)| match comparison {
                     Comparison::Exact => line.clone(),
                     Comparison::Transliteration => transliteration_shape(line),
+                    Comparison::IgnoreOnGlibc => kind_and_diagnostics(line),
                 })
                 .collect()
         };
@@ -194,4 +215,13 @@ fn transliteration_shape(line: &str) -> String {
         return "case=(ASCII string or refused)".to_string();
     }
     format!("case=(ASCII string){diagnostics}")
+}
+
+/// A case line with a string result reduced to its being a string.
+fn kind_and_diagnostics(line: &str) -> String {
+    let Some(rest) = line.strip_prefix("case=S:") else {
+        return line.to_string();
+    };
+    let diagnostics = &rest[rest.find('|').unwrap_or(rest.len())..];
+    format!("case=(string){diagnostics}")
 }

@@ -14,7 +14,7 @@ use phera_extension_api::{
     args,
 };
 
-use super::convert;
+use super::convert::{Failure, convert, report, try_convert};
 use super::settings::{encoding_argument, internal_encoding};
 use crate::mime::Scheme;
 
@@ -267,30 +267,30 @@ fn decode(
             let alone = (index == 0 || input[index - 1].is_ascii_whitespace())
                 && (end == input.len() || input[end].is_ascii_whitespace());
             if !mode.strict || alone {
-                match iconv_native::convert(&word.bytes, word.charset, target) {
+                match try_convert(&word.bytes, word.charset, target) {
                     Ok(bytes) => {
                         decoded.extend(bytes);
                         after_word = true;
                     }
-                    Err(error) if mode.continue_on_error => {
+                    Err(failure) if mode.continue_on_error => {
                         // PHP drops the last byte of an invalid word that
                         // ends the input, but not one before a line break.
                         let at_end = ends_input
                             && end == input.len()
-                            && matches!(error, iconv_native::ConvertError::InvalidInput);
+                            && failure != Failure::UnknownConversion;
                         decoded.extend_from_slice(&input[index..end - usize::from(at_end)]);
                         after_word = false;
                     }
-                    Err(iconv_native::ConvertError::UnknownConversion) => {
+                    Err(Failure::UnknownConversion) => {
                         ctx.warning(format!(
                             "{function}(): Wrong encoding, conversion from \"???\" to \"{target}\" \
                              is not allowed"
                         ));
                         return None;
                     }
-                    Err(iconv_native::ConvertError::InvalidInput) => {
-                        // Again through `convert`, for PHP's notice.
-                        return convert(ctx, &word.bytes, word.charset, target, function);
+                    Err(failure) => {
+                        report(ctx, failure, word.charset, target, function);
+                        return None;
                     }
                 }
                 index = end;
