@@ -10,6 +10,10 @@ use crate::value::Value;
 /// The VM's per-class data. Implemented by other crates; tests use a dummy.
 pub trait ClassHandle: Any {
     fn name(&self) -> &str;
+    fn is_instance_of(&self, name: &str) -> bool {
+        self.name().eq_ignore_ascii_case(name)
+    }
+
     fn as_any(&self) -> &dyn Any;
 }
 

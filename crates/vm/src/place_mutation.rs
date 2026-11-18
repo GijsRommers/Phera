@@ -51,7 +51,9 @@ impl Vm {
         } else {
             let root_value = self.read_root(register, Missing::Silent);
             let keys = self.property_keys(place, root_value.clone())?;
-            self.validate_property_mutation(root_value, &keys, &mut value, binding.into())?;
+            if self.validate_property_mutation(root_value, &keys, &mut value, binding.into())? {
+                return Ok(());
+            }
             keys
         };
         let mut root = self
@@ -117,13 +119,25 @@ impl Vm {
             .flatten()
             .unwrap_or_default();
         let keys = self.property_keys(place, raw.deref().clone())?;
-        for key in keys.iter().cloned() {
+        let mut steps = keys.iter().cloned().peekable();
+        while let Some(key) = steps.next() {
             let plain = raw.deref().clone();
             raw = match (plain, key) {
                 (Value::Array(array), PathKey::Index(Some(key))) => {
                     array.get(&key).cloned().unwrap_or_default()
                 }
                 (Value::Object(object), PathKey::Property(key)) => {
+                    if steps.peek().is_none()
+                        && let Some(access) = crate::properties::native_property_access(&object)
+                        && (access.mutate)(
+                            self,
+                            &object,
+                            &crate::path_update::property_name(&key),
+                            phera_extension_api::NativePropertyMutation::Reference,
+                        )?
+                    {
+                        return Ok(Value::Reference(Rc::new(RefCell::new(value))));
+                    }
                     crate::property_storage::read(&object, &key).unwrap_or_default()
                 }
                 _ => Value::Null,
@@ -171,7 +185,9 @@ impl Vm {
         }
         let root_value = self.read_root(register, Missing::Silent);
         let keys = self.property_keys(place, root_value.clone())?;
-        self.validate_property_mutation(root_value, &keys, &mut Value::Null, Mutation::Unset)?;
+        if self.validate_property_mutation(root_value, &keys, &mut Value::Null, Mutation::Unset)? {
+            return Ok(());
+        }
         let mut root = self
             .current_slot_mut(register)
             .and_then(Option::take)

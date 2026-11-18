@@ -55,6 +55,7 @@ phera-phpt = { path = "crates/phpt" }
 phera-extension-api = { path = "crates/extension-api" }
 phera-ext-core = { path = "crates/extensions/core" }
 phera-ext-ctype = { path = "crates/extensions/ctype" }
+phera-ext-date = { path = "crates/extensions/date" }
 phera-ext-filter = { path = "crates/extensions/filter" }
 phera-ext-hash = { path = "crates/extensions/hash" }
 phera-ext-http = { path = "crates/extensions/http" }
@@ -105,6 +106,9 @@ pcre2-sys = "=0.2.10"
 tokio-postgres = "0.7.18"
 mysql_async = { version = "0.37.1", default-features = false, features = ["minimal-rust"] }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
+tz-rs = { version = "=0.7.3", default-features = false, features = ["alloc"] }
+jiff-tzdb = "=0.1.9"
+tzdb_data = "=0.2.5"
 
 # Release builds are what gets measured and deployed. Whole-program
 # optimisation lets the compiler inline across crates (the value type lives in
