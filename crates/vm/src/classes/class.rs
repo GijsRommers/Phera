@@ -45,6 +45,7 @@ pub(crate) struct Class {
     pub(crate) property_template: Option<phera_value::PhpArray>,
     pub(crate) static_properties: Vec<PropertyDefault>,
     pub(crate) constants: HashMap<String, Rc<LinkedConstant>>,
+    pub(crate) declaration: Option<(crate::code_table::FunctionIndex, u32)>,
 }
 
 /// Defaults retain their mangled keys so private ancestors do not collide.

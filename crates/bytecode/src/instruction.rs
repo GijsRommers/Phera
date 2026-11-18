@@ -527,6 +527,17 @@ pub enum Instruction {
         function: FunctionId,
         binding: ClosureBinding,
     },
+    /// A class constant whose identifier is computed, e.g. `Foo::{$name}`.
+    FetchDynamicClassConstant {
+        dst: Reg,
+        class: Reg,
+        name: Reg,
+    },
+    /// Compile and execute a string in the caller's scope.
+    Eval {
+        dst: Reg,
+        source: Reg,
+    },
 }
 
 // The interpreter copies one instruction per step. Keep them register-sized;

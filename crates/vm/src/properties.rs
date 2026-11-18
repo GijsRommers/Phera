@@ -6,46 +6,6 @@ use phera_extension_api::{NativeError, NativePropertyRead, NativeResult};
 use phera_value::{ArrayKey, Value};
 
 impl Vm {
-    /// User-facing property enumeration strips visibility prefixes after checking the current scope.
-    pub(crate) fn visible_properties(&self, object: &phera_value::Object) -> phera_value::PhpArray {
-        let mut result = phera_value::PhpArray::new();
-        for (key, value) in object.to_array().iter() {
-            let name = crate::path_update::property_name(&key);
-            if self
-                .property_key(object, &name)
-                .is_ok_and(|resolved| resolved == key)
-            {
-                result.insert(ArrayKey::str(name), value.deref().clone());
-            }
-        }
-        result
-    }
-
-    /// Class variables expose defaults rather than values modified on existing objects.
-    pub(crate) fn class_variables(&mut self, name: &str) -> NativeResult {
-        let class = self
-            .classes
-            .get(name)
-            .ok_or_else(|| NativeError::error(format!("Class \"{name}\" not found")))?;
-        let temporary = self.classes.allocate(class.clone());
-        let mut result = phera_value::PhpArray::new();
-        for property in class.defaults.iter().chain(&class.static_properties) {
-            if !property.initialized || self.property_key(&temporary, &property.name).is_err() {
-                continue;
-            }
-            let value = if let Some(initializer) = &property.initializer {
-                self.evaluate_initializer(initializer, &property.declaring)?
-            } else {
-                property.static_storage.as_ref().map_or_else(
-                    || property.value.deref().clone(),
-                    |storage| storage.reference.borrow().borrow().deref().clone(),
-                )
-            };
-            result.insert(ArrayKey::str(property.name.as_bytes()), value);
-        }
-        Ok(Value::Array(std::rc::Rc::new(result)))
-    }
-
     /// Dynamic static targets accept either an object handle or a class-name string.
     pub(crate) fn static_property_names(
         &mut self,
@@ -78,7 +38,7 @@ impl Vm {
         let class = self
             .classes
             .get(&class_name)
-            .ok_or_else(|| NativeError::error(format!("Class \"{class_name}\" not found")))?;
+            .ok_or_else(|| Self::class_miss(&class_name, "Class"))?;
         let property = class
             .static_properties
             .iter()

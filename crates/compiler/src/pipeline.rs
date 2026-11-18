@@ -12,14 +12,22 @@ use crate::ir::{CompiledUnit, Constant, Instruction};
 use crate::policies::DeclarationTiming;
 use crate::{CompileError, errors, passes::lower};
 
+/// Included files return 1 by default; evaluated expressions return null.
+#[derive(Clone, Copy)]
+pub(super) enum SourceKind {
+    File,
+    Eval,
+}
+
 /// Parse and lower on the dedicated parser stack, returning immutable bytecode.
 pub(super) fn compile_on_stack(
     source: &[u8],
     file: &str,
+    kind: SourceKind,
 ) -> Result<phera_bytecode::CompiledUnit, CompileError> {
     let lines = LineTable::from_bytes(source);
     let (parsed, scanner_diagnostics) = phera_parser::parse_file_on_current_stack(source);
-    let result = compile_program(parsed, source, file, &lines);
+    let result = compile_program(parsed, source, file, &lines, kind);
     match result {
         Ok(mut unit) => {
             unit.scanner_diagnostics = scanner_diagnostics;
@@ -37,20 +45,29 @@ fn compile_program(
     source: &[u8],
     file: &str,
     lines: &LineTable,
+    kind: SourceKind,
 ) -> Result<phera_bytecode::CompiledUnit, CompileError> {
     let ast = parsed.map_err(|error| {
         let display = String::from_utf8_lossy(source);
         let token = source
             .get(error.span.start..error.span.end)
             .unwrap_or_default();
+        let token = String::from_utf8_lossy(token);
         let line = errors::parse_line(&error.message, &display, lines.line(error.span.start));
-        CompileError {
-            message: errors::parse_message(
-                &error.message,
+        let message = errors::parse_message(&error.message, &display, &token, line);
+        let message = match kind {
+            SourceKind::File => message,
+            SourceKind::Eval => crate::eval_diagnostics::message(
+                message,
                 &display,
-                &String::from_utf8_lossy(token),
+                &token,
+                error.span.start,
                 line,
+                lines,
             ),
+        };
+        CompileError {
+            message,
             file: file.into(),
             line,
             parse: true,
@@ -60,7 +77,11 @@ fn compile_program(
     let mut compiler = Compiler::new(file, lines, "{main}", "");
     compiler.function.dynamic_scope = true;
     compiler.block(&ast.statements, DeclarationTiming::Hoisted)?;
-    let register = compiler.literal(Constant::Int(1), 1)?;
+    let default = match kind {
+        SourceKind::File => Constant::Int(1),
+        SourceKind::Eval => Constant::Null,
+    };
+    let register = compiler.literal(default, 1)?;
     compiler.emit(Instruction::Return(register), 1);
     let unit = CompiledUnit {
         main: compiler.finish(),
