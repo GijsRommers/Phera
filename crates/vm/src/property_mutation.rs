@@ -77,6 +77,54 @@ impl Vm {
         Ok(())
     }
 
+    /// Reject readonly writes before the value's conversion can run PHP code.
+    pub(crate) fn check_readonly_property_write(
+        &self,
+        object: &phera_value::Object,
+        property: &crate::classes::class::PropertyDefault,
+        indirect: bool,
+        mutation: Mutation,
+    ) -> Result<(), NativeError> {
+        let name = &property.name;
+        let key = &property.key;
+        if mutation == Mutation::Bind {
+            return Err(NativeError::error(format!(
+                "Cannot indirectly modify readonly property {}::${name}",
+                property.declaring
+            )));
+        }
+        let scope = self.current().and_then(|frame| frame.scope());
+        if (crate::property_storage::read(object, key).is_some()
+            && !self.clone_can_update(object, key))
+            || indirect
+        {
+            let action = if mutation == Mutation::Unset {
+                "unset"
+            } else {
+                "modify"
+            };
+            return Err(NativeError::error(format!(
+                "Cannot {action} readonly property {}::${name}",
+                property.declaring
+            )));
+        }
+        if scope.is_none_or(|scope| !scope.is_a(&property.declaring)) {
+            let action = if mutation == Mutation::Unset {
+                "unset"
+            } else {
+                "modify"
+            };
+            let from = scope
+                .map(|scope| format!("scope {}", scope.name))
+                .unwrap_or_else(|| "global scope".into());
+            return Err(NativeError::error(format!(
+                "Cannot {action} protected(set) readonly property {}::${name} from {from}",
+                property.declaring
+            )));
+        }
+        Ok(())
+    }
+
     /// Validate each object boundary, including indirect mutations of readonly arrays.
     pub(crate) fn validate_property_mutation(
         &mut self,
@@ -119,41 +167,12 @@ impl Vm {
                                 && crate::property_storage::read(object, key)
                                     .is_some_and(|value| value.deref().is_object()))
                         {
-                            if mutation == Mutation::Bind {
-                                return Err(NativeError::error(format!(
-                                    "Cannot indirectly modify readonly property {}::${name}",
-                                    property.declaring
-                                )));
-                            }
-                            let scope = self.current().and_then(|frame| frame.scope());
-                            if (crate::property_storage::read(object, key).is_some()
-                                && !self.clone_can_update(object, key))
-                                || steps.peek().is_some()
-                            {
-                                let action = if mutation == Mutation::Unset {
-                                    "unset"
-                                } else {
-                                    "modify"
-                                };
-                                return Err(NativeError::error(format!(
-                                    "Cannot {action} readonly property {}::${name}",
-                                    property.declaring
-                                )));
-                            }
-                            if scope.is_none_or(|scope| !scope.is_a(&property.declaring)) {
-                                let action = if mutation == Mutation::Unset {
-                                    "unset"
-                                } else {
-                                    "modify"
-                                };
-                                let from = scope
-                                    .map(|scope| format!("scope {}", scope.name))
-                                    .unwrap_or_else(|| "global scope".into());
-                                return Err(NativeError::error(format!(
-                                    "Cannot {action} protected(set) readonly property {}::${name} from {from}",
-                                    property.declaring
-                                )));
-                            }
+                            self.check_readonly_property_write(
+                                object,
+                                property,
+                                steps.peek().is_some(),
+                                mutation,
+                            )?;
                         }
                         if steps.peek().is_none()
                             && mutation != Mutation::Unset

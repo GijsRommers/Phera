@@ -44,6 +44,20 @@ impl Vm {
         value: Value,
     ) -> NativeResult {
         if self.property_needs_string(object, key, &value) {
+            if let Some(property) = object
+                .class
+                .as_any()
+                .downcast_ref::<Class>()
+                .and_then(|class| class.defaults.iter().find(|property| property.key == *key))
+                .filter(|property| property.is_readonly)
+            {
+                self.check_readonly_property_write(
+                    object,
+                    property,
+                    false,
+                    crate::access_mode::Mutation::Assign,
+                )?;
+            }
             self.coerce_stringable(value).await
         } else {
             Ok(value)

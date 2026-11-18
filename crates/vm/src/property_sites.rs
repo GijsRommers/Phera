@@ -54,22 +54,32 @@ impl Vm {
             .names
             .get(name.index())
             .ok_or_else(|| internal_error!("property name"))?;
+        let class = object
+            .class
+            .as_any()
+            .downcast_ref::<crate::classes::Class>();
+        if class.is_some_and(|class| {
+            class
+                .static_properties
+                .iter()
+                .any(|property| property.name == *name)
+        }) {
+            // Access through an instance needs the static-property diagnostic only
+            // when the requested name is also declared static.
+            return Ok(None);
+        }
         let key = match self.property_key(object, name) {
             Ok(key) => key,
             Err(_) if has_magic_properties(object) => return Ok(None),
             Err(error) => return Err(error),
         };
-        let property = object
-            .class
-            .as_any()
-            .downcast_ref::<crate::classes::Class>()
-            .and_then(|class| {
-                class
-                    .defaults
-                    .iter()
-                    .enumerate()
-                    .find(|(_, property)| property.key == key)
-            });
+        let property = class.and_then(|class| {
+            class
+                .defaults
+                .iter()
+                .enumerate()
+                .find(|(_, property)| property.key == key)
+        });
         let slot = property.map(|(slot, _)| slot);
         let write_rule = match property {
             Some((_, property)) if !property.is_readonly => match &property.ty {
@@ -103,15 +113,6 @@ impl Vm {
         let Some(entry) = self.property_entry(&object, name)? else {
             return Ok(None);
         };
-        let class = object
-            .class
-            .as_any()
-            .downcast_ref::<crate::classes::Class>();
-        if let Some(class) = class
-            && !class.static_properties.is_empty()
-        {
-            return Ok(None);
-        }
         Ok(
             crate::property_storage::read_at(&object, &entry.key, entry.slot)
                 .map(|value| value.deref().clone()),
