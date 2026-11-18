@@ -10,6 +10,8 @@ Usage:
                                           serve PATH (a directory, or one
                                           script that answers every request)
   phera --dump <file.php>                 print the compiled bytecode
+  phera check [--level 0|1] [--format text|json|github] [--no-progress]
+              [--generate-baseline FILE] <paths...>
   phera --version";
 
 pub(crate) enum Command {
@@ -22,6 +24,7 @@ pub(crate) enum Command {
         script: String,
     },
     Serve(ServeOptions),
+    Check(phera_analyzer::config::Options),
     Version,
 }
 
@@ -41,6 +44,10 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
             arguments.next();
             let script = arguments.next().ok_or("--dump needs a file.")?;
             Ok(Command::Dump { script })
+        }
+        Some("check") => {
+            arguments.next();
+            phera_analyzer::config::Options::parse(arguments).map(Command::Check)
         }
         Some("serve") => {
             arguments.next();

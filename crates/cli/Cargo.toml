@@ -10,6 +10,7 @@ name = "phera"
 path = "src/main.rs"
 
 [dependencies]
+phera-analyzer.workspace = true
 phera-runtime.workspace = true
 phera-server.workspace = true
 tokio.workspace = true

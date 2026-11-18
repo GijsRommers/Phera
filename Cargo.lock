@@ -1158,6 +1158,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
+name = "phera-analyzer"
+version = "0.1.0"
+dependencies = [
+ "phera-ast",
+ "phera-lexer",
+ "phera-parser",
+ "phera-source",
+]
+
+[[package]]
 name = "phera-ast"
 version = "0.1.0"
 dependencies = [
@@ -1173,6 +1183,7 @@ name = "phera-cli"
 version = "0.1.0"
 dependencies = [
  "mimalloc",
+ "phera-analyzer",
  "phera-phpt",
  "phera-runtime",
  "phera-server",
