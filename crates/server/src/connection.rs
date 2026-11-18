@@ -4,8 +4,8 @@ use std::net::SocketAddr;
 use std::rc::Rc;
 use std::time::Duration;
 
-use http_body_util::{BodyExt, Full};
-use hyper::body::{Bytes, Incoming};
+use http_body_util::BodyExt;
+use hyper::body::Incoming;
 use hyper::header::{HeaderName, HeaderValue};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
@@ -14,9 +14,10 @@ use hyper_util::rt::{TokioIo, TokioTimer};
 use hyper_util::server::graceful::Watcher;
 use tokio::net::TcpStream;
 
+use crate::file_body::WireBody;
 use crate::handler::Handler;
 use crate::request::{HttpVersion, Request};
-use crate::response::Response;
+use crate::response::{Body, Response};
 
 /// Serve one connection. Runs until the client or the server closes it; a
 /// shutdown watcher finishes in-flight requests and stops new ones.
@@ -106,7 +107,7 @@ async fn to_request(
 }
 
 /// Turn a handler's [`Response`] into a hyper response.
-fn to_hyper_response(response: Response) -> HyperResponse<Full<Bytes>> {
+fn to_hyper_response(response: Response) -> HyperResponse<WireBody> {
     let status = hyper::StatusCode::from_u16(response.status)
         .unwrap_or(hyper::StatusCode::INTERNAL_SERVER_ERROR);
     let mut builder = HyperResponse::builder().status(status);
@@ -127,8 +128,8 @@ fn to_hyper_response(response: Response) -> HyperResponse<Full<Bytes>> {
         }
     }
     builder
-        .body(Full::new(Bytes::from(response.body)))
-        .unwrap_or_else(|_| HyperResponse::new(Full::new(Bytes::new())))
+        .body(WireBody::from(response.body))
+        .unwrap_or_else(|_| HyperResponse::new(WireBody::from(Body::default())))
 }
 
 enum BodyError {
