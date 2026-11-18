@@ -41,5 +41,12 @@ pub trait Extension {
         Some(self.name())
     }
 
+    /// What `phpversion('name')` reports, for a module that has a version of
+    /// its own: phpredis says "6.3.0". Modules that ship with PHP report
+    /// PHP's version, which is the default.
+    fn module_version(&self) -> Option<&'static str> {
+        None
+    }
+
     fn register(&self, registry: &mut Registry);
 }

@@ -64,6 +64,8 @@ pub struct Registry {
     functions: HashMap<String, FunctionEntry>,
     function_order: Vec<&'static str>,
     extensions: Vec<&'static str>,
+    /// Modules whose version is not PHP's, by lowercase name.
+    module_versions: HashMap<String, &'static str>,
     bundles: Vec<&'static str>,
     constants: HashMap<String, ConstantValue>,
     /// In registration order, which puts every parent before its children.
@@ -81,7 +83,18 @@ impl Registry {
         self.bundles.push(extension.name());
         if let Some(module) = extension.php_module() {
             self.php_module(module);
+            if let Some(version) = extension.module_version() {
+                self.module_versions
+                    .insert(module.to_ascii_lowercase(), version);
+            }
         }
+    }
+
+    /// The version a module reports for itself, when it is not PHP's.
+    pub fn module_version(&self, name: &str) -> Option<&'static str> {
+        self.module_versions
+            .get(&name.to_ascii_lowercase())
+            .copied()
     }
 
     /// Engine-provided PHP modules can register without an extension crate.

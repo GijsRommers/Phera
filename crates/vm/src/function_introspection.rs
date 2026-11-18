@@ -100,10 +100,16 @@ impl Vm {
                 Value::from(result)
             }
             RuntimeFunction::PhpVersion => {
-                if extension.is_none() || loaded {
-                    Value::from(phera_extension_api::PHP_VERSION)
-                } else {
-                    Value::Bool(false)
+                // A module that ships with PHP reports PHP's version; one
+                // with a release of its own (phpredis) reports that.
+                match &extension {
+                    None => Value::from(phera_extension_api::PHP_VERSION),
+                    Some(name) if loaded => Value::from(
+                        self.registry
+                            .module_version(name)
+                            .unwrap_or(phera_extension_api::PHP_VERSION),
+                    ),
+                    Some(_) => Value::Bool(false),
                 }
             }
             RuntimeFunction::DefinedFunctions => {
