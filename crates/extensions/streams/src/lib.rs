@@ -7,12 +7,16 @@
 //! ```
 
 mod context_options;
+mod copy;
+mod directory;
 mod errors;
+mod file_attributes;
 mod handles;
 mod io_policy;
 mod locking;
 mod metadata;
 mod mode;
+mod mutations;
 mod request;
 mod resource;
 mod stream;
@@ -35,9 +39,13 @@ impl Extension for Streams {
 
     fn register(&self, registry: &mut Registry) {
         context_options::register(registry);
+        copy::register(registry);
+        directory::register(registry);
+        file_attributes::register(registry);
         handles::register(registry);
         locking::register(registry);
         metadata::register(registry);
+        mutations::register(registry);
         resource::register(registry);
         temporary::register(registry);
         transfer::register(registry);

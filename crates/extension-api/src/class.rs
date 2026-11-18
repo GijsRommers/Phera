@@ -124,6 +124,7 @@ pub struct PropertyEntry {
     pub default: ConstantValue,
     pub visibility: Visibility,
     pub is_static: bool,
+    pub is_readonly: bool,
 }
 
 impl PropertyEntry {
@@ -133,7 +134,12 @@ impl PropertyEntry {
             default,
             visibility,
             is_static: false,
+            is_readonly: false,
         }
+    }
+    pub const fn readonly(mut self) -> Self {
+        self.is_readonly = true;
+        self
     }
 }
 

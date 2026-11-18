@@ -110,7 +110,7 @@ impl ClassTable {
                     initialized: true,
                     initializer: None,
                     ty: None,
-                    is_readonly: false,
+                    is_readonly: property.is_readonly,
                     static_initialized: Rc::new(std::cell::Cell::new(true)),
                     value_initialized: Rc::new(std::cell::Cell::new(true)),
                 });

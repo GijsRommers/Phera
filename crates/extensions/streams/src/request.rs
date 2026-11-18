@@ -5,7 +5,7 @@ use std::ffi::OsStr;
 use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 use std::sync::Arc;
 
 use phera_extension_api::{Context, RequestState, Value, value::Resource};
@@ -14,7 +14,7 @@ pub struct Files {
     pub cwd: Option<PathBuf>,
     pub mask: u32,
     pub include_path: Vec<u8>,
-    pub directory: Weak<Resource>,
+    pub directory: Option<Rc<Resource>>,
     pub input: Arc<[u8]>,
     next_id: i64,
 }
@@ -25,7 +25,7 @@ impl Default for Files {
             cwd: env::current_dir().ok(),
             mask: 0o022,
             include_path: b".".to_vec(),
-            directory: Weak::new(),
+            directory: None,
             input: Arc::default(),
             next_id: 4,
         }
