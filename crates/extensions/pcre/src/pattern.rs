@@ -1,21 +1,39 @@
-//! Delimiters nest: `preg_match('{a{2}}i', 'AA') === 1`; `/a/k` warns.
+//! Reading a PHP pattern: the delimiters, the body, then the modifiers.
+//!
+//! ```php
+//! preg_match('{a{2}}i', 'AA');   // 1: bracket delimiters may nest
+//! preg_match('/a/k', 'a');       // false; warning "Unknown modifier 'k'"
+//! ```
 
+/// The modifiers after the closing delimiter.
 #[derive(Default)]
 pub(crate) struct Options {
+    /// `i`
     pub insensitive: bool,
+    /// `m`: `^` and `$` at every line.
     pub multiline: bool,
+    /// `s`: `.` matches a newline too.
     pub dotall: bool,
+    /// `x`: whitespace and `#` comments in the pattern are ignored.
     pub extended: bool,
+    /// `A`: the match must start at the offset.
     pub anchored: bool,
+    /// `D`: `$` is the very end of the subject, not before a final newline.
     pub dollar_end: bool,
+    /// `u`: pattern and subject are UTF-8.
     pub utf: bool,
+    /// `U`, `J`, `n` and `r`, passed to PCRE2 as an inline setting such as
+    /// `(?U)` at the start of the pattern.
     pub inline: String,
 }
+
 pub(crate) struct Pattern<'a> {
     pub body: &'a [u8],
     pub options: Options,
 }
 
+/// Splits a pattern into body and modifiers. Leading whitespace is skipped,
+/// as in PHP. The error is PHP's warning text.
 pub(crate) fn parse(pattern: &[u8]) -> Result<Pattern<'_>, String> {
     let start = pattern
         .iter()

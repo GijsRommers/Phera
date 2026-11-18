@@ -26,8 +26,9 @@ impl Vm {
     pub(crate) fn end_iterator(&mut self, iterator: IterId) -> Result<(), NativeError> {
         let state = self
             .call_stack
-            .current_mut()
-            .and_then(|frame| frame.iterators.remove(&iterator.0));
+            .current_extras_mut()
+            .iterators
+            .remove(&iterator.0);
         if let Some(mut state) = state {
             self.release_iterator_subject(&mut state)?;
         }

@@ -1,20 +1,34 @@
-//! Port of php-src ext/standard/metaphone.c, metaphone.
-//! NUL termination and the two-phoneme X limit quirk are retained.
+//! `metaphone("Knight")` is `"NFT"`: a key for how an English word
+//! sounds, ported from php-src ext/standard/metaphone.c.
+//!
+//! Two quirks of the C code are kept: the input ends at its first NUL byte,
+//! and an X, which is two sounds (KS), may make the result one longer than
+//! `$max_phonemes`.
 
 use phera_extension_api::{
-    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Registry, Value, args,
+    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Value, args,
 };
 
-use super::{buffer, bytes};
+use super::{alphabetic, buffer};
 
-const PARAMS_PARAMS: &[Param] = &[
-    Param::new("string", ParamType::String),
-    Param::new("max_phonemes", ParamType::Int).optional(),
-];
+pub(super) const FUNCTIONS: &[FunctionEntry] = &[METAPHONE];
 
-pub(crate) fn register(registry: &mut Registry) {
-    registry.function(FunctionEntry::sync("metaphone", PARAMS_PARAMS, metaphone));
-}
+/// `metaphone(string $string, int $max_phonemes = 0): string`; 0 means no
+/// limit.
+///
+/// ```php
+/// metaphone("Thompson"); // "0MPSN": 0 stands for "th"
+/// metaphone("Knight", 2); // "NF"
+/// metaphone("Taxi", 2);   // "TKS": the X is not split
+/// ```
+const METAPHONE: FunctionEntry = FunctionEntry::sync(
+    "metaphone",
+    &[
+        Param::new("string", ParamType::String),
+        Param::new("max_phonemes", ParamType::Int).optional(),
+    ],
+    metaphone,
+);
 
 fn vowel(byte: u8) -> bool {
     b"AEIOU".contains(&byte)
@@ -24,7 +38,6 @@ fn soft(byte: u8) -> bool {
     b"EIY".contains(&byte)
 }
 
-/// PHP may emit two phonemes for X even when only one remains before the limit.
 fn metaphone(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let limit = args::int(arguments, 1).unwrap_or_default();
     if limit < 0 {
@@ -37,10 +50,10 @@ fn metaphone(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         .iter()
         .position(|&byte| byte == 0)
         .unwrap_or(input.len());
-    let input = input.get(..end).unwrap_or_default();
+    let input = &input[..end];
     let output = buffer(input.len().saturating_mul(2))?;
-    let Some(cursor) = input.iter().position(|&byte| super::alphabetic(byte)) else {
-        return Ok(bytes(output));
+    let Some(cursor) = input.iter().position(|&byte| alphabetic(byte)) else {
+        return Ok(Value::from(output));
     };
     let mut encoder = Encoder {
         input,
@@ -51,7 +64,7 @@ fn metaphone(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     while encoder.cursor < input.len() && (limit == 0 || encoder.output.len() < limit as usize) {
         encoder.step();
     }
-    Ok(bytes(encoder.output))
+    Ok(Value::from(encoder.output))
 }
 
 struct Encoder<'a> {
@@ -196,7 +209,7 @@ impl Encoder<'_> {
                 None
             }
         } else if next == b'N' {
-            if !super::alphabetic(after) || after == b'E' && self.letter(self.cursor + 3) == b'D' {
+            if !alphabetic(after) || after == b'E' && self.letter(self.cursor + 3) == b'D' {
                 None
             } else {
                 Some(b'K')

@@ -1,52 +1,73 @@
-//! Port of php-src ext/standard/array.c: PHP_FUNCTION(range).
-//! Endpoint coercion and step validation retain PHP 8.3 diagnostic order.
+//! `range(1, 5, 2)` is `[1, 3, 5]`: ported from php-src
+//! ext/standard/array.c, `PHP_FUNCTION(range)`.
+//!
+//! The endpoints are read in range_endpoint.rs and the values made in
+//! range_values.rs; this file checks the arguments in PHP's order.
 
 use phera_extension_api::{
-    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Registry, Value, args,
+    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Value, args, prepare_call,
 };
 
 use super::range_endpoint::{ByteMeaning, Endpoint, NumberKind, endpoint, error};
+use super::range_values::{RangeKind, RangeValues};
+use crate::arguments::given_type;
 
-const RANGE_PARAMS: &[Param] = &[
-    Param::new("start", ParamType::Mixed),
-    Param::new("end", ParamType::Mixed),
-    Param::new("step", ParamType::Mixed).optional(),
-];
+pub(super) const FUNCTIONS: &[FunctionEntry] = &[RANGE];
 
-const PREPARED_RANGE_PARAMS: &[Param] = &[
+/// `range(string|int|float $start, string|int|float $end, int|float $step
+/// = 1): array`
+///
+/// Single-byte strings make a range of characters; a float anywhere makes
+/// floats. The step's sign does not matter, except that a negative step
+/// cannot go up.
+///
+/// ```php
+/// range(1, 5, 2);   // [1, 3, 5]
+/// range(5, 1, 2);   // [5, 3, 1]
+/// range("a", "e", 2); // ["a", "c", "e"]
+/// range(0, 1, 0.25);  // [0.0, 0.25, 0.5, 0.75, 1.0]
+/// ```
+const RANGE: FunctionEntry = FunctionEntry::sync(
+    "range",
+    &[
+        // string|int|float, which a parameter list cannot declare; see below.
+        Param::new("start", ParamType::Mixed),
+        Param::new("end", ParamType::Mixed),
+        Param::new("step", ParamType::Mixed).optional(),
+    ],
+    range,
+);
+
+/// The parameters once the endpoints are checked, to prepare the step.
+const PREPARED_PARAMS: &[Param] = &[
     Param::new("start", ParamType::Mixed),
     Param::new("end", ParamType::Mixed),
     Param::new("step", ParamType::Number).optional(),
 ];
 
-pub(crate) fn register(registry: &mut Registry) {
-    registry.function(FunctionEntry::sync("range", RANGE_PARAMS, range));
-}
-
-/// The endpoint union cannot be declared in ParamType. Parse it before the
-/// step so null deprecations and type errors retain PHP's argument order.
 fn range(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    // The endpoints are checked as `string|int|float` here, before the step
+    // is prepared, so that their deprecations and errors come first.
     for (index, name) in [(0, "start"), (1, "end")] {
-        let value = args::value(arguments, index);
+        let value = &arguments[index];
         let scalar = matches!(value, Value::Int(_) | Value::Float(_) | Value::String(_));
         let coercible = matches!(value, Value::Null | Value::Bool(_));
         if !scalar && (context.strict_types() || !coercible) {
-            let given = crate::argument_type_name(value);
             return Err(NativeError::type_error(format!(
-                "range(): Argument #{} (${name}) must be of type string|int|float, {given} given",
-                index + 1
+                "range(): Argument #{} (${name}) must be of type string|int|float, {} given",
+                index + 1,
+                given_type(value)
             )));
         }
         if value.is_null() {
-            context.deprecated(format!("range(): Passing null to parameter #{} (${name}) of type string|int|float is deprecated",index+1));
+            context.deprecated(format!(
+                "range(): Passing null to parameter #{} (${name}) of type string|int|float is deprecated",
+                index + 1
+            ));
         }
     }
     let mut prepared = arguments.to_vec();
-    phera_extension_api::prepare_arguments(
-        &FunctionEntry::sync("range", PREPARED_RANGE_PARAMS, range_values),
-        &mut prepared,
-        context,
-    )?;
+    prepare_call("range", PREPARED_PARAMS, &mut prepared, context)?;
     range_values(context, &prepared)
 }
 
@@ -60,13 +81,13 @@ fn range_values(context: &mut dyn Context, arguments: &[Value]) -> NativeResult 
         || matches!(end.kind, NumberKind::Floating)
         || matches!(step.kind, StepKind::Fractional)
     {
-        super::range_values::RangeKind::Floating
+        RangeKind::Floating
     } else if characters {
-        super::range_values::RangeKind::Character
+        RangeKind::Character
     } else {
-        super::range_values::RangeKind::Integer
+        RangeKind::Integer
     };
-    super::range_values::RangeValues::new(start, end, step, kind).collect()
+    RangeValues::new(start, end, step, kind).collect()
 }
 
 #[derive(Clone, Copy)]

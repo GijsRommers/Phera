@@ -1,10 +1,9 @@
-//! Per-unit call-symbol caches avoid resolving the same callee on every call.
+//! Request-local values made once per loaded file: names, literals, call
+//! links and the per-instruction site caches.
 
-use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
+use std::{cell::RefCell, rc::Rc};
 
 use phera_bytecode::CompiledUnit;
-
-use crate::SymbolCache;
 
 /// Materialized immutable literals share PHP COW values across frame activations.
 /// Keyed by constant/symbol index in a retained unit; populated at first unit use.
@@ -18,9 +17,6 @@ pub(crate) struct UnitCache {
     /// Keyed by immutable unit TypeId and made at first unit use; spelling cannot
     /// change, so scope classification needs no invalidation. Relative types resolve per call.
     pub(crate) type_scopes: Vec<crate::types::DeclarationScope>,
-    /// Keyed by immutable function index, made at first unit use. The count is
-    /// records the last required slot; bytecode cannot change.
-    pub(crate) required_parameters: Vec<usize>,
     pub(crate) class_types: Vec<RefCell<Option<ClassTypeEntry>>>,
     main_sites: Vec<RefCell<CachedSite>>,
     function_sites: Vec<Vec<RefCell<CachedSite>>>,
@@ -42,8 +38,6 @@ pub(crate) struct ClassTypeEntry {
 pub(crate) enum CachedSite {
     Empty,
     Property(Rc<crate::property_sites::PropertyEntry>),
-    Method(Box<crate::classes::method_cache::MethodEntry>),
-    Static(Box<crate::classes::static_sites::StaticEntry>),
 }
 
 impl UnitCache {
@@ -63,86 +57,31 @@ fn instruction_sites(function: &phera_bytecode::Function) -> Vec<RefCell<CachedS
         .collect()
 }
 
-/// Cache identity follows the compiled unit allocation for the current request.
-pub(crate) struct UnitCaches {
-    symbols: HashMap<usize, UnitSymbols>,
-}
-
-/// Retaining the unit prevents allocator address reuse from changing cache identity.
-struct UnitSymbols {
-    unit: Arc<CompiledUnit>,
-    symbols: SymbolCache,
-}
-
-impl UnitCaches {
-    pub(crate) fn new() -> Self {
+impl UnitCache {
+    /// Make the request-local values of a file when the code table loads it.
+    pub(crate) fn new(unit: &CompiledUnit) -> Self {
         Self {
-            symbols: HashMap::new(),
+            names: unit.names.iter().map(|name| name.as_str().into()).collect(),
+            symbols: RefCell::new(vec![None; unit.symbols.len()]),
+            constants: unit
+                .constants
+                .iter()
+                .map(crate::calls::frame::value)
+                .collect(),
+            classes: unit.symbols.iter().map(|_| RefCell::new(None)).collect(),
+            type_scopes: unit
+                .types
+                .iter()
+                .map(crate::types::declaration_scope)
+                .collect(),
+            class_types: unit.types.iter().map(|_| RefCell::new(None)).collect(),
+            main_sites: instruction_sites(&unit.main),
+            function_sites: unit.functions.iter().map(instruction_sites).collect(),
+            class_names: unit
+                .symbols
+                .iter()
+                .map(|symbol| phera_value::Value::from(symbol.written.as_str()))
+                .collect(),
         }
-    }
-
-    /// Frames share symbol slots so recursive calls reuse the resolved signatures.
-    pub(crate) fn symbols(&mut self, unit: &Arc<CompiledUnit>) -> SymbolCache {
-        let entry = self
-            .symbols
-            .entry(Arc::as_ptr(unit) as usize)
-            .or_insert_with(|| UnitSymbols {
-                unit: unit.clone(),
-                symbols: Rc::new(UnitCache {
-                    names: unit.names.iter().map(|name| name.as_str().into()).collect(),
-                    symbols: RefCell::new(vec![None; unit.symbols.len()]),
-                    constants: unit
-                        .constants
-                        .iter()
-                        .map(crate::calls::frame::value)
-                        .collect(),
-                    classes: unit.symbols.iter().map(|_| RefCell::new(None)).collect(),
-                    type_scopes: unit
-                        .types
-                        .iter()
-                        .map(crate::types::declaration_scope)
-                        .collect(),
-                    required_parameters: unit
-                        .functions
-                        .iter()
-                        .map(|function| {
-                            function
-                                .parameters
-                                .iter()
-                                .rposition(|parameter| {
-                                    !parameter.has_default && !parameter.variadic
-                                })
-                                .map_or(0, |index| index + 1)
-                        })
-                        .collect(),
-                    class_types: unit.types.iter().map(|_| RefCell::new(None)).collect(),
-                    main_sites: instruction_sites(&unit.main),
-                    function_sites: unit.functions.iter().map(instruction_sites).collect(),
-                    class_names: unit
-                        .symbols
-                        .iter()
-                        .map(|symbol| phera_value::Value::from(symbol.written.as_str()))
-                        .collect(),
-                }),
-            });
-        debug_assert!(Arc::ptr_eq(&entry.unit, unit));
-        entry.symbols.clone()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::UnitCaches;
-    use std::sync::Arc;
-
-    /// Cached symbols must retain their allocation identity after all frames return.
-    #[test]
-    fn cached_units_stay_alive() {
-        let unit = Arc::new(phera_compiler::compile("<?php", "cache.php").unwrap());
-        let weak = Arc::downgrade(&unit);
-        let mut caches = UnitCaches::new();
-        caches.symbols(&unit);
-        drop(unit);
-        assert!(weak.upgrade().is_some());
     }
 }
