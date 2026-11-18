@@ -17,6 +17,7 @@ mod signatures;
 mod static_calls;
 mod static_known;
 mod trait_adaptations;
+mod trait_defaults;
 mod trait_members;
 pub(crate) mod trait_methods;
 

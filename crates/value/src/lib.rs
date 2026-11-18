@@ -19,7 +19,9 @@ pub use error::{
     CollectDiagnostics, DiagnosticKind, Diagnostics, ErrorKind, NoDiagnostics, OpError,
 };
 pub use float_format::{float_repr, float_to_string_precision14};
-pub use object::{ClassHandle, Object, ObjectIds, PropertyScope, Resource, split_property_key};
+pub use object::{
+    ClassHandle, Object, ObjectIds, PropertyScope, Resource, class_display_name, split_property_key,
+};
 pub use ops::{
     add, bitwise_and, bitwise_not, bitwise_or, bitwise_xor, compare, compare_after_error,
     compare_op, concat, decrement, div, increment, less, less_equal, loose_equals,

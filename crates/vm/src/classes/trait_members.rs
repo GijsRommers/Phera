@@ -8,11 +8,11 @@ use std::{
 
 use phera_bytecode::{ClassDeclaration, CompiledUnit, Visibility};
 use phera_extension_api::NativeError;
-use phera_value::{ArrayKey, Object, Value};
+use phera_value::{ArrayKey, Object};
 
 use super::{
     Class, ConstantState, LinkedConstant,
-    class::{ConstantInitializer, PropertyDefault, literal_initializer},
+    class::{ConstantInitializer, PropertyDefault},
     trait_methods::display,
 };
 use crate::Vm;
@@ -31,78 +31,6 @@ impl Vm {
         let mut property_origins = HashMap::new();
         let mut constant_origins = HashMap::new();
         for provider in traits {
-            for (source, opposite) in [
-                (&provider.defaults, &*statics),
-                (&provider.static_properties, &*defaults),
-            ] {
-                for property in source {
-                    let name = property.name.as_str();
-                    if opposite
-                        .iter()
-                        .any(|existing| existing.declaring == *class && existing.name == name)
-                    {
-                        let origin = property_origins.get(name).copied().unwrap_or(class);
-                        return Err(incompatible(
-                            "property",
-                            &format!("${name}"),
-                            class,
-                            origin,
-                            &provider.name,
-                        ));
-                    }
-                }
-            }
-            for (properties, target) in [
-                (&provider.defaults, &mut *defaults),
-                (&provider.static_properties, &mut *statics),
-            ] {
-                for property in properties {
-                    let name = property.name.as_str();
-                    let key = property_key(class, property);
-                    let same_name = |candidate: &PropertyDefault| {
-                        candidate.name == name && candidate.declaring == *class
-                    };
-                    if let Some(existing) = target.iter().find(|candidate| same_name(candidate)) {
-                        let agree = self.with_trait_constants(class, constants, |vm| {
-                            vm.trait_properties_agree(existing, property, class)
-                        });
-                        if !agree {
-                            let origin = property_origins.get(name).copied().unwrap_or(class);
-                            return Err(incompatible(
-                                "property",
-                                &format!("${name}"),
-                                class,
-                                origin,
-                                &provider.name,
-                            ));
-                        }
-                        continue;
-                    }
-                    if declaration.is_readonly && !property.is_readonly {
-                        let class = display(class);
-                        return Err(NativeError::error(format!(
-                            "Readonly class {class} cannot use trait with a non-readonly property {}::${}",
-                            provider.name, property.name,
-                        )));
-                    }
-                    let mut linked = property.clone();
-                    linked.key = key.clone();
-                    linked.declaring = class.clone();
-                    linked.static_storage = property.static_storage.as_ref().map(|_| {
-                        crate::reference_holders::StaticProperty::new(property.value.clone())
-                    });
-                    linked.static_initialized = Rc::new(Cell::new(false));
-                    linked.value_initialized = Rc::new(Cell::new(property.initialized));
-                    if let Some(inherited) =
-                        target.iter_mut().find(|candidate| candidate.key == key)
-                    {
-                        *inherited = linked;
-                    } else {
-                        target.push(linked);
-                    }
-                    property_origins.insert(name, &provider.name);
-                }
-            }
             let mut trait_constants: Vec<_> = provider.constants.iter().collect();
             trait_constants.sort_by_key(|(name, _)| *name);
             for (name, constant) in trait_constants {
@@ -120,8 +48,8 @@ impl Vm {
                     && existing.declaring == *class
                 {
                     let agree = self.with_trait_constants(class, constants, |vm| {
-                        vm.trait_constants_agree(existing, constant, class)
-                    });
+                        vm.trait_constants_agree(existing, constant, class, unit)
+                    })?;
                     if !agree {
                         let origin = constant_origins
                             .get(name.as_str())
@@ -171,77 +99,118 @@ impl Vm {
                 constant_origins.insert(name.as_str(), &provider.name);
             }
         }
-        Ok(())
-    }
-
-    fn with_trait_constants<T>(
-        &mut self,
-        name: &str,
-        constants: &HashMap<String, Rc<LinkedConstant>>,
-        compare: impl FnOnce(&mut Self) -> T,
-    ) -> T {
-        let previous = self
-            .initializer_class
-            .replace(crate::initializers::InitializerClass {
-                name: name.to_owned(),
-                constants: constants.clone(),
-            });
-        let result = compare(self);
-        self.initializer_class = previous;
-        result
-    }
-
-    fn trait_properties_agree(
-        &mut self,
-        existing: &PropertyDefault,
-        incoming: &PropertyDefault,
-        class: &str,
-    ) -> bool {
-        if existing.visibility != incoming.visibility
-            || existing.ty != incoming.ty
-            || existing.is_readonly != incoming.is_readonly
-            || existing.initialized != incoming.initialized
-        {
-            return false;
-        }
-        let left = self.trait_property_default(existing, class);
-        let right = self.trait_property_default(incoming, class);
-        identical(left, right)
-    }
-
-    fn trait_property_default(&mut self, property: &PropertyDefault, class: &str) -> Option<Value> {
-        match property.initializer {
-            Some(initializer) => self.evaluate_initializer(&initializer, class).ok(),
-            None => Some(property.value.clone()),
-        }
-    }
-
-    fn trait_constants_agree(
-        &mut self,
-        existing: &LinkedConstant,
-        incoming: &LinkedConstant,
-        class: &str,
-    ) -> bool {
-        if existing.visibility != incoming.visibility
-            || existing.ty != incoming.ty
-            || existing.is_final != incoming.is_final
-        {
-            return false;
-        }
-        let left = self.trait_constant_default(existing, class);
-        let right = self.trait_constant_default(incoming, class);
-        identical(left, right)
-    }
-
-    fn trait_constant_default(&mut self, constant: &LinkedConstant, class: &str) -> Option<Value> {
-        match &constant.initializer {
-            ConstantInitializer::Compiled { function, .. } => {
-                literal_initializer(&self.code, function)
-                    .or_else(|| self.evaluate_initializer(function, class).ok())
+        for provider in traits {
+            for (source, opposite) in [
+                (&provider.defaults, &*statics),
+                (&provider.static_properties, &*defaults),
+            ] {
+                for property in source {
+                    let name = property.name.as_str();
+                    if let Some(existing) = opposite.iter().find(|existing| {
+                        existing.name == name
+                            && (existing.declaring == *class
+                                || existing.visibility != Visibility::Private)
+                    }) {
+                        if existing.declaring == *class {
+                            let origin = property_origins.get(name).copied().unwrap_or(class);
+                            return Err(incompatible(
+                                "property",
+                                &format!("${name}"),
+                                class,
+                                origin,
+                                &provider.name,
+                            ));
+                        }
+                        let (previous, next) = if property.static_storage.is_some() {
+                            ("non static", "static")
+                        } else {
+                            ("static", "non static")
+                        };
+                        return Err(NativeError::error(format!(
+                            "Cannot redeclare {previous} {}::${name} as {next} {class}::${name}",
+                            existing.declaring,
+                        )));
+                    }
+                }
             }
-            ConstantInitializer::Value(value) => Some(value.clone()),
-            ConstantInitializer::EnumCase { .. } => None,
+            for (properties, target) in [
+                (&provider.defaults, &mut *defaults),
+                (&provider.static_properties, &mut *statics),
+            ] {
+                for property in properties {
+                    let name = property.name.as_str();
+                    let key = property_key(class, property);
+                    let same_name = |candidate: &PropertyDefault| {
+                        candidate.name == name && candidate.declaring == *class
+                    };
+                    if let Some(existing) = target.iter().find(|candidate| same_name(candidate)) {
+                        let agree = self.with_trait_constants(class, constants, |vm| {
+                            vm.trait_properties_agree(existing, property, class, unit)
+                        })?;
+                        if !agree {
+                            let origin = property_origins.get(name).copied().unwrap_or(class);
+                            return Err(incompatible(
+                                "property",
+                                &format!("${name}"),
+                                class,
+                                origin,
+                                &provider.name,
+                            ));
+                        }
+                        continue;
+                    }
+                    if declaration.is_readonly && !property.is_readonly {
+                        let class = display(class);
+                        return Err(NativeError::error(format!(
+                            "Readonly class {class} cannot use trait with a non-readonly property {}::${}",
+                            provider.name, property.name,
+                        )));
+                    }
+                    super::declaration_errors::check_property_visibility(
+                        display(class),
+                        property.visibility,
+                        name,
+                        target,
+                    )?;
+                    if let Some(inherited) = target.iter().find(|inherited| {
+                        inherited.name == name && inherited.visibility != Visibility::Private
+                    }) && !self.trait_types_match(
+                        property.ty.as_ref(),
+                        class,
+                        inherited.ty.as_ref(),
+                        &inherited.declaring,
+                        unit,
+                    ) {
+                        let expected = inherited
+                            .ty
+                            .as_ref()
+                            .map_or("omitted", |ty| ty.display.as_str());
+                        return Err(NativeError::error(format!(
+                            "Type of {class}::${name} must be {expected} (as in class {})",
+                            inherited.declaring,
+                        )));
+                    }
+                    let mut linked = property.clone();
+                    linked.key = key.clone();
+                    linked.declaring = class.clone();
+                    linked.static_storage = property.static_storage.as_ref().map(|_| {
+                        crate::reference_holders::StaticProperty::new(property.value.clone())
+                    });
+                    linked.static_initialized = Rc::new(Cell::new(false));
+                    linked.value_initialized = Rc::new(Cell::new(property.initialized));
+                    if let Some(inherited) =
+                        target.iter_mut().find(|candidate| candidate.key == key)
+                    {
+                        *inherited = linked;
+                    } else {
+                        target.push(linked);
+                    }
+                    property_origins.insert(name, &provider.name);
+                }
+            }
         }
+
+        Ok(())
     }
 }
 
@@ -251,20 +220,6 @@ fn property_key(class: &str, property: &PropertyDefault) -> ArrayKey {
     } else {
         property.key.clone()
     }
-}
-
-fn identical(left: Option<Value>, right: Option<Value>) -> bool {
-    let (Some(left), Some(right)) = (left, right) else {
-        return false;
-    };
-    matches!(
-        phera_value::strict_equals(
-            &left,
-            &right,
-            &mut phera_value::CollectDiagnostics::default()
-        ),
-        Ok(Value::Bool(true))
-    )
 }
 
 fn incompatible(kind: &str, name: &str, class: &str, origin: &str, provider: &str) -> NativeError {

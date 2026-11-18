@@ -257,13 +257,20 @@ impl Vm {
                     self.initializer_property(value, &name.to_string_lossy())?
                 }
                 Step::Index(index) => {
-                    let Value::Array(array) = value else {
-                        return Err(NativeError::error(
-                            "Cannot use [] on objects in constant expression",
-                        ));
-                    };
                     let key = ArrayKey::from_value(&slot(slots, index))?;
-                    array.get(&key).cloned().unwrap_or_default()
+                    match value {
+                        Value::Array(array) => array.get(&key).cloned().unwrap_or_default(),
+                        Value::String(string) => self.read_string_offset(
+                            &string,
+                            key,
+                            crate::access_mode::Missing::Warn,
+                        )?,
+                        _ => {
+                            return Err(NativeError::error(
+                                "Cannot use [] on objects in constant expression",
+                            ));
+                        }
+                    }
                 }
                 Step::Append => return Err(internal_error!("constant expression append")),
             };

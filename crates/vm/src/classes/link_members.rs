@@ -150,6 +150,7 @@ impl Vm {
                 .as_ref()
                 .and_then(|reference| super::class::literal_initializer(&self.code, reference))
             {
+                let value = super::class::widen_property_value(value, linked.ty.as_ref());
                 if property.is_static {
                     if let Some(storage) = &linked.static_storage {
                         *storage.reference.borrow().borrow_mut() = value.clone();
@@ -167,7 +168,7 @@ impl Vm {
             };
             super::declaration_errors::check_property_visibility(
                 name,
-                property,
+                property.visibility,
                 property_name,
                 inherited,
             )?;

@@ -82,7 +82,7 @@ impl Vm {
             }
             return Err(NativeError::error(format!(
                 "Call to undefined method {}::{name}()",
-                class.name
+                phera_value::class_display_name(&class.name)
             )));
         };
         self.prepare_resolved_method(
@@ -172,7 +172,7 @@ impl Vm {
             "protected"
         };
         let from = scope
-            .map(|scope| format!("scope {}", scope.name))
+            .map(|scope| format!("scope {}", phera_value::class_display_name(&scope.name)))
             .unwrap_or_else(|| "global scope".into());
         let kind = if invocation == Invocation::Constructor {
             ""
@@ -181,7 +181,8 @@ impl Vm {
         };
         Err(NativeError::error(format!(
             "Call to {visibility} {kind}{}::{}() from {from}",
-            method.declaring, method.name
+            phera_value::class_display_name(&method.declaring),
+            method.name
         )))
     }
 }

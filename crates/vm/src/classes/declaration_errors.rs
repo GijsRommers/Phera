@@ -1,7 +1,7 @@
 //! Invalid linked declarations remain fatal and never enter PHP catch handlers.
 
 use super::{Class, LinkedConstant, class::PropertyDefault};
-use phera_bytecode::{ClassDeclaration, ClassId, CompiledUnit, PropertyDeclaration, Visibility};
+use phera_bytecode::{ClassDeclaration, ClassId, CompiledUnit, Visibility};
 use phera_extension_api::{NativeError, Unwind};
 use std::{collections::HashMap, rc::Rc};
 
@@ -60,7 +60,7 @@ pub(crate) fn merge_interface_constants(
 /// Private ancestor properties are separate slots; visible inherited properties cannot narrow access.
 pub(crate) fn check_property_visibility(
     class: &str,
-    property: &PropertyDeclaration,
+    visibility: Visibility,
     name: &str,
     inherited: &[PropertyDefault],
 ) -> Result<(), NativeError> {
@@ -71,8 +71,8 @@ pub(crate) fn check_property_visibility(
         return Ok(());
     };
     let narrower = match inherited.visibility {
-        Visibility::Public => property.visibility != Visibility::Public,
-        Visibility::Protected => property.visibility == Visibility::Private,
+        Visibility::Public => visibility != Visibility::Public,
+        Visibility::Protected => visibility == Visibility::Private,
         Visibility::Private => false,
     };
     if narrower {

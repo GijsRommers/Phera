@@ -67,7 +67,7 @@ impl Vm {
                 }
                 let value = if let Some(initializer) = &property.initializer {
                     loop {
-                        match self.evaluate_initializer(initializer, &property.declaring) {
+                        match self.evaluate_property_initializer(initializer, property) {
                             Ok(value) => break value,
                             Err(error) => {
                                 let miss = crate::autoload::ClassMiss::take(error)?;

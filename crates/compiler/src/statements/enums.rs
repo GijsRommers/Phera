@@ -52,7 +52,7 @@ impl Compiler<'_> {
                     if let Some(promoted) = method
                         .parameters
                         .iter()
-                        .find(|parameter| parameter.modifiers.visibility.is_some()) =>
+                        .find(|parameter| parameter.is_promoted()) =>
                 {
                     return Err(self.error(
                         format!("Enum {name} cannot include properties"),

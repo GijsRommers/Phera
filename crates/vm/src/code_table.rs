@@ -67,6 +67,10 @@ pub(crate) struct CodeTable {
 }
 
 impl CodeTable {
+    pub(crate) fn next_unit_index(&self) -> UnitIndex {
+        UnitIndex(self.units.len() as u32)
+    }
+
     /// Adds a compiled file and numbers its functions, or finds it when it
     /// was loaded before. Returns the number of its top-level code.
     pub(crate) fn load(&mut self, unit: &Arc<CompiledUnit>) -> FunctionIndex {
@@ -77,7 +81,7 @@ impl CodeTable {
         {
             return loaded.first;
         }
-        let index = UnitIndex(self.units.len() as u32);
+        let index = self.next_unit_index();
         let first = FunctionIndex(self.functions.len() as u32);
         let bodies = std::iter::once((None, &unit.main)).chain(
             unit.functions

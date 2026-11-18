@@ -24,6 +24,7 @@ impl Compiler<'_> {
             return Err(self.error("Constant expression contains invalid operations", line));
         }
         let mut builder = Compiler::new(self.file, self.lines, "{initializer}", &self.namespace);
+        builder.anonymous_classes = self.anonymous_classes.clone();
         builder.class_scope = Some(class.to_owned());
         builder.trait_scope = trait_scope.map(str::to_owned);
         builder.imports = self.imports.clone();

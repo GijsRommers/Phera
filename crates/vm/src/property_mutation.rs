@@ -119,10 +119,10 @@ impl Vm {
                                 && crate::property_storage::read(object, key)
                                     .is_some_and(|value| value.deref().is_object()))
                         {
+                            let declaring = phera_value::class_display_name(&property.declaring);
                             if mutation == Mutation::Bind {
                                 return Err(NativeError::error(format!(
-                                    "Cannot indirectly modify readonly property {}::${name}",
-                                    property.declaring
+                                    "Cannot indirectly modify readonly property {declaring}::${name}",
                                 )));
                             }
                             let scope = self.current().and_then(|frame| frame.scope());
@@ -135,8 +135,7 @@ impl Vm {
                                     "modify"
                                 };
                                 return Err(NativeError::error(format!(
-                                    "Cannot {action} readonly property {}::${name}",
-                                    property.declaring
+                                    "Cannot {action} readonly property {declaring}::${name}",
                                 )));
                             }
                             if scope.is_none_or(|scope| !scope.is_a(&property.declaring)) {
@@ -146,11 +145,15 @@ impl Vm {
                                     "modify"
                                 };
                                 let from = scope
-                                    .map(|scope| format!("scope {}", scope.name))
+                                    .map(|scope| {
+                                        format!(
+                                            "scope {}",
+                                            phera_value::class_display_name(&scope.name)
+                                        )
+                                    })
                                     .unwrap_or_else(|| "global scope".into());
                                 return Err(NativeError::error(format!(
-                                    "Cannot {action} protected(set) readonly property {}::${name} from {from}",
-                                    property.declaring
+                                    "Cannot {action} protected(set) readonly property {declaring}::${name} from {from}",
                                 )));
                             }
                         }
@@ -173,7 +176,7 @@ impl Vm {
                         {
                             return Err(NativeError::error(format!(
                                 "Cannot create dynamic property {}::${name}",
-                                class.name
+                                phera_value::class_display_name(&class.name)
                             )));
                         }
                         if !class.allows_dynamic_properties {

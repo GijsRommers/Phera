@@ -312,3 +312,9 @@ impl Class {
         self.declaration_matches.borrow().get(name).copied()
     }
 }
+
+/// A default int can widen to float without scalar coercion from strings.
+pub(crate) fn widen_property_value(value: Value, ty: Option<&phera_bytecode::Type>) -> Value {
+    ty.and_then(|ty| crate::types::widen_int_to_float(&value, ty.mask))
+        .unwrap_or(value)
+}

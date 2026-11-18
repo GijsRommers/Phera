@@ -20,6 +20,11 @@ pub trait ClassHandle: Any {
     }
 }
 
+/// Anonymous classes expose their full identity through get_class, while diagnostics use the prefix.
+pub fn class_display_name(name: &str) -> &str {
+    name.split_once('\0').map_or(name, |(prefix, _)| prefix)
+}
+
 /// A PHP object. Cloning the surrounding `Rc<Object>` shares the instance;
 /// every variable holding the object sees the same properties.
 pub struct Object {

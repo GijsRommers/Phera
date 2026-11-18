@@ -1,5 +1,6 @@
 //! Class declarations compile methods as ordinary functions so calls keep heap-frame execution.
 
+use super::class_default_types::DefaultKind;
 use phera_ast as ast;
 use phera_bytecode::{ClassKind, Visibility};
 
@@ -90,6 +91,16 @@ impl Compiler<'_> {
                     if constant.name.name.eq_ignore_ascii_case("class") {
                         return Err(self.error("A class constant must not be called 'class'; it is reserved for class name fetching", self.lines.line(member.span.start)));
                     }
+                    if let Some(ty) = ty {
+                        let member = format!("{display}::{}", constant.name.name);
+                        self.validate_literal_member_default(
+                            &constant.value,
+                            ty,
+                            &member,
+                            DefaultKind::Constant,
+                            self.lines.line(constant.name.span.start),
+                        )?;
+                    }
                     constants.push(crate::ir::ClassConstant {
                         name: constant.name.name.clone(),
                         visibility: member_visibility(modifiers),
@@ -168,6 +179,16 @@ impl Compiler<'_> {
                             self.lines.line(property.span.start),
                         ));
                     }
+                    if let (Some(default), Some(ty)) = (&property.default, ty) {
+                        let member = format!("{display}::${}", property.name);
+                        self.validate_literal_member_default(
+                            default,
+                            ty,
+                            &member,
+                            DefaultKind::Property,
+                            self.lines.line(property.span.start),
+                        )?;
+                    }
                     let default = property
                         .default
                         .as_ref()
@@ -218,15 +239,14 @@ impl Compiler<'_> {
                     });
             }
             for parameter in &method.parameters {
-                if parameter.modifiers.visibility.is_some() {
+                if parameter.is_promoted() {
                     if !method.name.name.eq_ignore_ascii_case("__construct") {
                         return Err(self.error(
                             "Cannot declare promoted property outside a constructor",
                             self.lines.line(parameter.span.start),
                         ));
                     }
-                    if declaration.name.is_none()
-                        && declaration.modifiers.is_readonly
+                    if (declaration.modifiers.is_readonly || parameter.modifiers.is_readonly)
                         && parameter.ty.is_none()
                     {
                         return Err(self.error(

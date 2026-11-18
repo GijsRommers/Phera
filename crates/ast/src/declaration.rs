@@ -37,6 +37,13 @@ pub struct Parameter {
     pub span: Span,
 }
 
+impl Parameter {
+    /// A readonly constructor parameter promotes even without explicit visibility.
+    pub fn is_promoted(&self) -> bool {
+        self.modifiers.visibility.is_some() || self.modifiers.is_readonly
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Visibility {
     Public,

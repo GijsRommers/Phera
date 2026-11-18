@@ -27,7 +27,7 @@ pub(super) struct Compiler<'ast> {
     pub(super) hoisted: Vec<usize>,
     pub(super) classes: Vec<crate::ir::ClassDeclaration>,
     pub(super) hoisted_classes: Vec<usize>,
-    pub(super) anonymous_classes: Rc<Cell<usize>>,
+    pub(super) anonymous_classes: Rc<Cell<u64>>,
     pub(super) next: usize,
     pub(super) peak: usize,
     pub(super) locals: HashMap<String, Reg>,
