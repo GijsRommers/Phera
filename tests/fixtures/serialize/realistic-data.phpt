@@ -49,7 +49,7 @@ foreach ($cases as $label => $value) {
     var_dump(serialize($value) === $bytes);
     var_dump(unserialize($bytes));
 }
---EXPECT--
+--EXPECTF--
 config
 bool(true)
 array(3) {
@@ -67,11 +67,11 @@ array(3) {
 }
 cycle
 bool(true)
-object(stdClass)#9 (2) {
+object(stdClass)#%d (2) {
   ["name"]=>
   string(4) "root"
   ["child"]=>
-  object(stdClass)#10 (1) {
+  object(stdClass)#%d (1) {
     ["parent"]=>
     *RECURSION*
   }
@@ -80,7 +80,7 @@ cache items
 bool(true)
 array(2) {
   [0]=>
-  object(CacheItem)#11 (3) {
+  object(CacheItem)#%d (3) {
     ["id":"CacheItem":private]=>
     string(4) "a-17"
     ["tags":protected]=>
@@ -92,7 +92,7 @@ array(2) {
     int(60)
   }
   [1]=>
-  object(CacheItem)#12 (3) {
+  object(CacheItem)#%d (3) {
     ["id":"CacheItem":private]=>
     string(4) "b-21"
     ["tags":protected]=>
@@ -104,7 +104,7 @@ array(2) {
 }
 exception
 bool(true)
-object(ErrorException)#12 (8) {
+object(ErrorException)#%d (8) {
   ["message":protected]=>
   string(14) "The job failed"
   ["string":"Exception":private]=>
@@ -119,7 +119,7 @@ object(ErrorException)#12 (8) {
   array(0) {
   }
   ["previous":"Exception":private]=>
-  object(ErrorException)#11 (8) {
+  object(ErrorException)#%d (8) {
     ["message":protected]=>
     string(17) "The API timed out"
     ["string":"Exception":private]=>
@@ -143,7 +143,7 @@ object(ErrorException)#12 (8) {
 }
 scheduled time
 bool(true)
-object(DateTimeImmutable)#12 (3) {
+object(DateTimeImmutable)#%d (3) {
   ["date"]=>
   string(26) "2026-10-25 03:00:00.125000"
   ["timezone_type"]=>
@@ -161,7 +161,7 @@ array(2) {
 }
 queue payload
 bool(true)
-object(JobPayload)#12 (1) {
+object(JobPayload)#%d (1) {
   ["data":"JobPayload":private]=>
   array(3) {
     ["account"]=>

@@ -66,30 +66,42 @@ struct Digits {
 fn scientific_digits(value: f64, count: usize) -> Digits {
     let places = count - 1;
     let text = NumberText::formatted(format_args!("{:.places$e}", value.abs()));
-    let (mantissa, exponent) = text.as_str().split_once('e').expect("scientific notation");
-    let mut digits = Digits {
-        bytes: [0; 17],
-        len: count,
-        decpt: exponent.parse::<i32>().expect("decimal exponent") + 1,
-        negative: value.is_sign_negative(),
-    };
-    for (index, digit) in mantissa.bytes().filter(|&byte| byte != b'.').enumerate() {
-        digits.bytes[index] = digit;
-    }
-    digits
+    digits_from_scientific(&text, value.is_sign_negative())
 }
 
-/// Shortest round-tripping digits (dtoa mode 0). At a decimal tie, Rust
-/// and David Gay's dtoa can pick different shortest forms, so grow the
-/// digit count until the ties-even rounded form reads back to the input.
-fn shortest_digits(value: f64) -> Digits {
-    for count in 1..17 {
-        let digits = scientific_digits(value, count);
-        if gcvt_layout(&digits, 17).as_str().parse::<f64>() == Ok(value) {
-            return digits;
-        }
+fn digits_from_scientific(text: &NumberText, negative: bool) -> Digits {
+    let (mantissa, exponent) = text.as_str().split_once('e').expect("scientific notation");
+    let mut bytes = [0; 17];
+    let mut len = 0;
+    for (slot, digit) in bytes
+        .iter_mut()
+        .zip(mantissa.bytes().filter(|&byte| byte != b'.'))
+    {
+        *slot = digit;
+        len += 1;
     }
-    scientific_digits(value, 17)
+    Digits {
+        bytes,
+        len,
+        decpt: exponent.parse::<i32>().expect("decimal exponent") + 1,
+        negative,
+    }
+}
+
+/// Shortest round-tripping digits (dtoa mode 0). At a tie PHP uses the
+/// ties-even decimal if it fits; a power of two has a narrower interval
+/// toward zero and can need the other decimal at the same precision.
+fn shortest_digits(value: f64) -> Digits {
+    let text = NumberText::formatted(format_args!("{:e}", value.abs()));
+    let shortest = digits_from_scientific(&text, value.is_sign_negative());
+    let rounded = scientific_digits(value, shortest.len);
+    if (shortest.bytes == rounded.bytes && shortest.decpt == rounded.decpt)
+        || gcvt_layout(&rounded, 17).as_str().parse::<f64>() == Ok(value)
+    {
+        rounded
+    } else {
+        shortest
+    }
 }
 
 /// Digits rounded to `count` significant digits with trailing zeros

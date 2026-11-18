@@ -185,14 +185,12 @@ impl Vm {
                 is_abstract: method.is_abstract,
                 body: MethodBody::User(self.code.index_in(&unit, Some(method.function.index()))),
             });
-            let lower_name = method_name.to_ascii_lowercase();
-            self.check_serialization_method(&lower_name, &linked)?;
-            if let Some(inherited) = methods.get(&lower_name) {
+            if let Some(inherited) = methods.get(&method_name.to_ascii_lowercase()) {
                 super::inheritance_checks::check_override(name, inherited, &linked)
                     .map_err(|error| self.magic_override_error(&linked, error))?;
                 self.check_method_contract(inherited, &linked, &unit)?;
             }
-            methods.insert(lower_name, linked);
+            methods.insert(method_name.to_ascii_lowercase(), linked);
         }
         if let Some(method) = methods.get("__tostring") {
             if method.visibility != Visibility::Public
@@ -456,13 +454,7 @@ impl Vm {
             constants,
             declaration: declaration_location,
         });
-        self.deprecate_legacy_serializable(
-            &class,
-            crate::diagnostics::SourceLocation {
-                file: unit.file.clone(),
-                line: declaration.line as usize,
-            },
-        );
+        self.deprecate_legacy_serializable(&class, &unit.file, declaration.line as usize);
         self.classes.insert(name.to_ascii_lowercase(), class);
         Ok(())
     }

@@ -3,6 +3,7 @@
 mod graph;
 mod objects;
 mod options;
+mod plain;
 
 use std::{borrow::Cow, rc::Rc};
 
@@ -69,6 +70,9 @@ pub async fn unserialize(context: &mut dyn Context, arguments: Vec<Value>) -> Na
         return Ok(Value::Bool(false));
     }
     let options = Options::read(context, args::array(&arguments, 1).map(Rc::as_ref)).await?;
+    if plain::applies(input.as_bytes()) {
+        return plain::read(context, input.as_bytes(), options.max_depth);
+    }
     let mut decoder = Decoder {
         reader: Reader::new(input.as_bytes()),
         graph: Graph::default(),
@@ -79,25 +83,14 @@ pub async fn unserialize(context: &mut dyn Context, arguments: Vec<Value>) -> Na
     let root = decoder.graph.new_place();
     let build = decoder.build(context, root).await;
     match build {
-        Ok(()) => {
-            let offset = decoder.reader.offset();
-            if offset < input.len() {
-                context.warning(format!(
-                    "unserialize(): Extra data starting at offset {offset} of {} bytes",
-                    input.len()
-                ));
-            }
-        }
+        Ok(()) => report_extra(context, decoder.reader.offset(), input.len()),
         Err(Failure::Native(error)) => return Err(error),
         Err(Failure::Parse | Failure::At(_)) => {
             let offset = match build {
                 Err(Failure::At(offset)) => offset,
                 _ => decoder.reader.offset(),
             };
-            context.warning(format!(
-                "unserialize(): Error at offset {offset} of {} bytes",
-                input.len()
-            ));
+            report_offset(context, offset, input.len());
             if !decoder.delayed.is_empty() {
                 decoder.complete(context).await?;
             }
@@ -190,10 +183,7 @@ impl Decoder<'_> {
     ) -> BuildResult<()> {
         let limit = self.options.max_depth;
         if limit != 0 && self.frames.len() >= limit {
-            context.warning(format!(
-                "unserialize(): Maximum depth of {limit} exceeded. The depth limit can be changed \
-                 using the max_depth unserialize() option or the unserialize_max_depth ini setting"
-            ));
+            report_depth(context, limit);
             return Err(Failure::Parse);
         }
         self.frames.push(Frame {
@@ -240,6 +230,27 @@ impl Decoder<'_> {
         }
         Ok(())
     }
+}
+
+fn report_offset(context: &mut dyn Context, offset: usize, length: usize) {
+    context.warning(format!(
+        "unserialize(): Error at offset {offset} of {length} bytes"
+    ));
+}
+
+fn report_extra(context: &mut dyn Context, offset: usize, length: usize) {
+    if offset < length {
+        context.warning(format!(
+            "unserialize(): Extra data starting at offset {offset} of {length} bytes"
+        ));
+    }
+}
+
+fn report_depth(context: &mut dyn Context, limit: usize) {
+    context.warning(format!(
+        "unserialize(): Maximum depth of {limit} exceeded. The depth limit can be changed \
+         using the max_depth unserialize() option or the unserialize_max_depth ini setting"
+    ));
 }
 
 fn php_string(bytes: Cow<'_, [u8]>) -> PhpString {

@@ -189,7 +189,7 @@ fn serialize_php_matrix() {
     }
     let mut bits = 0xc3dc2db218da258du64;
     cases.push("serialize", "-0.0", vec![Value::Float(-0.0)]);
-    for _ in 0..2048 {
+    for _ in 0..8192 {
         bits ^= bits << 13;
         bits ^= bits >> 7;
         bits ^= bits << 17;
@@ -199,6 +199,17 @@ fn serialize_php_matrix() {
             &expression,
             vec![Value::Float(f64::from_bits(bits))],
         );
+    }
+    for exponent in 1..2047 {
+        let center = exponent << 52;
+        for bits in [center - 1, center, center + 1] {
+            let expression = format!("unpack('E', hex2bin('{bits:016x}'))[1]");
+            cases.push(
+                "serialize",
+                &expression,
+                vec![Value::Float(f64::from_bits(bits))],
+            );
+        }
     }
     for (expression, args) in [("", vec![]), ("1, 2", vec![Value::Int(1), Value::Int(2)])] {
         cases.push("serialize", expression, args);

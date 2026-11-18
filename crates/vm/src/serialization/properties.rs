@@ -77,11 +77,7 @@ impl Vm {
                 .defaults
                 .iter()
                 .rev()
-                .find(|prop| {
-                    prop.name.as_bytes() == name
-                        && (prop.visibility != phera_bytecode::Visibility::Private
-                            || prop.declaring == class.name)
-                })
+                .find(|prop| prop.name.as_bytes() == name)
                 .map_or(key, |prop| prop.key.clone()),
         )
     }
