@@ -6,4 +6,4 @@ class Record {
     public protected(set) private(set) int $value;
 }
 --EXPECTF--
-Fatal error: Multiple access type modifiers are not allowed in /private%s on line 3
+Fatal error: Multiple access type modifiers are not allowed in %s on line 3

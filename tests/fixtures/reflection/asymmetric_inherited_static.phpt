@@ -7,4 +7,4 @@ class Record extends Base {
     public static int $value;
 }
 --EXPECTF--
-Fatal error: Cannot override final property Base::$value in /private%s on line 3
+Fatal error: Cannot override final property Base::$value in %s on line 3

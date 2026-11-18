@@ -6,4 +6,4 @@ class Record {
     public function __construct(public private(set) readonly $value) {}
 }
 --EXPECTF--
-Fatal error: Readonly property Record::$value must have type in /private%s on line 3
+Fatal error: Readonly property Record::$value must have type in %s on line 3

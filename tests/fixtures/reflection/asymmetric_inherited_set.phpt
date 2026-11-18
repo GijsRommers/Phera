@@ -7,4 +7,4 @@ class Record extends Base {
     public protected(set) int $value;
 }
 --EXPECTF--
-Fatal error: Set access level of Record::$value must be omitted (as in class Base) in /private%s on line 3
+Fatal error: Set access level of Record::$value must be omitted (as in class Base) in %s on line 3
