@@ -23,6 +23,7 @@
 //! have a destructor, so it is left alone: clearing it would only cost an
 //! instruction, inside a loop on every round.
 
+use std::collections::HashMap;
 use std::ops::Range;
 
 use phera_bytecode::Reg;
@@ -81,40 +82,60 @@ impl Compiler<'_> {
             .instructions
             .get(temporaries.instructions.clone())
             .unwrap_or_default();
-        let merges = code.iter().filter_map(jump_target).any(|target| {
-            temporaries.instructions.contains(&target) && target > temporaries.instructions.start
-        });
         temporaries
             .registers
             .clone()
             .map(|index| Reg(index as u16))
             .filter(|register| Some(*register) != keep)
             .filter(|register| !self.locals.values().any(|local| local == register))
-            .filter(|register| !holds_a_scalar(code, *register, merges))
+            .filter(|register| !holds_a_scalar(code, temporaries.instructions.start, *register))
             .collect()
     }
 }
 
-/// Whether `register` holds a scalar after `code`. In straight-line code
-/// its last write decides; where paths merge, every write must be scalar.
-/// An instruction that mentions the register in a way not known here
-/// counts as writing anything into it.
-fn holds_a_scalar(code: &[Instruction], register: Reg, merges: bool) -> bool {
-    let mut scalar = false;
-    for instruction in code {
-        let written = match scalar_write(instruction, register) {
-            Some(result) => Some(result),
-            None if reads_only(instruction, register) => None,
-            None => Some(false),
-        };
-        if let Some(result) = written {
-            if merges && !result {
-                return false;
-            }
-            scalar = result;
+/// Whether `register` holds a scalar after `code`, the instructions from
+/// position `start` on, whichever way control goes through them. A forward
+/// pass: the state after each write, carried along jumps (an expression
+/// only jumps forward, past its short-circuited parts) and merged where
+/// they land. An instruction that mentions the register in a way not known
+/// here counts as writing anything into it, and so does a path that never
+/// writes it.
+fn holds_a_scalar(code: &[Instruction], start: usize, register: Reg) -> bool {
+    let end = start + code.len();
+    let mut landing: HashMap<usize, bool> = HashMap::new();
+    // `None` after an unconditional jump, until something lands.
+    let mut state = Some(false);
+    let mut leaving = true;
+    for (offset, instruction) in code.iter().enumerate() {
+        let here = start + offset;
+        if let Some(&landed) = landing.get(&here) {
+            state = Some(state.map_or(landed, |current| current && landed));
         }
+        let Some(mut scalar) = state else {
+            continue;
+        };
+        match scalar_write(instruction, register) {
+            Some(result) => scalar = result,
+            None if reads_only(instruction, register) => {}
+            None => scalar = false,
+        }
+        if let Some(target) = jump_target(instruction) {
+            if here < target && target < end {
+                let merged = landing
+                    .get(&target)
+                    .map_or(scalar, |other| *other && scalar);
+                landing.insert(target, merged);
+            } else {
+                leaving &= scalar;
+            }
+            if matches!(instruction, Instruction::Jump(_)) {
+                state = None;
+                continue;
+            }
+        }
+        state = Some(scalar);
     }
-    scalar
+    leaving && state.unwrap_or(true)
 }
 
 /// Where a jump inside an expression can land.

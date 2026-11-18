@@ -42,7 +42,7 @@ fn integer_at(slots: &[Option<Value>], register: Reg) -> Option<i64> {
 fn store_integer(slots: &mut [Option<Value>], register: Reg, integer: i64) -> ScalarStep {
     match slots.get_mut(register.index()) {
         Some(Some(Value::Int(target))) => *target = integer,
-        Some(slot @ None) => *slot = Some(Value::Int(integer)),
+        Some(slot) if !owns_heap_values(slot) => *slot = Some(Value::Int(integer)),
         Some(slot) => return replace(slot, Value::Int(integer)),
         None => return ScalarStep::Fallback,
     }
@@ -64,7 +64,7 @@ fn overwrite_integer(slots: &mut [Option<Value>], register: Reg, integer: i64) -
 #[inline(always)]
 fn store(slots: &mut [Option<Value>], register: Reg, value: Value) -> ScalarStep {
     match slots.get_mut(register.index()) {
-        Some(slot @ None) => {
+        Some(slot) if !owns_heap_values(slot) => {
             *slot = Some(value);
             ScalarStep::Complete
         }
@@ -110,6 +110,18 @@ fn write_releasing(slot: &mut Option<Value>, value: Option<Value>) -> ScalarStep
         Some(pool) if pool.has_doomed() => ScalarStep::Fallback,
         _ => ScalarStep::Complete,
     }
+}
+
+/// Whether a register holds an array, object, resource or PHP reference,
+/// whose release the out-of-line writes look at. Resources free no object;
+/// they are included because the four kinds are adjacent in `Value`, which
+/// makes this test a single comparison.
+#[inline(always)]
+fn owns_heap_values(slot: &Option<Value>) -> bool {
+    matches!(
+        slot,
+        Some(Value::Array(_) | Value::Object(_) | Value::Resource(_) | Value::Reference(_))
+    )
 }
 
 /// Whether dropping what a register holds could free an object: it holds
@@ -346,13 +358,20 @@ pub(crate) fn scalar_step(
             ScalarStep::Complete
         }
         Instruction::Clear { reg: register } => match slots.get_mut(register.index()) {
-            Some(None) => ScalarStep::Complete,
+            Some(slot) if !owns_heap_values(slot) => {
+                *slot = None;
+                ScalarStep::Complete
+            }
             Some(slot) => clear(slot),
             None => ScalarStep::Fallback,
         },
         // Unsetting a variable bound to a PHP reference has more to undo.
         Instruction::UnsetLocal { local } => match slots.get_mut(local.index()) {
             Some(Some(Value::Reference(_))) | None => ScalarStep::Fallback,
+            Some(slot) if !owns_heap_values(slot) => {
+                *slot = None;
+                ScalarStep::Complete
+            }
             Some(slot) => clear(slot),
         },
         _ => ScalarStep::Fallback,
@@ -410,7 +429,10 @@ pub(crate) fn array_index_step(
 /// nothing changed) for any other instruction or case; the general handler
 /// then runs it. It does its few writes itself rather than through
 /// [`scalar_step`], whose code is best left with a single caller.
-pub(crate) fn releasing_step(instruction: Instruction, slots: &mut [Option<Value>]) -> Option<Value> {
+pub(crate) fn releasing_step(
+    instruction: Instruction,
+    slots: &mut [Option<Value>],
+) -> Option<Value> {
     let (register, value) = match instruction {
         Instruction::LoadInt { dst, value } => (dst, Some(Value::Int(i64::from(value)))),
         Instruction::LoadNull { dst } => (dst, Some(Value::Null)),

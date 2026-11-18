@@ -196,7 +196,6 @@ impl Machine<'_> {
                 destination,
             )
     }
-
 }
 
 impl crate::Vm {
