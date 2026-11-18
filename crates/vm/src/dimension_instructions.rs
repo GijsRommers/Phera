@@ -33,12 +33,7 @@ impl Vm {
         instruction: Instruction,
     ) -> Result<bool, NativeError> {
         let path = match instruction {
-            Instruction::Fetch { path, .. }
-            | Instruction::FetchIndex { path, .. }
-            | Instruction::AssignPath { path, .. }
-            | Instruction::AssignOpPath { path, .. }
-            | Instruction::IncDecPath { path, .. }
-            | Instruction::MakeReference { path, .. }
+            Instruction::MakeReference { path, .. }
             | Instruction::BindReference { path, .. }
             | Instruction::SendPath { path }
             | Instruction::UnsetPath { path } => self.path(path)?,
@@ -48,7 +43,8 @@ impl Vm {
         self.prepare_dimension(&path)
     }
 
-    fn prepare_dimension(&mut self, place: &AccessPath) -> Result<bool, NativeError> {
+    #[cold]
+    pub(crate) fn prepare_dimension(&mut self, place: &AccessPath) -> Result<bool, NativeError> {
         if !place.steps()?.any(|step| {
             matches!(
                 step,
@@ -78,9 +74,8 @@ impl Vm {
                 self.set(dst, value);
                 return Ok(());
             }
-            Instruction::AssignPath { src, .. } | Instruction::AppendLocal { src, .. } => {
-                (Write::Assign(self.read_local(src)), None)
-            }
+            Instruction::AssignPath { src, .. } => (Write::Assign(self.get(src)), None),
+            Instruction::AppendLocal { src, .. } => (Write::Assign(self.read_local(src)), None),
             Instruction::AssignOpPath { op, dst, src, .. } => {
                 (Write::Compound(op, self.get(src)), Some(dst))
             }
@@ -204,6 +199,7 @@ impl Vm {
                 vm.ordinary_step(value, *step, Missing::Warn)
             })
         };
+        let keys = self.property_keys_for(steps.iter().copied(), plain.clone())?;
         let (mut value, mutation, result) = match write {
             Write::Assign(value) => (value, Mutation::Assign, Value::Null),
             Write::Bind(value) => (value, Mutation::Bind, Value::Null),
@@ -219,11 +215,14 @@ impl Vm {
                 (value, Mutation::Assign, result)
             }
             Write::Reference => {
-                let value = make_cell(read(self)?);
+                let existing = raw_member(&root, &keys);
+                if existing.is_reference() {
+                    return Ok(existing);
+                }
+                let value = make_cell(existing);
                 (value.clone(), Mutation::Bind, value)
             }
         };
-        let keys = self.property_keys_for(steps.iter().copied(), plain.clone())?;
         if mutation == Mutation::Assign {
             value = self.check_path_reference_assignment(&root, &keys, value)?;
         }
@@ -274,6 +273,26 @@ impl Vm {
         };
         Ok((updated, result))
     }
+}
+
+/// A reference to an overloaded array's member must keep any existing cell.
+fn raw_member(
+    root: &Value,
+    keys: &crate::inline_stack::InlineStack<crate::path_update::PathKey>,
+) -> Value {
+    use crate::path_update::PathKey;
+    let mut current = root.clone();
+    for key in keys.iter() {
+        let member = match (&*current.deref(), key) {
+            (Value::Array(array), PathKey::Index(Some(key))) => array.get(key).cloned(),
+            (Value::Object(object), PathKey::Property(key)) => {
+                crate::property_storage::read(object, key)
+            }
+            _ => None,
+        };
+        current = member.unwrap_or_default();
+    }
+    current
 }
 
 fn make_cell(value: Value) -> Value {

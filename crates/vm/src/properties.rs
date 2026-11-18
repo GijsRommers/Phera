@@ -312,5 +312,5 @@ pub(crate) fn native_property_access(
         .class
         .as_any()
         .downcast_ref::<crate::classes::Class>()?
-        .property_access()
+        .property_access
 }

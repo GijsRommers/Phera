@@ -11,6 +11,8 @@ use phera_value::{ArrayKey, ClassHandle, Object, Value};
 pub(crate) struct Class {
     /// The class's number in the request's class table.
     pub(crate) hooks: Option<std::rc::Rc<phera_extension_api::ClassHooks>>,
+    /// Direct property opcodes can check their own hook in one load.
+    pub(crate) property_access: Option<&'static phera_extension_api::NativePropertyAccess>,
     pub(crate) operations: super::operations::ClassOperations,
     pub(crate) index: super::ClassIndex,
     /// Only user class scopes may be assigned freely by Closure::bind.
@@ -130,12 +132,6 @@ impl ClassHandle for Class {
 }
 
 impl Class {
-    pub(crate) fn property_access(
-        &self,
-    ) -> Option<&'static phera_extension_api::NativePropertyAccess> {
-        self.hooks.as_ref()?.property_access
-    }
-
     /// Traverse ancestry iteratively so user inheritance never grows the Rust stack.
     pub(crate) fn is_a(&self, name: &str) -> bool {
         if self.name.eq_ignore_ascii_case(name) {

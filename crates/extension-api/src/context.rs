@@ -90,7 +90,7 @@ pub trait Context {
         })
     }
 
-    /// The class selected by a static or instance method call, including inherited factories.
+    /// The class selected by a native static method call, including inherited factories.
     fn called_class(&self) -> Option<&str> {
         None
     }
@@ -155,6 +155,16 @@ pub trait Context {
             }
             CompileDiagnosticKind::Deprecated => self.deprecated(diagnostic.message.clone()),
         }
+    }
+
+    /// A native handler that returns an error after awaiting can attach its call site.
+    fn native_call_error(
+        &mut self,
+        _function: &str,
+        _arguments: &[Value],
+        error: NativeError,
+    ) -> NativeError {
+        error
     }
 
     fn warning(&mut self, message: String) {

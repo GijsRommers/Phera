@@ -196,7 +196,14 @@ impl Vm {
                 if let Some(implementation) = methods.get(method_name) {
                     if matches!(method.body, MethodBody::Native(entry) if entry.return_type.is_some())
                     {
-                        super::inheritance_checks::check_override(name, method, implementation)?;
+                        super::inheritance_checks::check_override(name, method, implementation)
+                            .map_err(|error| {
+                                super::declaration_errors::method_failure(
+                                    &self.code,
+                                    implementation,
+                                    error,
+                                )
+                            })?;
                     }
                     self.check_method_contract(method, implementation, &unit)?;
                 }
@@ -386,6 +393,7 @@ impl Vm {
             name.to_ascii_lowercase(),
             Rc::new_cyclic(|identity| Class {
                 index,
+                property_access: hooks.as_ref().and_then(|hooks| hooks.property_access),
                 hooks,
                 operations,
                 origin: super::class::ClassOrigin::User,

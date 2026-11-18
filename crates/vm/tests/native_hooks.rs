@@ -70,6 +70,7 @@ class ChildCounter extends EngineCounter {
 }
 $child = ChildCounter::make(8);
 echo get_class($child), ' ', $child->label, ' ', EngineCounter::accept($child), "\n";
+var_dump($child == ChildCounter::make(8), $child != ChildCounter::make(9));
 try { var_dump($child->stamp); } catch (Error $e) { echo $e->getMessage(), "\n"; }
 $child->stamp();
 try { $child->stamp = 10; } catch (Error $e) { echo $e->getMessage(), "\n"; }

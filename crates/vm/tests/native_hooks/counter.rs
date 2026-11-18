@@ -116,7 +116,7 @@ fn compare(
     right: &Object,
     _: &mut dyn Diagnostics,
 ) -> Result<NativeComparison, OpError> {
-    if left.class.name() != right.class.name() {
+    if left.class.name() != CLASS || right.class.name() != CLASS {
         return Ok(NativeComparison::Default);
     }
     Ok(NativeComparison::Ordered(

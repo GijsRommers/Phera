@@ -96,7 +96,7 @@ impl Vm {
                         .ok_or_else(|| internal_error!("property class"))?;
                     let property = class.defaults.iter().find(|property| property.key == *key);
                     let name = crate::path_update::property_name(key);
-                    if let Some(access) = class.property_access() {
+                    if let Some(access) = class.property_access {
                         let change = if steps.peek().is_some() {
                             NativePropertyMutation::Indirect
                         } else {

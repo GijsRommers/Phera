@@ -71,6 +71,11 @@ impl Vm {
             self.call_stack.recycle_native_arguments(arguments);
             return Err(error);
         }
+        if matches!(arguments.first(), Some(Value::Object(_)))
+            && let Some(handler) = self.registry.object_handler(entry.name)
+        {
+            return handler(self, arguments).await;
+        }
         match entry.handler {
             NativeFn::Sync(handler) => {
                 let result = handler(self, &arguments);
@@ -85,14 +90,6 @@ impl Vm {
                     ));
                 }
                 self.call_stack.recycle_native_arguments(arguments);
-                result
-            }
-            NativeFn::Async(frame) if entry.trace_async_errors => {
-                let trace = crate::error_traces::NativeTrace::new(entry.name, &arguments);
-                let result = frame(self, arguments).await;
-                if result.is_err() {
-                    self.failed_native = Some(trace);
-                }
                 result
             }
             NativeFn::Async(frame) => frame(self, arguments).await,
@@ -191,7 +188,10 @@ impl Vm {
                     self.call_stack.recycle_native_arguments(arguments);
                     return Ok(value);
                 }
-                let previous = self.native_called_class.replace(context.called.clone());
+                let previous = self.native_called_class.take();
+                if method.is_static {
+                    self.native_called_class = Some(context.called.clone());
+                }
                 let result = match entry.handler {
                     phera_extension_api::NativeMethod::Sync(handler) => {
                         let track =

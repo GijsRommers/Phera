@@ -26,10 +26,17 @@ impl Vm {
         work: &mut usize,
     ) -> Result<Option<BatchExit>, NativeError> {
         use Instruction as I;
-        if self.classes.has_dimensions && self.prepare_dimension_instruction(instruction)? {
-            return Ok(Some(BatchExit::Instruction(instruction)));
-        }
         match instruction {
+            I::MakeReference { .. }
+            | I::BindReference { .. }
+            | I::SendPath { .. }
+            | I::UnsetPath { .. }
+            | I::AppendLocal { .. }
+                if self.classes.has_dimensions
+                    && self.prepare_dimension_instruction(instruction)? =>
+            {
+                return Ok(Some(BatchExit::Instruction(instruction)));
+            }
             I::Call { dst } => return self.call(dst, work),
             I::CallDirect {
                 function,
@@ -101,11 +108,27 @@ impl Vm {
             I::Fetch { dst, path, mode }
             | I::FetchIndex {
                 dst, path, mode, ..
-            } => self.fetch_path(dst, path, mode)?,
-            I::AssignOpPath { op, dst, path, src } => self.assign_op_path(op, dst, path, src)?,
-            I::IncDecPath { mode, dst, path } => self.inc_dec_path(mode, dst, path)?,
+            } => {
+                if !self.fetch_path(dst, path, mode)? {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+            }
+            I::AssignOpPath { op, dst, path, src } => {
+                if !self.assign_op_path(op, dst, path, src)? {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+            }
+            I::IncDecPath { mode, dst, path } => {
+                if !self.inc_dec_path(mode, dst, path)? {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+            }
             I::AppendLocal { local, src } => self.append_local(local, src)?,
-            I::AssignPath { path, src } => self.assign_path(path, src)?,
+            I::AssignPath { path, src } => {
+                if !self.assign_path(path, src)? {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+            }
             I::MakeReference { dst, path } => self.make_reference(dst, path)?,
             I::BindReference { path, src } => self.bind_reference(path, src)?,
             I::UnsetPath { path } => self.unset_place(&self.path(path)?)?,

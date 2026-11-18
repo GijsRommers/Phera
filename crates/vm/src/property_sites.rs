@@ -21,6 +21,8 @@ pub(crate) struct PropertyEntry {
     key: ArrayKey,
     write_rule: WriteRule,
     slot: Option<usize>,
+    /// An immutable class fact, so a property-site hit avoids a class downcast.
+    read_without_static_notice: bool,
 }
 
 impl Vm {
@@ -55,17 +57,17 @@ impl Vm {
             .get(name.index())
             .ok_or_else(|| internal_error!("property name"))?;
         let key = self.property_key(object, name)?;
-        let property = object
+        let class = object
             .class
             .as_any()
-            .downcast_ref::<crate::classes::Class>()
-            .and_then(|class| {
-                class
-                    .defaults
-                    .iter()
-                    .enumerate()
-                    .find(|(_, property)| property.key == key)
-            });
+            .downcast_ref::<crate::classes::Class>();
+        let property = class.and_then(|class| {
+            class
+                .defaults
+                .iter()
+                .enumerate()
+                .find(|(_, property)| property.key == key)
+        });
         let slot = property.map(|(slot, _)| slot);
         let write_rule = match property {
             Some((_, property)) if !property.is_readonly => match &property.ty {
@@ -80,6 +82,8 @@ impl Vm {
             key,
             write_rule,
             slot,
+            read_without_static_notice: class
+                .is_none_or(|class| class.static_properties.is_empty()),
         });
         if let Some(slot) = self.current().and_then(|frame| frame.site_cache()) {
             *slot.borrow_mut() = crate::unit_caches::CachedSite::Property(entry.clone());
@@ -105,13 +109,7 @@ impl Vm {
         let Some(entry) = self.property_entry(&object, name)? else {
             return Ok(None);
         };
-        let class = object
-            .class
-            .as_any()
-            .downcast_ref::<crate::classes::Class>();
-        if let Some(class) = class
-            && !class.static_properties.is_empty()
-        {
+        if !entry.read_without_static_notice {
             return Ok(None);
         }
         Ok(

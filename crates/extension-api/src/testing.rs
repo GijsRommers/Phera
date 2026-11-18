@@ -98,7 +98,14 @@ pub fn call(
         .get_function(name)
         .ok_or_else(|| NativeError::error(format!("Call to undefined function {name}()")))?;
     crate::prepare_arguments(entry, &mut arguments, context)?;
-    match entry.handler {
+    let handler = if matches!(arguments.first(), Some(Value::Object(_))) {
+        registry
+            .object_handler(entry.name)
+            .map_or(entry.handler, NativeFn::Async)
+    } else {
+        entry.handler
+    };
+    match handler {
         NativeFn::Sync(function) => function(context, &arguments),
         NativeFn::Async(function) => {
             let mut future = function(context, arguments);

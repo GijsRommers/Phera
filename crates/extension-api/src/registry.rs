@@ -62,6 +62,8 @@ impl From<&'static str> for ConstantValue {
 pub struct Registry {
     /// Keyed by lowercase name: PHP function names are case-insensitive.
     functions: HashMap<String, FunctionEntry>,
+    /// Only calls already holding a first-argument object need to check this table.
+    object_handlers: HashMap<&'static str, crate::AsyncFn>,
     function_order: Vec<&'static str>,
     extensions: Vec<&'static str>,
     /// Modules whose version is not PHP's, by lowercase name.
@@ -168,6 +170,17 @@ impl Registry {
 
     pub fn get_constant(&self, name: &str) -> Option<&ConstantValue> {
         self.constants.get(name)
+    }
+
+    /// Keep a synchronous implementation for other arguments, such as count($array).
+    pub fn function_with_object_handler(&mut self, entry: FunctionEntry, callback: crate::AsyncFn) {
+        self.function(entry);
+        self.object_handlers.insert(entry.name, callback);
+    }
+
+    /// The first argument is already bound and checked when the VM selects this handler.
+    pub fn object_handler(&self, name: &str) -> Option<crate::AsyncFn> {
+        self.object_handlers.get(name).copied()
     }
 
     pub fn functions(&self) -> impl Iterator<Item = &FunctionEntry> {

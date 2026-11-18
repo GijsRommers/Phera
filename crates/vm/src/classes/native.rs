@@ -18,6 +18,7 @@ impl ClassTable {
             Rc::new_cyclic(|identity| Class {
                 index,
                 hooks: None,
+                property_access: None,
                 operations: super::operations::ClassOperations::default(),
                 origin: super::class::ClassOrigin::Native,
                 identity: identity.clone(),
@@ -166,12 +167,14 @@ impl ClassTable {
                 || interfaces
                     .iter()
                     .any(|interface: &Rc<Class>| interface.is_throwable);
+            let hooks = super::operations::inherit_hooks(entry.hooks, parent.as_deref());
             let index = table.next_index();
             table.insert(
                 entry.name.to_ascii_lowercase(),
                 Rc::new_cyclic(|identity| Class {
                     index,
-                    hooks: super::operations::inherit_hooks(entry.hooks, parent.as_deref()),
+                    property_access: hooks.as_ref().and_then(|hooks| hooks.property_access),
+                    hooks,
                     operations: super::operations::ClassOperations::link(
                         entry.name,
                         parent.as_deref(),

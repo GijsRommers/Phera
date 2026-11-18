@@ -1,7 +1,7 @@
 //! Cold instruction dispatch delegates PHP behavior to concern-specific handlers.
 
 use phera_bytecode::Instruction;
-use phera_extension_api::NativeError;
+use phera_extension_api::{LocalFuture, NativeError};
 use phera_value::Value;
 
 use crate::Vm;
@@ -25,10 +25,6 @@ impl Vm {
         instruction: Instruction,
         stop: usize,
     ) -> Result<DispatchResult, NativeError> {
-        if self.pending_dimension.is_some() {
-            self.dispatch_dimension(instruction).await?;
-            return Ok(DispatchResult::Continue);
-        }
         match instruction {
             Instruction::ReturnChecked { source } => {
                 return self
@@ -52,33 +48,6 @@ impl Vm {
                     .await;
             }
 
-            Instruction::ArraySpread { array, src } => {
-                self.spread_traversable(src, crate::traversable_unpack::SpreadTarget::Array(array))
-                    .await?;
-            }
-            Instruction::SendSpread { src } => {
-                self.spread_traversable(src, crate::traversable_unpack::SpreadTarget::Arguments)
-                    .await?;
-            }
-            Instruction::IterStart { iter, src, .. } => {
-                self.start_traversable(iter, self.get(src), false).await?;
-            }
-            Instruction::IterStartReference { iter, subject, .. } => {
-                let value = self.get(subject);
-                self.set(subject, Value::Null);
-                self.start_traversable(iter, value, true).await?;
-            }
-            Instruction::IterNext { iter, value, end } => {
-                self.next_traversable(iter, None, value, end).await?;
-            }
-            Instruction::IterNextKeyed {
-                iter,
-                key,
-                value,
-                end,
-            } => {
-                self.next_traversable(iter, Some(key), value, end).await?;
-            }
             Instruction::Exit { src: source } => {
                 return self.exit_value(source).map(DispatchResult::Returned);
             }
@@ -88,8 +57,59 @@ impl Vm {
                 path,
                 kind,
             } => self.include(destination, path, kind).await?,
-            _ => return Err(internal_error!("unimplemented instruction")),
+            _ => return self.dispatch_object_operation(instruction).await,
         }
         Ok(DispatchResult::Continue)
+    }
+
+    /// The PHP interpreter's common suspension state need not hold the futures for object hooks.
+    #[cold]
+    fn dispatch_object_operation(
+        &mut self,
+        instruction: Instruction,
+    ) -> LocalFuture<'_, Result<DispatchResult, NativeError>> {
+        Box::pin(async move {
+            if self.pending_dimension.is_some() {
+                self.dispatch_dimension(instruction).await?;
+                return Ok(DispatchResult::Continue);
+            }
+            match instruction {
+                Instruction::ArraySpread { array, src } => {
+                    self.spread_traversable(
+                        src,
+                        crate::traversable_unpack::SpreadTarget::Array(array),
+                    )
+                    .await?;
+                }
+                Instruction::SendSpread { src } => {
+                    self.spread_traversable(
+                        src,
+                        crate::traversable_unpack::SpreadTarget::Arguments,
+                    )
+                    .await?;
+                }
+                Instruction::IterStart { iter, src, .. } => {
+                    self.start_traversable(iter, self.get(src), false).await?;
+                }
+                Instruction::IterStartReference { iter, subject, .. } => {
+                    let value = self.get(subject);
+                    self.set(subject, Value::Null);
+                    self.start_traversable(iter, value, true).await?;
+                }
+                Instruction::IterNext { iter, value, end } => {
+                    self.next_traversable(iter, None, value, end).await?;
+                }
+                Instruction::IterNextKeyed {
+                    iter,
+                    key,
+                    value,
+                    end,
+                } => {
+                    self.next_traversable(iter, Some(key), value, end).await?;
+                }
+                _ => return Err(internal_error!("unimplemented instruction")),
+            }
+            Ok(DispatchResult::Continue)
+        })
     }
 }
