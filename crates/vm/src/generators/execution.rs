@@ -86,18 +86,7 @@ impl Vm {
         self.diagnostic_reporter.restore_silence(caller_silence);
         state(object, |generator| match outcome {
             Ok(Pause::Value(destination, key, value)) => {
-                let key = match key {
-                    Some(Value::Int(key)) => {
-                        generator.largest_key = generator.largest_key.max(key);
-                        Value::Int(key)
-                    }
-                    Some(key) => key,
-                    None => {
-                        generator.largest_key = generator.largest_key.wrapping_add(1);
-                        Value::Int(generator.largest_key)
-                    }
-                };
-                generator.item = Some(Item { key, value });
+                generator.publish(key, value);
                 let mut activation = self.suspend_generator_frame(storage)?;
                 activation.silence = generator_silence;
                 generator.state = State::Yielded(activation, destination);

@@ -1,0 +1,129 @@
+//! A suspended generator can execute register-only instructions in its own window.
+//!
+//! ```php
+//! foreach ((function () { for ($i = 0; $i < 3; ++$i) yield $i; })() as $value) {}
+//! ```
+//!
+//! The scalar interpreter cannot call back into PHP. When it encounters an
+//! instruction that needs the VM, the normal resume path installs the frame
+//! at that instruction, with the input to the preceding yield already bound.
+
+use phera_bytecode::{Instruction, Reg};
+use phera_extension_api::{GeneratorOperation, NativeResult, traversal::IteratorStep};
+use phera_value::{Object, Value};
+
+use crate::{
+    Vm,
+    calls::execution_loop::YIELD_AFTER_STEPS,
+    fast::{ScalarStep, scalar_step},
+};
+
+use super::{Generator, State, state};
+
+impl Vm {
+    pub(crate) fn resume_generator_operation(
+        &mut self,
+        object: &Object,
+        operation: &GeneratorOperation,
+    ) -> Option<NativeResult> {
+        match operation {
+            GeneratorOperation::Send(value) => self.resume_in_place(object, value, |generator| {
+                generator
+                    .item
+                    .as_ref()
+                    .map_or(Value::Null, |item| item.value.deref().clone())
+            }),
+            GeneratorOperation::Method(IteratorStep::Advance)
+            | GeneratorOperation::Cursor {
+                step: IteratorStep::Advance,
+                ..
+            } => self.resume_in_place(object, &Value::Null, |_| Value::Null),
+            _ => None,
+        }
+    }
+
+    fn resume_in_place<T>(
+        &mut self,
+        object: &Object,
+        sent: &Value,
+        result: impl FnOnce(&Generator) -> T,
+    ) -> Option<Result<T, phera_extension_api::NativeError>> {
+        if !self.error_handlers.pending.is_empty() || self.generator_releases_pending() {
+            return None;
+        }
+        match state(object, |generator| {
+            if generator.reference {
+                return None;
+            }
+            let State::Yielded(frame, received) = &mut generator.state else {
+                return None;
+            };
+            let instructions = self.code.instructions(frame.frame.function);
+            let mut ip = frame.frame.ip();
+            let registers = frame.local_registers()?;
+            *registers.get_mut(received.index())? = Some(sent.clone());
+            generator.first_yield = false;
+
+            let mut work = 0;
+            let mut executed = 0;
+            let yielded = loop {
+                let Some(&instruction) = instructions.get(ip) else {
+                    break None;
+                };
+                let mut next = ip + 1;
+                if scalar_step(instruction, registers, &mut next) == ScalarStep::Complete {
+                    executed += 1;
+                    if next <= ip {
+                        work += 1;
+                    }
+                    ip = next;
+                    if work < YIELD_AFTER_STEPS {
+                        continue;
+                    }
+                    break None;
+                }
+                let Instruction::Yield { dst, key, value } = instruction else {
+                    break None;
+                };
+                let Some(key) = read_operand(key, registers) else {
+                    break None;
+                };
+                let Some(value) = read_operand(value, registers) else {
+                    break None;
+                };
+                if self.generator_releases_pending() {
+                    break None;
+                }
+                executed += 1;
+                ip = next;
+                break Some((dst, key, value.unwrap_or_default()));
+            };
+            self.executed_instructions += executed;
+            frame.frame.set_ip(ip);
+            if let Some((destination, key, value)) = yielded {
+                *received = destination;
+                generator.publish(key, value);
+                Some(result(generator))
+            } else {
+                let old = std::mem::replace(&mut generator.state, State::Running);
+                if let State::Yielded(frame, _) = old {
+                    generator.state = State::Ready(frame);
+                }
+                None
+            }
+        }) {
+            Ok(result) => result.map(Ok),
+            Err(error) => Some(Err(error)),
+        }
+    }
+}
+
+/// Absent operands are distinct from operands referring to an undefined local.
+fn read_operand(operand: Option<Reg>, registers: &[Option<Value>]) -> Option<Option<Value>> {
+    match operand {
+        Some(register) => Some(Some(
+            registers.get(register.index())?.as_ref()?.deref().clone(),
+        )),
+        None => Some(None),
+    }
+}

@@ -144,6 +144,9 @@ impl Context for Vm {
         if let Some(result) = crate::generators::local_observation(&object, &operation) {
             return Box::pin(std::future::ready(result));
         }
+        if let Some(result) = self.resume_generator_operation(&object, &operation) {
+            return Box::pin(std::future::ready(result));
+        }
         Box::pin(async move {
             self.call_stack.enter_callback()?;
             self.generator_traces

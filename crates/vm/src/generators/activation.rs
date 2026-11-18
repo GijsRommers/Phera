@@ -36,6 +36,19 @@ pub(super) struct Storage {
 }
 
 impl Activation {
+    /// The scalar interpreter has no access to the VM side tables.
+    pub(super) fn local_registers(&mut self) -> Option<&mut [Option<Value>]> {
+        if self.silence != 0
+            || self.frame.has_extras()
+            || !self.storage.calls.is_empty()
+            || !self.storage.finally.is_empty()
+            || !self.storage.captures.is_empty()
+        {
+            return None;
+        }
+        self.storage.registers.get_mut(self.frame.kind().prefix()..)
+    }
+
     pub(super) fn has_receiver(&self) -> bool {
         let prefix = self.frame.kind().prefix();
         prefix > 0

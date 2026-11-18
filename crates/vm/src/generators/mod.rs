@@ -11,6 +11,7 @@ pub(crate) mod class;
 pub(crate) mod cleanup;
 mod delegation;
 mod execution;
+mod in_place;
 mod operations;
 mod resume;
 pub(crate) use operations::local_observation;
@@ -52,6 +53,23 @@ enum State {
 struct Item {
     key: Value,
     value: Value,
+}
+
+impl Generator {
+    fn publish(&mut self, key: Option<Value>, value: Value) {
+        let key = match key {
+            Some(Value::Int(key)) => {
+                self.largest_key = self.largest_key.max(key);
+                Value::Int(key)
+            }
+            Some(key) => key,
+            None => {
+                self.largest_key = self.largest_key.wrapping_add(1);
+                Value::Int(self.largest_key)
+            }
+        };
+        self.item = Some(Item { key, value });
+    }
 }
 
 pub(crate) enum Suspension {
