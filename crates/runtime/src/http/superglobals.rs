@@ -1,6 +1,8 @@
-//! Building `$_SERVER`, `$_GET`, `$_POST`, `$_COOKIE` and `$_REQUEST` from a
-//! request.
+//! Request variables exposed to PHP. Two `X-Tag` fields reach
+//! `$_SERVER['HTTP_X_TAG']` as a single comma-separated string.
 
+use std::borrow::Cow;
+use std::collections::HashMap;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -25,15 +27,16 @@ pub(crate) fn define_superglobals(
         Duplicates::Replace,
     );
 
+    let headers = joined_headers(request);
     let mut post = PhpArray::new();
     // PHP fills `$_POST` for the POST method only. A form body sent with PUT
     // or GET stays in the raw request body.
-    if request.method.eq_ignore_ascii_case("POST") && is_form(request) {
+    if request.method == "POST" && is_form(header(&headers, "content-type")) {
         parse_pairs(&mut post, &request.body, b'&', Duplicates::Replace);
     }
 
     let mut cookie = PhpArray::new();
-    if let Some(header) = request.header("Cookie") {
+    if let Some(header) = header(&headers, "cookie") {
         parse_pairs(&mut cookie, header, b';', Duplicates::KeepFirst);
     }
 
@@ -46,7 +49,7 @@ pub(crate) fn define_superglobals(
 
     vm.set_global(
         "_SERVER",
-        Value::from(server(request, script, document_root)),
+        Value::from(server(request, headers, script, document_root)),
     );
     vm.set_global("_GET", Value::from(get));
     vm.set_global("_POST", Value::from(post));
@@ -57,8 +60,13 @@ pub(crate) fn define_superglobals(
 
 /// Whether the body is an HTML form in the default encoding. File uploads
 /// (`multipart/form-data`) are not parsed yet.
-fn is_form(request: &HttpRequest) -> bool {
-    request.header("Content-Type").is_some_and(|value| {
+fn is_form(content_type: Option<&Cow<'_, [u8]>>) -> bool {
+    // A form has one media type. A joined Content-Type is ambiguous even
+    // when the first field has a semicolon before the comma.
+    content_type.is_some_and(|value| {
+        let Cow::Borrowed(value) = value else {
+            return false;
+        };
         let media_type = value.split(|&byte| byte == b';').next().unwrap_or_default();
         media_type
             .trim_ascii()
@@ -66,7 +74,42 @@ fn is_form(request: &HttpRequest) -> bool {
     })
 }
 
-fn server(request: &HttpRequest, script: &Path, document_root: &Path) -> PhpArray {
+/// Group HTTP field names before applying CGI's dash-to-underscore mapping.
+type Headers<'request> = Vec<(String, Cow<'request, [u8]>)>;
+
+fn joined_headers(request: &HttpRequest) -> Headers<'_> {
+    let mut positions = HashMap::<String, usize>::new();
+    let mut headers = Headers::new();
+    for (name, value) in &request.headers {
+        let name = name.to_ascii_lowercase();
+        if let Some(&position) = positions.get(&name) {
+            let joined = headers[position].1.to_mut();
+            joined.extend_from_slice(b", ");
+            joined.extend_from_slice(value);
+        } else {
+            positions.insert(name.clone(), headers.len());
+            headers.push((name, Cow::Borrowed(value)));
+        }
+    }
+    headers
+}
+
+fn header<'headers, 'request>(
+    headers: &'headers Headers<'request>,
+    name: &str,
+) -> Option<&'headers Cow<'request, [u8]>> {
+    headers
+        .iter()
+        .find(|(key, _)| key == name)
+        .map(|(_, value)| value)
+}
+
+fn server(
+    request: &HttpRequest,
+    headers: Headers<'_>,
+    script: &Path,
+    document_root: &Path,
+) -> PhpArray {
     let mut server = PhpArray::new();
     let mut set = |name: &str, value: Value| {
         server.insert(ArrayKey::str(name), value);
@@ -119,7 +162,7 @@ fn server(request: &HttpRequest, script: &Path, document_root: &Path) -> PhpArra
     let name = host.split(|&byte| byte == b':').next().unwrap_or_default();
     set("SERVER_NAME", Value::from(name));
 
-    for (header, value) in &request.headers {
+    for (header, value) in headers {
         // CGI's convention: `Accept-Language` becomes `HTTP_ACCEPT_LANGUAGE`,
         // except for the two headers that describe the body.
         let upper = header.to_ascii_uppercase().replace('-', "_");
@@ -127,7 +170,7 @@ fn server(request: &HttpRequest, script: &Path, document_root: &Path) -> PhpArra
             "CONTENT_TYPE" | "CONTENT_LENGTH" => upper,
             _ => format!("HTTP_{upper}"),
         };
-        set(&key, Value::from(value.as_slice()));
+        set(&key, Value::from(value.as_ref()));
     }
     server
 }

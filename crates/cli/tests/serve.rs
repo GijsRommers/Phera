@@ -152,6 +152,49 @@ fn a_form_post_reaches_the_script() {
     assert_eq!(response, (201, "POST Hello Phera".to_string()));
 }
 
+#[test]
+fn only_the_exact_post_method_populates_post_and_request() {
+    let served = Served::start(
+        "post-case",
+        &[(
+            "form.php",
+            "<?php echo $_SERVER['REQUEST_METHOD'], '|', $_POST['title'] ?? '-', '|', $_REQUEST['title'];",
+        )],
+    );
+    let form = "Content-Type: application/x-www-form-urlencoded\r\n";
+    for (method, expected) in [
+        ("POST", "POST|body|body"),
+        ("post", "post|-|query"),
+        ("Post", "Post|-|query"),
+    ] {
+        assert_eq!(
+            served.request(method, "/form.php?title=query", form, "title=body"),
+            (200, expected.to_string())
+        );
+    }
+}
+
+#[test]
+fn repeated_headers_are_joined_and_do_not_describe_a_form() {
+    let served = Served::start(
+        "repeat-headers",
+        &[(
+            "form.php",
+            "<?php echo $_SERVER['CONTENT_TYPE'], '|', $_SERVER['HTTP_X_TAG'], '|', count($_POST), '|', $_REQUEST['title'];",
+        )],
+    );
+    let headers = "Content-Type: application/x-www-form-urlencoded; charset=UTF-8\r\n\
+                   cOnTeNt-TyPe: text/plain\r\nX-Tag: first\r\nx-tag: second\r\nX-TAG: third\r\n";
+    assert_eq!(
+        served.request("POST", "/form.php?title=query", headers, "title=body"),
+        (
+            200,
+            "application/x-www-form-urlencoded; charset=UTF-8, text/plain|first, second, third|0|query"
+                .to_string()
+        )
+    );
+}
+
 /// Many clients at once, on two worker threads: every request gets its own
 /// answer and none sees another's variables.
 #[test]
