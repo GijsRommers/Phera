@@ -1747,6 +1747,7 @@ dependencies = [
  "getrandom 0.3.4",
  "phera-ext-core",
  "phera-extension-api",
+ "phera-source",
  "sha2 0.10.9",
  "tokio",
 ]
