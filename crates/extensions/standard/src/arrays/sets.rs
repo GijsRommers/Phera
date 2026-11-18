@@ -6,8 +6,7 @@ use std::cmp::Ordering;
 use std::collections::HashSet;
 
 use phera_extension_api::{
-    ArrayKey, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType,
-    PhpArray, Value, args,
+    Context, FunctionEntry, LocalFuture, NativeResult, Param, ParamType, PhpArray, Value, args,
 };
 
 use super::ordering::SortFlags;
@@ -110,8 +109,8 @@ const ARRAY_DIFF_KEY: FunctionEntry = FunctionEntry::sync(
     array_diff_key,
 );
 
-fn array_diff_key(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    keep_entries(context, arguments, Keep::InNone, Match::Key)
+fn array_diff_key(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    keep_keys(arguments, Keep::InNone)
 }
 
 /// `array_diff_assoc(array $array, array ...$arrays): array`, the entries
@@ -120,18 +119,14 @@ fn array_diff_key(context: &mut dyn Context, arguments: &[Value]) -> NativeResul
 /// ```php
 /// array_diff_assoc(["a" => 1, "b" => 2], ["a" => "1", "b" => 3]); // ["b" => 2]
 /// ```
-const ARRAY_DIFF_ASSOC: FunctionEntry = FunctionEntry::sync(
+const ARRAY_DIFF_ASSOC: FunctionEntry = FunctionEntry::asynchronous(
     "array_diff_assoc",
     &[
         Param::new("array", ParamType::Array),
         Param::new("arrays", ParamType::Array).variadic(),
     ],
-    array_diff_assoc,
+    super::callback_sets::diff_associative_strings,
 );
-
-fn array_diff_assoc(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    keep_entries(context, arguments, Keep::InNone, Match::KeyAndValue)
-}
 
 /// `array_intersect(array $array, array ...$arrays): array`, the entries
 /// whose value is in every other array.
@@ -159,8 +154,8 @@ const ARRAY_INTERSECT_KEY: FunctionEntry = FunctionEntry::sync(
     array_intersect_key,
 );
 
-fn array_intersect_key(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    keep_entries(context, arguments, Keep::InAll, Match::Key)
+fn array_intersect_key(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    keep_keys(arguments, Keep::InAll)
 }
 
 /// `array_intersect_assoc(array $array, array ...$arrays): array`, the
@@ -183,52 +178,17 @@ enum Keep {
     InAll,
 }
 
-/// What makes an entry of another array match.
-#[derive(Clone, Copy)]
-enum Match {
-    Key,
-    KeyAndValue,
-}
-
-fn keep_entries(
-    context: &mut dyn Context,
-    arguments: &[Value],
-    keep: Keep,
-    by: Match,
-) -> NativeResult {
+fn keep_keys(arguments: &[Value], keep: Keep) -> NativeResult {
     let mut result = PhpArray::new();
     'entries: for (key, value) in required_array(arguments, 0).iter() {
         for other in other_arrays(arguments) {
-            let found = contains(context, other, &key, value, by)?;
-            if found != (keep == Keep::InAll) {
+            if other.contains_key(&key) != (keep == Keep::InAll) {
                 continue 'entries;
             }
         }
         result.insert(key, value.clone());
     }
     Ok(Value::from(result))
-}
-
-/// Whether `other` has an entry that matches `key` and `value`.
-fn contains(
-    context: &mut dyn Context,
-    other: &PhpArray,
-    key: &ArrayKey,
-    value: &Value,
-    by: Match,
-) -> Result<bool, NativeError> {
-    let equal_strings = |context: &mut dyn Context, other_value: &Value| {
-        Ok::<_, NativeError>(
-            SortFlags::STRING.compare(context, value, other_value)? == Ordering::Equal,
-        )
-    };
-    match by {
-        Match::Key => Ok(other.contains_key(key)),
-        Match::KeyAndValue => match other.get(key) {
-            Some(other_value) => equal_strings(context, other_value),
-            None => Ok(false),
-        },
-    }
 }
 
 /// `array_unique(array $array, int $flags = SORT_STRING): array`, the

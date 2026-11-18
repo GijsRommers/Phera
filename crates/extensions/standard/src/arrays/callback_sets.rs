@@ -340,14 +340,14 @@ pub(super) fn intersect_strings(
         values: Values::Strings,
         keys: Keys::Ignored,
     };
-    run_builtin_intersection(context, arguments, variant)
+    run_builtin_string_set(context, arguments, variant)
 }
 
 pub(super) fn intersect_associative_strings(
     context: &mut dyn Context,
     arguments: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
-    run_builtin_intersection(
+    run_builtin_string_set(
         context,
         arguments,
         Variant {
@@ -359,7 +359,23 @@ pub(super) fn intersect_associative_strings(
     )
 }
 
-fn run_builtin_intersection(
+pub(super) fn diff_associative_strings(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    run_builtin_string_set(
+        context,
+        arguments,
+        Variant {
+            function: "array_diff_assoc",
+            result: SetResult::Difference,
+            values: Values::Strings,
+            keys: Keys::Exact,
+        },
+    )
+}
+
+fn run_builtin_string_set(
     context: &mut dyn Context,
     arguments: Vec<Value>,
     variant: Variant,
