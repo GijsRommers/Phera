@@ -148,7 +148,8 @@ impl Vm {
                 Instruction::FetchConstant { dst, constant } => {
                     (dst, self.constants.fetch(unit.clone(), constant)?)
                 }
-                Instruction::Fetch { dst, path, .. } => (
+                Instruction::Fetch { dst, path, .. }
+                | Instruction::FetchIndex { dst, path, .. } => (
                     dst,
                     self.initializer_path(&unit, &function.paths[path.index()], slots)?,
                 ),
@@ -257,6 +258,11 @@ impl Vm {
                     self.initializer_property(value, &name.to_string_lossy())?
                 }
                 Step::Index(index) => {
+                    if value.is_object() {
+                        return Err(NativeError::error(
+                            "Cannot use [] on objects in constant expression",
+                        ));
+                    }
                     let key = ArrayKey::from_value(&slot(slots, index))?;
                     match value {
                         Value::Array(array) => array.get(&key).cloned().unwrap_or_default(),
