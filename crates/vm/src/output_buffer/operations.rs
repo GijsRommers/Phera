@@ -143,7 +143,8 @@ impl Vm {
     }
 
     pub(crate) async fn drain_output(&mut self) -> Result<(), NativeError> {
-        self.drain_output_from(None).await
+        let caller = self.output_writer.chunk_caller.take();
+        self.drain_output_from(caller).await
     }
 
     pub(crate) async fn drain_output_from(

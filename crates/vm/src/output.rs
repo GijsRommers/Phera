@@ -45,6 +45,7 @@ pub(crate) struct Output {
     web: bool,
     pub(crate) origin: Option<SourceLocation>,
     queued_origin: Option<SourceLocation>,
+    pub(crate) chunk_caller: Option<&'static str>,
     queued: Vec<u8>,
 }
 
@@ -58,6 +59,7 @@ impl Output {
             web: false,
             origin: None,
             queued_origin: None,
+            chunk_caller: None,
             queued: Vec::new(),
         }
     }

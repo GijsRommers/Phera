@@ -133,7 +133,7 @@ impl Context for Vm {
         arguments: Vec<Value>,
     ) -> LocalFuture<'_, NativeResult> {
         match self.protocol_method(object, name) {
-            Ok(callee) => self.invoke_resolved_callable(callee, arguments),
+            Ok(callee) => Box::pin(self.invoke_resolved_callable(callee, arguments)),
             Err(error) => Box::pin(std::future::ready(Err(error))),
         }
     }
@@ -269,7 +269,7 @@ impl Vm {
         &mut self,
         callee: crate::calls::call_state::Callee,
         arguments: impl IntoIterator<Item = Value>,
-    ) -> LocalFuture<'_, NativeResult> {
+    ) -> impl Future<Output = NativeResult> {
         self.invoke_callable_origin(
             callee,
             arguments,

@@ -181,7 +181,7 @@ impl Vm {
                 let result = self.native_entry_origin(*entry, arguments, origin).await;
                 self.native_called_class = previous;
                 if self.output_writer.buffers.pending.is_some() && result.is_ok() {
-                    Box::pin(self.drain_output_from(Some(entry.name))).await?;
+                    self.output_writer.chunk_caller = Some(entry.name);
                 }
                 result
             }

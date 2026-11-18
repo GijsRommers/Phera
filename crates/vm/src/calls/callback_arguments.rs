@@ -32,7 +32,7 @@ impl Vm {
         let routed = self
             .prepare_call(callee)
             .and_then(|()| self.route_callback_array(array));
-        self.finish_callback(routed, base, depth, origin)
+        Box::pin(self.finish_callback(routed, base, depth, origin))
     }
 
     /// Integer keys follow positional order and string keys select declared or variadic slots.
