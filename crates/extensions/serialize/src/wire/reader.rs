@@ -202,13 +202,14 @@ impl<'a> Reader<'a> {
     /// An object header has been read; PHP resolves its class before these bytes.
     pub fn properties(&mut self) -> Result<usize, ParseError> {
         let colon = self.offset.checked_sub(1).ok_or(ParseError)?;
-        if self.input.len() - colon <= 2 {
-            self.offset = colon;
+        let quote = colon.checked_sub(1).ok_or(ParseError)?;
+        if self.input.len() - quote <= 2 {
+            self.offset = quote;
             self.diagnostic = Some(Diagnostic::BadObjectData);
             return Err(ParseError);
         }
         let (count, end) = self.object_count(colon);
-        let count = self.checked_count(count, colon)?;
+        let count = self.checked_count(count, quote)?;
         self.open_object_body(end)?;
         Ok(count)
     }
@@ -216,6 +217,9 @@ impl<'a> Reader<'a> {
     pub fn custom_data(&mut self) -> Result<&'a [u8], ParseError> {
         let colon = self.offset.checked_sub(1).ok_or(ParseError)?;
         let (length, end) = self.object_count(colon);
+        if self.input.len() - end < 2 {
+            return Err(ParseError);
+        }
         self.open_object_body(end)?;
         let available = self.input.len() - self.offset;
         let size = usize::try_from(length)

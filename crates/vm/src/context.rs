@@ -235,6 +235,92 @@ impl Context for Vm {
         }
     }
 
+    fn serialization_class<'a>(
+        &'a mut self,
+        name: &'a str,
+    ) -> LocalFuture<
+        'a,
+        Result<Option<phera_extension_api::serialization::SerializationClass>, NativeError>,
+    > {
+        Box::pin(async move {
+            Ok(self
+                .lookup_class(name)
+                .await?
+                .as_deref()
+                .map(Self::serialization_class_info))
+        })
+    }
+
+    fn serialization_forbidden(&self, object: &phera_value::Object) -> bool {
+        self.classes
+            .for_object(object)
+            .is_some_and(|class| Self::class_forbids_serialization(&class))
+    }
+
+    fn has_serialization_method(&self, object: &phera_value::Object, name: &str) -> bool {
+        self.classes
+            .for_object(object)
+            .is_some_and(|class| Self::serialization_method(&class, name).is_some())
+    }
+
+    fn call_serialization_method(
+        &mut self,
+        object: std::rc::Rc<phera_value::Object>,
+        name: &str,
+        arguments: Vec<Value>,
+    ) -> LocalFuture<'_, NativeResult> {
+        self.invoke_serialization_method(object, name, arguments)
+    }
+
+    fn create_unserialized_object(&mut self, name: &str) -> NativeResult {
+        let class = self.factory_class(name)?;
+        self.allocate_unserialized_object(class)
+    }
+
+    fn serialization_properties(
+        &mut self,
+        object: &phera_value::Object,
+    ) -> Result<phera_value::PhpArray, NativeError> {
+        self.ordered_serialization_properties(object)
+    }
+
+    fn has_uninitialized_serialized_property(
+        &self,
+        object: &phera_value::Object,
+        key: &phera_value::ArrayKey,
+    ) -> bool {
+        self.classes.for_object(object).is_some_and(|class| {
+            class
+                .defaults
+                .iter()
+                .any(|prop| prop.key == *key && prop.ty.is_some())
+        })
+    }
+
+    fn unserialized_property_key(
+        &mut self,
+        object: &phera_value::Object,
+        key: phera_value::ArrayKey,
+    ) -> Result<Option<phera_value::ArrayKey>, NativeError> {
+        Ok(self.resolve_serialized_property(object, key))
+    }
+
+    fn unserialized_dynamic_property(
+        &mut self,
+        object: &phera_value::Object,
+        key: &phera_value::ArrayKey,
+    ) -> Result<(), NativeError> {
+        self.check_serialized_dynamic_property(object, key)
+    }
+
+    fn finish_unserialized_object(
+        &mut self,
+        object: &std::rc::Rc<phera_value::Object>,
+        properties: phera_value::PhpArray,
+    ) -> Result<(), NativeError> {
+        self.write_unserialized_properties(object, properties)
+    }
+
     fn called_class(&self) -> Option<&str> {
         self.native_called_class
             .as_ref()

@@ -176,6 +176,47 @@ pub fn float_repr(v: f64) -> String {
     gcvt(v, -1).as_str().to_owned()
 }
 
+/// The decimal format requested by PHP's `serialize_precision` INI setting.
+pub fn float_repr_with_precision(value: f64, precision: i32) -> String {
+    if precision < 0 || !value.is_finite() {
+        return float_repr(value);
+    }
+    if (1..=17).contains(&precision) {
+        return gcvt(value, precision).as_str().to_owned();
+    }
+    if precision == 0 {
+        return gcvt_layout(&rounded_digits(value, 1), 0)
+            .as_str()
+            .to_owned();
+    }
+    // A binary64 has at most 767 significant decimal digits in its exact expansion.
+    let places = (precision - 1).min(767) as usize;
+    let scientific = format!("{:.places$e}", value.abs());
+    let Some((coefficient, exponent)) = scientific.split_once('e') else {
+        return float_repr(value);
+    };
+    let point = exponent.parse::<i32>().unwrap_or(0) + 1;
+    let mut digits = coefficient.replace('.', "");
+    while digits.len() > 1 && digits.ends_with('0') {
+        digits.pop();
+    }
+    let sign = if value.is_sign_negative() { "-" } else { "" };
+    if point > precision || point < -3 {
+        let (first, rest) = digits.split_at(1);
+        let rest = if rest.is_empty() { "0" } else { rest };
+        return format!("{sign}{first}.{rest}E{:+}", point - 1);
+    }
+    if point <= 0 {
+        return format!("{sign}0.{}{digits}", "0".repeat((-point) as usize));
+    }
+    let point = point as usize;
+    if point >= digits.len() {
+        return format!("{sign}{digits}{}", "0".repeat(point - digits.len()));
+    }
+    let (whole, fraction) = digits.split_at(point);
+    format!("{sign}{whole}.{fraction}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

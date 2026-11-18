@@ -1,6 +1,11 @@
 //! Exercise the byte reader with arbitrary bytes and mutations of native PHP encodings.
 
+use phera_ext_serialize::Serialize;
 use phera_ext_serialize::wire::{ObjectFormat, ParseError, Reader, Token};
+use phera_extension_api::{
+    Registry, Value,
+    testing::{TestContext, call},
+};
 
 fn walk(bytes: &[u8]) -> Result<(), ParseError> {
     let mut reader = Reader::new(bytes);
@@ -63,6 +68,8 @@ fn arbitrary_and_mutated_bytes_return() {
         b"s:18446744073709551615:\"a\";",
     ];
     let mut input = Vec::new();
+    let mut registry = Registry::new();
+    registry.load(&Serialize);
     for index in 0..300_000 {
         input.clear();
         if index % 2 == 0 {
@@ -80,5 +87,11 @@ fn arbitrary_and_mutated_bytes_return() {
             }
         }
         let _ = walk(&input);
+        let _ = call(
+            &registry,
+            &mut TestContext::default(),
+            "unserialize",
+            vec![Value::from(input.clone())],
+        );
     }
 }

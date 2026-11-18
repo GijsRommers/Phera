@@ -185,12 +185,14 @@ impl Vm {
                 is_abstract: method.is_abstract,
                 body: MethodBody::User(self.code.index_in(&unit, Some(method.function.index()))),
             });
-            if let Some(inherited) = methods.get(&method_name.to_ascii_lowercase()) {
+            let lower_name = method_name.to_ascii_lowercase();
+            self.check_serialization_method(&lower_name, &linked)?;
+            if let Some(inherited) = methods.get(&lower_name) {
                 super::inheritance_checks::check_override(name, inherited, &linked)
                     .map_err(|error| self.magic_override_error(&linked, error))?;
                 self.check_method_contract(inherited, &linked, &unit)?;
             }
-            methods.insert(method_name.to_ascii_lowercase(), linked);
+            methods.insert(lower_name, linked);
         }
         if let Some(method) = methods.get("__tostring") {
             if method.visibility != Visibility::Public
@@ -424,39 +426,44 @@ impl Vm {
             self.code.set_declaring_class(function, index);
         }
         let declaration_location = Some((self.code.index_in(&unit, None), declaration.line));
-        self.classes.insert(
-            name.to_ascii_lowercase(),
-            Rc::new_cyclic(|identity| Class {
-                index,
-                property_access: hooks.as_ref().and_then(|hooks| hooks.property_access),
-                hooks,
-                operations,
-                origin: super::class::ClassOrigin::User,
-                identity: identity.clone(),
-                declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
-                ancestors: super::class::ancestor_names(&parent, &interfaces),
-                name_value: phera_value::Value::from(name.as_str()),
-                name: name.clone(),
-                has_native_layout: parent.as_ref().is_some_and(|class| class.has_native_layout),
-                parent,
-                interfaces,
-                kind: declaration.kind,
-                is_abstract: declaration.is_abstract,
-                is_throwable,
-                is_final: declaration.is_final,
-                is_readonly: declaration.is_readonly,
-                allows_dynamic_properties,
-                constructor: methods.get("__construct").cloned(),
-                magic: super::magic::MagicMethods::link(&methods),
-                methods,
-                method_table: std::cell::OnceCell::new(),
-                property_template: super::class::property_template(&defaults),
-                defaults,
-                static_properties,
-                constants,
-                declaration: declaration_location,
-            }),
+        let class = Rc::new_cyclic(|identity| Class {
+            index,
+            property_access: hooks.as_ref().and_then(|hooks| hooks.property_access),
+            hooks,
+            operations,
+            origin: super::class::ClassOrigin::User,
+            identity: identity.clone(),
+            declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
+            ancestors: super::class::ancestor_names(&parent, &interfaces),
+            name_value: phera_value::Value::from(name.as_str()),
+            name: name.clone(),
+            has_native_layout: parent.as_ref().is_some_and(|class| class.has_native_layout),
+            parent,
+            interfaces,
+            kind: declaration.kind,
+            is_abstract: declaration.is_abstract,
+            is_throwable,
+            is_final: declaration.is_final,
+            is_readonly: declaration.is_readonly,
+            allows_dynamic_properties,
+            constructor: methods.get("__construct").cloned(),
+            magic: super::magic::MagicMethods::link(&methods),
+            methods,
+            method_table: std::cell::OnceCell::new(),
+            property_template: super::class::property_template(&defaults),
+            defaults,
+            static_properties,
+            constants,
+            declaration: declaration_location,
+        });
+        self.deprecate_legacy_serializable(
+            &class,
+            crate::diagnostics::SourceLocation {
+                file: unit.file.clone(),
+                line: declaration.line as usize,
+            },
         );
+        self.classes.insert(name.to_ascii_lowercase(), class);
         Ok(())
     }
 }
