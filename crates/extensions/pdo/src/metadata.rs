@@ -14,13 +14,17 @@ use crate::statement::state;
 
 #[derive(Clone, Debug)]
 pub enum Metadata {
-    Postgres {
-        oid: u32,
-        table_oid: u32,
-        modifier: i32,
-        native_type: String,
-    },
+    Postgres(PostgresColumn),
     Mysql(mysql_async::Column),
+}
+
+/// What tokio-postgres tells about a result column.
+#[derive(Clone, Debug)]
+pub struct PostgresColumn {
+    pub oid: u32,
+    pub table_oid: u32,
+    pub modifier: i32,
+    pub native_type: String,
 }
 
 pub fn get<'a>(
@@ -112,12 +116,12 @@ pub fn mysql(column: &mysql_async::Column) -> PhpArray {
 pub fn postgres(column: &tokio_postgres::Column) -> Column {
     Column {
         name: column.name().into(),
-        metadata: Metadata::Postgres {
+        metadata: Metadata::Postgres(PostgresColumn {
             oid: column.type_().oid(),
             table_oid: column.table_oid().unwrap_or(0),
             modifier: column.type_modifier(),
             native_type: column.type_().name().into(),
-        },
+        }),
     }
 }
 
@@ -125,16 +129,20 @@ pub fn insert(array: &mut PhpArray, name: &str, value: Value) {
     array.insert(ArrayKey::str(name), value);
 }
 
-pub fn postgres_values(column: &Column, length: i16, table: Option<String>) -> PhpArray {
-    let Metadata::Postgres {
+/// `getColumnMeta()` for PostgreSQL, with the type length and table name
+/// the catalog lookup found.
+pub fn postgres_values(
+    name: &str,
+    column: &PostgresColumn,
+    length: i16,
+    table: Option<String>,
+) -> PhpArray {
+    let PostgresColumn {
         oid,
         table_oid,
         modifier,
         native_type,
-    } = &column.metadata
-    else {
-        unreachable!("PostgreSQL metadata only")
-    };
+    } = column;
     let mut values = PhpArray::new();
     insert(&mut values, "pgsql:oid", Value::Int(i64::from(*oid)));
     insert(
@@ -153,7 +161,7 @@ pub fn postgres_values(column: &Column, length: i16, table: Option<String>) -> P
         _ => PARAM_STR,
     };
     insert(&mut values, "pdo_type", Value::Int(pdo_type));
-    insert(&mut values, "name", Value::from(column.name.clone()));
+    insert(&mut values, "name", Value::from(name));
     insert(&mut values, "len", Value::Int(i64::from(length)));
     insert(&mut values, "precision", Value::Int(i64::from(*modifier)));
     values

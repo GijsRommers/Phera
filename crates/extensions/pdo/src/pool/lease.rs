@@ -21,20 +21,27 @@ pub struct Lease {
 }
 
 impl Lease {
-    pub(super) fn new(connection: phera_io_pool::Lease<Driver>) -> Self {
-        let (version, observed_transaction) = connection
-            .try_inspect(|driver| {
-                (
-                    driver.version().to_owned(),
-                    driver.observed_transaction_state(),
-                )
-            })
-            .expect("no operation uses a lease that was just lent");
-        Self {
+    pub(super) async fn new(connection: phera_io_pool::Lease<Driver>) -> Result<Self, DbError> {
+        let inspect = |driver: &Driver| {
+            (
+                driver.version().to_owned(),
+                driver.observed_transaction_state(),
+            )
+        };
+        // Nothing else uses a lease that was just lent, so this reads it on
+        // the worker at once; were it ever busy, the I/O runtime is asked.
+        let (version, observed_transaction) = match connection.try_inspect(inspect) {
+            Some(found) => found,
+            None => connection
+                .run(move |driver| Box::pin(async move { inspect(driver) }))
+                .await
+                .map_err(connection_error)?,
+        };
+        Ok(Self {
             connection,
             version,
             observed_transaction,
-        }
+        })
     }
 
     pub fn version(&self) -> &str {
@@ -111,14 +118,20 @@ impl Lease {
 
     /// `getColumnMeta()`. Only PostgreSQL needs to ask the server.
     pub async fn metadata(&mut self, column: &Column) -> Result<PhpArray, DbError> {
-        if let Metadata::Mysql(mysql) = &column.metadata {
-            return Ok(crate::metadata::mysql(mysql));
-        }
+        let postgres = match &column.metadata {
+            Metadata::Mysql(mysql) => return Ok(crate::metadata::mysql(mysql)),
+            Metadata::Postgres(postgres) => postgres,
+        };
         let owned = column.clone();
         let (length, table) = self
             .run(move |driver| Box::pin(async move { driver.postgres_column(&owned).await }))
             .await?;
-        Ok(crate::metadata::postgres_values(column, length, table))
+        Ok(crate::metadata::postgres_values(
+            &column.name,
+            postgres,
+            length,
+            table,
+        ))
     }
 
     pub fn observed_transaction_state(&self) -> Option<bool> {

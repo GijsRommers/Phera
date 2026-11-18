@@ -137,14 +137,15 @@ async fn acquire_from(
         }
         Policy::Unpooled => pool.connect_unpooled(connect).await,
     };
-    lease.map(Lease::new).map_err(|error| match error {
+    let lease = lease.map_err(|error| match error {
         AcquireError::Settings(detail) => DbError::general(detail),
         AcquireError::Runtime(detail) => connection_error(detail),
         AcquireError::Exhausted { limit } => DbError::general(format!(
             "PDO connection pool exhausted (limit {limit}); timed out waiting"
         )),
         AcquireError::Connect(error) => error,
-    })
+    })?;
+    Lease::new(lease).await
 }
 
 #[cfg(test)]

@@ -70,7 +70,10 @@ fn open(counts: &Arc<Counts>) -> impl Future<Output = Result<Fake, String>> + Se
 }
 
 async fn id(lease: &super::Lease<Fake>) -> usize {
-    lease.run(|fake| Box::pin(async move { fake.id })).await.unwrap()
+    lease
+        .run(|fake| Box::pin(async move { fake.id }))
+        .await
+        .unwrap()
 }
 
 async fn update(lease: &super::Lease<Fake>, change: fn(&mut Fake)) {
@@ -111,7 +114,11 @@ async fn failing_checks_and_unreusable_connections_are_closed() {
     drop(second);
     returned(&pool).await;
     assert_eq!(counts.closed.load(Ordering::SeqCst), 2);
-    assert_eq!(counts.resets.load(Ordering::SeqCst), 1, "no reset when unreusable");
+    assert_eq!(
+        counts.resets.load(Ordering::SeqCst),
+        1,
+        "no reset when unreusable"
+    );
 }
 
 #[tokio::test]

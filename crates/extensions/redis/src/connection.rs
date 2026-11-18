@@ -62,7 +62,12 @@ impl Session {
     }
     pub async fn ensure(&self) -> Result<Lease, NativeError> {
         if self.lease.borrow().is_none() && self.enabled.get() {
-            let endpoint = self.endpoint.borrow().clone().expect("enabled endpoint");
+            // `enabled` is only set together with an endpoint.
+            let endpoint = self
+                .endpoint
+                .borrow()
+                .clone()
+                .ok_or_else(|| exception("Redis server went away"))?;
             let lease = crate::pool::acquire(endpoint)
                 .await
                 .map_err(|e| exception(e.to_string()))?;

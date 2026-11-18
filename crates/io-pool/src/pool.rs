@@ -90,7 +90,9 @@ where
                 _ = sender.closed() => return,
                 permit = bucket.capacity.clone().acquire_owned() => permit,
             };
-            let permit = permit.expect("a bucket never closes its semaphore");
+            // A bucket never closes its semaphore; if it did, the request
+            // would see the channel closed and get a runtime error.
+            let Ok(permit) = permit else { return };
             // Cancelled from here on, the undelivered lease is dropped, which
             // resets and returns its connection like any other.
             let _ = sender.send(bucket.lend(permit, connect).await);

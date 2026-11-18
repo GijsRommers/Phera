@@ -40,18 +40,10 @@ pub async fn convert(
     if matches!(reply, Reply::Nil) && matches!(shape, Shape::Values) {
         return Ok(Value::from(PhpArray::new()));
     }
+    // Before the nil and error checks: `getWithMeta()` reports a missing
+    // key as [false, ['length' => -1]].
     if matches!(shape, Shape::Metadata) {
-        let length = match &reply {
-            Reply::BulkString(bytes) => bytes.len() as i64,
-            Reply::Nil => -1,
-            _ => 0,
-        };
-        let mut metadata = PhpArray::new();
-        metadata.insert(ArrayKey::str("length"), Value::Int(length));
-        let mut result = PhpArray::new();
-        result.push(value(context, options, reply).await?)?;
-        result.push(Value::from(metadata))?;
-        return Ok(Value::from(result));
+        return with_metadata(context, options, reply).await;
     }
     if matches!(reply, Reply::Nil) && matches!(shape, Shape::Pop { .. } | Shape::Streams) {
         return Ok(if options.null_multibulk {
@@ -81,7 +73,7 @@ pub async fn convert(
                 || matches!(reply, Reply::Okay | Reply::Boolean(true)),
         )),
         Shape::Value => value(context, options, reply).await,
-        Shape::Metadata => unreachable!("metadata replies handled before nil and errors"),
+        Shape::Metadata => with_metadata(context, options, reply).await,
         Shape::Float => float(reply),
         Shape::Type => Ok(Value::Int(match bytes(reply).as_slice() {
             b"string" => 1,
@@ -175,6 +167,21 @@ pub async fn convert(
             Ok(Value::from(result))
         }
     }
+}
+
+/// `getWithMeta()` and `hGetWithMeta()`: the value and its length.
+async fn with_metadata(context: &mut dyn Context, options: &Options, reply: Reply) -> NativeResult {
+    let length = match &reply {
+        Reply::BulkString(bytes) => bytes.len() as i64,
+        Reply::Nil => -1,
+        _ => 0,
+    };
+    let mut metadata = PhpArray::new();
+    metadata.insert(ArrayKey::str("length"), Value::Int(length));
+    let mut result = PhpArray::new();
+    result.push(value(context, options, reply).await?)?;
+    result.push(Value::from(metadata))?;
+    Ok(Value::from(result))
 }
 
 async fn value(context: &mut dyn Context, options: &Options, reply: Reply) -> NativeResult {

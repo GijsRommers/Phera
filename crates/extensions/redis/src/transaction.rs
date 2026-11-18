@@ -94,8 +94,7 @@ pub async fn control(
                         error.details().unwrap_or_default()
                     ));
                 }
-                while effects.peek().is_some_and(|(i, _)| *i == index) {
-                    let (_, db) = effects.next().expect("peeked database");
+                while let Some((_, db)) = effects.next_if(|(queued, _)| *queued == index) {
                     if matches!(reply, redis::Value::Okay) {
                         s.database.set(db);
                     }
@@ -104,7 +103,9 @@ pub async fn control(
             }
             Ok(Value::from(result))
         }
-        _ => unreachable!(),
+        _ => Err(exception(format!(
+            "Redis::{name} is not a transaction method"
+        ))),
     }
 }
 

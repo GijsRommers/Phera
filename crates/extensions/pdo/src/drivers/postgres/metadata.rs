@@ -5,10 +5,10 @@ use tokio_postgres::Client;
 use super::error;
 use crate::drivers::Column;
 use crate::errors::DbError;
-use crate::metadata::Metadata;
+use crate::metadata::{Metadata, PostgresColumn};
 
 pub async fn get(client: &Client, column: &Column) -> Result<(i16, Option<String>), DbError> {
-    let Metadata::Postgres { oid, table_oid, .. } = &column.metadata else {
+    let Metadata::Postgres(PostgresColumn { oid, table_oid, .. }) = &column.metadata else {
         return Err(crate::drivers::connection_error(
             "Mismatched metadata driver",
         ));

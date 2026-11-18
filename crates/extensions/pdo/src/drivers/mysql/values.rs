@@ -20,8 +20,11 @@ pub fn convert(columns: Vec<mysql_async::Column>, rows: Vec<Row>, affected: u64)
     let values: Vec<Vec<Value>> = rows
         .into_iter()
         .map(|row| {
-            row.unwrap()
+            // `unwrap_raw` instead of `unwrap`, which panics for a value that
+            // was taken out of the row; nothing here takes one.
+            row.unwrap_raw()
                 .into_iter()
+                .map(|value| value.unwrap_or(MysqlValue::NULL))
                 .zip(&columns)
                 .map(|(value, column)| cell(value, column.column_type(), column.decimals()))
                 .collect()

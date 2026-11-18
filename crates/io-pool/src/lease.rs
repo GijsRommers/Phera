@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 use tokio::runtime::Handle;
 use tokio::sync::{Mutex, OwnedSemaphorePermit};
-use tokio::task::JoinError;
 use tokio::time::Instant;
 
 use crate::Connection;
@@ -73,9 +72,9 @@ impl<C: Connection> Lease<C> {
     ///
     /// The task holds its own clone of the lease, so when the caller stops
     /// waiting (a cancelled PHP request) the operation still finishes before
-    /// the connection can be reset. The error is a task that panicked or a
-    /// runtime that is shutting down.
-    pub async fn run<T, F>(&self, operation: F) -> Result<T, JoinError>
+    /// the connection can be reset. The error says why the operation did not
+    /// run to the end: the runtime is shutting down, or the task failed.
+    pub async fn run<T, F>(&self, operation: F) -> Result<T, String>
     where
         T: Send + 'static,
         F: for<'c> FnOnce(&'c mut C) -> Operation<'c, T> + Send + 'static,
@@ -85,12 +84,14 @@ impl<C: Connection> Lease<C> {
             .runtime
             .spawn(async move {
                 let mut connection = shared.connection.lock().await;
-                let connection = connection
-                    .as_mut()
-                    .expect("a lease that is still shared holds its connection");
-                operation(connection).await
+                // `None` only after `Drop` took the connection back, which
+                // cannot happen while this task holds a clone of the lease.
+                let connection = connection.as_mut()?;
+                Some(operation(connection).await)
             })
             .await
+            .map_err(|lost| lost.to_string())?
+            .ok_or_else(|| "the connection was already returned to its pool".to_owned())
     }
 }
 
