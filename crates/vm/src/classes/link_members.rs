@@ -122,7 +122,17 @@ impl Vm {
                 }
                 _ => phera_value::Value::Null,
             };
+            let hooks = property.hooks.as_ref().map(|hooks| {
+                Rc::new(super::property_hooks::LinkedPropertyHooks::link(
+                    hooks, self, unit,
+                ))
+            });
+            let initialized = property.default.is_some()
+                || (property.ty.is_none()
+                    && hooks.as_ref().is_none_or(|hooks| !hooks.hooks.is_virtual));
             let mut linked = PropertyDefault {
+                hooks,
+                is_final: property.is_final,
                 key: key.clone(),
                 static_storage: property
                     .is_static
@@ -131,7 +141,7 @@ impl Vm {
                 name: property_name.clone(),
                 declaring: name.clone(),
                 visibility: property.visibility,
-                initialized: property.default.is_some() || property.ty.is_none(),
+                initialized,
                 initializer: match property.default {
                     Some(phera_bytecode::Initializer::Function(index)) => {
                         Some(self.code.index_in(unit, Some(index.index())))
@@ -141,10 +151,9 @@ impl Vm {
                 ty: property.ty.map(|index| unit.types[index.index()].clone()),
                 is_readonly: property.is_readonly,
                 static_initialized: Rc::new(std::cell::Cell::new(false)),
-                value_initialized: Rc::new(std::cell::Cell::new(
-                    property.default.is_some() || property.ty.is_none(),
-                )),
+                value_initialized: Rc::new(std::cell::Cell::new(initialized)),
             };
+            self.verify_set_hook_type(&linked, unit)?;
             if let Some(value) = linked
                 .initializer
                 .as_ref()
@@ -183,6 +192,7 @@ impl Vm {
                         && entry.visibility != Visibility::Private
                         && property.visibility != Visibility::Private)
             }) {
+                self.inherit_property_hooks(&mut linked, inherited, unit)?;
                 *inherited = linked;
             } else {
                 target.push(linked);

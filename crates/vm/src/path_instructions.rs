@@ -38,6 +38,9 @@ impl Vm {
             self.set(destination, value);
             return Ok(None);
         }
+        if mode == FetchMode::Read && self.start_cached_getter(&place, destination)? {
+            return Ok(None);
+        }
         if self.classes.has_dimensions && self.prepare_dimension(&place)? {
             return Ok(Some(BatchExit::Instruction(Instruction::Fetch {
                 dst: destination,
@@ -207,6 +210,9 @@ impl Vm {
         let value = self.read_local(source);
         let place = self.path(path)?;
         if self.assign_property_site(&place, &value)? {
+            return Ok(None);
+        }
+        if self.start_cached_setter(&place, &value)? {
             return Ok(None);
         }
         if place.steps()?.next().is_none()

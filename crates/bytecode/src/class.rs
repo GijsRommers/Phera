@@ -121,6 +121,7 @@ pub struct PropertyDeclaration {
     pub visibility: Visibility,
     pub is_static: bool,
     pub is_readonly: bool,
+    pub is_final: bool,
     pub ty: Option<TypeId>,
     pub default: Option<Initializer>,
     pub hooks: Option<Box<PropertyHooks<FunctionId>>>,

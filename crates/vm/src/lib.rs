@@ -116,6 +116,7 @@ mod path_update;
 mod place_mutation;
 mod places;
 mod properties;
+mod property_hook_sites;
 mod property_mutation;
 mod property_sites;
 mod property_storage;

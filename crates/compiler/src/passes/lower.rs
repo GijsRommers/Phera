@@ -341,6 +341,7 @@ pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
                     visibility: property.visibility,
                     is_static: property.is_static,
                     is_readonly: property.is_readonly,
+                    is_final: property.is_final,
                     ty: property.ty.map(|name| tables.ty(&name)),
                     hooks: property.hooks.map(|hooks| {
                         let lower_hook = |hook: phera_bytecode::PropertyHook<usize>| {

@@ -43,6 +43,25 @@ impl Vm {
                             .classes
                             .for_object(&object)
                             .ok_or_else(|| internal_error!("property class"))?;
+                        if let Some(property) = slot
+                            .as_ref()
+                            .and_then(|key| crate::classes::property_hooks::for_key(&class, key))
+                            && let Some(hooks) = &property.hooks
+                            && let Some(value) = self
+                                .read_declared_hook(&object, property, hooks, true)
+                                .await?
+                        {
+                            if steps.peek().is_none() {
+                                return Ok(match value {
+                                    Value::Reference(_) => value,
+                                    _ => Value::Reference(Rc::new(RefCell::new(value))),
+                                });
+                            }
+                            cursor = value.clone();
+                            detached = Some(value);
+                            keys = InlineStack::new();
+                            continue;
+                        }
                         if stored.is_none()
                             && !slot.as_ref().is_some_and(|key| {
                                 self.typed_property_uninitialized(&class, &object, key)

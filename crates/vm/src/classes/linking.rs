@@ -318,6 +318,7 @@ impl Vm {
                 &mut constants,
             )?;
         }
+        self.link_property_contracts(declaration, &unit, &interfaces, &mut defaults)?;
         if let Some(enum_info) = &mut enum_info {
             self.link_enum_members(
                 declaration,
@@ -339,6 +340,14 @@ impl Vm {
         for method in &declaration.methods {
             let function = self.code.index_in(&unit, Some(method.function.index()));
             self.code.set_declaring_class(function, index);
+        }
+        for property in &declaration.properties {
+            if let Some(hooks) = &property.hooks {
+                for hook in hooks.get.iter().chain(&hooks.set) {
+                    let function = self.code.index_in(&unit, Some(hook.function.index()));
+                    self.code.set_declaring_class(function, index);
+                }
+            }
         }
         let declaration_location = Some((self.code.index_in(&unit, None), declaration.line));
         self.classes.insert(

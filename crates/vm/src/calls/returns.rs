@@ -64,8 +64,9 @@ impl Vm {
             ))
         } else {
             NativeError::type_error(format!(
-                "{}(): Return value must be of type string, none returned",
-                function.name
+                "{}(): Return value must be of type {}, none returned",
+                function.name,
+                declared.map_or("string", |ty| ty.display.as_str())
             ))
         }
     }

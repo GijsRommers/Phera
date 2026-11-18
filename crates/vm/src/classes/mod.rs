@@ -18,6 +18,8 @@ pub(crate) mod method_table;
 mod methods;
 mod native;
 pub(crate) mod operations;
+mod property_hook_inheritance;
+pub(crate) mod property_hooks;
 mod protocol_methods;
 mod signatures;
 mod static_calls;

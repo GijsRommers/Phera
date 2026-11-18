@@ -35,7 +35,20 @@ impl Vm {
             return Ok(());
         }
         let (stored, slot) = self.property_slot(&object, &display);
-        if stored.is_none()
+        let declared = slot
+            .as_ref()
+            .and_then(|key| crate::classes::property_hooks::for_key(&class, key));
+        if let Some(property) = declared
+            && let Some(hooks) = &property.hooks
+            && let crate::classes::property_hooks::HookWrite::Setter(setter) =
+                self.declared_hook_write(&object, property, hooks)?
+        {
+            self.invoke_declared_hook(setter, object, Some(value))
+                .await?;
+            return Ok(());
+        }
+        if declared.is_none()
+            && stored.is_none()
             && !slot
                 .as_ref()
                 .is_some_and(|slot| self.typed_property_uninitialized(&class, &object, slot))

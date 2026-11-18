@@ -65,7 +65,9 @@ impl Vm {
             let name = if closure {
                 function.as_str()
             } else {
-                function.rsplit("::").next().unwrap_or(function)
+                function
+                    .split_once("::")
+                    .map_or(function.as_str(), |(_, name)| name)
             };
             entry.insert(ArrayKey::str("function"), Value::from(name));
             let class = if closure {

@@ -228,6 +228,7 @@ impl Compiler<'_> {
                             _ => Visibility::Public,
                         },
                         is_static: modifiers.is_static,
+                        is_final: modifiers.is_final,
                         is_readonly: modifiers.is_readonly || declaration.modifiers.is_readonly,
                         ty: ty
                             .as_ref()
@@ -293,6 +294,7 @@ impl Compiler<'_> {
                         name: parameter.name.clone(),
                         visibility: member_visibility(&parameter.modifiers),
                         is_static: false,
+                        is_final: parameter.modifiers.is_final,
                         is_readonly: parameter.modifiers.is_readonly
                             || declaration.modifiers.is_readonly,
                         ty: parameter

@@ -132,6 +132,8 @@ impl ClassTable {
                     is_readonly: property.is_readonly,
                     static_initialized: Rc::new(std::cell::Cell::new(true)),
                     value_initialized: Rc::new(std::cell::Cell::new(property.default.is_some())),
+                    hooks: None,
+                    is_final: false,
                 });
             }
             if table.get(entry.name).is_none() {

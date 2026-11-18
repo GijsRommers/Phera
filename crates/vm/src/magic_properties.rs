@@ -50,6 +50,7 @@ pub(crate) struct ReadProperty {
 pub(crate) enum PropertyReadSource {
     Storage,
     Getter,
+    DeclaredHook,
 }
 
 impl ReadProperty {
@@ -211,7 +212,28 @@ impl Vm {
         if let Some(value) = self.native_property_read(object, &name, missing)? {
             return Ok(ReadProperty::stored(value));
         }
-        let Some(class) = self.classes.for_object(object).filter(|class| {
+        let class = self.classes.for_object(object);
+        let (stored, accessible) = self.property_slot(object, &name);
+        if let Some(class) = &class
+            && let Some(property) = accessible
+                .as_ref()
+                .and_then(|key| crate::classes::property_hooks::for_key(class, key))
+            && let Some(hooks) = &property.hooks
+        {
+            if let Some(value) = self
+                .read_declared_hook(object, property, hooks, false)
+                .await?
+            {
+                return Ok(ReadProperty {
+                    value,
+                    source: PropertyReadSource::DeclaredHook,
+                });
+            }
+            return self
+                .read_declared_property(object, &name, missing)
+                .map(ReadProperty::stored);
+        }
+        let Some(class) = class.filter(|class| {
             class
                 .magic
                 .as_ref()
@@ -221,7 +243,6 @@ impl Vm {
                 .read_declared_property(object, &name, missing)
                 .map(ReadProperty::stored);
         };
-        let (stored, accessible) = self.property_slot(object, &name);
         if let Some(stored) = stored {
             return Ok(ReadProperty::stored(stored));
         }

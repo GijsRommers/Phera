@@ -144,6 +144,14 @@ impl Vm {
                         candidate.name == name && candidate.declaring == *class
                     };
                     if let Some(existing) = target.iter().find(|candidate| same_name(candidate)) {
+                        if existing.hooks.is_some() || property.hooks.is_some() {
+                            let origin = property_origins.get(name).copied().unwrap_or(class);
+                            let provider = &provider.name;
+                            let class = display(class);
+                            return Err(NativeError::error(format!(
+                                "{origin} and {provider} define the same hooked property (${name}) in the composition of {class}. Conflict resolution between hooked properties is currently not supported. Class was composed"
+                            )));
+                        }
                         let agree = self.with_trait_constants(class, constants, |vm| {
                             vm.trait_properties_agree(existing, property, class, unit)
                         })?;
@@ -193,6 +201,21 @@ impl Vm {
                     let mut linked = property.clone();
                     linked.key = key.clone();
                     linked.declaring = class.clone();
+                    if let Some(hooks) = &mut linked.hooks {
+                        let hooks = Rc::make_mut(hooks);
+                        hooks.prototype = Rc::new(());
+                        for (kind, hook) in
+                            [("get", &mut hooks.hooks.get), ("set", &mut hooks.hooks.set)]
+                        {
+                            if let Some(hook) = hook {
+                                hook.function = self.code.import_trait_method(
+                                    hook.function,
+                                    self.classes.next_index(),
+                                    format!("{}::${name}::{kind}", display(class)),
+                                );
+                            }
+                        }
+                    }
                     linked.static_storage = property.static_storage.as_ref().map(|_| {
                         crate::reference_holders::StaticProperty::new(property.value.clone())
                     });
@@ -201,6 +224,7 @@ impl Vm {
                     if let Some(inherited) =
                         target.iter_mut().find(|candidate| candidate.key == key)
                     {
+                        self.inherit_property_hooks(&mut linked, inherited, unit)?;
                         *inherited = linked;
                     } else {
                         target.push(linked);

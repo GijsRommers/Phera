@@ -223,6 +223,8 @@ fn enum_property(class: &str, name: &str) -> PropertyDefault {
         is_readonly: true,
         static_initialized: Rc::new(Cell::new(false)),
         value_initialized: Rc::new(Cell::new(true)),
+        hooks: None,
+        is_final: false,
     }
 }
 

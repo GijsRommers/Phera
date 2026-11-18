@@ -20,6 +20,7 @@ pub(crate) struct PropertyEntry {
     scope: Option<Rc<crate::classes::Class>>,
     key: ArrayKey,
     write_rule: WriteRule,
+    pub(crate) hook_slot: Option<usize>,
     slot: Option<usize>,
     /// An immutable class fact, so a property-site hit avoids a class downcast.
     read_without_static_notice: bool,
@@ -27,7 +28,7 @@ pub(crate) struct PropertyEntry {
 
 impl Vm {
     /// Share immutable entries so cache hits avoid copying class, scope and property-key owners.
-    fn property_entry(
+    pub(crate) fn property_entry(
         &mut self,
         object: &Object,
         name: NameId,
@@ -73,11 +74,14 @@ impl Vm {
                 .find(|(_, property)| property.key == key)
         });
         let slot = property.map(|(slot, _)| slot);
+        let hook_slot = property.and_then(|(slot, property)| property.hooks.as_ref().map(|_| slot));
         let write_rule = match property {
-            Some((_, property)) if !property.is_readonly => match &property.ty {
-                None => WriteRule::Untyped,
-                Some(declared) => WriteRule::Typed(declared.mask),
-            },
+            Some((_, property)) if !property.is_readonly && hook_slot.is_none() => {
+                match &property.ty {
+                    None => WriteRule::Untyped,
+                    Some(declared) => WriteRule::Typed(declared.mask),
+                }
+            }
             _ => WriteRule::General,
         };
         let entry = Rc::new(PropertyEntry {
@@ -86,12 +90,14 @@ impl Vm {
             key,
             write_rule,
             slot,
-            read_without_static_notice: class.is_none_or(|class| {
-                class
-                    .static_properties
-                    .iter()
-                    .all(|property| property.name != *name)
-            }),
+            hook_slot,
+            read_without_static_notice: hook_slot.is_none()
+                && class.is_none_or(|class| {
+                    class
+                        .static_properties
+                        .iter()
+                        .all(|property| property.name != *name)
+                }),
         });
         if let Some(slot) = self.current().and_then(|frame| frame.site_cache()) {
             *slot.borrow_mut() = crate::unit_caches::CachedSite::Property(entry.clone());

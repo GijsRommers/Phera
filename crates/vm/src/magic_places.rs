@@ -169,6 +169,25 @@ impl Vm {
                         .as_ref()
                         .map(|_| crate::path_update::property_name(&key));
                     if let Some(object) = &owner
+                        && let Some(class) = self.classes.for_object(object)
+                        && let Some(slot) = self
+                            .property_slot(object, &crate::path_update::property_name(&key))
+                            .1
+                        && let Some(property) =
+                            crate::classes::property_hooks::for_key(&class, &slot)
+                        && let Some(hooks) = &property.hooks
+                        && let Some(hooked) = self
+                            .read_declared_hook(object, property, hooks, true)
+                            .await?
+                    {
+                        value = hooked.deref().clone();
+                        indirect = Some(IndirectPath {
+                            root: hooked,
+                            keys: InlineStack::new(),
+                        });
+                        continue;
+                    }
+                    if let Some(object) = &owner
                         && matches!(steps.peek(), Some(Step::Index(_) | Step::Append))
                         && let Some(class) = self.classes.for_object(object)
                         && class.property_access.is_none()

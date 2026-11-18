@@ -189,7 +189,49 @@ impl Vm {
                     }
                 }
                 let (stored, slot) = self.property_slot(object, &display);
-                if stored.is_none()
+                let declared = slot
+                    .as_ref()
+                    .and_then(|key| crate::classes::property_hooks::for_key(&class, key));
+                if let Some(property) = declared
+                    && let Some(hooks) = &property.hooks
+                {
+                    use crate::classes::property_hooks::{HookWrite, property_error};
+                    if last && let PropertyMutation::Write(value, Binding::ByValue) = operation {
+                        if let HookWrite::Setter(setter) =
+                            self.declared_hook_write(object, property, hooks)?
+                        {
+                            let argument = value.read(self).clone();
+                            self.invoke_declared_hook(setter, object.clone(), Some(argument))
+                                .await?;
+                            if let Some(local) = assignment_local {
+                                local.refresh_result(self);
+                            }
+                            return Ok(OverloadedMutation::Handled);
+                        }
+                    } else if last && matches!(operation, PropertyMutation::Unset) {
+                        return Err(property_error(
+                            object,
+                            &display,
+                            "Cannot unset hooked property ",
+                            "",
+                        ));
+                    } else if let Some(value) = self
+                        .read_declared_hook(object, property, hooks, true)
+                        .await?
+                    {
+                        if last {
+                            return Err(NativeError::error(
+                                "Cannot assign by reference to overloaded object",
+                            ));
+                        }
+                        cursor = value.clone();
+                        detached = Some(value);
+                        resolved = InlineStack::new();
+                        continue;
+                    }
+                }
+                if declared.is_none()
+                    && stored.is_none()
                     && class
                         .magic
                         .as_ref()
