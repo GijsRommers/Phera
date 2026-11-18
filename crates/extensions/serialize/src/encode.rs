@@ -4,7 +4,7 @@ mod objects;
 
 use std::{collections::HashMap, rc::Rc};
 
-use phera_extension_api::serialization::SerializationSettings;
+use phera_extension_api::serialization::precision;
 use phera_extension_api::value::float_repr_with_precision;
 use phera_extension_api::{ArrayKey, Context, NativeError, NativeResult, PhpArray, Value};
 
@@ -32,8 +32,14 @@ enum Contents {
 struct Encoder {
     output: Writer,
     frames: Vec<Frame>,
+    slots: SerializationSlots,
+}
+
+/// Serializable methods may call serialize() with the parent's slot table.
+#[derive(Default)]
+struct SerializationSlots {
     identities: HashMap<Identity, (usize, Value)>,
-    slots: usize,
+    count: usize,
 }
 
 pub async fn serialize(context: &mut dyn Context, arguments: Vec<Value>) -> NativeResult {
@@ -42,18 +48,37 @@ pub async fn serialize(context: &mut dyn Context, arguments: Vec<Value>) -> Nati
             "serialize() expects exactly 1 argument, 0 given",
         ));
     };
-    let mut encoder = Encoder::default();
-    let mut value = value.try_deref()?.clone();
-    loop {
-        encoder.value(context, value).await?;
-        let Some(next) = encoder.next_value() else {
-            return Ok(Value::from(encoder.output.finish()));
-        };
-        value = next;
+    let inherited = context.state().take::<SerializationSlots>();
+    let restore = inherited.is_some();
+    let mut encoder = Encoder {
+        slots: inherited.unwrap_or_default(),
+        ..Encoder::default()
+    };
+    let result = encoder.write_value(context, value).await;
+    if restore {
+        *context.state().get_or_default::<SerializationSlots>() =
+            std::mem::take(&mut encoder.slots);
     }
+    result?;
+    Ok(Value::from(encoder.output.finish()))
 }
 
 impl Encoder {
+    async fn write_value(
+        &mut self,
+        context: &mut dyn Context,
+        value: &Value,
+    ) -> Result<(), NativeError> {
+        let mut value = value.try_deref()?.clone();
+        loop {
+            self.value(context, value).await?;
+            let Some(next) = self.next_value() else {
+                return Ok(());
+            };
+            value = next;
+        }
+    }
+
     fn next_value(&mut self) -> Option<Value> {
         while let Some(frame) = self.frames.last_mut() {
             if let Some(position) = frame.position
@@ -98,30 +123,31 @@ impl Encoder {
             (Value::Object(object), _) => Identity::Object(Rc::as_ptr(object) as usize),
             (_, Value::Reference(reference)) => Identity::Reference(Rc::as_ptr(reference) as usize),
             _ => {
-                self.slots += 1;
+                self.slots.count += 1;
                 return false;
             }
         };
-        if let Some((slot, _)) = self.identities.get(&identity) {
+        if let Some((slot, _)) = self.slots.identities.get(&identity) {
             if *slot == 0 {
-                self.slots += 1;
+                self.slots.count += 1;
                 self.output.null();
             } else if is_reference {
                 self.output.reference(*slot);
             } else {
-                self.slots += 1;
+                self.slots.count += 1;
                 self.output.object_reference(*slot);
             }
             true
         } else {
-            self.slots += 1;
+            self.slots.count += 1;
             let retained = if matches!(resolved, Value::Object(_)) {
                 resolved
             } else {
                 value
             };
-            self.identities
-                .insert(identity, (self.slots, retained.clone()));
+            self.slots
+                .identities
+                .insert(identity, (self.slots.count, retained.clone()));
             false
         }
     }
@@ -136,12 +162,8 @@ impl Encoder {
             Value::Bool(boolean) => self.output.boolean(boolean),
             Value::Int(integer) => self.output.integer(integer),
             Value::Float(float) => {
-                let precision = context
-                    .state()
-                    .get::<SerializationSettings>()
-                    .map_or(-1, |settings| settings.precision_digits);
                 self.output
-                    .float(&float_repr_with_precision(float, precision));
+                    .float(&float_repr_with_precision(float, precision(context)));
             }
             Value::String(string) => self.output.string(string.as_bytes()),
             Value::Array(array) => {

@@ -19,6 +19,16 @@ impl Vm {
         if class.defaults.is_empty() {
             return Ok(properties);
         }
+        let layout = class
+            .defaults
+            .iter()
+            .filter(|property| properties.contains_key(&property.key));
+        if layout
+            .zip(properties.keys())
+            .all(|(property, key)| property.key == key)
+        {
+            return Ok(properties);
+        }
         let mut ordered = PhpArray::with_capacity(properties.len());
         for property in &class.defaults {
             if let Some(value) = properties.get(&property.key) {
@@ -129,6 +139,7 @@ impl Vm {
                     self.coerce_property_in_mode(value.clone(), property, ty, Some(true))?;
                 if let Value::Reference(cell) = value {
                     if !converted.is_reference() {
+                        self.check_serialized_reference_widening(cell, &converted, property)?;
                         *cell
                             .try_borrow_mut()
                             .map_err(|_| internal_error!("unserialized property reference"))? =
@@ -141,10 +152,57 @@ impl Vm {
             } else {
                 value.clone()
             };
+            if let Value::Reference(cell) = &value {
+                crate::reference_holders::ReferenceHolders::track_object(
+                    &self.property_references,
+                    object,
+                    &key,
+                    cell,
+                )?;
+            }
             object.set(key, value);
         }
         let properties = self.ordered_serialization_properties(object)?;
         object.update(|storage| *storage = properties);
-        self.track_object_property_references(object)
+        Ok(())
+    }
+
+    fn check_serialized_reference_widening(
+        &mut self,
+        cell: &Rc<std::cell::RefCell<Value>>,
+        value: &Value,
+        property: &crate::classes::class::PropertyDefault,
+    ) -> Result<(), NativeError> {
+        let address = Rc::as_ptr(cell) as usize;
+        let holders = self
+            .property_references
+            .borrow()
+            .constraints
+            .get(&address)
+            .cloned();
+        for (_, holder) in holders.into_iter().flatten() {
+            if let Some(ty) = &holder.ty
+                && self
+                    .coerce_property_in_mode(value.clone(), &holder, ty, Some(true))
+                    .is_err()
+                && let Some(property_type) = &property.ty
+            {
+                let original = cell
+                    .try_borrow()
+                    .map_err(|_| internal_error!("unserialized property reference"))?;
+                return Err(NativeError::type_error(format!(
+                    "Reference with value of type {} held by property {}::${} of type {} \
+                     is not compatible with property {}::${} of type {}",
+                    original.type_name(),
+                    holder.declaring,
+                    holder.name,
+                    ty.display,
+                    property.declaring,
+                    property.name,
+                    property_type.display
+                )));
+            }
+        }
+        Ok(())
     }
 }

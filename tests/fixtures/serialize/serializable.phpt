@@ -11,9 +11,9 @@ $blob = serialize(new Legacy);
 echo bin2hex($blob), "\n";
 var_dump(get_class(unserialize($blob)));
 ?>
---EXPECT--
+--EXPECTF--
 
-Deprecated: Legacy implements the Serializable interface, which is deprecated. Implement __serialize() and __unserialize() instead (or in addition, if support for old PHP versions is necessary) in /private/tmp/phera-serialize-fixture-serializable.php on line 2
+Deprecated: Legacy implements the Serializable interface, which is deprecated. Implement __serialize() and __unserialize() instead (or in addition, if support for old PHP versions is necessary) in %s on line 2
 433a363a224c6567616379223a333a7b6100627d
 610062
 string(6) "Legacy"

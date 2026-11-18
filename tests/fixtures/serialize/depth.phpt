@@ -8,13 +8,13 @@ var_dump(ini_set('unserialize_max_depth', '1'));
 var_dump(unserialize($data));
 var_dump(unserialize($data, ['max_depth' => 2]));
 ?>
---EXPECT--
+--EXPECTF--
 string(4) "4096"
 string(4) "4096"
 
-Warning: unserialize(): Maximum depth of 1 exceeded. The depth limit can be changed using the max_depth unserialize() option or the unserialize_max_depth ini setting in /private/tmp/phera-serialize-fixture-depth.php on line 5
+Warning: unserialize(): Maximum depth of 1 exceeded. The depth limit can be changed using the max_depth unserialize() option or the unserialize_max_depth ini setting in %s on line 5
 
-Warning: unserialize(): Error at offset 14 of 26 bytes in /private/tmp/phera-serialize-fixture-depth.php on line 5
+Warning: unserialize(): Error at offset 14 of 26 bytes in %s on line 5
 bool(false)
 array(1) {
   [0]=>

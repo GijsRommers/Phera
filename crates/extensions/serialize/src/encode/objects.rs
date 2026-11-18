@@ -5,7 +5,7 @@ use std::rc::Rc;
 use phera_extension_api::serialization::{INCOMPLETE_CLASS, INCOMPLETE_CLASS_NAME};
 use phera_extension_api::{ArrayKey, Context, NativeError, Object, PhpArray, Value};
 
-use super::{Contents, Encoder, Identity};
+use super::{Contents, Encoder, Identity, SerializationSlots};
 
 impl Encoder {
     pub(super) async fn object(
@@ -32,16 +32,23 @@ impl Encoder {
             self.output.object(name.as_bytes(), entries.len());
             self.entries(entries, Contents::Object);
         } else if object.class.is_instance_of("Serializable") {
+            *context.state().get_or_default::<SerializationSlots>() =
+                std::mem::take(&mut self.slots);
             let result = context
                 .call_serialization_method(object.clone(), "serialize", Vec::new())
-                .await?;
+                .await;
+            self.slots = context
+                .state()
+                .take::<SerializationSlots>()
+                .unwrap_or_default();
+            let result = result?;
             match &*result.try_deref()? {
                 Value::String(payload) => self
                     .output
                     .custom_object(name.as_bytes(), payload.as_bytes()),
                 Value::Null => {
                     let identity = Identity::Object(Rc::as_ptr(&object) as usize);
-                    if let Some((slot, _)) = self.identities.get_mut(&identity) {
+                    if let Some((slot, _)) = self.slots.identities.get_mut(&identity) {
                         *slot = 0;
                     }
                     self.output.null();

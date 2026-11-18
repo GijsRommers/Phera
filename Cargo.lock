@@ -1826,7 +1826,7 @@ dependencies = [
 name = "phera-ext-serialize"
 version = "0.1.0"
 dependencies = [
- "indexmap",
+ "itoa",
  "phera-extension-api",
 ]
 

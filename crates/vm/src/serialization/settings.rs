@@ -17,6 +17,9 @@ impl Vm {
         let precision = match name {
             b"serialize_precision" => true,
             b"unserialize_max_depth" => false,
+            b"unserialize_callback_func" => {
+                return Some(self.unserialize_callback_setting(intrinsic, arguments));
+            }
             _ => return None,
         };
         Some(self.read_or_set_serialization_ini(precision, intrinsic, arguments))
@@ -50,6 +53,22 @@ impl Vm {
             *entry = value;
         }
         Ok(Value::from(old))
+    }
+    fn unserialize_callback_setting(
+        &mut self,
+        intrinsic: Intrinsic,
+        arguments: &[Value],
+    ) -> NativeResult {
+        let settings = self.state_mut().get_or_default::<SerializationSettings>();
+        if matches!(intrinsic, Intrinsic::IniSet) {
+            let value = arguments.get(1).cloned().unwrap_or_default();
+            let value = value::to_php_string(&value, &mut value::NoDiagnostics)?.to_string_lossy();
+            return Ok(Value::from(std::mem::replace(
+                &mut settings.callback,
+                value,
+            )));
+        }
+        Ok(Value::from(settings.callback.as_str()))
     }
 }
 

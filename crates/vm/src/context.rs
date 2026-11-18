@@ -251,6 +251,16 @@ impl Context for Vm {
         })
     }
 
+    fn unserialize_class_callback<'a>(
+        &'a mut self,
+        name: &'a str,
+    ) -> LocalFuture<
+        'a,
+        Result<Option<phera_extension_api::serialization::SerializationClass>, NativeError>,
+    > {
+        Box::pin(self.run_unserialize_class_callback(name))
+    }
+
     fn serialization_forbidden(&self, object: &phera_value::Object) -> bool {
         self.classes
             .for_object(object)
@@ -396,6 +406,14 @@ impl Context for Vm {
 
     fn ensure_instantiable(&self, name: &str) -> Result<(), phera_extension_api::NativeError> {
         self.factory_class(name).map(drop)
+    }
+
+    fn diagnostic_function(&self) -> Option<&str> {
+        self.current()
+            .map(|frame| match frame.function().name.as_str() {
+                "{main}" => "main",
+                function => function,
+            })
     }
 
     fn state(&mut self) -> &mut RequestState {

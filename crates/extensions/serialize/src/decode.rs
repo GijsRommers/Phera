@@ -199,7 +199,7 @@ impl Decoder<'_> {
         self.frames.push(Frame {
             remaining: count,
             kind,
-            members: Members::new(),
+            members: Members::default(),
         });
         Ok(())
     }

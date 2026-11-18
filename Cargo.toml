@@ -40,6 +40,7 @@ phera-ext-redis = { path = "crates/extensions/redis" }
 phera-io-pool = { path = "crates/io-pool" }
 phera-dotenv = { path = "crates/dotenv" }
 indexmap = "2"
+itoa = "1"
 regex = "1"
 phera-analyzer = { path = "crates/analyzer" }
 phera-lexer = { path = "crates/lexer" }

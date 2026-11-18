@@ -6,7 +6,7 @@ pub(crate) mod settings;
 
 use std::rc::Rc;
 
-use phera_extension_api::serialization::SerializationClass;
+use phera_extension_api::serialization::{SerializationClass, SerializationSettings};
 use phera_extension_api::{LocalFuture, NativeError, NativeResult};
 use phera_value::{Object, Value};
 
@@ -14,6 +14,36 @@ use crate::Vm;
 use crate::classes::{Class, Method};
 
 impl Vm {
+    pub(crate) async fn run_unserialize_class_callback(
+        &mut self,
+        name: &str,
+    ) -> Result<Option<SerializationClass>, NativeError> {
+        let Some(callback) = self
+            .state_mut()
+            .get::<SerializationSettings>()
+            .map(|settings| settings.callback.clone())
+            .filter(|callback| !callback.is_empty())
+        else {
+            return Ok(None);
+        };
+        let callee = self.resolve_callable(&Value::from(callback.as_str())).map_err(|_| NativeError::error(format!(
+            "Invalid callback {callback}, function \"{callback}\" not found or invalid function name"
+        )))?;
+        self.invoke_resolved_callable(callee, vec![Value::from(name)])
+            .await?;
+        let result = self
+            .lookup_class(name)
+            .await?
+            .as_deref()
+            .map(Self::serialization_class_info);
+        if result.is_none() {
+            self.warn(format!(
+                "unserialize(): Function {callback}() hasn't defined the class it was called for"
+            ));
+        }
+        Ok(result)
+    }
+
     pub(crate) fn serialization_class_info(class: &Class) -> SerializationClass {
         SerializationClass {
             name: class.name.clone(),

@@ -156,7 +156,13 @@ fn hex_at<const N: usize>(values: &PhpArray, index: i64) -> Option<[u8; N]> {
         return None;
     }
     let mut decoded = [0; N];
-    for (pair, byte) in hex.as_bytes().chunks_exact(2).zip(decoded.iter_mut()) {
+    for (pair, byte) in hex
+        .as_bytes()
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .zip(decoded.iter_mut())
+    {
         let high = (pair[0] as char).to_digit(16)? as u8;
         let low = (pair[1] as char).to_digit(16)? as u8;
         *byte = high << 4 | low;

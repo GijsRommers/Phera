@@ -65,7 +65,7 @@ pub(crate) trait Style {
     }
 
     /// Anything that is not an array or object.
-    fn scalar(&mut self, out: &mut Vec<u8>, value: &Value, place: Place);
+    fn scalar(&mut self, out: &mut Vec<u8>, value: &Value, place: Place, context: &mut dyn Context);
 
     /// The start of an array or object with `len` entries.
     fn open(&mut self, out: &mut Vec<u8>, container: &Container, len: usize, place: Place);
@@ -183,7 +183,7 @@ async fn enter(
         Value::Array(array) => Container::Array(array.clone()),
         Value::Object(object) => Container::Object(object.clone()),
         scalar => {
-            style.scalar(out, scalar, place);
+            style.scalar(out, scalar, place, context);
             return Ok(None);
         }
     };
@@ -244,7 +244,13 @@ mod tests {
     }
 
     impl Style for Tally {
-        fn scalar(&mut self, _out: &mut Vec<u8>, _value: &Value, _place: Place) {
+        fn scalar(
+            &mut self,
+            _out: &mut Vec<u8>,
+            _value: &Value,
+            _place: Place,
+            _context: &mut dyn Context,
+        ) {
             self.scalars += 1;
         }
 

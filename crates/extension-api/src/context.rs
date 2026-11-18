@@ -31,6 +31,11 @@ pub trait Context {
     /// Where warnings, notices and deprecations go.
     fn diagnostics(&mut self) -> &mut dyn Diagnostics;
 
+    /// Current PHP scope for diagnostics emitted by object handlers.
+    fn diagnostic_function(&self) -> Option<&str> {
+        None
+    }
+
     /// Per-request storage for extensions; see [`RequestState`].
     fn state(&mut self) -> &mut RequestState;
 
@@ -141,6 +146,15 @@ pub trait Context {
 
     /// Resolve an object header, invoking autoload when the class is missing.
     fn serialization_class<'a>(
+        &'a mut self,
+        _name: &'a str,
+    ) -> LocalFuture<'a, Result<Option<crate::serialization::SerializationClass>, NativeError>>
+    {
+        Box::pin(std::future::ready(Ok(None)))
+    }
+
+    /// Consult the configured fallback after ordinary object autoload fails.
+    fn unserialize_class_callback<'a>(
         &'a mut self,
         _name: &'a str,
     ) -> LocalFuture<'a, Result<Option<crate::serialization::SerializationClass>, NativeError>>

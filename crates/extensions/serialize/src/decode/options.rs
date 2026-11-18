@@ -43,7 +43,7 @@ impl Options {
                 other => {
                     return Err(NativeError::type_error(format!(
                         "unserialize(): Option \"allowed_classes\" must be of type array|bool, {} given",
-                        other.type_name()
+                        option_type(&other)
                     )));
                 }
             };
@@ -53,7 +53,7 @@ impl Options {
             let Value::Int(depth) = &*depth else {
                 return Err(NativeError::type_error(format!(
                     "unserialize(): Option \"max_depth\" must be of type int, {} given",
-                    depth.type_name()
+                    option_type(&depth)
                 )));
             };
             result.max_depth = usize::try_from(*depth).map_err(|_| {
@@ -86,7 +86,7 @@ async fn read_class_list(
             _ => {
                 return Err(NativeError::type_error(format!(
                     "unserialize(): Option \"allowed_classes\" must be an array of class names, {} given",
-                    value.type_name()
+                    option_type(&value)
                 )));
             }
         };
@@ -104,4 +104,11 @@ async fn read_class_list(
         names.insert(name.as_bytes().to_ascii_lowercase());
     }
     Ok(names)
+}
+
+fn option_type(value: &Value) -> String {
+    match &*value.deref() {
+        Value::Bool(value) => value.to_string(),
+        _ => value.type_name(),
+    }
 }

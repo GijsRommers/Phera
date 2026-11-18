@@ -8,7 +8,6 @@ use std::{
     rc::{Rc, Weak},
 };
 
-use indexmap::IndexMap;
 use phera_extension_api::{ArrayKey, Context, NativeError, Object, PhpArray, Value};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -39,7 +38,14 @@ struct Stored {
     pending_array: bool,
 }
 
-pub(super) type Members = IndexMap<ArrayKey, Place>;
+#[derive(Default)]
+pub(super) struct Members(PhpArray);
+
+impl Members {
+    pub(super) fn contains_key(&self, key: &ArrayKey) -> bool {
+        self.0.contains_key(key)
+    }
+}
 
 #[derive(Default)]
 pub(super) struct Graph {
@@ -59,7 +65,12 @@ impl Graph {
     }
 
     pub(super) fn member(&mut self, members: &mut Members, key: ArrayKey) -> Place {
-        *members.entry(key).or_insert_with(|| self.new_place())
+        if let Some(Value::Int(place)) = members.0.get(&key) {
+            return Place(*place as usize);
+        }
+        let place = self.new_place();
+        members.0.insert(key, Value::Int(place.0 as i64));
+        place
     }
 
     pub(super) fn enter(&mut self, place: Place, takes_slot: bool) {
@@ -138,11 +149,13 @@ impl Graph {
     }
 
     pub(super) fn array(&self, members: Members) -> PhpArray {
-        let mut array = PhpArray::with_capacity(members.len());
-        for (key, place) in members {
-            array.insert(key, self.get(place));
+        let mut entries = members.0;
+        for (_, value) in entries.iter_mut() {
+            if let Value::Int(place) = value {
+                *value = self.get(Place(*place as usize));
+            }
         }
-        array
+        entries
     }
 
     pub(super) fn materialize(&mut self, context: &mut dyn Context) -> Result<(), NativeError> {

@@ -11,10 +11,8 @@ fn walk(bytes: &[u8]) -> Result<(), ParseError> {
     let mut reader = Reader::new(bytes);
     let mut frames = Vec::new();
     loop {
-        if !frames.is_empty() {
-            if !matches!(reader.token(true)?, Token::Int(_) | Token::String(_)) {
-                return Err(ParseError);
-            }
+        if !frames.is_empty() && !matches!(reader.token(true)?, Token::Int(_) | Token::String(_)) {
+            return Err(ParseError);
         }
         let count = match reader.token(false)? {
             Token::Array(count) => Some(count),
@@ -94,4 +92,39 @@ fn arbitrary_and_mutated_bytes_return() {
             vec![Value::from(input.clone())],
         );
     }
+}
+
+#[test]
+fn deep_values_use_heap_frames_with_or_without_a_depth_limit() {
+    use phera_extension_api::{ArrayKey, PhpArray};
+
+    let depth = 20_000;
+    let mut input = Vec::new();
+    for _ in 0..depth {
+        input.extend_from_slice(b"a:1:{i:0;");
+    }
+    input.extend_from_slice(b"N;");
+    input.resize(input.len() + depth, b'}');
+    let input = Value::from(input);
+    let mut registry = Registry::new();
+    registry.load(&Serialize);
+    let mut context = TestContext::default();
+    assert_eq!(
+        call(&registry, &mut context, "unserialize", vec![input.clone()]).unwrap(),
+        Value::Bool(false)
+    );
+    let options: PhpArray = [(ArrayKey::str("max_depth"), Value::Int(0))]
+        .into_iter()
+        .collect();
+    let value = call(
+        &registry,
+        &mut context,
+        "unserialize",
+        vec![input.clone(), options.into()],
+    )
+    .unwrap();
+    assert_eq!(
+        call(&registry, &mut context, "serialize", vec![value]).unwrap(),
+        input
+    );
 }

@@ -18,7 +18,10 @@ impl Decoder<'_> {
     ) -> BuildResult<()> {
         let info = if self.options.allows(class) {
             if let Ok(name) = std::str::from_utf8(class) {
-                context.serialization_class(name).await?
+                match context.serialization_class(name).await? {
+                    Some(class) => Some(class),
+                    None => context.unserialize_class_callback(name).await?,
+                }
             } else {
                 None
             }
