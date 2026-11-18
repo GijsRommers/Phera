@@ -33,6 +33,7 @@ pub(crate) struct Class {
     pub(crate) is_final: bool,
     pub(crate) is_readonly: bool,
     pub(crate) allows_dynamic_properties: bool,
+    pub(crate) native_clone: phera_extension_api::NativeClone,
     pub(crate) property_access: Option<&'static phera_extension_api::NativePropertyAccess>,
     pub(crate) magic: Option<Box<super::magic::MagicMethods>>,
     pub(crate) methods: HashMap<String, Rc<Method>>,

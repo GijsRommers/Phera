@@ -18,6 +18,7 @@ pub fn register(registry: &mut Registry) {
     for (class, methods) in [(MUTABLE, MUTABLE_METHODS), (IMMUTABLE, IMMUTABLE_METHODS)] {
         registry.class(ClassEntry {
             interfaces: &[INTERFACE],
+            clone: phera_extension_api::NativeClone::copy::<super::instant::Instant>(),
             methods,
             ..ClassEntry::class(class)
         });

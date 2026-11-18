@@ -194,6 +194,43 @@ pub struct NativePropertyAccess {
     pub mutate: MutateNativeProperty,
 }
 
+/// Native state has a class-specific duplication policy. PHP's ordinary
+/// object clone always copies user properties in the VM.
+#[derive(Clone, Copy)]
+pub enum NativeClone {
+    Properties,
+    Forbidden,
+    CopyState(fn(&Object, &Object) -> Result<(), NativeError>),
+}
+
+impl NativeClone {
+    /// Register this for values such as date/time data that own cloneable state.
+    pub const fn copy<T: Clone + 'static>() -> Self {
+        Self::CopyState(copy_state::<T>)
+    }
+}
+
+fn copy_state<T: Clone + 'static>(
+    source: &Object,
+    destination: &Object,
+) -> Result<(), NativeError> {
+    let state = source
+        .native
+        .try_borrow()
+        .map_err(|_| NativeError::error("Native clone source is already borrowed"))?
+        .as_ref()
+        .and_then(|data| data.downcast_ref::<T>())
+        .cloned();
+    if let Some(state) = state {
+        *destination
+            .native
+            .try_borrow_mut()
+            .map_err(|_| NativeError::error("Native clone destination is already borrowed"))? =
+            Some(Box::new(state));
+    }
+    Ok(())
+}
+
 /// A class or interface provided by an extension.
 #[derive(Clone, Copy)]
 pub struct ClassEntry {
@@ -209,6 +246,7 @@ pub struct ClassEntry {
     pub deprecated_constants: &'static [(&'static str, &'static str)],
     pub properties: &'static [PropertyEntry],
     pub property_access: Option<&'static NativePropertyAccess>,
+    pub clone: NativeClone,
     pub methods: &'static [MethodEntry],
 }
 
@@ -226,6 +264,7 @@ impl ClassEntry {
             deprecated_constants: &[],
             properties: &[],
             property_access: None,
+            clone: NativeClone::Properties,
             methods: &[],
         }
     }

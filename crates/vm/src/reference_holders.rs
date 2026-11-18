@@ -84,6 +84,16 @@ impl StaticProperty {
 }
 
 impl ReferenceHolders {
+    /// Ordinary object cloning owns property cells; other native payloads
+    /// require their class's own duplication function.
+    pub(crate) fn has_extension_payload(object: &Object) -> bool {
+        object
+            .native
+            .borrow()
+            .as_ref()
+            .is_some_and(|value| !value.is::<ObjectReferences>())
+    }
+
     #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
         self.entries.is_empty() && self.constraints.is_empty()

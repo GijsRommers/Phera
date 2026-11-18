@@ -32,6 +32,7 @@ impl ClassTable {
                 is_readonly: false,
                 allows_dynamic_properties: true,
                 property_access: None,
+                native_clone: phera_extension_api::NativeClone::Properties,
                 methods: HashMap::new(),
                 method_table: std::cell::OnceCell::new(),
                 constructor: None,
@@ -159,6 +160,12 @@ impl ClassTable {
             let property_access = entry
                 .property_access
                 .or_else(|| parent.as_ref().and_then(|parent| parent.property_access));
+            let native_clone = match entry.clone {
+                phera_extension_api::NativeClone::Properties => parent
+                    .as_ref()
+                    .map_or(entry.clone, |parent| parent.native_clone),
+                policy => policy,
+            };
             table.insert(
                 entry.name.to_ascii_lowercase(),
                 Rc::new_cyclic(|identity| Class {
@@ -186,6 +193,7 @@ impl ClassTable {
                     is_readonly: false,
                     allows_dynamic_properties: false,
                     property_access,
+                    native_clone,
                     constructor: methods.get("__construct").cloned(),
                     magic: super::magic::MagicMethods::link(&methods),
                     methods,

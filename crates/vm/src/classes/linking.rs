@@ -373,6 +373,11 @@ impl Vm {
             || parent
                 .as_ref()
                 .is_some_and(|parent| parent.allows_dynamic_properties);
+        let native_clone = parent
+            .as_ref()
+            .map_or(phera_extension_api::NativeClone::Properties, |parent| {
+                parent.native_clone
+            });
         let property_access = parent.as_ref().and_then(|parent| parent.property_access);
         let is_throwable = parent.as_ref().is_some_and(|parent| parent.is_throwable)
             || interfaces.iter().any(|interface| interface.is_throwable);
@@ -402,6 +407,7 @@ impl Vm {
                 is_readonly: declaration.is_readonly,
                 allows_dynamic_properties,
                 property_access,
+                native_clone,
                 constructor: methods.get("__construct").cloned(),
                 magic: super::magic::MagicMethods::link(&methods),
                 methods,

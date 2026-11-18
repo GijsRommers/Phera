@@ -7,6 +7,7 @@ use super::{period, period_properties, period_serialization as serialization};
 
 pub fn register(registry: &mut Registry) {
     registry.class(ClassEntry {
+        clone: phera_extension_api::NativeClone::copy::<period::Period>(),
         constants: &[
             (
                 "EXCLUDE_START_DATE",

@@ -10,6 +10,7 @@ pub const INTERVAL: Param = Param::new("interval", ParamType::Class(interval::CL
 
 pub fn register(registry: &mut Registry) {
     registry.class(ClassEntry {
+        clone: phera_extension_api::NativeClone::copy::<interval::Interval>(),
         property_access: Some(&interval_properties::ACCESS),
         methods: METHODS,
         ..ClassEntry::class(interval::CLASS)

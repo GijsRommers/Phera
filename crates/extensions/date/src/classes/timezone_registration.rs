@@ -7,6 +7,7 @@ use super::{This, abbreviations, catalog, timezone};
 
 pub fn register(registry: &mut Registry) {
     registry.class(ClassEntry {
+        clone: phera_extension_api::NativeClone::copy::<super::zone_kind::ZoneKind>(),
         constants: &[
             ("AFRICA", ConstantValue::Int(1)),
             ("AMERICA", ConstantValue::Int(2)),

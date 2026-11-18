@@ -4,7 +4,7 @@
 use std::rc::Rc;
 
 use phera_bytecode::Reg;
-use phera_extension_api::{NativeError, NativeResult};
+use phera_extension_api::{NativeClone, NativeError, NativeResult};
 use phera_value::{ArrayKey, Object, PhpArray, Value};
 
 use crate::Vm;
@@ -73,18 +73,13 @@ impl Vm {
             .classes
             .for_object(&original)
             .ok_or_else(|| internal_error!("clone class"))?;
-        if class.is_throwable {
+        if class.is_throwable || matches!(class.native_clone, NativeClone::Forbidden) {
             return Err(NativeError::error(format!(
                 "Trying to clone an uncloneable object of class {}",
                 class.name
             )));
         }
         if class.origin == ClassOrigin::Closure {
-            if !with.is_empty() {
-                return Err(NativeError::error(
-                    "Cloning objects of class Closure with updated properties is not supported",
-                ));
-            }
             let state = original
                 .native
                 .borrow()
@@ -92,13 +87,27 @@ impl Vm {
                 .and_then(|state| state.downcast_ref::<crate::closures::ClosureState>())
                 .map(|state| state.duplicate())
                 .ok_or_else(|| internal_error!("clone closure"))?;
-            return self.allocate_closure(state).map(Value::Object);
+            let cloned = self.allocate_closure(state)?;
+            self.update_clone_properties(&cloned, &with).await?;
+            return Ok(Value::Object(cloned));
         }
         let hook = class.magic.as_ref().and_then(|magic| magic.clone.clone());
         if let Some(method) = &hook {
             self.check_clone_visibility(method)?;
         }
         let cloned = self.classes.allocate(class.clone());
+        match class.native_clone {
+            NativeClone::CopyState(copy) => copy(&original, &cloned)?,
+            NativeClone::Properties
+                if crate::reference_holders::ReferenceHolders::has_extension_payload(&original) =>
+            {
+                return Err(NativeError::error(format!(
+                    "Trying to clone an uncloneable object of class {}",
+                    class.name
+                )));
+            }
+            _ => {}
+        }
         cloned.update(|properties| {
             let mut copied = original.to_array();
             if copied.values().any(|value| matches!(value, Value::Reference(cell) if Rc::strong_count(cell) == 1 && !value.is_object())) {
