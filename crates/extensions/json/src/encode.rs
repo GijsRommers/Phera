@@ -163,11 +163,12 @@ impl Encoder {
     /// 0 for a float that is not finite, null for anything else.
     fn failure(&mut self, error: Error) {
         self.error = error;
-        self.output.push_str(if error == Error::Infinite {
-            "0"
-        } else {
-            "null"
-        });
+        self.output
+            .push_str(if matches!(error, Error::Infinite | Error::NonBackedEnum) {
+                "0"
+            } else {
+                "null"
+            });
     }
 
     fn indent(&mut self, level: usize) {
@@ -255,6 +256,13 @@ impl Encoder {
                 self.work.push(Work::Value { value, level });
                 return Ok(());
             }
+        } else if object.class.is_enum() {
+            if let Some(value) = object.get(&ArrayKey::str("value")) {
+                self.work.push(Work::Value { value, level });
+            } else {
+                self.failure(Error::NonBackedEnum);
+            }
+            return Ok(());
         }
         let identity = Rc::as_ptr(&object) as usize;
         if self.active.contains(&identity) {

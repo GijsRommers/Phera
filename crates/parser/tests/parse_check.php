@@ -1,7 +1,6 @@
 <?php
 // Prints, for each file path read from stdin, whether PHP's parser accepts it:
-// "OK" or "ERR". Only ParseError counts as a rejection; a CompileError means
-// the grammar accepted the code and the failure is later, at compile time.
+// "OK", "ERR", or "COMPILE_ERR" for a declaration rejected with CompileError.
 error_reporting(0);
 
 while (($path = fgets(STDIN)) !== false) {
@@ -11,6 +10,8 @@ while (($path = fgets(STDIN)) !== false) {
         echo "OK\n";
     } catch (ParseError $e) {
         echo "ERR\n";
+    } catch (CompileError $e) {
+        echo "COMPILE_ERR\n";
     } catch (Throwable $e) {
         echo "OK\n";
     }

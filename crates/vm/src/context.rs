@@ -163,7 +163,7 @@ impl Context for Vm {
         for property in &class.defaults {
             if property.initialized {
                 let value = if let Some(initializer) = &property.initializer {
-                    self.evaluate_initializer(initializer, &property.declaring)?
+                    self.evaluate_property_initializer(initializer, property)?
                 } else {
                     property.value.clone()
                 };

@@ -5,7 +5,7 @@
 //! // Classes implementing Items also participate in foreach.
 //! ```
 
-use super::Class;
+use super::{Class, Method};
 use std::{collections::HashMap, rc::Rc};
 
 #[derive(Clone, Copy, Default)]
@@ -136,29 +136,34 @@ pub(super) fn inherit_hooks(
 
 /// PHP uses a native iterator until a subclass replaces a method of its protocol.
 pub(super) fn user_hooks(
-    unit: &phera_bytecode::CompiledUnit,
-    declaration: &phera_bytecode::ClassDeclaration,
+    methods: &HashMap<String, Rc<Method>>,
     parent: Option<&Class>,
     operations: ClassOperations,
 ) -> Option<Rc<phera_extension_api::ClassHooks>> {
-    let hooks = parent?.hooks.as_ref()?;
+    let parent = parent?;
+    let hooks = parent.hooks.as_ref()?;
     if hooks.iterator.is_none() {
         return Some(hooks.clone());
     }
-    let methods: &[&str] = if operations.has(ClassOperations::AGGREGATE) {
-        &["getIterator"]
+    let iterator_methods: &[&str] = if operations.has(ClassOperations::AGGREGATE) {
+        &["getiterator"]
     } else if operations.has(ClassOperations::ITERATOR) {
         &["rewind", "valid", "current", "key", "next"]
     } else {
         &[]
     };
-    if declaration.methods.iter().any(|method| {
-        let name = &unit.names[method.name.index()];
-        methods
-            .iter()
-            .chain(hooks.iterator_fallback_if_overridden)
-            .any(|candidate| name.eq_ignore_ascii_case(candidate))
-    }) {
+    if iterator_methods
+        .iter()
+        .chain(hooks.iterator_fallback_if_overridden)
+        .any(|&name| {
+            methods.get(name).is_some_and(|method| {
+                parent
+                    .methods
+                    .get(name)
+                    .is_none_or(|inherited| !Rc::ptr_eq(inherited, method))
+            })
+        })
+    {
         Some(Rc::new(phera_extension_api::ClassHooks {
             iterator: None,
             iterator_by_reference: None,

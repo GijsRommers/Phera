@@ -5,14 +5,14 @@ use std::{
     rc::{Rc, Weak},
 };
 
-use phera_value::{Object, ObjectIds};
+use phera_value::{Object, ObjectIds, PhpArray};
 
 use super::Class;
 use super::operations::ClassOperations;
 
 /// A class's position in the request's class table: a method frame's class
 /// scope and called class are kept as these numbers.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub(crate) struct ClassIndex(u32);
 
 /// One request owns the id pool; weak records exist solely for cycle cleanup.
@@ -65,8 +65,18 @@ impl ClassTable {
 
     /// Value-owned leases implement PHP's LIFO reuse without inspecting weak handles.
     pub(crate) fn allocate(&mut self, class: Rc<Class>) -> Rc<Object> {
+        self.allocate_with_properties(class, PhpArray::new())
+    }
+
+    pub(crate) fn allocate_with_properties(
+        &mut self,
+        class: Rc<Class>,
+        properties: PhpArray,
+    ) -> Rc<Object> {
         self.has_dimensions |= class.operations.has(ClassOperations::DIMENSIONS);
-        let object = Rc::new(Object::allocate(&self.ids, class));
+        let object = Rc::new(Object::allocate_with_properties(
+            &self.ids, class, properties,
+        ));
         // Record the already assigned id only for request-end cycle cleanup.
         // No weak handle's liveness participates in allocation or id selection.
         let index = object.id.saturating_sub(1) as usize;

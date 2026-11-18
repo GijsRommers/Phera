@@ -4,8 +4,12 @@ pub(crate) mod class;
 mod class_table;
 pub(crate) mod cloning;
 mod declaration_errors;
+pub(crate) mod enum_cases;
+mod enum_methods;
+pub(crate) mod enums;
 mod inheritance_checks;
 pub(crate) mod instantiation;
+mod link_members;
 mod linking;
 mod magic;
 mod magic_calls;
@@ -18,6 +22,10 @@ mod protocol_methods;
 mod signatures;
 mod static_calls;
 mod static_known;
+mod trait_adaptations;
+mod trait_defaults;
+mod trait_members;
+pub(crate) mod trait_methods;
 
 pub(crate) use class::{
     Class, ConstantState, Invocation, LinkedConstant, Method, MethodBody, MethodContext,
