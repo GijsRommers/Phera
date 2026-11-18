@@ -73,7 +73,7 @@ phera-ext-pdo = { path = "crates/extensions/pdo" }
 phera-ext-random = { path = "crates/extensions/random" }
 phera-ext-spl = { path = "crates/extensions/spl" }
 phera-ext-standard = { path = "crates/extensions/standard" }
-tempfile = "3"
+phera-ext-streams = { path = "crates/extensions/streams" }
 phera-ext-tokenizer = { path = "crates/extensions/tokenizer" }
 digest = "0.10"
 md2 = "0.10"
@@ -92,6 +92,10 @@ argon2 = "0.5"
 pwhash = "1"
 getrandom = "0.3"
 bytes = "1"
+percent-encoding = "2"
+nix = { version = "0.31", default-features = false, features = ["user"] }
+rustix = { version = "1", features = ["fs", "process", "termios", "time"] }
+tempfile = "3"
 http-body-util = "0.1"
 hyper = { version = "1", default-features = false, features = ["http1", "server"] }
 hyper-util = { version = "0.1", default-features = false, features = ["tokio", "http1", "server-graceful"] }
