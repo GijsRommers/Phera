@@ -49,14 +49,7 @@ impl Vm {
                                 Err(handler_error) => handler_error,
                             }
                         };
-                        self.handle_exception(error, stop)?;
-                        // Unwinding released the locals of the frames it
-                        // left; their destructors run before the catch.
-                        if self.destructors_due()
-                            && let Err(error) = self.run_destructors().await
-                        {
-                            pending = Some(Err(error));
-                        }
+                        self.unwind_to_handler(error, stop).await?;
                     }
                 }
             }

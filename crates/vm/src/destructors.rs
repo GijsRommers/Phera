@@ -73,6 +73,52 @@ impl Vm {
         failure.map_or(Ok(()), Err)
     }
 
+    /// Unwinds `error` to its `catch` or `finally` (as `handle_exception`
+    /// does), then runs the destructors of what the frames it left released,
+    /// before the handler. A destructor that throws there throws from the
+    /// same place, with the unwound exception as its previous one, so the
+    /// same `catch` can take it, as in PHP.
+    pub(crate) async fn unwind_to_handler(
+        &mut self,
+        error: NativeError,
+        stop: usize,
+    ) -> Result<(), NativeError> {
+        let mut error = error;
+        loop {
+            let unwound = self.materialize_error(error);
+            let previous = thrown_object(&unwound);
+            let positions: Vec<usize> = self
+                .call_stack
+                .frames()
+                .iter()
+                .map(|frame| frame.ip())
+                .collect();
+            let finallies = self.finally_stack.len();
+            self.handle_exception(unwound, stop)?;
+            if !self.destructors_due() {
+                return Ok(());
+            }
+            let Err(failure) = self.run_destructors().await else {
+                return Ok(());
+            };
+            let failure = self.materialize_error(failure);
+            if let (Some(previous), Some(object)) = (previous, thrown_object(&failure)) {
+                crate::exception_unwind::append_previous(&object, previous);
+            }
+            // Back to where the first exception was thrown, and out of a
+            // `finally` that it entered: the new exception takes its place.
+            self.finally_stack.truncate(finallies);
+            let depth = self.call_stack.depth();
+            if let (Some(&ip), Some(frame)) = (
+                positions.get(depth.wrapping_sub(1)),
+                self.call_stack.current_mut(),
+            ) {
+                frame.set_ip(ip);
+            }
+            error = failure;
+        }
+    }
+
     /// Calls one object's destructor, after the visibility check PHP makes.
     pub(crate) async fn destruct(&mut self, object: Rc<Object>) -> Result<(), NativeError> {
         let Some(class) = self.classes.for_object(&object) else {
