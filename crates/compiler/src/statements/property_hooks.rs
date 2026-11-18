@@ -184,7 +184,7 @@ impl Compiler<'_> {
             }
             body.compile_hook_body(&hook.body, setter, self.lines.line(hook.span.end))?;
             result.is_virtual &= !body.uses_hook_backing;
-            let function = self.append_function_body(&mut body);
+            let function = self.append_function_body(&mut body)?;
             *entry = Some(PropertyHook {
                 function,
                 is_abstract: abstract_hook,

@@ -21,10 +21,13 @@ impl Analyzer<'_> {
         self.depth += 1;
         let mut flow = Flow::Next;
         for statement in statements {
-            flow = self.statement(statement, scope);
             if flow != Flow::Next {
-                break;
+                if !contains_label(statement) {
+                    continue;
+                }
+                scope.unknown_writes();
             }
+            flow = self.statement(statement, scope);
         }
         self.depth -= 1;
         flow
@@ -77,7 +80,8 @@ impl Analyzer<'_> {
             } => return self.try_statement(body, catches, finally.as_deref(), scope),
             StatementKind::Break(levels) => return self.control_exit(*levels, false, scope),
             StatementKind::Continue(levels) => return self.control_exit(*levels, true, scope),
-            StatementKind::Goto(_) | StatementKind::Label(_) => scope.dynamic = true,
+            // Incoming jumps can bypass assignments or revisit a label.
+            StatementKind::Goto(_) | StatementKind::Label(_) => scope.unknown_writes(),
             _ => {
                 for e in crate::walk::statement_expressions(statement) {
                     self.expression(e, scope, false);
@@ -148,7 +152,13 @@ impl Analyzer<'_> {
         if self.expression(condition, scope, false) == ValueType::Never {
             return Flow::Terminal;
         }
-        if let Some(truth) = truth {
+        if let Some(truth) = truth
+            && !(if truth {
+                otherwise.is_some_and(|body| body.iter().any(contains_label))
+            } else {
+                then.iter().any(contains_label)
+            })
+        {
             return if truth {
                 self.block(then, scope)
             } else {
@@ -180,4 +190,23 @@ impl Analyzer<'_> {
             Flow::Continue
         }
     }
+}
+
+/// A label can re-enter a block after an otherwise terminal statement.
+fn contains_label(statement: &Statement) -> bool {
+    let mut pending = vec![statement];
+    while let Some(statement) = pending.pop() {
+        if matches!(statement.kind, StatementKind::Label(_)) {
+            return true;
+        }
+        pending.extend(
+            crate::collect::child_blocks(statement)
+                .into_iter()
+                .flatten(),
+        );
+        if let StatementKind::Namespace { statements, .. } = &statement.kind {
+            pending.extend(statements);
+        }
+    }
+    false
 }

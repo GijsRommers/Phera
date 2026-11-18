@@ -20,7 +20,6 @@ fn later_milestones_remain_compile_errors() {
         "<?php $callback = function () {};",
         "<?php $callback = fn () => 1;",
         "<?php function generator() { yield 1; }",
-        "<?php goto target; target:",
         "<?php class Example {static function method(){}} Example::method(...);",
         "<?php class Example {function method(){}} (new Example)->method(...);",
         "<?php #[Other] class Example {}",
@@ -72,6 +71,15 @@ fn property_hooks_and_set_visibility_emit_access_metadata() {
         Some(phera_bytecode::Visibility::Private)
     );
     assert!(properties[1].is_final);
+}
+
+#[test]
+fn goto_uses_an_existing_jump_instruction() {
+    let unit = phera_compiler::compile("<?php goto target; target:", "goto.php").unwrap();
+    assert!(matches!(
+        unit.main.instructions.first(),
+        Some(phera_bytecode::Instruction::Jump { target }) if target.index() == 1
+    ));
 }
 
 #[test]
