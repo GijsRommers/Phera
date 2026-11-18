@@ -62,7 +62,9 @@ impl Vm {
             }
             I::InitCall { function } => self.init_call(function)?,
             I::InitDynamicCall { callee } => self.init_dynamic_call(callee)?,
-            I::InitMethodCall { receiver, method } => self.init_method_call(receiver, method)?,
+            I::InitMethodCall { receiver, method } => {
+                self.init_method_call::<TRACK_GENERATORS>(receiver, method)?
+            }
             I::InitStaticCall {
                 class,
                 method,
@@ -273,12 +275,12 @@ impl Vm {
                 value,
                 end,
             } => {
-                if !self.iter_next(iter, Some(key), value, end)? {
+                if !self.iter_next::<TRACK_GENERATORS>(iter, Some(key), value, end)? {
                     return Ok(Some(BatchExit::Instruction(instruction)));
                 }
             }
             I::IterNext { iter, value, end } => {
-                if !self.iter_next(iter, None, value, end)? {
+                if !self.iter_next::<TRACK_GENERATORS>(iter, None, value, end)? {
                     return Ok(Some(BatchExit::Instruction(instruction)));
                 }
             }

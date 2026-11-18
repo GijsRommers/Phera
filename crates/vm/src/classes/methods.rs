@@ -14,7 +14,7 @@ use crate::calls::call_state::{CallTarget, Callee};
 
 impl Vm {
     /// Receiver errors precede argument evaluation, matching ordinary PHP calls.
-    pub(crate) fn init_method_call(
+    pub(crate) fn init_method_call<const TRACK_GENERATORS: bool>(
         &mut self,
         receiver: Reg,
         method: NameId,
@@ -39,7 +39,7 @@ impl Vm {
             .classes
             .for_object(&object)
             .ok_or_else(|| internal_error!("receiver class"))?;
-        if class.origin == ClassOrigin::Native && class.name == "Generator" {
+        if TRACK_GENERATORS && class.origin == ClassOrigin::Native && class.name == "Generator" {
             self.discard_generator_temporary(receiver);
         }
         self.prepare_method(class, Some(object), name, Invocation::Method)

@@ -104,14 +104,14 @@ impl Vm {
     }
 
     /// Advance in insertion order and bind a live element cell for reference iteration.
-    pub(crate) fn iter_next(
+    pub(crate) fn iter_next<const TRACK_GENERATORS: bool>(
         &mut self,
         iterator: IterId,
         key: Option<Reg>,
         value: Reg,
         end: Target,
     ) -> Result<bool, NativeError> {
-        if self.next_generator_element(iterator, key, value)? {
+        if TRACK_GENERATORS && self.next_generator_element(iterator, key, value)? {
             return Ok(true);
         }
         let mut state = self

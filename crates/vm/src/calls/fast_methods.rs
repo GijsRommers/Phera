@@ -34,7 +34,7 @@ impl Machine<'_> {
     /// `InitMethodCall` of a public instance method written in PHP: reserve
     /// the method's window with the receiver in its first register.
     #[inline(always)]
-    pub(super) fn prepare_method(
+    pub(super) fn prepare_method<const TRACK_GENERATORS: bool>(
         &mut self,
         position: Position,
         receiver: Reg,
@@ -59,12 +59,13 @@ impl Machine<'_> {
         {
             return Step::Slow;
         }
-        match found.method.body {
-            MethodBody::Native(entry) if matches!(entry.handler, NativeMethod::Window(_)) => {
-                self.prepare_found_window(found, object, &class, position, receiver)
-            }
-            _ => self.prepare_found(found, Some(object), None, position.ip),
+        if TRACK_GENERATORS
+            && let MethodBody::Native(entry) = found.method.body
+            && matches!(entry.handler, NativeMethod::Window(_))
+        {
+            return self.prepare_found_window(found, object, &class, position, receiver);
         }
+        self.prepare_found(found, Some(object), None, position.ip)
     }
 
     /// The linked method table has already resolved this native window.
