@@ -3,7 +3,6 @@
 use std::fs;
 use std::io::{self, Cursor};
 use std::os::fd::AsFd;
-use std::path::Path;
 use std::sync::Arc;
 
 use base64::{
@@ -59,10 +58,6 @@ impl<'a> Target<'a> {
         } else {
             Self::Unavailable(protocol)
         }
-    }
-
-    pub fn local(self) -> bool {
-        !matches!(self, Self::Data(_) | Self::Unavailable(_))
     }
 }
 
@@ -287,10 +282,4 @@ pub fn resolve_file(context: &mut dyn Context, name: &[u8]) -> io::Result<std::p
         Target::File(bytes) => files(context).resolve(path(bytes)),
         _ => Err(io::ErrorKind::Unsupported.into()),
     }
-}
-
-pub fn is_explicit(path: &Path) -> bool {
-    use std::os::unix::ffi::OsStrExt;
-    let bytes = path.as_os_str().as_bytes();
-    path.is_absolute() || bytes.starts_with(b"./") || bytes.starts_with(b"../")
 }

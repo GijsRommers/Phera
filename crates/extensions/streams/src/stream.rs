@@ -37,6 +37,7 @@ pub struct Stream {
     pub eof: bool,
     pub seekable: bool,
     pub blocked: bool,
+    pub read_buffered: bool,
     pub spill_limit: Option<u64>,
     pub temporary_path: Option<TempPath>,
     pub data_header: Option<Vec<u8>>,
@@ -60,6 +61,7 @@ impl Stream {
             eof: false,
             seekable,
             blocked: true,
+            read_buffered: true,
             spill_limit: None,
             temporary_path: None,
             data_header: None,
@@ -110,14 +112,17 @@ impl Stream {
                 .ok()
                 .map(|meta| meta.len().saturating_sub(self.position))
         });
-        IoPolicy::transfer(self.seekable, length)
+        IoPolicy::transfer(self.seekable && self.wrapper != Wrapper::Standard, length)
     }
 
     pub fn write_policy(&self, length: u64) -> IoPolicy {
         let spills = self
             .spill_limit
             .is_some_and(|limit| self.position.saturating_add(length) >= limit);
-        IoPolicy::transfer(self.seekable && !spills, Some(length))
+        IoPolicy::transfer(
+            self.seekable && !spills && self.wrapper != Wrapper::Standard,
+            Some(length),
+        )
     }
 
     pub fn read(&mut self, limit: Option<u64>) -> io::Result<Vec<u8>> {
@@ -149,6 +154,9 @@ impl Stream {
 
     fn read_bytes(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         match &mut self.backing {
+            Backing::File(file) if !self.read_buffered && file.buffer().is_empty() => {
+                file.get_mut().read(buffer)
+            }
             Backing::File(file) => file.read(buffer),
             Backing::Memory(cursor) => cursor.read(buffer),
             Backing::Input(cursor) => cursor.read(buffer),
