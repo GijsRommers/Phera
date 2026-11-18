@@ -100,7 +100,27 @@ struct Frame {
     /// The entries: the array itself, or a copy of an object's properties so
     /// no borrow of the object is held while printing.
     entries: Rc<PhpArray>,
+    source: EntrySource,
     next: Option<usize>,
+}
+
+#[derive(Clone, Copy)]
+enum EntrySource {
+    Live,
+    PropertySnapshot,
+}
+
+impl Frame {
+    /// Copying an object's property table adds a Rust owner, not a PHP alias.
+    fn duplicate_owner(&self, key: &ArrayKey, value: &Value) -> usize {
+        if let (EntrySource::PropertySnapshot, Container::Object(object), Value::Reference(cell)) =
+            (self.source, &self.container, value)
+            && let Some(Value::Reference(original)) = object.get(key)
+        {
+            return usize::from(Rc::ptr_eq(&original, cell));
+        }
+        0
+    }
 }
 
 pub(crate) async fn walk(
@@ -111,7 +131,7 @@ pub(crate) async fn walk(
 ) -> Result<(), NativeError> {
     let mut frames: Vec<Frame> = Vec::new();
     let mut active: HashSet<usize> = HashSet::new();
-    frames.extend(enter(style, out, value, 0, &mut active, context).await?);
+    frames.extend(enter(style, out, value, 0, 0, &mut active, context).await?);
 
     loop {
         let depth = frames.len();
@@ -125,7 +145,8 @@ pub(crate) async fn walk(
             Some((position, (key, item))) => {
                 frame.next = frame.entries.next_position(position);
                 style.key(out, &key, &frame.container, depth);
-                match enter(style, out, item, depth, &mut active, context).await? {
+                let duplicate = frame.duplicate_owner(&key, item);
+                match enter(style, out, item, depth, duplicate, &mut active, context).await? {
                     Some(child) => frames.push(child),
                     None => style.after_entry(out),
                 }
@@ -150,12 +171,14 @@ async fn enter(
     out: &mut Vec<u8>,
     value: &Value,
     depth: usize,
+    duplicate_owner: usize,
     active: &mut HashSet<usize>,
     context: &mut dyn Context,
 ) -> Result<Option<Frame>, NativeError> {
     // PHP marks a reference only while a second holder exists. A variable
     // that was the last one bound to it prints like a plain value.
-    let is_reference = matches!(value, Value::Reference(cell) if Rc::strong_count(cell) > 1);
+    let is_reference =
+        matches!(value, Value::Reference(cell) if Rc::strong_count(cell) > 1 + duplicate_owner);
     let mut place = Place {
         depth,
         is_reference,
@@ -173,8 +196,8 @@ async fn enter(
         style.recursion(out, &container, place, context);
         return Ok(None);
     }
-    let entries = match &container {
-        Container::Array(array) => array.clone(),
+    let (entries, source) = match &container {
+        Container::Array(array) => (array.clone(), EntrySource::Live),
         Container::Object(object) => {
             if context.has_debug_info(object)
                 && matches!(style.properties(), PropertyView::Debug { .. })
@@ -192,7 +215,7 @@ async fn enter(
                     .debug_properties(object.clone(), function, arguments)
                     .await?
                 {
-                    DebugProperties::Properties(properties) => properties,
+                    DebugProperties::Properties(properties) => (properties, EntrySource::Live),
                     DebugProperties::Recursive => {
                         style.recursion(out, &container, place, context);
                         active.remove(&container.identity());
@@ -200,7 +223,7 @@ async fn enter(
                     }
                 }
             } else {
-                Rc::new(object.to_array())
+                (Rc::new(object.to_array()), EntrySource::PropertySnapshot)
             }
         }
     };
@@ -209,6 +232,7 @@ async fn enter(
         container,
         next: entries.first_position(),
         entries,
+        source,
     }))
 }
 

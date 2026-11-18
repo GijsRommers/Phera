@@ -27,6 +27,12 @@ impl Vm {
         name: &str,
     ) -> Result<(), NativeError> {
         let resolved = self.find_method(&class, name, Invocation::Method);
+        if matches!(resolved, Ok(None)) && name.eq_ignore_ascii_case("__construct") {
+            return Err(NativeError::error(format!(
+                "Call to undefined method {}::{name}()",
+                class.name
+            )));
+        }
         self.prepare_method_lookup(class, receiver, name, MethodSyntax::Static, resolved)
     }
 
@@ -46,6 +52,9 @@ impl Vm {
             Ok(None) => None,
             Err(error) => Some(error),
         };
+        if syntax == MethodSyntax::Static && name.eq_ignore_ascii_case("__construct") {
+            return Err(error.unwrap_or_else(|| NativeError::error("Cannot call constructor")));
+        }
         let instance = receiver
             .as_ref()
             .filter(|_| {
