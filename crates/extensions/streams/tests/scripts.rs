@@ -1,0 +1,37 @@
+//! Run the same stateful PHP script through the CLI and the PHP oracle.
+
+mod script_cases;
+
+use std::path::Path;
+
+use phera_extension_api::testing::scripts::{Comparison, php_scripts};
+
+#[test]
+fn scripts_match_php() {
+    let Some(comparison) = Comparison::from_environment("streams") else {
+        return;
+    };
+    let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/scripts");
+    let temporary = tempfile::tempdir().expect("create isolated script directories");
+    let sources = temporary.path().join("scripts");
+    std::fs::create_dir(&sources).expect("create script source directory");
+    let mut scripts = Vec::new();
+    for source in php_scripts(&directory, "") {
+        let target = sources.join(source.file_name().expect("script filename"));
+        std::fs::copy(source, &target).expect("copy script fixture to its temporary directory");
+        scripts.push(target);
+    }
+    scripts.extend(script_cases::generate(&sources));
+    assert!(scripts.len() >= 80);
+    comparison.compare_all(&scripts, |script, runtime, command| {
+        let name = script.file_stem().expect("script name").to_string_lossy();
+        let directory = temporary.path().join(format!("{name}-{}", runtime.label()));
+        std::fs::create_dir(&directory).expect("create script working directory");
+        if name == "stdio" {
+            let input = directory.join("input");
+            std::fs::write(&input, b"stdin\n").expect("write standard input");
+            command.stdin(std::fs::File::open(input).expect("open standard input"));
+        }
+        command.env("TMPDIR", &directory).current_dir(directory);
+    });
+}

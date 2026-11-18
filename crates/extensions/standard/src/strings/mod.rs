@@ -12,7 +12,7 @@ mod compare;
 mod decimal;
 mod encode;
 mod escaping;
-mod format;
+pub(crate) mod format;
 mod html;
 mod metaphone;
 mod number_format;
