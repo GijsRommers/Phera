@@ -101,11 +101,12 @@ impl Vm {
 
     /// Slots are removed after every path, including repeated executions in a loop.
     fn take_finally(&mut self, state: Reg) -> Option<Continuation> {
-        let frame_base = self.current()?.base();
-        let index = self
-            .finally_stack
-            .iter()
-            .rposition(|entry| entry.frame_base == frame_base && entry.state == state)?;
+        let frame_base = self.call_stack.current()?.base();
+        let matches = |entry: &SavedFinally| entry.frame_base == frame_base && entry.state == state;
+        if let Some(entry) = self.finally_stack.pop_if(|entry| matches(entry)) {
+            return Some(entry.continuation);
+        }
+        let index = self.finally_stack.iter().rposition(matches)?;
         Some(self.finally_stack.remove(index).continuation)
     }
 }

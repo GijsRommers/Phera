@@ -152,6 +152,9 @@ impl Vm {
 
     /// A throw escaping finally appends its saved exception to the new previous chain.
     fn replace_finally_exceptions(&mut self, object: &Rc<Object>, target: Option<usize>) {
+        if self.finally_stack.is_empty() {
+            return;
+        }
         let Some(frame) = self.call_stack.current() else {
             return;
         };
