@@ -65,7 +65,7 @@ impl Vm {
         name: &str,
         access: ConstantAccess,
     ) -> NativeResult {
-        let (linked, constant) = self.resolve_class_constant(class, name)?;
+        let (linked, constant) = self.resolve_class_constant(class, name, access)?;
         // A linked value can return directly. The dependency stack is needed
         // only for unfinished initializers or the initial backing-table build.
         if !linked
@@ -104,7 +104,7 @@ impl Vm {
             spelling,
             access,
         } = &lookup;
-        let (linked, constant) = self.resolve_class_constant(class, name)?;
+        let (linked, constant) = self.resolve_class_constant(class, name, *access)?;
         if let Some(linked) = &linked
             && self.needs_enum_backing(linked)
         {
@@ -151,6 +151,7 @@ impl Vm {
         &self,
         class: &str,
         name: &str,
+        access: ConstantAccess,
     ) -> Result<(Option<Rc<crate::classes::Class>>, Rc<LinkedConstant>), NativeError> {
         let linked = self.classes.get(class);
         let (display, constants) = if let Some(linked) = &linked {
@@ -184,6 +185,7 @@ impl Vm {
         })?;
         if let Some(linked) = &linked
             && linked.kind == ClassKind::Trait
+            && access != ConstantAccess::Reflect
         {
             return Err(NativeError::error(format!(
                 "Cannot access trait constant {display}::{name} directly"

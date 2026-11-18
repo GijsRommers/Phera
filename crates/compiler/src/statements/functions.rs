@@ -180,7 +180,7 @@ impl<'ast> Compiler<'ast> {
                     *default += id + 1;
                 }
             }
-            for (_, backing) in &mut class.enum_cases {
+            for (_, backing, _) in &mut class.enum_cases {
                 if let Some(initializer) = backing {
                     *initializer += id + 1;
                 }

@@ -328,7 +328,8 @@ pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
             enum_cases: declaration
                 .enum_cases
                 .into_iter()
-                .map(|(name, backing)| phera_bytecode::EnumCase {
+                .map(|(name, backing, metadata)| phera_bytecode::EnumCase {
+                    metadata,
                     name: tables.name(&name),
                     backing: backing.map(|index| FunctionId(index as u32)),
                 })

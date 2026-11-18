@@ -322,12 +322,14 @@ impl Vm {
                 Some(phera_extension_api::NativeClone::Forbidden)
             )
             && clone_method.is_none_or(|method| method.visibility == Visibility::Public);
+        let mut trait_aliases = Vec::new();
         let mut source = None;
         let mut attributes = Vec::new();
         if let Some((first, index)) = class.declaration {
             let unit = self.code.unit(first);
             if let Some(declaration) = unit.classes.get(index.index()) {
                 source = Some(source_info(unit, &declaration.metadata));
+                trait_aliases = self.reflection_trait_aliases(class, declaration);
                 attributes = self.reflection_attributes(
                     first,
                     &declaration.metadata.attributes,
@@ -351,8 +353,16 @@ impl Vm {
                 .into_iter()
                 .map(|interface| interface.name.clone())
                 .collect(),
-            traits: Vec::new(),
-            trait_aliases: Vec::new(),
+            traits: class.traits.clone(),
+            trait_aliases,
+            enum_backing: class
+                .enum_info
+                .as_ref()
+                .and_then(|info| info.backing)
+                .map(|backing| match backing {
+                    phera_bytecode::EnumBacking::Int => "int",
+                    phera_bytecode::EnumBacking::String => "string",
+                }),
             modifiers: flags(class.is_abstract && kind == ReflectedClassKind::Class, 64)
                 | flags(class.is_final || class.origin == ClassOrigin::Closure, 32)
                 | flags(class.is_readonly, 65536),
@@ -362,7 +372,7 @@ impl Vm {
             instantiable: concrete && constructor_public && class.origin != ClassOrigin::Closure,
             cloneable,
             iterable: concrete && class.is_a("Traversable"),
-            anonymous: false,
+            anonymous: class.kind == phera_bytecode::ClassKind::Anonymous,
             constructor: class
                 .constructor
                 .as_ref()

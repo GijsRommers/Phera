@@ -48,6 +48,7 @@ pub enum EnumBacking {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EnumCase {
+    pub metadata: crate::reflection::DeclarationMetadata,
     pub name: NameId,
     pub backing: Option<FunctionId>,
 }

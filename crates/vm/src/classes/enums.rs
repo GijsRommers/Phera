@@ -15,14 +15,20 @@ use crate::Vm;
 const VALUE_PARAMETER: Param = Param::new("value", ParamType::IntOrString);
 pub(super) const INTERFACES: &[ClassEntry] = &[
     ClassEntry {
-        methods: &[MethodEntry::required("cases", &[]).static_()],
+        methods: &[MethodEntry::required("cases", &[])
+            .static_()
+            .returning("array")],
         ..ClassEntry::interface("UnitEnum")
     },
     ClassEntry {
         interfaces: &["UnitEnum"],
         methods: &[
-            MethodEntry::required("from", &[VALUE_PARAMETER]).static_(),
-            MethodEntry::required("tryFrom", &[VALUE_PARAMETER]).static_(),
+            MethodEntry::required("from", &[VALUE_PARAMETER])
+                .static_()
+                .returning("static"),
+            MethodEntry::required("tryFrom", &[VALUE_PARAMETER])
+                .static_()
+                .returning("?static"),
         ],
         ..ClassEntry::interface("BackedEnum")
     },
@@ -54,7 +60,7 @@ impl EnumMethod {
 }
 
 pub(crate) struct EnumInfo {
-    pub(super) backing: Option<EnumBacking>,
+    pub(crate) backing: Option<EnumBacking>,
     pub(super) names: Vec<String>,
 }
 

@@ -190,7 +190,18 @@ impl Vm {
                     None => {}
                 }
             }
-            MethodBody::Enum(_) => {}
+            MethodBody::Enum(operation) => {
+                use crate::classes::enums::EnumMethod;
+                reflected.parameters = native_parameters(operation.parameters());
+                reflected.return_type = Some(
+                    match operation {
+                        EnumMethod::Cases => "array",
+                        EnumMethod::From => "static",
+                        EnumMethod::TryFrom => "?static",
+                    }
+                    .into(),
+                );
+            }
             MethodBody::Closure(operation) => {
                 reflected.parameters = native_parameters(operation.parameters());
                 reflected.extension = Some("Core".into());

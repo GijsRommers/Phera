@@ -54,9 +54,13 @@ impl Compiler<'_> {
                 if declaration.kind != ast::ClassKind::Enum {
                     return Err(self.error("Case can only be used in enums", case_line));
                 }
-                if !attributes.is_empty() {
-                    return Err(self.error("Attributes not supported yet", case_line));
-                }
+                let metadata = self.declaration_metadata(
+                    attributes,
+                    member.span,
+                    member.doc_comment,
+                    Some(&name),
+                    AttributePlacement::Declaration(AttributeTarget::ClassConstant),
+                )?;
                 let value = value
                     .as_ref()
                     .map(|value| {
@@ -68,7 +72,7 @@ impl Compiler<'_> {
                         )
                     })
                     .transpose()?;
-                enum_cases.push((case.name.clone(), value));
+                enum_cases.push((case.name.clone(), value, metadata));
                 continue;
             }
             if let ast::ClassMemberKind::TraitUse {

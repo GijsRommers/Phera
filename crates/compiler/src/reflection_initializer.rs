@@ -19,14 +19,18 @@ pub fn compile_reflection_initializer(
     source: &[u8],
     file: &str,
     initializer: &InitializerSource,
+    in_trait: bool,
 ) -> Result<CompiledInitializer, CompileError> {
-    crate::on_compile_stack(file, || compile_on_stack(source, file, initializer))
+    crate::on_compile_stack(file, || {
+        compile_on_stack(source, file, initializer, in_trait)
+    })
 }
 
 fn compile_on_stack(
     source: &[u8],
     file: &str,
     initializer: &InitializerSource,
+    in_trait: bool,
 ) -> Result<CompiledInitializer, CompileError> {
     let error = || CompileError {
         message: "Invalid source for reflection initializer".into(),
@@ -66,6 +70,9 @@ fn compile_on_stack(
         &reflection,
     );
     compiler.class_scope.clone_from(&initializer.scope);
+    if in_trait {
+        compiler.trait_scope.clone_from(&initializer.scope);
+    }
     compiler.imports.clone_from(&initializer.imports);
     compiler.function.strict_types = initializer.strict_types;
     let class_constant = match &expression.kind {

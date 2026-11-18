@@ -157,7 +157,11 @@ pub struct ClassDeclaration {
     pub methods: Vec<ClassMethod>,
     pub traits: Vec<phera_bytecode::TraitUse>,
     pub enum_backing: Option<phera_bytecode::EnumBacking>,
-    pub enum_cases: Vec<(String, Option<usize>)>,
+    pub enum_cases: Vec<(
+        String,
+        Option<usize>,
+        phera_bytecode::reflection::DeclarationMetadata,
+    )>,
 }
 /// Method metadata travels beside ordinary function IR rather than entering global scope.
 #[derive(Debug, Clone)]

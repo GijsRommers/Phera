@@ -45,6 +45,10 @@ pub(crate) fn register(registry: &mut Registry) {
                 MethodEntry::public("isPublic", &[], |_, o, _| has_modifier(o, 1)),
                 MethodEntry::public("isProtected", &[], |_, o, _| has_modifier(o, 2)),
                 MethodEntry::public("isPrivate", &[], |_, o, _| has_modifier(o, 4)),
+                MethodEntry::public("isEnumCase", &[], |_, o, _| {
+                    data(o, |m| Value::Bool(m.enum_case))
+                })
+                .returning("bool"),
                 MethodEntry::public("isFinal", &[], |_, o, _| has_modifier(o, 32)),
                 MethodEntry::public("getDocComment", &[], |_, o, _| doc(o)),
                 MethodEntry::public("getValue", &[], |c, o, _| {

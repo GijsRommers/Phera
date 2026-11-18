@@ -306,7 +306,10 @@ pub(crate) async fn reflect_class(context: &mut dyn Context, name: &str) -> Nati
 }
 
 pub(crate) fn split(name: &str) -> (&str, &str) {
-    name.rsplit_once('\\').unwrap_or(("", name))
+    let class_name = name.split('\0').next().unwrap_or(name);
+    class_name.rfind('\\').map_or(("", name), |separator| {
+        (&name[..separator], &name[separator + 1..])
+    })
 }
 
 fn data(this: Option<&Rc<Object>>, result: impl FnOnce(&ClassInfo) -> Value) -> NativeResult {

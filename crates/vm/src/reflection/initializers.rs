@@ -58,14 +58,23 @@ impl Vm {
             .cloned()
             .ok_or_else(|| NativeError::error("Reflection initializer's file was not loaded"))?;
         let index = initializer.index;
+        let in_trait = unit
+            .reflection_initializers
+            .get(index)
+            .and_then(|source| source.scope.as_deref())
+            .and_then(|scope| self.classes.get(scope))
+            .is_some_and(|class| class.kind == phera_bytecode::ClassKind::Trait);
         let compile = move || match (
             unit.reflection_source.as_deref(),
             unit.reflection_initializers.get(index),
         ) {
-            (Some(source), Some(initializer)) => {
-                phera_compiler::compile_reflection_initializer(source, &unit.file, initializer)
-                    .map_err(|error| error.message)
-            }
+            (Some(source), Some(initializer)) => phera_compiler::compile_reflection_initializer(
+                source,
+                &unit.file,
+                initializer,
+                in_trait,
+            )
+            .map_err(|error| error.message),
             _ => Err("Reflection initializer has no source".into()),
         };
         let compiled = match tokio::runtime::Handle::try_current() {
