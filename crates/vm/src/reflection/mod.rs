@@ -356,6 +356,13 @@ impl Vm {
                 return self.create_object(&class.name, PhpArray::new());
             }
         };
+        // Closure exposes a private placeholder for reflection, while Zend's
+        // object allocator has no callable constructor for argument forwarding.
+        if class.origin == crate::classes::class::ClassOrigin::Closure && !args.is_empty() {
+            return Err(exception(
+                "Class Closure does not have a constructor, so you cannot pass any constructor arguments",
+            ));
+        }
         let created = self.create_object(&class.name, PhpArray::new())?;
         let constructor = class.constructor.clone();
         match &constructor {
@@ -406,7 +413,7 @@ impl Vm {
         Callee {
             name: signature.name.clone(),
             parameters: signature.parameters.clone(),
-            argument_binding: crate::calls::callback_binding::ArgumentBinding::Internal,
+            argument_binding: crate::calls::callback_binding::ArgumentBinding::Caller,
             target: CallTarget::Method {
                 context: MethodContext {
                     receiver: if method.is_static { None } else { receiver },

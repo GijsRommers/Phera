@@ -23,6 +23,7 @@ impl Extension for Standard {
     fn register(&self, registry: &mut Registry) {
         registry.function(version_compare::ENTRY);
         strings::register(registry);
+        registry.describe_function("strlen", "int", Some("Core"));
         math::register(registry);
         arrays::register(registry);
         constants::register(registry);

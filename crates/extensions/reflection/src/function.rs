@@ -5,7 +5,7 @@ use std::rc::Rc;
 use phera_extension_api::reflection::{FunctionInfo, FunctionTarget, MemberInfo};
 use phera_extension_api::{
     ArrayKey, ClassEntry, ClassKind, ConstantValue, Context, LocalFuture, MethodEntry,
-    NativeResult, Object, Param, ParamType, PhpArray, Registry, Value,
+    NativeResult, Object, Param, ParamType, PhpArray, PhpString, Registry, Value,
 };
 
 use crate::class::{NAME_PROPERTY, reflect_class, split};
@@ -30,16 +30,16 @@ pub(crate) fn register(registry: &mut Registry) {
             &[
                 MethodEntry::public(
                     "__construct",
-                    const { &[Param::new("function", ParamType::ObjectOrString)] },
+                    const { &[Param::new("function", ParamType::ClosureOrString)] },
                     construct,
                 ),
                 MethodEntry::public("isAnonymous", &[], |_, o, _| {
                     data(o, |f| Value::Bool(f.anonymous))
                 }),
-                MethodEntry::public_async("invoke", &[ARGS], |c, o, a| {
+                MethodEntry::public_async_named("invoke", &[ARGS], |c, o, a, names| {
                     Box::pin(async move {
                         let function = reflected(o.as_ref())?;
-                        let args = positional(a)?;
+                        let args = forwarded_arguments(a, 0, names)?;
                         engine(c)?
                             .reflect_invoke(function.target.clone(), None, args)
                             .await
@@ -309,12 +309,21 @@ fn attributes(
     })
 }
 
-pub(crate) fn positional(
-    args: impl IntoIterator<Item = Value>,
+pub(crate) fn forwarded_arguments(
+    args: Vec<Value>,
+    skip: usize,
+    named: &[(usize, PhpString)],
 ) -> Result<PhpArray, phera_extension_api::NativeError> {
     let mut array = PhpArray::new();
-    for arg in args {
-        array.push(arg)?;
+    let mut named = named.iter().peekable();
+    for (index, argument) in args.into_iter().enumerate().skip(skip) {
+        if named.peek().is_some_and(|(position, _)| *position == index)
+            && let Some((_, name)) = named.next()
+        {
+            array.insert(ArrayKey::String(name.clone()), argument);
+        } else {
+            array.push(argument)?;
+        }
     }
     Ok(array)
 }

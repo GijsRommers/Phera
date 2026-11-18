@@ -104,7 +104,20 @@ pub(crate) fn register(registry: &mut Registry) {
                         ]
                     },
                     |c, o, a| {
-                        if reflected(o)?.modifiers & 16 != 0 {
+                        let member = reflected(o)?;
+                        let mut static_property = member.modifiers & 16 != 0;
+                        if !static_property
+                            && let Some(object) = args::object(a, 0)
+                            && !object.class.is_instance_of(&member.class)
+                        {
+                            static_property = engine(c)?
+                                .reflect_members(object.class.name(), MemberKind::Property)
+                                .iter()
+                                .any(|property| {
+                                    property.name == member.name && property.modifiers & 16 != 0
+                                });
+                        }
+                        if static_property {
                             return Err(crate::exception(
                                 "May not use setRawValue on static properties",
                             ));
@@ -164,12 +177,22 @@ fn read(
     method: &str,
 ) -> NativeResult {
     let member = reflected(this)?;
-    if member.modifiers & 16 != 0 && method == "getRawValue" {
-        return Err(crate::exception(
-            "May not use getRawValue on static properties",
-        ));
-    }
     let object = args::object(args, 0).cloned();
+    if method == "getRawValue" {
+        if object
+            .as_ref()
+            .is_some_and(|object| !object.class.is_instance_of(&member.lookup_class))
+        {
+            return Err(crate::exception(
+                "Given object is not an instance of the class this property was declared in",
+            ));
+        }
+        if member.modifiers & 16 != 0 {
+            return Err(crate::exception(
+                "May not use getRawValue on static properties",
+            ));
+        }
+    }
     if member.modifiers & 16 == 0 && object.is_none() {
         return Err(NativeError::type_error(format!(
             "ReflectionProperty::{method}(): Argument #1 ($object) must be provided for instance properties"

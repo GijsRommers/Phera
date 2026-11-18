@@ -11,6 +11,7 @@ use crate::closures::{ClosureOrigin, ClosureState};
 /// VM-owned methods need access to lexical scope and the heap interpreter.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ClosureMethod {
+    Construct,
     Bind,
     BindTo,
     Call,
@@ -20,6 +21,7 @@ pub(crate) enum ClosureMethod {
 impl ClosureMethod {
     fn name(self) -> &'static str {
         match self {
+            Self::Construct => "__construct",
             Self::Bind => "bind",
             Self::BindTo => "bindTo",
             Self::Call => "call",
@@ -29,6 +31,7 @@ impl ClosureMethod {
 
     pub(crate) fn entries() -> &'static [(Self, &'static str)] {
         &[
+            (Self::Construct, "__construct"),
             (Self::Bind, "bind"),
             (Self::BindTo, "bindTo"),
             (Self::Call, "call"),
@@ -52,6 +55,7 @@ impl ClosureMethod {
         ];
         const FROM: &[Param] = &[Param::new("callback", ParamType::Mixed)];
         match self {
+            Self::Construct => &[],
             Self::Bind => BIND,
             Self::BindTo => BIND_TO,
             Self::Call => CALL,
@@ -71,6 +75,11 @@ impl Vm {
         named_keys: Vec<phera_value::PhpString>,
         origin: crate::calls::callback_binding::ArgumentOrigin,
     ) -> NativeResult {
+        if operation == ClosureMethod::Construct {
+            return Err(NativeError::error(
+                "Instantiation of class Closure is not allowed",
+            ));
+        }
         let name = operation.name();
         self.with_argument_origin(origin, |vm| {
             phera_extension_api::prepare_call(

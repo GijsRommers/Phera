@@ -5,12 +5,12 @@ use std::rc::Rc;
 use phera_extension_api::reflection::FunctionTarget;
 use phera_extension_api::{
     ClassEntry, ConstantValue, Context, LocalFuture, MethodEntry, NativeResult, Object, Param,
-    ParamType, Registry, Value, args,
+    ParamType, PhpString, Registry, Value, args,
 };
 
 use crate::class::{reflect_class, target_class};
 use crate::function::{
-    ARGS, ARRAY, argument_array, data, make, method, positional, reflected, set_class,
+    ARGS, ARRAY, argument_array, data, forwarded_arguments, make, method, reflected, set_class,
 };
 use crate::member::{ACCESS, CLASS_PROPERTY, accessible};
 use crate::{bind, engine, exception, receiver};
@@ -43,7 +43,13 @@ pub(crate) fn register(registry: &mut Registry) {
                         ]
                     },
                     construct,
-                ),
+                )
+                .with_preparation(|context, _, arguments| {
+                    if arguments.len() == 1 {
+                        context.deprecated("Calling ReflectionMethod::__construct() with 1 argument is deprecated, use ReflectionMethod::createFromMethodName() instead".into());
+                    }
+                    Ok(phera_extension_api::MethodPreparation::Default)
+                }),
                 MethodEntry::public_async(
                     "createFromMethodName",
                     const { &[Param::new("method", ParamType::String)] },
@@ -94,6 +100,15 @@ pub(crate) fn register(registry: &mut Registry) {
                                 "ReflectionMethod::getClosure(): Argument #1 ($object) cannot be null for non-static methods",
                             ));
                         }
+                        if !function.is_static
+                            && object.as_ref().is_some_and(|object| {
+                                !object.class.is_instance_of(&member.class)
+                            })
+                        {
+                            return Err(exception(
+                                "Given object is not an instance of the class this method was declared in",
+                            ));
+                        }
                         let target = FunctionTarget::Method {
                             class: member.class.clone(),
                             name: member.name.clone(),
@@ -101,8 +116,8 @@ pub(crate) fn register(registry: &mut Registry) {
                         engine(c)?.reflect_closure(target, object)
                     },
                 ),
-                MethodEntry::public_async("invoke", &[INSTANCE, ARGS], |c, o, a| {
-                    invoke(c, o, a, Arguments::Positional)
+                MethodEntry::public_async_named("invoke", &[INSTANCE, ARGS], |c, o, a, names| {
+                    invoke(c, o, a, Arguments::Forwarded(names))
                 }),
                 MethodEntry::public_async("invokeArgs", &[INSTANCE, ARRAY], |c, o, a| {
                     invoke(c, o, a, Arguments::Array)
@@ -131,22 +146,19 @@ fn construct(
             .ok_or_else(|| exception("Expected a class or method name"))?;
         let (class, name) = match args::string(&arguments, 1) {
             Some(name) => (target_class(first)?, name.to_string_lossy()),
-            None => {
-                context.deprecated("Calling ReflectionMethod::__construct() with 1 argument is deprecated, use ReflectionMethod::createFromMethodName() instead".into());
-                match first {
-                    Value::String(name) => split_method(
-                        &name.to_string_lossy(),
-                        "ReflectionMethod::__construct()",
-                        "objectOrMethod",
-                    )?,
-                    _ => {
-                        return Err(phera_extension_api::NativeError::throw(
-                            "ArgumentCountError",
-                            "ReflectionMethod::__construct() expects exactly 2 arguments, 1 given",
-                        ));
-                    }
+            None => match first {
+                Value::String(name) => split_method(
+                    &name.to_string_lossy(),
+                    "ReflectionMethod::__construct()",
+                    "objectOrMethod",
+                )?,
+                _ => {
+                    return Err(phera_extension_api::NativeError::throw(
+                        "ArgumentCountError",
+                        "ReflectionMethod::__construct() expects exactly 2 arguments, 1 given",
+                    ));
                 }
-            }
+            },
         };
         engine(context)?.reflect_class(&class).await?;
         let function =
@@ -221,23 +233,23 @@ fn prototype(context: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value]) 
     )
 }
 
-enum Arguments {
+enum Arguments<'a> {
     Array,
-    Positional,
+    Forwarded(&'a [(usize, PhpString)]),
 }
 
-fn invoke(
-    context: &mut dyn Context,
+fn invoke<'a>(
+    context: &'a mut dyn Context,
     this: Option<Rc<Object>>,
     args: Vec<Value>,
-    mode: Arguments,
-) -> LocalFuture<'_, NativeResult> {
+    mode: Arguments<'a>,
+) -> LocalFuture<'a, NativeResult> {
     Box::pin(async move {
         let function = reflected(this.as_ref())?;
         let object = args::object(&args, 0).cloned();
         let arguments = match mode {
             Arguments::Array => argument_array(&args, 1),
-            Arguments::Positional => positional(args.into_iter().skip(1))?,
+            Arguments::Forwarded(names) => forwarded_arguments(args, 1, names)?,
         };
         engine(context)?
             .reflect_invoke(function.target.clone(), object, arguments)

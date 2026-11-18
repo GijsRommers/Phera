@@ -66,6 +66,7 @@ pub struct Registry {
     object_handlers: HashMap<&'static str, crate::AsyncFn>,
     callback_frames: HashSet<&'static str>,
     function_modules: HashMap<&'static str, &'static str>,
+    function_return_types: HashMap<&'static str, &'static str>,
     function_order: Vec<&'static str>,
     extensions: Vec<&'static str>,
     /// Modules whose version is not PHP's, by lowercase name.
@@ -224,6 +225,23 @@ impl Registry {
     /// PHP module owning a native function's canonical name.
     pub fn function_module(&self, name: &str) -> Option<&'static str> {
         self.function_modules.get(name).copied()
+    }
+
+    /// Describe the return type and PHP ownership without growing native call entries.
+    pub fn describe_function(
+        &mut self,
+        name: &'static str,
+        return_type: &'static str,
+        module: Option<&'static str>,
+    ) {
+        self.function_return_types.insert(name, return_type);
+        if let Some(module) = module {
+            self.function_modules.insert(name, module);
+        }
+    }
+
+    pub fn function_return_type(&self, name: &str) -> Option<&'static str> {
+        self.function_return_types.get(name).copied()
     }
 
     pub fn get_function(&self, name: &str) -> Option<&FunctionEntry> {

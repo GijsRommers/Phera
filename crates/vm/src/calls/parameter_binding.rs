@@ -7,6 +7,7 @@ use phera_extension_api::NativeError;
 use phera_value::{ArrayKey, PhpArray, PhpString, Value};
 
 use crate::calls::call_view::ArgumentSlots;
+use crate::calls::callback_binding::ArgumentOrigin;
 use crate::calls::frame_extras::ArgumentFacts;
 use crate::calls::prepared_call::{CallFlags, PreparedCall};
 use crate::code_table::FunctionIndex;
@@ -150,11 +151,16 @@ impl Vm {
         } else {
             "at least"
         };
-        let location = self.location();
+        let location = if self.argument_origin == ArgumentOrigin::Callback {
+            String::new()
+        } else {
+            let location = self.location();
+            format!(" in {} on line {}", location.file, location.line)
+        };
         NativeError::argument_count_error(format!(
-            "Too few arguments to function {}(), {supplied} passed in {} on line {} and \
+            "Too few arguments to function {}(), {supplied} passed{location} and \
              {qualifier} {required} expected",
-            function.name, location.file, location.line,
+            function.name,
         ))
     }
 

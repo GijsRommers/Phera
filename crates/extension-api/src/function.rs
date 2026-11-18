@@ -41,6 +41,8 @@ pub enum ParamType {
     ArrayOrString,
     /// `object|string`
     ObjectOrString,
+    /// `Closure|string`
+    ClosureOrString,
     /// `string|int|float`, used by phpredis blocking pop timeouts.
     StringOrNumber,
     /// `array|int|float`, used by geographic search shapes.

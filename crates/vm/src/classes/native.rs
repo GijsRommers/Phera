@@ -85,7 +85,13 @@ impl ClassTable {
                             signature: std::cell::OnceCell::new(),
                             name: name.into(),
                             declaring: "Closure".into(),
-                            visibility: Visibility::Public,
+                            visibility: if operation
+                                == crate::closure_methods::ClosureMethod::Construct
+                            {
+                                Visibility::Private
+                            } else {
+                                Visibility::Public
+                            },
                             is_static: matches!(
                                 operation,
                                 crate::closure_methods::ClosureMethod::Bind

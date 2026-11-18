@@ -94,6 +94,10 @@ impl Vm {
             CallTarget::Native(entry) => {
                 reflected.parameters = native_parameters(entry.params);
                 reflected.extension = self.registry.function_module(entry.name).map(str::to_owned);
+                reflected.return_type = self
+                    .registry
+                    .function_return_type(entry.name)
+                    .map(str::to_owned);
             }
             CallTarget::Method { method, context } => {
                 self.reflect_method_signature(reflected, method, &context.called.name);

@@ -157,7 +157,8 @@ impl Vm {
 }
 
 /// Every interface of `class`, in the order PHP keeps them: the parent
-/// class's list first, then the interfaces the class names itself, and
+/// class's list first (reversed for a child without its own implements list),
+/// then the interfaces the class names itself, and
 /// only then what those interfaces extend, each interface's own list
 /// taken back to front.
 ///
@@ -189,6 +190,9 @@ pub(crate) fn interfaces_in_php_order(class: &Class) -> Vec<&Class> {
         }
         let list_of = |part: &Class| lists.get(part.name.as_str()).cloned().unwrap_or_default();
         let mut list = current.parent.as_deref().map(list_of).unwrap_or_default();
+        if current.interfaces.is_empty() {
+            list.reverse();
+        }
         let inherited = list.len();
         for named in &current.interfaces {
             if !list.iter().any(|known| known.name == named.name) {

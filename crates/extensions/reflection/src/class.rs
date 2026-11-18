@@ -22,7 +22,7 @@ pub(crate) struct ReflectedClass {
 pub(crate) fn register(registry: &mut Registry) {
     use ConstantValue::Int;
     registry.class(ClassEntry {
-        interfaces: &["Reflector"],
+        interfaces: &["Stringable", "Reflector"],
         properties: const { &[NAME_PROPERTY] },
         constants: const {
             &[
@@ -180,15 +180,12 @@ const IDENTITY_METHODS: &[MethodEntry] = const {
             const { &[Param::new("interface", ParamType::ObjectOrString)] },
             |c, o, a| relationship(c, o, a, Relationship::Interface),
         ),
-        MethodEntry::public_async(
+        MethodEntry::public_async_named(
             "newInstance",
             const { &[Param::new("args", ParamType::Mixed).variadic()] },
-            |c, o, a| {
+            |c, o, a, names| {
                 Box::pin(async move {
-                    let mut arguments = PhpArray::new();
-                    for value in a {
-                        arguments.push(value)?;
-                    }
+                    let arguments = crate::function::forwarded_arguments(a, 0, names)?;
                     instantiate(c, o, Some(arguments)).await
                 })
             },
