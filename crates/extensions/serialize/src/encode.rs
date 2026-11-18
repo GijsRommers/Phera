@@ -5,8 +5,8 @@ mod objects;
 use std::{collections::HashMap, rc::Rc};
 
 use phera_extension_api::serialization::precision;
-use phera_extension_api::value::float_repr_with_precision;
-use phera_extension_api::{ArrayKey, Context, NativeError, NativeResult, PhpArray, Value};
+use phera_extension_api::value::with_float_repr;
+use phera_extension_api::{ArrayKey, Context, NativeError, NativeResult, Object, PhpArray, Value};
 
 use crate::wire::Writer;
 
@@ -33,6 +33,7 @@ struct Encoder {
     output: Writer,
     frames: Vec<Frame>,
     slots: SerializationSlots,
+    precision: Option<i32>,
 }
 
 /// Serializable methods may call serialize() with the parent's slot table.
@@ -71,7 +72,11 @@ impl Encoder {
     ) -> Result<(), NativeError> {
         let mut value = value.try_deref()?.clone();
         loop {
-            self.value(context, value).await?;
+            if let Some(object) = self.value(context, value)? {
+                self.object(context, object).await?;
+                // A hook can change the request's serialization precision.
+                self.precision = None;
+            }
             let Some(next) = self.next_value() else {
                 return Ok(());
             };
@@ -152,28 +157,38 @@ impl Encoder {
         }
     }
 
-    async fn value(&mut self, context: &mut dyn Context, value: Value) -> Result<(), NativeError> {
-        let resolved = value.try_deref()?.clone();
-        if self.seen(&value, &resolved) {
-            return Ok(());
-        }
+    fn value(
+        &mut self,
+        context: &mut dyn Context,
+        value: Value,
+    ) -> Result<Option<Rc<Object>>, NativeError> {
+        let resolved = if matches!(value, Value::Reference(_) | Value::Object(_)) {
+            let resolved = value.try_deref()?.clone();
+            if self.seen(&value, &resolved) {
+                return Ok(None);
+            }
+            resolved
+        } else {
+            self.slots.count += 1;
+            value
+        };
         match resolved {
             Value::Null => self.output.null(),
             Value::Bool(boolean) => self.output.boolean(boolean),
             Value::Int(integer) => self.output.integer(integer),
             Value::Float(float) => {
-                self.output
-                    .float(&float_repr_with_precision(float, precision(context)));
+                let precision = *self.precision.get_or_insert_with(|| precision(context));
+                with_float_repr(float, precision, |decimal| self.output.float(decimal));
             }
             Value::String(string) => self.output.string(string.as_bytes()),
             Value::Array(array) => {
                 self.output.array(array.len());
                 self.entries(array, Contents::Array);
             }
-            Value::Object(object) => self.object(context, object).await?,
+            Value::Object(object) => return Ok(Some(object)),
             Value::Resource(_) => self.output.integer(0),
             Value::Reference(_) => return Err(NativeError::error("Invalid nested PHP reference")),
         }
-        Ok(())
+        Ok(None)
     }
 }
