@@ -31,6 +31,11 @@ pub trait Context {
         None
     }
 
+    /// The request's include path, used by the VM and by the file wrappers.
+    fn include_path(&self) -> phera_value::PhpString {
+        ".".into()
+    }
+
     /// Whether the PHP file making this call declared `strict_types=1`, which
     /// turns off scalar coercion of arguments.
     fn strict_types(&self) -> bool;

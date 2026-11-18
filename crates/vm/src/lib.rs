@@ -172,7 +172,7 @@ pub struct Vm {
     state: RequestState,
     property_references: std::rc::Rc<std::cell::RefCell<reference_holders::ReferenceHolders>>,
     autoload: autoload::Autoloaders,
-    include_path: Option<String>,
+    include_path: Option<phera_value::PhpString>,
 }
 
 impl Vm {

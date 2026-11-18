@@ -59,18 +59,21 @@ impl Vm {
             phera_extension_api::prepare_call(name, parameters, &mut arguments, vm)
         })?;
         if let Some(Value::String(path)) = arguments.first() {
-            return Ok(Value::from(self.set_include_path(path.to_string_lossy())));
+            return Ok(Value::from(self.set_include_path(path.clone())));
         }
         Ok(Value::from(self.include_path()))
     }
 }
 
 impl Vm {
-    pub(crate) fn include_path(&self) -> &str {
-        self.include_path.as_deref().unwrap_or(".")
+    pub(crate) fn include_path(&self) -> phera_value::PhpString {
+        self.include_path.clone().unwrap_or_else(|| ".".into())
     }
 
-    pub(crate) fn set_include_path(&mut self, path: String) -> String {
+    pub(crate) fn set_include_path(
+        &mut self,
+        path: phera_value::PhpString,
+    ) -> phera_value::PhpString {
         self.include_path
             .replace(path)
             .unwrap_or_else(|| ".".into())

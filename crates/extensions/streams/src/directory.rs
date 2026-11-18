@@ -22,7 +22,9 @@ const HANDLE: Param = Param::new("dir_handle", ParamType::Mixed).optional();
 pub fn register(registry: &mut Registry) {
     const OPEN: &[Param] = &[DIRECTORY, OPTIONAL_CONTEXT];
     const SCAN: &[Param] = &[
-        DIRECTORY, Param::new("sorting_order", ParamType::Int).optional(), OPTIONAL_CONTEXT,
+        DIRECTORY,
+        Param::new("sorting_order", ParamType::Int).optional(),
+        OPTIONAL_CONTEXT,
     ];
     for entry in [
         FunctionEntry::asynchronous("opendir", OPEN, opendir),
@@ -37,28 +39,36 @@ pub fn register(registry: &mut Registry) {
         registry.function(entry);
     }
     for (name, value) in [
-        ("SCANDIR_SORT_ASCENDING", 0), ("SCANDIR_SORT_DESCENDING", 1), ("SCANDIR_SORT_NONE", 2),
+        ("SCANDIR_SORT_ASCENDING", 0),
+        ("SCANDIR_SORT_DESCENDING", 1),
+        ("SCANDIR_SORT_NONE", 2),
     ] {
         registry.constant(name, value);
     }
     registry.class(ClassEntry {
         kind: ClassKind::FinalClass,
-        properties: &[
-            PropertyEntry::new("path", ConstantValue::Null, Visibility::Public).readonly(),
-            PropertyEntry::new("handle", ConstantValue::Null, Visibility::Public).readonly(),
-        ],
-        methods: &[
-            MethodEntry::public("__construct", &[], construct),
-            MethodEntry::public_async("read", &[], object_read),
-            MethodEntry::public_async("rewind", &[], object_rewind),
-            MethodEntry::public("close", &[], object_close),
-        ],
+        properties: const {
+            &[
+                PropertyEntry::new("path", ConstantValue::Null, Visibility::Public).readonly(),
+                PropertyEntry::new("handle", ConstantValue::Null, Visibility::Public).readonly(),
+            ]
+        },
+        methods: const {
+            &[
+                MethodEntry::public("__construct", &[], construct),
+                MethodEntry::public_async("read", &[], object_read),
+                MethodEntry::public_async("rewind", &[], object_rewind),
+                MethodEntry::public("close", &[], object_close),
+            ]
+        },
         ..ClassEntry::class("Directory")
     });
 }
 
 fn construct(_: &mut dyn Context, _: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
-    Err(NativeError::error("Cannot directly construct Directory, use dir() instead"))
+    Err(NativeError::error(
+        "Cannot directly construct Directory, use dir() instead",
+    ))
 }
 
 fn opendir(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
@@ -94,25 +104,36 @@ async fn open(context: &mut dyn Context, arguments: Vec<Value>, function: &str) 
             }
             Ok(value)
         }
-        Err(error) => warn_false(context, format!(
-            "{}: Failed to open directory: {}", path_call(function, name), reason(&error)
-        )),
+        Err(error) => warn_false(
+            context,
+            format!(
+                "{}: Failed to open directory: {}",
+                path_call(function, name),
+                reason(&error)
+            ),
+        ),
     }
 }
 
-async fn open_directory(context: &mut dyn Context, name: &[u8], function: &str)
-    -> Result<io::Result<Dir>, NativeError>
-{
+async fn open_directory(
+    context: &mut dyn Context,
+    name: &[u8],
+    function: &str,
+) -> Result<io::Result<Dir>, NativeError> {
     let name = match local(context, function, name) {
         Ok(name) => name,
         Err(error) => return Ok(Err(error)),
     };
-    IoPolicy::Blocking.run(move || {
-        let descriptor = rustix::fs::open(
-            name, OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC, Mode::empty()
-        )?;
-        Dir::new(descriptor).map_err(Into::into)
-    }).await
+    IoPolicy::Blocking
+        .run(move || {
+            let descriptor = rustix::fs::open(
+                name,
+                OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+                Mode::empty(),
+            )?;
+            Dir::new(descriptor).map_err(Into::into)
+        })
+        .await
 }
 
 fn scandir(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
@@ -122,7 +143,7 @@ fn scandir(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, 
         validate(args::value(&arguments, 2), "scandir", 3)?;
         if name.is_empty() {
             return Err(NativeError::value_error(
-                "scandir(): Argument #1 ($directory) must not be empty"
+                "scandir(): Argument #1 ($directory) must not be empty",
             ));
         }
         let directory = match open_directory(context, name, "scandir").await? {
@@ -130,26 +151,33 @@ fn scandir(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, 
             Err(error) => {
                 let description = reason(&error);
                 context.warning(format!(
-                    "{}: Failed to open directory: {description}", path_call("scandir", name)
+                    "{}: Failed to open directory: {description}",
+                    path_call("scandir", name)
                 ));
                 let errno = error.raw_os_error().unwrap_or(0);
-                return warn_false(context, format!("scandir(): (errno {errno}): {description}"));
+                return warn_false(
+                    context,
+                    format!("scandir(): (errno {errno}): {description}"),
+                );
             }
         };
         let order = args::int(&arguments, 1).unwrap_or(0);
-        let entries = IoPolicy::Blocking.run(move || {
-            let entries = directory.map(|entry| entry.map(|e| e.file_name().to_bytes().to_vec()));
-            let mut entries: Vec<_> = entries.filter_map(Result::ok).collect();
-            match order {
-                0 => entries.sort_unstable(),
-                2 => (),
-                _ => {
-                    entries.sort_unstable();
-                    entries.reverse();
+        let entries = IoPolicy::Blocking
+            .run(move || {
+                let entries =
+                    directory.map(|entry| entry.map(|e| e.file_name().to_bytes().to_vec()));
+                let mut entries: Vec<_> = entries.filter_map(Result::ok).collect();
+                match order {
+                    0 => entries.sort_unstable(),
+                    2 => (),
+                    _ => {
+                        entries.sort_unstable();
+                        entries.reverse();
+                    }
                 }
-            }
-            entries
-        }).await?;
+                entries
+            })
+            .await?;
         let mut result = PhpArray::new();
         for entry in entries {
             result.push(Value::from(entry))?;
@@ -178,21 +206,28 @@ fn closedir(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(Value::Null)
 }
 
-fn handle(context: &mut dyn Context, arguments: &[Value], function: &str)
-    -> Result<Rc<Resource>, NativeError>
-{
+fn handle(
+    context: &mut dyn Context,
+    arguments: &[Value],
+    function: &str,
+) -> Result<Rc<Resource>, NativeError> {
     let handle = match args::value(arguments, 0) {
         Value::Resource(resource) => resource.clone(),
         Value::Null => {
             context.deprecated(format!(
                 "{function}(): Passing null is deprecated, instead the last opened                  directory stream should be provided"
             ));
-            files(context).directory.clone().ok_or_else(|| NativeError::type_error("No resource supplied"))?
+            files(context)
+                .directory
+                .clone()
+                .ok_or_else(|| NativeError::type_error("No resource supplied"))?
         }
-        other => return Err(NativeError::type_error(format!(
-            "{function}(): Argument #1 ($dir_handle) must be of type resource or null, {} given",
-            given(other)
-        ))),
+        other => {
+            return Err(NativeError::type_error(format!(
+                "{function}(): Argument #1 ($dir_handle) must be of type resource or null, {} given",
+                given(other)
+            )));
+        }
     };
     if !is_open(&handle) {
         return Err(NativeError::type_error(format!(
@@ -214,17 +249,27 @@ fn object_handle(object: Option<&Rc<Object>>, action: &str) -> Result<Rc<Resourc
 }
 
 fn is_open(resource: &Resource) -> bool {
-    resource.data.borrow().as_ref().is_some_and(|dir| dir.is::<Dir>())
+    resource
+        .data
+        .borrow()
+        .as_ref()
+        .is_some_and(|dir| dir.is::<Dir>())
 }
 
-fn object_read(_: &mut dyn Context, object: Option<Rc<Object>>, _: Vec<Value>)
-    -> LocalFuture<'_, NativeResult> {
-    Box::pin(async move { read(&object_handle(object.as_ref(), "read")?).await })
+fn object_read(
+    _: &mut dyn Context,
+    object: Option<Rc<Object>>,
+    _: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move { read(object_handle(object.as_ref(), "read")?.as_ref()).await })
 }
 
-fn object_rewind(_: &mut dyn Context, object: Option<Rc<Object>>, _: Vec<Value>)
-    -> LocalFuture<'_, NativeResult> {
-    Box::pin(async move { rewind(&object_handle(object.as_ref(), "rewind")?).await })
+fn object_rewind(
+    _: &mut dyn Context,
+    object: Option<Rc<Object>>,
+    _: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move { rewind(object_handle(object.as_ref(), "rewind")?.as_ref()).await })
 }
 
 fn object_close(_: &mut dyn Context, object: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
@@ -233,9 +278,13 @@ fn object_close(_: &mut dyn Context, object: Option<&Rc<Object>>, _: &[Value]) -
 }
 
 async fn read(resource: &Resource) -> NativeResult {
-    with_directory(resource, |dir| dir.read().and_then(Result::ok)
-        .map(|entry| entry.file_name().to_bytes().to_vec())
-    ).await.map(|value| value.map_or(Value::Bool(false), Value::from))
+    with_directory(resource, |dir| {
+        dir.read()
+            .and_then(Result::ok)
+            .map(|entry| entry.file_name().to_bytes().to_vec())
+    })
+    .await
+    .map(|value| value.map_or(Value::Bool(false), Value::from))
 }
 
 async fn rewind(resource: &Resource) -> NativeResult {
@@ -244,19 +293,27 @@ async fn rewind(resource: &Resource) -> NativeResult {
 }
 
 async fn with_directory<T: Send + 'static>(
-    resource: &Resource, work: impl FnOnce(&mut Dir) -> T + Send + 'static,
+    resource: &Resource,
+    work: impl FnOnce(&mut Dir) -> T + Send + 'static,
 ) -> Result<T, NativeError> {
-    let mut dir = resource.data.borrow_mut().take().and_then(|data| data.downcast::<Dir>().ok())
+    let mut dir = resource
+        .data
+        .borrow_mut()
+        .take()
+        .and_then(|data| data.downcast::<Dir>().ok())
         .ok_or_else(|| NativeError::error("Directory state is unavailable"))?;
-    let (result, dir) = IoPolicy::Blocking.run(move || (work(&mut dir), dir)).await?;
+    let (result, dir) = IoPolicy::Blocking
+        .run(move || (work(&mut dir), dir))
+        .await?;
     *resource.data.borrow_mut() = Some(dir);
     Ok(result)
 }
 
 fn getcwd(context: &mut dyn Context, _: &[Value]) -> NativeResult {
-    Ok(files(context).cwd.as_deref().map_or(Value::Bool(false), |cwd| {
-        Value::from(bytes(cwd).to_vec())
-    }))
+    Ok(files(context)
+        .cwd
+        .as_deref()
+        .map_or(Value::Bool(false), |cwd| Value::from(bytes(cwd).to_vec())))
 }
 
 fn chdir(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
@@ -277,8 +334,13 @@ fn chdir(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
             files(context).cwd = Some(cwd);
             Ok(Value::Bool(true))
         }
-        Err(error) => warn_false(context, format!(
-            "chdir(): {} (errno {})", reason(&error), error.raw_os_error().unwrap_or(0)
-        )),
+        Err(error) => warn_false(
+            context,
+            format!(
+                "chdir(): {} (errno {})",
+                reason(&error),
+                error.raw_os_error().unwrap_or(0)
+            ),
+        ),
     }
 }

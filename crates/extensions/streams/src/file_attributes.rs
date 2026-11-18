@@ -6,8 +6,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use phera_extension_api::{
-    Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, Registry,
-    Value, args,
+    Context, FunctionEntry, LocalFuture, NativeResult, Param, ParamType, Registry, Value, args,
 };
 use rustix::fs::{AtFlags, CWD, Timestamps, UTIME_NOW, chownat, utimensat};
 use rustix::process::{Gid, Uid};
@@ -46,8 +45,11 @@ fn chmod(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
         let mode = args::int(&arguments, 1).unwrap_or(0) as u32;
         let resolved = local(context, "chmod", name);
         let result = match resolved {
-            Ok(path) => IoPolicy::Blocking
-                .run(move || fs::set_permissions(path, Permissions::from_mode(mode))).await?,
+            Ok(path) => {
+                IoPolicy::Blocking
+                    .run(move || fs::set_permissions(path, Permissions::from_mode(mode)))
+                    .await?
+            }
             Err(error) => Err(error),
         };
         result_value(context, "chmod", result)
@@ -55,16 +57,40 @@ fn chmod(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
 }
 
 fn chown(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(change_owner(context, arguments, "chown", Owner::User, AtFlags::empty()))
+    Box::pin(change_owner(
+        context,
+        arguments,
+        "chown",
+        Owner::User,
+        AtFlags::empty(),
+    ))
 }
 fn lchown(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(change_owner(context, arguments, "lchown", Owner::User, AtFlags::SYMLINK_NOFOLLOW))
+    Box::pin(change_owner(
+        context,
+        arguments,
+        "lchown",
+        Owner::User,
+        AtFlags::SYMLINK_NOFOLLOW,
+    ))
 }
 fn chgrp(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(change_owner(context, arguments, "chgrp", Owner::Group, AtFlags::empty()))
+    Box::pin(change_owner(
+        context,
+        arguments,
+        "chgrp",
+        Owner::Group,
+        AtFlags::empty(),
+    ))
 }
 fn lchgrp(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(change_owner(context, arguments, "lchgrp", Owner::Group, AtFlags::SYMLINK_NOFOLLOW))
+    Box::pin(change_owner(
+        context,
+        arguments,
+        "lchgrp",
+        Owner::Group,
+        AtFlags::SYMLINK_NOFOLLOW,
+    ))
 }
 
 #[derive(Clone, Copy)]
@@ -76,8 +102,14 @@ enum Owner {
 impl Owner {
     fn id(self, name: &str) -> Option<u32> {
         match self {
-            Self::User => nix::unistd::User::from_name(name).ok().flatten().map(|user| user.uid.as_raw()),
-            Self::Group => nix::unistd::Group::from_name(name).ok().flatten().map(|group| group.gid.as_raw()),
+            Self::User => nix::unistd::User::from_name(name)
+                .ok()
+                .flatten()
+                .map(|user| user.uid.as_raw()),
+            Self::Group => nix::unistd::Group::from_name(name)
+                .ok()
+                .flatten()
+                .map(|group| group.gid.as_raw()),
         }
     }
 
@@ -90,7 +122,11 @@ impl Owner {
 }
 
 async fn change_owner(
-    context: &mut dyn Context, arguments: Vec<Value>, function: &str, owner: Owner, flags: AtFlags,
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+    function: &str,
+    owner: Owner,
+    flags: AtFlags,
 ) -> NativeResult {
     let name = args::bytes(&arguments, 0);
     check_path(function, "#1 ($filename)", name)?;
@@ -100,25 +136,33 @@ async fn change_owner(
         let username = String::from_utf8_lossy(args::bytes(&arguments, 1)).into_owned();
         let lookup = username.clone();
         let Some(id) = IoPolicy::Blocking.run(move || owner.id(&lookup)).await? else {
-            return warn_false(context, format!(
-                "{function}(): Unable to find {} for {username}", owner.kind()
-            ));
+            return warn_false(
+                context,
+                format!(
+                    "{function}(): Unable to find {} for {username}",
+                    owner.kind()
+                ),
+            );
         };
         id
     };
     let path = local(context, function, name);
     let result = match path {
-        Ok(path) => IoPolicy::Blocking.run(move || {
-            let (user, group) = if id == u32::MAX {
-                (None, None)
-            } else {
-                match owner {
-                    Owner::User => (Some(Uid::from_raw(id)), None),
-                    Owner::Group => (None, Some(Gid::from_raw(id))),
-                }
-            };
-            chownat(CWD, path, user, group, flags).map_err(Into::into)
-        }).await?,
+        Ok(path) => {
+            IoPolicy::Blocking
+                .run(move || {
+                    let (user, group) = if id == u32::MAX {
+                        (None, None)
+                    } else {
+                        match owner {
+                            Owner::User => (Some(Uid::from_raw(id)), None),
+                            Owner::Group => (None, Some(Gid::from_raw(id))),
+                        }
+                    };
+                    chownat(CWD, path, user, group, flags).map_err(Into::into)
+                })
+                .await?
+        }
         Err(error) => Err(error),
     };
     result_value(context, function, result)
@@ -133,30 +177,47 @@ fn touch(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
         let mask = files(context).mask;
         let result = local(context, "touch", name);
         let result = match result {
-            Ok(path) => IoPolicy::Blocking.run(move || touch_path(&path, mask, mtime, atime)).await?,
+            Ok(path) => {
+                IoPolicy::Blocking
+                    .run(move || touch_path(&path, mask, mtime, atime))
+                    .await?
+            }
             Err(error) => Err((error, "Unable to create file")),
         };
         match result {
             Ok(()) => Ok(Value::Bool(true)),
-            Err((error, task)) => warn_false(context, format!(
-                "touch(): {task} {} because {}", String::from_utf8_lossy(name), reason(&error)
-            )),
+            Err((error, task)) => warn_false(
+                context,
+                format!(
+                    "touch(): {task} {} because {}",
+                    String::from_utf8_lossy(name),
+                    reason(&error)
+                ),
+            ),
         }
     })
 }
 
-fn touch_path(path: &Path, mask: u32, mtime: Option<i64>, atime: Option<i64>)
-    -> Result<(), (io::Error, &'static str)>
-{
+fn touch_path(
+    path: &Path,
+    mask: u32,
+    mtime: Option<i64>,
+    atime: Option<i64>,
+) -> Result<(), (io::Error, &'static str)> {
     if !path.exists() {
-        let mode = Mode::parse(b"c").ok_or_else(|| (io::ErrorKind::InvalidInput.into(), "Unable to create file"))?;
-        mode.open(path, mask).map_err(|error| (error, "Unable to create file"))?;
+        let mode = Mode::parse(b"c")
+            .ok_or_else(|| (io::ErrorKind::InvalidInput.into(), "Unable to create file"))?;
+        mode.open(path, mask)
+            .map_err(|error| (error, "Unable to create file"))?;
     }
     let stamp = |time: Option<i64>| rustix::time::Timespec {
         tv_sec: time.unwrap_or(0),
         tv_nsec: if time.is_some() { 0 } else { UTIME_NOW },
     };
-    let times = Timestamps { last_access: stamp(atime), last_modification: stamp(mtime) };
+    let times = Timestamps {
+        last_access: stamp(atime),
+        last_modification: stamp(mtime),
+    };
     utimensat(CWD, path, &times, AtFlags::empty())
         .map_err(|error| (error.into(), "Unable to set time on file"))
 }

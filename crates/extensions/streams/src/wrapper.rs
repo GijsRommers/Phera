@@ -128,11 +128,10 @@ async fn open_file(
             String::from_utf8_lossy(mode)
         )));
     };
-    let script = context.script_path();
+    let include = include_path.then(|| (context.include_path(), context.script_path()));
     let request = files(context);
-    let found = include_path
-        .then(|| request.search(filename, script.as_deref()))
-        .flatten();
+    let found =
+        include.and_then(|(include, script)| request.search(filename, &include, script.as_deref()));
     let filename = match found.map_or_else(|| request.resolve(path(filename)), Ok) {
         Ok(filename) => filename,
         Err(error) => return Ok(Err(reason(&error))),

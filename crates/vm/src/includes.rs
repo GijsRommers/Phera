@@ -61,12 +61,12 @@ impl Vm {
         if matches!(kind, IncludeKind::Require | IncludeKind::RequireOnce) {
             return Err(NativeError::error(format!(
                 "Failed opening required '{name}' (include_path='{}')",
-                self.include_path()
+                self.include_path().to_string_lossy()
             )));
         }
         self.warn(format!(
             "{construct}(): Failed opening '{name}' for inclusion (include_path='{}')",
-            self.include_path()
+            self.include_path().to_string_lossy()
         ));
         self.set(destination, Value::Bool(false));
         Ok(())
@@ -87,7 +87,8 @@ impl Vm {
         if path.is_absolute() || name.starts_with("./") || name.starts_with("../") {
             candidates.push(path.to_path_buf());
         } else {
-            candidates.extend(std::env::split_paths(self.include_path()).map(|directory| {
+            let include_path = include_path_os(self.include_path().as_bytes());
+            candidates.extend(std::env::split_paths(&include_path).map(|directory| {
                 if directory == Path::new(".") {
                     path.to_path_buf()
                 } else {
@@ -159,4 +160,15 @@ impl Vm {
         }
         Ok(())
     }
+}
+
+#[cfg(unix)]
+fn include_path_os(bytes: &[u8]) -> std::ffi::OsString {
+    use std::os::unix::ffi::OsStrExt;
+    std::ffi::OsStr::from_bytes(bytes).to_owned()
+}
+
+#[cfg(not(unix))]
+fn include_path_os(bytes: &[u8]) -> std::ffi::OsString {
+    String::from_utf8_lossy(bytes).into_owned().into()
 }

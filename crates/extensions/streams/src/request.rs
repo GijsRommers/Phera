@@ -13,7 +13,6 @@ use phera_extension_api::{Context, RequestState, Value, value::Resource};
 pub struct Files {
     pub cwd: Option<PathBuf>,
     pub mask: u32,
-    pub include_path: Vec<u8>,
     pub directory: Option<Rc<Resource>>,
     pub input: Arc<[u8]>,
     next_id: i64,
@@ -24,7 +23,6 @@ impl Default for Files {
         Self {
             cwd: env::current_dir().ok(),
             mask: 0o022,
-            include_path: b".".to_vec(),
             directory: None,
             input: Arc::default(),
             next_id: 4,
@@ -76,7 +74,12 @@ impl Files {
         Ok(cwd.join(name))
     }
 
-    pub fn search(&self, filename: &[u8], script: Option<&Path>) -> Option<PathBuf> {
+    pub fn search(
+        &self,
+        filename: &[u8],
+        include: &phera_extension_api::PhpString,
+        script: Option<&Path>,
+    ) -> Option<PathBuf> {
         let name = path(filename);
         if filename.is_empty() {
             return None;
@@ -84,7 +87,7 @@ impl Files {
         if name.is_absolute() || filename.starts_with(b"./") || filename.starts_with(b"../") {
             return self.resolve(name).ok()?.canonicalize().ok();
         }
-        for component in self.include_path.split(|byte| *byte == b':') {
+        for component in include.as_bytes().split(|byte| *byte == b':') {
             let candidate = self.resolve(&path(component).join(name)).ok()?;
             if let Ok(found) = candidate.canonicalize() {
                 return Some(found);

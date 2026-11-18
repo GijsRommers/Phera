@@ -6,8 +6,7 @@ use std::os::unix::fs::{DirBuilderExt, PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 
 use phera_extension_api::{
-    Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, Registry,
-    Value, args,
+    Context, FunctionEntry, LocalFuture, NativeResult, Param, ParamType, Registry, Value, args,
 };
 
 use crate::context_options::{OPTIONAL_CONTEXT, validate};
@@ -27,8 +26,10 @@ pub fn register(registry: &mut Registry) {
         Param::new("link", ParamType::String),
     ];
     const MKDIR: &[Param] = &[
-        DIRECTORY, PERMISSIONS.optional(),
-        Param::new("recursive", ParamType::Bool).optional(), OPTIONAL_CONTEXT,
+        DIRECTORY,
+        PERMISSIONS.optional(),
+        Param::new("recursive", ParamType::Bool).optional(),
+        OPTIONAL_CONTEXT,
     ];
     const UMASK: &[Param] = &[Param::new("mask", ParamType::Int).optional().nullable()];
     for entry in [
@@ -54,8 +55,11 @@ fn mkdir(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
         let mask = files(context).mask;
         let result = local(context, "mkdir", name).map(|name| (name, permissions & !mask));
         let result = match result {
-            Ok((name, mode)) => IoPolicy::Blocking
-                .run(move || create_directory(&name, mode, recursive)).await?,
+            Ok((name, mode)) => {
+                IoPolicy::Blocking
+                    .run(move || create_directory(&name, mode, recursive))
+                    .await?
+            }
             Err(error) => Err(error),
         };
         if let Err(error) = result {
@@ -97,19 +101,35 @@ fn create_directory(name: &Path, mode: u32, recursive: bool) -> io::Result<()> {
 }
 
 fn unlink(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(remove(context, arguments, "unlink", fs::remove_file::<PathBuf>))
+    Box::pin(remove(
+        context,
+        arguments,
+        "unlink",
+        fs::remove_file::<PathBuf>,
+    ))
 }
 
 fn rmdir(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(remove(context, arguments, "rmdir", fs::remove_dir::<PathBuf>))
+    Box::pin(remove(
+        context,
+        arguments,
+        "rmdir",
+        fs::remove_dir::<PathBuf>,
+    ))
 }
 
 async fn remove(
-    context: &mut dyn Context, arguments: Vec<Value>, function: &str,
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+    function: &str,
     operation: fn(PathBuf) -> io::Result<()>,
 ) -> NativeResult {
     let name = args::bytes(&arguments, 0);
-    let parameter = if function == "unlink" { "#1 ($filename)" } else { "#1 ($directory)" };
+    let parameter = if function == "unlink" {
+        "#1 ($filename)"
+    } else {
+        "#1 ($directory)"
+    };
     check_path(function, parameter, name)?;
     validate(args::value(&arguments, 1), function, 2)?;
     let result = match local(context, function, name) {
@@ -125,13 +145,17 @@ async fn remove(
                 } else {
                     "PHP"
                 };
-                return warn_false(context, format!("{function}(): {wrapper} does not allow unlinking"));
+                return warn_false(
+                    context,
+                    format!("{function}(): {wrapper} does not allow unlinking"),
+                );
             }
             Ok(Value::Bool(false))
         }
-        Err(error) => warn_false(context, format!(
-            "{}: {}", path_call(function, name), reason(&error)
-        )),
+        Err(error) => warn_false(
+            context,
+            format!("{}: {}", path_call(function, name), reason(&error)),
+        ),
     }
 }
 
@@ -174,7 +198,10 @@ enum Link {
 }
 
 async fn link(
-    context: &mut dyn Context, arguments: Vec<Value>, function: &str, link: Link,
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+    function: &str,
+    link: Link,
 ) -> NativeResult {
     let name = args::bytes(&arguments, 0);
     let destination = args::bytes(&arguments, 1);
@@ -189,10 +216,14 @@ async fn link(
         local(context, function, destination).map(|destination| (name, destination))
     });
     let result = match result {
-        Ok((name, destination)) => IoPolicy::Blocking.run(move || match link {
-            Link::Hard => fs::hard_link(name, destination),
-            Link::Symbolic => symlink(name, destination),
-        }).await?,
+        Ok((name, destination)) => {
+            IoPolicy::Blocking
+                .run(move || match link {
+                    Link::Hard => fs::hard_link(name, destination),
+                    Link::Symbolic => symlink(name, destination),
+                })
+                .await?
+        }
         Err(error) => Err(error),
     };
     match result {
