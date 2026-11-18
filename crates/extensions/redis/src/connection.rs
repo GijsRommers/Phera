@@ -70,7 +70,7 @@ impl Session {
                 .ok_or_else(|| exception("Redis server went away"))?;
             let lease = crate::pool::acquire(endpoint)
                 .await
-                .map_err(|e| exception(e.to_string()))?;
+                .map_err(|e| exception(system_message(&e)))?;
             let auth = self.auth.borrow().clone();
             let read_timeout = self.options.borrow().read_timeout;
             if !matches!(auth, Value::Null) {
@@ -88,7 +88,7 @@ impl Session {
                 let reply = lease
                     .query(command, read_timeout)
                     .await
-                    .map_err(|e| exception(e.to_string()))?;
+                    .map_err(|e| exception(system_message(&e)))?;
                 if let redis::Value::ServerError(error) = reply {
                     return Err(exception(format!(
                         "{} {}",
@@ -103,7 +103,7 @@ impl Session {
                 let reply = lease
                     .query(command, read_timeout)
                     .await
-                    .map_err(|e| exception(e.to_string()))?;
+                    .map_err(|e| exception(system_message(&e)))?;
                 if let redis::Value::ServerError(error) = reply {
                     return Err(exception(format!(
                         "{} {}",
@@ -172,7 +172,7 @@ pub async fn connect(name: &str, session: &Session, arguments: &[Value]) -> Nati
     session.lease.borrow_mut().take();
     let lease = crate::pool::acquire(endpoint.clone())
         .await
-        .map_err(|e| exception(e.to_string()))?;
+        .map_err(|e| exception(system_message(&e)))?;
     *session.endpoint.borrow_mut() = Some(endpoint);
     *session.lease.borrow_mut() = Some(lease);
     session.enabled.set(true);
@@ -256,4 +256,14 @@ pub fn throws(message: &str) -> bool {
     ]
     .iter()
     .any(|prefix| message.starts_with(prefix))
+}
+
+/// An error's text as PHP shows it: Rust adds " (os error 61)" to a message
+/// from the operating system, phpredis prints "Connection refused" alone.
+fn system_message(error: &impl std::fmt::Display) -> String {
+    let message = error.to_string();
+    match message.rfind(" (os error ") {
+        Some(start) if message.ends_with(')') => message[..start].to_owned(),
+        _ => message,
+    }
 }
