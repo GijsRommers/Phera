@@ -126,7 +126,7 @@ impl Vm {
                 self.out(error.as_bytes());
                 self.status = 255;
                 return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
-                    (),
+                    crate::request_end::FatalStop,
                 ))));
             }
             if result.is_ok() {
@@ -161,7 +161,7 @@ impl Vm {
                     self.out(text.as_bytes());
                     self.status = 255;
                     return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
-                        (),
+                        crate::request_end::FatalStop,
                     ))));
                 }
                 let main = self.code.load(unit);
