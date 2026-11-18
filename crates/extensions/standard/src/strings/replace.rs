@@ -43,6 +43,7 @@ fn str_replace(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<
             CaseSensitivity::Sensitive,
         )
         .await
+        .map_err(|error| context.native_call_error("str_replace", &arguments, error))
     })
 }
 
@@ -72,6 +73,7 @@ fn str_ireplace(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture
             CaseSensitivity::Insensitive,
         )
         .await
+        .map_err(|error| context.native_call_error("str_ireplace", &arguments, error))
     })
 }
 

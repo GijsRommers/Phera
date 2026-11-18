@@ -2,7 +2,7 @@
 
 use phera_extension_api::{
     CompileDiagnostic, CompileDiagnosticKind, CompileDiagnosticSite, Context, LocalFuture,
-    NativeResult, RequestState,
+    NativeError, NativeResult, RequestState,
 };
 use phera_value::{Diagnostics, Value};
 
@@ -29,6 +29,18 @@ impl Context for Vm {
 
     fn diagnostics(&mut self) -> &mut dyn Diagnostics {
         self
+    }
+
+    fn native_call_error(
+        &mut self,
+        name: &str,
+        arguments: &[Value],
+        error: NativeError,
+    ) -> NativeError {
+        if matches!(error, NativeError::Throw { .. }) {
+            self.failed_native = Some(crate::error_traces::NativeTrace::new(name, arguments));
+        }
+        error
     }
 
     fn stringify<'a>(

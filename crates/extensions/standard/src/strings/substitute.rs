@@ -51,7 +51,11 @@ fn substr_replace(
     context: &mut dyn Context,
     arguments: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
-    Box::pin(async move { replace_substrings(context, &arguments).await })
+    Box::pin(async move {
+        replace_substrings(context, &arguments)
+            .await
+            .map_err(|error| context.native_call_error("substr_replace", &arguments, error))
+    })
 }
 
 async fn replace_substrings(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
@@ -177,10 +181,15 @@ const STRTR_BYTES: &[Param] = &[
 ];
 
 fn strtr(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(translate(context, arguments))
+    Box::pin(async move {
+        translate(context, &arguments)
+            .await
+            .map_err(|error| context.native_call_error("strtr", &arguments, error))
+    })
 }
 
-async fn translate(context: &mut dyn Context, mut prepared: Vec<Value>) -> NativeResult {
+async fn translate(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let mut prepared = arguments.to_vec();
     let params = if prepared.len() == 2 {
         STRTR_PAIRS
     } else {

@@ -37,6 +37,17 @@ pub trait Context {
     /// turns off scalar coercion of arguments.
     fn strict_types(&self) -> bool;
 
+    /// Attach the caller-visible function frame to an error raised by an
+    /// async native handler itself. A PHP callback already owns its trace.
+    fn native_call_error(
+        &mut self,
+        _name: &str,
+        _arguments: &[Value],
+        error: NativeError,
+    ) -> NativeError {
+        error
+    }
+
     /// Calls a PHP callable (a closure, a function name, `[$object, 'method']`)
     /// and waits for its result.
     ///

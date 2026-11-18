@@ -262,7 +262,11 @@ const ARRAY_UNIQUE: FunctionEntry = FunctionEntry::asynchronous(
 );
 
 fn array_unique(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(async move { unique(context, &arguments).await })
+    Box::pin(async move {
+        unique(context, &arguments)
+            .await
+            .map_err(|error| context.native_call_error("array_unique", &arguments, error))
+    })
 }
 
 async fn unique(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
