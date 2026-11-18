@@ -292,7 +292,7 @@ PHERA_BIN="$PWD/target/release/phera" cargo test --release -p phera-ext-date
 
 The audit executed all 705 upstream FILE sections locally. The PHP 8.5.12
 harness passed 693 and skipped 12. The Phera audit matched the upstream
-EXPECT, EXPECTF or EXPECTREGEX output for 422 tests. Another 204 were blocked
+EXPECT, EXPECTF or EXPECTREGEX output for 426 tests. Another 200 were blocked
 by identified engine or runtime gaps, 67 exercised excluded deprecated
 surfaces, and 12 were skipped by the reference harness. The Phera CLI has no
 INI flag, so the audit translated valid `date.timezone` settings into explicit

@@ -6,7 +6,7 @@ use phera_extension_api::{
     Value,
 };
 
-use super::interval::{FIELDS, Interval, fraction_micros, optional_integer};
+use super::interval::{FIELDS, Interval, optional_integer};
 
 pub(super) const ACCESS: NativePropertyAccess = NativePropertyAccess { read, mutate };
 
@@ -95,7 +95,8 @@ fn mutate(
         }
         Field::Fraction => {
             let value = to_float(value, context.diagnostics())?;
-            interval.relative.delta[6] = fraction_micros(value);
+            interval.relative.delta[6] =
+                to_int(&Value::Float(value * 1_000_000.0), context.diagnostics())?;
         }
         Field::Invert => interval.invert = i64::from(to_int(value, context.diagnostics())? as i32),
         Field::Days => return Ok(false), // PHP stores an unrelated dynamic property on write.

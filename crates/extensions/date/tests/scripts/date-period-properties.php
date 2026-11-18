@@ -30,7 +30,12 @@ $period = new DatePeriod($start, $interval, 3);
 inspect_period_properties($period);
 inspect_period_properties(new DatePeriod($start, $interval, new DateTime('2024-01-03 UTC'), 3));
 class UninitializedPeriod extends DatePeriod { public function __construct() {} }
-inspect_period_properties(new UninitializedPeriod());
+$uninitialized = new UninitializedPeriod();
+inspect_period_properties($uninitialized);
+echo json_encode([
+    $uninitialized->recurrences ?? 'missing', empty($uninitialized->recurrences),
+    $uninitialized->include_start_date ?? 'missing',
+]), "\n";
 $first = $period->start;
 $first->modify('+10 days');
 echo $period->start->format('Y-m-d\TH:i:s.uP e I'), "\n";

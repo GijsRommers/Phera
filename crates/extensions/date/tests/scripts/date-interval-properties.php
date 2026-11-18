@@ -43,3 +43,8 @@ $shadow = new ShadowedInterval('P3D');
 echo $shadow->d, "\n";
 $shadow->d = 7;
 echo $shadow->d, "\n";
+$interval = new DateInterval('P1D');
+foreach ([1.0e100, INF, NAN, PHP_INT_MAX, PHP_INT_MIN, -1] as $value) {
+    $interval->f = $value;
+    echo json_encode([$interval->f, isset($interval->f)]), "\n";
+}

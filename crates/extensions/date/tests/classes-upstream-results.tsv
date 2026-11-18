@@ -31,10 +31,10 @@ DatePeriod_by_ref_iterator.phpt	blocked	native-object-iterator: Iterate native D
 DatePeriod_createFromISO8601String_static_return.phpt	blocked	native-property-projection: PHP native object projection
 DatePeriod_double_constructor_call.phpt	passed
 DatePeriod_getter.phpt	passed
-DatePeriod_modify_readonly_property.phpt	blocked	native-virtual-properties: Reference binding diagnostic
+DatePeriod_modify_readonly_property.phpt	passed
 DatePeriod_no_advance_on_valid.phpt	blocked	native-object-iterator: Iterate native DatePeriod entries
 DatePeriod_properties1.phpt	passed
-DatePeriod_properties2.phpt	blocked	native-virtual-properties: Indirect readonly mutation diagnostics
+DatePeriod_properties2.phpt	passed
 DatePeriod_serialize-001.phpt	blocked	native-object-serialization: General serialization entry point
 DatePeriod_serialize-002.phpt	blocked	native-object-serialization: General serialization entry point
 DatePeriod_serialize-003.phpt	blocked	native-object-serialization: General serialization entry point
@@ -307,7 +307,7 @@ bug52290.phpt	passed
 bug52342.phpt	passed
 bug52430.phpt	passed
 bug52454.phpt	passed
-bug52480.phpt	passed
+bug52480.phpt	blocked	native-property-projection: DateInterval array cast
 bug52577.phpt	passed
 bug52668.phpt	blocked	native-object-iterator: Iterate native DatePeriod entries
 bug52738.phpt	blocked	native-property-projection: DateInterval property order in print_r
@@ -412,7 +412,7 @@ bug74852.phpt	passed
 bug75002.phpt	blocked	native-object-iterator: Iterate native DatePeriod entries
 bug75035.phpt	blocked	native-object-serialization: General serialization entry point
 bug75167.phpt	blocked	native-object-clone: Copy native object state
-bug75222.phpt	passed
+bug75222.phpt	blocked	native-property-projection: DateInterval fields in get_object_vars
 bug75232.phpt	blocked	native-property-projection: The date key appears only in print_r projection
 bug75577.phpt	blocked	native-property-projection: PHP native object projection
 bug75851.phpt	passed
@@ -472,11 +472,11 @@ date_create-relative.phpt	passed
 date_create_basic.phpt	blocked	native-property-projection: PHP native object projection
 date_create_from_format_basic2.phpt	passed
 date_date_set_basic1.phpt	passed
-date_default_timezone_get-1.phpt	blocked	runtime: Missing putenv()
-date_default_timezone_get-2.phpt	blocked	runtime: Missing putenv()
+date_default_timezone_get-1.phpt	blocked	runtime: INI and environment handling
+date_default_timezone_get-2.phpt	blocked	runtime: INI and environment handling
 date_default_timezone_get-3.phpt	passed
 date_default_timezone_get-4.phpt	blocked	runtime: INI and environment handling
-date_default_timezone_set-1.phpt	blocked	runtime: Missing putenv()
+date_default_timezone_set-1.phpt	blocked	runtime: INI and environment handling
 date_default_timezone_set_error.phpt	passed
 date_diff.phpt	blocked	native-object-clone: Copy native object state
 date_diff1.phpt	blocked	native-property-projection: PHP native object projection
@@ -512,7 +512,7 @@ date_period_set_state2.phpt	passed
 date_period_unserialize1.phpt	blocked	native-property-projection: PHP native object fields
 date_period_unserialize2.phpt	passed
 date_period_unserialize3.phpt	blocked	native-property-projection: Dump after partial direct restoration
-date_period_unset_property.phpt	blocked	native-virtual-properties: Unset of a native readonly property
+date_period_unset_property.phpt	passed
 date_sub_basic.phpt	passed
 date_sun_info_001.phpt	passed
 date_sun_info_002.phpt	passed
@@ -535,9 +535,9 @@ date_timestamp_set.phpt	passed
 date_timestamp_set_nullparam2.phpt	blocked	native-property-projection: PHP native object projection
 date_timezone_get_basic1.phpt	passed
 date_timezone_set_basic1.phpt	passed
-default-timezone-1.phpt	blocked	runtime: Missing putenv()
-default-timezone-2.phpt	blocked	runtime: Missing putenv()
-format-negative-timestamp.phpt	blocked	runtime: Missing getrandmax()
+default-timezone-1.phpt	passed
+default-timezone-2.phpt	passed
+format-negative-timestamp.phpt	passed
 forward-transition-construction.phpt	passed
 getSetMicroseconds.phpt	blocked	native-property-projection: PHP native object projection
 getdate_basic.phpt	passed

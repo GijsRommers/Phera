@@ -69,7 +69,7 @@ fn read(
         return Ok(Some(Value::Null));
     }
     let period = Period::read(object).unwrap_or_default();
-    if matches!(mode, NativePropertyRead::Quiet) && !period.initialized {
+    if matches!(mode, NativePropertyRead::Isset) && !period.initialized {
         return Ok(Some(Value::Null));
     }
     field.value(context, &period).map(Some)
