@@ -44,7 +44,7 @@ impl Parser<'_> {
             return Ok(statement);
         }
 
-        if self.at(TokenKind::Use) {
+        if self.at(TokenKind::Use) && !self.at2(TokenKind::Colon) {
             return self.parse_use_statement();
         }
 
@@ -62,6 +62,14 @@ impl Parser<'_> {
 
     fn parse_statement_inner(&mut self, top: bool) -> Result<Statement, ParseError> {
         let start = self.peek_span();
+
+        if self.at2(TokenKind::Colon) && crate::parser::is_word_token(self.kind()) {
+            let kind = self.parse_label(top)?;
+            return Ok(Statement {
+                kind,
+                span: self.span_since(start),
+            });
+        }
 
         let kind = match self.kind() {
             TokenKind::LeftBrace => {
@@ -191,34 +199,6 @@ impl Parser<'_> {
                 }
             }
             TokenKind::HaltCompiler => return self.parse_halt_compiler(),
-            TokenKind::Default => {
-                let expectation = if top { ", expecting end of file" } else { "" };
-                return Err(self.error(format!(
-                    "syntax error, unexpected token \"default\"{expectation}"
-                )));
-            }
-            TokenKind::Exit
-            | TokenKind::MagicLine
-            | TokenKind::MagicFile
-            | TokenKind::MagicDir
-            | TokenKind::MagicClass
-            | TokenKind::MagicFunction
-            | TokenKind::MagicMethod
-            | TokenKind::MagicNamespace
-            | TokenKind::MagicTrait
-            | TokenKind::MagicProperty
-                if self.at2(TokenKind::Colon) =>
-            {
-                let colon = self.second_span();
-                return Err(self.error_at(colon, "syntax error, unexpected token \":\""));
-            }
-            TokenKind::Identifier | TokenKind::True | TokenKind::False | TokenKind::Null
-                if self.at2(TokenKind::Colon) =>
-            {
-                let name = self.parse_strict_identifier()?;
-                self.bump()?; // `:`
-                StatementKind::Label(name)
-            }
             TokenKind::Function
                 if matches!(self.kind2(), TokenKind::LeftParen)
                     || (self.at2(TokenKind::Ampersand) && self.kind3() == TokenKind::LeftParen) =>

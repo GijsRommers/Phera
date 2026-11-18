@@ -116,8 +116,13 @@ impl Compiler<'_> {
         }) {
             return Err(self.error("jump out of a finally block is disallowed", line));
         }
+        let leaves_target = is_break
+            || matches!(
+                self.loops[at].cleanup,
+                Some(super::exits::LoopCleanup::Switch(_))
+            );
         let retained = super::exits::ExitDepth {
-            loops: if is_break { at } else { at + 1 },
+            loops: if leaves_target { at } else { at + 1 },
             finalies: self
                 .finalies
                 .partition_point(|scope| scope.loop_depth <= at),
@@ -232,7 +237,10 @@ impl Compiler<'_> {
             self.emit(Instruction::CheckReturn { source }, line);
         }
         self.emit_control_exits(
-            super::exits::ExitDepth::default(),
+            super::exits::ExitDepth {
+                loops: self.loops.len(),
+                finalies: 0,
+            },
             phera_bytecode::FinallyEntry::Return,
             line,
             |_, _| {},

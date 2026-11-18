@@ -1,5 +1,5 @@
 //! A nonlocal exit unwinds lexical scopes from the inside out.
-//! In `try { foreach ($items as $item) { break 2; } } finally { ... }`
+//! In `try { foreach ($items as $item) { goto done; } } finally { cleanup(); } done:`
 //! the iterator is released before the finally outside that foreach is called.
 
 use std::ops::Range;
