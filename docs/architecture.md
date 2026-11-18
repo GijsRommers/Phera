@@ -182,38 +182,48 @@ HTTP/1.1 to a container. So the work that matters most is being a good
 upstream, not being an edge server.
 
 Today (2026-11-18) the server speaks HTTP/1.1 with keep-alive, runs one
-worker per core, serves static files and a front controller, reads `.env`
-files and shuts down gracefully. What production needs, in the order it
-will be built:
+worker per core, serves a front controller, reads `.env` files and shuts
+down gracefully. Static files are answered, but read whole into memory and
+without caching headers. What production needs, in the order it will be
+built:
 
 1. **Limits and timeouts** (5.1). A proxy does not protect a worker from a
    script that never ends or a body that is too large.
-2. **Knowing the proxy.** A list of trusted proxies decides when
+2. **Static files, properly.** Sent from disk in chunks, never held whole in
+   memory; `ETag` and `Last-Modified` with 304 answers; `Range` (206) for
+   video and resumed downloads; `HEAD`; a precompressed sibling
+   (`app.js.br`, `.zst`, `.gz`) when the client accepts it; a
+   `Cache-Control` rule per path. PHP source, dot files and anything outside
+   the document root are never served.
+3. **Knowing the proxy.** A list of trusted proxies decides when
    `X-Forwarded-For`, `X-Forwarded-Proto`, `X-Forwarded-Host` and
    `Forwarded` set `REMOTE_ADDR`, `HTTPS`, `SERVER_PORT` and `HTTP_HOST`.
    Without the list those headers are ignored, since any client can send
    them.
-3. **Being a good container.** Listening on the address and port the
+4. **HTTP/2 on the same port**, without TLS ("h2c"), for proxies that speak
+   HTTP/2 to their upstreams: many requests share one connection. The
+   server answers HTTP/1.1 and HTTP/2 on one listener; a script sees no
+   difference except `SERVER_PROTOCOL`.
+5. **Being a good container.** Listening on the address and port the
    platform gives (`PORT`), a health endpoint that tells "started" from
    "ready", finishing in-flight requests on `SIGTERM` within the platform's
    grace period, logs as lines on standard output, and no need to write
    anywhere but a temporary directory.
-4. **Boot once.** Snapshot and fork (section 5, phase 2) is Phera's answer
+6. **Boot once.** Snapshot and fork (section 5, phase 2) is Phera's answer
    to FrankenPHP's worker mode and Laravel Octane: the framework boots once
    per worker and every request starts from that state. Because a request
    works on a fork, it cannot leak state into the next one, which is the
    known risk of those worker modes.
-5. **Finishing early.** `fastcgi_finish_request()` (send the response, keep
+7. **Finishing early.** `fastcgi_finish_request()` (send the response, keep
    working), which Symfony calls when it exists, and Early Hints (103),
    which the proxy passes on.
-6. **Static files and compression.** `ETag`, `Last-Modified`, `Range` and
-   precompressed files; gzip, zstd and brotli for PHP's responses where the
-   proxy does not compress.
-7. **Operations.** A `phera.toml`, an access log, metrics, reloading code
+8. **Compression** of PHP's responses (gzip, zstd, brotli) where the proxy
+   does not compress.
+9. **Operations.** A `phera.toml`, an access log, metrics, reloading code
    and configuration without dropping connections.
-8. **HTTPS by itself**, for the machine with no proxy in front: TLS through
-   `rustls`, certificates from files or from Let's Encrypt, HTTP/2. Last,
-   because the usual deployment does not need it.
+10. **HTTPS by itself**, for the machine with no proxy in front: TLS through
+    `rustls`, certificates from files or from Let's Encrypt, and HTTP/2 to
+    browsers. Last, because the usual deployment does not need it.
 
 `php_sapi_name()` answers `phera` under `serve`, as FrankenPHP answers
 `frankenphp` and FPM `fpm-fcgi`; code that asks "is this the command line?"
