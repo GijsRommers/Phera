@@ -12,14 +12,20 @@ impl Vm {
         iterator: IterId,
         path: PathId,
         subject: Reg,
-    ) -> Result<(), NativeError> {
+    ) -> Result<bool, NativeError> {
         let place = self.path(path)?;
         let value = self.read_place(&place, crate::access_mode::Missing::Warn)?;
+        if let phera_value::Value::Object(ref object) = value
+            && object.class.is_traversable()
+        {
+            self.set(subject, value);
+            return Ok(false);
+        }
         drop(value);
         let reference = self.reference(&place)?;
         self.set(subject, reference);
         self.iter_start_reference(iterator, crate::AccessPath::local(subject))?;
-        Ok(())
+        Ok(true)
     }
 
     /// Implements PHP IterEnd semantics outside the dispatch loop.

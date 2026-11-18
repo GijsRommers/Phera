@@ -1,12 +1,13 @@
 //! `DatePeriod::INCLUDE_END_DATE` includes an end instant on the interval boundary.
 
 use phera_extension_api::{ClassEntry, ConstantValue, MethodEntry, Param, ParamType};
-use phera_extension_api::{PropertyEntry, Registry, Visibility};
+use phera_extension_api::{PropertyEntry, PropertyType, Registry, Visibility};
 
-use super::{period, period_properties, period_serialization as serialization};
+use super::{period, period_serialization as serialization};
 
 pub fn register(registry: &mut Registry) {
     registry.class(ClassEntry {
+        interfaces: &["IteratorAggregate"],
         constants: &[
             (
                 "EXCLUDE_START_DATE",
@@ -15,20 +16,20 @@ pub fn register(registry: &mut Registry) {
             ("INCLUDE_END_DATE", ConstantValue::Int(period::INCLUDE_END)),
         ],
         properties: PROPERTIES,
-        property_access: Some(&period_properties::ACCESS),
+        hooks: Some(&super::object_hooks::PERIOD),
         methods: METHODS,
         ..ClassEntry::class(period::CLASS)
     });
 }
 
 const PROPERTIES: &[PropertyEntry] = &[
-    property("start", ConstantValue::Null),
-    property("current", ConstantValue::Null),
-    property("end", ConstantValue::Null),
-    property("interval", ConstantValue::Null),
-    property("recurrences", ConstantValue::Int(0)),
-    property("include_start_date", ConstantValue::Bool(false)),
-    property("include_end_date", ConstantValue::Bool(false)),
+    property("start", PropertyType::NullableClass("DateTimeInterface")),
+    property("current", PropertyType::NullableClass("DateTimeInterface")),
+    property("end", PropertyType::NullableClass("DateTimeInterface")),
+    property("interval", PropertyType::NullableClass("DateInterval")),
+    property("recurrences", PropertyType::Int),
+    property("include_start_date", PropertyType::Bool),
+    property("include_end_date", PropertyType::Bool),
 ];
 
 const METHODS: &[MethodEntry] = &[
@@ -51,6 +52,8 @@ const METHODS: &[MethodEntry] = &[
         period::from_iso,
     )
     .static_(),
+    MethodEntry::public("getIterator", &[], super::period_dates::get_iterator)
+        .returning("Iterator"),
     MethodEntry::public("getStartDate", &[], period::start),
     MethodEntry::public("getEndDate", &[], period::end),
     MethodEntry::public("getDateInterval", &[], period::interval),
@@ -69,6 +72,6 @@ const METHODS: &[MethodEntry] = &[
     .static_(),
 ];
 
-const fn property(name: &'static str, value: ConstantValue) -> PropertyEntry {
-    PropertyEntry::new(name, value, Visibility::Public).readonly()
+const fn property(name: &'static str, ty: PropertyType) -> PropertyEntry {
+    PropertyEntry::typed(name, ty, Visibility::Public).readonly()
 }

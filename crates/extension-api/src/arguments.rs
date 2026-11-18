@@ -124,7 +124,7 @@ impl Site<'_> {
 }
 
 /// The type as PHP writes it in messages.
-fn type_text(ty: ParamType) -> &'static str {
+pub(crate) fn type_text(ty: ParamType) -> &'static str {
     match ty {
         ParamType::Mixed => "mixed",
         ParamType::Bool => "bool",
@@ -194,7 +194,7 @@ fn convert(
             _ if strict => None,
             _ => to_int(value, site, context).map(Some),
         },
-        ParamType::Iterable => matches!(value, Value::Array(_) | Value::Object(_)).then_some(None),
+        ParamType::Iterable => value.is_iterable().then_some(None),
         ParamType::Bool => match value {
             Value::Bool(_) => Some(None),
             _ if strict => None,

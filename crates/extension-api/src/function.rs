@@ -53,6 +53,12 @@ pub enum ParamType {
     ArrayOrBool,
 }
 
+impl ParamType {
+    pub fn name(self) -> &'static str {
+        crate::arguments::type_text(self)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Param {
     /// Without the `$`. Used for named arguments and in error messages.
@@ -60,10 +66,10 @@ pub struct Param {
     pub ty: ParamType,
     pub nullable: bool,
     pub optional: bool,
+    /// Fills a skipped position when a later named argument is supplied.
+    pub default: Option<ConstantValue>,
     pub by_ref: bool,
     pub variadic: bool,
-    /// The value to insert when a later parameter is supplied by name.
-    pub default_value: Option<ConstantValue>,
 }
 
 impl Param {
@@ -73,9 +79,9 @@ impl Param {
             ty,
             nullable: false,
             optional: false,
+            default: None,
             by_ref: false,
             variadic: false,
-            default_value: None,
         }
     }
 
@@ -91,10 +97,9 @@ impl Param {
         self
     }
 
-    /// Declares a PHP default. Trailing omissions still arrive as a shorter slice.
-    pub const fn with_default(mut self, value: ConstantValue) -> Self {
+    pub const fn with_default(mut self, default: ConstantValue) -> Self {
         self.optional = true;
-        self.default_value = Some(value);
+        self.default = Some(default);
         self
     }
 

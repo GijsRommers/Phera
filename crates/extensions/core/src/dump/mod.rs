@@ -13,7 +13,9 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use phera_extension_api::value::Object;
-use phera_extension_api::{ArrayKey, Context, PhpArray, Registry, Value};
+use phera_extension_api::{
+    ArrayKey, Context, NativeError, PhpArray, PropertyPurpose, Registry, Value,
+};
 
 pub(crate) fn register(registry: &mut Registry) {
     var_dump::register(registry);
@@ -51,6 +53,10 @@ pub(crate) struct Place {
 /// What differs between the three functions. The walker calls these in
 /// document order.
 pub(crate) trait Style {
+    fn property_purpose(&self) -> PropertyPurpose {
+        PropertyPurpose::Debug
+    }
+
     /// Anything that is not an array or object.
     fn scalar(&mut self, out: &mut Vec<u8>, value: &Value, place: Place);
 
@@ -90,10 +96,10 @@ pub(crate) fn walk(
     out: &mut Vec<u8>,
     value: &Value,
     context: &mut dyn Context,
-) {
+) -> Result<(), NativeError> {
     let mut frames: Vec<Frame> = Vec::new();
     let mut active: HashSet<usize> = HashSet::new();
-    frames.extend(enter(style, out, value, 0, &mut active, context));
+    frames.extend(enter(style, out, value, 0, &mut active, context)?);
 
     loop {
         let depth = frames.len();
@@ -107,7 +113,7 @@ pub(crate) fn walk(
             Some((position, (key, item))) => {
                 frame.next = frame.entries.next_position(position);
                 style.key(out, &key, &frame.container, depth);
-                match enter(style, out, item, depth, &mut active, context) {
+                match enter(style, out, item, depth, &mut active, context)? {
                     Some(child) => frames.push(child),
                     None => style.after_entry(out),
                 }
@@ -122,6 +128,7 @@ pub(crate) fn walk(
             }
         }
     }
+    Ok(())
 }
 
 /// Prints a scalar, or the start of a container. Returns the frame to walk
@@ -133,7 +140,7 @@ fn enter(
     depth: usize,
     active: &mut HashSet<usize>,
     context: &mut dyn Context,
-) -> Option<Frame> {
+) -> Result<Option<Frame>, NativeError> {
     // PHP marks a reference only while a second holder exists. A variable
     // that was the last one bound to it prints like a plain value.
     let is_reference = matches!(value, Value::Reference(cell) if Rc::strong_count(cell) > 1);
@@ -145,23 +152,23 @@ fn enter(
         Value::Array(array) => (Container::Array(array.clone()), array.clone()),
         Value::Object(object) => (
             Container::Object(object.clone()),
-            Rc::new(object.to_array()),
+            Rc::new(context.object_properties(object, style.property_purpose())?),
         ),
         scalar => {
             style.scalar(out, scalar, place);
-            return None;
+            return Ok(None);
         }
     };
     if !active.insert(container.identity()) {
         style.recursion(out, &container, place, context);
-        return None;
+        return Ok(None);
     }
     style.open(out, &container, entries.len(), place);
-    Some(Frame {
+    Ok(Some(Frame {
         container,
         next: entries.first_position(),
         entries,
-    })
+    }))
 }
 
 pub(crate) fn spaces(out: &mut Vec<u8>, count: usize) {
@@ -234,7 +241,8 @@ mod tests {
             &mut Vec::new(),
             &value,
             &mut TestContext::default(),
-        );
+        )
+        .unwrap();
         assert_eq!(
             (tally.opened, tally.closed, tally.scalars),
             (200_000, 200_000, 1)

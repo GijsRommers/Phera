@@ -54,7 +54,7 @@ impl Compiler<'_> {
         value: &ast::Expression,
         line: usize,
     ) -> Result<Reg, CompileError> {
-        let src = self.quiet_access(value, FetchMode::Isset)?;
+        let src = self.quiet_access(value, FetchMode::Empty)?;
         let dst = self.allocate_register()?;
         self.emit(
             Instruction::Unary {

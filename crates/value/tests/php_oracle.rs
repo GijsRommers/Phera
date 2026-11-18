@@ -85,13 +85,7 @@ fn enc_value(v: &Value) -> String {
 }
 
 fn enc_err(e: &OpError) -> String {
-    let class = match e.kind {
-        ErrorKind::Error => "Error",
-        ErrorKind::TypeError => "TypeError",
-        ErrorKind::ValueError => "ValueError",
-        ErrorKind::ArithmeticError => "ArithmeticError",
-        ErrorKind::DivisionByZeroError => "DivisionByZeroError",
-    };
+    let class = e.kind.class_name();
     format!("E:{class}:{}", e.message)
 }
 

@@ -3,7 +3,7 @@
 use std::{collections::HashSet, rc::Rc};
 
 use phera_bytecode::Visibility;
-use phera_extension_api::NativeResult;
+use phera_extension_api::{NativeError, NativeResult};
 use phera_value::{ArrayKey, PhpArray, Value};
 
 use crate::{
@@ -14,9 +14,15 @@ use crate::{
 
 impl Vm {
     /// User-facing property enumeration strips visibility prefixes after checking the current scope.
-    pub(crate) fn visible_properties(&self, object: &phera_value::Object) -> phera_value::PhpArray {
+    pub(crate) fn visible_properties(
+        &mut self,
+        object: &phera_value::Object,
+        purpose: phera_extension_api::PropertyPurpose,
+    ) -> Result<phera_value::PhpArray, NativeError> {
         let mut result = phera_value::PhpArray::new();
-        for (key, value) in object.to_array().iter() {
+        for (key, value) in
+            phera_extension_api::Context::object_properties(self, object, purpose)?.iter()
+        {
             let name = crate::path_update::property_name(&key);
             if self
                 .property_key(object, &name)
@@ -25,7 +31,7 @@ impl Vm {
                 result.insert(ArrayKey::str(name), value.clone());
             }
         }
-        result
+        Ok(result)
     }
 
     /// Class variables list declaration defaults, including null for uninitialized typed properties.

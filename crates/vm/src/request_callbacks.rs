@@ -51,8 +51,19 @@ impl Vm {
         callable: &Value,
     ) -> Result<Callee, NativeError> {
         self.autoload_callable(callable).await?;
-        self.resolve_callable(callable)
-            .map_err(|error| self.invalid_callback(function, 1, "callback", callable, error, false))
+        self.resolve_native_callback(function, 1, "callback", callable)
+    }
+
+    pub(crate) fn resolve_native_callback(
+        &mut self,
+        function: &str,
+        number: usize,
+        parameter: &str,
+        callable: &Value,
+    ) -> Result<Callee, NativeError> {
+        self.resolve_callable(callable).map_err(|error| {
+            self.invalid_callback(function, number, parameter, callable, error, false)
+        })
     }
 
     pub(crate) async fn run_shutdown_callbacks(&mut self) {

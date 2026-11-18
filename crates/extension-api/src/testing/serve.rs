@@ -136,17 +136,20 @@ impl Server {
         // macOS queues at most 128 connections a server has not accepted
         // yet (`kern.ipc.somaxconn`), and resets the rest of a burst; PHP's
         // built-in server queues fewer still. A request reset before any of
-        // its response arrived is sent again, after a growing pause.
+        // its response arrived is sent again, after a growing pause. On
+        // Linux such a dropped connection can also end without an error and
+        // without a byte, so an empty response counts as a reset: no HTTP
+        // server answers a request with nothing.
         for attempt in 1..=RESETS_RETRIED {
             match self.try_get(path) {
-                Err(error) if error.kind() == ErrorKind::ConnectionReset => {
-                    // Let the server drain its queue before trying again.
-                    std::thread::sleep(RESET_PAUSE * attempt);
-                }
+                Err(error) if error.kind() == ErrorKind::ConnectionReset => {}
+                Ok(response) if response.is_empty() => {}
                 response => return response.expect("send the request and read its response"),
             }
+            // Let the server drain its queue before trying again.
+            std::thread::sleep(RESET_PAUSE * attempt);
         }
-        panic!("{path}: the connection was reset {RESETS_RETRIED} times");
+        panic!("{path}: the connection was reset or closed unanswered {RESETS_RETRIED} times");
     }
 
     fn try_get(&self, path: &str) -> std::io::Result<String> {

@@ -170,6 +170,73 @@ Errors: under `serve`, an uncaught error answers 500 with a generic body and
 writes the message, file and line to the log; `display_errors=1` shows them in
 the response, as PHP does, and is the default only on the command line.
 
+### 5.2 `phera serve` is the production server
+
+The goal is one binary that takes the place of PHP-FPM and the web server
+in front of it, the way FrankenPHP does: it accepts the requests, serves the
+static files, and runs the PHP. `php -S` is only the yardstick for what a
+script sees in `$_SERVER`, `$_POST` and the response; it is not the model
+for the server.
+
+**Where it runs.** In practice behind a reverse proxy: a hosting platform's
+edge, a load balancer, an ingress controller. That proxy owns the
+certificates, speaks HTTP/2 and HTTP/3 to browsers, and sends plain
+HTTP/1.1 to a container. So the work that matters most is being a good
+upstream, not being an edge server.
+
+Today (2026-11-18) the server speaks HTTP/1.1 with keep-alive, runs one
+worker per core, serves a front controller, reads `.env` files and shuts
+down gracefully. Static files are answered, but read whole into memory and
+without caching headers. What production needs, in the order it will be
+built:
+
+1. **Limits and timeouts** (5.1). A proxy does not protect a worker from a
+   script that never ends or a body that is too large.
+2. **Static files, properly.** Sent from disk in chunks, never held whole in
+   memory; `ETag` and `Last-Modified` with 304 answers; `Range` (206) for
+   video and resumed downloads; `HEAD`; a precompressed sibling
+   (`app.js.br`, `.zst`, `.gz`) when the client accepts it; a
+   `Cache-Control` rule per path. PHP source, dot files and anything outside
+   the document root are never served.
+3. **Knowing the proxy.** A list of trusted proxies decides when
+   `X-Forwarded-For`, `X-Forwarded-Proto`, `X-Forwarded-Host` and
+   `Forwarded` set `REMOTE_ADDR`, `HTTPS`, `SERVER_PORT` and `HTTP_HOST`.
+   Without the list those headers are ignored, since any client can send
+   them.
+4. **HTTP/2 on the same port**, without TLS ("h2c"), for proxies that speak
+   HTTP/2 to their upstreams: many requests share one connection. The
+   server answers HTTP/1.1 and HTTP/2 on one listener; a script sees no
+   difference except `SERVER_PROTOCOL`.
+5. **Being a good container.** Listening on the address and port the
+   platform gives (`PORT`), a health endpoint that tells "started" from
+   "ready", finishing in-flight requests on `SIGTERM` within the platform's
+   grace period, logs as lines on standard output, and no need to write
+   anywhere but a temporary directory.
+6. **Boot once.** Snapshot and fork (section 5, phase 2) is Phera's answer
+   to FrankenPHP's worker mode and Laravel Octane: the framework boots once
+   per worker and every request starts from that state. Because a request
+   works on a fork, it cannot leak state into the next one, which is the
+   known risk of those worker modes.
+7. **Finishing early.** `fastcgi_finish_request()` (send the response, keep
+   working), which Symfony calls when it exists, and Early Hints (103),
+   which the proxy passes on.
+8. **Compression** of PHP's responses (gzip, zstd, brotli) where the proxy
+   does not compress.
+9. **Operations.** A `phera.toml`, an access log, metrics, reloading code
+   and configuration without dropping connections.
+10. **HTTPS by itself**, for the machine with no proxy in front: TLS through
+    `rustls`, certificates from files or from Let's Encrypt, and HTTP/2 to
+    browsers. Last, because the usual deployment does not need it.
+
+`php_sapi_name()` answers `phera` under `serve`, as FrankenPHP answers
+`frankenphp` and FPM `fpm-fcgi`; code that asks "is this the command line?"
+tests for `cli` and keeps working.
+
+Not planned: speaking FastCGI, that is, being a drop-in for PHP-FPM behind
+an existing nginx `fastcgi_pass`. A proxy reaches Phera over HTTP like any
+other upstream. This can be revisited if someone needs to keep an nginx
+configuration unchanged.
+
 ## 6. Scope
 
 In: the PHP that Symfony and Laravel and their dependencies run in production.

@@ -1,7 +1,8 @@
 use std::future::Future;
 use std::pin::Pin;
+use std::rc::Rc;
 
-use phera_value::{Diagnostics, PhpArray, Value};
+use phera_value::{Diagnostics, Object, PhpArray, Value};
 
 use crate::{
     CompileDiagnostic, CompileDiagnosticKind, CompileDiagnosticSite, NativeError, NativeResult,
@@ -61,6 +62,88 @@ pub trait Context {
         _arguments: Vec<Value>,
     ) -> LocalFuture<'_, NativeResult> {
         Box::pin(async { Err(NativeError::error("This context has no request lifecycle")) })
+    }
+
+    /// Validates a callable before a native operation starts its work.
+    fn validate_callback(
+        &mut self,
+        _function: &str,
+        _number: usize,
+        _parameter: &str,
+        _callable: &Value,
+    ) -> Result<(), NativeError> {
+        Err(NativeError::error(
+            "Cannot resolve a PHP callback without a runtime",
+        ))
+    }
+
+    /// Passes numeric arguments positionally and string keys as names.
+    fn call_array(
+        &mut self,
+        _callable: &Value,
+        _arguments: &PhpArray,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(std::future::ready(Err(NativeError::error(
+            "Cannot call a PHP callback without a runtime",
+        ))))
+    }
+
+    /// Invokes a public instance method selected by a language protocol.
+    fn call_method(
+        &mut self,
+        object: Rc<Object>,
+        name: &str,
+        arguments: Vec<Value>,
+    ) -> LocalFuture<'_, NativeResult> {
+        drop(arguments);
+        let message = format!(
+            "Cannot call {}::{name}() without a runtime",
+            object.class.name()
+        );
+        Box::pin(std::future::ready(Err(NativeError::error(message))))
+    }
+
+    /// Countable results are converted to integers even without a declared return type.
+    fn count_object(&mut self, object: Rc<Object>) -> LocalFuture<'_, NativeResult> {
+        Box::pin(async move {
+            let value = self.call_method(object, "count", Vec::new()).await?;
+            Ok(Value::Int(phera_value::to_int(&value, self.diagnostics())?))
+        })
+    }
+
+    /// The class selected by a native static method call, including inherited factories.
+    fn called_class(&self) -> Option<&str> {
+        None
+    }
+
+    /// Projects a native object's properties for the requesting PHP operation.
+    fn object_properties(
+        &mut self,
+        object: &Object,
+        _purpose: crate::PropertyPurpose,
+    ) -> Result<PhpArray, NativeError> {
+        Ok(object.to_array())
+    }
+
+    /// Acquires a cursor for an object that implements Traversable.
+    fn traverse(
+        &mut self,
+        object: Rc<Object>,
+    ) -> LocalFuture<'_, crate::traversal::TraversalResult> {
+        let message = format!("Cannot iterate {} without a runtime", object.class.name());
+        Box::pin(std::future::ready(Err(NativeError::error(message))))
+    }
+
+    /// Wraps a native cursor in PHP's InternalIterator class.
+    fn create_iterator(&mut self, _iterator: Box<dyn crate::NativeIterator>) -> NativeResult {
+        Err(NativeError::error(
+            "Cannot create an InternalIterator without a runtime",
+        ))
+    }
+
+    /// Checks a factory target even when there will be no objects in the result.
+    fn ensure_instantiable(&self, _class: &str) -> Result<(), NativeError> {
+        Ok(())
     }
 
     /// Creates an object of the named class with these properties, without

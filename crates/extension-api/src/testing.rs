@@ -86,11 +86,8 @@ impl Context for TestContext {
     }
 }
 
-/// Calls a sync native function the way the VM does: arguments are prepared
-/// against the signature first, then the body runs.
-///
-/// Fails for a name that is not registered and for async functions, which
-/// need a runtime to await them.
+/// Prepares native arguments and runs a handler that can complete immediately.
+/// A handler waiting on the runtime needs an integration test instead.
 pub fn call(
     registry: &Registry,
     context: &mut TestContext,
@@ -101,10 +98,24 @@ pub fn call(
         .get_function(name)
         .ok_or_else(|| NativeError::error(format!("Call to undefined function {name}()")))?;
     crate::prepare_arguments(entry, &mut arguments, context)?;
-    match entry.handler {
+    let handler = if matches!(arguments.first(), Some(Value::Object(_))) {
+        registry
+            .object_handler(entry.name)
+            .map_or(entry.handler, NativeFn::Async)
+    } else {
+        entry.handler
+    };
+    match handler {
         NativeFn::Sync(function) => function(context, &arguments),
-        NativeFn::Async(_) => Err(NativeError::error(format!(
-            "{name}() is async and cannot be called from testing::call"
-        ))),
+        NativeFn::Async(function) => {
+            let mut future = function(context, arguments);
+            let mut task = std::task::Context::from_waker(std::task::Waker::noop());
+            match future.as_mut().poll(&mut task) {
+                std::task::Poll::Ready(result) => result,
+                std::task::Poll::Pending => Err(NativeError::error(format!(
+                    "{name}() is waiting for a runtime"
+                ))),
+            }
+        }
     }
 }
