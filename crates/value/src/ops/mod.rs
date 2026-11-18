@@ -10,8 +10,9 @@ pub mod incdec;
 pub use arithmetic::{add, div, modulo, mul, negate, pow, sub, unary_plus};
 pub use bitwise::{bitwise_and, bitwise_not, bitwise_or, bitwise_xor, shift_left, shift_right};
 pub use compare::{
-    ObjectComparator, ObjectComparison, compare, compare_after_error, compare_op,
-    compare_with_objects, less, less_equal, loose_equals, loose_equals_with_objects, strict_equals,
+    ObjectComparator, ObjectComparison, StringComparison, StringComparisonStep, compare,
+    compare_after_error, compare_op, compare_with_objects, compare_with_string_objects, less,
+    less_equal, loose_equals, loose_equals_with_objects, strict_equals,
 };
 pub use concat::concat;
 pub use incdec::{decrement, increment};

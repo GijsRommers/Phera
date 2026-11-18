@@ -26,7 +26,7 @@ impl Traversal for Cursor {
         operation: IteratorStep,
     ) -> LocalFuture<'a, NativeResult> {
         match self {
-            Self::Php(object) => context.call_method(
+            Self::Php(object) => context.call_protocol_method(
                 object.clone(),
                 match operation {
                     IteratorStep::Rewind => "rewind",
@@ -103,7 +103,7 @@ impl Vm {
                 return Err(invalid());
             }
             let value = self
-                .call_method(object.clone(), "getIterator", Vec::new())
+                .call_protocol_method(object.clone(), "getIterator", Vec::new())
                 .await?;
             let Value::Object(iterator) = value.deref().clone() else {
                 return Err(invalid());

@@ -4,7 +4,7 @@ use std::path::Path;
 
 use phera_bytecode::{IncludeKind, Reg};
 use phera_extension_api::{NativeError, WorkingDirectory};
-use phera_value::{Value, to_php_string};
+use phera_value::Value;
 
 use crate::Vm;
 
@@ -17,9 +17,7 @@ impl Vm {
         kind: IncludeKind,
     ) -> Result<(), NativeError> {
         let once = matches!(kind, IncludeKind::IncludeOnce | IncludeKind::RequireOnce);
-        let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
-        let name = to_php_string(&diagnostics.vm.operand(path), &mut diagnostics.buffer)?;
-        drop(diagnostics);
+        let name = self.stringify_value(&self.get(path)).await?;
         let unit = match self.load_include(name.as_bytes()).await? {
             Ok(unit) => unit,
             Err(reason) => {

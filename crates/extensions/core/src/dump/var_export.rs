@@ -1,6 +1,7 @@
 use phera_extension_api::value::{float_repr, split_property_key};
 use phera_extension_api::{
-    ArrayKey, Context, FunctionEntry, NativeResult, Param, ParamType, Registry, Value, args,
+    ArrayKey, Context, FunctionEntry, LocalFuture, NativeResult, Param, ParamType, Registry, Value,
+    args,
 };
 
 use super::{Container, Place, Style, spaces, walk};
@@ -10,12 +11,21 @@ pub(crate) fn register(registry: &mut Registry) {
         Param::new("value", ParamType::Mixed),
         Param::new("return", ParamType::Bool).optional(),
     ];
-    registry.function(FunctionEntry::sync("var_export", PARAMS, var_export));
+    registry.function(FunctionEntry::asynchronous(
+        "var_export",
+        PARAMS,
+        var_export,
+    ));
 }
 
-fn var_export(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn var_export(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(render(context, arguments))
+}
+
+async fn render(context: &mut dyn Context, arguments: Vec<Value>) -> NativeResult {
+    let arguments = &arguments;
     let mut out = Vec::new();
-    walk(&mut VarExport, &mut out, args::value(arguments, 0), context)?;
+    walk(&mut VarExport, &mut out, args::value(arguments, 0), context).await?;
     if args::bool(arguments, 1).unwrap_or(false) {
         Ok(Value::from(out))
     } else {
@@ -54,6 +64,10 @@ fn float_source(float: f64) -> String {
 }
 
 impl Style for VarExport {
+    fn call_site(&self) -> (&'static str, &[Value]) {
+        ("var_export", &[])
+    }
+
     fn property_purpose(&self) -> phera_extension_api::PropertyPurpose {
         phera_extension_api::PropertyPurpose::Export
     }

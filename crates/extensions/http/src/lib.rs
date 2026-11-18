@@ -12,6 +12,7 @@ mod cookies;
 mod head;
 mod log;
 mod request;
+mod uploads;
 
 use phera_extension_api::{
     ConstantValue, Context, Extension, FunctionEntry, NativeResult, Param, ParamType, PhpArray,
@@ -20,6 +21,7 @@ use phera_extension_api::{
 
 pub use head::ResponseHead;
 pub use request::{RequestHeaders, Sapi, register_web};
+pub use uploads::UploadedFiles;
 
 pub struct Http;
 
@@ -44,6 +46,18 @@ const HEADER_CALLBACK_PARAMS: &[Param] = &[Param::new("callback", ParamType::Cal
 const SHUTDOWN_PARAMS: &[Param] = &[
     Param::new("callback", ParamType::Callable),
     Param::new("args", ParamType::Mixed).variadic(),
+];
+
+/// The values of `$_FILES[...]['error']`.
+const UPLOAD_ERRORS: &[(&str, i64)] = &[
+    ("UPLOAD_ERR_OK", 0),
+    ("UPLOAD_ERR_INI_SIZE", 1),
+    ("UPLOAD_ERR_FORM_SIZE", 2),
+    ("UPLOAD_ERR_PARTIAL", 3),
+    ("UPLOAD_ERR_NO_FILE", 4),
+    ("UPLOAD_ERR_NO_TMP_DIR", 6),
+    ("UPLOAD_ERR_CANT_WRITE", 7),
+    ("UPLOAD_ERR_EXTENSION", 8),
 ];
 
 impl Extension for Http {
@@ -94,6 +108,10 @@ impl Extension for Http {
             HTTP_RESPONSE_CODE_PARAMS,
             http_response_code,
         ));
+        uploads::register(registry);
+        for (name, value) in UPLOAD_ERRORS {
+            registry.constant(name, phera_extension_api::ConstantValue::Int(*value));
+        }
     }
 }
 

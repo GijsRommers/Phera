@@ -96,6 +96,7 @@ pub(crate) mod declarations;
 mod function_parameters;
 pub(crate) mod functions;
 pub(crate) mod loops;
+mod magic_methods;
 pub(crate) mod switching;
 
 pub(crate) mod exceptions;

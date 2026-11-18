@@ -34,6 +34,7 @@ impl Tables {
                 binding,
             },
             Old::CheckReturn { source } => Instruction::CheckReturn { source },
+            Old::ReturnMissing => Instruction::ReturnMissing,
             Old::ReturnChecked { source } => Instruction::ReturnChecked { source },
             Old::FinallyCall {
                 state,
@@ -110,9 +111,11 @@ impl Tables {
             Old::Clone {
                 destination,
                 source,
+                with,
             } => Instruction::Clone {
                 dst: destination,
                 src: source,
+                with,
             },
             Old::InstanceOf {
                 destination,
@@ -207,6 +210,15 @@ impl Tables {
                 mode,
             } => self.read_place(function, dst, place, mode),
             Old::Write { place, source: src } => self.write_place(function, place, src),
+            Old::WriteFromLocal {
+                place,
+                source: src,
+                destination: dst,
+            } => Instruction::AssignPathFromLocal {
+                path: path(self, function, place),
+                src,
+                dst,
+            },
             Old::Reference {
                 destination: dst,
                 place,

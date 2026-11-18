@@ -11,6 +11,15 @@ use crate::constants::{
 };
 use crate::natural::natural_compare;
 
+pub(super) fn can_invoke_string_comparison(left: &Value, right: &Value) -> bool {
+    matches!(
+        (&*left.deref(), &*right.deref()),
+        (Value::Object(_), Value::Object(_) | Value::String(_))
+            | (Value::String(_), Value::Object(_))
+            | (Value::Array(_), Value::Array(_))
+    )
+}
+
 /// A `$flags` argument such as `SORT_STRING | SORT_FLAG_CASE`.
 #[derive(Clone, Copy)]
 pub(super) enum SortFlags {
@@ -39,6 +48,25 @@ impl SortFlags {
             SORT_STRING | SORT_LOCALE_STRING => Self::String { ignore_case },
             SORT_NATURAL => Self::Natural { ignore_case },
             _ => Self::Regular,
+        }
+    }
+
+    pub(super) async fn compare_with_objects(
+        self,
+        context: &mut dyn Context,
+        left: &Value,
+        right: &Value,
+    ) -> Result<Ordering, NativeError> {
+        match self {
+            Self::Regular if can_invoke_string_comparison(left, right) => {
+                Ok(context.compare(left, right).await?.cmp(&0))
+            }
+            Self::String { .. } | Self::Natural { .. } if left.is_object() || right.is_object() => {
+                let left = Value::String(context.stringify(left).await?);
+                let right = Value::String(context.stringify(right).await?);
+                self.compare(context, &left, &right)
+            }
+            _ => self.compare(context, left, right),
         }
     }
 

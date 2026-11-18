@@ -18,20 +18,34 @@ use crate::calls::prepared_call::{CallDetails, CallFlags, PreparedCall, Prepared
 use crate::calls::window_context::WindowContext;
 use crate::code_table::FunctionIndex;
 
+pub(crate) enum CallEntry {
+    Php,
+    Native,
+    ConvertStrings,
+}
+
 impl Vm {
-    /// Enters the prepared call if its target is PHP code. Returns `false`
-    /// for a native target, which the async shell runs instead.
+    /// Enter ordinary PHP frames directly. Native calls and string conversions
+    /// that must run PHP code are left for the asynchronous interpreter.
     pub(crate) fn enter_prepared_call(
         &mut self,
         destination: Option<Reg>,
-    ) -> Result<bool, NativeError> {
-        if self.call_stack.top_call()?.callee == PreparedCallee::General {
-            return Ok(false);
+    ) -> Result<CallEntry, NativeError> {
+        let call = self.call_stack.top_call()?;
+        if call.callee == PreparedCallee::General {
+            if !call.flags.contains(CallFlags::MAGIC) {
+                return Ok(CallEntry::Native);
+            }
+            self.expand_magic_call()?;
+        } else if call.flags.contains(CallFlags::STRING_ARGUMENT)
+            && self.deferred_string_coercion(self.argument_origin)
+        {
+            return Ok(CallEntry::ConvertStrings);
         }
         self.check_frame_limit()?;
         let (call, details) = self.call_stack.pop_call()?;
         self.enter_call(call, details, destination)?;
-        Ok(true)
+        Ok(CallEntry::Php)
     }
 
     /// `CallDirect` when the interpreter loop's quick entry does not apply
@@ -60,10 +74,11 @@ impl Vm {
             self.store_sent_value(index, value)?;
         }
         *work += 1;
-        self.check_frame_limit()?;
-        let (call, details) = self.call_stack.pop_call()?;
-        self.enter_call(call, details, Some(destination))?;
-        Ok(None)
+        match self.enter_prepared_call(Some(destination))? {
+            CallEntry::Php => Ok(None),
+            CallEntry::ConvertStrings => Ok(Some(BatchExit::BindCall(destination))),
+            CallEntry::Native => Err(internal_error!("native direct PHP call")),
+        }
     }
 
     /// Bind the arguments, then push the frame. The frame is pushed even when

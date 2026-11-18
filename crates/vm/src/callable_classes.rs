@@ -8,7 +8,7 @@ use crate::Vm;
 use crate::callables::CallableUse;
 use crate::calls::call_state::CallTarget;
 use crate::calls::prepared_call::CallFlags;
-use crate::classes::{Class, Invocation};
+use crate::classes::Class;
 
 impl Vm {
     /// Literal class strings never borrow $this; only the deprecated relative keywords may do so.
@@ -32,12 +32,23 @@ impl Vm {
                     method,
                 ),
             })?;
-            return self.prepare_callback_method(class, None, method, usage);
+            let receiver = if usage == CallableUse::Callback {
+                self.current()
+                    .and_then(|frame| frame.this())
+                    .filter(|object| {
+                        self.classes
+                            .for_object(object)
+                            .is_some_and(|called| called.is_a(&class.name))
+                    })
+                    .cloned()
+            } else {
+                None
+            };
+            if usage == CallableUse::Callback && method.contains("::") {
+                return self.prepare_callback_method(class, receiver, method, usage);
+            }
+            return self.prepare_class_callback(class, receiver, method);
         }
-        self.diagnostic(
-            "Deprecated",
-            format!("Use of \"{name}\" in callables is deprecated"),
-        );
         let context = self
             .current()
             .and_then(|frame| frame.method())
@@ -46,6 +57,10 @@ impl Vm {
                     "Cannot access \"{name}\" when no class scope is active"
                 ))
             })?;
+        self.diagnostic(
+            "Deprecated",
+            format!("Use of \"{name}\" in callables is deprecated"),
+        );
         let class = match name {
             "parent" => context.scope.parent.clone(),
             "static" => Some(context.called.clone()),
@@ -54,7 +69,7 @@ impl Vm {
         .ok_or_else(|| {
             NativeError::error("Cannot access \"parent\" when current class scope has no parent")
         })?;
-        self.prepare_method(class, context.receiver, method, Invocation::Method)?;
+        self.prepare_class_callback(class, context.receiver, method)?;
         self.forward_callback_class(context.called)
     }
 
@@ -69,10 +84,10 @@ impl Vm {
             return Ok(());
         }
         let details = self.call_stack.top_details_mut()?;
-        if let Some(CallTarget::Method { context, .. }) =
-            details.callee.as_mut().map(|callee| &mut callee.target)
-        {
-            context.called = class;
+        match details.callee.as_mut().map(|callee| &mut callee.target) {
+            Some(CallTarget::Method { context, .. }) => context.called = class,
+            Some(CallTarget::Magic(magic)) => Rc::make_mut(magic).context.called = class,
+            _ => {}
         }
         Ok(())
     }

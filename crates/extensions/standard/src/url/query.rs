@@ -67,23 +67,30 @@ fn parse(variables: &mut PhpArray, input: &[u8], separator: u8, duplicates: Dupl
             Some(equals) => (&pair[..equals], &pair[equals + 1..]),
             None => (pair, &[][..]),
         };
-        let name = url_decode(name);
-        let Some((keys, valid)) = parse_name(&name) else {
-            continue;
-        };
-        if valid {
-            store(
-                variables,
-                &name,
-                &keys,
-                Value::from(url_decode(value)),
-                duplicates,
-            );
-        } else if let Some(Some(base)) = keys.first() {
-            variables.remove(&array_key(base));
-        }
+        register_variable(
+            variables,
+            &url_decode(name),
+            || Value::from(url_decode(value)),
+            duplicates,
+        );
     }
     false
+}
+
+/// Stores a multipart field under its literal name, as in `name="a[b][]"`.
+pub fn store_named(variables: &mut PhpArray, name: &[u8], value: Value) {
+    register_variable(variables, name, || value, Duplicates::Replace);
+}
+
+fn register_variable(variables: &mut PhpArray, name: &[u8], value: Value, duplicates: Duplicates) {
+    let Some((keys, valid)) = parse_name(name) else {
+        return;
+    };
+    if valid {
+        store(variables, name, &keys, value(), duplicates);
+    } else if let Some(Some(base)) = keys.first() {
+        variables.remove(&array_key(base));
+    }
 }
 
 /// Decodes `%41` to `A` and `+` to a space. A `%` that is not followed by two

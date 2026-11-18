@@ -13,15 +13,20 @@ use crate::compile::Compiled;
 use crate::errors::Error;
 use crate::scan::{Captures, Scanner};
 use crate::{cache, errors, matches, replacement};
-use phera_extension_api::value::to_php_string;
-use phera_extension_api::{Context, NativeError, NativeResult, PhpArray, Value, args};
+use phera_extension_api::{Context, LocalFuture, NativeError, NativeResult, PhpArray, Value, args};
 
-pub(crate) fn replace(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    run(context, arguments, Function::Replace)
+pub(crate) fn replace(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    replacing(context, arguments, Function::Replace)
 }
 
-pub(crate) fn filter(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    run(context, arguments, Function::Filter)
+pub(crate) fn filter(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    replacing(context, arguments, Function::Filter)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -99,7 +104,19 @@ struct Operation {
     count: usize,
 }
 
-fn run(context: &mut dyn Context, arguments: &[Value], function: Function) -> NativeResult {
+fn replacing(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+    function: Function,
+) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        run(context, &arguments, function)
+            .await
+            .map_err(|error| context.native_call_error(function.name(), &arguments, error))
+    })
+}
+
+async fn run(context: &mut dyn Context, arguments: &[Value], function: Function) -> NativeResult {
     if args::array(arguments, 0).is_none() && args::array(arguments, 1).is_some() {
         return Err(NativeError::type_error(format!(
             "{}(): Argument #1 ($pattern) must be of type array when argument #2 \
@@ -118,14 +135,16 @@ fn run(context: &mut dyn Context, arguments: &[Value], function: Function) -> Na
     let result = if let Some(subjects) = args::array(arguments, 2) {
         let mut output = PhpArray::new();
         for (key, value) in subjects.iter() {
-            let result = operation.subject(context, value)?;
+            let result = operation.subject(context, value).await?;
             if !result.is_null() {
                 output.insert(key, result);
             }
         }
         Value::from(output)
     } else {
-        operation.subject(context, args::value(arguments, 2))?
+        operation
+            .subject(context, args::value(arguments, 2))
+            .await?
     };
     matches::finish(arguments, 4, operation.count, result)
 }
@@ -133,18 +152,16 @@ fn run(context: &mut dyn Context, arguments: &[Value], function: Function) -> Na
 impl Operation {
     /// Every pattern over one subject, in turn. Null when a pattern does not
     /// compile or a match fails, and for `preg_filter` when nothing matched.
-    fn subject(&mut self, context: &mut dyn Context, value: &Value) -> NativeResult {
-        let mut subject = to_php_string(value, context.diagnostics())?
-            .as_bytes()
-            .to_vec();
+    async fn subject(&mut self, context: &mut dyn Context, value: &Value) -> NativeResult {
+        let mut subject = context.stringify(value).await?.as_bytes().to_vec();
         let count_before = self.count;
         for (index, pattern) in self.patterns.iter().enumerate() {
-            let pattern = to_php_string(pattern, context.diagnostics())?;
+            let pattern = context.stringify(pattern).await?;
             let template = self
                 .replacements
                 .get(if self.pairwise { index } else { 0 })
                 .unwrap_or(&Value::Null);
-            let template = to_php_string(template, context.diagnostics())?;
+            let template = context.stringify(template).await?;
             let Some(compiled) = cache::get(context, self.function.name(), pattern.as_bytes())
             else {
                 return Ok(Value::Null);

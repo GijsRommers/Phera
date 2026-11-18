@@ -74,6 +74,21 @@ impl Vm {
                 BatchExit::Returned(value) => return Ok(value),
                 BatchExit::Yield => tokio::task::yield_now().await,
                 BatchExit::Handlers => {}
+                BatchExit::Compare(pending) => {
+                    let order = self.finish_string_comparison(pending.cast).await?;
+                    let value = crate::string_comparison::comparison_value(pending.operator, order);
+                    self.set(pending.destination, value);
+                }
+                BatchExit::BindCall(destination) => {
+                    self.coerce_call_strings(self.argument_origin).await?;
+                    if !matches!(
+                        self.enter_prepared_call(Some(destination))?,
+                        crate::calls::call_execution::CallEntry::Php
+                    ) {
+                        let value = self.finish_native_window().await?;
+                        self.set(destination, value);
+                    }
+                }
                 BatchExit::NativeCall(destination) => {
                     let value = self.finish_native_window().await?;
                     self.set(destination, value);

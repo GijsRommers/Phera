@@ -4,6 +4,7 @@ use phera_extension_api::NativeResult;
 use phera_value::Value;
 
 use crate::Vm;
+use crate::calls::call_execution::CallEntry;
 use crate::calls::call_state::Callee;
 use crate::calls::callback_binding::ArgumentOrigin;
 
@@ -60,9 +61,13 @@ impl Vm {
             self.drain_error_handlers().await?;
         }
         let stop = self.call_stack.depth();
-        let entered = self.with_argument_origin(origin, |vm| vm.enter_prepared_call(None));
+        let mut entered = self.with_argument_origin(origin, |vm| vm.enter_prepared_call(None));
+        if matches!(entered, Ok(CallEntry::ConvertStrings)) {
+            self.coerce_call_strings(origin).await?;
+            entered = self.with_argument_origin(origin, |vm| vm.enter_prepared_call(None));
+        }
         match entered {
-            Ok(true) => {
+            Ok(CallEntry::Php) => {
                 // A PHP callback may return before it needs any async service.
                 let mut work = 0;
                 match self.run_batch(stop, &mut work) {
@@ -70,7 +75,7 @@ impl Vm {
                     pending => self.continue_execution(stop, work, Some(pending)).await,
                 }
             }
-            Ok(false) => {
+            Ok(CallEntry::Native) => {
                 let previous = std::mem::replace(&mut self.argument_origin, origin);
                 let result = Box::pin(self.finish_native_window()).await;
                 self.argument_origin = previous;
@@ -79,6 +84,7 @@ impl Vm {
                 }
                 result
             }
+            Ok(CallEntry::ConvertStrings) => Err(internal_error!("unchecked callback strings")),
             Err(error) => {
                 self.handle_exception(error, stop)?;
                 Err(internal_error!("callback error escaped boundary"))
