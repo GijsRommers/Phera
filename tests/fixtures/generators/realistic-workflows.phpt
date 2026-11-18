@@ -2,11 +2,9 @@
 A lazy pipeline, keyed data provider and send-driven scheduler
 --FILE--
 <?php
-function read_lines(string $source): Generator {
-    $offset = 0;
-    while (($end = strpos($source, "\n", $offset)) !== false) {
-        yield substr($source, $offset, $end - $offset);
-        $offset = $end + 1;
+function read_lines($source): Generator {
+    while (($line = fgets($source)) !== false) {
+        yield rtrim($line, "\n");
     }
 }
 function active(iterable $lines): Generator {
@@ -21,12 +19,16 @@ function labels(iterable $lines): Generator {
         yield strtoupper($line);
     }
 }
-function pipeline(string $input): Generator {
+function pipeline($input): Generator {
     yield from labels(active(read_lines($input)));
 }
-foreach (pipeline("+one\n-two\n+three\n") as $line) {
+$input = fopen('php://memory', 'w+');
+fwrite($input, "+one\n-two\n+three\n");
+rewind($input);
+foreach (pipeline($input) as $line) {
     echo "$line\n";
 }
+fclose($input);
 
 function data_provider(): Generator {
     yield 'empty' => ['', 0];
