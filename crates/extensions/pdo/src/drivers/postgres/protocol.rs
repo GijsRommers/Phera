@@ -14,7 +14,7 @@ impl From<&BoundValue> for TextParameter {
     fn from(value: &BoundValue) -> Self {
         Self(match value {
             BoundValue::Null => None,
-            BoundValue::String(value) => Some(value.clone()),
+            BoundValue::String(value) | BoundValue::Blob(value) => Some(value.clone()),
             BoundValue::Int(value) => Some(value.to_string().into_bytes()),
             BoundValue::Bool(value) => Some(if *value { b"t" } else { b"f" }.to_vec()),
         })

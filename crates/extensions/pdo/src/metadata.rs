@@ -16,6 +16,7 @@ use crate::statement::state;
 pub enum Metadata {
     Postgres(PostgresColumn),
     Mysql(mysql_async::Column),
+    Sqlite(phera_sqlite::Column, i64),
 }
 
 /// What tokio-postgres tells about a result column.
@@ -40,6 +41,13 @@ pub fn get<'a>(
             )
         })?;
         let statement = state(this.as_ref())?;
+        if matches!(
+            statement.borrow().prepared,
+            crate::drivers::Prepared::Sqlite(_)
+        ) && !statement.borrow().sqlite_executed
+        {
+            return Ok(Value::Bool(false));
+        }
         let (connection, column) = {
             let statement = statement.borrow();
             (
@@ -48,6 +56,26 @@ pub fn get<'a>(
             )
         };
         let Some(column) = column else {
+            if connection.name == crate::dsn::DriverName::Sqlite {
+                let active = match &statement.borrow().prepared {
+                    crate::drivers::Prepared::Sqlite(handle) => handle.busy(),
+                    _ => false,
+                };
+                return connection.fail(
+                    context,
+                    crate::errors::DbError {
+                        state: "HY000".into(),
+                        code: Some(if active { 100 } else { 25 }),
+                        detail: if active {
+                            "another row available"
+                        } else {
+                            "column index out of range"
+                        }
+                        .into(),
+                    },
+                    "PDOStatement::getColumnMeta",
+                );
+            }
             return Ok(Value::Bool(false));
         };
         let result = connection.driver.lock().await.metadata(&column).await;

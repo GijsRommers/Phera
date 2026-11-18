@@ -51,6 +51,38 @@ impl Server {
         Self { process, address }
     }
 
+    /// PHP's built-in server (`php -n -S`) on `root` with `workers`
+    /// processes, to compare `phera serve` with.
+    pub fn start_php(php: &Path, root: &Path, workers: usize) -> Self {
+        // Ask the system for a free port, then hand it to PHP.
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .and_then(|listener| listener.local_addr())
+            .expect("find a free port")
+            .port();
+        let address = format!("127.0.0.1:{port}");
+        let process = Command::new(php)
+            .args(["-n", "-S", &address, "-t"])
+            .arg(root)
+            .env("PHP_CLI_SERVER_WORKERS", workers.to_string())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("start php -S");
+        let server = Self { process, address };
+        for _ in 0..200 {
+            if TcpStream::connect(&server.address).is_ok() {
+                return server;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        panic!("php -S did not start on {}", server.address);
+    }
+
+    /// The raw response to one `GET`.
+    pub fn get_one(&self, path: &str) -> String {
+        self.get(path)
+    }
+
     /// Sends a `GET` for every path at the same time, one connection each,
     /// and returns the raw responses in the order of `paths`.
     pub fn get_all(&self, paths: impl IntoIterator<Item = String>) -> Vec<String> {
@@ -69,11 +101,15 @@ impl Server {
 
     fn get(&self, path: &str) -> String {
         // macOS queues at most 128 connections a server has not accepted
-        // yet (`kern.ipc.somaxconn`), and resets the rest of a burst. A
-        // request reset before any of its response arrived is sent again.
-        for _ in 0..RESETS_RETRIED {
+        // yet (`kern.ipc.somaxconn`), and resets the rest of a burst; PHP's
+        // built-in server queues fewer still. A request reset before any of
+        // its response arrived is sent again, after a growing pause.
+        for attempt in 1..=RESETS_RETRIED {
             match self.try_get(path) {
-                Err(error) if error.kind() == ErrorKind::ConnectionReset => continue,
+                Err(error) if error.kind() == ErrorKind::ConnectionReset => {
+                    // Let the server drain its queue before trying again.
+                    std::thread::sleep(RESET_PAUSE * attempt);
+                }
                 response => return response.expect("send the request and read its response"),
             }
         }
@@ -98,8 +134,10 @@ impl Server {
     }
 }
 
-/// How often one request is sent again after its connection was reset.
-const RESETS_RETRIED: usize = 3;
+/// How often one request is sent after its connection was reset, and the
+/// pause before the first retry, which grows with each.
+const RESETS_RETRIED: u32 = 5;
+const RESET_PAUSE: Duration = Duration::from_millis(50);
 
 impl Drop for Server {
     fn drop(&mut self) {

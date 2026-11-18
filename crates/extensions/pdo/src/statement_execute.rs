@@ -24,6 +24,10 @@ pub fn execute_named<'a>(
 ) -> LocalFuture<'a, NativeResult> {
     Box::pin(async move {
         let state = state(this.as_ref())?;
+        if matches!(state.borrow().prepared, Prepared::Sqlite(_)) {
+            return crate::drivers::sqlite::statement::execute(context, &state, &arguments, method)
+                .await;
+        }
         if let Some(params) = arguments.first().filter(|value| !value.is_null()) {
             state.borrow_mut().bindings = parameters::execute_bindings(params)?;
         }
@@ -98,11 +102,17 @@ pub fn execute_named<'a>(
 pub fn fail(
     state: &RefCell<Statement>,
     context: &mut dyn Context,
-    error: DbError,
+    mut error: DbError,
     method: &str,
 ) -> NativeResult {
     let mode = {
         let mut statement = state.borrow_mut();
+        if statement.connection.name == crate::dsn::DriverName::Sqlite {
+            crate::drivers::sqlite::normalize(
+                &mut error,
+                statement.connection.attributes.borrow().extended,
+            );
+        }
         let mut diagnostic = error.clone();
         if error.state == "HY093" {
             if statement.connection.name == crate::dsn::DriverName::Postgres {

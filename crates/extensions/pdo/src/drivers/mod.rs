@@ -25,6 +25,7 @@
 
 pub mod mysql;
 pub mod postgres;
+pub mod sqlite;
 
 use std::time::Duration;
 
@@ -68,6 +69,8 @@ pub enum Prepared {
         number: u64,
     },
     Mysql(mysql_async::Statement),
+    /// A live SQLite statement on its database's thread; see `sqlite`.
+    Sqlite(phera_sqlite::Statement),
 }
 
 /// A result as the driver returned it. It becomes PHP values on the worker,
@@ -120,6 +123,9 @@ impl RawRows {
 pub enum Driver {
     Postgres(postgres::Postgres),
     Mysql(mysql::Mysql),
+    /// Never pooled, and its statements run outside this interface; see
+    /// the `sqlite` module for why.
+    Sqlite(sqlite::Sqlite),
 }
 
 impl Driver {
@@ -132,6 +138,7 @@ impl Driver {
             DriverName::Mysql => mysql::Mysql::connect(dsn, user, password)
                 .await
                 .map(Self::Mysql),
+            DriverName::Sqlite => sqlite::Sqlite::connect(dsn).await.map(Self::Sqlite),
         }
     }
 
@@ -140,6 +147,7 @@ impl Driver {
         match self {
             Self::Postgres(driver) => &driver.version,
             Self::Mysql(driver) => &driver.version,
+            Self::Sqlite(_) => phera_sqlite::version(),
         }
     }
 
@@ -153,6 +161,12 @@ impl Driver {
                 .await
                 .map(|statement| Prepared::Postgres { statement, number }),
             Self::Mysql(driver) => driver.prepare(sql).await.map(Prepared::Mysql),
+            Self::Sqlite(driver) => driver
+                .database
+                .prepare(sql.source.clone())
+                .await
+                .map(Prepared::Sqlite)
+                .map_err(sqlite::error),
         }
     }
 
@@ -174,6 +188,9 @@ impl Driver {
         match self {
             Self::Postgres(driver) => driver.execute(sql, prepared, values).await,
             Self::Mysql(driver) => driver.execute(sql, prepared, values).await,
+            Self::Sqlite(_) => Err(connection_error(
+                "a SQLite statement is executed through its own handle",
+            )),
         }
     }
 
@@ -182,6 +199,7 @@ impl Driver {
         match self {
             Self::Postgres(driver) => driver.run_unprepared(sql).await,
             Self::Mysql(driver) => driver.exec(sql).await,
+            Self::Sqlite(driver) => driver.run_unprepared(sql).await,
         }
     }
 
@@ -190,6 +208,7 @@ impl Driver {
         match self {
             Self::Postgres(driver) => driver.run_unprepared(sql).await,
             Self::Mysql(driver) => driver.run_unprepared(sql).await,
+            Self::Sqlite(driver) => driver.run_unprepared(sql).await,
         }
     }
 
@@ -198,6 +217,12 @@ impl Driver {
         match self {
             Self::Postgres(driver) => driver.last_id(name).await,
             Self::Mysql(driver) => Ok(driver.last_id()),
+            Self::Sqlite(driver) => driver
+                .database
+                .last_id()
+                .await
+                .map(|id| id.to_string())
+                .map_err(sqlite::error),
         }
     }
 
@@ -206,6 +231,7 @@ impl Driver {
         match self {
             Self::Postgres(driver) => driver.quote(bytes).await,
             Self::Mysql(driver) => driver.quote(bytes).await,
+            Self::Sqlite(_) => Ok(String::from_utf8_lossy(&sqlite::quote(bytes)).into_owned()),
         }
     }
 
@@ -217,7 +243,7 @@ impl Driver {
     ) -> Result<(i16, Option<String>), DbError> {
         match self {
             Self::Postgres(driver) => driver.metadata(column).await,
-            Self::Mysql(_) => Err(connection_error("Mismatched metadata driver")),
+            Self::Mysql(_) | Self::Sqlite(_) => Err(connection_error("Mismatched metadata driver")),
         }
     }
 
@@ -226,6 +252,7 @@ impl Driver {
         match self {
             Self::Postgres(driver) => Some(driver.transaction_state().await),
             Self::Mysql(driver) => driver.transaction_state(),
+            Self::Sqlite(driver) => driver.database.transaction().await.ok(),
         }
     }
 
@@ -233,7 +260,7 @@ impl Driver {
     /// drivers whose replies carry it (MySQL).
     pub fn observed_transaction_state(&self) -> Option<bool> {
         match self {
-            Self::Postgres(_) => None,
+            Self::Postgres(_) | Self::Sqlite(_) => None,
             Self::Mysql(driver) => driver.transaction_state(),
         }
     }
@@ -244,6 +271,7 @@ impl Driver {
         match self {
             Self::Postgres(driver) => driver.reset().await,
             Self::Mysql(driver) => driver.reset().await,
+            Self::Sqlite(_) => Err(connection_error("SQLite handles are never pooled")),
         }
     }
 
@@ -251,6 +279,8 @@ impl Driver {
         match self {
             Self::Postgres(driver) => driver.close().await,
             Self::Mysql(driver) => driver.close().await,
+            // Dropping the last handle ends the database's thread.
+            Self::Sqlite(driver) => drop(driver),
         }
     }
 
@@ -258,6 +288,7 @@ impl Driver {
         match self {
             Self::Postgres(driver) => driver.reusable(),
             Self::Mysql(_) => true,
+            Self::Sqlite(_) => false,
         }
     }
 
@@ -265,6 +296,7 @@ impl Driver {
         match self {
             Self::Postgres(driver) => driver.is_broken(),
             Self::Mysql(driver) => driver.is_broken(),
+            Self::Sqlite(_) => false,
         }
     }
 
@@ -273,6 +305,7 @@ impl Driver {
         match self {
             Self::Postgres(driver) => driver.health().await,
             Self::Mysql(driver) => driver.health().await,
+            Self::Sqlite(driver) => driver.run_unprepared("SELECT 1").await.map(|_| ()),
         }
     }
 }
