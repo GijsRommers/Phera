@@ -43,6 +43,26 @@ impl Thrown {
 }
 
 impl Vm {
+    pub(crate) fn exception_with_previous(
+        &mut self,
+        error: NativeError,
+        previous: NativeError,
+    ) -> NativeError {
+        let error = self.materialize_error(error);
+        let previous = self.materialize_error(previous);
+        if let NativeError::Unwind(previous) = &previous
+            && let Some(previous) = previous.0.downcast_ref::<Thrown>()
+            && let NativeError::Unwind(error) = &error
+            && let Some(error) = error.0.downcast_ref::<Thrown>()
+        {
+            error.object.set(
+                Object::private_key(throwable_root(&error.object), "previous"),
+                Value::Object(previous.object.clone()),
+            );
+        }
+        error
+    }
+
     /// PHP accepts only objects implementing Throwable, including derived native classes.
     pub(crate) fn throw_operand(&mut self, source: Reg) -> Result<NativeError, NativeError> {
         let Value::Object(object) = self.read_local(source) else {

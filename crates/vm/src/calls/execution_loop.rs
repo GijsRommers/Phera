@@ -50,7 +50,7 @@ pub(crate) enum BatchExit {
     Returned(Value),
     /// The work budget is spent; other tasks get a turn.
     Yield,
-    /// A warning queued a user error handler, which must run now.
+    /// Output or diagnostics queued a callback, which must run now.
     Handlers,
     /// An instruction released an object whose destructor must run before
     /// the next instruction (see `crate::destructors`).
@@ -126,7 +126,7 @@ impl Vm {
             if self.destructors_due() {
                 return Ok(BatchExit::Destructors);
             }
-            if !self.error_handlers.pending.is_empty() {
+            if self.pending_callbacks {
                 return Ok(BatchExit::Handlers);
             }
             if *work >= YIELD_AFTER_STEPS {

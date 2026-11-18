@@ -1,6 +1,6 @@
 //! Global and static reference identity.
 
-use std::{cell::RefCell, rc::Rc, sync::Arc};
+use std::{cell::RefCell, rc::Rc};
 
 use phera_bytecode::Reg;
 use phera_extension_api::NativeError;
@@ -8,11 +8,10 @@ use phera_value::Value;
 
 use crate::Vm;
 
-/// Static storage is scoped by compiled unit, function, and static variable.
+/// Trait imports have distinct function indices even when the source bytecode is shared.
 #[derive(Hash, PartialEq, Eq)]
 pub(crate) struct StaticKey {
-    pub(crate) unit: usize,
-    pub(crate) function: Option<usize>,
+    pub(crate) function: crate::code_table::FunctionIndex,
     pub(crate) variable: u16,
 }
 
@@ -31,8 +30,7 @@ impl Vm {
     ) -> Result<StaticKey, NativeError> {
         let frame = self.current().ok_or_else(|| internal_error!("static"))?;
         Ok(StaticKey {
-            unit: Arc::as_ptr(frame.unit()) as usize,
-            function: frame.function_id(),
+            function: frame.frame.function,
             variable: variable.0,
         })
     }

@@ -24,6 +24,14 @@ pub trait ClassHandle: Any {
     }
 
     fn as_any(&self) -> &dyn Any;
+    fn is_enum(&self) -> bool {
+        false
+    }
+}
+
+/// Anonymous classes expose their full identity through get_class, while diagnostics use the prefix.
+pub fn class_display_name(name: &str) -> &str {
+    name.split_once('\0').map_or(name, |(prefix, _)| prefix)
 }
 
 /// A PHP object. Cloning the surrounding `Rc<Object>` shares the instance;
@@ -68,6 +76,15 @@ impl Object {
     /// when the object is freed, so the pool never has to look for dead
     /// objects.
     pub fn allocate(ids: &Rc<ObjectIds>, class: Rc<dyn ClassHandle>) -> Self {
+        Self::allocate_with_properties(ids, class, PhpArray::new())
+    }
+
+    /// Install the property table before publishing the object.
+    pub fn allocate_with_properties(
+        ids: &Rc<ObjectIds>,
+        class: Rc<dyn ClassHandle>,
+        properties: PhpArray,
+    ) -> Self {
         let lease = IdLease {
             id: ids.take(),
             pool: ids.clone(),
@@ -75,7 +92,7 @@ impl Object {
         Object {
             id: lease.id,
             class,
-            properties: RefCell::new(PhpArray::new()),
+            properties: RefCell::new(properties),
             native: RefCell::new(None),
             destruction: Cell::new(Destruction::Never),
             lease: Some(lease),
@@ -229,7 +246,7 @@ pub fn split_property_key(key: &[u8]) -> (&[u8], PropertyScope<'_>) {
     let [0, rest @ ..] = key else {
         return (key, PropertyScope::Public);
     };
-    let Some(end) = rest.iter().position(|&byte| byte == 0) else {
+    let Some(end) = rest.iter().rposition(|&byte| byte == 0) else {
         return (key, PropertyScope::Public);
     };
     let (scope, name) = (&rest[..end], &rest[end + 1..]);

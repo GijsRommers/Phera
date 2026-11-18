@@ -41,7 +41,7 @@ impl Comparison<'_, '_> {
         if Rc::ptr_eq(left, right) {
             return Ok(Pair::Compared(0));
         }
-        if matches!(self, Self::Strict) {
+        if matches!(self, Self::Strict) || left.class.is_enum() || right.class.is_enum() {
             return Ok(Pair::Compared(1));
         }
         if let Self::Native(compare) = self {

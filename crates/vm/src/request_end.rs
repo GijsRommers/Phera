@@ -135,14 +135,15 @@ impl Vm {
     /// Ends the request in PHP's order; `end` says how the script's code
     /// ended.
     pub(crate) async fn finish_request(&mut self, end: ScriptEnd) {
-        // 1. Shutdown functions belong here; they run after a fatal error
-        //    too.
+        // 1. Shutdown functions; they run after a fatal error too.
+        self.run_shutdown_callbacks().await;
         // 2. Destructors.
         if end == ScriptEnd::Destructible {
             self.run_request_destructors().await;
         }
-        // 3. Output buffers belong here. Objects their callbacks create
-        //    still get destructors, since the pool is not closed yet.
+        // 3. Output buffers. Objects their callbacks create still get
+        //    destructors, since the pool is not closed yet.
+        self.finish_buffers().await;
         // 4. Everything still alive is freed without its destructor.
         drop(self.classes.ids().close());
         self.call_stack.clear();

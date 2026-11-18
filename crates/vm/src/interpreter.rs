@@ -80,7 +80,7 @@ impl Vm {
             match exit {
                 BatchExit::Returned(value) => return Ok(value),
                 BatchExit::Yield => tokio::task::yield_now().await,
-                BatchExit::Handlers => self.drain_error_handlers().await?,
+                BatchExit::Handlers => {}
                 BatchExit::Destructors => self.run_destructors().await?,
                 BatchExit::Compare(pending) => {
                     let order = self.finish_string_comparison(pending.cast).await?;
@@ -112,10 +112,25 @@ impl Vm {
             if self.destructors_due() {
                 self.run_destructors().await?;
             }
-            if !self.error_handlers.pending.is_empty() {
-                self.drain_error_handlers().await?;
+            if self.pending_callbacks {
+                Box::pin(self.drain_pending_callbacks()).await?;
             }
         }
+    }
+
+    async fn drain_pending_callbacks(&mut self) -> Result<(), NativeError> {
+        if !self.error_handlers.pending.is_empty() {
+            self.drain_error_handlers().await?;
+        }
+        if self.output_pending() {
+            self.drain_output().await?;
+        }
+        self.refresh_pending_callbacks();
+        Ok(())
+    }
+
+    pub(crate) fn refresh_pending_callbacks(&mut self) {
+        self.pending_callbacks = !self.error_handlers.pending.is_empty() || self.output_pending();
     }
 
     /// Backward branches consume the same fairness budget as calls.

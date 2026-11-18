@@ -35,7 +35,7 @@ impl Globals {
     pub(crate) fn sole_object_owners(&self) -> Vec<String> {
         self.values
             .iter()
-            .filter(|(_, value)| matches!(value, Value::Object(object) if Rc::strong_count(object) == 1))
+            .filter(|(_, value)| sole_object_owner(value))
             .map(|(name, _)| name.clone())
             .collect()
     }
@@ -60,5 +60,18 @@ impl Globals {
             *value = Value::Reference(Rc::new(RefCell::new(std::mem::take(value))));
         }
         value.clone()
+    }
+}
+
+/// Whether `value` is the only holder of an object. A global that only the
+/// globals table binds (as `$GLOBALS['name'] = ...` makes one) is a PHP
+/// reference held once, which PHP's symbol table would hold as a plain value.
+fn sole_object_owner(value: &Value) -> bool {
+    match value {
+        Value::Object(object) => Rc::strong_count(object) == 1,
+        Value::Reference(cell) if Rc::strong_count(cell) == 1 => cell.try_borrow().is_ok_and(
+            |inner| matches!(&*inner, Value::Object(object) if Rc::strong_count(object) == 1),
+        ),
+        _ => false,
     }
 }

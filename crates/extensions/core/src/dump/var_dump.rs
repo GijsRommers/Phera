@@ -47,6 +47,22 @@ impl Style for VarDump<'_> {
         out.clear();
     }
 
+    fn enum_case(
+        &mut self,
+        out: &mut Vec<u8>,
+        object: &phera_extension_api::Object,
+        name: &phera_extension_api::PhpString,
+        place: Place,
+    ) -> bool {
+        Self::lead(out, place);
+        out.extend_from_slice(b"enum(");
+        out.extend_from_slice(object.class.name().as_bytes());
+        out.extend_from_slice(b"::");
+        out.extend_from_slice(name.as_bytes());
+        out.extend_from_slice(b")\n");
+        true
+    }
+
     fn scalar(&mut self, out: &mut Vec<u8>, value: &Value, place: Place) {
         Self::lead(out, place);
         match value {
@@ -85,7 +101,9 @@ impl Style for VarDump<'_> {
         let head = match container {
             Container::Array(_) => format!("array({len}) {{\n"),
             Container::Object(object) => {
-                format!("object({})#{} ({len}) {{\n", object.class.name(), object.id)
+                let class = object.class.name();
+                let display = class.split('\0').next().unwrap_or(class);
+                format!("object({display})#{} ({len}) {{\n", object.id)
             }
         };
         out.extend_from_slice(head.as_bytes());
@@ -112,7 +130,9 @@ impl Style for VarDump<'_> {
                     PropertyScope::Protected => out.extend_from_slice(b":protected"),
                     PropertyScope::Private(class) => {
                         out.extend_from_slice(b":\"");
-                        out.extend_from_slice(class);
+                        out.extend_from_slice(
+                            class.split(|byte| *byte == 0).next().unwrap_or(class),
+                        );
                         out.extend_from_slice(b"\":private");
                     }
                 }

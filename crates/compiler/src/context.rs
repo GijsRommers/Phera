@@ -3,8 +3,9 @@
 //! AST nodes lower to compiler IR here; final interning belongs to `lower`.
 
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
+    rc::Rc,
 };
 
 use phera_ast as ast;
@@ -33,6 +34,7 @@ pub(super) struct Compiler<'ast> {
     pub(super) hoisted: Vec<usize>,
     pub(super) classes: Vec<crate::ir::ClassDeclaration>,
     pub(super) hoisted_classes: Vec<usize>,
+    pub(super) anonymous_classes: Rc<Cell<u64>>,
     pub(super) next: usize,
     pub(super) peak: usize,
     pub(super) locals: HashMap<String, Reg>,
@@ -42,6 +44,7 @@ pub(super) struct Compiler<'ast> {
     pub(super) namespace: String,
     /// __CLASS__ is lexical and does not change when a closure is rebound.
     pub(super) class_scope: Option<String>,
+    pub(super) trait_scope: Option<String>,
     pub(super) imports: HashMap<(NameKind, String), String>,
     /// Temporaries cleared right after the call that consumed them (see
     /// `expressions::operand_release`), which the statement's end need not
@@ -72,6 +75,7 @@ impl<'ast> Compiler<'ast> {
             hoisted: vec![],
             classes: vec![],
             hoisted_classes: vec![],
+            anonymous_classes: Rc::default(),
             next: 0,
             peak: 0,
             locals: HashMap::new(),
@@ -79,6 +83,7 @@ impl<'ast> Compiler<'ast> {
             finalies: vec![],
             namespace: namespace.into(),
             class_scope: None,
+            trait_scope: None,
             imports: HashMap::new(),
             released: HashSet::new(),
         }

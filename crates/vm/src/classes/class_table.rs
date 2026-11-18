@@ -5,13 +5,13 @@ use std::{
     rc::{Rc, Weak},
 };
 
-use phera_value::{Object, ObjectIds};
+use phera_value::{Object, ObjectIds, PhpArray};
 
 use super::Class;
 
 /// A class's position in the request's class table: a method frame's class
 /// scope and called class are kept as these numbers.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub(crate) struct ClassIndex(u32);
 
 /// One request owns the id pool; weak records exist solely for cycle cleanup.
@@ -42,10 +42,12 @@ impl ClassTable {
     /// lowercased name.
     pub(crate) fn insert(&mut self, lowercase_name: String, class: Rc<Class>) {
         debug_assert_eq!(class.index, self.next_index());
-        self.has_dimensions |= (class.kind == phera_bytecode::ClassKind::Class
-            && class
-                .operations
-                .has(super::operations::ClassOperations::ARRAY_ACCESS))
+        self.has_dimensions |= (!matches!(
+            class.kind,
+            phera_bytecode::ClassKind::Interface | phera_bytecode::ClassKind::Trait
+        ) && class
+            .operations
+            .has(super::operations::ClassOperations::ARRAY_ACCESS))
             || class
                 .hooks
                 .as_ref()
@@ -76,11 +78,19 @@ impl ClassTable {
 
     /// Value-owned leases implement PHP's LIFO reuse without inspecting weak handles.
     pub(crate) fn allocate(&mut self, class: Rc<Class>) -> Rc<Object> {
+        self.allocate_with_properties(class, PhpArray::new())
+    }
+
+    pub(crate) fn allocate_with_properties(
+        &mut self,
+        class: Rc<Class>,
+        properties: PhpArray,
+    ) -> Rc<Object> {
         let has_destructor = class
             .magic
             .as_ref()
             .is_some_and(|magic| magic.destruct.is_some());
-        let object = Object::allocate(&self.ids, class);
+        let object = Object::allocate_with_properties(&self.ids, class, properties);
         if has_destructor {
             object.expect_destructor();
         }

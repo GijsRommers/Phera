@@ -5,6 +5,7 @@ mod scenarios {
     mod compression;
     mod environment;
     mod limits;
+    mod new_project;
     mod proxy;
     mod request_headers;
     mod static_files;
@@ -33,6 +34,11 @@ impl Served {
         Self::start_in(name, workers, files, ".", &[])
     }
 
+    /// The directory `start_in` puts the site of the test called `name` in.
+    fn root_of(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("phera-serve-{name}-{}", std::process::id()))
+    }
+
     fn start_in(
         name: &str,
         workers: usize,
@@ -40,7 +46,7 @@ impl Served {
         directory: &str,
         flags: &[&str],
     ) -> Served {
-        let root = std::env::temp_dir().join(format!("phera-serve-{name}-{}", std::process::id()));
+        let root = Served::root_of(name);
         for (path, contents) in files {
             let file = root.join(path);
             std::fs::create_dir_all(file.parent().expect("parent")).expect("create directory");

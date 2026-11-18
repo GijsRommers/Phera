@@ -88,6 +88,7 @@ mod handler_installation;
 mod include_scope;
 mod include_state;
 mod includes;
+mod initializer_tasks;
 mod initializers;
 mod inline_stack;
 mod instructions;
@@ -113,6 +114,7 @@ mod object_iteration;
 mod operators;
 mod ops;
 mod output;
+mod output_buffer;
 mod path;
 mod path_dimensions;
 mod path_instructions;
@@ -127,6 +129,7 @@ mod property_strings;
 mod property_targets;
 mod reference_holders;
 mod references;
+mod request_callbacks;
 mod request_end;
 mod scope_intrinsics;
 mod spl_autoload;
@@ -152,6 +155,7 @@ pub trait CodeLoader: Send + Sync {
 /// Receives each PHP output write while Vm also retains its output buffer.
 pub trait OutputSink {
     fn write(&mut self, bytes: &[u8]);
+    fn flush(&mut self) {}
 }
 
 impl OutputSink for Vec<u8> {
@@ -166,6 +170,7 @@ pub const DEFAULT_FRAME_LIMIT: usize = 250_000;
 /// One request interpreter; PHP calls use heap frames rather than Rust recursion.
 pub struct Vm {
     classes: classes::ClassTable,
+    enum_cases: classes::enums::EnumCases,
     native_callback_sites: Vec<error_traces::NativeCallbackSite>,
     debug_objects: Vec<u32>,
     property_guards: Vec<magic_properties::PropertyGuard>,
@@ -174,6 +179,7 @@ pub struct Vm {
     closure_captures: Vec<closures::PendingCapture>,
     /// Pure defaults retain lexical class scope while running outside a method frame.
     initializer_scope: Option<String>,
+    initializer_class: Option<initializers::InitializerClass>,
     argument_origin: calls::callback_binding::ArgumentOrigin,
     native_called_class: Option<std::rc::Rc<classes::Class>>,
     pending_dimension: Option<dimensions::DimensionPath>,
@@ -195,12 +201,15 @@ pub struct Vm {
     /// All PHP output emitted during this request.
     pub output: Vec<u8>,
     output_writer: output::Output,
+    request_callbacks: request_callbacks::RequestCallbacks,
     registers: calls::registers::Registers,
     constants: constant_table::ConstantTable,
     /// PHP call depth limit, independent of the native Rust stack.
     pub frame_limit: usize,
     status: i32,
     error_handlers: error_handlers::ErrorHandlers,
+    /// Whether output or a diagnostic needs to invoke a PHP callback.
+    pending_callbacks: bool,
     failed_native: Option<error_traces::NativeTrace>,
     /// What extensions remember during this request (response headers, ...).
     state: RequestState,
@@ -227,6 +236,7 @@ impl Vm {
             })
             .collect();
         Self {
+            enum_cases: classes::enums::EnumCases::default(),
             classes: classes::ClassTable::native(&registry),
             autoload: Default::default(),
             include_path: None,
@@ -240,6 +250,7 @@ impl Vm {
             property_references: Default::default(),
             closure_captures: Vec::new(),
             initializer_scope: None,
+            initializer_class: None,
             argument_origin: calls::callback_binding::ArgumentOrigin::Php,
             native_called_class: None,
             pending_dimension: None,
@@ -257,11 +268,13 @@ impl Vm {
             registry,
             output: vec![],
             output_writer: output::Output::new(),
+            request_callbacks: Default::default(),
             registers: calls::registers::Registers::new(),
             constants: constant_table::ConstantTable::new(constants),
             frame_limit: DEFAULT_FRAME_LIMIT,
             status: 0,
             error_handlers: error_handlers::ErrorHandlers::default(),
+            pending_callbacks: false,
             failed_native: None,
             state: RequestState::default(),
         }
@@ -304,10 +317,6 @@ impl Vm {
             .insert("argc".into(), Value::Int(arguments.len() as i64));
     }
 
-    fn out(&mut self, bytes: &[u8]) {
-        self.output_writer.write(&mut self.output, bytes);
-    }
-
     /// Run a compiled top-level function on the request heap stack and report its exit status.
     pub async fn run(&mut self, unit: Arc<CompiledUnit>) -> i32 {
         let main = self.code.load(&unit);
@@ -334,28 +343,34 @@ impl Vm {
             }
         }
         self.publish_declaration_warnings(&unit);
-        if let Err(error) = self.hoist_classes(&unit) {
+        let end = if let Err(error) = self.hoist_classes(&unit) {
             self.unwind(error);
-            self.finish_request(request_end::ScriptEnd::Fatal).await;
-            return self.status;
-        }
-        let end = match self.interpret(0).await {
-            Ok(_) => request_end::ScriptEnd::Destructible,
-            Err(error) => {
-                let mut error = self.materialize_error(error);
-                // The frames the error left released their variables; PHP
-                // runs those destructors before it reports the error.
-                if let Err(failure) = self.run_destructors().await {
-                    error = self.materialize_error(failure);
+            request_end::ScriptEnd::Fatal
+        } else {
+            match self.interpret(0).await {
+                Ok(_) => request_end::ScriptEnd::Destructible,
+                Err(error) => {
+                    let mut error = self.materialize_error(error);
+                    // The frames the error left released their variables;
+                    // PHP runs those destructors before it reports the error.
+                    if let Err(failure) = self.run_destructors().await {
+                        error = self.materialize_error(failure);
+                    }
+                    let end = request_end::ScriptEnd::of(&error);
+                    self.report_uncaught(error).await;
+                    end
                 }
-                let end = request_end::ScriptEnd::of(&error);
-                if !self.invoke_exception_handler(&error).await {
-                    self.unwind(error);
-                }
-                end
             }
         };
+        if self.output_pending()
+            && let Err(error) = self.drain_output().await
+        {
+            self.unwind(error);
+        }
         self.finish_request(end).await;
+        if let Err(error) = self.finish_headers().await {
+            self.unwind(error);
+        }
         self.status
     }
 
