@@ -169,45 +169,60 @@ the response, as PHP does, and is the default only on the command line.
 
 ### 5.2 `phera serve` is the production server
 
-The goal is one binary that takes the place of nginx with PHP-FPM, the way
-FrankenPHP does: it answers HTTPS itself, serves the static files, and runs
-the PHP. Nothing else has to be installed next to it. `php -S` is only the
-yardstick for what a script sees in `$_SERVER`, `$_POST` and the response;
-it is not the model for the server.
+The goal is one binary that takes the place of PHP-FPM and the web server
+in front of it, the way FrankenPHP does: it accepts the requests, serves the
+static files, and runs the PHP. `php -S` is only the yardstick for what a
+script sees in `$_SERVER`, `$_POST` and the response; it is not the model
+for the server.
+
+**Where it runs.** In practice behind a reverse proxy: a hosting platform's
+edge, a load balancer, an ingress controller. That proxy owns the
+certificates, speaks HTTP/2 and HTTP/3 to browsers, and sends plain
+HTTP/1.1 to a container. So the work that matters most is being a good
+upstream, not being an edge server.
 
 Today (2026-11-18) the server speaks HTTP/1.1 with keep-alive, runs one
 worker per core, serves static files and a front controller, reads `.env`
-files and shuts down gracefully. It has no TLS, so for now it stands behind
-a reverse proxy. What production needs, in the order it will be built:
+files and shuts down gracefully. What production needs, in the order it
+will be built:
 
-1. **Limits and timeouts** (5.1). Without them the server must not face the
-   internet.
-2. **HTTPS.** TLS through `rustls` (Rust, no C library), with certificates
-   from files or obtained and renewed automatically from Let's Encrypt
-   (ACME), a redirect from HTTP, and HTTP/2. HTTP/3 comes later.
-3. **Behind a proxy or load balancer.** A list of trusted proxies decides
-   when `X-Forwarded-For` and `X-Forwarded-Proto` set `REMOTE_ADDR` and
-   `HTTPS`; listening on a Unix socket.
-4. **Static files and compression.** `ETag`, `Last-Modified`, `Range`,
-   precompressed files, and gzip, zstd and brotli for PHP's responses.
-5. **Operations.** A `phera.toml`, an access log, a health endpoint,
-   metrics, reloading code and configuration without dropping connections.
-6. **Boot once.** Snapshot and fork (section 5, phase 2) is Phera's answer
+1. **Limits and timeouts** (5.1). A proxy does not protect a worker from a
+   script that never ends or a body that is too large.
+2. **Knowing the proxy.** A list of trusted proxies decides when
+   `X-Forwarded-For`, `X-Forwarded-Proto`, `X-Forwarded-Host` and
+   `Forwarded` set `REMOTE_ADDR`, `HTTPS`, `SERVER_PORT` and `HTTP_HOST`.
+   Without the list those headers are ignored, since any client can send
+   them.
+3. **Being a good container.** Listening on the address and port the
+   platform gives (`PORT`), a health endpoint that tells "started" from
+   "ready", finishing in-flight requests on `SIGTERM` within the platform's
+   grace period, logs as lines on standard output, and no need to write
+   anywhere but a temporary directory.
+4. **Boot once.** Snapshot and fork (section 5, phase 2) is Phera's answer
    to FrankenPHP's worker mode and Laravel Octane: the framework boots once
    per worker and every request starts from that state. Because a request
    works on a fork, it cannot leak state into the next one, which is the
    known risk of those worker modes.
-7. **Finishing early.** `fastcgi_finish_request()` (send the response, keep
-   working), which Symfony calls when it exists, and Early Hints (103).
+5. **Finishing early.** `fastcgi_finish_request()` (send the response, keep
+   working), which Symfony calls when it exists, and Early Hints (103),
+   which the proxy passes on.
+6. **Static files and compression.** `ETag`, `Last-Modified`, `Range` and
+   precompressed files; gzip, zstd and brotli for PHP's responses where the
+   proxy does not compress.
+7. **Operations.** A `phera.toml`, an access log, metrics, reloading code
+   and configuration without dropping connections.
+8. **HTTPS by itself**, for the machine with no proxy in front: TLS through
+   `rustls`, certificates from files or from Let's Encrypt, HTTP/2. Last,
+   because the usual deployment does not need it.
 
 `php_sapi_name()` answers `phera` under `serve`, as FrankenPHP answers
 `frankenphp` and FPM `fpm-fcgi`; code that asks "is this the command line?"
 tests for `cli` and keeps working.
 
 Not planned: speaking FastCGI, that is, being a drop-in for PHP-FPM behind
-an existing nginx `fastcgi_pass`. The point is to remove that hop; behind
-nginx, Phera is reached over HTTP like any other upstream. This can be
-revisited if someone needs to keep an nginx configuration unchanged.
+an existing nginx `fastcgi_pass`. A proxy reaches Phera over HTTP like any
+other upstream. This can be revisited if someone needs to keep an nginx
+configuration unchanged.
 
 ## 6. Scope
 
