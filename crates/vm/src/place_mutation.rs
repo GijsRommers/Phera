@@ -113,6 +113,9 @@ impl Vm {
 
     /// Promote a slot to a shared reference cell only when an alias is requested.
     pub(crate) fn reference(&mut self, place: &AccessPath) -> NativeResult {
+        if let PathBase::StaticProperty { class, name, .. } = place.base()? {
+            self.validate_static_mutation(class, name, &mut Value::Null, PropertyChange::Indirect)?;
+        }
         let value = if place.steps()?.any(|step| matches!(step, Step::Append)) {
             // A writable reference to [] creates an element rather than reading one.
             Value::Null
@@ -148,7 +151,20 @@ impl Vm {
                     {
                         return Ok(Value::Reference(Rc::new(RefCell::new(value))));
                     }
-                    crate::property_storage::read(&object, &key).unwrap_or_default()
+                    let value = crate::property_storage::read(&object, &key).unwrap_or_default();
+                    if (steps.peek().is_none() || !value.deref().is_object())
+                        && let Some(class) = object
+                            .class
+                            .as_any()
+                            .downcast_ref::<crate::classes::Class>()
+                        && let Some(property) = class
+                            .defaults
+                            .iter()
+                            .find(|item| item.key == key && item.set_visibility.is_some())
+                    {
+                        self.check_set_visibility(property, PropertyChange::Indirect)?;
+                    }
+                    value
                 }
                 _ => Value::Null,
             };
@@ -157,12 +173,6 @@ impl Vm {
             if let PathBase::StaticProperty { class, name, .. } = place.base()?
                 && place.steps()?.next().is_none()
             {
-                self.validate_static_mutation(
-                    class,
-                    name,
-                    &mut Value::Null,
-                    PropertyChange::Indirect,
-                )?;
                 self.track_static_property_reference(class, name)?;
             }
             return Ok(raw);
@@ -190,6 +200,9 @@ impl Vm {
                 "Attempt to unset static property {}::${name}",
                 class.name
             )));
+        }
+        if let PathBase::StaticProperty { class, name, .. } = place.base()? {
+            self.validate_static_mutation(class, name, &mut Value::Null, PropertyChange::Indirect)?;
         }
         let Some(register) = self.base_register(place, Creation::Existing, Missing::Silent)? else {
             return Ok(());

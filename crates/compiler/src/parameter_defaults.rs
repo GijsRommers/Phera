@@ -80,10 +80,14 @@ pub(crate) fn initializer_error(
             Literal(_) | Name(_) | MagicConstant(_) => {}
             ClassConstant {
                 class,
-                name: MemberName::Identifier(_),
+                name: MemberName::Identifier(member),
             } => match &class.kind {
                 Name(name) if name.text.eq_ignore_ascii_case("static") => {
-                    return Some("\"static::\" is not allowed in compile-time constants");
+                    return Some(if member.name.eq_ignore_ascii_case("class") {
+                        "static::class cannot be used for compile-time class name resolution"
+                    } else {
+                        "\"static::\" is not allowed in compile-time constants"
+                    });
                 }
                 Name(_) => {}
                 _ => return Some("Cannot use dynamic class name in constant expression"),
@@ -105,6 +109,9 @@ pub(crate) fn initializer_error(
                 class: NewTarget::Class(class),
                 arguments: Arguments::List(arguments),
             } if permits_new && matches!(class.kind, Name(_)) => {
+                if matches!(&class.kind, Name(name) if name.text.eq_ignore_ascii_case("static")) {
+                    return Some("\"static\" is not allowed in compile-time constants");
+                }
                 for argument in arguments.iter().rev() {
                     if argument.spread {
                         return Some("Argument unpacking in constant expressions is not supported");
