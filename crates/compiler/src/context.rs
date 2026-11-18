@@ -6,6 +6,7 @@ use std::{cell::RefCell, collections::HashMap};
 
 use phera_ast as ast;
 use phera_bytecode::Reg;
+use phera_bytecode::reflection::{Imports, InitializerSource};
 use phera_source::{CompileDiagnostic, LineTable};
 
 use crate::CompileError;
@@ -39,7 +40,8 @@ pub(super) struct Compiler<'ast> {
     pub(super) namespace: String,
     /// __CLASS__ is lexical and does not change when a closure is rebound.
     pub(super) class_scope: Option<String>,
-    pub(super) imports: HashMap<(NameKind, String), String>,
+    pub(super) imports: Option<Imports>,
+    pub(super) reflection_initializers: &'ast RefCell<Vec<InitializerSource>>,
 }
 impl<'ast> Compiler<'ast> {
     /// Start an independent function builder in the current namespace.
@@ -49,6 +51,7 @@ impl<'ast> Compiler<'ast> {
         name: &str,
         namespace: &str,
         compile_diagnostics: &'ast RefCell<Vec<CompileDiagnostic>>,
+        reflection_initializers: &'ast RefCell<Vec<InitializerSource>>,
     ) -> Self {
         Self {
             file,
@@ -72,7 +75,8 @@ impl<'ast> Compiler<'ast> {
             finalies: vec![],
             namespace: namespace.into(),
             class_scope: None,
-            imports: HashMap::new(),
+            imports: None,
+            reflection_initializers,
         }
     }
 
@@ -204,9 +208,11 @@ impl<'ast> Compiler<'ast> {
         if index.kind == ast::NameKind::FullyQualified {
             return (index.text.clone(), None);
         }
-        if index.kind != ast::NameKind::Relative {
+        if index.kind != ast::NameKind::Relative
+            && let Some(imports) = &self.imports
+        {
             let (first, rest) = index.text.split_once('\\').unwrap_or((&index.text, ""));
-            if let Some(value) = self.imports.get(&(
+            if let Some(value) = imports.get(&(
                 if rest.is_empty() {
                     kind
                 } else {

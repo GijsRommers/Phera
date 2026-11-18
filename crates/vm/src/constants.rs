@@ -74,8 +74,7 @@ impl Vm {
                 let metadata = frame.unit().constant_metadata.get(&name)?;
                 let attr =
                     crate::attribute_diagnostics::attribute(&metadata.attributes, "Deprecated")?;
-                Some(self.deprecation_message(
-                    frame.frame.function,
+                Some(crate::attribute_diagnostics::deprecation_message(
                     attr,
                     &format!("Constant {name}"),
                 ))

@@ -1,11 +1,9 @@
 //! `#[Deprecated(message: 'Use newApi', since: '2')]` reports at the call site.
 
-use phera_bytecode::reflection::Attribute;
+use crate::{Vm, diagnostics::SourceLocation};
+use phera_bytecode::reflection::{Attribute, Initializer};
 use phera_bytecode::{CallResult, Instruction};
 use phera_extension_api::NativeError;
-use phera_value::Value;
-
-use crate::{Vm, code_table::FunctionIndex, diagnostics::SourceLocation};
 
 impl Vm {
     pub(crate) fn function_attribute_diagnostics(&mut self) -> Result<(), NativeError> {
@@ -35,7 +33,6 @@ impl Vm {
                 )
             )
         });
-        let function = frame.frame.function;
         let name = &frame.function().name;
         let is_method = name.contains("::") && !name.starts_with("{closure:");
         let kind = if is_method { "Method" } else { "Function" };
@@ -47,14 +44,14 @@ impl Vm {
         };
         let attrs = &metadata.declaration.attributes;
         let deprecated = attribute(attrs, "Deprecated")
-            .map(|attr| self.deprecation_message(function, attr, &format!("{kind} {name}()")));
+            .map(|attr| deprecation_message(attr, &format!("{kind} {name}()")));
         let nodiscard = if discard {
             attribute(attrs, "NoDiscard").map(|attr| {
                 let kind = kind.to_ascii_lowercase();
                 let mut text = format!(
                     "The return value of {kind} {name}() should either be used or intentionally ignored by casting it as (void)"
                 );
-                if let Some(message) = self.attribute_literal_string(function, attr, "message", 0) {
+                if let Some(message) = attribute_literal_string(attr, "message", 0) {
                     text.push_str(", ");
                     text.push_str(&message);
                 }
@@ -73,50 +70,36 @@ impl Vm {
         self.diagnostic_location = previous;
         Ok(())
     }
+}
 
-    pub(crate) fn deprecation_message(
-        &self,
-        function: FunctionIndex,
-        attr: &Attribute,
-        target: &str,
-    ) -> String {
-        let mut description = format!("{target} is deprecated");
-        if let Some(since) = self.attribute_literal_string(function, attr, "since", 1) {
-            description.push_str(" since ");
-            description.push_str(&since);
-        }
-        if let Some(message) = self.attribute_literal_string(function, attr, "message", 0) {
-            description.push_str(", ");
-            description.push_str(&message);
-        }
-        description
+pub(crate) fn deprecation_message(attr: &Attribute, target: &str) -> String {
+    let mut description = format!("{target} is deprecated");
+    if let Some(since) = attribute_literal_string(attr, "since", 1) {
+        description.push_str(" since ");
+        description.push_str(&since);
     }
+    if let Some(message) = attribute_literal_string(attr, "message", 0) {
+        description.push_str(", ");
+        description.push_str(&message);
+    }
+    description
+}
 
-    fn attribute_literal_string(
-        &self,
-        function: FunctionIndex,
-        attr: &Attribute,
-        name: &str,
-        index: usize,
-    ) -> Option<String> {
-        let arg = attr
-            .arguments
-            .iter()
-            .enumerate()
-            .find(|(position, argument)| {
-                argument
-                    .name
-                    .as_deref()
-                    .map_or(*position == index, |argument| argument == name)
-            })?
-            .1;
-        let first = self.code.facts(function).unit_first;
-        let (function, _) = self.code.declared_facts(first, arg.initializer.index())?;
-        let value = crate::classes::class::literal_initializer(&self.code, &function)?;
-        match value {
-            Value::String(value) => Some(value.to_string_lossy()),
-            _ => None,
-        }
+fn attribute_literal_string(attr: &Attribute, name: &str, index: usize) -> Option<String> {
+    let arg = attr
+        .arguments
+        .iter()
+        .enumerate()
+        .find(|(position, argument)| {
+            argument
+                .name
+                .as_deref()
+                .map_or(*position == index, |argument| argument == name)
+        })?
+        .1;
+    match &arg.initializer {
+        Initializer::String(value) => Some(String::from_utf8_lossy(value).into_owned()),
+        _ => None,
     }
 }
 

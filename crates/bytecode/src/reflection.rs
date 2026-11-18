@@ -1,6 +1,46 @@
 //! Declaration data read by reflection, such as the argument in `#[Column('id')]`.
 
-use crate::FunctionId;
+use std::{collections::HashMap, sync::Arc};
+
+use phera_source::Span;
+
+/// The file-local index of an expression that is only executed by reflection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InitializerId(pub usize);
+
+/// Keep literals in the file's cold metadata and compile expressions on demand.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Initializer {
+    Null,
+    Bool(bool),
+    Int(i64),
+    Float(u64),
+    String(Vec<u8>),
+    EmptyArray,
+    Expression(InitializerId),
+}
+
+/// Distinct PHP import tables for classes, functions and constants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NameKind {
+    Class,
+    Function,
+    Constant,
+}
+
+pub type Imports = Arc<HashMap<(NameKind, String), String>>;
+
+/// Validated source with the lexical context needed to compile it on demand.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InitializerSource {
+    pub span: Span,
+    pub first_line: usize,
+    pub function: String,
+    pub namespace: String,
+    pub scope: Option<String>,
+    pub imports: Option<Imports>,
+    pub strict_types: bool,
+}
 
 /// Argument initializers execute in declaration order with the lexical scope.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,7 +53,7 @@ pub struct Attribute {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AttributeArgument {
     pub name: Option<String>,
-    pub initializer: FunctionId,
+    pub initializer: Initializer,
 }
 
 /// Source information shared by declarations and reflected members.
@@ -29,7 +69,7 @@ pub struct DeclarationMetadata {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ParameterMetadata {
     pub attributes: Vec<Attribute>,
-    pub default: Option<FunctionId>,
+    pub default: Option<Initializer>,
     pub default_constant: Option<String>,
     pub promoted: bool,
 }
@@ -39,35 +79,4 @@ pub struct ParameterMetadata {
 pub struct FunctionMetadata {
     pub declaration: DeclarationMetadata,
     pub parameters: Vec<ParameterMetadata>,
-}
-
-impl FunctionMetadata {
-    /// Move cold initializer references with the ordinary bytecode they name.
-    pub fn relocate(&mut self, offset: usize) {
-        self.declaration.relocate(offset);
-        for parameter in &mut self.parameters {
-            for attribute in &mut parameter.attributes {
-                attribute.relocate(offset);
-            }
-            if let Some(default) = &mut parameter.default {
-                default.0 += offset as u32;
-            }
-        }
-    }
-}
-
-impl DeclarationMetadata {
-    pub fn relocate(&mut self, offset: usize) {
-        for attribute in &mut self.attributes {
-            attribute.relocate(offset);
-        }
-    }
-}
-
-impl Attribute {
-    fn relocate(&mut self, offset: usize) {
-        for argument in &mut self.arguments {
-            argument.initializer.0 += offset as u32;
-        }
-    }
 }

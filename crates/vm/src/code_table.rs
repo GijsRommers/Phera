@@ -193,6 +193,11 @@ impl CodeTable {
         &self.loaded(function).unit
     }
 
+    pub(crate) fn known_unit(&self, function: FunctionIndex) -> Option<&Arc<CompiledUnit>> {
+        let facts = self.functions.get(function.index())?;
+        self.units.get(facts.unit.0 as usize).map(|unit| &unit.unit)
+    }
+
     /// The request-local values made from that file (names, literals, sites).
     pub(crate) fn cache(&self, function: FunctionIndex) -> &UnitCache {
         &self.loaded(function).cache

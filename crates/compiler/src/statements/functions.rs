@@ -99,7 +99,7 @@ impl<'ast> Compiler<'ast> {
         )?;
         builder.validate_nodiscard(declaration, line)?;
         for parameter in declaration.parameters {
-            let metadata = builder.reflected_parameter(parameter, line)?;
+            let metadata = builder.reflected_parameter(parameter)?;
             builder.function.metadata.parameters.push(metadata);
         }
         builder.compile_promoted_properties(declaration.parameters, line)?;
@@ -145,22 +145,16 @@ impl<'ast> Compiler<'ast> {
                 _ => {}
             }
         }
-        for function in std::iter::once(&mut function).chain(&mut builder.functions) {
-            function.metadata.relocate(id + 1);
-        }
         self.functions.push(function);
         self.functions.extend(builder.functions);
         for mut class in builder.classes {
-            class.metadata.relocate(id + 1);
             for method in &mut class.methods {
                 method.function += id + 1;
             }
             for constant in &mut class.constants {
                 constant.initializer += id + 1;
-                constant.metadata.relocate(id + 1);
             }
             for property in &mut class.properties {
-                property.metadata.relocate(id + 1);
                 if let Some(initializer) = &mut property.default {
                     *initializer += id + 1;
                 }
@@ -190,6 +184,7 @@ impl<'ast> Compiler<'ast> {
             name,
             &self.namespace,
             self.compile_diagnostics,
+            self.reflection_initializers,
         );
         builder.source = self.source;
         builder.class_scope = if !name.starts_with("{closure:") {

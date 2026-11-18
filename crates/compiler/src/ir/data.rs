@@ -125,6 +125,8 @@ pub struct Function {
 /// The top-level function and declarations awaiting final bytecode emission.
 #[derive(Debug, Clone)]
 pub struct CompiledUnit {
+    pub reflection_initializers: Vec<phera_bytecode::reflection::InitializerSource>,
+    pub reflection_source: Option<Box<[u8]>>,
     pub constant_metadata:
         std::collections::HashMap<String, phera_bytecode::reflection::DeclarationMetadata>,
     pub declaration_warnings: Vec<phera_bytecode::DeclarationWarning>,

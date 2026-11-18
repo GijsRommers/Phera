@@ -88,7 +88,15 @@ fn compile_program(
             scanner_diagnostics: Vec::new(),
         }
     })?;
-    let mut compiler = Compiler::new(file, lines, "{main}", "", compile_diagnostics);
+    let reflection_initializers = RefCell::new(Vec::new());
+    let mut compiler = Compiler::new(
+        file,
+        lines,
+        "{main}",
+        "",
+        compile_diagnostics,
+        &reflection_initializers,
+    );
     compiler.source = source;
     compiler.function.dynamic_scope = true;
     compiler.block(&ast.statements, DeclarationTiming::Hoisted)?;
@@ -98,15 +106,25 @@ fn compile_program(
     };
     let register = compiler.literal(default, 1)?;
     compiler.emit(Instruction::Return(register), 1);
+    finish(compiler, source)
+}
+
+pub(super) fn finish(
+    mut compiler: Compiler<'_>,
+    source: &[u8],
+) -> Result<phera_bytecode::CompiledUnit, CompileError> {
+    let reflection_initializers = compiler.reflection_initializers.take();
     let unit = CompiledUnit {
         main: compiler.finish(),
+        reflection_source: (!reflection_initializers.is_empty()).then(|| source.into()),
+        reflection_initializers,
         constant_metadata: compiler.constant_metadata,
         declaration_warnings: compiler.declaration_warnings,
         functions: compiler.functions,
         hoisted: compiler.hoisted,
         classes: compiler.classes,
         hoisted_classes: compiler.hoisted_classes,
-        file: file.into(),
+        file: compiler.file.into(),
     };
     validate_global_writes(&unit)?;
     Ok(lower::lower(unit))

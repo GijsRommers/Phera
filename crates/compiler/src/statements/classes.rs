@@ -307,6 +307,7 @@ impl Compiler<'_> {
             "{initializer}",
             &self.namespace,
             self.compile_diagnostics,
+            self.reflection_initializers,
         );
         builder.imports = self.imports.clone();
         let result = builder.compile_expression(expression)?;

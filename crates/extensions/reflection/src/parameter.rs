@@ -251,7 +251,7 @@ fn default_value(
     Box::pin(async move {
         let parameter = parameter(this.as_ref())?;
         match require_default(&parameter)?.default.clone() {
-            Some(ParameterDefault::Native(value)) => Ok(value),
+            Some(ParameterDefault::Literal(value)) => Ok(value),
             Some(ParameterDefault::Expression(initializer)) => {
                 engine(context)?.reflect_evaluate(initializer).await
             }

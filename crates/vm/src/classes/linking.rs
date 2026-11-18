@@ -320,8 +320,7 @@ impl Vm {
                         "Deprecated",
                     )
                     .map(|attr| {
-                        self.deprecation_message(
-                            self.code.index_in(&unit, None),
+                        crate::attribute_diagnostics::deprecation_message(
                             attr,
                             &format!("Constant {name}::{}", unit.names[constant.name.index()]),
                         )

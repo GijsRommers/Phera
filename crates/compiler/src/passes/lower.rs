@@ -281,6 +281,8 @@ pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
         ..Tables::default()
     };
     tables.unit.file = source.file;
+    tables.unit.reflection_initializers = source.reflection_initializers;
+    tables.unit.reflection_source = source.reflection_source;
     tables.unit.constant_metadata = source.constant_metadata;
     tables.unit.declaration_warnings = source.declaration_warnings;
     tables.unit.main = tables.function(source.main);

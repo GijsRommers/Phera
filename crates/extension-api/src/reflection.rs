@@ -48,7 +48,8 @@ pub struct ClassInfo {
 /// A request-local handle to code that evaluates a declaration expression.
 #[derive(Clone, Debug)]
 pub struct Initializer {
-    pub function: u32,
+    pub unit: u32,
+    pub index: usize,
     pub scope: Option<String>,
 }
 
@@ -63,7 +64,7 @@ pub struct AttributeInfo {
 #[derive(Clone, Debug)]
 pub enum AttributeValue {
     Expression(Initializer),
-    Integer(i64),
+    Literal(Value),
 }
 
 pub use phera_source::attributes::{AttributeTarget, builtin_flags, target_names};
@@ -200,11 +201,7 @@ pub enum FunctionTarget {
     Closure(Weak<Object>),
 }
 
-#[derive(Clone)]
-pub enum ParameterDefault {
-    Native(Value),
-    Expression(Initializer),
-}
+pub type ParameterDefault = AttributeValue;
 
 #[derive(Clone)]
 pub struct ParameterInfo {

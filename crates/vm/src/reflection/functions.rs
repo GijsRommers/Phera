@@ -1,8 +1,7 @@
 //! `ReflectionFunction('strlen')->getParameters()` reads registered native signatures.
 
 use phera_extension_api::reflection::{
-    AttributeTarget, FunctionInfo, FunctionTarget, Initializer, MemberInfo, ParameterDefault,
-    ParameterInfo,
+    AttributeTarget, FunctionInfo, FunctionTarget, MemberInfo, ParameterDefault, ParameterInfo,
 };
 use phera_extension_api::{MethodReturn, NativeError, Param};
 use std::rc::Rc;
@@ -231,14 +230,9 @@ impl Vm {
                     optional,
                     promoted: metadata.is_some_and(|meta| meta.promoted),
                     default: metadata
-                        .and_then(|meta| meta.default)
+                        .and_then(|meta| meta.default.as_ref())
                         .filter(|_| optional)
-                        .map(|default| {
-                            ParameterDefault::Expression(Initializer {
-                                function: self.code.declared(first, default.index()).0,
-                                scope: scope.map(str::to_owned),
-                            })
-                        }),
+                        .map(|default| super::initializers::reflected_value(default, first, scope)),
                     default_constant: metadata
                         .filter(|_| optional)
                         .and_then(|meta| meta.default_constant.clone()),
@@ -286,7 +280,7 @@ fn native_parameter(position: usize, param: Param) -> ParameterInfo {
         promoted: false,
         default: param
             .default
-            .map(|value| ParameterDefault::Native(value.to_value())),
+            .map(|value| ParameterDefault::Literal(value.to_value())),
         default_constant: None,
         attributes: Vec::new(),
     }

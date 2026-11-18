@@ -97,7 +97,7 @@ pub(crate) async fn class_attributes(
             validation_error: None,
             name: "Attribute".into(),
             target: AttributeTarget::Class,
-            arguments: vec![(None, AttributeValue::Integer(flags))],
+            arguments: vec![(None, AttributeValue::Literal(Value::Int(flags)))],
         };
         return list(context, &[marker], args, "ReflectionClass").await;
     }
@@ -260,7 +260,7 @@ async fn arguments(
                     .reflect_evaluate(initializer.clone())
                     .await?
             }
-            AttributeValue::Integer(value) => Value::Int(*value),
+            AttributeValue::Literal(value) => value.clone(),
         };
         match name {
             Some(name) => {

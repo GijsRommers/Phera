@@ -4,8 +4,8 @@ use std::rc::Rc;
 
 use phera_bytecode::Visibility;
 use phera_extension_api::reflection::{
-    AttributeInfo, AttributeTarget, AttributeValue, ClassInfo, ExtensionInfo, Initializer,
-    MemberInfo, MemberKind, PropertyRead, ReflectedClassKind, ReflectionContext, SourceInfo,
+    AttributeInfo, AttributeTarget, ClassInfo, ExtensionInfo, Initializer, MemberInfo, MemberKind,
+    PropertyRead, ReflectedClassKind, ReflectionContext, SourceInfo,
 };
 use phera_extension_api::{LocalFuture, NativeError, NativeResult};
 use phera_value::{Object, PhpArray, Value};
@@ -18,6 +18,7 @@ use crate::code_table::FunctionIndex;
 mod callables;
 mod constants;
 mod functions;
+mod initializers;
 mod members;
 mod properties;
 
@@ -198,25 +199,27 @@ impl ReflectionContext for Vm {
     }
 
     fn reflect_evaluate(&mut self, initializer: Initializer) -> LocalFuture<'_, NativeResult> {
-        let function = FunctionIndex(initializer.function);
-        let callee = if let Some(scope) = initializer.scope.and_then(|name| self.classes.get(&name))
-        {
-            self.code.set_declaring_class(function, scope.index);
-            let method = Rc::new(Method {
-                signature: std::cell::OnceCell::new(),
-                name: "{reflection initializer}".into(),
-                declaring: scope.name.clone(),
-                visibility: Visibility::Public,
-                is_static: true,
-                is_final: false,
-                is_abstract: false,
-                body: MethodBody::User(function),
-            });
-            self.reflection_callee(scope.clone(), scope, method, None)
-        } else {
-            self.function_callee(function)
-        };
-        self.invoke_resolved_callable(callee, [])
+        Box::pin(async move {
+            let function = self.reflection_initializer_code(&initializer).await?;
+            let callee =
+                if let Some(scope) = initializer.scope.and_then(|name| self.classes.get(&name)) {
+                    self.code.set_declaring_class(function, scope.index);
+                    let method = Rc::new(Method {
+                        signature: std::cell::OnceCell::new(),
+                        name: "{reflection initializer}".into(),
+                        declaring: scope.name.clone(),
+                        visibility: Visibility::Public,
+                        is_static: true,
+                        is_final: false,
+                        is_abstract: false,
+                        body: MethodBody::User(function),
+                    });
+                    self.reflection_callee(scope.clone(), scope, method, None)
+                } else {
+                    self.function_callee(function)
+                };
+            self.invoke_resolved_callable(callee, []).await
+        })
     }
 
     fn reflect_property_read(
@@ -324,13 +327,9 @@ impl Vm {
                     .arguments
                     .iter()
                     .map(|argument| {
-                        let function = self.code.declared(first, argument.initializer.index());
                         (
                             argument.name.clone(),
-                            AttributeValue::Expression(Initializer {
-                                function: function.0,
-                                scope: class.map(str::to_owned),
-                            }),
+                            initializers::reflected_value(&argument.initializer, first, class),
                         )
                     })
                     .collect(),

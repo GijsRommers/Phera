@@ -11,13 +11,7 @@ pub(crate) enum DeclarationTiming {
     Hidden,
 }
 
-/// PHP keeps class, function and constant aliases in separate namespaces.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum NameKind {
-    Class,
-    Function,
-    Constant,
-}
+pub(crate) use phera_bytecode::reflection::NameKind;
 
 /// Whether foreach copies values or binds the loop variable to each element.
 #[derive(Clone, Copy, PartialEq, Eq)]

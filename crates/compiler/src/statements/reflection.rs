@@ -2,18 +2,20 @@
 
 use std::collections::HashSet;
 
-use phera_ast::{Attribute, Expression, ExpressionKind, MemberName};
-use phera_bytecode::FunctionId;
-use phera_bytecode::reflection::{AttributeArgument, DeclarationMetadata, ParameterMetadata};
+use phera_ast::{Attribute, Expression, ExpressionKind, Literal, MemberName};
+use phera_bytecode::reflection::{
+    AttributeArgument, DeclarationMetadata, Initializer, InitializerId, InitializerSource,
+    ParameterMetadata,
+};
 use phera_source::{Span, attributes::AttributeTarget};
 
 use super::builtin_attributes::AttributePlacement;
 
-use crate::{CompileError, Compiler, ir::Instruction};
+use crate::{CompileError, Compiler};
 
 impl Compiler<'_> {
     pub(super) fn declaration_metadata(
-        &mut self,
+        &self,
         attributes: &[Attribute],
         span: Span,
         doc_comment: Option<Span>,
@@ -33,7 +35,7 @@ impl Compiler<'_> {
     }
 
     pub(super) fn compile_attributes(
-        &mut self,
+        &self,
         attributes: &[Attribute],
         scope: Option<&str>,
         placement: AttributePlacement,
@@ -69,8 +71,14 @@ impl Compiler<'_> {
                         }
                         _ => {}
                     }
-                    let initializer =
-                        self.compile_reflection_initializer(&argument.value, scope, line)?;
+                    if let Some(message) = crate::constant_callables::callable_constant_error(
+                        &argument.value,
+                    )
+                    .or_else(|| crate::parameter_defaults::initializer_error(&argument.value, true))
+                    {
+                        return Err(self.error(message, line));
+                    }
+                    let initializer = self.remember_initializer(&argument.value, scope);
                     arguments.push(AttributeArgument { name, initializer });
                 }
                 let name = self
@@ -88,22 +96,18 @@ impl Compiler<'_> {
     }
 
     pub(super) fn reflected_parameter(
-        &mut self,
+        &self,
         parameter: &phera_ast::Parameter,
-        line: usize,
     ) -> Result<ParameterMetadata, CompileError> {
-        let scope = self.class_scope.clone();
+        let scope = self.class_scope.as_deref();
         let default = parameter
             .default
             .as_ref()
-            .map(|expression| {
-                self.compile_reflection_initializer(expression, scope.as_deref(), line)
-            })
-            .transpose()?;
+            .map(|expression| self.remember_initializer(expression, scope));
         Ok(ParameterMetadata {
             attributes: self.compile_attributes(
                 &parameter.attributes,
-                scope.as_deref(),
+                scope,
                 if parameter.modifiers.promotes_property() {
                     AttributePlacement::Promoted(AttributeTarget::Parameter)
                 } else {
@@ -137,34 +141,31 @@ impl Compiler<'_> {
         }
     }
 
-    fn compile_reflection_initializer(
-        &mut self,
-        expression: &Expression,
-        scope: Option<&str>,
-        line: usize,
-    ) -> Result<FunctionId, CompileError> {
-        if let Some(message) = crate::constant_callables::callable_constant_error(expression) {
-            return Err(self.error(message, line));
+    fn remember_initializer(&self, expression: &Expression, scope: Option<&str>) -> Initializer {
+        match &expression.kind {
+            ExpressionKind::Literal(value) => {
+                return match value {
+                    Literal::Null => Initializer::Null,
+                    Literal::Bool(value) => Initializer::Bool(*value),
+                    Literal::Int(value) => Initializer::Int(*value),
+                    Literal::Float(value) => Initializer::Float(value.to_bits()),
+                    Literal::String(value) => Initializer::String(value.clone()),
+                };
+            }
+            ExpressionKind::Array(items) if items.is_empty() => return Initializer::EmptyArray,
+            _ => {}
         }
-        if let Some(message) = crate::parameter_defaults::initializer_error(expression, true) {
-            return Err(self.error(message, line));
-        }
-        let mut builder = Compiler::new(
-            self.file,
-            self.lines,
-            &self.function.name,
-            &self.namespace,
-            self.compile_diagnostics,
-        );
-        builder.source = self.source;
-        builder.imports = self.imports.clone();
-        builder.class_scope = scope.map(str::to_owned);
-        builder.function.strict_types = self.function.strict_types;
-        let result = builder.compile_expression(expression)?;
-        builder.function.name = "{reflection initializer}".into();
-        builder.emit(Instruction::Return(result), line);
-        let index = self.functions.len();
-        self.append_function(builder, crate::policies::DeclarationTiming::Hidden, line);
-        Ok(FunctionId(index as u32))
+        let mut initializers = self.reflection_initializers.borrow_mut();
+        let index = initializers.len();
+        initializers.push(InitializerSource {
+            span: expression.span,
+            first_line: self.lines.line(expression.span.start),
+            function: self.function.name.clone(),
+            namespace: self.namespace.clone(),
+            scope: scope.map(str::to_owned),
+            imports: self.imports.clone(),
+            strict_types: self.function.strict_types,
+        });
+        Initializer::Expression(InitializerId(index))
     }
 }

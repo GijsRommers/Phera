@@ -191,8 +191,8 @@ impl Parser<'_> {
                 // the right side is a class name reference, so not even `**`
                 // binds into it: `a instanceof b ** c` is `(a instanceof b) ** c`.
                 self.bump()?;
-                let span = self.span_since(left.span);
                 let right = self.parse_expr(prec::CLONE)?;
+                let span = self.span_since(left.span);
                 left = Expression {
                     kind: ExpressionKind::InstanceOf {
                         value: Box::new(left),
@@ -221,8 +221,8 @@ impl Parser<'_> {
                 Assoc::Left | Assoc::Nonassoc => level + 1,
                 Assoc::Right => level,
             };
-            let span = self.span_since(left.span);
             let right = self.parse_expr(next_min)?;
+            let span = self.span_since(left.span);
             left = Expression {
                 kind: ExpressionKind::Binary {
                     operator: op,

@@ -20,6 +20,10 @@ pub struct CompiledUnit {
     pub functions: Vec<Function>,
     /// Reflection metadata for functions, indexed by their local function number.
     pub function_metadata: Vec<crate::reflection::FunctionMetadata>,
+    /// Validated declaration expressions are compiled only when reflection reads them.
+    pub reflection_initializers: Vec<crate::reflection::InitializerSource>,
+    /// Only files with a reflection initializer need source after compilation.
+    pub reflection_source: Option<Box<[u8]>>,
     /// Source class declarations; runtime linking is request-local.
     pub classes: Vec<crate::ClassDeclaration>,
     /// Unconditional declarations eligible for dependency-aware prelinking.
