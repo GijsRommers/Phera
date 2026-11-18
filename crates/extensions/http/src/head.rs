@@ -7,6 +7,7 @@ pub struct ResponseHead {
     /// In the order they were set. Names keep the spelling the script used;
     /// they are compared without regard to case.
     pub headers: Vec<(String, Vec<u8>)>,
+    lines: Vec<Vec<u8>>,
 }
 
 impl Default for ResponseHead {
@@ -14,6 +15,7 @@ impl Default for ResponseHead {
         ResponseHead {
             status: 200,
             headers: Vec::new(),
+            lines: Vec::new(),
         }
     }
 }
@@ -47,11 +49,32 @@ impl ResponseHead {
             self.remove(&name);
         }
         self.headers.push((name, value));
+        self.lines.push(line.to_vec());
     }
 
     pub(crate) fn remove(&mut self, name: &str) {
         self.headers
             .retain(|(existing, _)| !existing.eq_ignore_ascii_case(name));
+        self.lines.retain(|line| {
+            !line
+                .split(|&byte| byte == b':')
+                .next()
+                .is_some_and(|existing| existing.trim_ascii().eq_ignore_ascii_case(name.as_bytes()))
+        });
+    }
+
+    pub(crate) fn append_cookie(&mut self, value: &[u8]) {
+        self.headers.push(("Set-Cookie".into(), value.to_vec()));
+        self.lines.push([b"Set-Cookie: ", value].concat());
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.headers.clear();
+        self.lines.clear();
+    }
+
+    pub(crate) fn lines(&self) -> impl Iterator<Item = &[u8]> {
+        self.lines.iter().map(Vec::as_slice)
     }
 
     /// The value of a header, if the script set it.

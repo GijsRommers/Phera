@@ -132,6 +132,9 @@ Phase 1 is the classic PHP model made cheap: each request gets a fresh `Vm` and
 runs the front controller from the top. Parsing and compiling are paid once, in
 the shared code cache. This is correct for every application with no changes.
 
+Under `phera run`, `php_sapi_name()` and `PHP_SAPI` both report `cli`.
+Under `phera serve`, they report `phera`, while PHP's development server reports `cli-server`.
+
 Phase 2 is snapshot and fork. A worker boots the application once (autoloader,
 container, routes), freezes that heap as a snapshot, and gives each request a
 fork of it. Arrays and strings are already copy-on-write, so a fork copies only

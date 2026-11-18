@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use phera_bytecode::CompiledUnit;
 use phera_dotenv::Environment;
-use phera_ext_http::ResponseHead;
+use phera_ext_http::{RequestHeaders, ResponseHead, Sapi};
 use phera_ext_standard::environment::{RequestEnvironment, php_array};
 use phera_extension_api::{LocalFuture, Registry};
 use phera_value::Value;
@@ -32,6 +32,7 @@ pub use phera_vm::OutputSink;
 #[derive(Clone)]
 pub struct Runtime {
     registry: Arc<Registry>,
+    web_registry: Arc<Registry>,
     cache: CodeCache,
     environment: Arc<Environment>,
 }
@@ -79,7 +80,11 @@ impl Runtime {
         registry.load(&phera_ext_http::Http);
         registry.load(&phera_ext_hash::Hash);
         registry.load(&phera_ext_random::Random);
+        let mut web_registry = registry.clone();
+        phera_ext_http::register_web(&mut web_registry);
+        registry.constant("PHP_SAPI", Sapi::Cli.name());
         Runtime {
+            web_registry: Arc::new(web_registry),
             registry: Arc::new(registry),
             cache: CodeCache::default(),
             environment: Arc::new(environment),
@@ -109,7 +114,7 @@ impl Runtime {
         sink: Option<Box<dyn OutputSink>>,
     ) -> Result<RunResult, RuntimeError> {
         let unit = self.compile_file(path.as_ref()).await?;
-        let mut vm = self.new_vm();
+        let mut vm = self.new_vm(Sapi::Cli);
         vm.set_args(arguments);
         let server =
             environment::cli_server(php_array(self.environment.iter()), path.as_ref(), arguments);
@@ -144,7 +149,7 @@ impl Runtime {
             Err(error) => return HttpResponse::plain(500, error.to_string()),
         };
 
-        let mut vm = self.new_vm();
+        let mut vm = self.new_vm(Sapi::Web);
         http::define_superglobals(
             &mut vm,
             &request,
@@ -152,6 +157,7 @@ impl Runtime {
             document_root,
             php_array(self.environment.iter()),
         );
+        *vm.state_mut().get_or_default::<RequestHeaders>() = RequestHeaders(request.headers);
         let exit_status = vm.run(unit).await;
 
         let head = vm.state_mut().take::<ResponseHead>().unwrap_or_default();
@@ -194,8 +200,13 @@ impl Runtime {
         Ok(unit.to_string())
     }
 
-    fn new_vm(&self) -> Vm {
-        let mut vm = Vm::new(self.registry.clone());
+    fn new_vm(&self, sapi: Sapi) -> Vm {
+        let registry = match sapi {
+            Sapi::Cli => &self.registry,
+            Sapi::Web => &self.web_registry,
+        };
+        let mut vm = Vm::new(registry.clone());
+        *vm.state_mut().get_or_default::<Sapi>() = sapi;
         vm.set_global("_ENV", Value::from(php_array(self.environment.iter())));
         *vm.state_mut().get_or_default::<RequestEnvironment>() =
             RequestEnvironment::new(self.environment.clone());

@@ -89,6 +89,9 @@ impl Vm {
             if !self.error_handlers.pending.is_empty() {
                 self.drain_error_handlers().await?;
             }
+            if self.output_pending() {
+                Box::pin(self.finish_headers()).await?;
+            }
         }
     }
 

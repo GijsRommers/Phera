@@ -2,7 +2,7 @@
 
 use phera_extension_api::{
     CompileDiagnostic, CompileDiagnosticKind, CompileDiagnosticSite, Context, LocalFuture,
-    NativeResult, RequestState,
+    NativeResult, RequestCallback, RequestState,
 };
 use phera_value::{Diagnostics, Value};
 
@@ -25,6 +25,19 @@ impl Diagnostics for Vm {
 impl Context for Vm {
     fn write(&mut self, bytes: &[u8]) {
         self.out(bytes)
+    }
+
+    fn output_origin(&self) -> Option<(&str, usize)> {
+        let origin = self.output_writer.origin.as_ref()?;
+        Some((&origin.file, origin.line))
+    }
+
+    fn register_request_callback(
+        &mut self,
+        phase: RequestCallback,
+        arguments: Vec<Value>,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(self.register_callback(phase, arguments))
     }
 
     fn diagnostics(&mut self) -> &mut dyn Diagnostics {

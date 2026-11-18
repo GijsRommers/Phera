@@ -8,14 +8,18 @@
 //!
 //! [`RequestState`]: phera_extension_api::RequestState
 
+mod cookies;
 mod head;
+mod log;
+mod request;
 
 use phera_extension_api::{
-    Context, Extension, FunctionEntry, NativeResult, Param, ParamType, PhpArray, Registry, Value,
-    args,
+    Context, Extension, FunctionEntry, NativeResult, Param, ParamType, PhpArray, Registry,
+    RequestCallback, Value, args,
 };
 
 pub use head::ResponseHead;
+pub use request::{RequestHeaders, Sapi, register_web};
 
 pub struct Http;
 
@@ -36,6 +40,12 @@ const HEADERS_SENT_PARAMS: &[Param] = &[
     Param::new("line", ParamType::Mixed).by_ref().optional(),
 ];
 
+const HEADER_CALLBACK_PARAMS: &[Param] = &[Param::new("callback", ParamType::Callable)];
+const SHUTDOWN_PARAMS: &[Param] = &[
+    Param::new("callback", ParamType::Callable),
+    Param::new("args", ParamType::Mixed).variadic(),
+];
+
 impl Extension for Http {
     fn name(&self) -> &'static str {
         "http"
@@ -46,6 +56,27 @@ impl Extension for Http {
     }
 
     fn register(&self, registry: &mut Registry) {
+        cookies::register(registry);
+        log::register(registry);
+        registry.function(FunctionEntry::sync(
+            "php_sapi_name",
+            &[],
+            request::sapi_name,
+        ));
+        registry.function(FunctionEntry::asynchronous(
+            "header_register_callback",
+            HEADER_CALLBACK_PARAMS,
+            |context, arguments| {
+                context.register_request_callback(RequestCallback::Headers, arguments)
+            },
+        ));
+        registry.function(FunctionEntry::asynchronous(
+            "register_shutdown_function",
+            SHUTDOWN_PARAMS,
+            |context, arguments| {
+                context.register_request_callback(RequestCallback::Shutdown, arguments)
+            },
+        ));
         registry.function(FunctionEntry::sync("header", HEADER_PARAMS, header));
         registry.function(FunctionEntry::sync(
             "header_remove",
@@ -71,12 +102,8 @@ fn header(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let replace = args::bool(arguments, 1).unwrap_or(true);
     let status = args::int(arguments, 2).unwrap_or(0);
 
-    // A header may not contain a line break: that is how one request could
-    // smuggle a second header, or a body, into the response.
-    if line.iter().any(|byte| matches!(byte, b'\r' | b'\n' | 0)) {
-        context.warning(
-            "Header may not contain more than a single header, new line detected".to_string(),
-        );
+    let line = line.trim_ascii_end();
+    if !headers_open(context) || !valid_header_line(context, line) {
         return Ok(Value::Null);
     }
 
@@ -88,31 +115,74 @@ fn header(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(Value::Null)
 }
 
+pub(crate) fn headers_open(context: &mut dyn Context) -> bool {
+    let Some((file, line)) = context.output_origin() else {
+        return true;
+    };
+    let message = if file.is_empty() {
+        "Cannot modify header information - headers already sent".into()
+    } else {
+        format!(
+            "Cannot modify header information - headers already sent by \
+             (output started at {file}:{line})"
+        )
+    };
+    context.warning(message);
+    false
+}
+
+pub(crate) fn valid_header_line(context: &mut dyn Context, line: &[u8]) -> bool {
+    for &byte in line {
+        let message = match byte {
+            0 => "Header may not contain NUL bytes",
+            b'\r' | b'\n' => "Header may not contain more than a single header, new line detected",
+            _ => continue,
+        };
+        context.warning(message.into());
+        return false;
+    }
+    true
+}
+
 fn header_remove(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    if !headers_open(context) {
+        return Ok(Value::Null);
+    }
+    let name = args::string(arguments, 0);
+    if name.is_some_and(|name| name.as_bytes().contains(&b':')) {
+        context.warning("Header to delete may not contain colon.".into());
+        return Ok(Value::Null);
+    }
     let head = context.state().get_or_default::<ResponseHead>();
-    match args::string(arguments, 0) {
-        Some(name) => head.remove(&name.to_string_lossy()),
-        None => head.headers.clear(),
+    match name {
+        Some(name) => head.remove(name.to_string_lossy().trim_end()),
+        None => head.clear(),
     }
     Ok(Value::Null)
 }
 
 fn headers_list(context: &mut dyn Context, _arguments: &[Value]) -> NativeResult {
-    let head = context.state().get_or_default::<ResponseHead>();
     let mut list = PhpArray::new();
-    for (name, value) in &head.headers {
-        let mut line = name.clone().into_bytes();
-        line.extend_from_slice(b": ");
-        line.extend_from_slice(value);
-        list.push(Value::from(line))?;
+    if matches!(request::sapi(context), Sapi::Web) {
+        for line in context.state().get_or_default::<ResponseHead>().lines() {
+            list.push(Value::from(line))?;
+        }
     }
     Ok(Value::from(list))
 }
 
-/// Phera builds the whole response before sending anything, so headers can
-/// still change until the script ends.
-fn headers_sent(_context: &mut dyn Context, _arguments: &[Value]) -> NativeResult {
-    Ok(Value::Bool(false))
+fn headers_sent(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let origin = context.output_origin();
+    let sent = origin.is_some();
+    let (file, line) = origin.unwrap_or(("", 0));
+    let file = Value::from(file);
+    if let Some(reference) = args::reference(arguments, 1) {
+        *reference.borrow_mut() = Value::Int(line as i64);
+    }
+    if let Some(reference) = args::reference(arguments, 0) {
+        *reference.borrow_mut() = file;
+    }
+    Ok(Value::Bool(sent))
 }
 
 /// With an argument, sets the status and returns the previous one; without,

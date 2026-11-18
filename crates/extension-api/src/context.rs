@@ -12,6 +12,13 @@ use crate::{
 /// reference counted with `Rc`, so nothing that holds one can be `Send`.
 pub type LocalFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
 
+/// When a callback registered by PHP runs.
+#[derive(Clone, Copy)]
+pub enum RequestCallback {
+    Headers,
+    Shutdown,
+}
+
 /// What a native function may ask of the runtime that called it.
 ///
 /// One context belongs to one running request. The VM implements it; tests use
@@ -41,6 +48,20 @@ pub trait Context {
         callable: &'a Value,
         arguments: Vec<Value>,
     ) -> LocalFuture<'a, NativeResult>;
+
+    /// The location of the first write that committed the response headers.
+    fn output_origin(&self) -> Option<(&str, usize)> {
+        None
+    }
+
+    /// Resolves a callable in the registering scope and keeps it until the given request phase.
+    fn register_request_callback(
+        &mut self,
+        _phase: RequestCallback,
+        _arguments: Vec<Value>,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(async { Err(NativeError::error("This context has no request lifecycle")) })
+    }
 
     /// Creates an object of the named class with these properties, without
     /// calling its constructor. This is how `json_decode` and `(object)`

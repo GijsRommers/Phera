@@ -58,7 +58,7 @@ impl From<&'static str> for ConstantValue {
 
 /// Collects what extensions provide so the runtime can expose it to PHP code.
 /// Built once at startup and then shared, read-only, by every worker thread.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Registry {
     /// Keyed by lowercase name: PHP function names are case-insensitive.
     functions: HashMap<String, FunctionEntry>,

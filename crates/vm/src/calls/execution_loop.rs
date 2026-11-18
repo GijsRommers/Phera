@@ -46,7 +46,7 @@ pub(crate) enum BatchExit {
     Returned(Value),
     /// The work budget is spent; other tasks get a turn.
     Yield,
-    /// A warning queued a user error handler, which must run now.
+    /// Output or diagnostics queued a callback, which must run now.
     Handlers,
 }
 
@@ -112,7 +112,7 @@ impl Vm {
             if let Some(exit) = self.execute(instruction, stop, work)? {
                 return Ok(exit);
             }
-            if !self.error_handlers.pending.is_empty() {
+            if !self.error_handlers.pending.is_empty() || self.output_pending() {
                 return Ok(BatchExit::Handlers);
             }
             if *work >= YIELD_AFTER_STEPS {
