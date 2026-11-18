@@ -1,4 +1,7 @@
-//! Explicit recursive merge frames preserve PHP collisions without Rust stack recursion.
+//! `array_merge_recursive` and `array_replace_recursive`, which go into
+//! nested arrays. PHP recurses; here a stack of frames, one per nested
+//! array being combined, does the same without Rust recursion, so deep
+//! input cannot overflow the stack.
 
 use std::rc::Rc;
 
@@ -34,7 +37,7 @@ impl Frame {
     fn next_entry(&mut self) -> Option<(ArrayKey, Value)> {
         let position = self.position?;
         let (key, value) = self.source.entry_at(position)?;
-        let entry = (key.clone(), value.clone());
+        let entry = (key, value.clone());
         self.position = self.source.next_position(position);
         Some(entry)
     }
@@ -45,7 +48,8 @@ enum Resolution {
     Descend(Frame),
 }
 
-/// Explicit frames reproduce recursive collisions without using the Rust stack.
+/// Combines `source` into `result`, descending into nested arrays when
+/// `depth` is recursive.
 pub(super) fn combine_pair(
     context: &mut dyn Context,
     result: PhpArray,
@@ -55,20 +59,18 @@ pub(super) fn combine_pair(
 ) -> Result<PhpArray, NativeError> {
     let mut frames = vec![Frame::new(result, source, None, Vec::new())];
     loop {
-        let Some(frame) = frames.last_mut() else {
-            return Ok(PhpArray::new());
-        };
+        let frame = frames
+            .last_mut()
+            .expect("the outermost frame is returned when it completes");
         let Some((key, value)) = frame.next_entry() else {
-            let Some(completed) = frames.pop() else {
-                return Ok(PhpArray::new());
+            let completed = frames.pop().expect("this frame was just read");
+            let Some(parent) = frames.last_mut() else {
+                return Ok(completed.result);
             };
-            if let Some(parent) = frames.last_mut() {
-                if let Some(key) = completed.parent_key {
-                    parent.result.insert(key, Value::from(completed.result));
-                }
-                continue;
+            if let Some(key) = completed.parent_key {
+                parent.result.insert(key, Value::from(completed.result));
             }
-            return Ok(completed.result);
+            continue;
         };
         // Merge treats integer keys as positions; replace treats them as names.
         if matches!(collision, Collision::Merge) && matches!(key, ArrayKey::Int(_)) {
@@ -84,9 +86,7 @@ pub(super) fn combine_pair(
         };
         match resolution {
             Resolution::Store(value) => {
-                if let Some(frame) = frames.last_mut() {
-                    frame.result.insert(key, value);
-                }
+                frame.result.insert(key, value);
             }
             Resolution::Descend(child) => {
                 check_recursion(&frames, &child.identities)?;

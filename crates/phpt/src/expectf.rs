@@ -185,8 +185,17 @@ struct Matcher<'a> {
 }
 
 impl Matcher<'_> {
-    fn matches(&mut self, piece: usize, pos: usize) -> bool {
-        let Some(current) = self.pieces.get(piece) else {
+    fn matches(&mut self, mut piece: usize, mut pos: usize) -> bool {
+        // Literal text never needs a second try, so it is walked in a loop:
+        // a long expected output must not become equally deep recursion.
+        while let Some(Piece::Literal(c)) = self.pieces.get(piece) {
+            if self.output.get(pos) != Some(c) {
+                return false;
+            }
+            piece += 1;
+            pos += 1;
+        }
+        let Some(Piece::Placeholder(p)) = self.pieces.get(piece) else {
             return pos == self.output.len();
         };
 
@@ -194,26 +203,18 @@ impl Matcher<'_> {
             return false;
         }
 
-        let matched = match current {
-            Piece::Literal(c) => {
-                self.output.get(pos) == Some(c) && self.matches(piece + 1, pos + 1)
-            }
-            Piece::Placeholder(p) => {
-                let run = self.output[pos..]
-                    .iter()
-                    .take_while(|&&c| p.accepts_char(c))
-                    .count();
-                let max = if matches!(p, Placeholder::Char) {
-                    run.min(1)
-                } else {
-                    run
-                };
-
-                (p.min_len()..=max).rev().any(|len| {
-                    p.accepts(&self.output[pos..pos + len]) && self.matches(piece + 1, pos + len)
-                })
-            }
+        let run = self.output[pos..]
+            .iter()
+            .take_while(|&&c| p.accepts_char(c))
+            .count();
+        let max = if matches!(p, Placeholder::Char) {
+            run.min(1)
+        } else {
+            run
         };
+        let matched = (p.min_len()..=max).rev().any(|len| {
+            p.accepts(&self.output[pos..pos + len]) && self.matches(piece + 1, pos + len)
+        });
 
         if !matched {
             self.failed.insert((piece, pos));
@@ -278,5 +279,11 @@ mod tests {
     #[test]
     fn regex_is_unsupported() {
         assert!(expectf_matches("%r.*%r", "x").is_err());
+    }
+
+    #[test]
+    fn long_literal_output_does_not_recurse() {
+        let text = "line\n".repeat(200_000);
+        assert!(ok(&format!("{text}%d"), &format!("{text}7")));
     }
 }

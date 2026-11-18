@@ -1,48 +1,85 @@
-//! Calls are resolved before arguments are evaluated, preserving PHP warning order.
+//! `InitCall` and `InitDynamicCall`: find the callee, then reserve its window.
+//!
+//! ```php
+//! greet($name);      // InitCall: the symbol `greet`, linked once per file
+//! $handler($event);  // InitDynamicCall: whatever callable the value is
+//! ```
+//!
+//! The callee is found before the arguments are evaluated, because only it
+//! knows which parameters take references, and so that "undefined function"
+//! comes before any warning an argument raises, as in PHP. Then the window
+//! is reserved at the top of the register stack and a [`PreparedCall`] is
+//! pushed. A call to PHP code needs nothing else; any other callee keeps
+//! its full [`Callee`] in the call's details.
 
 use phera_bytecode::{NameId, PathId, Reg, SymbolId};
 use phera_extension_api::{NativeError, NativeResult};
 use phera_value::{Value, to_php_string};
 
-use crate::calls::call_state::{CallTarget, Callee, ParameterSpec, PendingCall};
+use crate::calls::call_state::{CallTarget, Callee, ParameterSpec};
+use crate::calls::prepared_call::{CallDetails, CallKind, PreparedCall, PreparedCallee};
+use crate::code_table::{CodeTable, FunctionIndex};
 use crate::{AccessPath, Vm};
+
+/// What a function symbol of a file was linked to: a PHP function, or the
+/// description of anything else (a native function, an intrinsic).
+#[derive(Clone)]
+pub(crate) enum LinkedFunction {
+    Php(FunctionIndex),
+    Other(Callee),
+}
 
 impl Vm {
     /// Resolve the callee before argument evaluation so reference parameters are known.
     pub(crate) fn init_call(&mut self, symbol: SymbolId) -> Result<(), NativeError> {
-        let cached = self.current().and_then(|frame| {
+        let linked = self.current().and_then(|frame| {
             frame
-                .cache
+                .cache()
                 .symbols
                 .borrow()
                 .get(symbol.index())
                 .cloned()
                 .flatten()
         });
-        let callee = if let Some(cached) = cached {
-            cached
-        } else {
-            let definition = self
-                .current()
-                .and_then(|frame| frame.unit.symbols.get(symbol.index()))
-                .cloned()
-                .ok_or_else(|| internal_error!("invalid symbol"))?;
-            let name = if self.exists(&definition.name) {
-                definition.name
-            } else if let Some(fallback) = definition.fallback.filter(|name| self.exists(name)) {
-                fallback
-            } else {
-                definition.written
-            };
-            let callee = self.resolve_callee(&name)?;
-            if let Some(frame) = self.current()
-                && let Some(slot) = frame.cache.symbols.borrow_mut().get_mut(symbol.index())
-            {
-                *slot = Some(callee.clone());
-            }
-            callee
+        let linked = match linked {
+            Some(linked) => linked,
+            None => self.link_function_symbol(symbol)?,
         };
-        self.prepare_call(callee)
+        match linked {
+            LinkedFunction::Php(function) => {
+                self.prepare_php_call(function);
+                Ok(())
+            }
+            LinkedFunction::Other(callee) => self.prepare_call(callee),
+        }
+    }
+
+    /// Find what a function symbol names, with PHP's namespace fallback, and
+    /// remember it for the file: a declared function cannot go away.
+    fn link_function_symbol(&mut self, symbol: SymbolId) -> Result<LinkedFunction, NativeError> {
+        let definition = self
+            .current()
+            .and_then(|frame| frame.unit().symbols.get(symbol.index()))
+            .cloned()
+            .ok_or_else(|| internal_error!("invalid symbol"))?;
+        let name = if self.exists(&definition.name) {
+            definition.name
+        } else if let Some(fallback) = definition.fallback.filter(|name| self.exists(name)) {
+            fallback
+        } else {
+            definition.written
+        };
+        let callee = self.resolve_callee(&name)?;
+        let linked = match callee.target {
+            CallTarget::User(function) => LinkedFunction::Php(function),
+            _ => LinkedFunction::Other(callee),
+        };
+        if let Some(frame) = self.current()
+            && let Some(slot) = frame.cache().symbols.borrow_mut().get_mut(symbol.index())
+        {
+            *slot = Some(linked.clone());
+        }
+        Ok(linked)
     }
 
     /// Resolve a computed callable after publishing its conversion diagnostics.
@@ -50,7 +87,7 @@ impl Vm {
         let value = self.read_local(callee);
         let usage = if self.current().is_some_and(|frame| {
             matches!(
-                frame.function().instructions.get(frame.ip),
+                frame.function().instructions.get(frame.ip()),
                 Some(phera_bytecode::Instruction::MakeCallable { .. })
             )
         }) {
@@ -59,64 +96,41 @@ impl Vm {
             crate::callables::CallableUse::Direct
         };
         let callee = self.resolve_callable_for(&value, usage)?;
-        self.prepare_call(callee)?;
-        if let Value::Object(object) = value
-            && object.class.name() == "Closure"
-            && let Some(call) = self.call_stack.preparing.last_mut()
-        {
-            call.owner = Some(object);
-        }
-        Ok(())
+        self.prepare_call(callee)
     }
 
     /// Snapshot the signature and target so argument evaluation cannot change resolution.
     pub(crate) fn resolve_callee(&self, name: &str) -> Result<Callee, NativeError> {
         let lower = name.trim_start_matches('\\').to_ascii_lowercase();
-        let (name, target, parameters) = if let Some(reference) = self.function_table.get(&lower) {
-            let unit = &reference.unit;
-            let index = reference.index;
-            let function = unit
-                .functions
-                .get(index)
-                .ok_or_else(|| internal_error!("function table"))?;
-            let parameters: Vec<_> = function
-                .parameters
-                .iter()
-                .map(|parameter| ParameterSpec::user(unit, parameter))
-                .collect();
-            (
-                function.name.as_str().into(),
-                CallTarget::User {
-                    unit: unit.clone(),
-                    index,
-                },
-                parameters,
-            )
-        } else if let Some(entry) = self.registry.get_function(name.trim_start_matches('\\')) {
-            (
-                entry.name.into(),
-                CallTarget::Native(*entry),
-                entry.params.iter().map(ParameterSpec::native).collect(),
-            )
-        } else if let Some(intrinsic) = crate::intrinsics::Intrinsic::resolve(name) {
-            let parameters = intrinsic
-                .parameter_names()
-                .iter()
-                .map(|name| ParameterSpec {
-                    name: (*name).to_owned(),
-                    ty: None,
-                    by_reference: matches!(intrinsic, crate::intrinsics::Intrinsic::IsCallable)
-                        && *name == "callable_name",
-                    variadic: matches!(intrinsic, crate::intrinsics::Intrinsic::CallUserFunc)
-                        && *name == "args",
-                })
-                .collect();
-            (lower.into(), CallTarget::Intrinsic(intrinsic), parameters)
-        } else {
-            return Err(NativeError::error(format!(
-                "Call to undefined function {name}()"
-            )));
-        };
+        if let Some(index) = self.function_table.get(&lower) {
+            return Ok(self.function_callee(index));
+        }
+        let (name, target, parameters): (_, _, Vec<_>) =
+            if let Some(entry) = self.registry.get_function(name.trim_start_matches('\\')) {
+                (
+                    entry.name.into(),
+                    CallTarget::Native(*entry),
+                    entry.params.iter().map(ParameterSpec::native).collect(),
+                )
+            } else if let Some(intrinsic) = crate::intrinsics::Intrinsic::resolve(name) {
+                let parameters = intrinsic
+                    .parameter_names()
+                    .iter()
+                    .map(|name| ParameterSpec {
+                        name: (*name).to_owned(),
+                        ty: None,
+                        by_reference: matches!(intrinsic, crate::intrinsics::Intrinsic::IsCallable)
+                            && *name == "callable_name",
+                        variadic: matches!(intrinsic, crate::intrinsics::Intrinsic::CallUserFunc)
+                            && *name == "args",
+                    })
+                    .collect();
+                (lower.into(), CallTarget::Intrinsic(intrinsic), parameters)
+            } else {
+                return Err(NativeError::error(format!(
+                    "Call to undefined function {name}()"
+                )));
+            };
         Ok(Callee {
             argument_binding: crate::calls::callback_binding::ArgumentBinding::Caller,
             name,
@@ -125,50 +139,42 @@ impl Vm {
         })
     }
 
-    /// Resolution reserves the callee window before any argument expression executes.
-    pub(crate) fn prepare_call(&mut self, callee: Callee) -> Result<(), NativeError> {
-        let registers = match &callee.target {
-            CallTarget::User { unit, index } => unit.functions[*index].registers as usize,
-            CallTarget::Method { method, .. } => match &method.body {
-                crate::classes::MethodBody::User(function) => {
-                    function.unit.functions[function.index].registers as usize
-                }
-                _ => callee.parameters.len(),
-            },
-            CallTarget::Closure(object) => {
-                let native = object.native.borrow();
-                let state = native
-                    .as_ref()
-                    .and_then(|value| value.downcast_ref::<crate::closures::ClosureState>())
-                    .ok_or_else(|| internal_error!("closure state"))?;
-                state
-                    .callee
-                    .user_function()
-                    .map_or(callee.parameters.len(), |(unit, index)| {
-                        unit.functions[index].registers as usize
-                    })
-            }
-            _ => callee.parameters.len(),
+    /// The callee record of a declared PHP function.
+    pub(crate) fn function_callee(&self, function: crate::code_table::FunctionIndex) -> Callee {
+        let unit = self.code.unit(function);
+        let body = self.code.function(function);
+        Callee {
+            argument_binding: crate::calls::callback_binding::ArgumentBinding::Caller,
+            name: body.name.as_str().into(),
+            parameters: body
+                .parameters
+                .iter()
+                .map(|parameter| ParameterSpec::user(unit, parameter))
+                .collect(),
+            target: CallTarget::User(function),
         }
-        .max(callee.parameters.len());
-        let base = self.registers.len();
-        self.registers.grow_to(base + registers);
-        let parameters = callee.parameters.len();
-        self.call_stack.preparing.push(PendingCall {
-            owner: None,
-            callee,
-            window: crate::calls::call_state::CallWindow {
-                base,
-                registers,
-                parameters,
-                supplied: 0,
-                argument_count: 0,
-                checks: crate::calls::call_state::TypeChecks::Complete,
-                named: None,
-                extra_named: Vec::new(),
-                order: crate::calls::call_state::ArgumentOrder::Positional,
-            },
-        });
+    }
+
+    /// Reserve the window of a call to a PHP function and record the call.
+    #[inline]
+    pub(crate) fn prepare_php_call(&mut self, function: FunctionIndex) {
+        let (code, stack, registers) = (&self.code, &mut self.call_stack, &mut self.registers);
+        crate::calls::php_windows::push_php_call(
+            code,
+            (stack, registers),
+            function,
+            CallKind::Function,
+            [],
+        );
+    }
+
+    /// Reserve the window of a call to `callee` and record the call. A call
+    /// to PHP code needs only the record; anything else keeps its
+    /// description in the call's details.
+    pub(crate) fn prepare_call(&mut self, callee: Callee) -> Result<(), NativeError> {
+        if let Err(callee) = self.prepare_php_callee(callee) {
+            prepare_general(&mut self.call_stack, &mut self.registers, callee);
+        }
         Ok(())
     }
 
@@ -178,13 +184,12 @@ impl Vm {
             .current()
             .ok_or_else(|| internal_error!("argument without frame"))?;
         let name = frame
-            .cache
+            .cache()
             .names
             .get(name.index())
             .cloned()
             .ok_or_else(|| internal_error!("argument name"))?;
-        let call = self.call_stack.pending_mut()?;
-        call.window.named = Some(name);
+        self.call_stack.top_details_mut()?.named = Some(name);
         Ok(())
     }
 
@@ -194,8 +199,8 @@ impl Vm {
             .current()
             .ok_or_else(|| internal_error!("missing path frame"))?;
         Ok(AccessPath::compiled(
-            frame.unit.clone(),
-            frame.function_id,
+            frame.unit().clone(),
+            frame.function_id(),
             index,
         ))
     }
@@ -219,4 +224,40 @@ impl Vm {
             (),
         ))))
     }
+}
+
+/// How many registers the window of a call to the PHP function `function`
+/// has before any surplus arguments: its own registers, and at least one, so
+/// that every prepared call starts above the previous one (unwinding tells
+/// them apart by where they start).
+#[inline]
+pub(crate) fn php_window(code: &CodeTable, function: FunctionIndex) -> usize {
+    let facts = code.facts(function);
+    (facts.registers.max(facts.parameters) as usize).max(1)
+}
+
+/// Reserve the window of a call to a general callee and record the call,
+/// with the callee in its details.
+pub(crate) fn prepare_general(
+    stack: &mut crate::calls::call_stack::CallStack,
+    registers: &mut crate::calls::registers::Registers,
+    callee: Callee,
+) {
+    let size = general_window(&callee);
+    let base = registers.len();
+    registers.grow_to(base + size);
+    let details = CallDetails {
+        callee: Some(callee),
+        ..CallDetails::default()
+    };
+    stack.push_call(
+        PreparedCall::new(PreparedCallee::General, base),
+        Some(details),
+    );
+}
+
+/// The window size of a call to a general callee (native code): one
+/// register per parameter, and at least one.
+pub(crate) fn general_window(callee: &Callee) -> usize {
+    callee.parameters.len().max(1)
 }

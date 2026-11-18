@@ -55,19 +55,18 @@ impl Vm {
             .to_string_lossy();
         drop(diagnostics);
         let frame = self
-            .call_stack
-            .current_mut()
+            .current()
             .ok_or_else(|| internal_error!("place without frame"))?;
         if let Some(index) = frame.function().locals.iter().position(|candidate| {
             frame
-                .unit
+                .unit()
                 .names
                 .get(candidate.index())
                 .is_some_and(|value| value == &name)
         }) {
             return Ok(Some(Reg(index as u16)));
         }
-        if let Some(register) = frame.dynamic.get(&name) {
+        if let Some(register) = frame.extras.dynamic.get(&name) {
             return Ok(Some(*register));
         }
         if creation == Creation::Create {
@@ -195,7 +194,7 @@ impl Vm {
                                 .function()
                                 .locals
                                 .get(register.0 as usize)
-                                .and_then(|name| frame.unit.names.get(name.index()))
+                                .and_then(|name| frame.unit().names.get(name.index()))
                         })
                         .cloned()
                         .unwrap_or_default();

@@ -1,40 +1,39 @@
-//! Padding and newline insertion preserve the original byte stream.
+//! Padding and line breaks: `str_pad("7", 3, "0", STR_PAD_LEFT)` is `"007"`.
 
 use phera_extension_api::{
-    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Registry, Value, args,
+    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Value, args,
 };
 
-use super::{buffer, bytes};
+use super::buffer;
+use crate::constants::{STR_PAD_BOTH, STR_PAD_LEFT, STR_PAD_RIGHT};
 
-enum Side {
-    Left,
-    Right,
-    Both,
-}
+pub(super) const FUNCTIONS: &[FunctionEntry] = &[STR_PAD, NL2BR];
 
-const PAD_PARAMS: &[Param] = &[
-    Param::new("string", ParamType::String),
-    Param::new("length", ParamType::Int),
-    Param::new("pad_string", ParamType::String).optional(),
-    Param::new("pad_type", ParamType::Int).optional(),
-];
+/// `str_pad(string $string, int $length, string $pad_string = " ",
+/// int $pad_type = STR_PAD_RIGHT): string`
+///
+/// ```php
+/// str_pad("7", 3, "0", STR_PAD_LEFT); // "007"
+/// str_pad("ab", 7, "-=", STR_PAD_BOTH); // "-=ab-=-": the padding restarts on each side
+/// ```
+const STR_PAD: FunctionEntry = FunctionEntry::sync(
+    "str_pad",
+    &[
+        Param::new("string", ParamType::String),
+        Param::new("length", ParamType::Int),
+        Param::new("pad_string", ParamType::String).optional(),
+        Param::new("pad_type", ParamType::Int).optional(),
+    ],
+    str_pad,
+);
 
-const NEWLINES_PARAMS: &[Param] = &[
-    Param::new("string", ParamType::String),
-    Param::new("use_xhtml", ParamType::Bool).optional(),
-];
-
-pub(crate) fn register(registry: &mut Registry) {
-    registry.function(FunctionEntry::sync("str_pad", PAD_PARAMS, pad));
-    registry.function(FunctionEntry::sync("nl2br", NEWLINES_PARAMS, newlines));
-}
-
-/// Padding arguments are checked only if the target is longer than the input.
-fn pad(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn str_pad(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let string = args::bytes(arguments, 0);
     let length = args::int(arguments, 1).unwrap_or_default();
+    // PHP returns a string that is long enough as it is, before it looks at
+    // the other two arguments: str_pad("abc", 2, "") is no error.
     if length <= string.len() as i64 {
-        return Ok(bytes(string.to_vec()));
+        return Ok(arguments[0].clone());
     }
     let padding = if args::given(arguments, 2) {
         args::bytes(arguments, 2)
@@ -46,31 +45,42 @@ fn pad(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
             "str_pad(): Argument #3 ($pad_string) must not be empty",
         ));
     }
-    let side = match args::int(arguments, 3).unwrap_or(1) {
-        0 => Side::Left,
-        1 => Side::Right,
-        2 => Side::Both,
+    let length = length as usize;
+    let missing = length - string.len();
+    let before = match args::int(arguments, 3).unwrap_or(STR_PAD_RIGHT) {
+        STR_PAD_LEFT => missing,
+        STR_PAD_RIGHT => 0,
+        STR_PAD_BOTH => missing / 2,
         _ => {
             return Err(NativeError::value_error(
                 "str_pad(): Argument #4 ($pad_type) must be STR_PAD_LEFT, STR_PAD_RIGHT, or STR_PAD_BOTH",
             ));
         }
     };
-    let mut result = buffer(length as usize)?;
-    let extra = length as usize - string.len();
-    let left = match side {
-        Side::Left => extra,
-        Side::Both => extra / 2,
-        Side::Right => 0,
-    };
-    result.extend(padding.iter().cycle().take(left));
+    let mut result = buffer(length)?;
+    result.extend(padding.iter().cycle().take(before));
     result.extend_from_slice(string);
-    result.extend(padding.iter().cycle().take(extra - left));
-    Ok(bytes(result))
+    result.extend(padding.iter().cycle().take(missing - before));
+    Ok(Value::from(result))
 }
 
-/// CRLF and LFCR each produce one break, and retain both original bytes.
-fn newlines(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+/// `nl2br(string $string, bool $use_xhtml = true): string`, a `<br />`
+/// before every line break.
+///
+/// ```php
+/// nl2br("a\nb");          // "a<br />\nb"
+/// nl2br("a\r\nb", false); // "a<br>\r\nb": "\r\n" and "\n\r" are one break
+/// ```
+const NL2BR: FunctionEntry = FunctionEntry::sync(
+    "nl2br",
+    &[
+        Param::new("string", ParamType::String),
+        Param::new("use_xhtml", ParamType::Bool).optional(),
+    ],
+    nl2br,
+);
+
+fn nl2br(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let string = args::bytes(arguments, 0);
     let tag: &[u8] = if args::bool(arguments, 1).unwrap_or(true) {
         b"<br />"
@@ -79,21 +89,22 @@ fn newlines(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     };
     let mut result = buffer(string.len().saturating_mul(7))?;
     let mut cursor = 0;
-    while let Some(&byte) = string.get(cursor) {
-        if matches!(byte, b'\r' | b'\n') {
-            result.extend_from_slice(tag);
-            result.push(byte);
-            if let Some(&next) = string.get(cursor + 1)
-                && matches!(next, b'\r' | b'\n')
-                && next != byte
-            {
-                result.push(next);
-                cursor += 1;
-            }
-        } else {
-            result.push(byte);
-        }
+    while cursor < string.len() {
+        let byte = string[cursor];
         cursor += 1;
+        let line_break = matches!(byte, b'\r' | b'\n');
+        if line_break {
+            result.extend_from_slice(tag);
+        }
+        result.push(byte);
+        if line_break
+            && let Some(&next) = string.get(cursor)
+            && matches!(next, b'\r' | b'\n')
+            && next != byte
+        {
+            result.push(next);
+            cursor += 1;
+        }
     }
-    Ok(bytes(result))
+    Ok(Value::from(result))
 }

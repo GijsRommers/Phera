@@ -1,11 +1,31 @@
-//! Heap call frames and conversion of immutable bytecode constants.
+//! A frame is five numbers; what only some frames need lives beside it.
+//!
+//! During `f(1, g(2))`, after `g` has been entered:
+//!
+//! ```text
+//! frames (Vec<Frame>):   [ {main} base 0 ]  [ g base 9, destination r6 ]
+//! registers:             [ main's locals and temporaries | g: 2, g's locals ]
+//!                          0                                9
+//! side table (by depth):   0: dynamic names of {main}       1: (unused)
+//! ```
+//!
+//! `f`'s first argument is already in main's temporaries; when `g` returns, its
+//! result goes to main's r6 and `g`'s registers are emptied again. Pushing
+//! and popping a frame copies sixteen bytes. A frame that uses `foreach`,
+//! `$$name` or `func_get_args()` keeps that state in `FrameExtras` at its
+//! depth, and only such frames touch it. A method's `$this` and a closure
+//! are in its window (see `window_context`); `FrameView` reads a frame.
 
-use std::{rc::Rc, sync::Arc};
+use std::rc::Rc;
 
-use phera_bytecode::{CompiledUnit, Constant, Function, Reg};
-use phera_value::{PhpArray, Value};
+use phera_bytecode::Reg;
+use phera_value::PhpArray;
 
 use crate::AccessPath;
+use crate::calls::prepared_call::CallKind;
+use crate::code_table::FunctionIndex;
+
+pub(crate) use crate::calls::frame_view::FrameView;
 
 /// Foreach either owns a value snapshot or follows a live reference path.
 pub(crate) struct IteratorState {
@@ -19,196 +39,149 @@ pub(crate) struct IteratorState {
     pub(crate) started: bool,
 }
 
-/// A PHP activation lives on the heap; calls never recurse through the Rust stack.
+/// One running PHP function: which code, where its registers start, where it
+/// continues, and where its result goes.
+#[derive(Clone, Copy)]
 pub(crate) struct Frame {
-    /// Active callable objects stay alive; lexical closures also own their static storage.
-    pub(crate) closure: Option<Rc<phera_value::Object>>,
-    /// Present only for methods; ordinary functions never inherit $this.
-    pub(crate) method: Option<crate::classes::MethodContext>,
-    /// Resolved callees are shared by all frames executing this unit.
-    pub(crate) cache: crate::SymbolCache,
-    /// Preparation depth on entry, used to release abandoned argument windows.
-    pub(crate) call_start: usize,
-    pub(crate) unit: Arc<CompiledUnit>,
-    /// None selects the unit top level, including include/eval frames.
-    pub(crate) function_id: Option<usize>,
-    /// Instruction pointer: the next instruction, published before observable operations.
-    pub(crate) ip: usize,
-    /// The caller register receiving the result; absent at a callback boundary.
-    pub(crate) destination: Option<Reg>,
-    /// Start of this frame window in the request register stack.
-    pub(crate) base: usize,
-    /// Includes dynamic locals introduced after frame construction.
-    pub(crate) count: usize,
-    /// PHP traces omit defaulted parameters beyond the supplied call arity.
-    pub(crate) supplied_arguments: usize,
-    /// Saved argument view for PHP func_get_args and related intrinsics.
-    pub(crate) saved_arguments: Option<usize>,
-    /// Number of supplied positional arguments, excluding named variadic entries.
-    pub(crate) argument_count: usize,
-    /// Surplus values are stored immediately past the declared register window.
-    pub(crate) extra_arguments: usize,
-    /// Optional names for variables accessed through dynamic scope.
-    pub(crate) dynamic: crate::dynamic_variables::DynamicVariables,
-    /// Compiler-assigned slots hold active foreach traversals.
-    pub(crate) iterators: crate::iterators::Iterators,
+    pub(crate) function: FunctionIndex,
+    base: u32,
+    ip: u32,
+    /// The caller's register that receives the result.
+    destination: Reg,
+    flags: FrameFlags,
 }
 
+/// Small facts about a frame, one bit each.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct FrameFlags(u16);
+
+impl FrameFlags {
+    /// The frame's side-table entry holds something and is emptied on return.
+    const EXTRAS: u16 = 1;
+    /// Native code called this function: its result goes back to Rust, not
+    /// to a register.
+    const CALLBACK: u16 = 1 << 1;
+    /// Bits 2 and 3 hold the frame's [`CallKind`], which says what its
+    /// window keeps below the first register.
+    const KIND_SHIFT: u16 = 2;
+    const KIND_MASK: u16 = 0b11 << Self::KIND_SHIFT;
+    /// The top eight bits hold how many arguments the call passed, when it
+    /// passed fewer than the function's parameters (at most 64, see
+    /// `FunctionShape::Plain`), so that a call with defaults needs no
+    /// side-table entry. All ones means "one per parameter".
+    const PASSED_SHIFT: u16 = 8;
+    const PASSED_UNKNOWN: u16 = 0xff;
+
+    #[inline]
+    fn of_kind(kind: CallKind) -> u16 {
+        (kind as u16) << Self::KIND_SHIFT
+    }
+}
+
+const _: () = assert!(std::mem::size_of::<Frame>() == 16);
+
 impl Frame {
-    /// Allocate the function window with undefined slots and no Rust call recursion.
-    pub(crate) fn new(
-        cache: crate::SymbolCache,
-        registers: &mut crate::calls::registers::Registers,
-        unit: Arc<CompiledUnit>,
-        function_id: Option<usize>,
-        destination: Option<Reg>,
+    /// A frame about to run `function` from its first instruction.
+    #[inline]
+    pub(crate) fn new(function: FunctionIndex, base: usize, destination: Option<Reg>) -> Self {
+        Self::of_kind(function, CallKind::Function, base, destination)
+    }
+
+    /// A frame of `kind` whose first parameter is at register `base`.
+    #[inline]
+    pub(crate) fn of_kind(
+        function: FunctionIndex,
+        kind: CallKind,
         base: usize,
+        destination: Option<Reg>,
     ) -> Self {
-        let function = function_id
-            .and_then(|i| unit.functions.get(i))
-            .unwrap_or(&unit.main);
-        let count = function.registers;
-        let dynamic =
-            crate::dynamic_variables::DynamicVariables::new(function.dynamic_scope.into());
-        let iterators = crate::iterators::Iterators::new(function.iterators);
-        registers.grow_to(base + count as usize);
+        let passed = FrameFlags::PASSED_UNKNOWN << FrameFlags::PASSED_SHIFT;
+        let mut flags = FrameFlags(FrameFlags::of_kind(kind) | passed);
+        if destination.is_none() {
+            flags.0 |= FrameFlags::CALLBACK;
+        }
         Self {
-            closure: None,
-            method: None,
-            cache,
-            call_start: 0,
-            unit,
-            function_id,
+            function,
+            base: base as u32,
             ip: 0,
-            destination,
-            base,
-            count: count as usize,
-            saved_arguments: None,
-            argument_count: 0,
-            extra_arguments: 0,
-            supplied_arguments: 0,
-            dynamic,
-            iterators,
+            destination: destination.unwrap_or(Reg(0)),
+            flags,
         }
     }
 
-    /// Local operands address only this activation, excluding saved arguments.
+    /// Where this frame's registers start in the request's register stack.
     #[inline]
-    pub fn slots<'a>(
-        &self,
-        registers: &'a crate::calls::registers::Registers,
-    ) -> &'a [Option<Value>] {
-        registers.window(self.base, self.count)
+    pub(crate) fn base(&self) -> usize {
+        self.base as usize
     }
 
-    /// Raw local writes must stay inside the declared or dynamically grown window.
+    /// The same frame, recording that its call passed only `passed`
+    /// arguments (fewer than 64).
     #[inline]
-    pub fn slots_mut<'a>(
-        &self,
-        registers: &'a mut crate::calls::registers::Registers,
-    ) -> &'a mut [Option<Value>] {
-        registers.window_mut(self.base, self.count)
+    pub(crate) fn with_passed(mut self, passed: usize) -> Self {
+        let mask = FrameFlags::PASSED_UNKNOWN << FrameFlags::PASSED_SHIFT;
+        self.flags.0 = (self.flags.0 & !mask) | ((passed as u16) << FrameFlags::PASSED_SHIFT);
+        self
     }
 
-    /// Top-level and function activations share immutable bytecode access.
-    pub fn function(&self) -> &Function {
-        self.function_id
-            .and_then(|i| self.unit.functions.get(i))
-            .unwrap_or(&self.unit.main)
-    }
-
-    /// PHP exposes current fixed parameters, but keeps original variadic arguments separately.
-    pub(crate) fn argument(
-        &self,
-        registers: &crate::calls::registers::Registers,
-        index: usize,
-    ) -> Value {
-        let function = self.function();
-        let fixed = function.parameters.len()
-            - usize::from(function.argument_layout == phera_bytecode::ArgumentLayout::Variadic);
-        let slot = if index < fixed {
-            self.base + index
-        } else if let Some(base) = self.saved_arguments {
-            base + index
-        } else {
-            self.base + self.count + index - fixed
-        };
-        registers
-            .window(slot, 1)
-            .first()
-            .and_then(Option::as_ref)
-            .map(|value| value.deref().clone())
-            .unwrap_or_default()
-    }
-
-    /// IP has already advanced, so diagnostics use the previous instruction line.
-    pub(crate) fn line(&self) -> usize {
-        if self.ip == 0 && self.function_id.is_some() {
-            return self.function().definition_line as usize;
-        }
-        self.function()
-            .lines
-            .get(self.ip.saturating_sub(1))
-            .copied()
-            .unwrap_or(1) as usize
-    }
-
-    /// Ordinary reads see through PHP references without copying the reference cell.
+    /// How many arguments the call passed, when it recorded that in the
+    /// frame (fewer than the parameters, through the quick entry).
     #[inline]
-    pub fn get(&self, registers: &crate::calls::registers::Registers, register: Reg) -> Value {
-        self.slots(registers)
-            .get(register.0 as usize)
-            .and_then(Option::as_ref)
-            .map(|value| value.deref().clone())
-            .unwrap_or_default()
+    pub(crate) fn passed(&self) -> Option<usize> {
+        let passed = self.flags.0 >> FrameFlags::PASSED_SHIFT;
+        (passed != FrameFlags::PASSED_UNKNOWN).then_some(passed as usize)
     }
 
-    /// Store a raw slot value; PHP write-through assignment is handled separately.
+    /// What kind of code the frame runs.
     #[inline]
-    pub fn set(
-        &mut self,
-        registers: &mut crate::calls::registers::Registers,
-        register: Reg,
-        value: Value,
-    ) {
-        if let Some(slot) = self.slots_mut(registers).get_mut(register.0 as usize) {
-            *slot = Some(value)
+    pub(crate) fn kind(&self) -> CallKind {
+        match (self.flags.0 & FrameFlags::KIND_MASK) >> FrameFlags::KIND_SHIFT {
+            0 => CallKind::Function,
+            1 => CallKind::Method,
+            2 => CallKind::Constructor,
+            _ => CallKind::Closure,
         }
     }
-}
 
-/// Materialize bytecode constants as request-local PHP values.
-pub(crate) fn value(constant: &Constant) -> Value {
-    match constant {
-        Constant::Null => Value::Null,
-        Constant::Array(entries) => {
-            let mut array = PhpArray::new();
-            for (key, constant) in entries {
-                let value = value(constant);
-                match key {
-                    phera_bytecode::ConstantKey::Next => {
-                        let _ = array.push(value);
-                    }
-                    phera_bytecode::ConstantKey::Int(key) => {
-                        array.insert(phera_value::ArrayKey::Int(*key), value);
-                    }
-                    phera_bytecode::ConstantKey::String(key) => {
-                        array.insert(phera_value::ArrayKey::String(key.clone().into()), value);
-                    }
-                }
-            }
-            Value::Array(Rc::new(array))
-        }
-        Constant::Bool(value) => Value::Bool(*value),
-        Constant::Int(value) => Value::Int(*value),
-        Constant::Float(value) => Value::Float(*value),
-        Constant::String(value) => Value::from(value.clone()),
+    /// Where the frame's window starts, below its first register when it
+    /// keeps `$this` or a closure there. Returning empties from here.
+    #[inline]
+    pub(crate) fn start(&self) -> usize {
+        self.base() - self.kind().prefix()
     }
-}
 
-impl Frame {
-    /// The unit-owned slot is keyed by this function and its published next IP.
-    pub(crate) fn site_cache(&self) -> Option<&std::cell::RefCell<crate::unit_caches::CachedSite>> {
-        self.cache.site(self.function_id, self.ip)
+    /// The next instruction to run.
+    #[inline]
+    pub(crate) fn ip(&self) -> usize {
+        self.ip as usize
+    }
+
+    #[inline]
+    pub(crate) fn set_ip(&mut self, ip: usize) {
+        self.ip = ip as u32;
+    }
+
+    /// The same frame with its registers starting at `base` instead.
+    pub(crate) fn moved_to(self, base: usize) -> Self {
+        Self {
+            base: base as u32,
+            ..self
+        }
+    }
+
+    /// The caller's register for the result; `None` when native code called.
+    #[inline]
+    pub(crate) fn destination(&self) -> Option<Reg> {
+        (self.flags.0 & FrameFlags::CALLBACK == 0).then_some(self.destination)
+    }
+
+    /// Whether the side table holds state for this frame.
+    #[inline]
+    pub(crate) fn has_extras(&self) -> bool {
+        self.flags.0 & FrameFlags::EXTRAS != 0
+    }
+
+    pub(crate) fn mark_extras(&mut self) {
+        self.flags.0 |= FrameFlags::EXTRAS;
     }
 }

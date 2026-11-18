@@ -57,7 +57,7 @@ pub(crate) fn equal(
             return Ok(Value::Bool(false));
         }
         for (key, value) in arrays.0.iter() {
-            let Some(other) = arrays.1.get(key) else {
+            let Some(other) = arrays.1.get(&key) else {
                 return Ok(Value::Bool(false));
             };
             pending.push((value.clone(), other.clone()));
@@ -120,6 +120,6 @@ fn implementation(target: &crate::calls::call_state::CallTarget) -> Option<Imple
                 Some(Implementation::Internal)
             }
         },
-        CallTarget::Constructed(_) | CallTarget::Closure(_) => None,
+        CallTarget::Closure(_) => None,
     }
 }

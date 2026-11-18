@@ -1,4 +1,5 @@
-//! Walking writes through references: `array_walk($a, function (&$v) { $v *= 2; })`.
+//! `array_walk` and `array_walk_recursive`, which give the callback each
+//! value by reference.
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -6,32 +7,65 @@ use std::rc::Rc;
 
 use phera_extension_api::{
     ArrayKey, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType,
-    Registry, Value, args,
+    Value, args,
 };
 
 type Cell = Rc<RefCell<Value>>;
 
-const PARAMS: &[Param] = &[
-    // The API has no ArrayOrObject type; validate this union in the handler.
-    Param::new("array", ParamType::Mixed).by_ref(),
-    Param::new("callback", ParamType::Callable),
-    Param::new("arg", ParamType::Mixed).optional(),
-];
+pub(super) const FUNCTIONS: &[FunctionEntry] = &[ARRAY_WALK, ARRAY_WALK_RECURSIVE];
 
-pub(crate) fn register(registry: &mut Registry) {
-    registry.function(FunctionEntry::asynchronous("array_walk", PARAMS, walk));
-    registry.function(FunctionEntry::asynchronous(
-        "array_walk_recursive",
-        PARAMS,
-        recursive,
-    ));
+/// Whether nested arrays are walked into.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Depth {
+    Shallow,
+    Recursive,
 }
 
-fn walk(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(run(context, arguments, false))
+/// `array_walk(array|object &$array, callable $callback, mixed $arg):
+/// true`, calling `$callback($value, $key[, $arg])` for each entry; a
+/// callback that takes `&$value` changes the array.
+///
+/// ```php
+/// $a = [1, 2];
+/// array_walk($a, function (&$value, $key) { $value *= 10; }); // $a is [10, 20]
+/// ```
+const ARRAY_WALK: FunctionEntry = FunctionEntry::asynchronous(
+    "array_walk",
+    &[
+        // array|object, which a parameter list cannot declare; walk() checks it.
+        Param::new("array", ParamType::Mixed).by_ref(),
+        Param::new("callback", ParamType::Callable),
+        Param::new("arg", ParamType::Mixed).optional(),
+    ],
+    array_walk,
+);
+
+fn array_walk(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(walk(context, arguments, Depth::Shallow))
 }
-fn recursive(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(run(context, arguments, true))
+
+/// `array_walk_recursive()`, `array_walk()` going into nested arrays and
+/// calling the callback for the values that are not arrays.
+///
+/// ```php
+/// $a = [1, [2, 3]];
+/// array_walk_recursive($a, function (&$value) { $value++; }); // $a is [2, [3, 4]]
+/// ```
+const ARRAY_WALK_RECURSIVE: FunctionEntry = FunctionEntry::asynchronous(
+    "array_walk_recursive",
+    &[
+        Param::new("array", ParamType::Mixed).by_ref(),
+        Param::new("callback", ParamType::Callable),
+        Param::new("arg", ParamType::Mixed).optional(),
+    ],
+    array_walk_recursive,
+);
+
+fn array_walk_recursive(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    Box::pin(walk(context, arguments, Depth::Recursive))
 }
 
 // Snapshot keys per level so callbacks that keep appending cannot prolong the
@@ -46,8 +80,8 @@ impl Frame {
         let keys = {
             let value = target.try_borrow().map_err(|_| borrowed())?;
             match &*value {
-                Value::Array(array) => array.keys().cloned().collect::<Vec<_>>(),
-                Value::Object(object) => object.to_array().keys().cloned().collect(),
+                Value::Array(array) => array.keys().collect::<Vec<_>>(),
+                Value::Object(object) => object.to_array().keys().collect(),
                 _ => return Err(changed_type()),
             }
         };
@@ -73,7 +107,7 @@ impl Frame {
         {
             return Ok(Value::from(number.to_string()));
         }
-        Ok(super::key_value(key))
+        Ok(Value::from(key.clone()))
     }
 
     /// Install the cell before calling PHP. Never hold a table or cell borrow
@@ -116,8 +150,8 @@ fn changed_type() -> NativeError {
     NativeError::type_error("Iterated value is no longer an array or object")
 }
 
-async fn run(context: &mut dyn Context, arguments: Vec<Value>, recursive: bool) -> NativeResult {
-    let name = if recursive {
+async fn walk(context: &mut dyn Context, arguments: Vec<Value>, depth: Depth) -> NativeResult {
+    let name = if depth == Depth::Recursive {
         "array_walk_recursive"
     } else {
         "array_walk"
@@ -130,12 +164,12 @@ async fn run(context: &mut dyn Context, arguments: Vec<Value>, recursive: bool) 
         if !matches!(&*value, Value::Array(_) | Value::Object(_)) {
             return Err(NativeError::type_error(format!(
                 "{name}(): Argument #1 ($array) must be of type array, {} given",
-                crate::argument_type_name(&value)
+                crate::arguments::given_type(&value)
             )));
         }
     }
     let callback = args::value(&arguments, 1);
-    super::callback::validate(name, 2, true, callback, false)?;
+    super::callback::check_callback(name, callback)?;
     let mut active = HashSet::from([Rc::as_ptr(&target)]);
     let mut frames = vec![Frame::new(target)?];
     while let Some(frame) = frames.last_mut() {
@@ -152,7 +186,7 @@ async fn run(context: &mut dyn Context, arguments: Vec<Value>, recursive: bool) 
             &*element.try_borrow().map_err(|_| borrowed())?,
             Value::Array(_)
         );
-        if recursive && is_array {
+        if depth == Depth::Recursive && is_array {
             if !active.insert(Rc::as_ptr(&element)) {
                 return Err(NativeError::error("Recursion detected"));
             }

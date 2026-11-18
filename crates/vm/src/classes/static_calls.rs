@@ -44,7 +44,9 @@ impl Vm {
         method: Reg,
         binding: ClassBinding,
     ) -> Result<(), NativeError> {
-        self.prepare_static_site(class, method, binding)
+        let class = self.class_target(class)?;
+        let method = self.method_name(method)?;
+        self.prepare_static_style(&class, &method, binding)
     }
 
     /// Resolve lookup scope separately from the late-bound scope saved on the pending call.
@@ -58,10 +60,7 @@ impl Vm {
             .classes
             .get(name)
             .ok_or_else(|| NativeError::error(format!("Class \"{name}\" not found")))?;
-        let context = self
-            .current()
-            .and_then(|frame| frame.method.as_ref())
-            .cloned();
+        let context = self.current().and_then(|frame| frame.method());
         let receiver = context
             .as_ref()
             .and_then(|context| context.receiver.clone())
@@ -74,13 +73,7 @@ impl Vm {
         if binding == ClassBinding::Forward
             && let Some(context) = context
         {
-            let pending = self.call_stack.pending_mut()?;
-            if let crate::calls::call_state::CallTarget::Method {
-                context: target, ..
-            } = &mut pending.callee.target
-            {
-                target.called = context.called.clone();
-            }
+            self.forward_callback_class(context.called.clone())?;
         }
         Ok(())
     }

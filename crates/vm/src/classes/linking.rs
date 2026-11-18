@@ -48,7 +48,7 @@ impl Vm {
         let unit = self
             .current()
             .ok_or_else(|| internal_error!("class frame"))?
-            .unit
+            .unit()
             .clone();
         if self
             .prelinked_classes
@@ -145,10 +145,7 @@ impl Vm {
                 is_static: method.is_static,
                 is_final: method.is_final,
                 is_abstract: method.is_abstract,
-                body: MethodBody::User(crate::function_table::FunctionRef {
-                    unit: unit.clone(),
-                    index: method.function.index(),
-                }),
+                body: MethodBody::User(self.code.index_in(&unit, Some(method.function.index()))),
             });
             if let Some(inherited) = methods.get(&method_name.to_ascii_lowercase()) {
                 super::inheritance_checks::check_override(name, inherited, &linked)?;
@@ -245,10 +242,9 @@ impl Vm {
                     visibility: constant.visibility,
                     is_final: constant.is_final,
                     initializer: super::class::ConstantInitializer::Compiled {
-                        function: crate::function_table::FunctionRef {
-                            unit: unit.clone(),
-                            index: constant.initializer.index(),
-                        },
+                        function: self
+                            .code
+                            .index_in(&unit, Some(constant.initializer.index())),
                         state: std::cell::RefCell::new(super::ConstantState::Uninitialized),
                     },
                     ty: constant.ty.map(|index| unit.types[index.index()].clone()),
@@ -268,17 +264,15 @@ impl Vm {
             };
             let value = match property.default {
                 Some(phera_bytecode::Initializer::Literal(index)) => {
-                    crate::calls::frame::value(&unit.constants[index.index()])
+                    crate::unit_caches::value(&unit.constants[index.index()])
                 }
                 _ => phera_value::Value::Null,
             };
-            let value = if property.is_static {
-                phera_value::Value::Reference(Rc::new(std::cell::RefCell::new(value)))
-            } else {
-                value
-            };
             let mut linked = PropertyDefault {
                 key: key.clone(),
+                static_storage: property
+                    .is_static
+                    .then(|| crate::reference_holders::StaticProperty::new(value.clone())),
                 value,
                 name: property_name.clone(),
                 declaring: name.clone(),
@@ -286,10 +280,7 @@ impl Vm {
                 initialized: property.default.is_some() || property.ty.is_none(),
                 initializer: match property.default {
                     Some(phera_bytecode::Initializer::Function(index)) => {
-                        Some(crate::function_table::FunctionRef {
-                            unit: unit.clone(),
-                            index: index.index(),
-                        })
+                        Some(self.code.index_in(&unit, Some(index.index())))
                     }
                     _ => None,
                 },
@@ -303,11 +294,11 @@ impl Vm {
             if let Some(value) = linked
                 .initializer
                 .as_ref()
-                .and_then(super::class::literal_initializer)
+                .and_then(|reference| super::class::literal_initializer(&self.code, reference))
             {
                 if property.is_static {
-                    if let phera_value::Value::Reference(cell) = &linked.value {
-                        *cell.borrow_mut() = value;
+                    if let Some(storage) = &linked.static_storage {
+                        *storage.reference.borrow().borrow_mut() = value;
                     }
                 } else {
                     linked.value = value;
@@ -343,14 +334,19 @@ impl Vm {
         let is_throwable = parent.as_ref().is_some_and(|parent| parent.is_throwable)
             || interfaces.iter().any(|interface| interface.is_throwable);
         self.classes.order.push(name.clone());
-        self.classes.entries.insert(
+        let index = self.classes.next_index();
+        for method in &declaration.methods {
+            let function = self.code.index_in(&unit, Some(method.function.index()));
+            self.code.set_declaring_class(function, index);
+        }
+        self.classes.insert(
             name.to_ascii_lowercase(),
             Rc::new_cyclic(|identity| Class {
+                index,
                 origin: super::class::ClassOrigin::User,
                 identity: identity.clone(),
                 declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
                 ancestors: super::class::ancestor_names(&parent, &interfaces),
-                empty_constructor: super::class::empty_constructor(name),
                 name_value: phera_value::Value::from(name.as_str()),
                 name: name.clone(),
                 parent,
@@ -363,6 +359,7 @@ impl Vm {
                 allows_dynamic_properties,
                 constructor: methods.get("__construct").cloned(),
                 methods,
+                method_table: std::cell::OnceCell::new(),
                 property_template: super::class::property_template(&defaults),
                 defaults,
                 static_properties,

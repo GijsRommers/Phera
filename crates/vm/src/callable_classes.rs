@@ -7,6 +7,7 @@ use phera_extension_api::NativeError;
 use crate::Vm;
 use crate::callables::CallableUse;
 use crate::calls::call_state::CallTarget;
+use crate::calls::prepared_call::CallFlags;
 use crate::classes::{Class, Invocation};
 
 impl Vm {
@@ -30,8 +31,7 @@ impl Vm {
         );
         let context = self
             .current()
-            .and_then(|frame| frame.method.as_ref())
-            .cloned()
+            .and_then(|frame| frame.method())
             .ok_or_else(|| {
                 NativeError::error(format!(
                     "Cannot access \"{name}\" when no class scope is active"
@@ -49,10 +49,20 @@ impl Vm {
         self.forward_callback_class(context.called)
     }
 
-    /// Parent-qualified callback lookup changes visibility scope but retains late static binding.
+    /// `call_user_func('parent::m')` looks the method up in the parent but
+    /// keeps the caller's called class, as `parent::m()` does. A call to PHP
+    /// code keeps its called class in the record itself; a call with details
+    /// keeps it in the method context there.
     pub(crate) fn forward_callback_class(&mut self, class: Rc<Class>) -> Result<(), NativeError> {
-        let pending = self.call_stack.pending_mut()?;
-        if let CallTarget::Method { context, .. } = &mut pending.callee.target {
+        let call = self.call_stack.top_call_mut()?;
+        call.called = Some(class.index);
+        if !call.flags.contains(CallFlags::DETAILS) {
+            return Ok(());
+        }
+        let details = self.call_stack.top_details_mut()?;
+        if let Some(CallTarget::Method { context, .. }) =
+            details.callee.as_mut().map(|callee| &mut callee.target)
+        {
             context.called = class;
         }
         Ok(())

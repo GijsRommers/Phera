@@ -24,7 +24,6 @@ impl Vm {
         &mut self,
         instruction: Instruction,
         stop: usize,
-        _work: &mut usize,
     ) -> Result<DispatchResult, NativeError> {
         match instruction {
             Instruction::ReturnChecked { source } => {

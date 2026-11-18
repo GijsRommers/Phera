@@ -17,7 +17,7 @@ impl Vm {
     ) -> phera_extension_api::LocalFuture<'_, NativeResult> {
         let origin = callee.argument_binding.origin(origin);
         let base = self.registers.len();
-        let depth = self.call_stack.preparing.len();
+        let depth = self.call_stack.call_depth();
         let routed = self.prepare_call(callee).and_then(|()| {
             for (index, value) in arguments.into_iter().enumerate() {
                 self.store_sent_value(index, value)?;
@@ -49,7 +49,7 @@ impl Vm {
                 Err(error) => Err(error),
             };
             let result = result.map_err(|error| self.materialize_error(error));
-            self.call_stack.preparing.truncate(depth);
+            self.call_stack.truncate_calls(depth);
             self.registers.truncate(base);
             result
         })

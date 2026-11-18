@@ -66,6 +66,7 @@ impl Context for Vm {
                 storage.insert(key.clone(), value.clone());
             }
         });
+        self.track_object_property_references(&object)?;
         if class.is_throwable {
             self.initialize_throwable(&object, crate::exceptions::TraceOrigin::Construction);
         }

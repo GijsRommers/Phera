@@ -11,6 +11,7 @@ use phera_value::{Object, Value};
 use crate::Vm;
 use crate::calls::call_state::{CallTarget, Callee, ParameterSpec};
 use crate::classes::MethodContext;
+use crate::code_table::FunctionIndex;
 
 /// A pending capture belongs to a frame, so throwing from its warning handler releases it.
 pub(crate) struct PendingCapture {
@@ -46,13 +47,8 @@ impl Vm {
                 .and_then(Option::as_ref)
                 .map(|value| value.deref().clone()),
             CaptureKind::Reference => {
-                let frame = self
-                    .call_stack
-                    .current_mut()
-                    .ok_or_else(|| internal_error!("capture frame"))?;
-                let slot = frame
-                    .slots_mut(&mut self.registers)
-                    .get_mut(source.index())
+                let slot = self
+                    .current_slot_mut(source)
                     .ok_or_else(|| internal_error!("capture slot"))?;
                 if !slot.as_ref().is_some_and(Value::is_reference) {
                     let value = slot.take().unwrap_or_default();
@@ -64,7 +60,7 @@ impl Vm {
         let base = self
             .current()
             .ok_or_else(|| internal_error!("capture frame"))?
-            .base;
+            .base();
         self.closure_captures.push(PendingCapture { base, value });
         Ok(())
     }
@@ -79,14 +75,14 @@ impl Vm {
         let frame = self
             .current()
             .ok_or_else(|| internal_error!("closure frame"))?;
-        let unit = frame.unit.clone();
-        let body = unit
-            .functions
-            .get(function.index())
+        let main = self.code.facts(frame.frame.function).unit_first;
+        let (index, _) = self
+            .code
+            .declared_facts(main, function.index())
             .ok_or_else(|| internal_error!("closure body"))?;
-        let capture_count = body.captures as usize;
+        let capture_count = self.code.function(index).captures as usize;
         let context = self.closure_context(binding);
-        let callee = closure_callee(unit, function)?;
+        let callee = closure_callee(&self.code, index);
         let first_capture = self
             .closure_captures
             .len()
@@ -113,7 +109,7 @@ impl Vm {
 
     /// A static closure keeps private class access while deliberately omitting the receiver.
     fn closure_context(&self, binding: ClosureBinding) -> Option<MethodContext> {
-        let mut context = self.current()?.method.as_ref()?.clone();
+        let mut context = self.current()?.method()?.clone();
         context.invocation = crate::classes::Invocation::Method;
         if binding == ClosureBinding::Static {
             context.receiver = None;
@@ -165,7 +161,7 @@ impl ClosureState {
 impl Vm {
     /// Function-derived closures share the original named function's statics.
     pub(crate) fn lexical_closure(&self) -> Option<Rc<Object>> {
-        let object = self.current()?.closure.as_ref()?;
+        let object = self.current()?.closure()?;
         let lexical = object
             .native
             .borrow()
@@ -176,27 +172,19 @@ impl Vm {
     }
 }
 
-/// Captured values remain per object; the signature only holds immutable unit metadata.
-fn closure_callee(
-    unit: std::sync::Arc<phera_bytecode::CompiledUnit>,
-    function: FunctionId,
-) -> Result<Callee, NativeError> {
-    let body = unit
-        .functions
-        .get(function.index())
-        .ok_or_else(|| internal_error!("closure body"))?;
+/// The callee of a closure's body; captured values stay in each closure object.
+fn closure_callee(code: &crate::code_table::CodeTable, function: FunctionIndex) -> Callee {
+    let unit = code.unit(function);
+    let body = code.function(function);
     let parameters: Vec<ParameterSpec> = body
         .parameters
         .iter()
-        .map(|parameter| ParameterSpec::user(&unit, parameter))
+        .map(|parameter| ParameterSpec::user(unit, parameter))
         .collect();
-    Ok(Callee {
+    Callee {
         argument_binding: crate::calls::callback_binding::ArgumentBinding::Caller,
         name: body.name.as_str().into(),
         parameters: parameters.into(),
-        target: CallTarget::User {
-            unit,
-            index: function.index(),
-        },
-    })
+        target: CallTarget::User(function),
+    }
 }

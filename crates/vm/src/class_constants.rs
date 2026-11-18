@@ -33,11 +33,7 @@ impl Vm {
             .initializer_scope
             .as_ref()
             .and_then(|name| self.classes.get(name))
-            .or_else(|| {
-                self.current()
-                    .and_then(|frame| frame.method.as_ref())
-                    .map(|context| context.scope.clone())
-            });
+            .or_else(|| self.current().and_then(|frame| frame.scope().cloned()));
         let allowed = match constant.visibility {
             Visibility::Public => true,
             Visibility::Private => scope.is_some_and(|scope| scope.name == constant.declaring),

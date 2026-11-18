@@ -29,7 +29,7 @@ pub fn materialize_exception(
             if let Some(property) = entry
                 .properties
                 .iter()
-                .find(|property| !property.is_static && *name == ArrayKey::str(property.name))
+                .find(|property| !property.is_static && name == ArrayKey::str(property.name))
             {
                 key = Some(match property.visibility {
                     Visibility::Public => ArrayKey::str(property.name),

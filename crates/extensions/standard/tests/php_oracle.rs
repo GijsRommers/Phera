@@ -10,73 +10,6 @@ use std::{fmt::Write, io::Write as _, process::Command};
 fn hex(s: &[u8]) -> String {
     s.iter().map(|b| format!("{b:02x}")).collect()
 }
-fn enc(v: &Value) -> String {
-    match v {
-        Value::Reference(r) => enc(&r.borrow()),
-        Value::Null => "N".into(),
-        Value::Bool(b) => format!("B:{}", u8::from(*b)),
-        Value::Int(n) => format!("I:{n}"),
-        Value::Float(f) => oracle::encode_float(*f),
-        Value::String(s) => format!("S:{}", hex(s.as_bytes())),
-        Value::Array(a) => format!(
-            "A({})",
-            a.iter()
-                .map(|(k, v)| format!(
-                    "{}>{};",
-                    enc(&match k {
-                        ArrayKey::Int(i) => Value::Int(*i),
-                        ArrayKey::String(s) => Value::String(s.clone()),
-                    }),
-                    enc(v)
-                ))
-                .collect::<String>()
-        ),
-        _ => panic!("unsupported oracle value"),
-    }
-}
-fn php(v: &Value) -> String {
-    match v {
-        Value::Reference(r) => php(&r.borrow()),
-        Value::Null => "null".into(),
-        Value::Bool(b) => b.to_string(),
-        Value::Int(i) => {
-            if *i == i64::MIN {
-                "(-PHP_INT_MAX-1)".into()
-            } else {
-                i.to_string()
-            }
-        }
-        Value::Float(f) => {
-            if f.is_nan() {
-                "NAN".into()
-            } else if f.is_infinite() {
-                if f.is_sign_negative() {
-                    "-INF".into()
-                } else {
-                    "INF".into()
-                }
-            } else {
-                format!("{f:?}")
-            }
-        }
-        Value::String(s) => format!("hex2bin('{}')", hex(s.as_bytes())),
-        Value::Array(a) => format!(
-            "[{}]",
-            a.iter()
-                .map(|(k, v)| format!(
-                    "{}=>{}",
-                    php(&match k {
-                        ArrayKey::Int(i) => Value::Int(*i),
-                        ArrayKey::String(s) => Value::String(s.clone()),
-                    }),
-                    php(v)
-                ))
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
-        _ => panic!("unsupported"),
-    }
-}
 fn s(bytes: &[u8]) -> Value {
     Value::String(PhpString::from(bytes))
 }
@@ -680,7 +613,10 @@ function invoke($name,$args){global $diag;$diag='';$refs=[];if(in_array($name,['
         writeln!(
             script,
             "invoke('{name}',[{}]);",
-            a.iter().map(php).collect::<Vec<_>>().join(",")
+            a.iter()
+                .map(oracle::php_literal)
+                .collect::<Vec<_>>()
+                .join(",")
         )
         .expect("format");
     }
@@ -794,7 +730,7 @@ function invoke($name,$args){global $diag;$diag='';$refs=[];if(in_array($name,['
         let mut c = TestContext::default();
         let result = call(&registry, &mut c, name, a.clone());
         let mut actual = match result {
-            Ok(v) => enc(&v),
+            Ok(v) => oracle::encode(&v),
             Err(NativeError::Throw { class, message, .. }) => {
                 format!("E:{class}:{}", hex(message.as_bytes()))
             }
@@ -802,7 +738,7 @@ function invoke($name,$args){global $diag;$diag='';$refs=[];if(in_array($name,['
         };
         for v in a {
             if let Value::Reference(r) = v {
-                write!(actual, "|R:{}", enc(&r.borrow())).expect("format");
+                write!(actual, "|R:{}", oracle::encode(&r.borrow())).expect("format");
             }
         }
         for (kind, message) in c.diagnostics.entries {

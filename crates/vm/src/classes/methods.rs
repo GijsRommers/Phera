@@ -20,7 +20,7 @@ impl Vm {
         let unit = self
             .current()
             .ok_or_else(|| internal_error!("method frame"))?
-            .unit
+            .unit()
             .clone();
         let name = unit
             .names
@@ -37,7 +37,7 @@ impl Vm {
             .classes
             .for_object(&object)
             .ok_or_else(|| internal_error!("receiver class"))?;
-        let resolved = self.cached_method(&class, name, Invocation::Method)?;
+        let resolved = self.find_method(&class, name, Invocation::Method)?;
         if let Some(resolved) = resolved {
             self.prepare_resolved_method(class, Some(object), resolved, Invocation::Method)?;
         } else {
@@ -60,7 +60,7 @@ impl Vm {
             })?;
             let instruction = self
                 .current()
-                .and_then(|frame| frame.function().instructions.get(frame.ip));
+                .and_then(|frame| frame.function().instructions.get(frame.ip()));
             let usage = match instruction {
                 Some(phera_bytecode::Instruction::MakeCallable { .. }) => {
                     crate::callables::CallableUse::FirstClass
@@ -73,13 +73,12 @@ impl Vm {
             callee.argument_binding = crate::calls::callback_binding::ArgumentBinding::Internal;
             return self.prepare_call(callee);
         }
-        let resolved = self.cached_method(&class, name, invocation)?;
-        let Some(super::method_cache::ResolvedMethod { method, scope }) = resolved else {
+        let resolved = self.find_method(&class, name, invocation)?;
+        let Some(super::method_lookup::ResolvedMethod { method, scope }) = resolved else {
             if invocation == Invocation::Constructor {
-                return self.prepare_constructed_object(
-                    &class,
-                    receiver.ok_or_else(|| internal_error!("constructor receiver"))?,
-                );
+                let object = receiver.ok_or_else(|| internal_error!("constructor receiver"))?;
+                self.prepare_constructed_object(object);
+                return Ok(());
             }
             return Err(NativeError::error(format!(
                 "Call to undefined method {}::{name}()",
@@ -89,7 +88,7 @@ impl Vm {
         self.prepare_resolved_method(
             class,
             receiver,
-            super::method_cache::ResolvedMethod { method, scope },
+            super::method_lookup::ResolvedMethod { method, scope },
             invocation,
         )
     }
@@ -99,10 +98,10 @@ impl Vm {
         &mut self,
         class: Rc<Class>,
         receiver: Option<Rc<Object>>,
-        resolved: super::method_cache::ResolvedMethod,
+        resolved: super::method_lookup::ResolvedMethod,
         invocation: Invocation,
     ) -> Result<(), NativeError> {
-        let super::method_cache::ResolvedMethod { method, scope } = resolved;
+        let super::method_lookup::ResolvedMethod { method, scope } = resolved;
         if method.is_abstract {
             return Err(NativeError::error(format!(
                 "Cannot call abstract method {}::{}()",
@@ -115,7 +114,7 @@ impl Vm {
                 method.declaring, method.name
             )));
         }
-        let signature = method.signature();
+        let signature = method.signature(&self.code);
         let call_name = signature.name.clone();
         let parameters = signature.parameters.clone();
         let context = MethodContext {
@@ -139,11 +138,9 @@ impl Vm {
             .initializer_scope
             .as_ref()
             .and_then(|name| self.classes.get(name));
-        let scope = initializer_scope.as_ref().or_else(|| {
-            self.current()
-                .and_then(|frame| frame.method.as_ref())
-                .map(|context| &context.scope)
-        });
+        let scope = initializer_scope
+            .as_ref()
+            .or_else(|| self.current().and_then(|frame| frame.scope()));
         let allowed = match method.visibility {
             Visibility::Public => true,
             Visibility::Private => scope.is_some_and(|scope| scope.name == method.declaring),
@@ -175,17 +172,8 @@ impl Vm {
 
 impl Vm {
     /// A missing constructor still consumes arguments and returns its allocated receiver.
-    pub(crate) fn prepare_constructed_object(
-        &mut self,
-        class: &Class,
-        object: Rc<Object>,
-    ) -> Result<(), NativeError> {
-        let callee = Callee {
-            argument_binding: crate::calls::callback_binding::ArgumentBinding::Caller,
-            name: class.empty_constructor.name.clone(),
-            parameters: class.empty_constructor.parameters.clone(),
-            target: CallTarget::Constructed(object),
-        };
-        self.prepare_call(callee)
+    pub(crate) fn prepare_constructed_object(&mut self, object: Rc<Object>) {
+        let parts = (&mut self.call_stack, &mut self.registers);
+        crate::calls::php_windows::push_constructed(parts, object);
     }
 }

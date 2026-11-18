@@ -1,11 +1,9 @@
-//! Safe Rust port of php-src ext/standard/strnatcmp.c: strnatcmp_ex.
-//! Digit runs retain Martin Pool's magnitude and leading-zero rules.
+//! Natural order, `strnatcmp`: a port of php-src ext/standard/strnatcmp.c,
+//! `strnatcmp_ex`, which `natsort` and `SORT_NATURAL` use too.
 
 use std::cmp::Ordering;
 
-use phera_extension_api::{
-    Context, FunctionEntry, NativeResult, Param, ParamType, Registry, Value, args,
-};
+use phera_extension_api::{Context, FunctionEntry, NativeResult, Param, ParamType, Value, args};
 /*
 
   Modified for PHP by Andrei Zmievski <andrei@ispi.net>
@@ -31,34 +29,43 @@ use phera_extension_api::{
 */
 // Altered version: safe Rust slices replace C pointers; no locale-dependent folding.
 
-const NATURAL_COMPARE_PARAMS: &[Param] = &[
-    Param::new("string1", ParamType::String),
-    Param::new("string2", ParamType::String),
-];
+pub(crate) const FUNCTIONS: &[FunctionEntry] = &[STRNATCMP, STRNATCASECMP];
 
-pub(crate) fn register(registry: &mut Registry) {
-    registry.function(FunctionEntry::sync(
-        "strnatcmp",
-        NATURAL_COMPARE_PARAMS,
-        strnatcmp,
-    ));
-    registry.function(FunctionEntry::sync(
-        "strnatcasecmp",
-        NATURAL_COMPARE_PARAMS,
-        strnatcasecmp,
-    ));
-}
+/// `strnatcmp(string $string1, string $string2): int`, -1, 0 or 1 in
+/// "natural" order, where runs of digits compare as numbers.
+///
+/// ```php
+/// strnatcmp("img12", "img10"); // 1
+/// strcmp("img2", "img10");     // 1
+/// strnatcmp("img2", "img10");  // -1
+/// ```
+const STRNATCMP: FunctionEntry = FunctionEntry::sync(
+    "strnatcmp",
+    &[
+        Param::new("string1", ParamType::String),
+        Param::new("string2", ParamType::String),
+    ],
+    strnatcmp,
+);
 
 fn strnatcmp(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(Value::Int(
-        natural_compare(args::bytes(arguments, 0), args::bytes(arguments, 1), false) as i64,
-    ))
+    let order = natural_compare(args::bytes(arguments, 0), args::bytes(arguments, 1), false);
+    Ok(Value::Int(order as i64))
 }
 
+/// `strnatcasecmp()`, `strnatcmp()` ignoring ASCII case.
+const STRNATCASECMP: FunctionEntry = FunctionEntry::sync(
+    "strnatcasecmp",
+    &[
+        Param::new("string1", ParamType::String),
+        Param::new("string2", ParamType::String),
+    ],
+    strnatcasecmp,
+);
+
 fn strnatcasecmp(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(Value::Int(
-        natural_compare(args::bytes(arguments, 0), args::bytes(arguments, 1), true) as i64,
-    ))
+    let order = natural_compare(args::bytes(arguments, 0), args::bytes(arguments, 1), true);
+    Ok(Value::Int(order as i64))
 }
 
 /// Leading zeros are ignored only at the start; embedded zero-prefixed runs
@@ -96,6 +103,8 @@ pub(crate) fn natural_compare(mut left: &[u8], mut right: &[u8], fold_case: bool
         if order != Ordering::Equal {
             return order;
         }
+        // Either string may be empty here, after trailing whitespace: the C
+        // code steps past its terminating NUL, which an empty slice stays.
         left = left.get(1..).unwrap_or_default();
         right = right.get(1..).unwrap_or_default();
         if left.is_empty() || right.is_empty() {
@@ -106,11 +115,11 @@ pub(crate) fn natural_compare(mut left: &[u8], mut right: &[u8], fold_case: bool
 
 /// Only initial zeros disappear; zeros inside a string select fractional comparison.
 fn skip_leading_zeros(mut bytes: &[u8]) -> &[u8] {
-    while let [b'0', next, rest @ ..] = bytes {
+    while let [b'0', next, ..] = bytes {
         if !next.is_ascii_digit() {
             break;
         }
-        bytes = bytes.get(1..).unwrap_or(rest);
+        bytes = &bytes[1..];
     }
     bytes
 }
@@ -134,8 +143,8 @@ fn compare_digit_runs(left: &mut &[u8], right: &mut &[u8]) -> Ordering {
         .iter()
         .take_while(|byte| byte.is_ascii_digit())
         .count();
-    let left_digits = left.get(..left_length).unwrap_or_default();
-    let right_digits = right.get(..right_length).unwrap_or_default();
+    let left_digits = &left[..left_length];
+    let right_digits = &right[..right_length];
     let order = if fractional {
         left_digits.cmp(right_digits)
     } else {
@@ -143,7 +152,7 @@ fn compare_digit_runs(left: &mut &[u8], right: &mut &[u8]) -> Ordering {
             .cmp(&right_length)
             .then_with(|| left_digits.cmp(right_digits))
     };
-    *left = left.get(left_length..).unwrap_or_default();
-    *right = right.get(right_length..).unwrap_or_default();
+    *left = &left[left_length..];
+    *right = &right[right_length..];
     order
 }

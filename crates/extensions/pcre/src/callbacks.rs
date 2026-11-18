@@ -1,24 +1,45 @@
-//! Callbacks await PHP: `preg_replace_callback('/a/', fn($m) => strtoupper($m[0]), 'a')`.
+//! `preg_replace_callback` and `preg_replace_callback_array`.
+//!
+//! ```php
+//! preg_replace_callback('/\d+/', fn($m) => $m[0] * 2, 'a1 b22');  // "a2 b44"
+//! preg_replace_callback_array(
+//!     ['/a/' => fn($m) => 'b', '/b/' => fn($m) => 'c'],
+//!     'a',
+//! );                                                              // "c"
+//! ```
+//!
+//! The callback is PHP code, so these functions are async and await the VM
+//! for each match. When a callback throws, PHP still matches the remaining
+//! subjects of an array, and counts their matches, but calls no callback;
+//! the exception is thrown when the call ends.
 
 use crate::errors::Error;
 use crate::flags::CaptureFlags;
+use crate::replace::{self, Splice};
 use crate::scan::Scanner;
-use crate::{cache, callable, errors, matches, replace};
+use crate::{cache, callable, errors, matches};
 use phera_extension_api::value::to_php_string;
 use phera_extension_api::{
     ArrayKey, Context, LocalFuture, NativeError, NativeResult, PhpArray, Value, args,
 };
 
 struct Operation<'a> {
+    /// The function, for warnings.
     name: &'static str,
     patterns: Vec<Value>,
     callback: &'a Value,
-    limit: i64,
+    /// Matches to replace per pattern and subject.
+    limit: usize,
     flags: CaptureFlags,
+    /// Matches replaced so far: PHP's `$count`.
     count: usize,
+    /// What a callback threw, to be thrown when the call ends.
     exception: Option<NativeError>,
 }
+
 impl Operation<'_> {
+    /// Every pattern over one subject, in turn. Null when a pattern does not
+    /// compile or a match fails.
     async fn subject(&mut self, context: &mut dyn Context, value: &Value) -> NativeResult {
         let mut subject = to_php_string(value, context.diagnostics())?
             .as_bytes()
@@ -26,7 +47,7 @@ impl Operation<'_> {
         for pattern in &self.patterns {
             let pattern = to_php_string(pattern, context.diagnostics())?;
             let compiled = if self.exception.is_some() {
-                // PHP suppresses new warnings while propagating an existing exception.
+                // While an exception is pending PHP gives no new warnings.
                 match cache::lookup(pattern.as_bytes()) {
                     Ok(compiled) => Some(compiled),
                     Err(_) => {
@@ -41,20 +62,15 @@ impl Operation<'_> {
                 return Ok(Value::Null);
             };
             errors::set(context, Error::None);
-            let mut scanner = Scanner::new(&compiled, &subject, 0);
-            let mut output = Vec::new();
-            let mut previous_end = 0;
-            let mut replaced = 0;
-            while self.limit < 0 || replaced < self.limit {
-                let captures = match scanner.next() {
-                    Ok(Some(captures)) => captures,
-                    Ok(None) => break,
+            let mut splice = Splice::new(&subject);
+            for found in Scanner::new(&compiled, &subject, 0).take(self.limit) {
+                let captures = match found {
+                    Ok(captures) => captures,
                     Err(error) => {
                         errors::set(context, error);
                         return Ok(Value::Null);
                     }
                 };
-                let (start, end) = captures[0].expect("whole match");
                 let parameters = matches::row(
                     &subject,
                     &captures,
@@ -62,8 +78,9 @@ impl Operation<'_> {
                     self.flags,
                 );
                 self.count += 1;
-                // PHP still scans subsequent array subjects while an exception is pending,
-                // but never invokes their callbacks. Keep the original unwind untouched.
+                // With an exception pending (from a callback on an earlier
+                // subject of the array), PHP still matches but calls no
+                // callback, and the subject becomes null.
                 if self.exception.is_some() {
                     errors::set(context, Error::Internal);
                     return Ok(Value::Null);
@@ -77,23 +94,24 @@ impl Operation<'_> {
                     }
                 };
                 let replacement = to_php_string(&replacement, context.diagnostics())?;
-                output.extend_from_slice(&subject[previous_end..start]);
-                output.extend_from_slice(replacement.as_bytes());
-                previous_end = end;
-                replaced += 1;
+                splice
+                    .replace(&captures)
+                    .extend_from_slice(replacement.as_bytes());
             }
-            output.extend_from_slice(&subject[previous_end..]);
-            subject = output;
+            subject = splice.finish();
         }
         Ok(Value::from(subject))
     }
+
+    /// One subject, or each value of an array of subjects, keeping its key
+    /// and leaving out those that became null.
     async fn apply(&mut self, context: &mut dyn Context, subject: &Value) -> NativeResult {
         if let Value::Array(subjects) = &*subject.deref() {
             let mut output = PhpArray::new();
             for (key, value) in subjects.iter() {
                 let result = self.subject(context, value).await?;
                 if !result.is_null() {
-                    output.insert(key.clone(), result);
+                    output.insert(key, result);
                 }
             }
             Ok(Value::from(output))
@@ -108,12 +126,16 @@ pub(crate) fn replace(
     arguments: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
-        callable::validate(args::value(&arguments, 1), false)?;
+        if let Some(reason) = callable::invalid_reason(args::value(&arguments, 1)) {
+            return Err(NativeError::type_error(format!(
+                "preg_replace_callback(): Argument #2 ($callback) must be a valid callback, {reason}"
+            )));
+        }
         let mut operation = Operation {
             name: "preg_replace_callback",
             patterns: replace::values(args::value(&arguments, 0)),
             callback: args::value(&arguments, 1),
-            limit: args::int(&arguments, 3).unwrap_or(-1),
+            limit: replace::match_limit(args::int(&arguments, 3).unwrap_or(-1)),
             flags: CaptureFlags::parse(args::int(&arguments, 5).unwrap_or(0)),
             count: 0,
             exception: None,
@@ -126,6 +148,7 @@ pub(crate) fn replace(
         result
     })
 }
+
 pub(crate) fn replace_array(
     context: &mut dyn Context,
     arguments: Vec<Value>,
@@ -141,12 +164,17 @@ pub(crate) fn replace_array(
                          must contain only string patterns as keys",
                     ));
                 };
-                callable::validate(callback, true)?;
+                if callable::invalid_reason(callback).is_some() {
+                    return Err(NativeError::type_error(
+                        "preg_replace_callback_array(): Argument #1 ($pattern) \
+                         must contain only valid callbacks",
+                    ));
+                }
                 let mut operation = Operation {
                     name: "preg_replace_callback_array",
                     patterns: vec![Value::String(pattern.clone())],
                     callback,
-                    limit: args::int(&arguments, 2).unwrap_or(-1),
+                    limit: replace::match_limit(args::int(&arguments, 2).unwrap_or(-1)),
                     flags: CaptureFlags::parse(args::int(&arguments, 4).unwrap_or(0)),
                     count: 0,
                     exception: None,
