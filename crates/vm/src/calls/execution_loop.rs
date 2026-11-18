@@ -247,7 +247,9 @@ impl Machine<'_> {
             Instruction::AppendLocal { local, src } => {
                 self.write_native_dimension(position, local, None, src)
             }
-            Instruction::AssignPath { path, src } => self.write_dimension_path(position, path, src),
+            Instruction::AssignPath { path, src } if self.classes.has_dimensions => {
+                self.write_dimension_path(position, path, src)
+            }
             Instruction::CallDirect {
                 function,
                 args,

@@ -46,23 +46,27 @@ impl Machine<'_> {
             return Step::Slow;
         }
         let from = caller.frame.base() + args.index();
-        let arguments = self.registers.window(from, count);
-        let acceptable = arguments.iter().enumerate().all(|(index, argument)| {
-            argument.as_ref().is_some_and(|value| {
-                !value.is_reference()
-                    && (!facts.is_typed(index)
-                        || facts.parameter_masks[index].intersects(crate::types::own_type(value)))
-            })
-        });
-        if !acceptable {
+        let base = self.registers.len();
+        let size = facts.registers as usize;
+        if from + count > base || count > size {
             return Step::Slow;
         }
-        let Some(base) = self
-            .registers
-            .enter_window(from, count, facts.registers as usize)
-        else {
-            return Step::Slow;
-        };
+        let arguments = self.registers.window(from, count);
+        for (index, argument) in arguments.iter().enumerate() {
+            let Some(value) = argument else {
+                return Step::Slow;
+            };
+            if value.is_reference()
+                || (facts.is_typed(index)
+                    && !facts.parameter_masks[index].intersects(crate::types::own_type(value)))
+            {
+                return Step::Slow;
+            }
+        }
+        self.registers.grow_to(base + size);
+        for index in 0..count {
+            self.registers.move_slot(from + index, base + index);
+        }
         self.publish(caller.ip);
         let mut frame = Frame::new(function, base, Some(destination));
         if count < facts.parameters as usize {

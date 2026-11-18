@@ -99,12 +99,12 @@ impl CallFlags {
     /// as an internal function does (weakly typed, without the caller's
     /// location in errors), and messages name it `Closure::__invoke`.
     pub(crate) const INVOKE: Self = Self(1 << 3);
-    /// A legal simple native call may return straight from its argument window.
-    pub(crate) const DIRECT_NATIVE: Self = Self(1 << 4);
     /// A deferred PHP argument can need an interpreter call to __toString.
     pub(crate) const STRING_ARGUMENT: Self = Self(1 << 4);
     /// The general callee is a trampoline for __call or __callStatic.
     pub(crate) const MAGIC: Self = Self(1 << 5);
+    /// A legal simple native call may return straight from its argument window.
+    pub(crate) const DIRECT_NATIVE: Self = Self(1 << 6);
 
     pub(crate) fn contains(self, flag: Self) -> bool {
         self.0 & flag.0 != 0

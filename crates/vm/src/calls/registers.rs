@@ -137,18 +137,10 @@ impl Registers {
         }
     }
 
-    /// Move positional arguments into a fresh frame, exchanging them with empty slots.
-    #[inline]
-    pub(crate) fn enter_window(&mut self, from: usize, count: usize, size: usize) -> Option<usize> {
-        let base = self.top;
-        let end = from.checked_add(count)?;
-        if end > base || count > size {
-            return None;
-        }
-        self.grow_to(base.checked_add(size)?);
-        let (live, empty) = self.slots.split_at_mut(base);
-        live[from..end].swap_with_slice(&mut empty[..count]);
-        Some(base)
+    /// Move an argument into an empty slot of a newly reserved frame.
+    #[inline(always)]
+    pub(crate) fn move_slot(&mut self, from: usize, to: usize) {
+        self.slots.swap(from, to);
     }
 
     /// Take the value out of a slot, leaving it empty.
