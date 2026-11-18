@@ -11,7 +11,7 @@ use crate::access_mode::{Creation, Missing, Mutation};
 use crate::classes::property_hooks::HookRead;
 use crate::code_table::FunctionIndex;
 use crate::inline_stack::InlineStack;
-use crate::magic_properties::{PropertyHook, PropertyRead};
+use crate::magic_properties::{PropertyHook, PropertyRead, PropertyReadStep};
 use crate::path_update::PathKey;
 use crate::{AccessPath, Vm};
 
@@ -157,13 +157,26 @@ impl Vm {
                                 .property_hook(&class, &object, &name, PropertyHook::Get)
                                 .is_some()
                         {
-                            let value = self
-                                .read_overloaded_property(
+                            let value = match self
+                                .plan_property_read(
                                     Value::Object(object.clone()),
                                     name,
                                     PropertyRead::Read,
                                 )
-                                .await?;
+                                .await?
+                            {
+                                PropertyReadStep::Value(result) => result.value,
+                                PropertyReadStep::Hook(function, object) => {
+                                    return Ok(ReferenceStep::Hook(
+                                        function,
+                                        ReferenceGetter {
+                                            object,
+                                            name: display,
+                                            last: steps.peek().is_none(),
+                                        },
+                                    ));
+                                }
+                            };
                             self.warn_indirect_magic_property(&object, &display, &value);
                             if let Some(value) =
                                 path.retain_getter_value(value, steps.peek().is_none())

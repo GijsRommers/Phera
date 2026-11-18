@@ -63,7 +63,6 @@ impl From<ReadProperty> for PropertyReadStep {
 pub(crate) enum PropertyReadSource {
     Storage,
     Getter,
-    DeclaredHook,
 }
 
 impl ReadProperty {
@@ -194,30 +193,6 @@ impl Vm {
             .await;
         self.property_guards.pop();
         result
-    }
-
-    pub(crate) async fn read_overloaded_property(
-        &mut self,
-        value: Value,
-        key: ArrayKey,
-        mode: PropertyRead,
-    ) -> NativeResult {
-        Ok(self.resolve_property_read(value, key, mode).await?.value)
-    }
-
-    pub(crate) async fn resolve_property_read(
-        &mut self,
-        value: Value,
-        key: ArrayKey,
-        mode: PropertyRead,
-    ) -> Result<ReadProperty, phera_extension_api::NativeError> {
-        match self.plan_property_read(value, key, mode).await? {
-            PropertyReadStep::Value(value) => Ok(value),
-            PropertyReadStep::Hook(function, object) => Ok(ReadProperty {
-                value: self.invoke_declared_hook(function, object, None).await?,
-                source: PropertyReadSource::DeclaredHook,
-            }),
-        }
     }
 
     pub(crate) async fn plan_property_read(

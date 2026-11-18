@@ -20,18 +20,24 @@ pub(crate) struct PropertyEntry {
     scope: Option<Rc<crate::classes::Class>>,
     key: ArrayKey,
     write_rule: WriteRule,
-    slot: Option<usize>,
+    /// A compact index leaves room for the optional hook record without
+    /// increasing the size of the cached entry used for ordinary properties.
+    slot: Option<u32>,
     /// An immutable class fact, so a property-site hit avoids a class downcast.
     read_without_static_notice: bool,
     pub(crate) hooks: Option<Box<CachedPropertyHooks>>,
 }
 
 impl PropertyEntry {
+    fn slot(&self) -> Option<usize> {
+        self.slot.map(|slot| slot as usize)
+    }
+
     fn read(&self, object: &Object) -> Option<Value> {
         if !self.read_without_static_notice {
             return None;
         }
-        crate::property_storage::read_at(object, &self.key, self.slot).map(|value| match value {
+        crate::property_storage::read_at(object, &self.key, self.slot()).map(|value| match value {
             Value::Reference(_) => value.deref().clone(),
             value => value,
         })
@@ -98,7 +104,7 @@ impl Vm {
                 .enumerate()
                 .find(|(_, property)| property.key == key)
         });
-        let slot = property.map(|(slot, _)| slot);
+        let slot = property.and_then(|(slot, _)| u32::try_from(slot).ok());
         let dispatched =
             property.and_then(|(_, property)| {
                 let hooks = property.hooks.as_ref()?;
@@ -206,7 +212,7 @@ impl Vm {
             return Ok(None);
         }
         let Some(Value::Int(old)) =
-            crate::property_storage::read_at(&object, &entry.key, entry.slot)
+            crate::property_storage::read_at(&object, &entry.key, entry.slot())
         else {
             return Ok(None);
         };
@@ -218,7 +224,12 @@ impl Vm {
         let Some(new) = old.checked_add(delta) else {
             return Ok(None);
         };
-        crate::property_storage::write_at(&object, entry.key.clone(), entry.slot, Value::Int(new));
+        crate::property_storage::write_at(
+            &object,
+            entry.key.clone(),
+            entry.slot(),
+            Value::Int(new),
+        );
         Ok(Some(Value::Int(
             if matches!(mode, IncDec::PostIncrement | IncDec::PostDecrement) {
                 old
@@ -282,9 +293,13 @@ impl Vm {
         if !accepted {
             return self.enter_cached_setter(&entry, object, value, assignment);
         }
-        if !crate::property_storage::write_direct_at(&object, &entry.key, entry.slot, value, || {
-            !has_magic_properties(&object)
-        }) {
+        if !crate::property_storage::write_direct_at(
+            &object,
+            &entry.key,
+            entry.slot(),
+            value,
+            || !has_magic_properties(&object),
+        ) {
             return Ok(false);
         }
         if let Some((_, result)) = assignment {
@@ -311,7 +326,7 @@ impl Vm {
         if !entry.write_rule.allows(TypeMask::ARRAY) {
             return Ok(false);
         }
-        match crate::property_storage::append_at(&object, &entry.key, entry.slot, value) {
+        match crate::property_storage::append_at(&object, &entry.key, entry.slot(), value) {
             Some(result) => {
                 result?;
                 Ok(true)
