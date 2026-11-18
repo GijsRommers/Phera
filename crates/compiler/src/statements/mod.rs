@@ -49,7 +49,9 @@ impl Compiler<'_> {
                 finally,
             } => self.compile_try(body, catches, finally, line)?,
             StatementKind::Return(expression) => self.compile_return(expression, line)?,
-            StatementKind::Class(declaration) => self.compile_class(declaration, timing, line)?,
+            StatementKind::Class(declaration) => {
+                self.compile_class(declaration, timing, line)?;
+            }
             StatementKind::Function(declaration) => {
                 self.compile_function(declaration, timing, line)?
             }
@@ -95,14 +97,18 @@ pub(crate) mod bindings;
 pub(crate) mod classes;
 pub(crate) mod control;
 pub(crate) mod declarations;
+mod enums;
 mod function_parameters;
 pub(crate) mod functions;
 pub(crate) mod loops;
 mod magic_methods;
 pub(crate) mod switching;
+mod traits;
 
 pub(crate) mod exceptions;
 pub(crate) mod exits;
 pub(crate) mod gotos;
 
-pub(crate) mod class_errors;
+pub(crate) mod class_default_types;
+mod class_errors;
+mod class_functions;

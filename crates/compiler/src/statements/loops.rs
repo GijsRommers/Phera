@@ -123,7 +123,7 @@ impl Compiler<'_> {
             );
         let retained = super::exits::ExitDepth {
             loops: if leaves_target { at } else { at + 1 },
-            finalies: self
+            finally_blocks: self
                 .finalies
                 .partition_point(|scope| scope.loop_depth <= at),
         };
@@ -239,7 +239,7 @@ impl Compiler<'_> {
         self.emit_control_exits(
             super::exits::ExitDepth {
                 loops: self.loops.len(),
-                finalies: 0,
+                finally_blocks: 0,
             },
             phera_bytecode::FinallyEntry::Return,
             line,

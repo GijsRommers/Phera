@@ -28,11 +28,7 @@ impl NativeTrace {
 
 /// Exception traces label arrays and objects without recursively dumping their contents.
 fn argument(value: &Value) -> String {
-    match &*value.deref() {
-        Value::Array(_) => "Array".into(),
-        Value::Object(object) => format!("Object({})", object.class.name()),
-        _ => crate::error_values::describe(value),
-    }
+    crate::error_values::trace_argument(value, 15)
 }
 
 /// Read user parameter slots after coercion, as PHP's stack traces do.
@@ -100,9 +96,11 @@ impl Vm {
                 parent.unit().file,
                 parent.line(),
                 if child.this().is_some() {
-                    child.function().name.replacen("::", "->", 1)
+                    self.code
+                        .function_name(child.frame.function)
+                        .replacen("::", "->", 1)
                 } else {
-                    child.function().name.clone()
+                    self.code.function_name(child.frame.function).to_owned()
                 },
                 frame_arguments(self, child)
             ));

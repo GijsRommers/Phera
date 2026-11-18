@@ -12,7 +12,7 @@ use crate::{Compiler, ir::Instruction};
 #[derive(Clone, Copy, Default)]
 pub(super) struct ExitDepth {
     pub(super) loops: usize,
-    pub(super) finalies: usize,
+    pub(super) finally_blocks: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -25,7 +25,7 @@ impl ExitScope {
     pub(super) fn is_exited(self, retained: ExitDepth) -> bool {
         match self {
             Self::Loop(index) => index >= retained.loops,
-            Self::Finally(index) => index >= retained.finalies,
+            Self::Finally(index) => index >= retained.finally_blocks,
         }
     }
 }
@@ -51,7 +51,7 @@ impl Compiler<'_> {
         mut record: impl FnMut(ExitScope, Range<usize>),
     ) {
         let mut loops = self.loops.len();
-        for index in (retained.finalies..self.finalies.len()).rev() {
+        for index in (retained.finally_blocks..self.finalies.len()).rev() {
             let inner = self.finalies[index].loop_depth.max(retained.loops);
             while loops > inner {
                 loops -= 1;

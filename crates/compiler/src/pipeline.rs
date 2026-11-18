@@ -18,7 +18,7 @@ use crate::{CompileError, errors, passes::lower};
 #[derive(Clone, Copy)]
 pub(super) enum SourceKind {
     File,
-    Eval,
+    Eval { anonymous_seed: u64 },
 }
 
 /// Parse and lower on the dedicated parser stack, returning immutable bytecode.
@@ -55,7 +55,7 @@ fn compile_program(
     compile_diagnostics: &RefCell<Vec<CompileDiagnostic>>,
 ) -> Result<phera_bytecode::CompiledUnit, CompileError> {
     let ast = parsed.map_err(|error| {
-        if error.is_backtick_operator() {
+        if error.is_compile_error() || error.is_backtick_operator() {
             return CompileError {
                 message: error.message,
                 file: file.into(),
@@ -73,7 +73,7 @@ fn compile_program(
         let message = errors::parse_message(&error.message, &display, &token, line);
         let message = match kind {
             SourceKind::File => message,
-            SourceKind::Eval => crate::eval_diagnostics::message(
+            SourceKind::Eval { .. } => crate::eval_diagnostics::message(
                 message,
                 &display,
                 &token,
@@ -91,6 +91,9 @@ fn compile_program(
         }
     })?;
     let mut compiler = Compiler::new(file, source, lines, "{main}", "", compile_diagnostics);
+    if let SourceKind::Eval { anonymous_seed } = kind {
+        compiler.anonymous_classes.set(anonymous_seed);
+    }
     compiler.function.dynamic_scope = true;
     if let Err(mut error) = compiler
         .block(&ast.statements, DeclarationTiming::Hoisted)
@@ -109,7 +112,7 @@ fn compile_program(
     }
     let default = match kind {
         SourceKind::File => Constant::Int(1),
-        SourceKind::Eval => Constant::Null,
+        SourceKind::Eval { .. } => Constant::Null,
     };
     let register = compiler.literal(default, 1)?;
     compiler.emit(Instruction::Return(register), 1);

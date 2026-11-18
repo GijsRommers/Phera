@@ -47,6 +47,13 @@ impl MethodTable {
         code: &CodeTable,
         scope_of: impl Fn(&Method) -> Option<Rc<Class>>,
     ) -> Self {
+        // A direct trait call emits a deprecation every time. Composed
+        // methods have their own table on the consuming class.
+        if class.kind == phera_bytecode::ClassKind::Trait {
+            return Self {
+                slots: Box::new([None]),
+            };
+        }
         let size = (class.methods.len() * 2).next_power_of_two().max(4);
         let mut slots: Box<[Option<MethodSlot>]> = (0..size).map(|_| None).collect();
         for (name, method) in &class.methods {

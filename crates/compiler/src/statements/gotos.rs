@@ -39,7 +39,7 @@ struct ForwardJump {
 struct Scopes {
     /// An entry position identifies a loop among its siblings.
     loops: Vec<usize>,
-    finalies: Vec<FinallyLocation>,
+    finally_blocks: Vec<FinallyLocation>,
 }
 
 struct FinallyLocation {
@@ -54,12 +54,17 @@ impl Scopes {
         }
 
         let shared = self
-            .finalies
+            .finally_blocks
             .iter()
-            .zip(&target.finalies)
+            .zip(&target.finally_blocks)
             .take_while(|(source, target)| source.start == target.start)
             .count();
-        for (source, target) in self.finalies.iter().zip(&target.finalies).take(shared) {
+        for (source, target) in self
+            .finally_blocks
+            .iter()
+            .zip(&target.finally_blocks)
+            .take(shared)
+        {
             if source.phase != target.phase {
                 return Err(if target.phase == FinallyPhase::Running {
                     "jump into a finally block is disallowed"
@@ -68,10 +73,10 @@ impl Scopes {
                 });
             }
         }
-        let leaving = self.finalies[shared..]
+        let leaving = self.finally_blocks[shared..]
             .iter()
             .find(|scope| scope.phase == FinallyPhase::Running);
-        let entering = target.finalies[shared..]
+        let entering = target.finally_blocks[shared..]
             .iter()
             .find(|scope| scope.phase == FinallyPhase::Running);
         if let Some(scope) = leaving
@@ -84,7 +89,7 @@ impl Scopes {
         }
         Ok(ExitDepth {
             loops: target.loops.len(),
-            finalies: shared,
+            finally_blocks: shared,
         })
     }
 }
@@ -93,7 +98,7 @@ impl Compiler<'_> {
     fn label_scopes(&self) -> Scopes {
         Scopes {
             loops: self.loops.iter().map(|scope| scope.start).collect(),
-            finalies: self
+            finally_blocks: self
                 .finalies
                 .iter()
                 .map(|scope| FinallyLocation {
