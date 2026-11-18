@@ -17,7 +17,7 @@ mod resume;
 pub(crate) use operations::local_observation;
 pub(crate) mod trace;
 
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use phera_bytecode::{Instruction, Reg};
 use phera_extension_api::NativeError;
@@ -35,6 +35,7 @@ struct Generator {
     name: Value,
     reference: bool,
     state: State,
+    leaf: Option<Weak<Object>>,
     item: Option<Item>,
     first_yield: bool,
     largest_key: i64,
@@ -56,6 +57,14 @@ struct Item {
 }
 
 impl Generator {
+    fn delegation_leaf(&self) -> Option<Rc<Object>> {
+        if matches!(self.state, State::Delegating(_, _, Delegate::Generator(_))) {
+            self.leaf.as_ref()?.upgrade()
+        } else {
+            None
+        }
+    }
+
     fn publish(&mut self, key: Option<Value>, value: Value) {
         let key = match key {
             Some(Value::Int(key)) => {
@@ -147,6 +156,7 @@ impl Vm {
             name,
             reference,
             state: State::Created(activation),
+            leaf: None,
             item: None,
             first_yield: false,
             largest_key: -1,

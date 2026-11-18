@@ -32,6 +32,14 @@ pub(crate) fn local_observation(
         return None;
     }
     match state(object, |generator| {
+        if let Some(leaf) = generator.delegation_leaf() {
+            return match state(&leaf, |leaf| {
+                matches!(leaf.state, State::Yielded(..)).then(|| observe(leaf, step, by_reference))
+            }) {
+                Ok(observed) => observed.map(Ok),
+                Err(error) => Some(Err(error)),
+            };
+        }
         if needs_priming(generator)
             || matches!(
                 generator.state,
@@ -40,9 +48,9 @@ pub(crate) fn local_observation(
         {
             return None;
         }
-        Some(observe(generator, step, by_reference))
+        Some(Ok(observe(generator, step, by_reference)))
     }) {
-        Ok(observed) => observed.map(Ok),
+        Ok(observed) => observed,
         Err(error) => Some(Err(error)),
     }
 }

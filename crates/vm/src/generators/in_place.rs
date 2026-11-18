@@ -71,68 +71,87 @@ impl Vm {
             return None;
         }
         match state(object, |generator| {
-            if generator.reference {
-                return None;
+            if let Some(leaf) = generator.delegation_leaf() {
+                let outcome = state(&leaf, |leaf| {
+                    self.run_in_place(leaf, sent).map(|()| result(leaf))
+                })?;
+                if outcome.is_some() {
+                    generator.first_yield = false;
+                }
+                return Ok(outcome);
             }
-            let State::Yielded(frame, received) = &mut generator.state else {
-                return None;
-            };
-            let instructions = self.code.instructions(frame.frame.function);
-            let mut ip = frame.frame.ip();
-            let registers = frame.local_registers()?;
-            *registers.get_mut(received.index())? = Some(sent.clone());
-            generator.first_yield = false;
-
-            let mut work = 0;
-            let mut executed = 0;
-            let yielded = loop {
-                let Some(&instruction) = instructions.get(ip) else {
-                    break None;
-                };
-                let mut next = ip + 1;
-                if scalar_step(instruction, registers, &mut next) == ScalarStep::Complete {
-                    executed += 1;
-                    if next <= ip {
-                        work += 1;
-                    }
-                    ip = next;
-                    if work < YIELD_AFTER_STEPS {
-                        continue;
-                    }
-                    break None;
-                }
-                let Instruction::Yield { dst, key, value } = instruction else {
-                    break None;
-                };
-                let Some(key) = read_operand(key, registers) else {
-                    break None;
-                };
-                let Some(value) = read_operand(value, registers) else {
-                    break None;
-                };
-                if self.generator_releases_pending() {
-                    break None;
-                }
-                executed += 1;
-                ip = next;
-                break Some((dst, key, value.unwrap_or_default()));
-            };
-            self.executed_instructions += executed;
-            frame.frame.set_ip(ip);
-            if let Some((destination, key, value)) = yielded {
-                *received = destination;
-                generator.publish(key, value);
-                Some(result(generator))
-            } else {
-                let old = std::mem::replace(&mut generator.state, State::Running);
-                if let State::Yielded(frame, _) = old {
-                    generator.state = State::Ready(frame);
-                }
-                None
-            }
-        }) {
+            Ok(self.run_in_place(generator, sent).map(|()| {
+                generator.first_yield = false;
+                result(generator)
+            }))
+        })
+        .and_then(|result| result)
+        {
             Ok(result) => result.map(Ok),
             Err(error) => Some(Err(error)),
+        }
+    }
+
+    /// The cached delegate can be shared. It qualifies only while it still has
+    /// a local yield; finishing or delegating again requires the iterative driver.
+    fn run_in_place(&mut self, generator: &mut Generator, sent: &Value) -> Option<()> {
+        if generator.reference {
+            return None;
+        }
+        let State::Yielded(frame, received) = &mut generator.state else {
+            return None;
+        };
+        let instructions = self.code.instructions(frame.frame.function);
+        let mut ip = frame.frame.ip();
+        let registers = frame.local_registers()?;
+        *registers.get_mut(received.index())? = Some(sent.clone());
+
+        let mut work = 0;
+        let mut executed = 0;
+        let yielded = loop {
+            let Some(&instruction) = instructions.get(ip) else {
+                break None;
+            };
+            let mut next = ip + 1;
+            if scalar_step(instruction, registers, &mut next) == ScalarStep::Complete {
+                executed += 1;
+                if next <= ip {
+                    work += 1;
+                }
+                ip = next;
+                if work < YIELD_AFTER_STEPS {
+                    continue;
+                }
+                break None;
+            }
+            let Instruction::Yield { dst, key, value } = instruction else {
+                break None;
+            };
+            let Some(key) = read_operand(key, registers) else {
+                break None;
+            };
+            let Some(value) = read_operand(value, registers) else {
+                break None;
+            };
+            if self.generator_releases_pending() {
+                break None;
+            }
+            executed += 1;
+            ip = next;
+            break Some((dst, key, value.unwrap_or_default()));
+        };
+        self.executed_instructions += executed;
+        frame.frame.set_ip(ip);
+        if let Some((destination, key, value)) = yielded {
+            *received = destination;
+            generator.publish(key, value);
+            Some(())
+        } else {
+            let old = std::mem::replace(&mut generator.state, State::Running);
+            if let State::Yielded(frame, _) = old {
+                generator.state = State::Ready(frame);
+            }
+            None
         }
     }
 }

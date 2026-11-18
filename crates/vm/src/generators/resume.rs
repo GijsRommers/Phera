@@ -155,6 +155,7 @@ impl Vm {
                 }
                 Position::Local => {
                     if matches!(&motion, Motion::Observe) && !state(&object, needs_priming)? {
+                        drive.remember_leaf(&object)?;
                         return Ok(object);
                     }
                     let input = match std::mem::replace(&mut motion, Motion::Observe) {
@@ -187,12 +188,29 @@ impl Vm {
                 }
             };
             motion = match progress {
-                Progress::Visible => return Ok(object),
+                Progress::Visible => {
+                    drive.remember_leaf(&object)?;
+                    return Ok(object);
+                }
                 Progress::Complete if drive.ancestors.is_empty() => return Ok(object),
                 Progress::Complete => Motion::Advance(Input::Begin),
                 Progress::Delegated => Motion::Observe,
             };
         }
+    }
+}
+
+impl Drive {
+    fn remember_leaf(&self, leaf: &Rc<Object>) -> Result<(), NativeError> {
+        let Some(root) = self.ancestors.iter().next() else {
+            return Ok(());
+        };
+        let local = state(leaf, |generator| {
+            matches!(generator.state, State::Yielded(..))
+        })?;
+        state(root, |generator| {
+            generator.leaf = local.then(|| Rc::downgrade(leaf));
+        })
     }
 }
 
