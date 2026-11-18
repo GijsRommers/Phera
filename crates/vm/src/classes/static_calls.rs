@@ -59,7 +59,7 @@ impl Vm {
         let class = self
             .classes
             .get(name)
-            .ok_or_else(|| self.class_miss(name, "Class"))?;
+            .ok_or_else(|| Self::class_miss(name, "Class"))?;
         let context = self.current().and_then(|frame| frame.method());
         let receiver = context
             .as_ref()

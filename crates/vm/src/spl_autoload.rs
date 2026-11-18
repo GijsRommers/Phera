@@ -105,7 +105,8 @@ impl Vm {
                 Ok(Value::from(listed))
             }
             Operation::Call => {
-                self.call_autoloaders(&string(&arguments[0])).await?;
+                self.call_autoloaders(&string(&arguments[0]), Some((function.name(), &arguments)))
+                    .await?;
                 Ok(Value::Null)
             }
             Operation::Extensions => {
@@ -166,7 +167,7 @@ impl Vm {
         }
         let found = self.autoload.callbacks.iter().position(|slot| {
             slot.as_ref()
-                .is_some_and(|loader| same_loader(&loader.callee, &callee))
+                .is_some_and(|loader| same_loader(loader, &callee, &callback))
         });
         if !register {
             if let Some(position) = found {
@@ -191,8 +192,17 @@ impl Vm {
     }
 }
 
-fn same_loader(left: &Callee, right: &Callee) -> bool {
-    match (&left.target, &right.target) {
+fn same_loader(left: &RegisteredLoader, right: &Callee, original: &Value) -> bool {
+    let closure = |value: &Value| match value {
+        Value::Object(object) if object.class.name() == "Closure" => Some(object.clone()),
+        _ => None,
+    };
+    match (closure(&left.display), closure(original)) {
+        (Some(left), Some(right)) => return Rc::ptr_eq(&left, &right),
+        (Some(_), _) | (_, Some(_)) => return false,
+        _ => {}
+    }
+    match (&left.callee.target, &right.target) {
         (CallTarget::Closure(left), CallTarget::Closure(right)) => Rc::ptr_eq(left, right),
         (
             CallTarget::Method {
@@ -214,7 +224,7 @@ fn same_loader(left: &Callee, right: &Callee) -> bool {
         }
         (CallTarget::User(left), CallTarget::User(right)) => left == right,
         (CallTarget::Native(left), CallTarget::Native(right)) => left.name == right.name,
-        (CallTarget::Intrinsic(_), CallTarget::Intrinsic(_)) => left.name == right.name,
+        (CallTarget::Intrinsic(_), CallTarget::Intrinsic(_)) => left.callee.name == right.name,
         _ => false,
     }
 }

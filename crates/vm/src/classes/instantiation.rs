@@ -86,7 +86,7 @@ impl Vm {
             let class = self
                 .classes
                 .get(written)
-                .ok_or_else(|| self.class_miss(written, "Class"))?;
+                .ok_or_else(|| Self::class_miss(written, "Class"))?;
             if let Some(slot) = self
                 .current()
                 .and_then(|frame| frame.cache().classes.get(symbol.index()))
@@ -103,7 +103,7 @@ impl Vm {
         let class = self
             .classes
             .get(name)
-            .ok_or_else(|| self.class_miss(name, "Class"))?;
+            .ok_or_else(|| Self::class_miss(name, "Class"))?;
         self.new_linked_object(class)
     }
 

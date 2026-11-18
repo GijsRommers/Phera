@@ -23,7 +23,12 @@ impl Vm {
                 })
                 && self.classes.get(&declaration.name).is_none()
             {
-                self.link_class(unit.clone(), index)?;
+                if let Err(error) = self.link_class(unit.clone(), index) {
+                    if crate::autoload::ClassMiss::is(&error) {
+                        continue;
+                    }
+                    return Err(error);
+                }
                 self.prelinked_classes
                     .insert((Arc::as_ptr(unit) as usize, index.index()));
             }
@@ -73,7 +78,7 @@ impl Vm {
                 let parent_name = &unit.symbols[symbol.index()].written;
                 self.classes
                     .get(parent_name)
-                    .ok_or_else(|| self.class_miss(parent_name, "Class"))
+                    .ok_or_else(|| Self::class_miss(parent_name, "Class"))
             })
             .transpose()?;
         if let Some(parent) = &parent {
@@ -98,7 +103,7 @@ impl Vm {
                 let interface = self
                     .classes
                     .get(interface_name)
-                    .ok_or_else(|| self.class_miss(interface_name, "Interface"))?;
+                    .ok_or_else(|| Self::class_miss(interface_name, "Interface"))?;
                 if interface.kind != ClassKind::Interface {
                     return Err(NativeError::error(format!(
                         "{name} cannot implement {interface_name} - it is not an interface"
@@ -107,6 +112,21 @@ impl Vm {
                 Ok(interface)
             })
             .collect::<Result<Vec<_>, NativeError>>()?;
+        let mut seen = std::collections::HashSet::new();
+        if let Some(duplicate) = interfaces
+            .iter()
+            .find(|interface| !seen.insert(interface.name.as_str()))
+        {
+            let kind = if declaration.kind == ClassKind::Interface {
+                "Interface"
+            } else {
+                "Class"
+            };
+            return Err(NativeError::error(format!(
+                "{kind} {name} cannot implement previously implemented interface {}",
+                duplicate.name
+            )));
+        }
         if declaration.kind != ClassKind::Interface
             && interfaces
                 .iter()

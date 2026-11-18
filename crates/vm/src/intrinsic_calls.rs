@@ -7,7 +7,21 @@ use crate::{Vm, calls::callback_binding::ArgumentOrigin, intrinsics::Intrinsic};
 
 impl Vm {
     /// Callback entry preserves weak scalar binding without changing the PHP body mode.
-    pub(crate) async fn intrinsic_origin(
+    pub(crate) fn intrinsic_origin(
+        &mut self,
+        intrinsic: Intrinsic,
+        arguments: Vec<Value>,
+        origin: ArgumentOrigin,
+    ) -> phera_extension_api::LocalFuture<'_, NativeResult> {
+        if matches!(intrinsic, Intrinsic::ArrayMap) {
+            Box::pin(self.map_arrays(arguments))
+        } else {
+            Box::pin(self.request_intrinsic(intrinsic, arguments, origin))
+        }
+    }
+
+    /// Other request services may suspend while loading classes or entering a callback.
+    async fn request_intrinsic(
         &mut self,
         intrinsic: Intrinsic,
         arguments: Vec<Value>,
@@ -16,7 +30,7 @@ impl Vm {
         let argument = arguments.first().cloned().unwrap_or_default();
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         match intrinsic {
-            Intrinsic::ArrayMap => diagnostics.vm.map_arrays(arguments).await,
+            Intrinsic::ArrayMap => Err(internal_error!("array map intrinsic routing")),
             Intrinsic::Handler(function) => {
                 diagnostics
                     .vm
@@ -38,7 +52,7 @@ impl Vm {
             }
             Intrinsic::Class(function) => {
                 drop(diagnostics);
-                self.class_intrinsic(function, arguments, origin).await
+                Box::pin(self.class_intrinsic(function, arguments, origin)).await
             }
             Intrinsic::SplAutoload(function) => {
                 drop(diagnostics);
@@ -55,7 +69,7 @@ impl Vm {
             }
             Intrinsic::IsCallable => {
                 drop(diagnostics);
-                self.callable_introspection(arguments, origin).await
+                Box::pin(self.callable_introspection(arguments, origin)).await
             }
             Intrinsic::CallUserFunc => {
                 diagnostics.vm.autoload_callable(&argument).await?;
@@ -93,7 +107,7 @@ impl Vm {
             }
             Intrinsic::Defined | Intrinsic::Constant | Intrinsic::FunctionExists => {
                 drop(diagnostics);
-                self.name_intrinsic(intrinsic, arguments, origin).await
+                Box::pin(self.name_intrinsic(intrinsic, arguments, origin)).await
             }
             Intrinsic::FuncNumArgs => diagnostics.vm.argument_intrinsic(
                 crate::calls::argument_errors::ArgumentFunction::Count,

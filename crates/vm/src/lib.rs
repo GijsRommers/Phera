@@ -29,6 +29,7 @@ mod callback_errors;
 mod calls;
 mod class_alias;
 mod class_constants;
+mod class_function;
 mod class_intrinsics;
 mod class_listings;
 mod class_types;
@@ -138,7 +139,6 @@ pub const DEFAULT_FRAME_LIMIT: usize = 250_000;
 /// One request interpreter; PHP calls use heap frames rather than Rust recursion.
 pub struct Vm {
     classes: classes::ClassTable,
-    autoload: autoload::Autoloaders,
     closure_captures: Vec<closures::PendingCapture>,
     /// Pure defaults retain lexical class scope while running outside a method frame.
     initializer_scope: Option<String>,
@@ -171,6 +171,8 @@ pub struct Vm {
     /// What extensions remember during this request (response headers, ...).
     state: RequestState,
     property_references: std::rc::Rc<std::cell::RefCell<reference_holders::ReferenceHolders>>,
+    autoload: autoload::Autoloaders,
+    include_path: Option<String>,
 }
 
 impl Vm {
@@ -183,6 +185,7 @@ impl Vm {
         Self {
             classes: classes::ClassTable::native(&registry),
             autoload: Default::default(),
+            include_path: None,
             property_references: Default::default(),
             closure_captures: Vec::new(),
             initializer_scope: None,

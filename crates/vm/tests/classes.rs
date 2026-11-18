@@ -24,7 +24,6 @@ fn later_milestones_remain_compile_errors() {
         "<?php new class {};",
         "<?php function generator() { yield 1; }",
         "<?php goto target; target:",
-        "<?php eval('echo 1;');",
         "<?php class Example {static function method(){}} Example::method(...);",
         "<?php class Example {function method(){}} (new Example)->method(...);",
         "<?php class Example {public int $value {get => 1;}}",
@@ -52,6 +51,17 @@ fn later_milestones_remain_compile_errors() {
             "{source}: {error}"
         );
     }
+}
+
+#[test]
+fn eval_emits_a_scoped_unit_instruction() {
+    let unit = phera_compiler::compile("<?php eval('echo 1;');", "supported.php").unwrap();
+    assert!(
+        unit.main
+            .instructions
+            .iter()
+            .any(|instruction| matches!(instruction, phera_bytecode::Instruction::Eval { .. }))
+    );
 }
 
 #[tokio::test]

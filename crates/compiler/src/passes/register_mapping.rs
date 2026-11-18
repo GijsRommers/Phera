@@ -40,6 +40,15 @@ impl Instruction {
             | Instruction::FinallyReturn { state }
             | Instruction::FinallyDiscard { state } => *state = map(*state),
             Instruction::Throw { source } => *source = map(*source),
+            Instruction::DynamicClassConstant {
+                destination,
+                class,
+                name,
+            } => {
+                *destination = map(*destination);
+                *class = map(*class);
+                *name = map(*name);
+            }
             Instruction::ClassConstant {
                 destination, class, ..
             } => {

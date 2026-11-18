@@ -69,6 +69,11 @@ pub enum Instruction {
     },
 
     /// Fetch a constant using an evaluated class target.
+    DynamicClassConstant {
+        destination: Reg,
+        class: Reg,
+        name: Reg,
+    },
     ClassConstant {
         destination: Reg,
         class: Reg,

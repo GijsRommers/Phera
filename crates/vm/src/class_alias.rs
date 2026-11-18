@@ -28,6 +28,43 @@ impl Vm {
             .strip_prefix('\\')
             .unwrap_or(alias)
             .to_ascii_lowercase();
+        if let Some(short_name) = key.rsplit('\\').next()
+            && matches!(
+                short_name,
+                "array"
+                    | "bool"
+                    | "callable"
+                    | "false"
+                    | "float"
+                    | "int"
+                    | "iterable"
+                    | "mixed"
+                    | "never"
+                    | "null"
+                    | "object"
+                    | "parent"
+                    | "self"
+                    | "static"
+                    | "string"
+                    | "true"
+                    | "void"
+            )
+        {
+            let location = self.location();
+            return Err(phera_extension_api::NativeError::Unwind(
+                phera_extension_api::Unwind(Box::new(crate::error_traces::DeclarationFailure {
+                    message: format!("Cannot use \"{key}\" as a class alias as it is reserved"),
+                    file: location.file,
+                    line: location.line,
+                })),
+            ));
+        }
+        if key == "_" {
+            return Err(crate::function_introspection::deprecated(
+                "Using \"_\" as a class alias",
+                "8.4",
+            ));
+        }
         match self.classes.entries.entry(key.clone()) {
             Entry::Vacant(entry) => {
                 entry.insert(class);

@@ -33,7 +33,14 @@ impl Vm {
             self.resolve_callable(&value).is_ok()
         };
         if let Some(Value::Reference(reference)) = arguments.get(2) {
-            *reference.borrow_mut() = Value::from(shape.unwrap_or_default());
+            *reference.borrow_mut() = match shape {
+                Some(shape) => Value::from(shape),
+                None if matches!(value, Value::Array(_)) => Value::from("Array"),
+                None => Value::from(phera_value::to_php_string(
+                    &value,
+                    &mut phera_value::NoDiagnostics,
+                )?),
+            };
         }
         Ok(Value::Bool(valid))
     }

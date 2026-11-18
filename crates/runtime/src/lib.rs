@@ -51,6 +51,10 @@ impl Runtime {
     pub fn new() -> Self {
         let mut registry = Registry::new();
         registry.load(&phera_ext_core::Core);
+        registry.class(phera_extension_api::ClassEntry {
+            parent: Some("LogicException"),
+            ..phera_extension_api::ClassEntry::class("Phera\\NotSupportedException")
+        });
         registry.load(&phera_ext_standard::Standard);
         registry.php_module("SPL");
         registry.load(&phera_ext_ctype::Ctype);

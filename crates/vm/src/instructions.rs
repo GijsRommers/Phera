@@ -107,6 +107,9 @@ impl Vm {
             I::DynamicInstanceOf { dst, source, class } => {
                 self.dynamic_instance_of(dst, source, class)?
             }
+            I::FetchDynamicClassConstant { dst, class, name } => {
+                self.fetch_dynamic_class_constant(dst, class, name)?
+            }
             I::FetchClassConstant { dst, class, name } => {
                 self.fetch_class_constant(dst, class, name)?
             }
@@ -242,8 +245,19 @@ impl Vm {
         class: Reg,
         name: phera_bytecode::NameId,
     ) -> Result<(), NativeError> {
-        let class = self.class_target(class)?;
         let name = self.name(name)?;
+        if name.eq_ignore_ascii_case("class") {
+            let value = self.read_local(class);
+            let Value::Object(object) = value else {
+                return Err(NativeError::error(format!(
+                    "Cannot use \"::class\" on {}",
+                    value.type_name()
+                )));
+            };
+            self.set(destination, Value::from(object.class.name()));
+            return Ok(());
+        }
+        let class = self.class_target(class)?;
         let value = self.class_constant(&class, &name)?;
         self.set(destination, value);
         Ok(())

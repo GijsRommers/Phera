@@ -34,9 +34,14 @@ pub(super) fn compile_on_stack(
         let line = errors::parse_line(&error.message, source, lines.line(error.span.start));
         let message = match kind {
             SourceKind::File => message,
-            SourceKind::Eval => {
-                crate::eval_diagnostics::message(message, source, token, line, &lines)
-            }
+            SourceKind::Eval => crate::eval_diagnostics::message(
+                message,
+                source,
+                token,
+                error.span.start,
+                line,
+                &lines,
+            ),
         };
         CompileError {
             message,

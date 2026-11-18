@@ -2,17 +2,23 @@
 
 use std::{collections::HashSet, rc::Rc};
 
-use phera_bytecode::Instruction;
 use phera_extension_api::{NativeError, Unwind};
 use phera_value::Value;
 
-use crate::{Vm, calls::call_state::Callee, classes::Class};
+use crate::{Vm, calls::call_state::Callee, classes::Class, error_traces::NativeTrace};
 
 #[derive(Default)]
 pub(crate) struct Autoloaders {
     pub(crate) callbacks: Vec<Option<RegisteredLoader>>,
     pub(crate) extensions: Option<String>,
     active: HashSet<String>,
+    pub(crate) sites: Vec<AutoloadSite>,
+}
+
+/// A native call that triggered an autoloader stays visible in a thrown trace.
+pub(crate) struct AutoloadSite {
+    pub(crate) boundary: usize,
+    pub(crate) native: NativeTrace,
 }
 
 #[derive(Clone)]
@@ -23,8 +29,13 @@ pub(crate) struct RegisteredLoader {
 
 /// Synchronous class-fetch instructions can suspend before they have a class to act on.
 pub(crate) struct ClassMiss {
-    name: String,
-    kind: &'static str,
+    pub(crate) name: String,
+    failure: MissFailure,
+}
+
+enum MissFailure {
+    Lookup(&'static str),
+    Signature(crate::error_traces::DeclarationFailure),
 }
 
 impl ClassMiss {
@@ -42,18 +53,37 @@ impl ClassMiss {
         matches!(error, NativeError::Unwind(Unwind(payload)) if payload.is::<Self>())
     }
 
-    fn error(&self) -> NativeError {
-        NativeError::error(format!("{} \"{}\" not found", self.kind, self.name))
+    pub(crate) fn signature(
+        name: &str,
+        failure: crate::error_traces::DeclarationFailure,
+    ) -> NativeError {
+        NativeError::Unwind(Unwind(Box::new(Self {
+            name: name.into(),
+            failure: MissFailure::Signature(failure),
+        })))
+    }
+
+    pub(crate) fn error(self) -> NativeError {
+        match self.failure {
+            MissFailure::Lookup(kind) => {
+                NativeError::error(format!("{kind} \"{}\" not found", self.name))
+            }
+            MissFailure::Signature(failure) => NativeError::Unwind(Unwind(Box::new(failure))),
+        }
     }
 }
 
 impl Vm {
+    pub(crate) fn has_autoloaders(&self) -> bool {
+        !self.autoload.callbacks.is_empty()
+    }
+
     /// This path runs only after the ordinary class table lookup has failed.
     #[cold]
-    pub(crate) fn class_miss(&self, name: &str, kind: &'static str) -> NativeError {
+    pub(crate) fn class_miss(name: &str, kind: &'static str) -> NativeError {
         let miss = ClassMiss {
             name: name.into(),
-            kind,
+            failure: MissFailure::Lookup(kind),
         };
         NativeError::Unwind(Unwind(Box::new(miss)))
     }
@@ -63,6 +93,17 @@ impl Vm {
         &mut self,
         name: &str,
     ) -> Result<Option<Rc<Class>>, NativeError> {
+        self.lookup_class_from(name, None).await
+    }
+
+    pub(crate) async fn lookup_class_from(
+        &mut self,
+        name: &str,
+        origin: Option<(&str, &[Value])>,
+    ) -> Result<Option<Rc<Class>>, NativeError> {
+        if name.is_empty() || name == "\\" {
+            return Ok(None);
+        }
         if let Some(class) = self.classes.get(name) {
             return Ok(Some(class));
         }
@@ -79,7 +120,7 @@ impl Vm {
         if !self.autoload.active.insert(key.clone()) {
             return Ok(None);
         }
-        let result = self.call_autoloaders(callback_name).await;
+        let result = self.call_autoloaders(callback_name, origin).await;
         self.autoload.active.remove(&key);
         result?;
         Ok(self.classes.get(name))
@@ -87,7 +128,25 @@ impl Vm {
 
     /// Read the live list after each call so removing or appending loaders takes effect.
     /// Explicit `spl_autoload_call()` also calls the first loader for an existing name.
-    pub(crate) async fn call_autoloaders(&mut self, name: &str) -> Result<(), NativeError> {
+    pub(crate) async fn call_autoloaders(
+        &mut self,
+        name: &str,
+        origin: Option<(&str, &[Value])>,
+    ) -> Result<(), NativeError> {
+        if let Some((function, arguments)) = origin {
+            self.autoload.sites.push(AutoloadSite {
+                boundary: self.call_stack.depth(),
+                native: NativeTrace::new(function, arguments),
+            });
+        }
+        let result = self.call_autoloaders_in_order(name).await;
+        if origin.is_some() {
+            self.autoload.sites.pop();
+        }
+        result
+    }
+
+    async fn call_autoloaders_in_order(&mut self, name: &str) -> Result<(), NativeError> {
         let mut position = 0;
         while let Some(slot) = self.autoload.callbacks.get(position) {
             let loader = slot.clone();
@@ -108,25 +167,24 @@ impl Vm {
 
     /// Resume the interrupted operation only after the class is linked. Operands were
     /// already evaluated into registers before the fetch instruction was entered.
-    pub(crate) async fn resume_class_fetch(
-        &mut self,
-        instruction: Instruction,
-        mut miss: ClassMiss,
-        stop: usize,
-        work: &mut usize,
-    ) -> Result<Option<crate::calls::execution_loop::BatchExit>, NativeError> {
-        loop {
-            if !self.error_handlers.pending.is_empty() {
-                self.drain_error_handlers().await?;
-            }
-            if self.lookup_class(&miss.name).await?.is_none() {
-                return Err(miss.error());
-            }
-            match self.execute(instruction, stop, work) {
-                Ok(exit) => return Ok(exit),
-                Err(error) => miss = ClassMiss::take(error)?,
-            }
+    #[cold]
+    pub(crate) async fn resume_class_fetch(&mut self, miss: ClassMiss) -> Result<(), NativeError> {
+        if !self.error_handlers.pending.is_empty() {
+            self.drain_error_handlers().await?;
         }
+        if self.lookup_class(&miss.name).await?.is_none() {
+            return Err(miss.error());
+        }
+        let frame = self
+            .call_stack
+            .current_mut()
+            .ok_or_else(|| internal_error!("class fetch frame"))?;
+        let position = frame
+            .ip()
+            .checked_sub(1)
+            .ok_or_else(|| internal_error!("class fetch instruction"))?;
+        frame.set_ip(position);
+        Ok(())
     }
 
     /// Named static callbacks can trigger the same class lookup before their method is resolved.

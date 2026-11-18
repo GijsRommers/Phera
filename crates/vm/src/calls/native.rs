@@ -118,7 +118,7 @@ impl Vm {
         match &callee.target {
             CallTarget::Native(entry) => self.native_entry_origin(*entry, arguments, origin).await,
             CallTarget::Intrinsic(intrinsic) => {
-                Box::pin(self.intrinsic_origin(*intrinsic, arguments, origin)).await
+                self.intrinsic_origin(*intrinsic, arguments, origin).await
             }
             CallTarget::Method { method, context } => {
                 self.native_method_window(method, context, arguments, named, origin)

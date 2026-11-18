@@ -456,10 +456,6 @@ pub enum Instruction {
     },
     /// `include`, `require` and their `_once` forms. `dst` receives what the
     /// file returned.
-    Eval {
-        dst: Reg,
-        source: Reg,
-    },
     Include {
         kind: IncludeKind,
         dst: Reg,
@@ -530,6 +526,17 @@ pub enum Instruction {
         dst: Reg,
         function: FunctionId,
         binding: ClosureBinding,
+    },
+    /// A class constant whose identifier is computed, e.g. `Foo::{$name}`.
+    FetchDynamicClassConstant {
+        dst: Reg,
+        class: Reg,
+        name: Reg,
+    },
+    /// Compile and execute a string in the caller's scope.
+    Eval {
+        dst: Reg,
+        source: Reg,
     },
 }
 

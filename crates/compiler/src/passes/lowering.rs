@@ -56,6 +56,11 @@ impl Tables {
                 method: self.symbol(&method, None, crate::policies::NameKind::Function),
                 binding,
             },
+            Old::DynamicClassConstant {
+                destination: dst,
+                class,
+                name,
+            } => Instruction::FetchDynamicClassConstant { dst, class, name },
             Old::ClassConstant {
                 destination,
                 class,

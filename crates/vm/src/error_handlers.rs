@@ -118,6 +118,9 @@ impl Vm {
         }
         match function {
             HandlerFunction::SetException | HandlerFunction::SetError => {
+                if let Some(callback) = arguments.first() {
+                    self.autoload_callable(callback).await?;
+                }
                 self.install_handler(function, &arguments)
             }
             HandlerFunction::RestoreException => {

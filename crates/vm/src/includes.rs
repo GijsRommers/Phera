@@ -1,6 +1,6 @@
 //! Include resolution and sharing caller variable references.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use phera_bytecode::{IncludeKind, Reg};
 use phera_extension_api::NativeError;
@@ -61,12 +61,12 @@ impl Vm {
         if matches!(kind, IncludeKind::Require | IncludeKind::RequireOnce) {
             return Err(NativeError::error(format!(
                 "Failed opening required '{name}' (include_path='{}')",
-                self.include_state.path()
+                self.include_path()
             )));
         }
         self.warn(format!(
             "{construct}(): Failed opening '{name}' for inclusion (include_path='{}')",
-            self.include_state.path()
+            self.include_path()
         ));
         self.set(destination, Value::Bool(false));
         Ok(())
@@ -87,15 +87,23 @@ impl Vm {
         if path.is_absolute() || name.starts_with("./") || name.starts_with("../") {
             candidates.push(path.to_path_buf());
         } else {
-            candidates.extend(
-                std::env::split_paths(self.include_state.path())
-                    .map(|directory| directory.join(path)),
-            );
+            candidates.extend(std::env::split_paths(self.include_path()).map(|directory| {
+                if directory == Path::new(".") {
+                    path.to_path_buf()
+                } else {
+                    directory.join(path)
+                }
+            }));
             let file = self.location().file;
             if let Some(parent) = Path::new(&file).parent() {
-                candidates.push(parent.join(path));
+                let relative = parent.join(path);
+                if !candidates.contains(&relative) {
+                    candidates.push(relative);
+                }
             }
-            candidates.push(PathBuf::from(name));
+            if !candidates.iter().any(|candidate| candidate == path) {
+                candidates.push(path.to_path_buf());
+            }
         }
         let mut result = Err(String::new());
         for candidate in candidates {

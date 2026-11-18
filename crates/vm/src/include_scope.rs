@@ -12,7 +12,7 @@ use crate::{Vm, calls::frame::FrameView};
 pub(crate) struct ScopeBinding {
     pub(crate) register: Reg,
     pub(crate) name: Option<String>,
-    pub(crate) value: Value,
+    pub(crate) value: Option<Value>,
 }
 
 /// An included symbol can be absent after unset or contain a newly bound reference.
@@ -73,7 +73,7 @@ impl Vm {
                 extras.dynamic_count = Some(count);
                 extras.dynamic.insert(name, register);
             }
-            self.registers.window_mut(base + register.index(), 1)[0] = Some(value);
+            self.registers.window_mut(base + register.index(), 1)[0] = value;
         }
         Ok(())
     }
@@ -91,13 +91,14 @@ impl Vm {
             let slot = self
                 .current_slot_mut(register)
                 .ok_or_else(|| internal_error!("include variable slot"))?;
-            let value = slot.take().unwrap_or_default();
-            let reference = if value.is_reference() {
-                value
-            } else {
-                Value::Reference(Rc::new(RefCell::new(value)))
-            };
-            *slot = Some(reference.clone());
+            let reference = slot.take().map(|value| {
+                if value.is_reference() {
+                    value
+                } else {
+                    Value::Reference(Rc::new(RefCell::new(value)))
+                }
+            });
+            *slot = reference.clone();
             let destination = if index < static_count {
                 index
             } else {

@@ -42,7 +42,6 @@ pub(crate) enum BatchExit {
     Instruction(Instruction),
     /// A prepared call to a native function, whose result goes to this register.
     NativeCall(Reg),
-    ClassMiss(Instruction, crate::autoload::ClassMiss),
     /// The frame that native code called has returned this value.
     Returned(Value),
     /// The work budget is spent; other tasks get a turn.
@@ -85,6 +84,7 @@ pub(super) struct Position {
 impl Vm {
     /// Run frames until an instruction needs the async shell, the work budget
     /// is spent, or the frame at depth `stop` has returned.
+    #[inline(never)]
     pub(crate) fn run_batch(
         &mut self,
         stop: usize,
@@ -109,15 +109,8 @@ impl Vm {
                 LoopExit::Yield => return Ok(BatchExit::Yield),
                 LoopExit::Invalid => return Err(internal_error!("invalid IP")),
             };
-            match self.execute(instruction, stop, work) {
-                Ok(Some(exit)) => return Ok(exit),
-                Ok(None) => {}
-                Err(error) => {
-                    return Ok(BatchExit::ClassMiss(
-                        instruction,
-                        crate::autoload::ClassMiss::take(error)?,
-                    ));
-                }
+            if let Some(exit) = self.execute(instruction, stop, work)? {
+                return Ok(exit);
             }
             if !self.error_handlers.pending.is_empty() {
                 return Ok(BatchExit::Handlers);

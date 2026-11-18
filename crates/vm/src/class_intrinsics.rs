@@ -1,135 +1,12 @@
 //! `class_exists('A')` may load A, whereas `class_exists('A', false)` only checks the table.
 
 use phera_bytecode::{ClassKind, Visibility};
-use phera_extension_api::{NativeError, NativeResult, Param, ParamType};
+use phera_extension_api::{NativeError, NativeResult};
 use phera_value::{PhpArray, Value};
 
 use crate::{Vm, calls::callback_binding::ArgumentOrigin, function_introspection::deprecated};
 
-/// Class functions are resolved once alongside the other request intrinsics.
-#[derive(Clone, Copy)]
-pub(crate) enum ClassFunction {
-    GetClass,
-    GetParentClass,
-    GetCalledClass,
-    GetObjectVars,
-    GetClassVars,
-    PropertyExists,
-    MethodExists,
-    ClassExists,
-    InterfaceExists,
-    TraitExists,
-    EnumExists,
-    ClassAlias,
-    IsA,
-    IsSubclassOf,
-    ObjectId,
-    ObjectHash,
-    ClassMethods,
-    ClassParents,
-    ClassImplements,
-    DeclaredClasses,
-    DeclaredInterfaces,
-}
-
-impl ClassFunction {
-    pub(crate) const ALL: &[Self] = &[
-        Self::GetClass,
-        Self::GetParentClass,
-        Self::GetCalledClass,
-        Self::GetObjectVars,
-        Self::GetClassVars,
-        Self::PropertyExists,
-        Self::MethodExists,
-        Self::ClassExists,
-        Self::InterfaceExists,
-        Self::TraitExists,
-        Self::EnumExists,
-        Self::ClassAlias,
-        Self::IsA,
-        Self::IsSubclassOf,
-        Self::ObjectId,
-        Self::ObjectHash,
-        Self::ClassMethods,
-        Self::ClassParents,
-        Self::ClassImplements,
-        Self::DeclaredClasses,
-        Self::DeclaredInterfaces,
-    ];
-
-    pub(crate) fn resolve(name: &str) -> Option<Self> {
-        Self::ALL
-            .iter()
-            .copied()
-            .find(|function| function.name() == name)
-    }
-
-    pub(crate) const fn name(self) -> &'static str {
-        match self {
-            Self::GetClass => "get_class",
-            Self::GetParentClass => "get_parent_class",
-            Self::GetCalledClass => "get_called_class",
-            Self::GetObjectVars => "get_object_vars",
-            Self::GetClassVars => "get_class_vars",
-            Self::PropertyExists => "property_exists",
-            Self::MethodExists => "method_exists",
-            Self::ClassExists => "class_exists",
-            Self::InterfaceExists => "interface_exists",
-            Self::TraitExists => "trait_exists",
-            Self::EnumExists => "enum_exists",
-            Self::ClassAlias => "class_alias",
-            Self::IsA => "is_a",
-            Self::IsSubclassOf => "is_subclass_of",
-            Self::ObjectId => "spl_object_id",
-            Self::ObjectHash => "spl_object_hash",
-            Self::ClassMethods => "get_class_methods",
-            Self::ClassParents => "class_parents",
-            Self::ClassImplements => "class_implements",
-            Self::DeclaredClasses => "get_declared_classes",
-            Self::DeclaredInterfaces => "get_declared_interfaces",
-        }
-    }
-
-    pub(crate) fn parameters(self) -> &'static [Param] {
-        const AUTOLOAD: Param = Param::new("autoload", ParamType::Bool).optional();
-        const CLASS: Param = Param::new("class", ParamType::String);
-        const OBJECT: Param = Param::new("object", ParamType::Object);
-        const OBJECT_OR_CLASS: Param = Param::new("object_or_class", ParamType::Mixed);
-        match self {
-            Self::GetClass => const { &[OBJECT.optional()] },
-            Self::GetObjectVars | Self::ObjectId | Self::ObjectHash => const { &[OBJECT] },
-            Self::GetParentClass => const { &[OBJECT_OR_CLASS.optional()] },
-            Self::ClassMethods => const { &[OBJECT_OR_CLASS] },
-            Self::GetClassVars => const { &[CLASS] },
-            Self::ClassExists => const { &[CLASS, AUTOLOAD] },
-            Self::InterfaceExists => {
-                const { &[Param::new("interface", ParamType::String), AUTOLOAD] }
-            }
-            Self::TraitExists => const { &[Param::new("trait", ParamType::String), AUTOLOAD] },
-            Self::EnumExists => const { &[Param::new("enum", ParamType::String), AUTOLOAD] },
-            Self::ClassAlias => {
-                const { &[CLASS, Param::new("alias", ParamType::String), AUTOLOAD] }
-            }
-            Self::ClassParents | Self::ClassImplements => const { &[OBJECT_OR_CLASS, AUTOLOAD] },
-            Self::PropertyExists => {
-                const { &[OBJECT_OR_CLASS, Param::new("property", ParamType::String)] }
-            }
-            Self::MethodExists => {
-                const { &[OBJECT_OR_CLASS, Param::new("method", ParamType::String)] }
-            }
-            Self::IsA | Self::IsSubclassOf => {
-                const {
-                    &[
-                        OBJECT_OR_CLASS,
-                        CLASS,
-                        Param::new("allow_string", ParamType::Bool).optional(),
-                    ]
-                }
-            }
-            Self::GetCalledClass | Self::DeclaredClasses | Self::DeclaredInterfaces => &[],
-        }
-    }
-}
+pub(crate) use crate::class_function::ClassFunction;
 
 impl Vm {
     pub(crate) async fn class_intrinsic(
@@ -215,7 +92,8 @@ impl Vm {
             Value::String(name) => {
                 let name = name.to_string_lossy();
                 if autoload {
-                    self.lookup_class(&name).await?
+                    self.lookup_class_from(&name, Some((function.name(), &arguments)))
+                        .await?
                 } else if matches!(function, Operation::IsA | Operation::IsSubclassOf) {
                     None
                 } else {
@@ -258,7 +136,8 @@ impl Vm {
                 let class = class.ok_or_else(|| NativeError::type_error(format!(
                     "get_class_vars(): Argument #1 ($class) must be a valid class name, {} given", string(&value)
                 )))?;
-                self.class_variables(&class)
+                self.class_variables(&class, (function.name(), &arguments))
+                    .await
             }
             Operation::ClassParents | Operation::ClassImplements => {
                 check_object_or_class(function, &value)?;
@@ -311,7 +190,8 @@ impl Vm {
         for name in &self.classes.order {
             if self
                 .classes
-                .get(name)
+                .entries
+                .get(&name.to_ascii_lowercase())
                 .is_some_and(|class| class.kind == wanted)
             {
                 listed.push(Value::from(name.as_str()))?;

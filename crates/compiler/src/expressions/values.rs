@@ -30,6 +30,12 @@ impl Compiler<'_> {
         line: usize,
     ) -> Result<Reg, CompileError> {
         let (name, fallback) = self.resolve(name, NameKind::Constant);
+        match name.to_ascii_lowercase().as_str() {
+            "true" => return self.literal(Constant::Bool(true), line),
+            "false" => return self.literal(Constant::Bool(false), line),
+            "null" => return self.literal(Constant::Null, line),
+            _ => {}
+        }
         let dst = self.allocate_register()?;
         self.emit(
             Instruction::Constant {

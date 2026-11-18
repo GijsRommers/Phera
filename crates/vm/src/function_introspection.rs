@@ -169,30 +169,50 @@ impl Vm {
         }
         let predicate = matches!(intrinsic, Intrinsic::Defined);
         if let Some((class, constant)) = name.rsplit_once("::") {
-            let class = match self.relative_constant_scope(class) {
-                Ok(Some(class)) => class,
-                Ok(None) => class.to_owned(),
-                Err(_) if predicate => return Ok(Value::Bool(false)),
-                Err(error) => return Err(error),
-            };
-            let found = self.lookup_class(&class).await?;
-            let result = if let Some(found) = found {
-                if constant.eq_ignore_ascii_case("class") {
-                    Err(NativeError::error(format!(
-                        "Undefined constant {}::{constant}",
-                        found.name
-                    )))
+            let written = class;
+            let class = self
+                .relative_constant_scope(class)?
+                .unwrap_or_else(|| written.to_owned());
+            let origin = Some((function, arguments.as_slice()));
+            let Some(entry) = self.lookup_class_from(&class, origin).await? else {
+                return if predicate {
+                    Ok(Value::Bool(false))
                 } else {
-                    self.class_constant(&class, constant)
+                    Err(NativeError::error(format!("Class \"{class}\" not found")))
+                };
+            };
+            let accessible = entry
+                .constants
+                .get(constant)
+                .is_some_and(|constant| self.can_read_class_constant(constant));
+            if predicate && !accessible {
+                return Ok(Value::Bool(false));
+            }
+            if !entry.constants.contains_key(constant) {
+                return Err(NativeError::error(format!(
+                    "Undefined constant {written}::{constant}"
+                )));
+            }
+            loop {
+                match self.class_constant(&class, constant) {
+                    Ok(value) => return Ok(if predicate { Value::Bool(true) } else { value }),
+                    Err(error) => {
+                        let miss = crate::autoload::ClassMiss::take(error)?;
+                        if self.lookup_class_from(&miss.name, origin).await?.is_none() {
+                            return Err(miss.error());
+                        }
+                    }
                 }
-            } else {
-                Err(NativeError::error(format!("Class \"{class}\" not found")))
-            };
-            return if predicate {
-                Ok(Value::Bool(result.is_ok()))
-            } else {
-                result
-            };
+            }
+        }
+        let special = match name.to_ascii_lowercase().as_str() {
+            "true" => Some(Value::Bool(true)),
+            "false" => Some(Value::Bool(false)),
+            "null" => Some(Value::Null),
+            _ => None,
+        };
+        if let Some(value) = special {
+            return Ok(if predicate { Value::Bool(true) } else { value });
         }
         if predicate {
             Ok(Value::Bool(self.constants.contains_key(&name)))
@@ -209,7 +229,15 @@ impl Vm {
         let resolved = match class.to_ascii_lowercase().as_str() {
             "self" => frame.and_then(|frame| frame.scope().cloned()),
             "static" => frame.and_then(|frame| frame.called()),
-            "parent" => frame.and_then(|frame| frame.scope()?.parent.clone()),
+            "parent" => {
+                let scope = frame.and_then(|frame| frame.scope());
+                if scope.is_some_and(|scope| scope.parent.is_none()) {
+                    return Err(NativeError::error(
+                        "Cannot access \"parent\" when current class scope has no parent",
+                    ));
+                }
+                scope.and_then(|scope| scope.parent.clone())
+            }
             _ => return Ok(None),
         };
         resolved

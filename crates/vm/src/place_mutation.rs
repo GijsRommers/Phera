@@ -152,8 +152,13 @@ impl Vm {
             && place.steps()?.next().is_none()
         {
             let (class, name) = self.static_property_names(class, name)?;
+            let class = self
+                .classes
+                .get(&class)
+                .ok_or_else(|| Self::class_miss(&class, "Class"))?;
             return Err(NativeError::error(format!(
-                "Attempt to unset static property {class}::${name}"
+                "Attempt to unset static property {}::${name}",
+                class.name
             )));
         }
         let Some(register) = self.base_register(place, Creation::Existing, Missing::Silent)? else {

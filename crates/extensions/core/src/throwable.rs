@@ -103,7 +103,6 @@ const DERIVED: &[(&str, &str)] = &[
     ("UnhandledMatchError", "Error"),
     ("RuntimeException", "Exception"),
     ("LogicException", "Exception"),
-    ("Phera\\NotSupportedException", "LogicException"),
     ("BadFunctionCallException", "LogicException"),
     ("BadMethodCallException", "BadFunctionCallException"),
     ("DomainException", "LogicException"),

@@ -69,29 +69,31 @@ impl Vm {
                 entry.insert(ArrayKey::str("type"), Value::from(kind));
             }
             entry.insert(ArrayKey::str("args"), trace_arguments(self, callee));
-            let native = self
+            let warning = self
                 .error_handlers
                 .warning_site
                 .as_ref()
                 .filter(|site| site.boundary == callee_index);
-            if native.is_some() {
+            let autoload = self
+                .autoload
+                .sites
+                .iter()
+                .rev()
+                .find(|site| site.boundary == callee_index);
+            if warning.is_some() || autoload.is_some() {
                 entry.remove(&ArrayKey::str("file"));
                 entry.remove(&ArrayKey::str("line"));
             }
             let _ = trace.push(Value::Array(Rc::new(entry)));
-            if let Some(site) = native {
-                let mut entry = PhpArray::new();
-                entry.insert(
-                    ArrayKey::str("file"),
-                    Value::from(site.location.file.clone()),
+            if let Some(site) = warning {
+                append_native(
+                    &mut trace,
+                    &site.native,
+                    &site.location.file,
+                    site.location.line,
                 );
-                entry.insert(ArrayKey::str("line"), Value::Int(site.location.line as i64));
-                entry.insert(
-                    ArrayKey::str("function"),
-                    Value::from(site.native.name.clone()),
-                );
-                entry.insert(ArrayKey::str("args"), site.native.arguments.clone());
-                let _ = trace.push(Value::Array(Rc::new(entry)));
+            } else if let Some(site) = autoload {
+                append_native(&mut trace, &site.native, &caller.unit().file, caller.line());
             }
         }
         if let Some(frame) = self.frames().next()
@@ -182,4 +184,18 @@ fn scoped_unit_name(frame: FrameView<'_>) -> Option<&'static str> {
             _ => return None,
         },
     )
+}
+
+fn append_native(
+    trace: &mut PhpArray,
+    native: &crate::error_traces::NativeTrace,
+    file: &str,
+    line: usize,
+) {
+    let mut entry = PhpArray::new();
+    entry.insert(ArrayKey::str("file"), Value::from(file));
+    entry.insert(ArrayKey::str("line"), Value::Int(line as i64));
+    entry.insert(ArrayKey::str("function"), Value::from(native.name.clone()));
+    entry.insert(ArrayKey::str("args"), native.arguments.clone());
+    let _ = trace.push(Value::Array(Rc::new(entry)));
 }
