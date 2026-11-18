@@ -150,7 +150,12 @@ impl Server {
     }
 
     fn try_get(&self, path: &str) -> std::io::Result<String> {
-        self.try_request("GET", path, &[], &[])
+        let mut stream = self.connect()?;
+        write!(
+            stream,
+            "GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+        )?;
+        read_response(stream, path)
     }
 
     fn try_request(
@@ -160,9 +165,7 @@ impl Server {
         headers: &[(&str, &str)],
         body: &[u8],
     ) -> std::io::Result<String> {
-        let mut stream = TcpStream::connect(&self.address)?;
-        // A server that hangs fails the test instead of stalling it.
-        stream.set_read_timeout(Some(Duration::from_secs(30)))?;
+        let mut stream = self.connect()?;
         // Write the complete frame together so both test servers see the same request.
         let mut request = Vec::new();
         write!(
@@ -178,13 +181,24 @@ impl Server {
         request.extend_from_slice(b"\r\n");
         request.extend_from_slice(body);
         stream.write_all(&request)?;
-        let mut response = String::new();
-        match stream.read_to_string(&mut response) {
-            Err(error) if !response.is_empty() => {
-                panic!("{path}: the response broke off: {error}\n{response}")
-            }
-            result => result.map(|_| response),
+        read_response(stream, path)
+    }
+
+    fn connect(&self) -> std::io::Result<TcpStream> {
+        let stream = TcpStream::connect(&self.address)?;
+        // A server that hangs fails the test instead of stalling it.
+        stream.set_read_timeout(Some(Duration::from_secs(30)))?;
+        Ok(stream)
+    }
+}
+
+fn read_response(mut stream: TcpStream, path: &str) -> std::io::Result<String> {
+    let mut response = String::new();
+    match stream.read_to_string(&mut response) {
+        Err(error) if !response.is_empty() => {
+            panic!("{path}: the response broke off: {error}\n{response}")
         }
+        result => result.map(|_| response),
     }
 }
 
