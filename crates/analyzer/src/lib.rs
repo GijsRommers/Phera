@@ -49,7 +49,7 @@ fn check_project(options: &Options) -> Result<Report, String> {
     let start = std::time::Instant::now();
     let paths = project::discover(&options.paths, &options.exclude)?;
     let (files, mut diagnostics) = project::parse_files(&paths)?;
-    let mut index = builtins::load();
+    let mut index = builtins::load_supported();
     for file in &files {
         collect::collect(&mut index, &file.path, &file.source, &file.program);
     }

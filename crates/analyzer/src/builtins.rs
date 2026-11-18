@@ -11,6 +11,13 @@ use phera_source::deprecations::{ItemKind, Policy, items};
 
 pub fn load() -> Index {
     let mut index = decode::decode(include_str!("../data/php85.tsv"));
+    index.builtin_functions = index.functions.keys().cloned().collect();
+    index.builtin_classes = index.classes.keys().cloned().collect();
+    index
+}
+
+pub(crate) fn load_supported() -> Index {
+    let mut index = load();
     for item in items() {
         if item.since.is_empty()
             && let Some((class, _)) = item.name.split_once("::")
@@ -23,7 +30,9 @@ pub fn load() -> Index {
         }
         match item.kind() {
             ItemKind::Function => {
-                index.functions.remove(&item.name.to_ascii_lowercase());
+                let name = item.name.to_ascii_lowercase();
+                index.functions.remove(&name);
+                index.builtin_functions.remove(&name);
             }
             ItemKind::Constant => {
                 index.constants.remove(item.name);
@@ -41,7 +50,5 @@ pub fn load() -> Index {
             }
         }
     }
-    index.builtin_functions = index.functions.keys().cloned().collect();
-    index.builtin_classes.extend(index.classes.keys().cloned());
     index
 }
