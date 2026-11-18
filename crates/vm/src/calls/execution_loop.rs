@@ -65,6 +65,10 @@ enum LoopExit {
     /// A step released an object with a destructor; the frame's position
     /// is published.
     Destructors,
+    /// A simple instruction overwrote a value that could own an object;
+    /// the frame's position is published. The loop tests for due
+    /// destructors and goes on if there are none.
+    Released,
     /// The instruction pointer left the function's code.
     Invalid,
 }
@@ -117,7 +121,9 @@ impl Vm {
             let instruction = match exit {
                 LoopExit::Slow(instruction) => instruction,
                 LoopExit::Yield => return Ok(BatchExit::Yield),
-                LoopExit::Destructors => return Ok(BatchExit::Destructors),
+                LoopExit::Destructors | LoopExit::Released => {
+                    return Ok(BatchExit::Destructors);
+                }
                 LoopExit::Invalid => return Err(internal_error!("invalid IP")),
             };
             if let Some(exit) = self.execute(instruction, stop, work)? {
@@ -152,6 +158,8 @@ impl Machine<'_> {
         loop {
             let instruction = match self.run_simple(instructions, &mut position) {
                 Ok(instruction) => instruction,
+                Err(LoopExit::Released) if !self.classes.ids().has_doomed() => continue,
+                Err(LoopExit::Released) => return LoopExit::Destructors,
                 Err(exit) => return exit,
             };
             match self.step(instruction, position) {
@@ -207,13 +215,11 @@ impl Machine<'_> {
             match step {
                 ScalarStep::Complete => {}
                 ScalarStep::Fallback => break Ok(instruction),
-                // The write dropped a value that could own an object: run
-                // a destructor it made due before the next instruction.
-                ScalarStep::Released => {
-                    if self.classes.ids().has_doomed() {
-                        break Err(LoopExit::Destructors);
-                    }
-                }
+                // The write dropped a value that could own an object: the
+                // caller runs a destructor it made due before the next
+                // instruction. Testing here, inside the loop, would cost
+                // every simple instruction.
+                ScalarStep::Released => break Err(LoopExit::Released),
             }
             // Only backward jumps count as work; comparing positions also
             // covers fused compare-and-branch instructions.

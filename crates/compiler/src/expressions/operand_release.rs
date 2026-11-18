@@ -28,7 +28,7 @@ use std::ops::Range;
 use phera_bytecode::Reg;
 
 use crate::Compiler;
-use crate::ir::{ArgumentSource, Binary, Instruction, Target, Unary};
+use crate::ir::{ArgumentSource, Binary, Instruction, PlaceScope, Target, Unary};
 
 /// The temporaries of one expression: the registers allocated and the
 /// instructions emitted while it was compiled.
@@ -150,8 +150,41 @@ fn scalar_write(instruction: &Instruction, register: Reg) -> Option<bool> {
             operator,
             ..
         } if *destination == register => Some(!matches!(operator, Unary::Array | Unary::Object)),
+        // `$i++` gives a number or a string (objects and arrays throw);
+        // `instanceof` gives a boolean.
+        Instruction::IncPlace { destination, .. }
+        | Instruction::InstanceOf { destination, .. }
+        | Instruction::DynamicInstanceOf { destination, .. }
+            if *destination == register =>
+        {
+            Some(true)
+        }
+        // `$this`, and the scratch register a `$this->property` path keeps
+        // it in: the frame holds `$this`, so releasing a copy frees nothing.
+        Instruction::This { destination } if *destination == register => Some(true),
+        _ if this_scratch(instruction) == Some(register) => Some(true),
         _ => None,
     }
+}
+
+/// The register that holds `$this` for the instruction's `$this->...` path.
+fn this_scratch(instruction: &Instruction) -> Option<Reg> {
+    let place = match instruction {
+        Instruction::Read { place, .. }
+        | Instruction::Write { place, .. }
+        | Instruction::WriteFromLocal { place, .. }
+        | Instruction::IncPlace { place, .. }
+        | Instruction::Compound { place, .. }
+        | Instruction::Reference { place, .. }
+        | Instruction::Rebind { place, .. }
+        | Instruction::Unset(place) => place,
+        Instruction::Send { argument } => match &argument.source {
+            ArgumentSource::Place(place) => place,
+            ArgumentSource::Value(_) => return None,
+        },
+        _ => return None,
+    };
+    (place.scope == PlaceScope::This).then_some(place.base)
 }
 
 /// Whether the instruction leaves `register` alone or only reads it.
