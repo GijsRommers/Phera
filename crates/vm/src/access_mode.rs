@@ -5,6 +5,7 @@
 pub(crate) enum Missing {
     Warn,
     Silent,
+    Isset,
 }
 
 /// Writing an ordinary value preserves a destination alias; binding replaces it.

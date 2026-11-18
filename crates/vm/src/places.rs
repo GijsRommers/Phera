@@ -28,7 +28,7 @@ impl Vm {
             } => {
                 let reference = match self.static_property(class, name) {
                     Ok(reference) => reference,
-                    Err(_) if creation == Creation::Existing && missing == Missing::Silent => {
+                    Err(_) if creation == Creation::Existing && missing != Missing::Warn => {
                         return Ok(None);
                     }
                     Err(error) => return Err(error),

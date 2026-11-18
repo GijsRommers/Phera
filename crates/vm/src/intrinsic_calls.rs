@@ -59,6 +59,18 @@ impl Vm {
                     &mut diagnostics.buffer,
                 )?
                 .to_string_lossy();
+                if let Value::Object(object) = &argument
+                    && let Some(access) = crate::properties::native_property_access(object)
+                    && (access.read)(
+                        diagnostics.vm,
+                        object,
+                        &name,
+                        phera_extension_api::NativePropertyRead::Exists,
+                    )?
+                    .is_some()
+                {
+                    return Ok(Value::Bool(true));
+                }
                 let (class_name, dynamic) = match &argument {
                     Value::Object(object) => (
                         object.class.name().to_owned(),

@@ -332,6 +332,7 @@ impl Vm {
             || parent
                 .as_ref()
                 .is_some_and(|parent| parent.allows_dynamic_properties);
+        let property_access = parent.as_ref().and_then(|parent| parent.property_access);
         let is_throwable = parent.as_ref().is_some_and(|parent| parent.is_throwable)
             || interfaces.iter().any(|interface| interface.is_throwable);
         self.classes.order.push(name.clone());
@@ -358,6 +359,7 @@ impl Vm {
                 is_final: declaration.is_final,
                 is_readonly: declaration.is_readonly,
                 allows_dynamic_properties,
+                property_access,
                 constructor: methods.get("__construct").cloned(),
                 methods,
                 method_table: std::cell::OnceCell::new(),

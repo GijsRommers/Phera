@@ -1110,6 +1110,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3bd1574e617a9a6c1f8f8181bd7e841e1f20e4277607ef28945765188d6284d4"
 
 [[package]]
+name = "jiff-tzdb"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fa8377070c6bae868759445e5a77f66d84f0b72f3a054bfb00e6d038b8282da7"
+
+[[package]]
 name = "jobserver"
 version = "0.1.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1598,6 +1604,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "phera-ext-date"
+version = "0.1.0"
+dependencies = [
+ "jiff-tzdb",
+ "phera-ext-core",
+ "phera-extension-api",
+ "phera-phpt",
+ "tz-rs",
+ "tzdb_data",
+]
+
+[[package]]
 name = "phera-ext-filter"
 version = "0.1.0"
 dependencies = [
@@ -1772,6 +1790,7 @@ dependencies = [
  "phera-dotenv",
  "phera-ext-core",
  "phera-ext-ctype",
+ "phera-ext-date",
  "phera-ext-filter",
  "phera-ext-hash",
  "phera-ext-http",
@@ -2779,6 +2798,21 @@ name = "typenum"
 version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
+
+[[package]]
+name = "tz-rs"
+version = "0.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fc6c929ffa10fb34f4a3c7e9a73620a83ef2e85e47f9ec3381b8289e6762f42"
+
+[[package]]
+name = "tzdb_data"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "febaa995f6852367564e16c3369988b99d471d43ed12b1255b8d294661797f1c"
+dependencies = [
+ "tz-rs",
+]
 
 [[package]]
 name = "unicode-bidi"

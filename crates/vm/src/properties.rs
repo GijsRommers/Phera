@@ -2,7 +2,7 @@
 
 use crate::{Vm, access_mode::Missing};
 use phera_bytecode::Visibility;
-use phera_extension_api::{NativeError, NativeResult};
+use phera_extension_api::{NativeError, NativePropertyRead, NativeResult};
 use phera_value::{ArrayKey, Value};
 
 impl Vm {
@@ -140,9 +140,19 @@ impl Vm {
             }
             return Ok(Value::Null);
         };
+        if let Some(access) = native_property_access(&object) {
+            let mode = match missing {
+                Missing::Warn => NativePropertyRead::Read,
+                Missing::Silent => NativePropertyRead::Quiet,
+                Missing::Isset => NativePropertyRead::Isset,
+            };
+            if let Some(value) = (access.read)(self, &object, &name, mode)? {
+                return Ok(value);
+            }
+        }
         let key = match self.property_key(&object, &name) {
             Ok(key) => key,
-            Err(_) if missing == Missing::Silent => return Ok(Value::Null),
+            Err(_) if missing != Missing::Warn => return Ok(Value::Null),
             Err(error) => return Err(error),
         };
         if missing == Missing::Warn
@@ -212,7 +222,21 @@ impl Vm {
             let key = match (&current, key) {
                 (Value::Object(object), PathKey::Property(key)) => {
                     let name = crate::path_update::property_name(&key);
-                    PathKey::Property(self.property_key(object, &name)?)
+                    let resolved = match self.property_key(object, &name) {
+                        Ok(resolved) => resolved,
+                        Err(error) => {
+                            let Some(access) = native_property_access(object) else {
+                                return Err(error);
+                            };
+                            if (access.read)(self, object, &name, NativePropertyRead::Exists)?
+                                .is_none()
+                            {
+                                return Err(error);
+                            }
+                            key
+                        }
+                    };
+                    PathKey::Property(resolved)
                 }
                 (_, key) => key,
             };
@@ -308,4 +332,14 @@ impl Vm {
             Ok(ArrayKey::str(name))
         }
     }
+}
+
+pub(crate) fn native_property_access(
+    object: &phera_value::Object,
+) -> Option<&'static phera_extension_api::NativePropertyAccess> {
+    object
+        .class
+        .as_any()
+        .downcast_ref::<crate::classes::Class>()?
+        .property_access
 }
