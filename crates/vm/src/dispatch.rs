@@ -26,6 +26,14 @@ impl Vm {
         stop: usize,
     ) -> Result<DispatchResult, NativeError> {
         match instruction {
+            Instruction::GeneratorReturn { src } => {
+                return self
+                    .dispatched_return(
+                        crate::calls::returns::DispatchedReturn::Generator(src),
+                        stop,
+                    )
+                    .await;
+            }
             Instruction::ReturnChecked { source } => {
                 return self
                     .dispatched_return(

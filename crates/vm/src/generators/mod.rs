@@ -11,8 +11,9 @@ pub(crate) mod class;
 pub(crate) mod cleanup;
 mod delegation;
 mod execution;
+mod operations;
 mod resume;
-pub(crate) use resume::local_observation;
+pub(crate) use operations::local_observation;
 pub(crate) mod trace;
 
 use std::rc::Rc;

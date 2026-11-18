@@ -45,21 +45,18 @@ impl<'ast> Compiler<'ast> {
         }
         let mut builder = self.function_builder(declaration, &name, captures, line)?;
         builder.compile_parameter_defaults(&declaration.parameters, line)?;
-        // Keep instruction indices stable until the body tells us whether this is a generator.
-        builder.emit(Instruction::GeneratorStart, line);
+        if declaration.is_generator {
+            builder.emit(Instruction::GeneratorStart, line);
+        }
         builder.compile_promoted_properties(&declaration.parameters, line)?;
         builder.function.return_type = declaration
             .return_type
             .as_ref()
             .map(|declared_type| self.declaration_type(declared_type));
+        builder.validate_generator_type()?;
         builder.block(&declaration.body, DeclarationTiming::AtExecution)?;
-        if !builder.function.is_generator
-            && let Some(error) = builder.return_error.take()
-        {
-            return Err(error);
-        }
         let register = builder.literal(Constant::Null, line)?;
-        let implicit_return = if declaration.by_reference {
+        let implicit_return = if declaration.by_reference && !declaration.is_generator {
             Instruction::ReturnReference(register)
         } else {
             Instruction::Return(register)
@@ -140,6 +137,7 @@ impl<'ast> Compiler<'ast> {
         };
         builder.function.definition_line = line;
         builder.function.returns_reference = declaration.by_reference;
+        builder.function.is_generator = declaration.is_generator;
         builder.imports = self.imports.clone();
         builder.function.strict_types = self.function.strict_types;
         for parameter in &declaration.parameters {

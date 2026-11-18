@@ -58,7 +58,9 @@ impl Vm {
             I::Yield { dst, key, value } => return Ok(Some(self.generator_yield(dst, key, value))),
             I::YieldFrom { dst, src } => return Ok(Some(self.generator_delegate(dst, src))),
             I::GeneratorReturn { src } => {
-                let value = self.read_local(src);
+                let Some(value) = self.read_defined_local(src) else {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                };
                 return Ok(self
                     .finish_return_value(value, stop)?
                     .map(BatchExit::Returned));

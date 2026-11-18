@@ -16,6 +16,7 @@ pub struct FunctionDeclaration {
     pub name: Identifier,
     /// `function &foo()`
     pub by_reference: bool,
+    pub is_generator: bool,
     pub parameters: Vec<Parameter>,
     pub return_type: Option<Type>,
     pub body: Vec<Statement>,
@@ -130,6 +131,7 @@ pub struct Method {
     pub modifiers: Modifiers,
     pub name: Identifier,
     pub by_reference: bool,
+    pub is_generator: bool,
     pub parameters: Vec<Parameter>,
     pub return_type: Option<Type>,
     /// `None` for an abstract or interface method.

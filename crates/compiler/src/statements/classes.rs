@@ -287,6 +287,7 @@ impl Compiler<'_> {
                 span: method.name.span,
             },
             by_reference: method.by_reference,
+            is_generator: method.is_generator,
             parameters: method.parameters.clone(),
             return_type: method.return_type.clone(),
             body: method.body.clone().unwrap_or_default(),

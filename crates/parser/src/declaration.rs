@@ -114,13 +114,14 @@ impl Parser<'_> {
         let parameters = self.parse_parameter_list()?;
         let return_type = self.parse_return_type()?;
         self.expect(TokenKind::LeftBrace, "'{'")?;
-        let body = self.parse_inner_statements()?;
+        let (body, is_generator) = self.generator_body(Self::parse_inner_statements)?;
         self.close_brace()?;
 
         Ok(FunctionDeclaration {
             attributes,
             name,
             by_reference,
+            is_generator,
             parameters,
             return_type,
             body,
@@ -528,13 +529,13 @@ impl Parser<'_> {
         let parameters = self.parse_parameter_list()?;
         let return_type = self.parse_return_type()?;
 
-        let body = if self.eat(TokenKind::Semicolon)? {
-            None
+        let (body, is_generator) = if self.eat(TokenKind::Semicolon)? {
+            (None, false)
         } else {
             self.expect(TokenKind::LeftBrace, "'{' or ';'")?;
-            let statements = self.parse_inner_statements()?;
+            let (statements, is_generator) = self.generator_body(Self::parse_inner_statements)?;
             self.close_brace()?;
-            Some(statements)
+            (Some(statements), is_generator)
         };
 
         Ok(Method {
@@ -542,6 +543,7 @@ impl Parser<'_> {
             modifiers,
             name,
             by_reference,
+            is_generator,
             parameters,
             return_type,
             body,

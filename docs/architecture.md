@@ -508,7 +508,10 @@ each with its own fixtures checked against real PHP.
   why frames were kept detachable from the start.
 - `yield from` keeps a stack of inner generators inside the outer one.
 - A generator dropped while suspended inside a `try` runs its `finally`
-  blocks through the destructor queue.
+  blocks through a request-local release queue. The VM drains it at an
+  instruction boundary. A temporary that Phera still owns can delay that
+  release compared with PHP. References kept by closures or reference
+  cycles can also outlive the script's last explicit use of the generator.
 
 ### 9.5 Order of work
 

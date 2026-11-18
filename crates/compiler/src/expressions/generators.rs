@@ -16,7 +16,7 @@ impl Compiler<'_> {
         second: Option<&Expression>,
         line: usize,
     ) -> Result<Reg, CompileError> {
-        self.mark_generator(line)?;
+        self.check_yield_scope(line)?;
         let (key, value) = match second {
             Some(value) => (first, Some(value)),
             None => (None, first),
@@ -58,7 +58,7 @@ impl Compiler<'_> {
         source: &Expression,
         line: usize,
     ) -> Result<Reg, CompileError> {
-        self.mark_generator(line)?;
+        self.check_yield_scope(line)?;
         if self.function.returns_reference {
             return Err(self.error(
                 "Cannot use \"yield from\" inside a by-reference generator",
@@ -77,15 +77,19 @@ impl Compiler<'_> {
         Ok(destination)
     }
 
-    fn mark_generator(&mut self, line: usize) -> Result<(), CompileError> {
+    fn check_yield_scope(&self, line: usize) -> Result<(), CompileError> {
         if self.function.is_generator {
             return Ok(());
         }
-        if self.function.name == "{main}" {
-            return Err(self.error(
-                "The \"yield\" expression can only be used inside a function",
-                line,
-            ));
+        Err(self.error(
+            "The \"yield\" expression can only be used inside a function",
+            line,
+        ))
+    }
+
+    pub(crate) fn validate_generator_type(&self) -> Result<(), CompileError> {
+        if !self.function.is_generator {
+            return Ok(());
         }
         if let Some(ty) = &self.function.return_type
             && !accepts_generator(ty)
@@ -98,7 +102,6 @@ impl Compiler<'_> {
                 self.function.definition_line,
             ));
         }
-        self.function.is_generator = true;
         Ok(())
     }
 }

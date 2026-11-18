@@ -19,6 +19,7 @@ impl Compiler<'_> {
             attributes: arrow.attributes.clone(),
             is_static: arrow.is_static,
             by_reference: arrow.by_reference,
+            is_generator: arrow.is_generator,
             parameters: arrow.parameters.clone(),
             uses: Vec::new(),
             return_type: arrow.return_type.clone(),

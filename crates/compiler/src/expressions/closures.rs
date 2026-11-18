@@ -24,6 +24,7 @@ impl Compiler<'_> {
                 span,
             },
             by_reference: closure.by_reference,
+            is_generator: closure.is_generator,
             parameters: closure.parameters.clone(),
             return_type: closure.return_type.clone(),
             body: closure.body.clone(),

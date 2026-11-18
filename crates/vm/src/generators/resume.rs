@@ -6,17 +6,17 @@
 //! $outer->send('reply'); // reaches the innermost suspended yield
 //! ```
 
-use std::{cell::RefCell, collections::HashSet, rc::Rc};
+use std::{collections::HashSet, rc::Rc};
 
-use phera_extension_api::{GeneratorOperation, NativeError, NativeResult, traversal::IteratorStep};
+use phera_extension_api::NativeError;
 use phera_value::{Object, Value};
 
-use crate::{Vm, exceptions::Thrown};
+use crate::{Vm, calls::execution_loop::YIELD_AFTER_STEPS};
 
 use super::{Generator, Item, State, state};
 use super::{activation::Activation, delegation::Delegate, execution::Input};
 
-enum Motion {
+pub(super) enum Motion {
     Observe,
     Advance(Input),
 }
@@ -33,116 +33,8 @@ struct Drive {
     seen: HashSet<*const Object>,
 }
 
-/// Reading the current item of an already-started local generator never executes PHP.
-pub(crate) fn local_observation(
-    object: &Object,
-    operation: &GeneratorOperation,
-) -> Option<NativeResult> {
-    let (step, by_reference) = match *operation {
-        GeneratorOperation::Method(step) => (step, false),
-        GeneratorOperation::Cursor { step, by_reference } => (step, by_reference),
-        _ => return None,
-    };
-    if !matches!(
-        step,
-        IteratorStep::Current | IteratorStep::Key | IteratorStep::Valid
-    ) {
-        return None;
-    }
-    match state(object, |generator| {
-        if needs_priming(generator)
-            || matches!(
-                generator.state,
-                State::Delegating(_, _, Delegate::Generator(_))
-            )
-        {
-            return None;
-        }
-        Some(observe(generator, step, by_reference))
-    }) {
-        Ok(observed) => observed.map(Ok),
-        Err(error) => Some(Err(error)),
-    }
-}
-
-fn observe(generator: &mut Generator, step: IteratorStep, by_reference: bool) -> Value {
-    match step {
-        IteratorStep::Current => current_value(generator, by_reference),
-        IteratorStep::Key => active_item(generator)
-            .map(|item| item.key.clone())
-            .unwrap_or_default(),
-        IteratorStep::Valid => Value::Bool(is_open(generator)),
-        _ => Value::Null,
-    }
-}
-
 impl Vm {
-    pub(crate) async fn operate_generator(
-        &mut self,
-        object: Rc<Object>,
-        operation: GeneratorOperation,
-    ) -> NativeResult {
-        let (step, by_reference) = match operation {
-            GeneratorOperation::Method(step) => (Some(step), false),
-            GeneratorOperation::Cursor { step, by_reference } => (Some(step), by_reference),
-            _ => (None, false),
-        };
-        if state(&object, needs_priming)? {
-            let result = self.drive_generator(object.clone(), Motion::Observe).await;
-            state(&object, |generator| generator.first_yield = true)?;
-            result?;
-        }
-        match operation {
-            GeneratorOperation::GetReturn => state(&object, |generator| match &generator.state {
-                State::Returned(value) => Ok(value.clone()),
-                _ => Err(NativeError::throw(
-                    "Exception",
-                    "Cannot get return value of a generator that hasn't returned",
-                )),
-            })?,
-            GeneratorOperation::Send(value) => self
-                .advance_generator(object, Input::Send(value))
-                .await
-                .map(|leaf| current(&leaf, false))?,
-            GeneratorOperation::Throw(value) => {
-                let Value::Object(exception) = value else {
-                    return Err(internal_error!("generator Throwable argument"));
-                };
-                let error = Thrown {
-                    object: exception,
-                    skip_handlers: None,
-                }
-                .into_error();
-                self.advance_generator(object, Input::Throw(error))
-                    .await
-                    .map(|leaf| current(&leaf, false))?
-            }
-            _ => match step {
-                Some(IteratorStep::Advance) => {
-                    self.advance_generator(object, Input::Send(Value::Null))
-                        .await?;
-                    Ok(Value::Null)
-                }
-                Some(IteratorStep::Rewind) => state(&object, |generator| {
-                    if generator.first_yield {
-                        Ok(Value::Null)
-                    } else {
-                        Err(NativeError::throw(
-                            "Exception",
-                            "Cannot rewind a generator that was already run",
-                        ))
-                    }
-                })?,
-                Some(step) => {
-                    let leaf = self.drive_generator(object, Motion::Observe).await?;
-                    state(&leaf, |generator| observe(generator, step, by_reference))
-                }
-                None => Err(internal_error!("generator operation")),
-            },
-        }
-    }
-
-    async fn advance_generator(
+    pub(super) async fn advance_generator(
         &mut self,
         object: Rc<Object>,
         input: Input,
@@ -157,7 +49,7 @@ impl Vm {
         self.drive_generator(object, Motion::Advance(input)).await
     }
 
-    async fn drive_generator(
+    pub(super) async fn drive_generator(
         &mut self,
         mut object: Rc<Object>,
         mut motion: Motion,
@@ -178,11 +70,20 @@ impl Vm {
             let (activation, input) = match position {
                 Position::Delegates(delegate) => {
                     drive.seen.insert(Rc::as_ptr(&object));
-                    if drive.seen.contains(&Rc::as_ptr(&delegate)) {
+                    if drive.ancestors.len() >= self.frame_limit {
+                        let error = NativeError::error(format!(
+                            "Maximum call stack depth of {} exceeded",
+                            self.frame_limit,
+                        ));
+                        leave_delegate(&object, Input::Throw(error))?
+                    } else if drive.seen.contains(&Rc::as_ptr(&delegate)) {
                         let input = Input::Throw(impossible_delegation());
                         leave_delegate(&object, input)?
                     } else {
                         drive.ancestors.push(object);
+                        if drive.ancestors.len().is_multiple_of(YIELD_AFTER_STEPS) {
+                            tokio::task::yield_now().await;
+                        }
                         object = delegate;
                         continue;
                     }
@@ -314,37 +215,12 @@ fn retain_delegate_value(parent: &Object, child: &Object, value: Value) -> Resul
     })?
 }
 
-fn is_open(generator: &Generator) -> bool {
+pub(super) fn is_open(generator: &Generator) -> bool {
     !matches!(generator.state, State::Returned(_) | State::Failed)
 }
 
-fn needs_priming(generator: &mut Generator) -> bool {
+pub(super) fn needs_priming(generator: &mut Generator) -> bool {
     matches!(generator.state, State::Created(_) | State::Running) && generator.item.is_none()
-}
-
-fn active_item(generator: &mut Generator) -> Option<&mut Item> {
-    if is_open(generator) {
-        generator.item.as_mut()
-    } else {
-        None
-    }
-}
-
-fn current(object: &Object, by_reference: bool) -> NativeResult {
-    state(object, |generator| current_value(generator, by_reference))
-}
-
-fn current_value(generator: &mut Generator, by_reference: bool) -> Value {
-    let Some(item) = active_item(generator) else {
-        return Value::Null;
-    };
-    if !by_reference {
-        return item.value.deref().clone();
-    }
-    if !item.value.is_reference() {
-        item.value = Value::Reference(Rc::new(RefCell::new(std::mem::take(&mut item.value))));
-    }
-    item.value.clone()
 }
 
 pub(super) fn impossible_delegation() -> NativeError {

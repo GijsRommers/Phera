@@ -24,8 +24,6 @@ pub(super) struct Compiler<'ast> {
     pub(super) compile_diagnostics: &'ast RefCell<Vec<CompileDiagnostic>>,
     pub(super) lines: &'ast LineTable,
     pub(super) function: Function,
-    /// A yield elsewhere in this function can make an ordinary return rule inapplicable.
-    pub(super) return_error: Option<CompileError>,
     pub(super) functions: Vec<Function>,
     pub(super) hoisted: Vec<usize>,
     pub(super) classes: Vec<crate::ir::ClassDeclaration>,
@@ -59,7 +57,6 @@ impl<'ast> Compiler<'ast> {
                 name: name.into(),
                 ..Function::default()
             },
-            return_error: None,
             functions: vec![],
             hoisted: vec![],
             classes: vec![],
