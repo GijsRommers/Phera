@@ -99,10 +99,7 @@ impl Vm {
                 "#{number} {}({}): {}({})\n",
                 parent.unit().file,
                 parent.line(),
-                if child
-                    .method()
-                    .is_some_and(|context| context.receiver.is_some())
-                {
+                if child.this().is_some() {
                     child.function().name.replacen("::", "->", 1)
                 } else {
                     child.function().name.clone()

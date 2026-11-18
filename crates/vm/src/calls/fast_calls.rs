@@ -14,10 +14,10 @@
 use phera_bytecode::{FunctionId, Reg};
 use phera_value::Value;
 
-use crate::calls::call_state::{ArgumentOrder, CallTarget, Callee, TypeChecks};
+use crate::calls::call_state::CallTarget;
 use crate::calls::execution_loop::{Machine, Position, Step};
 use crate::calls::frame::Frame;
-use crate::classes::MethodContext;
+use crate::calls::prepared_call::{CallFlags, CallKind, PreparedCallee};
 use crate::code_table::{FunctionIndex, FunctionShape};
 
 impl Machine<'_> {
@@ -63,13 +63,12 @@ impl Machine<'_> {
             self.registers.move_slot(from + index, base + index);
         }
         self.publish(caller.ip);
-        let frame = Frame::new(function, base, Some(destination));
-        self.stack.push(frame);
+        let mut frame = Frame::new(function, base, Some(destination));
         if count < facts.parameters as usize {
-            let arguments = &mut self.stack.current_extras_mut().arguments;
-            arguments.supplied = Some(count);
-            arguments.count = Some(count);
+            frame = frame.with_passed(count);
         }
+        self.stack.push(frame);
+
         self.spend_work();
         Step::Switched(Position { frame, ip: 0 })
     }
@@ -88,10 +87,12 @@ impl Machine<'_> {
             return Step::Slow;
         };
         let depth = self.stack.depth();
-        if (frame.has_extras() && !self.stack.extras(depth - 1).holds_only_call_context())
-            || self.stack.depth() <= self.stop + 1
-            || self.code.local(frame.function).is_none()
-            || self.stack.has_calls_from(frame.base())
+        let kind = frame.kind();
+        let start = frame.base() - kind.prefix();
+        if depth <= self.stop + 1
+            || facts.local.is_none()
+            || (frame.has_extras() && !self.stack.extras(depth - 1).holds_only_called_class())
+            || self.stack.has_calls_from(start)
         {
             return Step::Slow;
         }
@@ -121,17 +122,13 @@ impl Machine<'_> {
         {
             return Step::Slow;
         }
-        let constructed = match frame.has_extras() {
-            true => self.stack.extras(depth - 1).constructed_object().cloned(),
-            false => None,
-        };
-        let value = match (constructed, source) {
-            (Some(object), _) => Value::Object(object),
-            (None, Some(source)) => self.registers.take(frame.base() + source.index()),
-            (None, None) => Value::Null,
+        let value = match (kind, source) {
+            (CallKind::Constructor, _) => self.registers.take(frame.base() - 1),
+            (_, Some(source)) => self.registers.take(frame.base() + source.index()),
+            (_, None) => Value::Null,
         };
         self.stack.pop();
-        self.registers.truncate(frame.base());
+        self.registers.truncate(start);
         self.registers
             .put(caller.base() + destination.index(), value);
         Step::Switched(Position {
@@ -146,20 +143,10 @@ impl Machine<'_> {
     /// type accepts the value as it is: write it into the window.
     #[inline(always)]
     pub(super) fn send(&mut self, position: Position, source: Reg) -> Step {
-        let Some(call) = self.stack.preparing.last() else {
+        let Some(call) = self.stack.last_call().copied() else {
             return Step::Slow;
         };
-        let index = call.window.supplied;
-        if call.window.named.is_some()
-            || index >= call.window.parameters
-            || matches!(call.callee.target, CallTarget::Intrinsic(_))
-        {
-            return Step::Slow;
-        }
-        let parameter = &call.callee.parameters[index];
-        if parameter.by_reference || parameter.variadic {
-            return Step::Slow;
-        }
+        let index = call.sent as usize;
         let value = match self
             .registers
             .window(position.frame.base() + source.index(), 1)
@@ -167,31 +154,36 @@ impl Machine<'_> {
             [Some(value)] => value.deref().clone(),
             _ => return Step::Slow,
         };
-        let accepted = match php_function(&call.callee) {
-            Some(function) => self.accepts_argument(function, index, &value),
-            None => parameter.ty.is_none(),
+        let accepted = match call.callee {
+            PreparedCallee::Php(function) => {
+                !call.flags.contains(CallFlags::DETAILS)
+                    && self.accepts_argument(function, index, &value)
+            }
+            PreparedCallee::General => self.general_accepts(index),
+            PreparedCallee::Constructed => false,
         };
         if !accepted {
             return Step::Slow;
         }
-        let Some(call) = self.stack.preparing.last_mut() else {
+        let Some(call) = self.stack.last_call_mut() else {
             return Step::Slow;
         };
-        self.registers.put(call.window.base + index, value);
-        call.window.supplied = index + 1;
-        call.window.argument_count = call.window.argument_count.max(index + 1);
+        self.registers.put(call.base() + index, value);
+        call.mark_sent(index, true);
         Step::Done(position.ip)
     }
 
-    /// Whether parameter `index` of `function` takes `value` as it is: no
-    /// declared type, a built-in type the value has, or a class type the
-    /// unit's cache knows the value's class satisfies.
+    /// Whether parameter `index` of `function` takes `value` as it is, by
+    /// value: no declared type, a built-in type the value has, or a class
+    /// type the unit's cache knows the value's class satisfies.
     fn accepts_argument(&self, function: FunctionIndex, index: usize, value: &Value) -> bool {
         let facts = self.code.facts(function);
-        if !facts.is_typed(index) {
-            return index < 64;
+        if !facts.takes_value(index) {
+            return false;
         }
-        if facts.parameter_masks[index].intersects(crate::types::own_type(value)) {
+        if !facts.is_typed(index)
+            || facts.parameter_masks[index].intersects(crate::types::own_type(value))
+        {
             return true;
         }
         let declared = self.code.function(function).parameters[index].ty;
@@ -200,54 +192,56 @@ impl Machine<'_> {
         })
     }
 
-    /// `Call` of a prepared function or method written in PHP whose
+    /// The same for a general callee, which is native code: any value, for
+    /// an untyped by-value parameter. A pending named argument takes the
+    /// general path.
+    fn general_accepts(&self, index: usize) -> bool {
+        let Some(details) = self.stack.top_details() else {
+            return false;
+        };
+        let Some(callee) = details.callee.as_ref().filter(|_| details.named.is_none()) else {
+            return false;
+        };
+        let intrinsic = matches!(callee.target, CallTarget::Intrinsic(_));
+        callee.parameters.get(index).is_some_and(|parameter| {
+            !intrinsic && !parameter.by_reference && !parameter.variadic && parameter.ty.is_none()
+        })
+    }
+
+    /// `Call` of a prepared function, method or closure written in PHP whose
     /// arguments all arrived positionally and passed their checks: push the
-    /// frame, with the method's class context beside it.
+    /// frame. `$this` and a closure's captures are in the window already.
     #[inline(always)]
     pub(super) fn enter_prepared(&mut self, position: Position, destination: Reg) -> Step {
-        let Some(call) = self.stack.preparing.last() else {
+        let Some(call) = self.stack.last_call().copied() else {
             return Step::Slow;
         };
-        if let CallTarget::Constructed(_) = call.callee.target {
-            return self.finish_construction(position, destination);
-        }
-        let Some(function) = php_function(&call.callee) else {
-            return Step::Slow;
+        let function = match call.callee {
+            PreparedCallee::Php(function) => function,
+            PreparedCallee::Constructed => return self.finish_construction(position, destination),
+            PreparedCallee::General => return Step::Slow,
         };
         let facts = self.code.facts(function);
-        let window = &call.window;
-        if window.checks != TypeChecks::Complete
-            || window.order != ArgumentOrder::Positional
-            || window.supplied < facts.required as usize
-            || window.supplied > facts.parameters as usize
+        let sent = call.sent as usize;
+        if call.flags != CallFlags::default()
+            || sent < facts.required as usize
+            || sent > facts.parameters as usize
             || facts.shape != FunctionShape::Plain
             || self.stack.depth() >= self.frame_limit
         {
             return Step::Slow;
         }
-        let Some(call) = self.stack.preparing.pop() else {
+        let Some(call) = self.stack.pop_plain() else {
             return Step::Slow;
         };
-        let (method, closure) = match call.callee.target {
-            CallTarget::Method { context, .. } => (Some(context), call.owner),
-            CallTarget::Closure(object) => {
-                let context = self.copy_captures(&object, function, call.window.base);
-                (context, Some(object))
-            }
-            _ => (None, call.owner),
-        };
         self.publish(position.ip);
-        let frame = Frame::new(function, call.window.base, Some(destination));
+        let mut frame = Frame::of_kind(function, call.kind, call.base(), Some(destination));
+        if sent < facts.parameters as usize {
+            frame = frame.with_passed(sent);
+        }
         self.stack.push(frame);
-        let supplied = call.window.supplied;
-        if method.is_some() || closure.is_some() || supplied < facts.parameters as usize {
-            let extras = self.stack.current_extras_mut();
-            extras.method = method;
-            extras.closure = closure;
-            if supplied < facts.parameters as usize {
-                extras.arguments.supplied = Some(supplied);
-                extras.arguments.count = Some(call.window.argument_count);
-            }
+        if call.called.is_some() {
+            self.stack.current_extras_mut().called = call.called;
         }
         self.spend_work();
         Step::Switched(Position { frame, ip: 0 })
@@ -258,50 +252,13 @@ impl Machine<'_> {
     /// `Call` after `new` of a class without a constructor: the object is the
     /// result, and the arguments, already evaluated, are dropped.
     fn finish_construction(&mut self, position: Position, destination: Reg) -> Step {
-        let Some(call) = self.stack.preparing.pop() else {
+        let Some(call) = self.stack.pop_plain() else {
             return Step::Slow;
         };
-        self.registers.truncate(call.window.base);
-        if let CallTarget::Constructed(object) = call.callee.target {
-            let slot = position.frame.base() + destination.index();
-            self.registers.put(slot, Value::Object(object));
-        }
+        let object = self.registers.take(call.base() - 1);
+        self.registers.truncate(call.start());
+        self.registers
+            .put(position.frame.base() + destination.index(), object);
         Step::Done(position.ip)
-    }
-
-    /// Copy a closure's captured values into the registers after its
-    /// parameters, and return the class context it was created in.
-    fn copy_captures(
-        &mut self,
-        object: &std::rc::Rc<phera_value::Object>,
-        function: FunctionIndex,
-        base: usize,
-    ) -> Option<MethodContext> {
-        let native = object.native.borrow();
-        let state = native
-            .as_ref()?
-            .downcast_ref::<crate::closures::ClosureState>()?;
-        let offset = base + self.code.function(function).parameters.len();
-        for (index, value) in state.captures.iter().enumerate() {
-            if let Some(value) = value {
-                self.registers.put(offset + index, value.clone());
-            }
-        }
-        state.context.clone()
-    }
-}
-
-/// The PHP function a prepared call enters, when its target is PHP code: a
-/// function, a method written in PHP, or a closure over a PHP function.
-fn php_function(callee: &Callee) -> Option<FunctionIndex> {
-    match &callee.target {
-        CallTarget::Closure(object) => object
-            .native
-            .borrow()
-            .as_ref()?
-            .downcast_ref::<crate::closures::ClosureState>()?
-            .callee
-            .user_function(),
-        _ => callee.user_function(),
     }
 }
