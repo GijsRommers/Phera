@@ -130,6 +130,11 @@ impl Vm {
                     if matches!(intrinsic, Intrinsic::Defined) {
                         Ok(Value::Bool(result.is_ok()))
                     } else {
+                        if result.is_err() {
+                            diagnostics.vm.failed_native = Some(
+                                crate::error_traces::NativeTrace::new("constant", &[argument]),
+                            );
+                        }
                         result
                     }
                 } else if matches!(intrinsic, Intrinsic::Defined) {

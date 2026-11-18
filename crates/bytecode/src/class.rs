@@ -56,6 +56,7 @@ pub enum TraitAdaptation {
         method: String,
         alias: Option<String>,
         visibility: Option<Visibility>,
+        is_final: bool,
     },
 }
 

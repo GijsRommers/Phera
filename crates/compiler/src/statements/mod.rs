@@ -105,3 +105,4 @@ mod traits;
 pub(crate) mod exceptions;
 
 pub(crate) mod class_errors;
+mod class_functions;

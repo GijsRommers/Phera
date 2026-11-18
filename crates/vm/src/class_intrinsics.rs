@@ -232,8 +232,8 @@ impl Vm {
             Function::ClassUses => {
                 for used_trait in &class.traits {
                     result.insert(
-                        ArrayKey::str(used_trait.name.as_str()),
-                        used_trait.name_value.clone(),
+                        ArrayKey::str(used_trait.as_str()),
+                        Value::from(used_trait.as_str()),
                     );
                 }
             }

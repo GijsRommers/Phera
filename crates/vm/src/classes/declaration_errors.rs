@@ -46,8 +46,15 @@ pub(crate) fn merge_interface_constants(
                     .any(|own| unit.names[own.name.index()] == *name)
             {
                 return Err(NativeError::error(format!(
-                    "Class {} inherits both {}::{name} and {}::{name}, which is ambiguous",
-                    declaration.name, previous.declaring, constant.declaring
+                    "{} {} inherits both {}::{name} and {}::{name}, which is ambiguous",
+                    if declaration.kind == phera_bytecode::ClassKind::Enum {
+                        "Enum"
+                    } else {
+                        "Class"
+                    },
+                    declaration.name,
+                    previous.declaring,
+                    constant.declaring
                 )));
             }
             constants.insert(name.clone(), constant.clone());

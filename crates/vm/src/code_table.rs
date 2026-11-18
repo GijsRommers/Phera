@@ -63,6 +63,7 @@ pub(crate) struct CodeTable {
     functions: Vec<FunctionFacts>,
     /// Every lowercased name of every loaded file, numbered.
     names: std::collections::HashMap<String, NameKey>,
+    trait_method_names: std::collections::HashMap<FunctionIndex, String>,
 }
 
 impl CodeTable {
@@ -180,7 +181,7 @@ impl CodeTable {
     }
 
     /// Flattened methods share immutable instructions and own their scope and static cells.
-    pub(crate) fn import_trait_body(
+    fn import_trait_body(
         &mut self,
         source: FunctionIndex,
         scope: crate::classes::ClassIndex,
@@ -190,6 +191,23 @@ impl CodeTable {
         let function = FunctionIndex(self.functions.len() as u32);
         self.functions.push(facts);
         function
+    }
+
+    pub(crate) fn import_trait_method(
+        &mut self,
+        source: FunctionIndex,
+        scope: crate::classes::ClassIndex,
+        name: String,
+    ) -> FunctionIndex {
+        let function = self.import_trait_body(source, scope);
+        self.trait_method_names.insert(function, name);
+        function
+    }
+
+    pub(crate) fn function_name(&self, function: FunctionIndex) -> &str {
+        self.trait_method_names
+            .get(&function)
+            .map_or_else(|| self.function(function).name.as_str(), String::as_str)
     }
 
     /// Composed methods reached through multiple traits can share the original body.

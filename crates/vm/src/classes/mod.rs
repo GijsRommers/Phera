@@ -7,6 +7,7 @@ mod enum_cases;
 pub(crate) mod enums;
 mod inheritance_checks;
 pub(crate) mod instantiation;
+mod link_members;
 mod linking;
 pub(crate) mod method_lookup;
 pub(crate) mod method_table;

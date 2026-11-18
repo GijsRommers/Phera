@@ -11,6 +11,25 @@ impl Compiler<'_> {
         name: &str,
     ) -> Result<(), CompileError> {
         let is_interface = declaration.kind == ast::ClassKind::Interface;
+        if let Some(identifier) = &declaration.name
+            && identifier.name == "_"
+            && matches!(
+                declaration.kind,
+                ast::ClassKind::Trait | ast::ClassKind::Enum
+            )
+        {
+            let kind = if declaration.kind == ast::ClassKind::Trait {
+                "a trait"
+            } else {
+                "an enum"
+            };
+            return Err(self.error(
+                format!(
+                    "Using \"_\" as {kind} name is not supported by Phera: deprecated since PHP 8.4"
+                ),
+                self.lines.line(identifier.span.start),
+            ));
+        }
         if declaration.name.is_none() {
             let modifier = if declaration.modifiers.is_abstract {
                 Some("abstract")

@@ -48,6 +48,11 @@ pub enum Instruction {
         class: Reg,
         name: NameId,
     },
+    FetchDynamicClassConstant {
+        dst: Reg,
+        class: Reg,
+        name: Reg,
+    },
     /// Does nothing. Left behind when the compiler removes an instruction.
     Nop,
     /// Link a declaration once execution reaches its source position.

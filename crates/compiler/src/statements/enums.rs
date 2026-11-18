@@ -25,7 +25,10 @@ impl Compiler<'_> {
                     "int" => Ok(EnumBacking::Int),
                     "string" => Ok(EnumBacking::String),
                     _ => Err(self.error(
-                        format!("Enum backing type must be int or string, {display} given"),
+                        format!(
+                            "Enum backing type must be int or string, {} given",
+                            backing_type_display(&display)
+                        ),
                         self.lines.line(declaration.span.start),
                     )),
                 }
@@ -92,4 +95,20 @@ impl Compiler<'_> {
         }
         Ok(backing)
     }
+}
+
+/// PHP prints named types first, then built-in types in mask order.
+fn backing_type_display(display: &str) -> String {
+    const TYPE_ORDER: &[&str] = &[
+        "static", "callable", "object", "array", "string", "int", "float", "bool", "false", "true",
+        "void", "never", "null",
+    ];
+    let mut members: Vec<_> = display.split('|').collect();
+    members.sort_by_key(|member| {
+        TYPE_ORDER
+            .iter()
+            .position(|ty| ty == member)
+            .map_or(0, |index| index + 1)
+    });
+    members.join("|")
 }

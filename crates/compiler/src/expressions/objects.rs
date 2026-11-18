@@ -46,11 +46,31 @@ impl Compiler<'_> {
                 class: ast::NewTarget::Anonymous(declaration),
                 arguments,
             } => {
+                if matches!(arguments, ast::Arguments::FirstClassCallable) {
+                    return Err(self.error("Cannot create Closure for new expression", line));
+                }
                 let class_line = self.lines.line(declaration.span.start);
                 let class =
                     self.compile_class(declaration, DeclarationTiming::AtExecution, class_line)?;
                 self.emit(Instruction::New { class }, line);
                 self.compile_arguments(arguments, line)
+            }
+            ast::ExpressionKind::ClassConstant {
+                class,
+                name: ast::MemberName::Expression(name),
+            } => {
+                let class = self.compile_class_target(class, line)?;
+                let name = self.compile_expression(name)?;
+                let destination = self.allocate_register()?;
+                self.emit(
+                    Instruction::DynamicClassConstant {
+                        destination,
+                        class,
+                        name,
+                    },
+                    line,
+                );
+                Ok(destination)
             }
             ast::ExpressionKind::New {
                 class: ast::NewTarget::Class(class),

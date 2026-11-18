@@ -206,7 +206,7 @@ pub fn split_property_key(key: &[u8]) -> (&[u8], PropertyScope<'_>) {
     let [0, rest @ ..] = key else {
         return (key, PropertyScope::Public);
     };
-    let Some(end) = rest.iter().position(|&byte| byte == 0) else {
+    let Some(end) = rest.iter().rposition(|&byte| byte == 0) else {
         return (key, PropertyScope::Public);
     };
     let (scope, name) = (&rest[..end], &rest[end + 1..]);

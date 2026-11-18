@@ -144,6 +144,11 @@ impl Compiler<'_> {
                 ast::MagicConstant::Function | ast::MagicConstant::Method => {
                     Constant::Bytes(if self.function.name == "{main}" {
                         vec![]
+                    } else if *match_expression == ast::MagicConstant::Function
+                        && let Some((_, method)) = self.function.name.rsplit_once("::")
+                        && !self.function.name.starts_with("{closure:")
+                    {
+                        method.as_bytes().to_vec()
                     } else {
                         self.function.name.as_bytes().to_vec()
                     })

@@ -59,10 +59,11 @@ impl<'ast> Compiler<'ast> {
         };
         builder.emit(implicit_return, line);
         if builder.classes.iter().any(|class| {
-            matches!(
-                class.kind,
-                phera_bytecode::ClassKind::Class | phera_bytecode::ClassKind::Interface
-            )
+            class.traits.is_empty()
+                && matches!(
+                    class.kind,
+                    phera_bytecode::ClassKind::Class | phera_bytecode::ClassKind::Interface
+                )
         }) {
             return Err(self.error("Nested class declarations not supported yet", line));
         }

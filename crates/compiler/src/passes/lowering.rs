@@ -65,6 +65,15 @@ impl Tables {
                 class,
                 name: self.name(&name),
             },
+            Old::DynamicClassConstant {
+                destination,
+                class,
+                name,
+            } => Instruction::FetchDynamicClassConstant {
+                dst: destination,
+                class,
+                name,
+            },
             Old::NewDynamic { class } => Instruction::NewDynamic { class },
             Old::DynamicMethodCall { receiver, method } => {
                 Instruction::DynamicMethodCall { receiver, method }

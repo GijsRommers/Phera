@@ -28,6 +28,7 @@ impl Vm {
         class: &Rc<Class>,
         name: &str,
         initializer: Option<FunctionIndex>,
+        spelling: Option<&str>,
     ) -> Result<Rc<Object>, NativeError> {
         if let Some(object) = self
             .enum_cases
@@ -41,7 +42,7 @@ impl Vm {
         if !self.enum_cases.initializing.insert(identity.clone()) {
             return Err(NativeError::error(format!(
                 "Cannot declare self-referencing constant {}::{name}",
-                class.name
+                spelling.unwrap_or(&class.name)
             )));
         }
         let backing = initializer
@@ -132,7 +133,7 @@ impl Vm {
         let ConstantInitializer::EnumCase { backing, .. } = constant.initializer else {
             return Err(internal_error!("enum case constant initializer"));
         };
-        self.enum_case(class, name, backing)
+        self.enum_case(class, name, backing, None)
     }
 
     pub(crate) fn call_enum_method(

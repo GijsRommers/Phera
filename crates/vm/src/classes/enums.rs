@@ -95,6 +95,15 @@ impl Vm {
             }
         }
         if declaration.kind == ClassKind::Enum {
+            let mut implemented = std::collections::HashSet::new();
+            for interface in interfaces.iter() {
+                if !implemented.insert(interface.index) {
+                    return Err(NativeError::error(format!(
+                        "Enum {name} cannot implement previously implemented interface {}",
+                        interface.name,
+                    )));
+                }
+            }
             for name in ["UnitEnum"]
                 .into_iter()
                 .chain(declaration.enum_backing.map(|_| "BackedEnum"))

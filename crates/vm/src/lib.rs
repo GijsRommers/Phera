@@ -135,6 +135,8 @@ pub struct Vm {
     closure_captures: Vec<closures::PendingCapture>,
     /// Pure defaults retain lexical class scope while running outside a method frame.
     initializer_scope: Option<String>,
+    initializer_class: Option<initializers::InitializerClass>,
+    initializer_depth: usize,
     argument_origin: calls::callback_binding::ArgumentOrigin,
     prelinked_classes: std::collections::HashSet<(usize, usize)>,
     function_table: function_table::FunctionTable,
@@ -179,6 +181,8 @@ impl Vm {
             property_references: Default::default(),
             closure_captures: Vec::new(),
             initializer_scope: None,
+            initializer_class: None,
+            initializer_depth: 0,
             argument_origin: calls::callback_binding::ArgumentOrigin::Php,
             prelinked_classes: std::collections::HashSet::new(),
             function_table: function_table::FunctionTable::new(),

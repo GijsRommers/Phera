@@ -26,7 +26,7 @@ pub(crate) struct Class {
     pub(crate) ancestors: std::collections::HashSet<String>,
     pub(crate) parent: Option<Rc<Class>>,
     pub(crate) interfaces: Vec<Rc<Class>>,
-    pub(crate) traits: Vec<Rc<Class>>,
+    pub(crate) traits: Vec<String>,
     pub(crate) enum_info: Option<super::enums::EnumInfo>,
     pub(crate) kind: ClassKind,
     pub(crate) is_abstract: bool,

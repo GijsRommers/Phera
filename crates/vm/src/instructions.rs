@@ -110,6 +110,12 @@ impl Vm {
             I::FetchClassConstant { dst, class, name } => {
                 self.fetch_class_constant(dst, class, name)?
             }
+            I::FetchDynamicClassConstant { dst, class, name } => {
+                let class = self.class_target(class)?;
+                let name = self.read_local(name);
+                let value = self.dynamic_class_constant(&class, &name)?;
+                self.set(dst, value);
+            }
             I::FetchClassName { dst, class } => self.fetch_class_name(dst, class)?,
             I::FetchThis { dst } => self.fetch_this(dst)?,
             I::ThisOrNull { dst } => self.this_or_null(dst),
@@ -242,8 +248,19 @@ impl Vm {
         class: Reg,
         name: phera_bytecode::NameId,
     ) -> Result<(), NativeError> {
-        let class = self.class_target(class)?;
         let name = self.name(name)?;
+        if name.eq_ignore_ascii_case("class") {
+            let value = self.read_local(class);
+            let Value::Object(object) = value else {
+                return Err(NativeError::error(format!(
+                    "Cannot use \"::class\" on value of type {}",
+                    value.type_name(),
+                )));
+            };
+            self.set(destination, Value::from(object.class.name()));
+            return Ok(());
+        }
+        let class = self.class_target(class)?;
         let value = self.class_constant(&class, &name)?;
         self.set(destination, value);
         Ok(())

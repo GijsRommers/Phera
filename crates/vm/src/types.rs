@@ -123,14 +123,30 @@ pub(crate) fn coerce(
     {
         return Ok(converted);
     }
+    let declared = diagnostic_type(&declaration_type.display);
     Err(NativeError::type_error(format!(
         "must be of type {}, {} given",
-        declaration_type.display,
+        declared,
         match &value {
             Value::Object(object) => object.class.name().to_owned(),
             _ => value.type_name(),
         }
     )))
+}
+
+/// PHP prints the anonymous class prefix in type errors, while matching its whole identity.
+fn diagnostic_type(declaration: &str) -> std::borrow::Cow<'_, str> {
+    if !declaration.contains('\0') {
+        return declaration.into();
+    }
+    let separators = ['|', '&', '?', '(', ')'];
+    let mut display = String::new();
+    for segment in declaration.split_inclusive(separators) {
+        let name = segment.trim_end_matches(separators);
+        display.push_str(name.split('\0').next().unwrap_or(name));
+        display.push_str(&segment[name.len()..]);
+    }
+    display.into()
 }
 
 /// PHP union coercion prefers numeric alternatives before strings and booleans.

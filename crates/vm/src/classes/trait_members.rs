@@ -6,7 +6,7 @@ use std::{
     rc::Rc,
 };
 
-use phera_bytecode::{ClassDeclaration, Visibility};
+use phera_bytecode::{ClassDeclaration, CompiledUnit, Visibility};
 use phera_extension_api::NativeError;
 use phera_value::{ArrayKey, Object, Value};
 
@@ -21,6 +21,7 @@ impl Vm {
     pub(super) fn compose_trait_members(
         &mut self,
         declaration: &ClassDeclaration,
+        unit: &CompiledUnit,
         traits: &[Rc<Class>],
         defaults: &mut Vec<PropertyDefault>,
         statics: &mut Vec<PropertyDefault>,
@@ -30,6 +31,27 @@ impl Vm {
         let mut property_origins = HashMap::new();
         let mut constant_origins = HashMap::new();
         for provider in traits {
+            for (source, opposite) in [
+                (&provider.defaults, &*statics),
+                (&provider.static_properties, &*defaults),
+            ] {
+                for property in source {
+                    let name = property.name.as_str();
+                    if opposite
+                        .iter()
+                        .any(|existing| existing.declaring == *class && existing.name == name)
+                    {
+                        let origin = property_origins.get(name).copied().unwrap_or(class);
+                        return Err(incompatible(
+                            "property",
+                            &format!("${name}"),
+                            class,
+                            origin,
+                            &provider.name,
+                        ));
+                    }
+                }
+            }
             for (properties, target) in [
                 (&provider.defaults, &mut *defaults),
                 (&provider.static_properties, &mut *statics),
@@ -41,7 +63,10 @@ impl Vm {
                         candidate.name == name && candidate.declaring == *class
                     };
                     if let Some(existing) = target.iter().find(|candidate| same_name(candidate)) {
-                        if !self.trait_properties_agree(existing, property) {
+                        let agree = self.with_trait_constants(class, constants, |vm| {
+                            vm.trait_properties_agree(existing, property, class)
+                        });
+                        if !agree {
                             let origin = property_origins.get(name).copied().unwrap_or(class);
                             return Err(incompatible(
                                 "property",
@@ -57,7 +82,7 @@ impl Vm {
                         let class = display(class);
                         return Err(NativeError::error(format!(
                             "Readonly class {class} cannot use trait with a non-readonly property {}::${}",
-                            provider.name, &property.name,
+                            provider.name, property.name,
                         )));
                     }
                     let mut linked = property.clone();
@@ -81,10 +106,23 @@ impl Vm {
             let mut trait_constants: Vec<_> = provider.constants.iter().collect();
             trait_constants.sort_by_key(|(name, _)| *name);
             for (name, constant) in trait_constants {
+                if declaration
+                    .enum_cases
+                    .iter()
+                    .any(|case| unit.names[case.name.index()] == *name)
+                {
+                    return Err(NativeError::error(format!(
+                        "Cannot use trait {}, because {}::{name} conflicts with enum case {class}::{name}",
+                        provider.name, provider.name,
+                    )));
+                }
                 if let Some(existing) = constants.get(name)
                     && existing.declaring == *class
                 {
-                    if !self.trait_constants_agree(existing, constant) {
+                    let agree = self.with_trait_constants(class, constants, |vm| {
+                        vm.trait_constants_agree(existing, constant, class)
+                    });
+                    if !agree {
                         let origin = constant_origins
                             .get(name.as_str())
                             .copied()
@@ -98,6 +136,14 @@ impl Vm {
                         ));
                     }
                     continue;
+                }
+                if let Some(inherited) = constants.get(name)
+                    && inherited.is_final
+                {
+                    return Err(NativeError::error(format!(
+                        "{class}::{name} cannot override final constant {}::{name}",
+                        inherited.declaring,
+                    )));
                 }
                 let initializer = match &constant.initializer {
                     ConstantInitializer::Value(value) => ConstantInitializer::Value(value.clone()),
@@ -127,10 +173,28 @@ impl Vm {
         Ok(())
     }
 
+    fn with_trait_constants<T>(
+        &mut self,
+        name: &str,
+        constants: &HashMap<String, Rc<LinkedConstant>>,
+        compare: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let previous = self
+            .initializer_class
+            .replace(crate::initializers::InitializerClass {
+                name: name.to_owned(),
+                constants: constants.clone(),
+            });
+        let result = compare(self);
+        self.initializer_class = previous;
+        result
+    }
+
     fn trait_properties_agree(
         &mut self,
         existing: &PropertyDefault,
         incoming: &PropertyDefault,
+        class: &str,
     ) -> bool {
         if existing.visibility != incoming.visibility
             || existing.ty != incoming.ty
@@ -139,16 +203,14 @@ impl Vm {
         {
             return false;
         }
-        let left = self.trait_property_default(existing);
-        let right = self.trait_property_default(incoming);
+        let left = self.trait_property_default(existing, class);
+        let right = self.trait_property_default(incoming, class);
         identical(left, right)
     }
 
-    fn trait_property_default(&mut self, property: &PropertyDefault) -> Option<Value> {
+    fn trait_property_default(&mut self, property: &PropertyDefault, class: &str) -> Option<Value> {
         match property.initializer {
-            Some(initializer) => self
-                .evaluate_initializer(&initializer, &property.declaring)
-                .ok(),
+            Some(initializer) => self.evaluate_initializer(&initializer, class).ok(),
             None => Some(property.value.clone()),
         }
     }
@@ -157,6 +219,7 @@ impl Vm {
         &mut self,
         existing: &LinkedConstant,
         incoming: &LinkedConstant,
+        class: &str,
     ) -> bool {
         if existing.visibility != incoming.visibility
             || existing.ty != incoming.ty
@@ -164,18 +227,16 @@ impl Vm {
         {
             return false;
         }
-        let left = self.trait_constant_default(existing);
-        let right = self.trait_constant_default(incoming);
+        let left = self.trait_constant_default(existing, class);
+        let right = self.trait_constant_default(incoming, class);
         identical(left, right)
     }
 
-    fn trait_constant_default(&mut self, constant: &LinkedConstant) -> Option<Value> {
+    fn trait_constant_default(&mut self, constant: &LinkedConstant, class: &str) -> Option<Value> {
         match &constant.initializer {
             ConstantInitializer::Compiled { function, .. } => {
-                literal_initializer(&self.code, function).or_else(|| {
-                    self.evaluate_initializer(function, &constant.declaring)
-                        .ok()
-                })
+                literal_initializer(&self.code, function)
+                    .or_else(|| self.evaluate_initializer(function, class).ok())
             }
             ConstantInitializer::Value(value) => Some(value.clone()),
             ConstantInitializer::EnumCase { .. } => None,

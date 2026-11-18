@@ -137,11 +137,10 @@ impl Vm {
                 class.name
             )));
         }
-        let object = self.classes.allocate(class.clone());
-        // Mirrors the default loop below for classes whose defaults are all literals.
-        if let Some(template) = &class.property_template {
-            object.update(|properties| *properties = template.clone());
+        let properties = if let Some(template) = &class.property_template {
+            template.clone()
         } else {
+            let mut properties = phera_value::PhpArray::new();
             for property in &class.defaults {
                 if property.initialized {
                     let value = if let Some(initializer) = &property.initializer {
@@ -149,10 +148,13 @@ impl Vm {
                     } else {
                         property.value.clone()
                     };
-                    object.set(property.key.clone(), value);
+                    properties.insert(property.key.clone(), value);
                 }
             }
-        }
+            properties
+        };
+        let object = self.classes.allocate(class.clone());
+        object.update(|storage| *storage = properties);
         if class.is_throwable {
             self.initialize_throwable(&object, crate::exceptions::TraceOrigin::Construction);
         }

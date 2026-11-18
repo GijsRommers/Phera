@@ -62,18 +62,21 @@ pub(crate) fn check_abstract(
     class: &str,
     kind: ClassKind,
     is_abstract: bool,
+    is_final: bool,
     methods: &HashMap<String, Rc<Method>>,
     interfaces: &[Rc<Class>],
 ) -> Result<(), NativeError> {
-    if is_abstract || matches!(kind, ClassKind::Interface | ClassKind::Trait) {
+    if matches!(kind, ClassKind::Interface | ClassKind::Trait) {
         return Ok(());
     }
     let mut missing: Vec<_> = methods
         .values()
-        .filter(|method| method.is_abstract)
+        .filter(|method| {
+            method.is_abstract && (!is_abstract || method.visibility == Visibility::Private)
+        })
         .map(|method| format!("{}::{}", method.declaring, method.name))
         .collect();
-    for interface in interfaces {
+    for interface in interfaces.iter().filter(|_| !is_abstract) {
         for (name, method) in &interface.methods {
             if methods.get(name).is_none_or(|method| method.is_abstract) {
                 missing.push(format!("{}::{}", method.declaring, method.name));
@@ -87,10 +90,15 @@ pub(crate) fn check_abstract(
     }
     let count = missing.len();
     let plural = if count == 1 { "" } else { "s" };
-    if kind == ClassKind::Anonymous {
+    if kind == ClassKind::Anonymous || is_abstract || is_final {
         let class = class.split('\0').next().unwrap_or(class);
+        let subject = if kind == ClassKind::Enum {
+            "Enum"
+        } else {
+            "Class"
+        };
         return Err(NativeError::error(format!(
-            "Class {class} must implement {count} abstract method{plural} ({})",
+            "{subject} {class} must implement {count} abstract method{plural} ({})",
             missing.join(", ")
         )));
     }

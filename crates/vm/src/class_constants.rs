@@ -6,6 +6,15 @@ use phera_extension_api::{NativeError, NativeResult};
 use phera_value::Value;
 
 impl Vm {
+    pub(crate) fn dynamic_class_constant(&mut self, class: &str, name: &Value) -> NativeResult {
+        let Value::String(name) = name else {
+            return Err(NativeError::type_error(format!(
+                "Cannot use value of type {} as class constant name",
+                name.type_name()
+            )));
+        };
+        self.class_constant(class, &name.to_string_lossy())
+    }
     /// Both objects and strings are valid dynamic class targets.
     pub(crate) fn class_target(&mut self, register: Reg) -> Result<String, NativeError> {
         match self.read_local(register) {
@@ -19,35 +28,53 @@ impl Vm {
 
     /// Resolve inherited constants while retaining the scope of their original declaration.
     pub(crate) fn class_constant(&mut self, class: &str, name: &str) -> NativeResult {
-        if name.eq_ignore_ascii_case("class") {
-            return Ok(Value::from(class.to_owned()));
-        }
-        let class = self
-            .classes
-            .get(class)
-            .ok_or_else(|| NativeError::error(format!("Class \"{class}\" not found")))?;
-        let constant = class.constants.get(name).cloned().ok_or_else(|| {
-            NativeError::error(format!("Undefined constant {}::{name}", class.name))
-        })?;
-        if class.kind == ClassKind::Trait {
-            return Err(NativeError::error(format!(
-                "Cannot access trait constant {}::{name} directly",
-                class.name
-            )));
-        }
-        if class.kind == ClassKind::Enum {
-            self.validate_enum_backing(&class)?;
+        self.class_constant_written(class, name, None)
+    }
+
+    pub(crate) fn class_constant_written(
+        &mut self,
+        class: &str,
+        name: &str,
+        spelling: Option<&str>,
+    ) -> NativeResult {
+        let linked = self.classes.get(class);
+        let (display, constants) = if let Some(linked) = &linked {
+            (&linked.name, &linked.constants)
+        } else if let Some(pending) = self
+            .initializer_class
+            .as_ref()
+            .filter(|pending| pending.name.eq_ignore_ascii_case(class))
+        {
+            (&pending.name, &pending.constants)
+        } else {
+            return Err(NativeError::error(format!("Class \"{class}\" not found")));
+        };
+        let constant = constants
+            .get(name)
+            .cloned()
+            .ok_or_else(|| NativeError::error(format!("Undefined constant {display}::{name}")))?;
+        if let Some(linked) = &linked {
+            if linked.kind == ClassKind::Trait {
+                return Err(NativeError::error(format!(
+                    "Cannot access trait constant {display}::{name} directly"
+                )));
+            }
+            if linked.kind == ClassKind::Enum {
+                self.validate_enum_backing(linked)?;
+            }
         }
         let scope = self
             .initializer_scope
             .as_ref()
             .and_then(|name| self.classes.get(name))
             .or_else(|| self.current().and_then(|frame| frame.scope().cloned()));
-        let allowed = match constant.visibility {
-            Visibility::Public => true,
-            Visibility::Private => scope.is_some_and(|scope| scope.name == constant.declaring),
-            Visibility::Protected => scope.is_some_and(|scope| scope.is_a(&constant.declaring)),
-        };
+        let same_scope = self.initializer_scope.as_deref() == Some(constant.declaring.as_str());
+        let allowed = same_scope
+            || match constant.visibility {
+                Visibility::Public => true,
+                Visibility::Private => scope.is_some_and(|scope| scope.name == constant.declaring),
+                Visibility::Protected => scope.is_some_and(|scope| scope.is_a(&constant.declaring)),
+            };
         if !allowed {
             let visibility = if constant.visibility == Visibility::Private {
                 "private"
@@ -61,7 +88,12 @@ impl Vm {
         }
         let (initializer, state) = match &constant.initializer {
             crate::classes::class::ConstantInitializer::EnumCase { name, backing } => {
-                return self.enum_case(&class, name, *backing).map(Value::Object);
+                let class = linked
+                    .as_ref()
+                    .ok_or_else(|| internal_error!("unlinked enum"))?;
+                return self
+                    .enum_case(class, name, *backing, spelling)
+                    .map(Value::Object);
             }
             crate::classes::class::ConstantInitializer::Value(value) => return Ok(value.clone()),
             crate::classes::class::ConstantInitializer::Compiled { function, state } => {

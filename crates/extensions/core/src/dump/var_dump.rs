@@ -87,7 +87,9 @@ impl Style for VarDump {
         let head = match container {
             Container::Array(_) => format!("array({len}) {{\n"),
             Container::Object(object) => {
-                format!("object({})#{} ({len}) {{\n", object.class.name(), object.id)
+                let class = object.class.name();
+                let display = class.split('\0').next().unwrap_or(class);
+                format!("object({display})#{} ({len}) {{\n", object.id)
             }
         };
         out.extend_from_slice(head.as_bytes());
@@ -114,7 +116,9 @@ impl Style for VarDump {
                     PropertyScope::Protected => out.extend_from_slice(b":protected"),
                     PropertyScope::Private(class) => {
                         out.extend_from_slice(b":\"");
-                        out.extend_from_slice(class);
+                        out.extend_from_slice(
+                            class.split(|byte| *byte == 0).next().unwrap_or(class),
+                        );
                         out.extend_from_slice(b"\":private");
                     }
                 }

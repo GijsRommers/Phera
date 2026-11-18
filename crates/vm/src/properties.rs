@@ -100,7 +100,13 @@ impl Vm {
         let allowed = match property.visibility {
             Visibility::Public => true,
             Visibility::Private => scope.is_some_and(|scope| scope.name == property.declaring),
-            Visibility::Protected => scope.is_some_and(|scope| scope.is_a(&property.declaring)),
+            Visibility::Protected => scope.is_some_and(|scope| {
+                scope.is_a(&property.declaring)
+                    || self
+                        .classes
+                        .get(&property.declaring)
+                        .is_some_and(|declaring| declaring.is_a(&scope.name))
+            }),
         };
         if !allowed {
             let visibility = if property.visibility == Visibility::Private {

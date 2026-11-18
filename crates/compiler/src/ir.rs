@@ -74,6 +74,11 @@ pub enum Instruction {
         class: Reg,
         name: String,
     },
+    DynamicClassConstant {
+        destination: Reg,
+        class: Reg,
+        name: Reg,
+    },
     /// Publish a request-local class declaration.
     DeclareClass(usize),
     /// Prepare a constructor using the same sends as a function call.

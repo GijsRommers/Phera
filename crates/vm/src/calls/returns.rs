@@ -16,7 +16,7 @@ pub(crate) enum DispatchedReturn {
 /// Retain code metadata while coercion mutably borrows the interpreter.
 struct ReturnTypeSite {
     unit: std::sync::Arc<phera_bytecode::CompiledUnit>,
-    function: Option<usize>,
+    function: crate::code_table::FunctionIndex,
     declaration: phera_bytecode::TypeId,
 }
 
@@ -67,7 +67,7 @@ impl Vm {
             }
             Some(ReturnTypeSite {
                 unit: frame.unit().clone(),
-                function: frame.function_id(),
+                function: frame.frame.function,
                 declaration,
             })
         });
@@ -85,32 +85,39 @@ impl Vm {
     ) -> Result<Value, NativeError> {
         let ReturnTypeSite {
             unit,
-            function: function_id,
+            function,
             declaration: index,
         } = site;
-        let function = function_id
-            .and_then(|id| unit.functions.get(id))
-            .unwrap_or(&unit.main);
+        let strict = self.code.function(function).strict_types;
         let declaration_type = &unit.types[index.index()];
+        let scoped = self.current().and_then(|frame| {
+            let method = frame.method()?;
+            (method.scope.kind == phera_bytecode::ClassKind::Anonymous)
+                .then(|| crate::closure_types::parameter_type(declaration_type, &method))
+        });
+        let declaration_type = scoped.as_ref().unwrap_or(declaration_type);
         let reference = match &value {
             Value::Reference(reference) => Some(reference.clone()),
             _ => None,
         };
-        let checked =
-            crate::types::coerce(value, declaration_type, function.strict_types.into(), self)
-                .map_err(|error| match error {
-                    NativeError::Throw { class, message, .. } => {
-                        let message = message
-                            .strip_suffix(" given")
-                            .map(|message| format!("{message} returned"))
-                            .unwrap_or(message);
-                        NativeError::throw(
-                            class,
-                            format!("{}(): Return value {message}", function.name),
-                        )
-                    }
-                    other => other,
-                })?;
+        let checked = crate::types::coerce(value, declaration_type, strict.into(), self).map_err(
+            |error| match error {
+                NativeError::Throw { class, message, .. } => {
+                    let message = message
+                        .strip_suffix(" given")
+                        .map(|message| format!("{message} returned"))
+                        .unwrap_or(message);
+                    NativeError::throw(
+                        class,
+                        format!(
+                            "{}(): Return value {message}",
+                            self.return_function_name(function)
+                        ),
+                    )
+                }
+                other => other,
+            },
+        )?;
         if let Some(reference) = reference {
             *reference
                 .try_borrow_mut()
@@ -118,6 +125,20 @@ impl Vm {
             Ok(Value::Reference(reference))
         } else {
             Ok(checked)
+        }
+    }
+
+    fn return_function_name(
+        &self,
+        function: crate::code_table::FunctionIndex,
+    ) -> std::borrow::Cow<'_, str> {
+        let name = self.code.function_name(function);
+        if let Some((short, _)) = name.split_once('\0')
+            && let Some((_, method)) = name.rsplit_once("::")
+        {
+            format!("{short}::{method}").into()
+        } else {
+            name.into()
         }
     }
 

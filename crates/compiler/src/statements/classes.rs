@@ -45,6 +45,9 @@ impl Compiler<'_> {
             } = &member.kind
             {
                 let case_line = self.lines.line(case.span.start);
+                if declaration.kind != ast::ClassKind::Enum {
+                    return Err(self.error("Case can only be used in enums", case_line));
+                }
                 if !attributes.is_empty() {
                     return Err(self.error("Attributes not supported yet", case_line));
                 }
@@ -156,6 +159,15 @@ impl Compiler<'_> {
                             self.lines.line(property.span.start),
                         ));
                     }
+                    if readonly && declaration.name.is_none() && property.default.is_some() {
+                        return Err(self.error(
+                            format!(
+                                "Readonly property {display}::${} cannot have default value",
+                                property.name
+                            ),
+                            self.lines.line(property.span.start),
+                        ));
+                    }
                     let default = property
                         .default
                         .as_ref()
@@ -207,6 +219,18 @@ impl Compiler<'_> {
             }
             for parameter in &method.parameters {
                 if parameter.modifiers.visibility.is_some() {
+                    if declaration.name.is_none()
+                        && declaration.modifiers.is_readonly
+                        && parameter.ty.is_none()
+                    {
+                        return Err(self.error(
+                            format!(
+                                "Readonly property {display}::${} must have type",
+                                parameter.name
+                            ),
+                            self.lines.line(parameter.span.start),
+                        ));
+                    }
                     properties.push(ClassProperty {
                         name: parameter.name.clone(),
                         visibility: member_visibility(&parameter.modifiers),
@@ -291,69 +315,6 @@ impl Compiler<'_> {
         self.anonymous_classes.set(number + 1);
         let line = self.lines.line(declaration.span.start);
         format!("{prefix}@anonymous\0{}:{line}${number:x}", self.file)
-    }
-
-    /// A separate pure function retains expression evaluation order without storing AST nodes.
-    fn compile_initializer(
-        &mut self,
-        expression: &ast::Expression,
-        class: &str,
-        trait_scope: Option<&str>,
-        line: usize,
-    ) -> Result<usize, CompileError> {
-        if let Some(message) = crate::constant_callables::callable_constant_error(expression) {
-            return Err(self.error(message, line));
-        }
-        if !crate::parameter_defaults::constant_expression(expression) {
-            return Err(self.error("Constant expression contains invalid operations", line));
-        }
-        let mut builder = Compiler::new(self.file, self.lines, "{initializer}", &self.namespace);
-        builder.class_scope = Some(class.to_owned());
-        builder.trait_scope = trait_scope.map(str::to_owned);
-        builder.imports = self.imports.clone();
-        let result = builder.compile_expression(expression)?;
-        builder.emit(Instruction::Return(result), line);
-        Ok(self.append_function_body(&mut builder))
-    }
-
-    /// Reuse parameter/default lowering while keeping method names out of the function table.
-    fn compile_method(
-        &mut self,
-        class: &str,
-        trait_scope: Option<&str>,
-        method: &ast::Method,
-        line: usize,
-    ) -> Result<ClassMethod, CompileError> {
-        let declaration = ast::FunctionDeclaration {
-            attributes: method.attributes.clone(),
-            name: ast::Identifier {
-                name: format!("{class}::{}", method.name.name),
-                span: method.name.span,
-            },
-            by_reference: method.by_reference,
-            parameters: method.parameters.clone(),
-            return_type: method.return_type.clone(),
-            body: method.body.clone().unwrap_or_default(),
-        };
-        let index = self.functions.len();
-        // The synthetic name is already fully qualified.
-        let previous = std::mem::replace(&mut self.trait_scope, trait_scope.map(str::to_owned));
-        let result = self.compile_function(&declaration, DeclarationTiming::Hoisted, line);
-        self.trait_scope = previous;
-        result?;
-        self.hoisted.retain(|candidate| *candidate != index);
-        Ok(ClassMethod {
-            name: method.name.name.clone(),
-            function: index,
-            visibility: match method.modifiers.visibility {
-                Some(ast::Visibility::Private) => Visibility::Private,
-                Some(ast::Visibility::Protected) => Visibility::Protected,
-                _ => Visibility::Public,
-            },
-            is_static: method.modifiers.is_static,
-            is_abstract: method.body.is_none(),
-            is_final: method.modifiers.is_final,
-        })
     }
 }
 

@@ -53,7 +53,7 @@ impl Contract {
     }
 
     /// PHP lists declaration modifiers before names, then optional defaults and return types.
-    fn display(&self, method: &Method) -> String {
+    fn display(&self, method: &Method, type_name: impl Fn(&str) -> String) -> String {
         let parameters = self
             .parameters
             .iter()
@@ -63,7 +63,7 @@ impl Contract {
                     parameter
                         .declaration
                         .as_ref()
-                        .map(|name| format!("{name} "))
+                        .map(|name| format!("{} ", type_name(name)))
                         .unwrap_or_default(),
                     if parameter.by_reference { "&" } else { "" },
                     if parameter.variadic { "..." } else { "" },
@@ -84,7 +84,7 @@ impl Contract {
             method.name,
             self.returns
                 .as_ref()
-                .map(|name| format!(": {name}"))
+                .map(|name| format!(": {}", type_name(name)))
                 .unwrap_or_default()
         )
     }
@@ -98,6 +98,26 @@ impl Vm {
         method: &Method,
         unit: &phera_bytecode::CompiledUnit,
     ) -> Result<(), NativeError> {
+        self.check_contract(inherited, method, None, unit)
+    }
+
+    pub(super) fn check_trait_contract(
+        &self,
+        inherited: &Method,
+        method: &Method,
+        consuming_class: &str,
+        unit: &phera_bytecode::CompiledUnit,
+    ) -> Result<(), NativeError> {
+        self.check_contract(inherited, method, Some(consuming_class), unit)
+    }
+
+    fn check_contract(
+        &self,
+        inherited: &Method,
+        method: &Method,
+        trait_scope: Option<&str>,
+        unit: &phera_bytecode::CompiledUnit,
+    ) -> Result<(), NativeError> {
         if (inherited.visibility == phera_bytecode::Visibility::Private && !inherited.is_abstract)
             || (method.name.eq_ignore_ascii_case("__construct") && !inherited.is_abstract)
         {
@@ -109,6 +129,7 @@ impl Vm {
         ) else {
             return Ok(());
         };
+        let inherited_scope = trait_scope.unwrap_or(&inherited.declaring);
         let mut compatible = !base.returns_reference || child.returns_reference;
         compatible &= child
             .parameters
@@ -136,7 +157,7 @@ impl Vm {
             compatible &= !parameter.optional || implementation.optional || implementation.variadic;
             compatible &= self.type_subset(
                 parameter.declaration.as_deref(),
-                &inherited.declaring,
+                inherited_scope,
                 implementation.declaration.as_deref(),
                 &method.declaring,
                 unit,
@@ -147,7 +168,7 @@ impl Vm {
                 child.returns.as_deref(),
                 &method.declaring,
                 base.returns.as_deref(),
-                &inherited.declaring,
+                inherited_scope,
                 unit,
             );
         }
@@ -161,13 +182,47 @@ impl Vm {
             crate::error_traces::DeclarationFailure {
                 message: format!(
                     "Declaration of {} must be compatible with {}",
-                    child.display(method),
-                    base.display(inherited)
+                    child.display(method, |ty| self.contract_type_name(
+                        ty,
+                        &method.declaring,
+                        trait_scope,
+                        unit
+                    )),
+                    base.display(inherited, |ty| self.contract_type_name(
+                        ty,
+                        inherited_scope,
+                        trait_scope,
+                        unit
+                    ))
                 ),
                 file: self.code.unit(*reference).file.clone(),
                 line: self.code.function(*reference).definition_line as usize,
             },
         ))))
+    }
+
+    fn contract_type_name(
+        &self,
+        ty: &str,
+        scope: &str,
+        trait_scope: Option<&str>,
+        unit: &phera_bytecode::CompiledUnit,
+    ) -> String {
+        if trait_scope.is_none() {
+            return ty.to_owned();
+        }
+        let separators = ['|', '&', '?', '(', ')'];
+        let mut display = String::new();
+        for segment in ty.split_inclusive(separators) {
+            let name = segment.trim_end_matches(separators);
+            if matches!(name, "self" | "parent") {
+                display.push_str(&self.resolve_signature_keyword(name, scope, unit));
+                display.push_str(&segment[name.len()..]);
+            } else {
+                display.push_str(segment);
+            }
+        }
+        display
     }
 
     /// Union members must each fit some destination member; intersections require all bounds.

@@ -1,7 +1,7 @@
 //! In `class C { use T; }`, T's methods become ordinary methods on C.
 
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     rc::Rc,
 };
 
@@ -50,30 +50,37 @@ impl Vm {
         let mut imports = Imports {
             class,
             own: methods,
-            methods: BTreeMap::new(),
+            methods: Vec::new(),
             requirements: Vec::new(),
         };
         for provider in traits {
             let mut entries: Vec<_> = provider.methods.iter().collect();
-            entries.sort_by_key(|(key, method)| (self.trait_body_order(method), *key));
+            entries.sort_by_key(|(key, method)| {
+                let order = match method.body {
+                    MethodBody::User(function) => function.index(),
+                    _ => 0,
+                };
+                (order, *key)
+            });
             for (key, method) in entries {
                 let provider_name = provider.name.to_ascii_lowercase();
                 let mut visibility = None;
+                let mut is_final = false;
                 for alias in rules.aliases(&provider_name, key) {
                     if let Some(name) = &alias.name {
-                        imports.add(
-                            self,
-                            copy_method(method, name, &provider.name, alias.visibility),
-                        )?;
+                        let mut linked =
+                            copy_method(method, name, &provider.name, alias.visibility);
+                        linked.is_final |= alias.is_final;
+                        imports.add(self, linked, &method.name)?;
                     } else {
                         visibility = alias.visibility.or(visibility);
+                        is_final |= alias.is_final;
                     }
                 }
                 if !rules.excludes(&provider_name, key) {
-                    imports.add(
-                        self,
-                        copy_method(method, &method.name, &provider.name, visibility),
-                    )?;
+                    let mut linked = copy_method(method, &method.name, &provider.name, visibility);
+                    linked.is_final |= is_final;
+                    imports.add(self, linked, &method.name)?;
                 }
             }
         }
@@ -106,7 +113,7 @@ impl Vm {
                         display(class),
                     )));
                 }
-                self.check_method_contract(&requirement, implementation, unit)?;
+                self.check_trait_contract(&requirement, implementation, class, unit)?;
             } else {
                 let linked = self.import_method(&requirement, class);
                 methods.insert(key, linked);
@@ -125,10 +132,12 @@ impl Vm {
     fn import_method(&mut self, method: &Method, class: &str) -> Rc<Method> {
         let mut linked = copy_method(method, &method.name, class, None);
         if let MethodBody::User(source) = linked.body {
-            linked.body = MethodBody::User(
-                self.code
-                    .import_trait_body(source, self.classes.next_index()),
-            );
+            let name = format!("{}::{}", display(class), method.name);
+            linked.body = MethodBody::User(self.code.import_trait_method(
+                source,
+                self.classes.next_index(),
+                name,
+            ));
         }
         Rc::new(linked)
     }
@@ -137,12 +146,12 @@ impl Vm {
 struct Imports<'a> {
     class: &'a str,
     own: &'a MethodTable,
-    methods: BTreeMap<String, Method>,
+    methods: Vec<(String, Method)>,
     requirements: Vec<Method>,
 }
 
 impl Imports<'_> {
-    fn add(&mut self, vm: &Vm, method: Method) -> Result<(), NativeError> {
+    fn add(&mut self, vm: &Vm, method: Method, original_name: &str) -> Result<(), NativeError> {
         let key = method.name.to_ascii_lowercase();
         if method.is_abstract {
             self.requirements.push(method);
@@ -155,19 +164,20 @@ impl Imports<'_> {
         {
             return Ok(());
         }
-        if let Some(previous) = self.methods.get(&key) {
+        if let Some((_, previous)) = self.methods.iter().find(|(name, _)| name == &key) {
             if vm.trait_body_order(previous) == vm.trait_body_order(&method)
                 && previous.visibility == method.visibility
+                && previous.is_final == method.is_final
             {
                 return Ok(());
             }
             let class = display(self.class);
             return Err(NativeError::error(format!(
                 "Trait method {}::{} has not been applied as {class}::{}, because of collision with {}::{}",
-                method.declaring, method.name, method.name, previous.declaring, previous.name,
+                method.declaring, original_name, method.name, previous.declaring, previous.name,
             )));
         }
-        self.methods.insert(key, method);
+        self.methods.push((key, method));
         Ok(())
     }
 }
