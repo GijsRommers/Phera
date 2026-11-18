@@ -44,6 +44,7 @@ mod closure_tests;
 mod closure_types;
 mod closures;
 mod code_table;
+mod constant_listings;
 mod constant_table;
 mod constants;
 mod context;
@@ -180,8 +181,16 @@ impl Vm {
     /// Create isolated request state from an immutable native registry.
     pub fn new(registry: Arc<Registry>) -> Self {
         let constants = registry
-            .constants()
-            .map(|(name, value)| (name.to_owned(), value.to_value()))
+            .constant_entries()
+            .map(|(name, value, deprecated)| {
+                (
+                    name.to_owned(),
+                    constant_table::GlobalConstant {
+                        value: value.to_value(),
+                        deprecated,
+                    },
+                )
+            })
             .collect();
         Self {
             classes: classes::ClassTable::native(&registry),

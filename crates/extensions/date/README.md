@@ -73,12 +73,11 @@ and arbitrary byte strings in error messages are tracked below.
 ### Deprecated PHP 8.5 surface
 
 Omitted declarations include `strftime`, `gmstrftime`, `date_sunrise`,
-`date_sunset`, `DATE_RFC7231`, `DateTimeInterface::RFC7231` and its inherited
-constant, `SUNFUNCS_RET_TIMESTAMP`, `SUNFUNCS_RET_STRING`,
+`date_sunset`, `SUNFUNCS_RET_TIMESTAMP`, `SUNFUNCS_RET_STRING`,
 `SUNFUNCS_RET_DOUBLE`, and the date classes' and interface's `__wakeup` methods.
 The ISO string construction path is `DatePeriod::createFromISO8601String`.
 The old string overload of the DatePeriod constructor emits a deprecation in PHP.
-The branch had no deprecated declarations before this work.
+`DATE_RFC7231` and `DateTimeInterface::RFC7231` emit PHP’s deprecation when read.
 
 ## Calendar and timezone dependencies
 

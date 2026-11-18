@@ -27,6 +27,7 @@ pub struct Deprecation {
     pub message: &'static str,
     pub policy: Policy,
     kind: ItemKind,
+    constant_notice: OnceLock<String>,
 }
 
 impl Deprecation {
@@ -46,13 +47,12 @@ impl Deprecation {
         message
     }
 
-    pub fn constant_notice(&self, accessed_name: &str) -> String {
-        let mut message = format!(
-            "Constant {accessed_name} is deprecated since {}",
-            self.since
-        );
-        append_message(&mut message, self.message);
-        message
+    fn constant_notice(&self) -> &str {
+        self.constant_notice.get_or_init(|| {
+            let mut message = format!("Constant {} is deprecated since {}", self.name, self.since);
+            append_message(&mut message, self.message);
+            message
+        })
     }
 }
 
@@ -107,6 +107,7 @@ pub fn find(kind: ItemKind, name: &str) -> Option<&'static Deprecation> {
                             message,
                             policy,
                             kind,
+                            constant_notice: OnceLock::new(),
                         },
                     ))
                 })
@@ -117,4 +118,10 @@ pub fn find(kind: ItemKind, name: &str) -> Option<&'static Deprecation> {
 
 pub fn omitted(kind: ItemKind, name: &str) -> Option<&'static Deprecation> {
     find(kind, name).filter(|item| item.policy == Policy::Omit)
+}
+
+pub fn kept_constant_notice(kind: ItemKind, name: &str) -> Option<&'static str> {
+    find(kind, name)
+        .filter(|item| item.policy == Policy::Keep)
+        .map(Deprecation::constant_notice)
 }

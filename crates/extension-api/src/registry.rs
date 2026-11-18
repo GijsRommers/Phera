@@ -67,9 +67,17 @@ pub struct Registry {
     /// Modules whose version is not PHP's, by lowercase name.
     module_versions: HashMap<String, &'static str>,
     bundles: Vec<&'static str>,
-    constants: HashMap<String, ConstantValue>,
+    constants: HashMap<String, NativeConstant>,
+    constant_order: Vec<String>,
+    registering_module: Option<&'static str>,
     /// In registration order, which puts every parent before its children.
     classes: Vec<ClassEntry>,
+}
+
+struct NativeConstant {
+    value: ConstantValue,
+    module: &'static str,
+    deprecated: Option<&'static str>,
 }
 
 impl Registry {
@@ -79,7 +87,9 @@ impl Registry {
 
     /// Runs the extension's registration against this registry.
     pub fn load(&mut self, extension: &dyn crate::Extension) {
+        let previous = std::mem::replace(&mut self.registering_module, extension.php_module());
         extension.register(self);
+        self.registering_module = previous;
         self.bundles.push(extension.name());
         if let Some(module) = extension.php_module() {
             self.php_module(module);
@@ -125,11 +135,38 @@ impl Registry {
 
     /// Panics on a duplicate name, like [`Registry::function`].
     pub fn constant(&mut self, name: &str, value: impl Into<ConstantValue>) {
+        self.register_constant(name, value.into(), None);
+    }
+
+    /// A retained PHP constant reports its stub deprecation only when read.
+    pub fn deprecated_constant(&mut self, name: &str, value: impl Into<ConstantValue>) {
+        use phera_source::deprecations::{ItemKind, kept_constant_notice};
+        self.register_constant(
+            name,
+            value.into(),
+            kept_constant_notice(ItemKind::Constant, name),
+        );
+    }
+
+    fn register_constant(
+        &mut self,
+        name: &str,
+        value: ConstantValue,
+        deprecated: Option<&'static str>,
+    ) {
         assert!(
             !self.constants.contains_key(name),
             "constant {name} is already registered"
         );
-        self.constants.insert(name.to_owned(), value.into());
+        self.constant_order.push(name.to_owned());
+        self.constants.insert(
+            name.to_owned(),
+            NativeConstant {
+                value,
+                module: self.registering_module.unwrap_or("Core"),
+                deprecated,
+            },
+        );
     }
 
     /// Panics on a duplicate name or an unregistered parent or interface:
@@ -167,7 +204,7 @@ impl Registry {
     }
 
     pub fn get_constant(&self, name: &str) -> Option<&ConstantValue> {
-        self.constants.get(name)
+        self.constants.get(name).map(|constant| &constant.value)
     }
 
     pub fn functions(&self) -> impl Iterator<Item = &FunctionEntry> {
@@ -179,7 +216,23 @@ impl Registry {
     pub fn constants(&self) -> impl Iterator<Item = (&str, &ConstantValue)> {
         self.constants
             .iter()
-            .map(|(name, value)| (name.as_str(), value))
+            .map(|(name, constant)| (name.as_str(), &constant.value))
+    }
+
+    pub fn constant_names(&self) -> impl Iterator<Item = (&str, &'static str)> {
+        self.constant_order.iter().filter_map(|name| {
+            self.constants
+                .get(name)
+                .map(|constant| (name.as_str(), constant.module))
+        })
+    }
+
+    pub fn constant_entries(
+        &self,
+    ) -> impl Iterator<Item = (&str, &ConstantValue, Option<&'static str>)> {
+        self.constants
+            .iter()
+            .map(|(name, constant)| (name.as_str(), &constant.value, constant.deprecated))
     }
 }
 

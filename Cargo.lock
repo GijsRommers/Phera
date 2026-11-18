@@ -1651,6 +1651,7 @@ dependencies = [
  "phera-ext-core",
  "phera-extension-api",
  "phera-phpt",
+ "phera-source",
  "tz-rs",
  "tzdb_data",
 ]

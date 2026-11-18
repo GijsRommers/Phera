@@ -2,6 +2,8 @@
 
 use phera_extension_api::{ClassEntry, ConstantValue, Context, MethodEntry};
 use phera_extension_api::{NativeResult, Param, ParamType, Registry, Value};
+use phera_source::deprecations::{ItemKind, kept_constant_notice};
+use std::sync::OnceLock;
 
 use super::instant::{IMMUTABLE, INTERFACE, MUTABLE};
 use super::{
@@ -10,8 +12,15 @@ use super::{
 };
 
 pub fn register(registry: &mut Registry) {
+    static DEPRECATED: OnceLock<Option<(&'static str, &'static str)>> = OnceLock::new();
     registry.class(ClassEntry {
         constants: FORMAT_CONSTANTS,
+        deprecated_constants: DEPRECATED
+            .get_or_init(|| {
+                kept_constant_notice(ItemKind::ClassConstant, "DateTimeInterface::RFC7231")
+                    .map(|notice| ("RFC7231", notice))
+            })
+            .as_slice(),
         methods: INTERFACE_METHODS,
         ..ClassEntry::interface(INTERFACE)
     });
@@ -23,6 +32,8 @@ pub fn register(registry: &mut Registry) {
         });
     }
 }
+
+pub(crate) const RFC7231_FORMAT: &str = "D, d M Y H:i:s \\G\\M\\T";
 
 pub const FORMAT_CONSTANTS: &[(&str, ConstantValue)] = &[
     ("ATOM", ConstantValue::String("Y-m-d\\TH:i:sP")),
@@ -39,6 +50,7 @@ pub const FORMAT_CONSTANTS: &[(&str, ConstantValue)] = &[
         "RFC3339_EXTENDED",
         ConstantValue::String("Y-m-d\\TH:i:s.vP"),
     ),
+    ("RFC7231", ConstantValue::String(RFC7231_FORMAT)),
     ("RSS", ConstantValue::String("D, d M Y H:i:s O")),
     ("W3C", ConstantValue::String("Y-m-d\\TH:i:sP")),
 ];

@@ -6,6 +6,12 @@ use phera_extension_api::{NativeError, NativeResult};
 use phera_source::deprecations::ItemKind;
 use phera_value::Value;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ConstantAccess {
+    Read,
+    Defined,
+}
+
 impl Vm {
     /// Both objects and strings are valid dynamic class targets.
     pub(crate) fn class_target(&mut self, register: Reg) -> Result<String, NativeError> {
@@ -51,6 +57,15 @@ impl Vm {
 
     /// Resolve inherited constants while retaining the scope of their original declaration.
     pub(crate) fn class_constant(&mut self, class: &str, name: &str) -> NativeResult {
+        self.class_constant_with_access(class, name, ConstantAccess::Read)
+    }
+
+    pub(crate) fn class_constant_with_access(
+        &mut self,
+        class: &str,
+        name: &str,
+        access: ConstantAccess,
+    ) -> NativeResult {
         let class = self
             .classes
             .get(class)
@@ -72,7 +87,9 @@ impl Vm {
                 constant.declaring
             )));
         }
-        if let Some(message) = constant.deprecated {
+        if access == ConstantAccess::Read
+            && let Some(message) = constant.deprecated
+        {
             self.diagnostic("Deprecated", message.into());
         }
         self.evaluate_class_constant(&constant, name)
