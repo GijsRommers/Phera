@@ -50,6 +50,7 @@ fn request(method: &str, target: &str) -> HttpRequest {
         body: Vec::new(),
         remote_addr: "203.0.113.9:51000".parse().expect("address"),
         local_addr: address,
+        https: false,
     }
 }
 

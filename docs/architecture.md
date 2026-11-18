@@ -186,11 +186,10 @@ certificates, speaks HTTP/2 and HTTP/3 to browsers, and sends plain
 HTTP/1.1 to a container. So the work that matters most is being a good
 upstream, not being an edge server.
 
-Today (2026-11-18) the server speaks HTTP/1.1 with keep-alive, runs one
-worker per core, serves a front controller, reads `.env` files and shuts
-down gracefully. Static files are answered, but read whole into memory and
-without caching headers. What production needs, in the order it will be
-built:
+The list below is the order of work. Built so far (2026-11-18): steps 1,
+2, 3 and 8, and of step 5 the platform's `PORT`, the health path and the
+graceful end on `SIGTERM`. The server speaks HTTP/1.1 with keep-alive and
+runs one worker per core.
 
 1. **Limits and timeouts** (5.1). A proxy does not protect a worker from a
    script that never ends or a body that is too large.
@@ -204,7 +203,8 @@ built:
    `X-Forwarded-For`, `X-Forwarded-Proto`, `X-Forwarded-Host` and
    `Forwarded` set `REMOTE_ADDR`, `HTTPS`, `SERVER_PORT` and `HTTP_HOST`.
    Without the list those headers are ignored, since any client can send
-   them.
+   them. (`--trusted-proxies 10.0.0.0/8,...`, or the word `private` for
+   every private range.)
 4. **HTTP/2 on the same port**, without TLS ("h2c"), for proxies that speak
    HTTP/2 to their upstreams: many requests share one connection. The
    server answers HTTP/1.1 and HTTP/2 on one listener; a script sees no

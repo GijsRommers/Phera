@@ -167,6 +167,10 @@ fn server(
         "REMOTE_PORT",
         Value::from(request.remote_addr.port().to_string()),
     );
+    if request.https {
+        // The key is absent for plain HTTP, which is what scripts test.
+        set("HTTPS", Value::from("on"));
+    }
     set("REQUEST_METHOD", Value::from(request.method.as_str()));
     set("REQUEST_URI", Value::from(request.target.as_str()));
     set("QUERY_STRING", Value::from(request.query.as_str()));
