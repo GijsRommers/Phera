@@ -67,7 +67,7 @@ impl Vm {
         sent: &Value,
         result: impl FnOnce(&Generator) -> T,
     ) -> Option<Result<T, NativeError>> {
-        if !self.error_handlers.pending.is_empty() || self.generator_releases_pending() {
+        if self.pending_callbacks || self.generator_releases_pending() {
             return None;
         }
         match state(object, |generator| {

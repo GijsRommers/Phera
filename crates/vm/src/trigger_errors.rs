@@ -52,7 +52,7 @@ impl Vm {
                 .as_ref()
                 .is_some_and(|handler| handler.levels & level != 0);
         if use_handler {
-            self.error_handlers.pending.push(event);
+            self.enqueue_diagnostic(event);
             self.drain_error_handlers().await?;
         } else {
             self.report_event(&event);

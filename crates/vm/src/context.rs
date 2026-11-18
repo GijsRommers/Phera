@@ -2,7 +2,7 @@
 
 use phera_extension_api::{
     CompileDiagnostic, CompileDiagnosticKind, CompileDiagnosticSite, Context, LocalFuture,
-    NativeError, NativeResult, RequestState,
+    NativeError, NativeResult, RequestCallback, RequestState,
 };
 use phera_value::{Diagnostics, Value};
 
@@ -25,6 +25,19 @@ impl Diagnostics for Vm {
 impl Context for Vm {
     fn write(&mut self, bytes: &[u8]) {
         self.out(bytes)
+    }
+
+    fn output_origin(&self) -> Option<(&str, usize)> {
+        let origin = self.output_writer.origin.as_ref()?;
+        Some((&origin.file, origin.line))
+    }
+
+    fn register_request_callback(
+        &mut self,
+        phase: RequestCallback,
+        arguments: Vec<Value>,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(self.register_callback(phase, arguments))
     }
 
     fn include_path(&self) -> phera_value::PhpString {
@@ -56,6 +69,17 @@ impl Context for Vm {
         value: &'a Value,
     ) -> LocalFuture<'a, Result<phera_value::PhpString, phera_extension_api::NativeError>> {
         Box::pin(self.stringify_value(value))
+    }
+
+    fn is_exception(&self, error: &NativeError) -> bool {
+        match error {
+            NativeError::Throw { .. } => true,
+            NativeError::Unwind(payload) => payload.0.is::<crate::exceptions::Thrown>(),
+        }
+    }
+
+    fn chain_exception(&mut self, error: NativeError, previous: NativeError) -> NativeError {
+        self.exception_with_previous(error, previous)
     }
 
     fn compare<'a>(
@@ -130,7 +154,7 @@ impl Context for Vm {
         // queued a callback, publish later warnings only if that callback returns.
         if calls_handler || (!self.error_handlers.active && !self.error_handlers.pending.is_empty())
         {
-            self.error_handlers.pending.push(event);
+            self.enqueue_diagnostic(event);
         } else {
             self.report_event(&event);
         }
@@ -180,11 +204,8 @@ impl Context for Vm {
         parameter: &str,
         callable: &Value,
     ) -> Result<(), phera_extension_api::NativeError> {
-        self.resolve_callable(callable)
+        self.resolve_native_callback(function, number, parameter, callable)
             .map(|_| ())
-            .map_err(|error| {
-                self.invalid_callback(function, number, parameter, callable, error, false)
-            })
     }
 
     fn call_array(
@@ -218,7 +239,7 @@ impl Context for Vm {
             self.take_resolved_callable()
         })();
         match callee {
-            Ok(callee) => self.invoke_resolved_callable(callee, arguments),
+            Ok(callee) => Box::pin(self.invoke_resolved_callable(callee, arguments)),
             Err(error) => Box::pin(std::future::ready(Err(error))),
         }
     }
@@ -230,7 +251,7 @@ impl Context for Vm {
         arguments: Vec<Value>,
     ) -> LocalFuture<'_, NativeResult> {
         match self.protocol_method(object, name) {
-            Ok(callee) => self.invoke_resolved_callable(callee, arguments),
+            Ok(callee) => Box::pin(self.invoke_resolved_callable(callee, arguments)),
             Err(error) => Box::pin(std::future::ready(Err(error))),
         }
     }
@@ -405,7 +426,7 @@ impl Vm {
         &mut self,
         callee: crate::calls::call_state::Callee,
         arguments: impl IntoIterator<Item = Value>,
-    ) -> LocalFuture<'_, NativeResult> {
+    ) -> impl Future<Output = NativeResult> {
         self.invoke_callable_origin(
             callee,
             arguments,

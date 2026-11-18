@@ -139,8 +139,7 @@ impl Vm {
             let mut work = 0;
             let result = match self.run_batch(stop, &mut work) {
                 Ok(BatchExit::GeneratorSuspended)
-                    if self.error_handlers.pending.is_empty()
-                        && !self.generator_releases_pending() =>
+                    if !self.pending_callbacks && !self.generator_releases_pending() =>
                 {
                     Value::Null
                 }

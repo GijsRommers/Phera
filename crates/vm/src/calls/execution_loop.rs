@@ -52,7 +52,7 @@ pub(crate) enum BatchExit {
     GeneratorSuspended,
     /// The work budget is spent; other tasks get a turn.
     Yield,
-    /// A warning queued a user error handler, which must run now.
+    /// Output or diagnostics queued a callback, which must run now.
     Handlers,
     /// The first generator changed which deferred work this request can queue.
     GeneratorTracking,
@@ -132,9 +132,7 @@ impl Vm {
             if let Some(exit) = self.execute::<TRACK_GENERATORS>(instruction, stop, work)? {
                 return Ok(exit);
             }
-            if !self.error_handlers.pending.is_empty()
-                || (TRACK_GENERATORS && self.generator_releases_pending())
-            {
+            if self.pending_callbacks || (TRACK_GENERATORS && self.generator_releases_pending()) {
                 return Ok(BatchExit::Handlers);
             }
             if *work >= YIELD_AFTER_STEPS {

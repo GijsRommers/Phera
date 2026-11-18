@@ -13,6 +13,9 @@ mod strings;
 mod time;
 mod version_compare;
 
+pub use url::query;
+mod url;
+
 pub struct Standard;
 
 impl Extension for Standard {
@@ -23,6 +26,7 @@ impl Extension for Standard {
     fn register(&self, registry: &mut Registry) {
         registry.function(version_compare::ENTRY);
         strings::register(registry);
+        url::register(registry);
         math::register(registry);
         arrays::register(registry);
         constants::register(registry);
