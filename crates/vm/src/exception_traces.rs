@@ -60,24 +60,24 @@ impl Vm {
                 let _ = trace.push(Value::Array(Rc::new(entry)));
                 continue;
             }
-            let function = &callee.function().name;
-            let function = if function.contains("::$") && !function.starts_with("{closure:") {
-                self.code.function_name(callee.frame.function)
+            let function = callee.function().name.as_str();
+            let (class, name) = if function.starts_with("{closure:") {
+                (callee.scope().map(|scope| scope.name.as_str()), function)
+            } else if let Some((class, method)) = function.split_once("::") {
+                if method.starts_with('$')
+                    && let Some((class, method)) = self
+                        .code
+                        .function_name(callee.frame.function)
+                        .split_once("::")
+                {
+                    (Some(class), method)
+                } else {
+                    (Some(class), method)
+                }
             } else {
-                function.as_str()
-            };
-            let closure = function.starts_with("{closure:");
-            let name = if closure {
-                function
-            } else {
-                function.split_once("::").map_or(function, |(_, name)| name)
+                (None, function)
             };
             entry.insert(ArrayKey::str("function"), Value::from(name));
-            let class = if closure {
-                callee.scope().map(|scope| scope.name.as_str())
-            } else {
-                function.split_once("::").map(|(class, _)| class)
-            };
             if let Some(class) = class {
                 entry.insert(ArrayKey::str("class"), Value::from(class));
                 let kind = if callee.this().is_some() { "->" } else { "::" };
