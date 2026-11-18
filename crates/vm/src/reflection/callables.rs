@@ -14,6 +14,20 @@ use crate::code_table::FunctionIndex;
 
 use super::exception;
 
+pub(super) fn closure_invoke_receiver(
+    receiver: Option<Rc<Object>>,
+) -> Result<Rc<Object>, NativeError> {
+    let object = receiver.ok_or_else(|| {
+        exception("Trying to invoke non static method Closure::__invoke() without an object")
+    })?;
+    if !object.class.is_instance_of("Closure") {
+        return Err(exception(
+            "Given object is not an instance of the class this method was declared in",
+        ));
+    }
+    Ok(object)
+}
+
 impl Vm {
     pub(super) fn reflection_function_callee(
         &mut self,
@@ -26,6 +40,10 @@ impl Vm {
                 let object = object
                     .upgrade()
                     .ok_or_else(|| exception("Closure is unavailable"))?;
+                self.resolve_callable(&Value::Object(object))?
+            }
+            FunctionTarget::ClosureInvoke(_) => {
+                let object = closure_invoke_receiver(receiver)?;
                 self.resolve_callable(&Value::Object(object))?
             }
             FunctionTarget::Method { class, name } => {
@@ -110,6 +128,7 @@ impl Vm {
             FunctionTarget::Method { class, name } => {
                 method_function(&self.reflection_method(class, name)?.1)
             }
+            FunctionTarget::ClosureInvoke(_) => None,
             FunctionTarget::Closure(object) => {
                 let object = object
                     .upgrade()

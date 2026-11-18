@@ -109,9 +109,12 @@ pub(crate) fn register(registry: &mut Registry) {
                                 "Given object is not an instance of the class this method was declared in",
                             ));
                         }
-                        let target = FunctionTarget::Method {
-                            class: member.class.clone(),
-                            name: member.name.clone(),
+                        let target = match &function.target {
+                            FunctionTarget::ClosureInvoke(_) => function.target.clone(),
+                            _ => FunctionTarget::Method {
+                                class: member.class.clone(),
+                                name: member.name.clone(),
+                            },
                         };
                         engine(c)?.reflect_closure(target, object)
                     },
@@ -161,11 +164,23 @@ fn construct(
             },
         };
         engine(context)?.reflect_class(&class).await?;
-        let function =
-            engine(context)?.reflect_function(&FunctionTarget::Method { class, name })?;
+        let target = method_target(first, class, name);
+        let function = engine(context)?.reflect_function(&target)?;
+        crate::function::keep_closure(this, &target);
         set_class(this, method(&function)?);
         bind(this, Some(&function.name.clone()), function)
     })
+}
+
+pub(crate) fn method_target(receiver: &Value, class: String, name: String) -> FunctionTarget {
+    if name.eq_ignore_ascii_case("__invoke")
+        && let Value::Object(closure) = receiver
+        && closure.class.is_instance_of("Closure")
+    {
+        FunctionTarget::ClosureInvoke(Rc::downgrade(closure))
+    } else {
+        FunctionTarget::Method { class, name }
+    }
 }
 
 fn create_from_method_name(

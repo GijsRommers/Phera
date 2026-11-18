@@ -185,21 +185,7 @@ impl Compiler<'_> {
                     self.lines.line(method.name.span.start),
                 ));
             }
-            if method.name.name.eq_ignore_ascii_case("__invoke")
-                && matches!(
-                    method.modifiers.visibility,
-                    Some(ast::Visibility::Private | ast::Visibility::Protected)
-                )
-            {
-                self.declaration_warnings
-                    .push(phera_bytecode::DeclarationWarning {
-                        message: format!(
-                            "The magic method {name}::{}() must have public visibility",
-                            method.name.name
-                        ),
-                        line: self.lines.line(method.name.span.start) as u32,
-                    });
-            }
+            self.validate_magic_method(&name, method)?;
             for parameter in &method.parameters {
                 if parameter.modifiers.promotes_property() {
                     let metadata = self.declaration_metadata(
@@ -327,6 +313,16 @@ impl Compiler<'_> {
     ) -> Result<ClassMethod, CompileError> {
         use super::functions::{FunctionBody, FunctionSource};
         let name = format!("{class}::{}", method.name.name);
+        let implicit_return = (method.return_type.is_none()
+            && method.name.name.eq_ignore_ascii_case("__toString"))
+        .then(|| ast::Type {
+            kind: ast::TypeKind::Named(ast::Name {
+                kind: ast::NameKind::Unqualified,
+                text: "string".into(),
+                span: method.name.span,
+            }),
+            span: method.name.span,
+        });
         let declaration = FunctionSource {
             span: method.span,
             doc_comment,
@@ -334,7 +330,7 @@ impl Compiler<'_> {
             name: &name,
             by_reference: method.by_reference,
             parameters: &method.parameters,
-            return_type: method.return_type.as_ref(),
+            return_type: method.return_type.as_ref().or(implicit_return.as_ref()),
             body: FunctionBody::Statements(method.body.as_deref().unwrap_or_default()),
         };
         let index = self.functions.len();

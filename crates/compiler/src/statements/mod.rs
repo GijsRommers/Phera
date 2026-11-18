@@ -112,6 +112,7 @@ pub(crate) mod declarations;
 mod function_parameters;
 pub(crate) mod functions;
 pub(crate) mod loops;
+mod magic_methods;
 mod property_visibility;
 mod reflection;
 pub(crate) mod switching;

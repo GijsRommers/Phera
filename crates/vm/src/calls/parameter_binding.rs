@@ -95,7 +95,7 @@ impl Vm {
     }
 
     /// Relative class types use the callee's lexical scope while strictness comes from the caller.
-    fn check_window_argument(
+    pub(super) fn check_window_argument(
         &mut self,
         (entry, call): (FunctionIndex, &PreparedCall),
         index: usize,

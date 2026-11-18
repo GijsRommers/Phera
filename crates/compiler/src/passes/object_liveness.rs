@@ -54,9 +54,14 @@ pub(crate) fn effect(
                 Unrelated
             }
         }
-        Instruction::Clone { dst, src } | Instruction::InstanceOf { dst, src, .. } => {
-            read_write(src, dst, register)
+        Instruction::Clone { dst, src, with } => {
+            if with == Some(register) {
+                Read
+            } else {
+                read_write(src, dst, register)
+            }
         }
+        Instruction::InstanceOf { dst, src, .. } => read_write(src, dst, register),
         Instruction::Fetch { dst, path, .. }
         | Instruction::FetchIndex { dst, path, .. }
         | Instruction::MakeReference { dst, path } => {
@@ -65,7 +70,8 @@ pub(crate) fn effect(
         Instruction::AssignPath { path, src } | Instruction::BindReference { path, src } => {
             path_effect(function, path, None, Some(src), register)
         }
-        Instruction::AssignOpPath { dst, path, src, .. } => {
+        Instruction::AssignOpPath { dst, path, src, .. }
+        | Instruction::AssignPathFromLocal { dst, path, src } => {
             path_effect(function, path, Some(dst), Some(src), register)
         }
         Instruction::IncDecPath { dst, path, .. } => {

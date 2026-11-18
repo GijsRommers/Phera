@@ -8,10 +8,20 @@
 use crate::errors::Error;
 use crate::scan::Scanner;
 use crate::{cache, errors, flags};
-use phera_extension_api::value::to_php_string;
-use phera_extension_api::{Context, NativeResult, PhpArray, Value, args};
+use phera_extension_api::{Context, LocalFuture, NativeResult, PhpArray, Value, args};
 
-pub(crate) fn grep(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+pub(crate) fn grep(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        matching_entries(context, &arguments)
+            .await
+            .map_err(|error| context.native_call_error("preg_grep", &arguments, error))
+    })
+}
+
+async fn matching_entries(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let Some(compiled) = cache::get(context, "preg_grep", args::bytes(arguments, 0)) else {
         return Ok(Value::Bool(false));
     };
@@ -20,7 +30,7 @@ pub(crate) fn grep(context: &mut dyn Context, arguments: &[Value]) -> NativeResu
     let mut result = PhpArray::new();
     if let Some(array) = args::array(arguments, 1) {
         for (key, value) in array.iter() {
-            let subject = to_php_string(value, context.diagnostics())?;
+            let subject = context.stringify(value).await?;
             match Scanner::new(&compiled, subject.as_bytes(), 0).next() {
                 Some(Err(error)) => {
                     errors::set(context, error);

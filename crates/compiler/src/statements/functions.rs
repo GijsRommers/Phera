@@ -112,11 +112,19 @@ impl<'ast> Compiler<'ast> {
             }
             FunctionBody::Arrow(body) => builder.compile_return(Some(body), line)?,
         }
-        let register = builder.literal(Constant::Null, line)?;
-        let implicit_return = if declaration.by_reference {
-            Instruction::ReturnReference(register)
+        let implicit_return = if declaration
+            .name
+            .rsplit_once("::")
+            .is_some_and(|(_, method)| method.eq_ignore_ascii_case("__toString"))
+        {
+            Instruction::ReturnMissing
         } else {
-            Instruction::Return(register)
+            let register = builder.literal(Constant::Null, line)?;
+            if declaration.by_reference {
+                Instruction::ReturnReference(register)
+            } else {
+                Instruction::Return(register)
+            }
         };
         builder.emit(implicit_return, line);
         self.append_function(builder, timing, line);

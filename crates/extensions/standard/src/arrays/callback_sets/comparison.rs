@@ -75,7 +75,9 @@ impl SetComparison<'_> {
                 .compare(context, callback, left.1.clone(), right.1.clone(), bools)
                 .await
         } else {
-            SortFlags::STRING.compare(context, &left.1, &right.1)
+            SortFlags::STRING
+                .compare_with_objects(context, &left.1, &right.1)
+                .await
         }
     }
 }

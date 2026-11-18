@@ -88,6 +88,19 @@ impl ReflectionContext for Vm {
         target: phera_extension_api::reflection::FunctionTarget,
         receiver: Option<Rc<Object>>,
     ) -> NativeResult {
+        use phera_extension_api::reflection::FunctionTarget;
+        match &target {
+            FunctionTarget::Closure(closure) => {
+                return closure
+                    .upgrade()
+                    .map(Value::Object)
+                    .ok_or_else(|| exception("Closure is unavailable"));
+            }
+            FunctionTarget::ClosureInvoke(_) => {
+                return callables::closure_invoke_receiver(receiver).map(Value::Object);
+            }
+            _ => {}
+        }
         let callee = self.reflection_function_callee(&target, receiver)?;
         self.closure_from_callee(callee).map(Value::Object)
     }

@@ -1,6 +1,7 @@
 use phera_extension_api::value::{NoDiagnostics, PropertyScope, split_property_key, to_php_string};
 use phera_extension_api::{
-    ArrayKey, Context, FunctionEntry, NativeResult, Param, ParamType, Registry, Value, args,
+    ArrayKey, Context, FunctionEntry, LocalFuture, NativeResult, Param, ParamType, Registry, Value,
+    args,
 };
 
 use super::{Container, Place, Style, spaces, walk};
@@ -10,12 +11,23 @@ pub(crate) fn register(registry: &mut Registry) {
         Param::new("value", ParamType::Mixed),
         Param::new("return", ParamType::Bool).optional(),
     ];
-    registry.function(FunctionEntry::sync("print_r", PARAMS, print_r));
+    registry.function(FunctionEntry::asynchronous("print_r", PARAMS, print_r));
 }
 
-fn print_r(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn print_r(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(render(context, arguments))
+}
+
+async fn render(context: &mut dyn Context, arguments: Vec<Value>) -> NativeResult {
+    let arguments = &arguments;
     let mut out = Vec::new();
-    walk(&mut PrintR, &mut out, args::value(arguments, 0), context)?;
+    walk(
+        &mut PrintR(arguments),
+        &mut out,
+        args::value(arguments, 0),
+        context,
+    )
+    .await?;
     if args::bool(arguments, 1).unwrap_or(false) {
         Ok(Value::from(out))
     } else {
@@ -24,9 +36,9 @@ fn print_r(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     }
 }
 
-struct PrintR;
+struct PrintR<'a>(&'a [Value]);
 
-impl PrintR {
+impl PrintR<'_> {
     fn head(container: &Container) -> String {
         match container {
             Container::Array(_) => "Array\n".to_string(),
@@ -35,7 +47,11 @@ impl PrintR {
     }
 }
 
-impl Style for PrintR {
+impl Style for PrintR<'_> {
+    fn call_site(&self) -> (&'static str, &[Value]) {
+        ("print_r", self.0)
+    }
+
     fn scalar(&mut self, out: &mut Vec<u8>, value: &Value, _place: Place) {
         // Scalars print as their string form, without the warnings a real
         // conversion would raise.

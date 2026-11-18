@@ -61,7 +61,7 @@ impl Vm {
                     ..MemberInfo::default()
                 });
             }
-            FunctionTarget::Closure(object) => {
+            FunctionTarget::Closure(object) | FunctionTarget::ClosureInvoke(object) => {
                 let object = object
                     .upgrade()
                     .ok_or_else(|| exception("Closure is unavailable"))?;
@@ -75,6 +75,25 @@ impl Vm {
                     .ok_or_else(|| exception("Closure is uninitialized"))?;
                 reflected.name = closure.callee.name.to_string();
                 self.reflect_callee(&mut reflected, &closure.callee.target);
+                if matches!(target, FunctionTarget::ClosureInvoke(_)) {
+                    reflected.name = "__invoke".into();
+                    reflected.member = Some(MemberInfo {
+                        name: reflected.name.clone(),
+                        class: "Closure".into(),
+                        lookup_class: "Closure".into(),
+                        modifiers: 1,
+                        ..MemberInfo::default()
+                    });
+                    reflected.source = None;
+                    reflected.extension = None;
+                    reflected.is_static = false;
+                    reflected.attributes.clear();
+                    for parameter in &mut reflected.parameters {
+                        parameter.default = None;
+                        parameter.default_constant = None;
+                    }
+                    return Ok(reflected);
+                }
                 reflected.is_closure = true;
                 reflected.anonymous = closure.origin == ClosureOrigin::Lexical;
                 reflected.is_static = closure.binding == phera_bytecode::ClosureBinding::Static;
@@ -122,6 +141,7 @@ impl Vm {
                 reflected.extension = Some("Core".into());
             }
             CallTarget::Closure(_) => {}
+            CallTarget::Magic(magic) => reflected.name.clone_from(&magic.written),
         }
     }
 

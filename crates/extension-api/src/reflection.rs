@@ -240,8 +240,13 @@ pub struct ExtensionInfo {
 #[derive(Clone)]
 pub enum FunctionTarget {
     Named(String),
-    Method { class: String, name: String },
+    Method {
+        class: String,
+        name: String,
+    },
     Closure(Weak<Object>),
+    /// The implicit __invoke method exists only on a concrete Closure object.
+    ClosureInvoke(Weak<Object>),
 }
 
 pub type ParameterDefault = AttributeValue;

@@ -1,6 +1,6 @@
 use phera_extension_api::value::{PropertyScope, float_repr, split_property_key};
 use phera_extension_api::{
-    ArrayKey, Context, FunctionEntry, NativeResult, Param, ParamType, Registry, Value,
+    ArrayKey, Context, FunctionEntry, LocalFuture, NativeResult, Param, ParamType, Registry, Value,
 };
 
 use super::{Container, Place, Style, spaces, walk};
@@ -10,21 +10,23 @@ pub(crate) fn register(registry: &mut Registry) {
         Param::new("value", ParamType::Mixed),
         Param::new("values", ParamType::Mixed).variadic(),
     ];
-    registry.function(FunctionEntry::sync("var_dump", PARAMS, var_dump));
+    registry.function(FunctionEntry::asynchronous("var_dump", PARAMS, var_dump));
 }
 
-fn var_dump(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    for value in arguments {
-        let mut out = Vec::new();
-        walk(&mut VarDump, &mut out, value, context)?;
-        context.write(&out);
-    }
-    Ok(Value::Null)
+fn var_dump(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        for value in &arguments {
+            let mut out = Vec::new();
+            walk(&mut VarDump(&arguments), &mut out, value, context).await?;
+            context.write(&out);
+        }
+        Ok(Value::Null)
+    })
 }
 
-struct VarDump;
+struct VarDump<'a>(&'a [Value]);
 
-impl VarDump {
+impl VarDump<'_> {
     /// Two spaces per level, then `&` for a shared reference.
     fn lead(out: &mut Vec<u8>, place: Place) {
         spaces(out, 2 * place.depth);
@@ -34,7 +36,17 @@ impl VarDump {
     }
 }
 
-impl Style for VarDump {
+impl Style for VarDump<'_> {
+    fn call_site(&self) -> (&'static str, &[Value]) {
+        ("var_dump", self.0)
+    }
+
+    fn before_debug(&mut self, out: &mut Vec<u8>, place: Place, context: &mut dyn Context) {
+        Self::lead(out, place);
+        context.write(out);
+        out.clear();
+    }
+
     fn scalar(&mut self, out: &mut Vec<u8>, value: &Value, place: Place) {
         Self::lead(out, place);
         match value {
@@ -67,7 +79,9 @@ impl Style for VarDump {
     }
 
     fn open(&mut self, out: &mut Vec<u8>, container: &Container, len: usize, place: Place) {
-        Self::lead(out, place);
+        if !place.leading_written {
+            Self::lead(out, place);
+        }
         let head = match container {
             Container::Array(_) => format!("array({len}) {{\n"),
             Container::Object(object) => {
@@ -122,7 +136,9 @@ impl Style for VarDump {
         place: Place,
         _context: &mut dyn Context,
     ) {
-        spaces(out, 2 * place.depth);
+        if !place.leading_written {
+            spaces(out, 2 * place.depth);
+        }
         out.extend_from_slice(b"*RECURSION*\n");
     }
 }

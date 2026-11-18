@@ -20,13 +20,13 @@ pub use phera_source::{CompileDiagnostic, CompileDiagnosticKind, CompileDiagnost
 pub use phera_value as value;
 pub use phera_value::{ArrayKey, Diagnostics, Object, PhpArray, PhpString, Value};
 
-pub use arguments::{args, prepare_arguments, prepare_call};
+pub use arguments::{args, prepare_arguments, prepare_call, prepare_single_argument};
 pub use class::{
     AsyncMethod, ClassEntry, ClassKind, MethodEntry, MethodPreparation, MethodReturn, NativeMethod,
     NativePropertyAccess, NativePropertyMutation, NativePropertyRead, PrepareMethod, PropertyEntry,
     PropertyType, SyncMethod, Visibility,
 };
-pub use context::{Context, LocalFuture};
+pub use context::{Context, LocalFuture, PropertyView};
 pub use error::{NativeError, NativeResult, Unwind};
 pub use function::{AsyncFn, FunctionEntry, NativeFn, Param, ParamType, SyncFn};
 pub use object_handlers::{

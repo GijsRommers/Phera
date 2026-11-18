@@ -78,12 +78,12 @@ fn eval_emits_a_scoped_unit_instruction() {
 }
 
 #[tokio::test]
-async fn clone_magic_is_not_implicitly_invoked_in_this_milestone() {
-    let source = "<?php class Example { function __clone() { echo 'later'; } } $original = new Example; $copy = clone $original; echo 7;";
+async fn clone_invokes_magic_on_the_copy() {
+    let source = "<?php class Example { public $value = 7; function __clone() { ++$this->value; } } $original = new Example; $copy = clone $original; echo $original->value, ':', $copy->value;";
     let unit = phera_compiler::compile(source, "clone.php").unwrap();
     let mut interpreter = Vm::new(Arc::new(Registry::new()));
     assert_eq!(interpreter.run(Arc::new(unit)).await, 0);
-    assert_eq!(interpreter.output, b"7");
+    assert_eq!(interpreter.output, b"7:8");
 }
 
 /// Repeated property appends must move the inner array rather than clone its owners.

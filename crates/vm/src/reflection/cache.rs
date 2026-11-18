@@ -83,7 +83,9 @@ impl Vm {
             FunctionTarget::Method { class, name } => {
                 FunctionKey::Method(class.to_ascii_lowercase(), name.to_ascii_lowercase())
             }
-            FunctionTarget::Closure(_) => return self.reflection_function(target).map(Rc::new),
+            FunctionTarget::Closure(_) | FunctionTarget::ClosureInvoke(_) => {
+                return self.reflection_function(target).map(Rc::new);
+            }
         };
         let cache = self.state.get_or_default::<ReflectionCache>();
         if let Some(info) = cache.functions.get(&key) {

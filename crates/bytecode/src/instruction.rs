@@ -79,6 +79,7 @@ pub enum Instruction {
     Clone {
         dst: Reg,
         src: Reg,
+        with: Option<Reg>,
     },
     /// Test a resolved class or interface name without invoking autoloaders.
     InstanceOf {
@@ -165,6 +166,12 @@ pub enum Instruction {
     AssignPath {
         path: PathId,
         src: Reg,
+    },
+    /// `<path> = $local`; `dst` is the value read after intermediate properties.
+    AssignPathFromLocal {
+        path: PathId,
+        src: Reg,
+        dst: Reg,
     },
     /// `<path> op= src`; `dst` receives the new value.
     AssignOpPath {
@@ -436,6 +443,8 @@ pub enum Instruction {
         src: Reg,
     },
     ReturnNull,
+    /// A typed magic method fell off the end without returning a value.
+    ReturnMissing,
 
     // ----- Declarations and constants -------------------------------------
     /// Declares a function when execution reaches this point. Functions

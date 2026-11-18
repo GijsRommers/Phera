@@ -122,3 +122,30 @@ pub(crate) fn check_property_visibility(
     }
     Ok(())
 }
+
+impl crate::Vm {
+    pub(super) fn magic_override_error(
+        &self,
+        method: &super::Method,
+        error: NativeError,
+    ) -> NativeError {
+        if !crate::classes::magic::MagicMethods::is_linked_magic(&method.name) {
+            return error;
+        }
+        match (&method.body, error) {
+            (
+                super::MethodBody::User(function),
+                NativeError::Throw {
+                    class: "Error",
+                    message,
+                    ..
+                },
+            ) => NativeError::Unwind(Unwind(Box::new(crate::error_traces::DeclarationFailure {
+                message,
+                file: self.code.unit(*function).file.clone(),
+                line: self.code.function(*function).definition_line as usize,
+            }))),
+            (_, error) => error,
+        }
+    }
+}

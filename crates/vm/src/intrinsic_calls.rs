@@ -30,6 +30,7 @@ impl Vm {
         let argument = arguments.first().cloned().unwrap_or_default();
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         match intrinsic {
+            Intrinsic::Clone => diagnostics.vm.clone_intrinsic(arguments).await,
             Intrinsic::ArrayMap => Err(internal_error!("array map intrinsic routing")),
             Intrinsic::Handler(function) => {
                 diagnostics

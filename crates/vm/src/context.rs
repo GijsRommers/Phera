@@ -2,7 +2,7 @@
 
 use phera_extension_api::{
     CompileDiagnostic, CompileDiagnosticKind, CompileDiagnosticSite, Context, LocalFuture,
-    NativeResult, RequestState,
+    NativeError, NativeResult, RequestState,
 };
 use phera_value::{Diagnostics, Value};
 
@@ -43,6 +43,69 @@ impl Context for Vm {
 
     fn diagnostics(&mut self) -> &mut dyn Diagnostics {
         self
+    }
+
+    fn native_call_error(
+        &mut self,
+        name: &str,
+        arguments: &[Value],
+        error: NativeError,
+    ) -> NativeError {
+        if matches!(error, NativeError::Throw { .. }) {
+            self.failed_native = Some(crate::error_traces::NativeTrace::new(name, arguments));
+        }
+        error
+    }
+
+    fn stringify<'a>(
+        &'a mut self,
+        value: &'a Value,
+    ) -> LocalFuture<'a, Result<phera_value::PhpString, phera_extension_api::NativeError>> {
+        Box::pin(self.stringify_value(value))
+    }
+
+    fn compare<'a>(
+        &'a mut self,
+        left: &'a Value,
+        right: &'a Value,
+    ) -> LocalFuture<'a, Result<i8, phera_extension_api::NativeError>> {
+        Box::pin(async move {
+            let value = self
+                .binary_with_strings(
+                    phera_bytecode::BinaryOp::Spaceship,
+                    left.deref().clone(),
+                    right.deref().clone(),
+                )
+                .await?;
+            match value {
+                Value::Int(order) => Ok(order.signum() as i8),
+                _ => Err(internal_error!("comparison result")),
+            }
+        })
+    }
+
+    fn property_view_runs_code(
+        &self,
+        object: &phera_value::Object,
+        purpose: phera_extension_api::PropertyPurpose,
+    ) -> bool {
+        purpose == phera_extension_api::PropertyPurpose::Debug && self.has_debug_info(object)
+    }
+
+    fn property_view(
+        &mut self,
+        object: std::rc::Rc<phera_value::Object>,
+        purpose: phera_extension_api::PropertyPurpose,
+        function: &'static str,
+        arguments: &[Value],
+    ) -> LocalFuture<'_, Result<phera_extension_api::PropertyView, NativeError>> {
+        if self.property_view_runs_code(&object, purpose) {
+            return self.debug_properties(object, function, arguments);
+        }
+        let view = self.object_properties(&object, purpose).map(|properties| {
+            phera_extension_api::PropertyView::Snapshot(std::rc::Rc::new(properties))
+        });
+        Box::pin(std::future::ready(view))
     }
 
     fn compile_diagnostic(
@@ -116,6 +179,31 @@ impl Context for Vm {
         name: &str,
         arguments: Vec<Value>,
     ) -> LocalFuture<'_, NativeResult> {
+        let callee = (|| {
+            let class = self
+                .classes
+                .for_object(&object)
+                .ok_or_else(|| internal_error!("extension method receiver"))?;
+            self.prepare_method(
+                class,
+                Some(object),
+                name,
+                crate::classes::Invocation::Method,
+            )?;
+            self.take_resolved_callable()
+        })();
+        match callee {
+            Ok(callee) => self.invoke_resolved_callable(callee, arguments),
+            Err(error) => Box::pin(std::future::ready(Err(error))),
+        }
+    }
+
+    fn call_protocol_method(
+        &mut self,
+        object: std::rc::Rc<phera_value::Object>,
+        name: &str,
+        arguments: Vec<Value>,
+    ) -> LocalFuture<'_, NativeResult> {
         match self.protocol_method(object, name) {
             Ok(callee) => self.invoke_resolved_callable(callee, arguments),
             Err(error) => Box::pin(std::future::ready(Err(error))),
@@ -166,7 +254,9 @@ impl Context for Vm {
             return Box::pin(std::future::ready(count(self, &object).map(Value::Int)));
         }
         Box::pin(async move {
-            let result = self.call_method(object, "count", Vec::new()).await?;
+            let result = self
+                .call_protocol_method(object, "count", Vec::new())
+                .await?;
             Ok(Value::Int(phera_value::to_int(&result, self)?))
         })
     }

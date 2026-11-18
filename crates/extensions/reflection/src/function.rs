@@ -237,7 +237,7 @@ fn construct(context: &mut dyn Context, this: Option<&Rc<Object>>, args: &[Value
 
 pub(crate) fn keep_closure(object: &Object, target: &FunctionTarget) {
     match target {
-        FunctionTarget::Closure(closure) => {
+        FunctionTarget::Closure(closure) | FunctionTarget::ClosureInvoke(closure) => {
             if let Some(closure) = closure.upgrade() {
                 crate::keep(object, Value::Object(closure));
             }

@@ -219,10 +219,11 @@ fn function_target(value: &Value) -> Result<FunctionTarget, phera_extension_api:
                     "Expected array($object, $method) or array($classname, $method)",
                 ));
             };
-            Ok(FunctionTarget::Method {
-                class: target_class(class)?,
-                name: method.to_string_lossy(),
-            })
+            Ok(crate::method::method_target(
+                class,
+                target_class(class)?,
+                method.to_string_lossy(),
+            ))
         }
         _ => Err(exception(format!(
             "ReflectionParameter::__construct(): Argument #1 ($function) must be a string, an array(class, method), or a callable object, {} given",

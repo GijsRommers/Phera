@@ -56,11 +56,15 @@ impl Vm {
             .names
             .get(name.index())
             .ok_or_else(|| internal_error!("property name"))?;
-        let key = self.property_key(object, name)?;
         let class = object
             .class
             .as_any()
             .downcast_ref::<crate::classes::Class>();
+        let key = match self.property_key(object, name) {
+            Ok(key) => key,
+            Err(_) if has_magic_properties(object) => return Ok(None),
+            Err(error) => return Err(error),
+        };
         let property = class.and_then(|class| {
             class
                 .defaults
@@ -84,8 +88,12 @@ impl Vm {
             key,
             write_rule,
             slot,
-            read_without_static_notice: class
-                .is_none_or(|class| class.static_properties.is_empty()),
+            read_without_static_notice: class.is_none_or(|class| {
+                class
+                    .static_properties
+                    .iter()
+                    .all(|property| property.name != *name)
+            }),
         });
         if let Some(slot) = self.current().and_then(|frame| frame.site_cache()) {
             *slot.borrow_mut() = crate::unit_caches::CachedSite::Property(entry.clone());
@@ -99,13 +107,7 @@ impl Vm {
         &mut self,
         place: &AccessPath,
     ) -> Result<Option<Value>, NativeError> {
-        let target = self.property_target(place, PropertyShape::Single)?;
-        let target = if target.is_some() {
-            target
-        } else {
-            self.indexed_property_target(place)?
-        };
-        let Some(PropertyTarget { object, name }) = target else {
+        let Some(PropertyTarget { object, name }) = self.read_property_target(place)? else {
             return Ok(None);
         };
         let Some(entry) = self.property_entry(&object, name)? else {
@@ -212,11 +214,12 @@ impl Vm {
         let value = widened.as_ref().unwrap_or(value);
         let accepted = !matches!(value, Value::Reference(_))
             && entry.write_rule.allows(crate::types::own_type(value));
-        if !accepted
-            || matches!(
-                crate::property_storage::read_at(&object, &entry.key, entry.slot),
-                Some(Value::Reference(_))
-            )
+        if !accepted {
+            return Ok(false);
+        }
+        let existing = crate::property_storage::read_at(&object, &entry.key, entry.slot);
+        if matches!(existing, Some(Value::Reference(_)))
+            || (existing.is_none() && has_magic_properties(&object))
         {
             return Ok(false);
         }
@@ -264,4 +267,13 @@ impl Vm {
         }
         Ok(self.write_property_site(place, value)? || self.append_property_site(place, value)?)
     }
+}
+
+fn has_magic_properties(object: &Object) -> bool {
+    object
+        .class
+        .as_any()
+        .downcast_ref::<crate::classes::Class>()
+        .and_then(|class| class.magic.as_ref())
+        .is_some_and(|hooks| hooks.has_properties())
 }
