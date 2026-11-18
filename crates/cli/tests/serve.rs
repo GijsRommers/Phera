@@ -5,6 +5,7 @@ mod scenarios {
     mod compression;
     mod environment;
     mod limits;
+    mod proxy;
     mod request_headers;
     mod static_files;
 }
