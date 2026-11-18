@@ -9,7 +9,9 @@
 mod context_options;
 mod copy;
 mod csv;
+mod data_uri;
 mod directory;
+mod directory_class;
 mod errors;
 mod file_attributes;
 mod formatted;
@@ -33,6 +35,7 @@ mod stream_options;
 mod temporary;
 mod transfer;
 mod whole_file;
+mod whole_write;
 mod wrapper;
 
 pub use request::{set_request, track_standard};
@@ -56,6 +59,7 @@ impl Extension for Streams {
         copy::register(registry);
         csv::register(registry);
         directory::register(registry);
+        directory_class::register(registry);
         file_attributes::register(registry);
         formatted::register(registry);
         glob::register(registry);
