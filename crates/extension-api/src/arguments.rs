@@ -133,6 +133,9 @@ fn type_text(ty: ParamType) -> &'static str {
         ParamType::String => "string",
         ParamType::Array => "array",
         ParamType::Object => "object",
+        // PHP reports array for invalid values passed to Z_PARAM_ARRAY_OR_OBJECT.
+        ParamType::ObjectOrArray => "array",
+        ParamType::ArrayOrInt => "array|int",
         ParamType::Class(name) => name,
         ParamType::Callable => "callable",
         ParamType::Iterable => "Traversable|array",
@@ -183,6 +186,14 @@ fn convert(
             matches!(value, Value::Object(obj) if obj.class.is_instance_of(name)).then_some(None)
         }
         ParamType::Object => matches!(value, Value::Object(_)).then_some(None),
+        ParamType::ObjectOrArray => {
+            matches!(value, Value::Array(_) | Value::Object(_)).then_some(None)
+        }
+        ParamType::ArrayOrInt => match value {
+            Value::Array(_) | Value::Int(_) => Some(None),
+            _ if strict => None,
+            _ => to_int(value, site, context).map(Some),
+        },
         ParamType::Iterable => matches!(value, Value::Array(_) | Value::Object(_)).then_some(None),
         ParamType::Bool => match value {
             Value::Bool(_) => Some(None),
