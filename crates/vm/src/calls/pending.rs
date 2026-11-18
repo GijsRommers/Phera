@@ -251,14 +251,19 @@ pub(crate) fn prepare_general(
     let size = general_window(&callee);
     let base = registers.len();
     registers.grow_to(base + size);
+    let mut call = PreparedCall::new(PreparedCallee::General, base);
+    if matches!(
+        callee.target,
+        crate::calls::call_state::CallTarget::Magic(_)
+    ) {
+        call.flags
+            .insert(crate::calls::prepared_call::CallFlags::MAGIC);
+    }
     let details = CallDetails {
         callee: Some(callee),
         ..CallDetails::default()
     };
-    stack.push_call(
-        PreparedCall::new(PreparedCallee::General, base),
-        Some(details),
-    );
+    stack.push_call(call, Some(details));
 }
 
 /// The window size of a call to a general callee (native code): one

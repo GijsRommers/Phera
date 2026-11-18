@@ -76,7 +76,10 @@ impl Vm {
                 BatchExit::Handlers => self.drain_error_handlers().await?,
                 BatchExit::BindCall(destination) => {
                     self.coerce_call_strings(self.argument_origin).await?;
-                    if !self.enter_prepared_call(Some(destination))? {
+                    if !matches!(
+                        self.enter_prepared_call(Some(destination))?,
+                        crate::calls::call_execution::CallEntry::Php
+                    ) {
                         let value = self.finish_native_window().await?;
                         self.set(destination, value);
                     }

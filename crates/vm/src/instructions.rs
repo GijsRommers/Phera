@@ -254,13 +254,12 @@ impl Vm {
         work: &mut usize,
     ) -> Result<Option<BatchExit>, NativeError> {
         *work += 1;
-        if self.call_needs_string_coercion(self.argument_origin) {
-            return Ok(Some(BatchExit::BindCall(destination)));
-        }
-        if self.enter_prepared_call(Some(destination))? {
-            return Ok(None);
-        }
-        Ok(Some(BatchExit::NativeCall(destination)))
+        use crate::calls::call_execution::CallEntry;
+        Ok(match self.enter_prepared_call(Some(destination))? {
+            CallEntry::Php => None,
+            CallEntry::Native => Some(BatchExit::NativeCall(destination)),
+            CallEntry::ConvertStrings => Some(BatchExit::BindCall(destination)),
+        })
     }
 
     /// `Return` of a register. An undefined variable warns first, which may

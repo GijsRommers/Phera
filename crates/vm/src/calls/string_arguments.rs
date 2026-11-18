@@ -10,17 +10,8 @@ use crate::calls::callback_binding::ArgumentOrigin;
 use crate::calls::prepared_call::{CallFlags, PreparedCallee};
 
 impl Vm {
-    #[inline]
-    pub(crate) fn call_needs_string_coercion(&self, origin: ArgumentOrigin) -> bool {
-        self.call_stack.last_call().is_some_and(|call| {
-            matches!(call.callee, PreparedCallee::Php(_))
-                && call.flags.contains(CallFlags::DEFERRED_CHECKS)
-                && self.deferred_string_coercion(origin)
-        })
-    }
-
     #[cold]
-    fn deferred_string_coercion(&self, origin: ArgumentOrigin) -> bool {
+    pub(super) fn deferred_string_coercion(&self, origin: ArgumentOrigin) -> bool {
         let Ok(view) = CallView::top(&self.code, &self.call_stack) else {
             return false;
         };
@@ -36,7 +27,14 @@ impl Vm {
         })
     }
 
-    pub(crate) async fn coerce_call_strings(
+    pub(crate) fn coerce_call_strings(
+        &mut self,
+        origin: ArgumentOrigin,
+    ) -> phera_extension_api::LocalFuture<'_, Result<(), NativeError>> {
+        Box::pin(self.convert_window_arguments(origin))
+    }
+
+    async fn convert_window_arguments(
         &mut self,
         origin: ArgumentOrigin,
     ) -> Result<(), NativeError> {
@@ -52,6 +50,10 @@ impl Vm {
         } else {
             origin
         };
+        self.call_stack
+            .top_call_mut()?
+            .flags
+            .remove(CallFlags::STRING_ARGUMENT);
         for index in 0..count {
             let parameters = CallView::top(&self.code, &self.call_stack)?.parameters();
             let Some(parameter) = parameters.receiving(index) else {

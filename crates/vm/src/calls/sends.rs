@@ -115,7 +115,7 @@ impl Vm {
                 )));
             }
         }
-        let mut deferred = false;
+        let mut deferred = None;
         if let Some(declaration) = parameters
             .receiving(index)
             .and_then(|parameter| parameters.ty(parameter))
@@ -123,7 +123,13 @@ impl Vm {
         {
             match crate::types::widen_int_to_float(&value, declaration.mask) {
                 Some(float) => value = float,
-                None => deferred = true,
+                None => {
+                    let string_argument = declaration
+                        .mask
+                        .intersects(phera_bytecode::TypeMask::STRING)
+                        && value.is_object();
+                    deferred = Some(string_argument);
+                }
             }
         }
         let was_named = named.is_some();
@@ -138,8 +144,11 @@ impl Vm {
         }
         let call = self.call_stack.top_call_mut()?;
         call.mark_sent(index, !extra);
-        if deferred {
+        if let Some(string_argument) = deferred {
             call.flags.insert(CallFlags::DEFERRED_CHECKS);
+            if string_argument {
+                call.flags.insert(CallFlags::STRING_ARGUMENT);
+            }
         }
         if was_named {
             call.flags.insert(CallFlags::NAMED);

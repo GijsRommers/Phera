@@ -57,20 +57,13 @@ impl Vm {
                 .await?;
         }
         let previous = std::mem::replace(&mut self.argument_origin, origin);
-        let mut prepared = self.prepare_call_with_trace(entry.name, entry.params, &mut arguments);
+        let prepared = self.prepare_call_with_trace(entry.name, entry.params, &mut arguments);
         self.argument_origin = previous;
-        if prepared.is_err() && self.native_strings_needed(entry.params, &arguments, origin) {
-            prepared = match self
-                .coerce_native_strings(entry.name, entry.params, &mut arguments, origin)
+        if let Err(error) = prepared
+            && let Err(error) = self
+                .retry_native_strings(entry, &mut arguments, origin, error)
                 .await
-            {
-                Ok(()) => self.with_argument_origin(origin, |vm| {
-                    vm.prepare_call_with_trace(entry.name, entry.params, &mut arguments)
-                }),
-                Err(error) => Err(error),
-            };
-        }
-        if let Err(error) = prepared {
+        {
             if !matches!(
                 entry.name,
                 "strlen" | "count" | "sizeof" | "array_key_exists"
@@ -100,6 +93,28 @@ impl Vm {
             }
             NativeFn::Async(frame) => frame(self, arguments).await,
         }
+    }
+
+    /// The successful native call keeps the synchronous argument parser. Only
+    /// a failed parse can request an interpreter call for a string conversion.
+    #[cold]
+    fn retry_native_strings<'a>(
+        &'a mut self,
+        entry: phera_extension_api::FunctionEntry,
+        arguments: &'a mut [Value],
+        origin: crate::calls::callback_binding::ArgumentOrigin,
+        original_error: NativeError,
+    ) -> phera_extension_api::LocalFuture<'a, Result<(), NativeError>> {
+        Box::pin(async move {
+            if !self.native_strings_needed(entry.params, arguments, origin) {
+                return Err(original_error);
+            }
+            self.coerce_native_strings(entry.name, entry.params, arguments, origin)
+                .await?;
+            self.with_argument_origin(origin, |vm| {
+                vm.prepare_call_with_trace(entry.name, entry.params, arguments)
+            })
+        })
     }
 }
 
