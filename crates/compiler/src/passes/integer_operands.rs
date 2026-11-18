@@ -70,16 +70,19 @@ pub(crate) fn fuse_integer_operands(function: &mut Function) {
 /// query walks forward until the register is overwritten, so without a bound
 /// a generated function with thousands of `case` arms takes quadratic time;
 /// giving up only means an operand is not fused.
-const DEAD_AFTER_SCAN: usize = 512;
+const DEAD_AFTER_SCAN: usize = 256;
 
 /// A deliberately conservative proof: only straight-line overwrites are accepted.
 pub(crate) fn dead_after(function: &Function, index: usize, register: phera_bytecode::Reg) -> bool {
     let mut pending = vec![index + 1];
-    let mut visited = HashSet::new();
+    // Sorted; at most DEAD_AFTER_SCAN entries, so searching it is cheaper
+    // than hashing every position.
+    let mut visited: Vec<usize> = Vec::new();
     while let Some(mut cursor) = pending.pop() {
         while let Some(instruction) = function.instructions.get(cursor) {
-            if !visited.insert(cursor) {
-                break;
+            match visited.binary_search(&cursor) {
+                Ok(_) => break,
+                Err(slot) => visited.insert(slot, cursor),
             }
             if visited.len() > DEAD_AFTER_SCAN {
                 return false;
