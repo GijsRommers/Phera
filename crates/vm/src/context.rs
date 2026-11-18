@@ -24,6 +24,10 @@ impl Context for Vm {
         self.out(bytes)
     }
 
+    fn script_path(&self) -> Option<std::path::PathBuf> {
+        Some(self.location().file.into())
+    }
+
     fn diagnostics(&mut self) -> &mut dyn Diagnostics {
         self
     }

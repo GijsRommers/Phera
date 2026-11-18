@@ -210,6 +210,11 @@ impl Vm {
         self.output_writer.set_sink(sink)
     }
 
+    /// Defines a request-local constant, such as a CLI stream.
+    pub fn set_constant(&mut self, name: &str, value: Value) {
+        self.constants.insert(name.to_owned(), value);
+    }
+
     /// Defines a global variable before the script starts, such as a
     /// superglobal the runtime fills from the request.
     pub fn set_global(&mut self, name: &str, value: Value) {

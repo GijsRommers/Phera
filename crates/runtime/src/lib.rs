@@ -89,6 +89,9 @@ impl Runtime {
         let unit = self.compile_file(path).await?;
         let mut vm = self.new_vm();
         vm.set_args(arguments);
+        for (name, stream) in phera_ext_streams::standard_constants() {
+            vm.set_constant(name, stream);
+        }
         if let Some(sink) = sink {
             vm.set_sink(sink);
         }
@@ -121,6 +124,11 @@ impl Runtime {
 
         let mut vm = self.new_vm();
         http::define_superglobals(&mut vm, &request, script, document_root);
+        phera_ext_streams::set_request(
+            vm.state_mut(),
+            script.parent().map(Path::to_path_buf),
+            request.body.into(),
+        );
         let exit_status = vm.run(unit).await;
 
         let head = vm.state_mut().take::<ResponseHead>().unwrap_or_default();

@@ -23,6 +23,11 @@ pub trait Context {
     /// Per-request storage for extensions; see [`RequestState`].
     fn state(&mut self) -> &mut RequestState;
 
+    /// The PHP file making this call, for include-path lookups.
+    fn script_path(&self) -> Option<std::path::PathBuf> {
+        None
+    }
+
     /// Whether the PHP file making this call declared `strict_types=1`, which
     /// turns off scalar coercion of arguments.
     fn strict_types(&self) -> bool;

@@ -7,6 +7,10 @@ license.workspace = true
 
 [dependencies]
 phera-extension-api.workspace = true
+base64.workspace = true
+percent-encoding.workspace = true
+rustix.workspace = true
+tempfile.workspace = true
 tokio = { workspace = true, features = ["fs"] }
 
 [lints]
