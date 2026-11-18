@@ -4,6 +4,7 @@ resolver = "3"
 members = [
     "crates/cli",
     "crates/dotenv",
+    "crates/analyzer",
     "crates/lexer",
     "crates/parser",
     "crates/ast",
@@ -34,6 +35,7 @@ unsafe_code = "forbid"
 phera-dotenv = { path = "crates/dotenv" }
 indexmap = "2"
 regex = "1"
+phera-analyzer = { path = "crates/analyzer" }
 phera-lexer = { path = "crates/lexer" }
 phera-parser = { path = "crates/parser" }
 phera-ast = { path = "crates/ast" }

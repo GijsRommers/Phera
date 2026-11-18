@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 phera-dotenv.workspace = true
+phera-analyzer.workspace = true
 phera-runtime.workspace = true
 phera-server.workspace = true
 tokio.workspace = true
