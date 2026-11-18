@@ -1,4 +1,8 @@
 //! The status line and headers of the response being built.
+//!
+//! `header('Content-Type: application/json')` replaces the default MIME type.
+
+use phera_extension_api::RequestState;
 
 /// What `header()` and `http_response_code()` have decided so far.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,6 +25,14 @@ impl Default for ResponseHead {
 }
 
 impl ResponseHead {
+    /// The web SAPI adds its default content type immediately before the header callback.
+    pub fn prepare(state: &mut RequestState) {
+        let head = state.get_or_default::<Self>();
+        if head.header("Content-Type").is_none() {
+            head.apply(b"Content-type: text/html; charset=UTF-8", false);
+        }
+    }
+
     /// Applies one `header()` line.
     ///
     /// Two forms are special in PHP. `HTTP/1.1 404 Not Found` sets the status

@@ -95,6 +95,7 @@ mod object_iteration;
 mod operators;
 mod ops;
 mod output;
+mod output_buffer;
 mod path;
 mod path_instructions;
 mod path_update;
@@ -126,6 +127,7 @@ pub trait CodeLoader: Send + Sync {
 /// Receives each PHP output write while Vm also retains its output buffer.
 pub trait OutputSink {
     fn write(&mut self, bytes: &[u8]);
+    fn flush(&mut self) {}
 }
 
 impl OutputSink for Vec<u8> {
@@ -282,7 +284,13 @@ impl Vm {
                 self.unwind(error);
             }
         }
+        if self.output_pending()
+            && let Err(error) = self.drain_output().await
+        {
+            self.unwind(error);
+        }
         self.run_shutdown_callbacks().await;
+        self.finish_buffers().await;
         if let Err(error) = self.finish_headers().await {
             self.unwind(error);
         }

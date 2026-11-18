@@ -39,6 +39,9 @@ impl ConstantTable {
         ] {
             values.insert(name.into(), Value::Int(number));
         }
+        for &(name, value) in crate::output_buffer::CONSTANTS {
+            values.insert(name.into(), Value::Int(value));
+        }
         Self {
             values,
             resolved: HashMap::new(),

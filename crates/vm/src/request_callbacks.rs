@@ -51,28 +51,8 @@ impl Vm {
         callable: &Value,
     ) -> Result<Callee, NativeError> {
         self.autoload_callable(callable).await?;
-        self.resolve_callable(callable).map_err(|error| {
-            let detail = match (callable, error) {
-                (Value::String(name), NativeError::Throw { message, .. })
-                    if message.starts_with("Call to undefined function ") =>
-                {
-                    format!(
-                        "function \"{}\" not found or invalid function name",
-                        name.to_string_lossy()
-                    )
-                }
-                (Value::Array(_), NativeError::Throw { message, .. })
-                    if message == "Array callback must have exactly two elements" =>
-                {
-                    "array callback must have exactly two members".into()
-                }
-                (Value::Array(_), NativeError::Throw { message, .. }) => message,
-                _ => "no array or string given".into(),
-            };
-            NativeError::type_error(format!(
-                "{function}(): Argument #1 ($callback) must be a valid callback, {detail}"
-            ))
-        })
+        self.resolve_callable(callable)
+            .map_err(|error| self.invalid_callback(function, 1, "callback", callable, error, false))
     }
 
     pub(crate) async fn run_shutdown_callbacks(&mut self) {

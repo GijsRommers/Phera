@@ -54,16 +54,37 @@ impl Server {
     /// PHP's built-in server (`php -n -S`) on `root` with `workers`
     /// processes, to compare `phera serve` with.
     pub fn start_php(php: &Path, root: &Path, workers: usize) -> Self {
+        Self::start_php_with_router(php, root, workers, None)
+    }
+
+    /// Runs PHP's built-in server with a PHP script routing every request.
+    pub fn start_php_router(php: &Path, root: &Path, router: &Path) -> Self {
+        Self::start_php_with_router(php, root, 1, Some(router))
+    }
+
+    fn start_php_with_router(
+        php: &Path,
+        root: &Path,
+        workers: usize,
+        router: Option<&Path>,
+    ) -> Self {
         // Ask the system for a free port, then hand it to PHP.
         let port = std::net::TcpListener::bind("127.0.0.1:0")
             .and_then(|listener| listener.local_addr())
             .expect("find a free port")
             .port();
         let address = format!("127.0.0.1:{port}");
-        let process = Command::new(php)
-            .args(["-n", "-S", &address, "-t"])
-            .arg(root)
-            .env("PHP_CLI_SERVER_WORKERS", workers.to_string())
+        let mut command = Command::new(php);
+        command.args(["-n", "-S", &address, "-t"]).arg(root);
+        if workers > 1 {
+            command.env("PHP_CLI_SERVER_WORKERS", workers.to_string());
+        } else {
+            command.env_remove("PHP_CLI_SERVER_WORKERS");
+        }
+        if let Some(router) = router {
+            command.arg(router);
+        }
+        let process = command
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
@@ -81,6 +102,18 @@ impl Server {
     /// The raw response to one `GET`.
     pub fn get_one(&self, path: &str) -> String {
         self.get(path)
+    }
+
+    /// One request with optional additional headers and a body, as raw HTTP.
+    pub fn request(
+        &self,
+        method: &str,
+        target: &str,
+        headers: &[(&str, &str)],
+        body: &[u8],
+    ) -> String {
+        self.try_request(method, target, headers, body)
+            .expect("send the request and read its response")
     }
 
     /// Sends a `GET` for every path at the same time, one connection each,
@@ -117,13 +150,31 @@ impl Server {
     }
 
     fn try_get(&self, path: &str) -> std::io::Result<String> {
+        self.try_request("GET", path, &[], &[])
+    }
+
+    fn try_request(
+        &self,
+        method: &str,
+        path: &str,
+        headers: &[(&str, &str)],
+        body: &[u8],
+    ) -> std::io::Result<String> {
         let mut stream = TcpStream::connect(&self.address)?;
         // A server that hangs fails the test instead of stalling it.
         stream.set_read_timeout(Some(Duration::from_secs(30)))?;
         write!(
             stream,
-            "GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+            "{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n"
         )?;
+        for (name, value) in headers {
+            write!(stream, "{name}: {value}\r\n")?;
+        }
+        if !body.is_empty() {
+            write!(stream, "Content-Length: {}\r\n", body.len())?;
+        }
+        stream.write_all(b"\r\n")?;
+        stream.write_all(body)?;
         let mut response = String::new();
         match stream.read_to_string(&mut response) {
             Err(error) if !response.is_empty() => {

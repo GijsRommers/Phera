@@ -90,7 +90,7 @@ impl Vm {
                 self.drain_error_handlers().await?;
             }
             if self.output_pending() {
-                Box::pin(self.finish_headers()).await?;
+                Box::pin(self.drain_output()).await?;
             }
         }
     }

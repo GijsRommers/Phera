@@ -158,6 +158,7 @@ impl Runtime {
             php_array(self.environment.iter()),
         );
         *vm.state_mut().get_or_default::<RequestHeaders>() = RequestHeaders(request.headers);
+        vm.prepare_web_headers_with(ResponseHead::prepare);
         let exit_status = vm.run(unit).await;
 
         let head = vm.state_mut().take::<ResponseHead>().unwrap_or_default();
@@ -170,12 +171,6 @@ impl Runtime {
         // chosen a status of its own.
         if exit_status == 255 && response.status == 200 {
             response.status = 500;
-        }
-        if response.header("Content-Type").is_none() {
-            response.headers.push((
-                "Content-Type".to_string(),
-                b"text/html; charset=UTF-8".to_vec(),
-            ));
         }
         response
     }
