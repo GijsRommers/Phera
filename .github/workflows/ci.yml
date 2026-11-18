@@ -178,6 +178,10 @@ jobs:
         run: cargo test -p phera-ext-date --test class_scripts
         env:
           PHERA_BIN: ${{ github.workspace }}/target/release/phera
+      - name: Compare files and streams against PHP and exercise one-worker I/O
+        run: cargo test -p phera-ext-streams --test scripts --test concurrency --no-fail-fast
+        env:
+          PHERA_BIN: ${{ github.workspace }}/target/release/phera
       - name: Run PDO, SQLite3 and Redis tests through the release binary
         run: cargo test -p phera-ext-pdo -p phera-ext-sqlite3 -p phera-ext-redis --no-fail-fast
         env:
