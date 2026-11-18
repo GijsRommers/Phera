@@ -125,7 +125,7 @@ impl Vm {
                 LoopExit::Yield => return Ok(BatchExit::Yield),
                 LoopExit::Invalid => return Err(internal_error!("invalid IP")),
             };
-            if let Some(exit) = self.execute(instruction, stop, work)? {
+            if let Some(exit) = self.execute::<TRACK_GENERATORS>(instruction, stop, work)? {
                 return Ok(exit);
             }
             if !self.error_handlers.pending.is_empty()

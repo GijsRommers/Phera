@@ -24,7 +24,7 @@ pub use arguments::{args, prepare_arguments, prepare_call};
 pub use class::{
     AsyncMethod, ClassEntry, ClassKind, MethodEntry, MethodPreparation, MethodReturn, NativeMethod,
     NativePropertyAccess, NativePropertyMutation, NativePropertyRead, PrepareMethod, PropertyEntry,
-    PropertyType, SyncMethod, Visibility,
+    PropertyType, SyncMethod, Visibility, WindowMethod,
 };
 pub use context::{Context, GeneratorOperation, LocalFuture};
 pub use error::{NativeError, NativeResult, Unwind};

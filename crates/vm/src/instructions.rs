@@ -19,7 +19,7 @@ use crate::calls::sends::SentArgument;
 impl Vm {
     /// Runs one instruction. `Some` hands control back to the async shell:
     /// a native call to run, a finished callback, or an instruction to await.
-    pub(crate) fn execute(
+    pub(crate) fn execute<const TRACK_GENERATORS: bool>(
         &mut self,
         instruction: Instruction,
         stop: usize,
@@ -37,7 +37,7 @@ impl Vm {
             {
                 return Ok(Some(BatchExit::Instruction(instruction)));
             }
-            I::Call { dst } => return self.call(dst, work),
+            I::Call { dst } => return self.call::<TRACK_GENERATORS>(dst, work),
             I::CallDirect {
                 function,
                 args,
@@ -251,13 +251,17 @@ impl Vm {
     }
 
     /// `Call`: enter the prepared PHP function, or let the shell run a native one.
-    fn call(
+    fn call<const TRACK_GENERATORS: bool>(
         &mut self,
         destination: Reg,
         work: &mut usize,
     ) -> Result<Option<BatchExit>, NativeError> {
         *work += 1;
         if self.enter_prepared_call(Some(destination))? {
+            return Ok(None);
+        }
+        if TRACK_GENERATORS && let Some(value) = self.finish_ready_native_window()? {
+            self.set(destination, value);
             return Ok(None);
         }
         Ok(Some(BatchExit::NativeCall(destination)))

@@ -135,6 +135,15 @@ pub trait Context {
         Box::pin(std::future::ready(Err(NativeError::error(message))))
     }
 
+    /// Performs a generator operation that can finish now.
+    fn generator_ready(
+        &mut self,
+        _object: &Object,
+        _operation: &GeneratorOperation,
+    ) -> Option<NativeResult> {
+        None
+    }
+
     /// Runs a generator method or iteration step on the VM.
     fn generator_operation(
         &mut self,

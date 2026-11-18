@@ -136,16 +136,22 @@ impl Context for Vm {
         }
     }
 
+    fn generator_ready(
+        &mut self,
+        object: &phera_value::Object,
+        operation: &phera_extension_api::GeneratorOperation,
+    ) -> Option<NativeResult> {
+        crate::generators::local_observation(object, operation)
+            .or_else(|| self.resume_generator_operation(object, operation))
+    }
+
     fn generator_operation(
         &mut self,
         object: std::rc::Rc<phera_value::Object>,
         operation: phera_extension_api::GeneratorOperation,
     ) -> phera_extension_api::traversal::StepFuture<'_> {
         use phera_extension_api::traversal::StepFuture;
-        if let Some(result) = crate::generators::local_observation(&object, &operation) {
-            return StepFuture::ready(result);
-        }
-        if let Some(result) = self.resume_generator_operation(&object, &operation) {
+        if let Some(result) = self.generator_ready(&object, &operation) {
             return StepFuture::ready(result);
         }
         StepFuture::Pending(Box::pin(async move {
