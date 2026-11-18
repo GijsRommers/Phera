@@ -13,6 +13,13 @@ use crate::{
 /// reference counted with `Rc`, so nothing that holds one can be `Send`.
 pub type LocalFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
 
+/// When a callback registered by PHP runs.
+#[derive(Clone, Copy)]
+pub enum RequestCallback {
+    Headers,
+    Shutdown,
+}
+
 /// Properties provided to an inspection operation that may run PHP code.
 pub enum PropertyView {
     Snapshot(Rc<PhpArray>),
@@ -76,6 +83,20 @@ pub trait Context {
         arguments: Vec<Value>,
     ) -> LocalFuture<'a, NativeResult>;
 
+    /// The location of the first write that committed the response headers.
+    fn output_origin(&self) -> Option<(&str, usize)> {
+        None
+    }
+
+    /// Resolves a callable in the registering scope and keeps it until the given request phase.
+    fn register_request_callback(
+        &mut self,
+        _phase: RequestCallback,
+        _arguments: Vec<Value>,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(async { Err(NativeError::error("This context has no request lifecycle")) })
+    }
+
     /// Convert a value to a PHP string. A VM context may run __toString.
     fn stringify<'a>(
         &'a mut self,
@@ -83,6 +104,17 @@ pub trait Context {
     ) -> LocalFuture<'a, Result<PhpString, NativeError>> {
         let result = phera_value::to_php_string(value, self.diagnostics()).map_err(Into::into);
         Box::pin(std::future::ready(result))
+    }
+
+    /// Whether an operation raised a PHP exception. Some PHP functions finish
+    /// a native side effect before propagating the exception to their caller.
+    fn is_exception(&self, error: &NativeError) -> bool {
+        matches!(error, NativeError::Throw { .. })
+    }
+
+    /// Link a new exception to the PHP exception that was already pending.
+    fn chain_exception(&mut self, error: NativeError, _previous: NativeError) -> NativeError {
+        error
     }
 
     /// Loose comparisons may invoke __toString on mixed string/object pairs.

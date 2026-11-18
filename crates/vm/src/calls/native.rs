@@ -169,11 +169,19 @@ impl Vm {
             .ok_or_else(|| internal_error!("native target"))?;
         let mut arguments = self.call_stack.native_arguments();
         arguments.reserve(call.sent as usize);
+        let mut missing = None;
         for index in 0..call.sent as usize {
             let value = self.registers.window_mut(slots.slot(index), 1)[0].take();
             let value = value.unwrap_or_else(|| match callee.target {
                 CallTarget::Intrinsic(intrinsic) => intrinsic.named_default(index),
-                CallTarget::Native(entry) => named_default(entry.params, index),
+                CallTarget::Native(entry) => {
+                    if let Some(parameter) = entry.params.get(index)
+                        && !parameter.optional
+                    {
+                        missing.get_or_insert((entry.name, index + 1, parameter.name));
+                    }
+                    named_default(entry.params, index)
+                }
                 CallTarget::Method { ref method, .. } => match method.body {
                     MethodBody::Native(entry) => named_default(entry.params, index),
                     _ => Value::Null,
@@ -183,6 +191,13 @@ impl Vm {
             arguments.push(value);
         }
         self.registers.truncate(slots.base);
+        if let Some((function, number, parameter)) = missing {
+            self.failed_native = Some(crate::error_traces::NativeTrace::new(function, &arguments));
+            self.call_stack.recycle_native_arguments(arguments);
+            return Err(NativeError::argument_count_error(format!(
+                "{function}(): Argument #{number} (${parameter}) not passed"
+            )));
+        }
         let origin = callee.argument_binding.origin(self.argument_origin);
         let named = &details.extra_named;
         match &callee.target {
@@ -190,6 +205,9 @@ impl Vm {
                 let previous = self.native_called_class.take();
                 let result = self.native_entry_origin(*entry, arguments, origin).await;
                 self.native_called_class = previous;
+                if self.output_writer.buffers.pending.is_some() && result.is_ok() {
+                    self.output_writer.chunk_caller = Some(entry.name);
+                }
                 result
             }
             CallTarget::Intrinsic(intrinsic) => {
