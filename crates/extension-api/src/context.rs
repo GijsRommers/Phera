@@ -13,9 +13,10 @@ use crate::{
 /// reference counted with `Rc`, so nothing that holds one can be `Send`.
 pub type LocalFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
 
-/// A debug hook can inspect the same object again without re-entering itself.
-pub enum DebugProperties {
-    Properties(Rc<PhpArray>),
+/// Properties provided to an inspection operation that may run PHP code.
+pub enum PropertyView {
+    Snapshot(Rc<PhpArray>),
+    DebugInfo(Rc<PhpArray>),
     Recursive,
 }
 
@@ -79,21 +80,117 @@ pub trait Context {
         Box::pin(std::future::ready(result))
     }
 
-    /// Whether inspecting this object can run PHP code.
-    fn has_debug_info(&self, _object: &Object) -> bool {
+    /// Validates a callable before a native operation starts its work.
+    fn validate_callback(
+        &mut self,
+        _function: &str,
+        _number: usize,
+        _parameter: &str,
+        _callable: &Value,
+    ) -> Result<(), NativeError> {
+        Err(NativeError::error(
+            "Cannot resolve a PHP callback without a runtime",
+        ))
+    }
+
+    /// Passes numeric arguments positionally and string keys as names.
+    fn call_array(
+        &mut self,
+        _callable: &Value,
+        _arguments: &PhpArray,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(std::future::ready(Err(NativeError::error(
+            "Cannot call a PHP callback without a runtime",
+        ))))
+    }
+
+    /// Calls an instance method with ordinary PHP method dispatch.
+    fn call_method(
+        &mut self,
+        object: Rc<Object>,
+        name: &str,
+        arguments: Vec<Value>,
+    ) -> LocalFuture<'_, NativeResult> {
+        drop(arguments);
+        let message = format!(
+            "Cannot call {}::{name}() without a runtime",
+            object.class.name()
+        );
+        Box::pin(std::future::ready(Err(NativeError::error(message))))
+    }
+
+    /// Invokes a public instance method required by a PHP language protocol.
+    fn call_protocol_method(
+        &mut self,
+        object: Rc<Object>,
+        name: &str,
+        arguments: Vec<Value>,
+    ) -> LocalFuture<'_, NativeResult> {
+        self.call_method(object, name, arguments)
+    }
+
+    /// Countable results are converted to integers even without a declared return type.
+    fn count_object(&mut self, object: Rc<Object>) -> LocalFuture<'_, NativeResult> {
+        Box::pin(async move {
+            let value = self
+                .call_protocol_method(object, "count", Vec::new())
+                .await?;
+            Ok(Value::Int(phera_value::to_int(&value, self.diagnostics())?))
+        })
+    }
+
+    /// The class selected by a native static method call, including inherited factories.
+    fn called_class(&self) -> Option<&str> {
+        None
+    }
+
+    /// Projects a native object's properties for the requesting PHP operation.
+    fn object_properties(
+        &mut self,
+        object: &Object,
+        _purpose: crate::PropertyPurpose,
+    ) -> Result<PhpArray, NativeError> {
+        Ok(object.to_array())
+    }
+
+    /// Whether the requesting operation will need to run a PHP property hook.
+    fn property_view_runs_code(&self, _object: &Object, _purpose: crate::PropertyPurpose) -> bool {
         false
     }
 
-    /// Fetch inspection properties with the object's debug hook, if present.
-    fn debug_properties<'a>(
-        &'a mut self,
+    /// Retrieves a property view for an inspector that can await a PHP hook.
+    fn property_view(
+        &mut self,
         object: Rc<Object>,
+        purpose: crate::PropertyPurpose,
         _function: &'static str,
         _arguments: &[Value],
-    ) -> LocalFuture<'a, Result<DebugProperties, NativeError>> {
-        Box::pin(std::future::ready(Ok(DebugProperties::Properties(
-            Rc::new(object.to_array()),
-        ))))
+    ) -> LocalFuture<'_, Result<PropertyView, NativeError>> {
+        let view = self
+            .object_properties(&object, purpose)
+            .map(|properties| PropertyView::Snapshot(Rc::new(properties)));
+        Box::pin(std::future::ready(view))
+    }
+
+    /// Acquires a cursor for an object that implements Traversable.
+    fn traverse(
+        &mut self,
+        object: Rc<Object>,
+    ) -> LocalFuture<'_, crate::traversal::TraversalResult> {
+        let message = format!("Cannot iterate {} without a runtime", object.class.name());
+        Box::pin(std::future::ready(Err(NativeError::error(message))))
+    }
+
+    /// Wraps a native cursor in PHP's InternalIterator class.
+    fn create_iterator(&mut self, _iterator: Box<dyn crate::NativeIterator>) -> NativeResult {
+        Err(NativeError::error(
+            "Cannot create an InternalIterator without a runtime",
+        ))
+    }
+
+    /// Checks a factory target even when there will be no objects in the result.
+    fn ensure_instantiable(&self, _class: &str) -> Result<(), NativeError> {
+        Ok(())
     }
 
     /// Creates an object of the named class with these properties, without

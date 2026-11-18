@@ -74,12 +74,13 @@ impl Vm {
                 .warning_site
                 .as_ref()
                 .filter(|site| site.boundary == callee_index);
-            let native_callback = self
+            let mut callbacks = self
                 .native_callback_sites
                 .iter()
                 .rev()
-                .find(|site| site.boundary == callee_index);
-            if warning.is_some() || native_callback.is_some() {
+                .filter(|site| site.boundary == callee_index)
+                .peekable();
+            if warning.is_some() || callbacks.peek().is_some() {
                 entry.remove(&ArrayKey::str("file"));
                 entry.remove(&ArrayKey::str("line"));
             }
@@ -91,8 +92,10 @@ impl Vm {
                     &site.location.file,
                     site.location.line,
                 );
-            } else if let Some(site) = native_callback {
-                append_native(&mut trace, &site.native, &caller.unit().file, caller.line());
+            } else {
+                for site in callbacks {
+                    append_native(&mut trace, &site.native, &caller.unit().file, caller.line());
+                }
             }
         }
         if let Some(frame) = self.frames().next()

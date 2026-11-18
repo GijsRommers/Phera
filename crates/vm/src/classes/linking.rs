@@ -140,6 +140,35 @@ impl Vm {
                  Error instead"
             )));
         }
+        use super::operations::ClassOperations;
+        let operations = ClassOperations::link(name, parent.as_deref(), &interfaces);
+        if declaration.kind == ClassKind::Class {
+            let iterator = operations.has(ClassOperations::ITERATOR);
+            let aggregate = operations.has(ClassOperations::AGGREGATE);
+            if iterator && aggregate {
+                return Err(NativeError::error(format!(
+                    "Class {name} cannot implement both Iterator and IteratorAggregate at the same time"
+                )));
+            }
+            if operations.has(ClassOperations::TRAVERSABLE)
+                && !iterator
+                && !aggregate
+                && !declaration.is_abstract
+                && parent.as_ref().is_none_or(|parent| {
+                    !parent.operations.has(ClassOperations::TRAVERSABLE) || parent.is_abstract
+                })
+            {
+                return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
+                    crate::error_traces::DeclarationFailure {
+                        message: format!(
+                            "Class {name} must implement interface Traversable as part of either Iterator or IteratorAggregate"
+                        ),
+                        file: "Unknown".into(),
+                        line: 0,
+                    },
+                ))));
+            }
+        }
         let mut methods = parent
             .as_ref()
             .map(|class| class.methods.clone())
@@ -193,12 +222,23 @@ impl Vm {
             }
         }
         for interface in &interfaces {
-            for (name, method) in &interface.methods {
-                if let Some(implementation) = methods.get(name) {
+            for (method_name, method) in &interface.methods {
+                if let Some(implementation) = methods.get(method_name) {
+                    if matches!(method.body, MethodBody::Native(entry) if entry.return_type.is_some())
+                    {
+                        super::inheritance_checks::check_override(name, method, implementation)
+                            .map_err(|error| {
+                                super::declaration_errors::method_failure(
+                                    &self.code,
+                                    implementation,
+                                    error,
+                                )
+                            })?;
+                    }
                     self.check_method_contract(method, implementation, &unit)?;
                 }
                 methods
-                    .entry(name.clone())
+                    .entry(method_name.clone())
                     .or_insert_with(|| method.clone());
             }
         }
@@ -207,8 +247,10 @@ impl Vm {
             declaration.kind,
             declaration.is_abstract,
             &methods,
-            &interfaces,
+            &self.registry,
         )?;
+        let hooks =
+            super::operations::user_hooks(&unit, declaration, parent.as_deref(), operations);
         let mut defaults = parent
             .as_ref()
             .map(|class| class.defaults.clone())
@@ -373,12 +415,6 @@ impl Vm {
             || parent
                 .as_ref()
                 .is_some_and(|parent| parent.allows_dynamic_properties);
-        let native_clone = parent
-            .as_ref()
-            .map_or(phera_extension_api::NativeClone::Properties, |parent| {
-                parent.native_clone
-            });
-        let property_access = parent.as_ref().and_then(|parent| parent.property_access);
         let is_throwable = parent.as_ref().is_some_and(|parent| parent.is_throwable)
             || interfaces.iter().any(|interface| interface.is_throwable);
         self.classes.order.push(name.clone());
@@ -392,12 +428,16 @@ impl Vm {
             name.to_ascii_lowercase(),
             Rc::new_cyclic(|identity| Class {
                 index,
+                property_access: hooks.as_ref().and_then(|hooks| hooks.property_access),
+                hooks,
+                operations,
                 origin: super::class::ClassOrigin::User,
                 identity: identity.clone(),
                 declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
                 ancestors: super::class::ancestor_names(&parent, &interfaces),
                 name_value: phera_value::Value::from(name.as_str()),
                 name: name.clone(),
+                has_native_layout: parent.as_ref().is_some_and(|class| class.has_native_layout),
                 parent,
                 interfaces,
                 kind: declaration.kind,
@@ -406,8 +446,6 @@ impl Vm {
                 is_final: declaration.is_final,
                 is_readonly: declaration.is_readonly,
                 allows_dynamic_properties,
-                property_access,
-                native_clone,
                 constructor: methods.get("__construct").cloned(),
                 magic: super::magic::MagicMethods::link(&methods),
                 methods,

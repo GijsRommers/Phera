@@ -236,6 +236,12 @@ impl Vm {
                 }
             }
             Value::String(string) => self.read_string_offset(&string, key.clone(), missing)?,
+            Value::Object(object) => {
+                return Err(NativeError::error(format!(
+                    "Cannot use object of type {} as array",
+                    object.class.name()
+                )));
+            }
             other => {
                 if missing == Missing::Warn {
                     self.warn(format!(

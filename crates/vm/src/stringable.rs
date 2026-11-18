@@ -105,10 +105,9 @@ impl Vm {
             left = Value::String(lhs);
             right = Value::String(rhs);
         } else if needs_comparison_step(op, &left, &right) {
-            let step = {
-                let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
-                begin_comparison(op, &left, &right, &mut diagnostics.buffer)?
-            };
+            let step = self.step_comparison(|diagnostics, objects| {
+                begin_comparison(op, &left, &right, diagnostics, objects)
+            })?;
             let order = match step {
                 StringComparisonStep::Complete(order) => order,
                 StringComparisonStep::Cast(cast) => self.finish_string_comparison(cast).await?,

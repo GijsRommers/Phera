@@ -70,20 +70,28 @@ impl Context for Vm {
         })
     }
 
-    fn has_debug_info(&self, object: &phera_value::Object) -> bool {
-        Vm::has_debug_info(self, object)
+    fn property_view_runs_code(
+        &self,
+        object: &phera_value::Object,
+        purpose: phera_extension_api::PropertyPurpose,
+    ) -> bool {
+        purpose == phera_extension_api::PropertyPurpose::Debug && self.has_debug_info(object)
     }
 
-    fn debug_properties<'a>(
-        &'a mut self,
+    fn property_view(
+        &mut self,
         object: std::rc::Rc<phera_value::Object>,
+        purpose: phera_extension_api::PropertyPurpose,
         function: &'static str,
         arguments: &[Value],
-    ) -> LocalFuture<
-        'a,
-        Result<phera_extension_api::DebugProperties, phera_extension_api::NativeError>,
-    > {
-        Vm::debug_properties(self, object, function, arguments)
+    ) -> LocalFuture<'_, Result<phera_extension_api::PropertyView, NativeError>> {
+        if self.property_view_runs_code(&object, purpose) {
+            return self.debug_properties(object, function, arguments);
+        }
+        let view = self.object_properties(&object, purpose).map(|properties| {
+            phera_extension_api::PropertyView::Snapshot(std::rc::Rc::new(properties))
+        });
+        Box::pin(std::future::ready(view))
     }
 
     fn compile_diagnostic(
@@ -122,26 +130,7 @@ impl Context for Vm {
 
     /// Native decoders construct linked objects without running PHP constructors.
     fn create_object(&mut self, name: &str, properties: phera_value::PhpArray) -> NativeResult {
-        let class = self.classes.get(name).ok_or_else(|| {
-            phera_extension_api::NativeError::error(format!("Class \"{name}\" not found"))
-        })?;
-        if class.origin == crate::classes::class::ClassOrigin::Closure {
-            return Err(phera_extension_api::NativeError::error(
-                "Instantiation of class Closure is not allowed",
-            ));
-        }
-        if class.kind == phera_bytecode::ClassKind::Interface {
-            return Err(phera_extension_api::NativeError::error(format!(
-                "Cannot instantiate interface {}",
-                class.name
-            )));
-        }
-        if class.is_abstract {
-            return Err(phera_extension_api::NativeError::error(format!(
-                "Cannot instantiate abstract class {}",
-                class.name
-            )));
-        }
+        let class = self.factory_class(name)?;
         let object = self.classes.allocate(class.clone());
         for property in &class.defaults {
             if property.initialized {
@@ -163,6 +152,145 @@ impl Context for Vm {
             self.initialize_throwable(&object, crate::exceptions::TraceOrigin::Construction);
         }
         Ok(Value::Object(object))
+    }
+
+    fn validate_callback(
+        &mut self,
+        function: &str,
+        number: usize,
+        parameter: &str,
+        callable: &Value,
+    ) -> Result<(), phera_extension_api::NativeError> {
+        self.resolve_callable(callable)
+            .map(|_| ())
+            .map_err(|error| {
+                self.invalid_callback(function, number, parameter, callable, error, false)
+            })
+    }
+
+    fn call_array(
+        &mut self,
+        callable: &Value,
+        arguments: &phera_value::PhpArray,
+    ) -> LocalFuture<'_, NativeResult> {
+        match self.resolve_callable(callable) {
+            Ok(callee) => self.invoke_array_callback(callee, arguments),
+            Err(error) => Box::pin(std::future::ready(Err(error))),
+        }
+    }
+
+    fn call_method(
+        &mut self,
+        object: std::rc::Rc<phera_value::Object>,
+        name: &str,
+        arguments: Vec<Value>,
+    ) -> LocalFuture<'_, NativeResult> {
+        let callee = (|| {
+            let class = self
+                .classes
+                .for_object(&object)
+                .ok_or_else(|| internal_error!("extension method receiver"))?;
+            self.prepare_method(
+                class,
+                Some(object),
+                name,
+                crate::classes::Invocation::Method,
+            )?;
+            self.take_resolved_callable()
+        })();
+        match callee {
+            Ok(callee) => self.invoke_resolved_callable(callee, arguments),
+            Err(error) => Box::pin(std::future::ready(Err(error))),
+        }
+    }
+
+    fn call_protocol_method(
+        &mut self,
+        object: std::rc::Rc<phera_value::Object>,
+        name: &str,
+        arguments: Vec<Value>,
+    ) -> LocalFuture<'_, NativeResult> {
+        match self.protocol_method(object, name) {
+            Ok(callee) => self.invoke_resolved_callable(callee, arguments),
+            Err(error) => Box::pin(std::future::ready(Err(error))),
+        }
+    }
+
+    fn called_class(&self) -> Option<&str> {
+        self.native_called_class
+            .as_ref()
+            .map(|class| class.name.as_str())
+    }
+
+    fn object_properties(
+        &mut self,
+        object: &phera_value::Object,
+        purpose: phera_extension_api::PropertyPurpose,
+    ) -> Result<phera_value::PhpArray, phera_extension_api::NativeError> {
+        let projection = object
+            .class
+            .as_any()
+            .downcast_ref::<crate::classes::Class>()
+            .and_then(|class| class.hooks.as_ref()?.properties);
+        match projection {
+            Some(project) => project(self, object, purpose),
+            None => Ok(object.to_array()),
+        }
+    }
+
+    fn count_object(
+        &mut self,
+        object: std::rc::Rc<phera_value::Object>,
+    ) -> LocalFuture<'_, NativeResult> {
+        let count = object
+            .class
+            .as_any()
+            .downcast_ref::<crate::classes::Class>()
+            .and_then(|class| {
+                let count = class.hooks.as_ref()?.count?;
+                class
+                    .methods
+                    .get("count")
+                    .is_none_or(|method| {
+                        !matches!(method.body, crate::classes::MethodBody::User(_))
+                    })
+                    .then_some(count)
+            });
+        if let Some(count) = count {
+            return Box::pin(std::future::ready(count(self, &object).map(Value::Int)));
+        }
+        Box::pin(async move {
+            let result = self
+                .call_protocol_method(object, "count", Vec::new())
+                .await?;
+            Ok(Value::Int(phera_value::to_int(&result, self)?))
+        })
+    }
+
+    fn traverse(
+        &mut self,
+        object: std::rc::Rc<phera_value::Object>,
+    ) -> LocalFuture<'_, phera_extension_api::traversal::TraversalResult> {
+        Box::pin(self.make_traversal(object, false))
+    }
+
+    fn create_iterator(
+        &mut self,
+        cursor: Box<dyn phera_extension_api::NativeIterator>,
+    ) -> NativeResult {
+        let value = self.create_object("InternalIterator", phera_value::PhpArray::new())?;
+        let Value::Object(object) = &value else {
+            return Err(internal_error!("InternalIterator allocation"));
+        };
+        *object.native.borrow_mut() = Some(Box::new(crate::internal_iterator::InternalIterator {
+            cursor,
+            initialized: false,
+        }));
+        Ok(value)
+    }
+
+    fn ensure_instantiable(&self, name: &str) -> Result<(), phera_extension_api::NativeError> {
+        self.factory_class(name).map(drop)
     }
 
     fn state(&mut self) -> &mut RequestState {
@@ -189,6 +317,33 @@ impl Context for Vm {
 }
 
 impl Vm {
+    fn factory_class(
+        &self,
+        name: &str,
+    ) -> Result<std::rc::Rc<crate::classes::Class>, phera_extension_api::NativeError> {
+        let class = self.classes.get(name).ok_or_else(|| {
+            phera_extension_api::NativeError::error(format!("Class \"{name}\" not found"))
+        })?;
+        if class.origin == crate::classes::class::ClassOrigin::Closure {
+            return Err(phera_extension_api::NativeError::error(
+                "Instantiation of class Closure is not allowed",
+            ));
+        }
+        if class.kind == phera_bytecode::ClassKind::Interface {
+            return Err(phera_extension_api::NativeError::error(format!(
+                "Cannot instantiate interface {}",
+                class.name
+            )));
+        }
+        if class.is_abstract {
+            return Err(phera_extension_api::NativeError::error(format!(
+                "Cannot instantiate abstract class {}",
+                class.name
+            )));
+        }
+        Ok(class)
+    }
+
     /// Native values are consumed directly into the same slots as PHP Send instructions.
     pub(crate) fn invoke_resolved_callable(
         &mut self,

@@ -1,8 +1,115 @@
 //! `foreach ($period as $date)` advances relative fields using the start's timezone.
-//! This cursor is compiled into the native tests until the VM accepts native iterators.
+//! Each traversal keeps an index. DatePeriod itself keeps the current instant,
+//! which is also visible through its readonly `current` property.
+
+use std::rc::Rc;
+
+use phera_extension_api::{Context, NativeError, NativeIterator, NativeResult, Object, Value};
+
+use super::{This, make, receiver};
 
 use super::{instant::Instant, interval_arithmetic::apply_relative, period::Period};
 
+pub(super) fn cursor(
+    _: &mut dyn Context,
+    period: Rc<Object>,
+) -> Result<Box<dyn NativeIterator>, NativeError> {
+    Ok(Box::new(PeriodCursor { period, index: 0 }))
+}
+
+pub(super) fn get_iterator(context: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
+    let iterator = cursor(context, receiver(this)?.clone())?;
+    context.create_iterator(iterator)
+}
+
+struct PeriodCursor {
+    period: Rc<Object>,
+    index: i64,
+}
+
+impl PeriodCursor {
+    fn update<T>(
+        &self,
+        f: impl FnOnce(&mut Period) -> Result<T, NativeError>,
+    ) -> Result<T, NativeError> {
+        let mut state = self
+            .period
+            .native
+            .try_borrow_mut()
+            .map_err(|_| NativeError::error("Cannot re-enter a DatePeriod cursor"))?;
+        let period = state
+            .as_mut()
+            .and_then(|state| state.downcast_mut::<Period>())
+            .ok_or_else(uninitialized)?;
+        f(period)
+    }
+}
+
+fn uninitialized() -> NativeError {
+    NativeError::throw(
+        "DateObjectError",
+        "Object of type DatePeriod has not been correctly initialized by calling parent::__construct() in its constructor",
+    )
+}
+
+fn advance(period: &mut Period) -> Result<(), NativeError> {
+    let date = period.current.as_mut().ok_or_else(uninitialized)?;
+    let interval = period.interval.as_ref().ok_or_else(uninitialized)?;
+    apply_relative(date, interval.relative.clone());
+    Ok(())
+}
+
+fn contains(period: &Period, date: &Instant, index: i64) -> bool {
+    if let Some(end) = &period.end {
+        let time = (date.timestamp, date.micros);
+        let boundary = (end.timestamp, end.micros);
+        time < boundary || (period.include_end && time == boundary)
+    } else {
+        index < period.recurrences
+    }
+}
+
+impl NativeIterator for PeriodCursor {
+    fn rewind(&mut self, _: &mut dyn Context) -> Result<(), NativeError> {
+        self.index = 0;
+        self.update(|period| {
+            period.current = Some(period.start.clone().ok_or_else(uninitialized)?);
+            if !period.include_start {
+                advance(period)?;
+            }
+            Ok(())
+        })
+    }
+
+    fn advance(&mut self, _: &mut dyn Context) -> Result<(), NativeError> {
+        self.update(advance)?;
+        self.index = self.index.saturating_add(1);
+        Ok(())
+    }
+
+    fn valid(&mut self, _: &mut dyn Context) -> Result<bool, NativeError> {
+        self.update(|period| {
+            let date = period.current.as_ref().ok_or_else(uninitialized)?;
+            Ok(contains(period, date, self.index))
+        })
+    }
+
+    fn current(&mut self, context: &mut dyn Context) -> NativeResult {
+        let (date, class) = self.update(|period| {
+            Ok((
+                period.current.clone().ok_or_else(uninitialized)?,
+                period.iteration_class,
+            ))
+        })?;
+        make(context, class, date)
+    }
+
+    fn key(&mut self, _: &mut dyn Context) -> NativeResult {
+        Ok(Value::Int(self.index))
+    }
+}
+
+#[cfg(test)]
 fn dates(period: &Period) -> impl Iterator<Item = Instant> + '_ {
     let relative = period
         .interval
@@ -19,14 +126,7 @@ fn dates(period: &Period) -> impl Iterator<Item = Instant> + '_ {
     }
     std::iter::from_fn(move || {
         let date = current.as_mut()?;
-        let include = if let Some(end) = &period.end {
-            let time = (date.timestamp, date.micros);
-            let boundary = (end.timestamp, end.micros);
-            time < boundary || (period.include_end && time == boundary)
-        } else {
-            index < period.recurrences
-        };
-        if include {
+        if contains(period, date, index) {
             let next = date.clone();
             apply_relative(date, relative.clone());
             index += 1;
@@ -101,6 +201,7 @@ mod tests {
                                 interval.clone(),
                                 end_date,
                                 count,
+                                "DateTimeImmutable",
                                 "DateTimeImmutable",
                             );
                             period.include_start = options & 1 == 0;

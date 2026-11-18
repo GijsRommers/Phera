@@ -29,7 +29,10 @@ const TWO_TO_53: f64 = 9007199254740992.0;
 
 /// `final class Random\Randomizer`
 pub const RANDOMIZER: ClassEntry = ClassEntry {
-    clone: phera_extension_api::NativeClone::Forbidden,
+    hooks: Some(&phera_extension_api::ClassHooks {
+        clone: Some(phera_extension_api::NativeClone::Forbidden),
+        ..phera_extension_api::ClassHooks::EMPTY
+    }),
     kind: ClassKind::FinalClass,
     properties: &[PropertyEntry::new(
         "engine",

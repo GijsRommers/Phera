@@ -31,6 +31,13 @@ impl Vm {
             self.set(destination, value);
             return Ok(None);
         }
+        if self.classes.has_dimensions && self.prepare_dimension(&place)? {
+            return Ok(Some(BatchExit::Instruction(Instruction::Fetch {
+                dst: destination,
+                path,
+                mode,
+            })));
+        }
         if place.has_properties()? && mode != FetchMode::Destructure {
             return Ok(Some(BatchExit::Instruction(Instruction::Fetch {
                 dst: destination,
@@ -75,7 +82,9 @@ impl Vm {
         source: Reg,
     ) -> Result<Option<BatchExit>, NativeError> {
         let place = self.path(path)?;
-        if place.has_properties()? {
+        if (self.classes.has_dimensions && self.prepare_dimension(&place)?)
+            || place.has_properties()?
+        {
             return Ok(Some(BatchExit::Instruction(Instruction::AssignOpPath {
                 op: operator,
                 dst: destination,
@@ -110,7 +119,9 @@ impl Vm {
             self.set(destination, value);
             return Ok(None);
         }
-        if place.has_properties()? {
+        if (self.classes.has_dimensions && self.prepare_dimension(&place)?)
+            || place.has_properties()?
+        {
             return Ok(Some(BatchExit::Instruction(Instruction::IncDecPath {
                 mode,
                 dst: destination,
@@ -154,7 +165,8 @@ impl Vm {
         {
             self.restart_subject_iterators(register);
         }
-        if place.has_properties()?
+        if (self.classes.has_dimensions && self.prepare_dimension(&place)?)
+            || place.has_properties()?
             || (matches!(value, phera_value::Value::Object(_))
                 && matches!(
                     place.base()?,

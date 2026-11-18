@@ -56,7 +56,9 @@ pub fn instantiate(registry: &Registry, class: &str) -> Option<Rc<Object>> {
                 Visibility::Protected => Object::protected_key(property.name),
                 Visibility::Public => ArrayKey::str(property.name),
             };
-            object.set(key, property.default.to_value());
+            if let Some(default) = property.default {
+                object.set(key, default.to_value());
+            }
         }
     }
     Some(Rc::new(object))

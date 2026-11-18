@@ -21,10 +21,11 @@ pub use error::{
 pub use float_format::{float_repr, float_to_string_precision14};
 pub use object::{ClassHandle, Object, ObjectIds, PropertyScope, Resource, split_property_key};
 pub use ops::{
-    ObjectEquality, StringComparison, StringComparisonStep, add, bitwise_and, bitwise_not,
-    bitwise_or, bitwise_xor, compare, compare_after_error, compare_op, compare_with_string_objects,
-    concat, decrement, div, increment, less, less_equal, loose_equals, loose_equals_with_objects,
-    modulo, mul, negate, pow, shift_left, shift_right, strict_equals, sub, unary_plus,
+    ObjectComparator, ObjectComparison, StringComparison, StringComparisonStep, add, bitwise_and,
+    bitwise_not, bitwise_or, bitwise_xor, compare, compare_after_error, compare_op,
+    compare_with_objects, compare_with_string_objects, concat, decrement, div, increment, less,
+    less_equal, loose_equals, loose_equals_with_objects, modulo, mul, negate, pow, shift_left,
+    shift_right, strict_equals, sub, unary_plus,
 };
 pub use string::PhpString;
 pub use value::{Value, ValueRef};

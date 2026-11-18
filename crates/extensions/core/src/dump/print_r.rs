@@ -4,7 +4,7 @@ use phera_extension_api::{
     args,
 };
 
-use super::{Container, Place, PropertyView, Style, spaces, walk};
+use super::{Container, Place, Style, spaces, walk};
 
 pub(crate) fn register(registry: &mut Registry) {
     const PARAMS: &[Param] = &[
@@ -48,11 +48,8 @@ impl PrintR<'_> {
 }
 
 impl Style for PrintR<'_> {
-    fn properties(&self) -> PropertyView<'_> {
-        PropertyView::Debug {
-            function: "print_r",
-            arguments: self.0,
-        }
+    fn call_site(&self) -> (&'static str, &[Value]) {
+        ("print_r", self.0)
     }
 
     fn scalar(&mut self, out: &mut Vec<u8>, value: &Value, _place: Place) {

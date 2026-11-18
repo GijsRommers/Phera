@@ -73,7 +73,7 @@ fn restore_into(data: &PhpArray, period: &mut Period) -> Result<(), NativeError>
         Some(Value::Object(object)) if object.class.is_instance_of(INTERFACE) && has_class => {
             Ok(Some((
                 Instant::read(object).map_err(|_| invalid())?,
-                object.class.name(),
+                object.as_ref(),
             )))
         }
         Some(Value::Null) => Ok(None),
@@ -81,7 +81,8 @@ fn restore_into(data: &PhpArray, period: &mut Period) -> Result<(), NativeError>
     };
     if let Some((start, class)) = date("start", true)? {
         period.start = Some(start);
-        period.date_class = class.into();
+        period.date_class = class.class.name().into();
+        period.iteration_class = Instant::base_class(class);
     }
     if let Some((end, _)) = date("end", !period.date_class.is_empty())? {
         period.end = Some(end);

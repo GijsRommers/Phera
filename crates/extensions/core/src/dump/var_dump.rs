@@ -3,7 +3,7 @@ use phera_extension_api::{
     ArrayKey, Context, FunctionEntry, LocalFuture, NativeResult, Param, ParamType, Registry, Value,
 };
 
-use super::{Container, Place, PropertyView, Style, spaces, walk};
+use super::{Container, Place, Style, spaces, walk};
 
 pub(crate) fn register(registry: &mut Registry) {
     const PARAMS: &[Param] = &[
@@ -37,11 +37,8 @@ impl VarDump<'_> {
 }
 
 impl Style for VarDump<'_> {
-    fn properties(&self) -> PropertyView<'_> {
-        PropertyView::Debug {
-            function: "var_dump",
-            arguments: self.0,
-        }
+    fn call_site(&self) -> (&'static str, &[Value]) {
+        ("var_dump", self.0)
     }
 
     fn before_debug(&mut self, out: &mut Vec<u8>, place: Place, context: &mut dyn Context) {

@@ -17,6 +17,9 @@ impl ClassTable {
             "stdclass".into(),
             Rc::new_cyclic(|identity| Class {
                 index,
+                hooks: None,
+                property_access: None,
+                operations: super::operations::ClassOperations::default(),
                 origin: super::class::ClassOrigin::Native,
                 identity: identity.clone(),
                 declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
@@ -28,11 +31,10 @@ impl ClassTable {
                 kind: ClassKind::Class,
                 is_abstract: false,
                 is_throwable: false,
+                has_native_layout: true,
                 is_final: false,
                 is_readonly: false,
                 allows_dynamic_properties: true,
-                property_access: None,
-                native_clone: phera_extension_api::NativeClone::Properties,
                 methods: HashMap::new(),
                 method_table: std::cell::OnceCell::new(),
                 constructor: None,
@@ -48,7 +50,14 @@ impl ClassTable {
             kind: NativeKind::FinalClass,
             ..phera_extension_api::ClassEntry::class("Closure")
         };
-        for entry in registry.classes().chain(std::iter::once(&closure)) {
+        let internal_iterator = registry
+            .get_class("Iterator")
+            .map(|_| &crate::internal_iterator::ENTRY);
+        for entry in registry
+            .classes()
+            .chain(std::iter::once(&closure))
+            .chain(internal_iterator)
+        {
             let parent = entry.parent.and_then(|name| table.get(name));
             let mut methods = parent
                 .as_ref()
@@ -107,16 +116,19 @@ impl ClassTable {
                 defaults.push(PropertyDefault {
                     static_storage: None,
                     key,
-                    value: property.default.to_value(),
+                    value: property
+                        .default
+                        .map(|value| value.to_value())
+                        .unwrap_or_default(),
                     name: property.name.into(),
                     declaring: entry.name.into(),
                     visibility: native_visibility(property.visibility),
-                    initialized: true,
+                    initialized: property.default.is_some(),
                     initializer: None,
-                    ty: None,
+                    ty: property.ty.map(property_type),
                     is_readonly: property.is_readonly,
                     static_initialized: Rc::new(std::cell::Cell::new(true)),
-                    value_initialized: Rc::new(std::cell::Cell::new(true)),
+                    value_initialized: Rc::new(std::cell::Cell::new(property.default.is_some())),
                 });
             }
             if table.get(entry.name).is_none() {
@@ -156,20 +168,19 @@ impl ClassTable {
                 || interfaces
                     .iter()
                     .any(|interface: &Rc<Class>| interface.is_throwable);
+            let hooks = super::operations::inherit_hooks(entry.hooks, parent.as_deref());
             let index = table.next_index();
-            let property_access = entry
-                .property_access
-                .or_else(|| parent.as_ref().and_then(|parent| parent.property_access));
-            let native_clone = match entry.clone {
-                phera_extension_api::NativeClone::Properties => parent
-                    .as_ref()
-                    .map_or(entry.clone, |parent| parent.native_clone),
-                policy => policy,
-            };
             table.insert(
                 entry.name.to_ascii_lowercase(),
                 Rc::new_cyclic(|identity| Class {
                     index,
+                    property_access: hooks.as_ref().and_then(|hooks| hooks.property_access),
+                    hooks,
+                    operations: super::operations::ClassOperations::link(
+                        entry.name,
+                        parent.as_deref(),
+                        &interfaces,
+                    ),
                     origin: if entry.name == "Closure" {
                         super::class::ClassOrigin::Closure
                     } else {
@@ -189,11 +200,10 @@ impl ClassTable {
                     },
                     is_abstract: entry.kind == NativeKind::AbstractClass,
                     is_throwable,
+                    has_native_layout: true,
                     is_final: entry.kind == NativeKind::FinalClass,
                     is_readonly: false,
                     allows_dynamic_properties: false,
-                    property_access,
-                    native_clone,
                     constructor: methods.get("__construct").cloned(),
                     magic: super::magic::MagicMethods::link(&methods),
                     methods,
@@ -234,5 +244,33 @@ fn native_visibility(visibility: phera_extension_api::Visibility) -> Visibility 
         phera_extension_api::Visibility::Public => Visibility::Public,
         phera_extension_api::Visibility::Protected => Visibility::Protected,
         phera_extension_api::Visibility::Private => Visibility::Private,
+    }
+}
+
+/// Native property types use the same storage and assignment checks as PHP declarations.
+fn property_type(ty: phera_extension_api::PropertyType) -> Type {
+    use phera_extension_api::PropertyType;
+    let (mask, name) = match ty {
+        PropertyType::Bool => (TypeMask::BOOL, "bool"),
+        PropertyType::Int => (TypeMask::INT, "int"),
+        PropertyType::Float => (TypeMask::FLOAT, "float"),
+        PropertyType::String => (TypeMask::STRING, "string"),
+        PropertyType::Array => (TypeMask::ARRAY, "array"),
+        PropertyType::Object => (TypeMask::OBJECT, "object"),
+        PropertyType::Mixed => (TypeMask::MIXED, "mixed"),
+        PropertyType::NullableClass(name) => {
+            return Type {
+                mask: TypeMask::NULL,
+                display: format!("?{name}"),
+                classes: Vec::new(),
+                intersection: false,
+            };
+        }
+    };
+    Type {
+        mask,
+        display: name.into(),
+        classes: Vec::new(),
+        intersection: false,
     }
 }

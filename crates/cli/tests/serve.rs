@@ -4,6 +4,7 @@
 mod scenarios {
     mod environment;
     mod request_headers;
+    mod static_files;
 }
 
 use std::io::{BufRead, BufReader, Read, Write};

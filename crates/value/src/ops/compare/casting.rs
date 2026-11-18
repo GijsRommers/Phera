@@ -5,8 +5,8 @@ use std::rc::Rc;
 
 use crate::{Diagnostics, Object, OpError, PhpString, Value};
 
-use super::structure::{CompareStep, Comparison, Table, TableComparison};
-use super::{ObjectEquality, compare_resolved, smart_strcmp};
+use super::structure::{CompareStep, Comparison, Pair, Table, TableComparison};
+use super::{ObjectComparator, compare_resolved, smart_strcmp};
 
 pub enum StringComparisonStep {
     Complete(i8),
@@ -52,6 +52,7 @@ impl StringComparison {
     pub fn resume(
         self,
         string: Option<PhpString>,
+        objects: &mut ObjectComparator<'_>,
         diagnostics: &mut dyn Diagnostics,
     ) -> Result<StringComparisonStep, OpError> {
         let Self { pair, remaining } = self;
@@ -62,7 +63,9 @@ impl StringComparison {
             (Side::Right, None) => -1,
         };
         match remaining {
-            Some(table) if order == 0 => resume_table(table, diagnostics),
+            Some(table) if order == 0 => {
+                resume_table(table, &mut Comparison::Native(objects), diagnostics)
+            }
             _ => Ok(StringComparisonStep::Complete(order)),
         }
     }
@@ -73,7 +76,7 @@ impl StringComparison {
 pub fn compare_with_string_objects(
     left: &Value,
     right: &Value,
-    object_equality: Option<ObjectEquality>,
+    objects: &mut ObjectComparator<'_>,
     diagnostics: &mut dyn Diagnostics,
 ) -> Result<StringComparisonStep, OpError> {
     let left = left.try_deref()?;
@@ -84,7 +87,7 @@ pub fn compare_with_string_objects(
             remaining: None,
         })));
     }
-    let comparison = object_equality.map_or(Comparison::Loose, Comparison::NativeEquality);
+    let mut comparison = Comparison::Native(objects);
     let (left, right) = match (&*left, &*right) {
         (Value::Array(left), Value::Array(right)) => {
             if Rc::ptr_eq(left, right) {
@@ -93,24 +96,29 @@ pub fn compare_with_string_objects(
             (Table::Array(left.clone()), Table::Array(right.clone()))
         }
         (Value::Object(left), Value::Object(right)) => {
-            if let Some(equal) = comparison.object_equality(left, right) {
-                return Ok(StringComparisonStep::Complete(equal));
+            match comparison.objects(left, right, diagnostics)? {
+                Pair::Compared(result) => return Ok(StringComparisonStep::Complete(result)),
+                Pair::Tables(left, right) => (left, right),
             }
-            (Table::object(left), Table::object(right))
         }
         _ => {
-            return compare_resolved(&left, &right, comparison, diagnostics)
+            return compare_resolved(&left, &right, &mut comparison, diagnostics)
                 .map(StringComparisonStep::Complete);
         }
     };
-    resume_table(TableComparison::new(left, right, comparison)?, diagnostics)
+    resume_table(
+        TableComparison::new(left, right, &comparison)?,
+        &mut comparison,
+        diagnostics,
+    )
 }
 
 fn resume_table(
     mut table: TableComparison,
+    comparison: &mut Comparison<'_, '_>,
     diagnostics: &mut dyn Diagnostics,
 ) -> Result<StringComparisonStep, OpError> {
-    match table.advance::<true>(diagnostics)? {
+    match table.advance::<true>(comparison, diagnostics)? {
         CompareStep::Complete(order) => Ok(StringComparisonStep::Complete(order)),
         CompareStep::Cast(pair) => Ok(StringComparisonStep::Cast(Box::new(StringComparison {
             pair,

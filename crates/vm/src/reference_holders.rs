@@ -83,17 +83,20 @@ impl StaticProperty {
     }
 }
 
-impl ReferenceHolders {
-    /// Ordinary object cloning owns property cells; other native payloads
-    /// require their class's own duplication function.
-    pub(crate) fn has_extension_payload(object: &Object) -> bool {
-        object
-            .native
-            .borrow()
-            .as_ref()
-            .is_some_and(|value| !value.is::<ObjectReferences>())
-    }
+/// The property-reference bookkeeping also occupies the opaque object slot.
+pub(crate) fn has_extension_state(
+    object: &Object,
+) -> Result<bool, phera_extension_api::NativeError> {
+    let state = object
+        .native
+        .try_borrow()
+        .map_err(|_| internal_error!("borrowed native clone state"))?;
+    Ok(state
+        .as_ref()
+        .is_some_and(|state| !state.is::<ObjectReferences>()))
+}
 
+impl ReferenceHolders {
     #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
         self.entries.is_empty() && self.constraints.is_empty()

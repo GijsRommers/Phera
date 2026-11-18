@@ -3,7 +3,9 @@
 
 use phera_bytecode::{BinaryOp, Reg};
 use phera_extension_api::{LocalFuture, NativeError};
-use phera_value::{Diagnostics, OpError, StringComparison, StringComparisonStep, Value};
+use phera_value::{
+    Diagnostics, ObjectComparator, OpError, StringComparison, StringComparisonStep, Value,
+};
 
 use crate::Vm;
 
@@ -21,16 +23,7 @@ pub(crate) fn needs_comparison_step(operator: BinaryOp, left: &Value, right: &Va
         (Value::Object(_), Value::Object(_) | Value::String(_))
             | (Value::String(_), Value::Object(_))
             | (Value::Array(_), Value::Array(_))
-    ) && matches!(
-        operator,
-        BinaryOp::Equal
-            | BinaryOp::NotEqual
-            | BinaryOp::Less
-            | BinaryOp::LessEqual
-            | BinaryOp::Greater
-            | BinaryOp::GreaterEqual
-            | BinaryOp::Spaceship
-    )
+    ) && crate::object_comparison::is_comparison(operator)
 }
 
 pub(crate) fn begin_comparison(
@@ -38,16 +31,13 @@ pub(crate) fn begin_comparison(
     left: &Value,
     right: &Value,
     diagnostics: &mut dyn Diagnostics,
+    objects: &mut ObjectComparator<'_>,
 ) -> Result<StringComparisonStep, OpError> {
     let (left, right) = match operator {
         BinaryOp::Greater | BinaryOp::GreaterEqual => (right, left),
         _ => (left, right),
     };
-    let equality: Option<phera_value::ObjectEquality> = match operator {
-        BinaryOp::Equal | BinaryOp::NotEqual => Some(crate::closure_equality::native_equal),
-        _ => None,
-    };
-    phera_value::compare_with_string_objects(left, right, equality, diagnostics)
+    phera_value::compare_with_string_objects(left, right, objects, diagnostics)
 }
 
 pub(crate) fn comparison_value(operator: BinaryOp, order: i8) -> Value {
@@ -73,10 +63,9 @@ impl Vm {
                 }
                 let object = Value::Object(cast.object().clone());
                 let string = self.object_to_string(&object).await?;
-                let next = {
-                    let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
-                    cast.resume(string, &mut diagnostics.buffer)?
-                };
+                let next = self.step_comparison(|diagnostics, objects| {
+                    cast.resume(string, objects, diagnostics)
+                })?;
                 match next {
                     StringComparisonStep::Complete(order) => return Ok(order),
                     StringComparisonStep::Cast(next) => cast = next,

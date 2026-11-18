@@ -19,6 +19,7 @@ struct ParameterContract {
 struct Contract {
     parameters: Vec<ParameterContract>,
     returns: Option<String>,
+    tentative: bool,
     /// A child must preserve reference returns from its prototype.
     returns_reference: bool,
 }
@@ -26,12 +27,37 @@ struct Contract {
 impl Contract {
     /// Copy small declaration metadata without executing default expressions.
     fn from_method(method: &Method, code: &crate::code_table::CodeTable) -> Option<Self> {
+        if let MethodBody::Native(entry) = method.body {
+            use phera_extension_api::MethodReturn;
+            let (returns, tentative) = match entry.return_type? {
+                MethodReturn::Required(ty) => (ty, false),
+                MethodReturn::Tentative(ty) => (ty, true),
+            };
+            return Some(Self {
+                parameters: entry
+                    .params
+                    .iter()
+                    .map(|parameter| ParameterContract {
+                        name: parameter.name.into(),
+                        declaration: Some(parameter.ty.name().into()),
+                        by_reference: parameter.by_ref,
+                        variadic: parameter.variadic,
+                        optional: parameter.optional,
+                        default_display: None,
+                    })
+                    .collect(),
+                returns: Some(returns.into()),
+                tentative,
+                returns_reference: false,
+            });
+        }
         let MethodBody::User(reference) = &method.body else {
             return None;
         };
         let function = code.function(*reference);
         Some(Self {
             returns_reference: function.returns_reference,
+            tentative: false,
             parameters: function
                 .parameters
                 .iter()
@@ -101,7 +127,7 @@ impl Contract {
 impl Vm {
     /// Contravariant parameters may widen inputs; covariant returns may narrow outputs.
     pub(crate) fn check_method_contract(
-        &self,
+        &mut self,
         inherited: &Method,
         method: &Method,
         unit: &phera_bytecode::CompiledUnit,
@@ -157,7 +183,7 @@ impl Vm {
                     unresolved.or_else(|| self.unresolved_contract_type(source, target, unit));
             }
         }
-        if base.returns.is_some() {
+        if base.returns.is_some() && (!base.tentative || child.returns.is_some()) {
             let source = child.returns.as_deref();
             let target = base.returns.as_deref();
             if !self.type_subset(
@@ -167,9 +193,24 @@ impl Vm {
                 &inherited.declaring,
                 unit,
             ) {
-                compatible = false;
-                unresolved =
-                    unresolved.or_else(|| self.unresolved_contract_type(source, target, unit));
+                if base.tentative && compatible {
+                    if let MethodBody::User(reference) = method.body {
+                        let location = crate::diagnostics::SourceLocation {
+                            file: self.code.unit(reference).file.clone(),
+                            line: self.code.function(reference).definition_line as usize,
+                        };
+                        let previous = self.diagnostic_location.replace(location);
+                        self.diagnostic("Deprecated", format!(
+                            "Return type of {} should either be compatible with {}, or the #[\\ReturnTypeWillChange] attribute should be used to temporarily suppress the notice",
+                            child.display(method), base.display(inherited)
+                        ));
+                        self.diagnostic_location = previous;
+                    }
+                } else {
+                    compatible = false;
+                    unresolved =
+                        unresolved.or_else(|| self.unresolved_contract_type(source, target, unit));
+                }
             }
         }
         if compatible {
@@ -289,9 +330,14 @@ impl Vm {
         if target == "bool" && matches!(source, "true" | "false") {
             return true;
         }
-        if target == "iterable" && matches!(source, "array" | "Traversable") {
+        if target == "iterable" && source == "array" {
             return true;
         }
+        let target = if target == "iterable" {
+            "Traversable"
+        } else {
+            target
+        };
         if target == "callable" && source == "Closure" {
             return true;
         }

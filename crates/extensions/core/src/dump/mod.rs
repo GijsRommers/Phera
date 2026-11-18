@@ -14,7 +14,7 @@ use std::rc::Rc;
 
 use phera_extension_api::value::Object;
 use phera_extension_api::{
-    ArrayKey, Context, DebugProperties, NativeError, PhpArray, Registry, Value,
+    ArrayKey, Context, NativeError, PhpArray, PropertyPurpose, PropertyView, Registry, Value,
 };
 
 pub(crate) fn register(registry: &mut Registry) {
@@ -54,11 +54,15 @@ pub(crate) struct Place {
 /// What differs between the three functions. The walker calls these in
 /// document order.
 pub(crate) trait Style {
-    fn properties(&self) -> PropertyView<'_> {
-        PropertyView::Raw
+    fn call_site(&self) -> (&'static str, &[Value]) {
+        ("", &[])
     }
 
     fn before_debug(&mut self, _out: &mut Vec<u8>, _place: Place, _context: &mut dyn Context) {}
+
+    fn property_purpose(&self) -> PropertyPurpose {
+        PropertyPurpose::Debug
+    }
 
     /// Anything that is not an array or object.
     fn scalar(&mut self, out: &mut Vec<u8>, value: &Value, place: Place);
@@ -83,15 +87,6 @@ pub(crate) trait Style {
         place: Place,
         context: &mut dyn Context,
     );
-}
-
-/// Export uses raw properties. Inspection retains the native call site for errors.
-pub(crate) enum PropertyView<'a> {
-    Raw,
-    Debug {
-        function: &'static str,
-        arguments: &'a [Value],
-    },
 }
 
 /// A container whose entries are partly printed.
@@ -199,31 +194,23 @@ async fn enter(
     let (entries, source) = match &container {
         Container::Array(array) => (array.clone(), EntrySource::Live),
         Container::Object(object) => {
-            if context.has_debug_info(object)
-                && matches!(style.properties(), PropertyView::Debug { .. })
-            {
+            let purpose = style.property_purpose();
+            if context.property_view_runs_code(object, purpose) {
                 style.before_debug(out, place, context);
                 place.leading_written = true;
-                let PropertyView::Debug {
-                    function,
-                    arguments,
-                } = style.properties()
-                else {
-                    return Err(NativeError::error("Invalid debug property view"));
-                };
-                match context
-                    .debug_properties(object.clone(), function, arguments)
-                    .await?
-                {
-                    DebugProperties::Properties(properties) => (properties, EntrySource::Live),
-                    DebugProperties::Recursive => {
-                        style.recursion(out, &container, place, context);
-                        active.remove(&container.identity());
-                        return Ok(None);
-                    }
+            }
+            let (function, arguments) = style.call_site();
+            match context
+                .property_view(object.clone(), purpose, function, arguments)
+                .await?
+            {
+                PropertyView::Snapshot(properties) => (properties, EntrySource::PropertySnapshot),
+                PropertyView::DebugInfo(properties) => (properties, EntrySource::Live),
+                PropertyView::Recursive => {
+                    style.recursion(out, &container, place, context);
+                    active.remove(&container.identity());
+                    return Ok(None);
                 }
-            } else {
-                (Rc::new(object.to_array()), EntrySource::PropertySnapshot)
             }
         }
     };

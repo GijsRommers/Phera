@@ -80,10 +80,17 @@ type_test!(
     is_scalar,
     Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::String(_)
 );
-// Objects that implement Traversable or Countable will count too, once
-// classes exist.
-type_test!(is_iterable, Value::Array(_));
-type_test!(is_countable, Value::Array(_));
+fn is_iterable(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    Ok(Value::Bool(args::value(arguments, 0).is_iterable()))
+}
+
+fn is_countable(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    Ok(Value::Bool(match args::value(arguments, 0) {
+        Value::Array(_) => true,
+        Value::Object(object) => object.class.is_countable(),
+        _ => false,
+    }))
+}
 
 /// A closed resource is no longer a resource to `is_resource`.
 fn is_resource(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {

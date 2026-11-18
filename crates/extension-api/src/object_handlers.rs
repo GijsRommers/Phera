@@ -1,0 +1,121 @@
+//! Optional operations implemented by Rust classes.
+//!
+//! ```php
+//! $copy = clone $date;       // copies the native calendar state
+//! $rows = (array) $date;    // projects the date fields for an array cast
+//! ```
+
+use std::rc::Rc;
+
+use crate::{Context, NativeError, NativeResult, Object, PhpArray, Value};
+
+/// PHP's three-way comparison. Uncomparable pairs fail every ordering test.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeComparison {
+    Default,
+    Ordered(std::cmp::Ordering),
+    Uncomparable,
+}
+
+/// A native object's property view can differ by consuming operation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PropertyPurpose {
+    Debug,
+    ArrayCast,
+    Export,
+    Json,
+    ObjectVars,
+    Foreach,
+    Comparison,
+    Serialize,
+}
+
+/// Native classes may copy their state or explicitly forbid cloning.
+#[derive(Clone, Copy)]
+pub enum NativeClone {
+    Copy(fn(&Object, &Object) -> Result<(), NativeError>),
+    Forbidden,
+}
+
+impl NativeClone {
+    /// Register this for values such as date/time data that own cloneable state.
+    pub const fn copy<T: Clone + 'static>() -> Self {
+        Self::Copy(copy_state::<T>)
+    }
+}
+
+fn copy_state<T: Clone + 'static>(
+    source: &Object,
+    destination: &Object,
+) -> Result<(), NativeError> {
+    let state = source
+        .native
+        .try_borrow()
+        .map_err(|_| NativeError::error("Native clone source is already borrowed"))?
+        .as_ref()
+        .and_then(|data| data.downcast_ref::<T>())
+        .cloned();
+    if let Some(state) = state {
+        *destination
+            .native
+            .try_borrow_mut()
+            .map_err(|_| NativeError::error("Native clone destination is already borrowed"))? =
+            Some(Box::new(state));
+    }
+    Ok(())
+}
+
+/// A separate cursor is constructed for each traversal of a native object.
+pub trait NativeIterator {
+    fn rewind(&mut self, context: &mut dyn Context) -> Result<(), NativeError>;
+    fn advance(&mut self, context: &mut dyn Context) -> Result<(), NativeError>;
+    fn valid(&mut self, context: &mut dyn Context) -> Result<bool, NativeError>;
+    fn current(&mut self, context: &mut dyn Context) -> NativeResult;
+    fn key(&mut self, context: &mut dyn Context) -> NativeResult;
+}
+
+pub type IteratorFactory =
+    fn(&mut dyn Context, Rc<Object>) -> Result<Box<dyn NativeIterator>, NativeError>;
+
+/// ArrayAccess's four methods can be serviced directly by native state.
+#[derive(Clone, Copy)]
+pub struct NativeDimensions {
+    pub get: fn(&mut dyn Context, &Object, Value) -> NativeResult,
+    pub exists: fn(&mut dyn Context, &Object, Value) -> Result<bool, NativeError>,
+    pub set: fn(&mut dyn Context, &Object, Value, Value) -> Result<(), NativeError>,
+    pub unset: fn(&mut dyn Context, &Object, Value) -> Result<(), NativeError>,
+}
+
+pub type NativeCompare = fn(
+    &Object,
+    &Object,
+    &mut dyn crate::Diagnostics,
+) -> Result<NativeComparison, crate::value::OpError>;
+pub type PropertyProjection =
+    fn(&mut dyn Context, &Object, PropertyPurpose) -> Result<PhpArray, NativeError>;
+pub type NativeCount = fn(&mut dyn Context, &Object) -> Result<i64, NativeError>;
+
+#[derive(Clone, Copy, Default)]
+pub struct ClassHooks {
+    pub clone: Option<NativeClone>,
+    pub compare: Option<NativeCompare>,
+    /// Whole-object enumeration, with the consuming operation supplied as a purpose.
+    pub properties: Option<PropertyProjection>,
+    /// Direct read, mutation or presence check for one virtual property.
+    pub property_access: Option<&'static crate::NativePropertyAccess>,
+    pub iterator: Option<IteratorFactory>,
+    pub dimensions: Option<NativeDimensions>,
+    pub count: Option<NativeCount>,
+}
+
+impl ClassHooks {
+    pub const EMPTY: Self = Self {
+        clone: None,
+        compare: None,
+        properties: None,
+        property_access: None,
+        iterator: None,
+        dimensions: None,
+        count: None,
+    };
+}

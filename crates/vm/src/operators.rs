@@ -1,10 +1,8 @@
 //! Borrowed arithmetic operands and amortised in-place string assignment.
 
-use std::rc::Rc;
-
 use crate::calls::execution_loop::BatchExit;
 use phera_bytecode::{BinaryOp, CastKind, IncDec, Instruction, Reg, UnaryOp};
-use phera_extension_api::NativeError;
+use phera_extension_api::{Context, NativeError, PropertyPurpose};
 use phera_value::{StringComparisonStep, Value, to_php_string};
 
 use crate::integer_arithmetic::{OverflowOperation, overflow_value};
@@ -60,8 +58,28 @@ impl Vm {
         let result = match fast_binary(operator, &left, &right) {
             Some(value) => Ok(value),
             None if needs_comparison_step(operator, &left, &right) => {
-                match begin_comparison(operator, &left, &right, self.diagnostic_reporter.operator())
+                if self.classes.has_property_views
+                    && matches!(
+                        (&*left, &*right),
+                        (Value::Array(_), Value::Array(_)) | (Value::Object(_), Value::Object(_))
+                    )
                 {
+                    let (a, b) = ((*left).clone(), (*right).clone());
+                    drop(left);
+                    drop(right);
+                    let step = self.step_comparison(|diagnostics, objects| {
+                        begin_comparison(operator, &a, &b, diagnostics, objects)
+                    })?;
+                    return Ok(self.store_comparison(step, operator, destination));
+                }
+                let step = begin_comparison(
+                    operator,
+                    &left,
+                    &right,
+                    self.diagnostic_reporter.operator(),
+                    &mut crate::object_comparison::compare_objects,
+                );
+                match step {
                     Ok(StringComparisonStep::Complete(order)) => {
                         Ok(comparison_value(operator, order))
                     }
@@ -71,11 +89,11 @@ impl Vm {
                         if self.diagnostic_reporter.has_pending() {
                             self.flush_operator_diagnostics();
                         }
-                        return Ok(Some(BatchExit::Compare(PendingComparison {
-                            cast,
+                        return Ok(self.store_comparison(
+                            StringComparisonStep::Cast(cast),
                             operator,
                             destination,
-                        })));
+                        ));
                     }
                     Err(error) => Err(error),
                 }
@@ -178,6 +196,25 @@ pub(crate) fn fast_binary(operator: BinaryOp, left: &Value, right: &Value) -> Op
 
 impl Vm {
     /// Apply PHP conversions and emit their diagnostics before publishing the result.
+    fn store_comparison(
+        &mut self,
+        step: StringComparisonStep,
+        operator: BinaryOp,
+        destination: Reg,
+    ) -> Option<BatchExit> {
+        match step {
+            StringComparisonStep::Complete(order) => {
+                self.set(destination, comparison_value(operator, order));
+                None
+            }
+            StringComparisonStep::Cast(cast) => Some(BatchExit::Compare(PendingComparison {
+                cast,
+                operator,
+                destination,
+            })),
+        }
+    }
+
     pub(crate) fn execute_cast(
         &mut self,
         to: phera_bytecode::CastKind,
@@ -195,10 +232,12 @@ impl Vm {
                 Value::Float(phera_value::to_float(&value, &mut diagnostics.buffer)?)
             }
             CastKind::String => Value::String(to_php_string(&value, &mut diagnostics.buffer)?),
-            CastKind::Array => Value::Array(Rc::new(phera_value::to_array(
-                &value,
-                &mut diagnostics.buffer,
-            ))),
+            CastKind::Array => Value::from(match &value {
+                Value::Object(object) => diagnostics
+                    .vm
+                    .object_properties(object, PropertyPurpose::ArrayCast)?,
+                _ => phera_value::to_array(&value, &mut diagnostics.buffer),
+            }),
             CastKind::Void => Value::Null,
             CastKind::Object => {
                 if value.is_object() {

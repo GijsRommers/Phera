@@ -3,7 +3,7 @@
 
 use std::rc::Rc;
 
-use phera_extension_api::{DebugProperties, LocalFuture, NativeError, Unwind};
+use phera_extension_api::{LocalFuture, NativeError, PropertyView, Unwind};
 use phera_value::{Object, Value};
 
 use crate::Vm;
@@ -23,7 +23,7 @@ impl Vm {
         object: Rc<Object>,
         function: &'static str,
         arguments: &[Value],
-    ) -> LocalFuture<'_, Result<DebugProperties, NativeError>> {
+    ) -> LocalFuture<'_, Result<PropertyView, NativeError>> {
         let native = crate::error_traces::NativeTrace::new(function, arguments);
         Box::pin(self.inspect_properties(object, native))
     }
@@ -32,19 +32,19 @@ impl Vm {
         &mut self,
         object: Rc<Object>,
         native: crate::error_traces::NativeTrace,
-    ) -> Result<DebugProperties, NativeError> {
+    ) -> Result<PropertyView, NativeError> {
         if self.debug_objects.contains(&object.id) {
-            return Ok(DebugProperties::Recursive);
+            return Ok(PropertyView::Recursive);
         }
         let Some(class) = self.classes.for_object(&object) else {
-            return Ok(DebugProperties::Properties(Rc::new(object.to_array())));
+            return Ok(PropertyView::Snapshot(Rc::new(object.to_array())));
         };
         let Some(method) = class
             .magic
             .as_ref()
             .and_then(|magic| magic.debug_info.clone())
         else {
-            return Ok(DebugProperties::Properties(Rc::new(object.to_array())));
+            return Ok(PropertyView::Snapshot(Rc::new(object.to_array())));
         };
         let qualified = format!("{}::{}()", method.declaring, method.name);
         self.debug_objects.push(object.id);
@@ -57,7 +57,7 @@ impl Vm {
         self.native_callback_sites.pop();
         self.debug_objects.pop();
         match result.map(|value| value.deref().clone()) {
-            Ok(Value::Array(properties)) => Ok(DebugProperties::Properties(properties)),
+            Ok(Value::Array(properties)) => Ok(PropertyView::DebugInfo(properties)),
             Ok(Value::Null) => Err(NativeError::error(format!(
                 "Returning null from {qualified} is not supported by Phera: deprecated since PHP 8.5, return an empty array instead"
             ))),

@@ -69,7 +69,8 @@ impl Vm {
             .classes
             .for_object(&original)
             .ok_or_else(|| internal_error!("clone class"))?;
-        if class.is_throwable || matches!(class.native_clone, NativeClone::Forbidden) {
+        let policy = class.hooks.as_ref().and_then(|hooks| hooks.clone);
+        if class.is_throwable || matches!(policy, Some(NativeClone::Forbidden)) {
             return Err(NativeError::error(format!(
                 "Trying to clone an uncloneable object of class {}",
                 class.name
@@ -92,10 +93,10 @@ impl Vm {
             self.check_clone_visibility(method)?;
         }
         let cloned = self.classes.allocate(class.clone());
-        match class.native_clone {
-            NativeClone::CopyState(copy) => copy(&original, &cloned)?,
-            NativeClone::Properties
-                if crate::reference_holders::ReferenceHolders::has_extension_payload(&original) =>
+        match policy {
+            Some(NativeClone::Copy(copy)) => copy(&original, &cloned)?,
+            None if class.has_native_layout
+                && crate::reference_holders::has_extension_state(&original)? =>
             {
                 return Err(NativeError::error(format!(
                     "Trying to clone an uncloneable object of class {}",

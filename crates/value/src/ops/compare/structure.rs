@@ -16,33 +16,57 @@ use crate::object::Object;
 use crate::value::Value;
 
 use super::casting::CastPair;
-use super::{ObjectEquality, cmp3, compare_leaf, identical_leaf};
+use super::{ObjectComparator, ObjectComparison, cmp3, compare_leaf, identical_leaf};
 
-#[derive(Clone, Copy)]
-pub(super) enum Comparison {
+pub(super) enum Comparison<'a, 'callback> {
     Strict,
     Loose,
     PendingError,
-    NativeEquality(ObjectEquality),
+    Native(&'a mut ObjectComparator<'callback>),
 }
 
-impl Comparison {
-    /// An object pair can compare as a leaf, even inside an array.
-    pub(super) fn object_equality(self, left: &Rc<Object>, right: &Rc<Object>) -> Option<i8> {
+pub(super) enum Pair {
+    Compared(i8),
+    Tables(Table, Table),
+}
+
+impl Comparison<'_, '_> {
+    /// Native handlers can also compare objects that have different class names.
+    pub(super) fn objects(
+        &mut self,
+        left: &Rc<Object>,
+        right: &Rc<Object>,
+        diagnostics: &mut dyn Diagnostics,
+    ) -> Result<Pair, OpError> {
         if Rc::ptr_eq(left, right) {
-            return Some(0);
+            return Ok(Pair::Compared(0));
         }
-        if left.class.name() != right.class.name() || matches!(self, Self::Strict) {
-            return Some(1);
+        if matches!(self, Self::Strict) {
+            return Ok(Pair::Compared(1));
         }
-        match self {
-            Self::NativeEquality(compare) => compare(left, right).map(|equal| i8::from(!equal)),
-            _ => None,
+        if let Self::Native(compare) = self {
+            match compare(left, right, diagnostics)? {
+                ObjectComparison::Compared(result) => return Ok(Pair::Compared(result)),
+                ObjectComparison::Projected(a, b) => {
+                    return Ok(Pair::Tables(
+                        Table::Projected(left.clone(), a),
+                        Table::Projected(right.clone(), b),
+                    ));
+                }
+                ObjectComparison::Default => {}
+            }
         }
+        if left.class.name() != right.class.name() {
+            return Ok(Pair::Compared(1));
+        }
+        Ok(Pair::Tables(
+            Table::Object(left.clone()),
+            Table::Object(right.clone()),
+        ))
     }
 
     pub(super) fn leaf(
-        self,
+        &self,
         left: &Value,
         right: &Value,
         diagnostics: &mut dyn Diagnostics,
@@ -57,6 +81,7 @@ impl Comparison {
 pub(super) enum Table {
     Array(Rc<PhpArray>),
     Object(Rc<Object>),
+    Projected(Rc<Object>, PhpArray),
 }
 
 enum Entries<'a> {
@@ -82,15 +107,12 @@ enum TableId {
 }
 
 impl Table {
-    pub(super) fn object(object: &Rc<Object>) -> Self {
-        Self::Object(object.clone())
-    }
-
     /// A cast may change a subsequently compared property. Borrow only while
     /// advancing, so the next step observes the current table after PHP runs.
     fn entries(&self) -> Result<Entries<'_>, OpError> {
         match self {
             Self::Array(array) => Ok(Entries::Array(array)),
+            Self::Projected(_, properties) => Ok(Entries::Array(properties)),
             Self::Object(object) => {
                 object
                     .properties
@@ -108,25 +130,29 @@ impl Table {
     fn id(&self) -> TableId {
         match self {
             Self::Array(array) => TableId::Array(Rc::as_ptr(array)),
-            Self::Object(object) => TableId::Object(Rc::as_ptr(object)),
+            Self::Object(object) | Self::Projected(object, _) => {
+                TableId::Object(Rc::as_ptr(object))
+            }
         }
     }
 
     /// PHP checks the native stack before comparing each table. Charge the
     /// frame sizes observed in the default PHP 8.5 arm64 build against a
     /// fixed budget, so long acyclic chains get a separate catchable error.
-    fn stack_cost(&self, comparison: Comparison) -> usize {
+    fn stack_cost(&self, comparison: &Comparison<'_, '_>) -> usize {
         match self {
             Self::Array(_) if matches!(comparison, Comparison::Strict) => 128,
             Self::Array(_) => 256,
-            Self::Object(_) => 352,
+            Self::Object(_) | Self::Projected(..) => 352,
         }
     }
 
     fn stack_error(&self) -> OpError {
         OpError::error(match self {
             Self::Array(_) => "Maximum call stack size reached during comparison",
-            Self::Object(_) => "Maximum call stack size reached during object comparison",
+            Self::Object(_) | Self::Projected(..) => {
+                "Maximum call stack size reached during object comparison"
+            }
         })
     }
 }
@@ -140,7 +166,7 @@ struct Frame {
 }
 
 impl Frame {
-    fn new(left: Table, right: Table, comparison: Comparison) -> Result<Self, OpError> {
+    fn new(left: Table, right: Table, comparison: &Comparison<'_, '_>) -> Result<Self, OpError> {
         let left_position = left.entries()?.first_position();
         let right_position = match comparison {
             Comparison::Strict => right.entries()?.first_position(),
@@ -167,11 +193,14 @@ pub(super) struct TableComparison {
     parents: Vec<Frame>,
     active: Option<HashSet<TableId>>,
     budget: usize,
-    comparison: Comparison,
 }
 
 impl TableComparison {
-    pub(super) fn new(left: Table, right: Table, comparison: Comparison) -> Result<Self, OpError> {
+    pub(super) fn new(
+        left: Table,
+        right: Table,
+        comparison: &Comparison<'_, '_>,
+    ) -> Result<Self, OpError> {
         let stack_budget = match comparison {
             Comparison::Strict => 8_329_216,
             _ => 8_329_215,
@@ -181,12 +210,12 @@ impl TableComparison {
             parents: Vec::new(),
             active: None,
             frame: Frame::new(left, right, comparison)?,
-            comparison,
         })
     }
 
     pub(super) fn advance<const CAST_STRINGS: bool>(
         &mut self,
+        comparison: &mut Comparison<'_, '_>,
         diagnostics: &mut dyn Diagnostics,
     ) -> Result<CompareStep, OpError> {
         let Self {
@@ -194,9 +223,7 @@ impl TableComparison {
             parents,
             active,
             budget,
-            comparison,
         } = self;
-        let comparison = *comparison;
         loop {
             let left = frame.left.entries()?;
             let right = frame.right.entries()?;
@@ -242,11 +269,12 @@ impl TableComparison {
                         break;
                     }
                     (Value::Object(a), Value::Object(b)) => {
-                        if let Some(result) = comparison.object_equality(a, b) {
-                            result
-                        } else {
-                            child = Some((Table::object(a), Table::object(b)));
-                            break;
+                        match comparison.objects(a, b, diagnostics)? {
+                            Pair::Compared(result) => result,
+                            Pair::Tables(left, right) => {
+                                child = Some((left, right));
+                                break;
+                            }
                         }
                     }
                     _ => {
@@ -295,10 +323,12 @@ impl TableComparison {
 pub(super) fn compare_tables(
     left: Table,
     right: Table,
-    comparison: Comparison,
+    comparison: &mut Comparison<'_, '_>,
     diagnostics: &mut dyn Diagnostics,
 ) -> Result<i8, OpError> {
-    match TableComparison::new(left, right, comparison)?.advance::<false>(diagnostics)? {
+    match TableComparison::new(left, right, comparison)?
+        .advance::<false>(comparison, diagnostics)?
+    {
         CompareStep::Complete(order) => Ok(order),
         CompareStep::Cast(_) => Err(OpError::error(
             "Unexpected PHP string conversion during value comparison",

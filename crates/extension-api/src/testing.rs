@@ -89,8 +89,8 @@ impl Context for TestContext {
     }
 }
 
-/// Prepare arguments and run a native handler in the standalone test context.
-/// A handler can use ready context futures, but may not require a runtime to suspend.
+/// Prepares native arguments and runs a handler that can complete immediately.
+/// A handler waiting on the runtime needs an integration test instead.
 pub fn call(
     registry: &Registry,
     context: &mut TestContext,
@@ -101,7 +101,14 @@ pub fn call(
         .get_function(name)
         .ok_or_else(|| NativeError::error(format!("Call to undefined function {name}()")))?;
     crate::prepare_arguments(entry, &mut arguments, context)?;
-    match entry.handler {
+    let handler = if matches!(arguments.first(), Some(Value::Object(_))) {
+        registry
+            .object_handler(entry.name)
+            .map_or(entry.handler, NativeFn::Async)
+    } else {
+        entry.handler
+    };
+    match handler {
         NativeFn::Sync(function) => function(context, &arguments),
         NativeFn::Async(function) => {
             match function(context, arguments)

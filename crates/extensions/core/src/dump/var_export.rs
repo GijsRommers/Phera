@@ -64,6 +64,14 @@ fn float_source(float: f64) -> String {
 }
 
 impl Style for VarExport {
+    fn call_site(&self) -> (&'static str, &[Value]) {
+        ("var_export", &[])
+    }
+
+    fn property_purpose(&self) -> phera_extension_api::PropertyPurpose {
+        phera_extension_api::PropertyPurpose::Export
+    }
+
     fn scalar(&mut self, out: &mut Vec<u8>, value: &Value, _place: Place) {
         match value {
             Value::Bool(flag) => out.extend_from_slice(flag.to_string().as_bytes()),
