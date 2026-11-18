@@ -2,9 +2,7 @@
 
 use std::borrow::Cow;
 
-use super::numbers::{
-    decimal, digits_end, float_end, short_unsigned, signed, signed_end, unsigned,
-};
+use super::numbers::{decimal, digits_end, float_end, signed, signed_end, unsigned};
 use super::{Diagnostic, ObjectFormat, ParseError, Token};
 
 #[derive(Clone)]
@@ -77,10 +75,6 @@ impl<'a> Reader<'a> {
 
     fn integer(&mut self) -> Result<Token<'a>, ParseError> {
         let start = self.offset + 2;
-        if let Some((value, length)) = short_unsigned(&self.input[start..], b";") {
-            self.offset = start + length;
-            return Ok(Token::Int(value as i64));
-        }
         let (end, digits) = signed_end(self.input, start);
         if !digits || self.input.get(end) != Some(&b';') {
             return Err(ParseError);
@@ -104,18 +98,19 @@ impl<'a> Reader<'a> {
             [b'I', b'N', b'F', b';', ..] => (3, f64::INFINITY),
             [b'-', b'I', b'N', b'F', b';', ..] => (4, f64::NEG_INFINITY),
             _ => {
-                if let Some((value, len)) = decimal(&self.input[start..]) {
-                    self.offset = start + len + 1;
-                    return Ok(Token::Float(value));
-                }
                 let end = float_end(self.input, start).ok_or(ParseError)?;
                 if self.input.get(end) != Some(&b';') {
                     return Err(ParseError);
                 }
-                let value = std::str::from_utf8(&self.input[start..end])
-                    .map_err(|_| ParseError)?
-                    .parse()
-                    .map_err(|_| ParseError)?;
+                let digits = &self.input[start..end];
+                let value = if let Some(value) = decimal(digits) {
+                    value
+                } else {
+                    std::str::from_utf8(digits)
+                        .map_err(|_| ParseError)?
+                        .parse()
+                        .map_err(|_| ParseError)?
+                };
                 (end - start, value)
             }
         };
@@ -125,9 +120,6 @@ impl<'a> Reader<'a> {
 
     fn length(&self, delimiters: &[u8]) -> Result<(usize, usize), ParseError> {
         let start = self.offset + 2;
-        if let Some((value, length)) = short_unsigned(&self.input[start..], delimiters) {
-            return Ok((start + length, value));
-        }
         let end = digits_end(self.input, start);
         if end == start || !self.input[end..].starts_with(delimiters) {
             return Err(ParseError);
@@ -186,13 +178,6 @@ impl<'a> Reader<'a> {
 
     fn array(&mut self, key: bool) -> Result<Token<'a>, ParseError> {
         let start = self.offset + 2;
-        if let Some((count, length)) = short_unsigned(&self.input[start..], b":{") {
-            self.offset = start + length;
-            if key {
-                return Err(ParseError);
-            }
-            return Ok(Token::Array(self.checked_count(count as i64, self.offset)?));
-        }
         let end = digits_end(self.input, start);
         if end == start || !self.input[end..].starts_with(b":{") {
             return Err(ParseError);
