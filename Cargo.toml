@@ -3,6 +3,8 @@ resolver = "3"
 
 members = [
     "crates/cli",
+    "crates/dotenv",
+    "crates/analyzer",
     "crates/lexer",
     "crates/parser",
     "crates/ast",
@@ -30,6 +32,10 @@ license = "MIT OR Apache-2.0"
 unsafe_code = "forbid"
 
 [workspace.dependencies]
+phera-dotenv = { path = "crates/dotenv" }
+indexmap = "2"
+regex = "1"
+phera-analyzer = { path = "crates/analyzer" }
 phera-lexer = { path = "crates/lexer" }
 phera-parser = { path = "crates/parser" }
 phera-ast = { path = "crates/ast" }

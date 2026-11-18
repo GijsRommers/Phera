@@ -1,0 +1,68 @@
+file	line	identifier	phpstan_level	message
+tests/fixtures/advanced/error_nested_function.phpt	2	function.notFound	0	Function absent not found.
+tests/fixtures/advanced/suppression_nested.phpt	2	variable.undefined	1	Undefined variable: $missing
+tests/fixtures/advanced/suppression_nested.phpt	2	variable.undefined	1	Undefined variable: $other
+tests/fixtures/advanced/undefined_constant.phpt	2	constant.notFound	1	Constant ABSENT not found.
+tests/fixtures/advanced/undefined_function.phpt	2	function.notFound	0	Function absent not found.
+tests/fixtures/advanced/warning_variable.phpt	2	variable.undefined	1	Undefined variable: $missing
+tests/fixtures/calls/window_argument_trace_extras.phpt	2	arguments.count	1	f() called with 3 arguments; 1 required, 1 accepted.
+tests/fixtures/calls/window_argument_trace_reassigned.phpt	2	arguments.count	1	f() called with 2 arguments; 1 required, 1 accepted.
+tests/fixtures/calls/window_named_unknown.phpt	2	argument.unknown	0	Unknown parameter $unknown in call to f().
+tests/fixtures/classes/class-name-constant.phpt	1	class.notFound	0	Class Absent not found.
+tests/fixtures/classes/instanceof-scalar.phpt	1	class.notFound	0	Class Missing not found.
+tests/fixtures/classes/instanceof-unknown.phpt	1	class.notFound	0	Class Missing not found.
+tests/fixtures/classes/m3b-error-constant-undefined.phpt	1	classConstant.notFound	0	Constant Foo::A not found.
+tests/fixtures/classes/m3b-error-static-undeclared.phpt	1	staticProperty.notFound	0	Access to undefined property Foo::$x.
+tests/fixtures/classes/m3c-nonstatic-error.phpt	1	method.staticCall	0	Static call to instance method A::m().
+tests/fixtures/classes/m3c-unknown-instanceof.phpt	1	class.notFound	0	Class Missing not found.
+tests/fixtures/classes/m3c-unknown-static-error.phpt	1	class.notFound	0	Class Missing not found.
+tests/fixtures/classes/sweep/m3c-sweep-included-class.phpt	4	class.notFound	0	Class IncludedChild not found.
+tests/fixtures/classes/sweep/m3c-sweep-included-class.phpt	5	class.notFound	0	Class IncludedChild not found.
+tests/fixtures/classes/sweep/m3c-sweep-included-class.phpt	20	class.notFound	0	Class IncludedBase not found.
+tests/fixtures/classes/sweep/m3c-sweep-included-class.phpt	21	class.notFound	0	Class IncludedBase not found.
+tests/fixtures/classes/sweep/m3c-sweep-included-class.phpt	30	class.notFound	0	Class IncludedChild not found.
+tests/fixtures/closures/closure_static_invoke_error.phpt	2	method.staticCall	0	Static call to instance method Closure::__invoke().
+tests/fixtures/closures/constant_dynamic_callable_error.phpt	2	variable.undefined	1	Undefined variable: $f
+tests/fixtures/closures/constant_dynamic_method_error.phpt	2	variable.undefined	1	Undefined variable: $m
+tests/fixtures/closures/include_invoke_visibility.phpt	7	class.notFound	0	Class IncludedInvoke not found.
+tests/fixtures/closures/no_this_error.phpt	2	variable.undefined	0	Using $this outside an object context.
+tests/fixtures/closures/static_no_this_error.phpt	2	variable.undefined	0	Using $this outside an object context.
+tests/fixtures/closures/undefined_function_spelling.phpt	3	function.notFound	0	Function Foo\MiSsInG not found.
+tests/fixtures/closures/undefined_function_spelling.phpt	4	function.notFound	0	Function Foo\MiSsInG not found.
+tests/fixtures/exceptions/catch_unknown.phpt	2	class.notFound	0	Class UnknownClass not found.
+tests/fixtures/exceptions/default_error.phpt	2	class.notFound	0	Class MissingClass not found.
+tests/fixtures/exceptions/engine_abstract_own.phpt	3	new.abstract	0	Cannot instantiate abstract class or interface Example.
+tests/fixtures/exceptions/engine_abstract_parent.phpt	3	new.abstract	0	Cannot instantiate abstract class or interface Example.
+tests/fixtures/exceptions/engine_abstract_throwable.phpt	3	new.abstract	0	Cannot instantiate abstract class or interface Example.
+tests/fixtures/exceptions/engine_argument_count_own.phpt	3	arguments.count	0	intdiv() called with 0 arguments; 2 required, 2 accepted.
+tests/fixtures/exceptions/engine_argument_count_parent.phpt	3	arguments.count	0	intdiv() called with 0 arguments; 2 required, 2 accepted.
+tests/fixtures/exceptions/engine_argument_count_throwable.phpt	3	arguments.count	0	intdiv() called with 0 arguments; 2 required, 2 accepted.
+tests/fixtures/exceptions/engine_undefined_class_own.phpt	3	class.notFound	0	Class MissingClass not found.
+tests/fixtures/exceptions/engine_undefined_class_parent.phpt	3	class.notFound	0	Class MissingClass not found.
+tests/fixtures/exceptions/engine_undefined_class_throwable.phpt	3	class.notFound	0	Class MissingClass not found.
+tests/fixtures/exceptions/engine_undefined_constant_own.phpt	3	constant.notFound	1	Constant MISSING_CONSTANT not found.
+tests/fixtures/exceptions/engine_undefined_constant_parent.phpt	3	constant.notFound	1	Constant MISSING_CONSTANT not found.
+tests/fixtures/exceptions/engine_undefined_constant_throwable.phpt	3	constant.notFound	1	Constant MISSING_CONSTANT not found.
+tests/fixtures/exceptions/engine_undefined_function_own.phpt	3	function.notFound	0	Function missing_function not found.
+tests/fixtures/exceptions/engine_undefined_function_parent.phpt	3	function.notFound	0	Function missing_function not found.
+tests/fixtures/exceptions/engine_undefined_function_throwable.phpt	3	function.notFound	0	Function missing_function not found.
+tests/fixtures/exceptions/engine_user_argument_count_own.phpt	3	arguments.count	0	needed() called with 0 arguments; 1 required, 1 accepted.
+tests/fixtures/exceptions/engine_user_argument_count_parent.phpt	3	arguments.count	0	needed() called with 0 arguments; 1 required, 1 accepted.
+tests/fixtures/exceptions/engine_user_argument_count_throwable.phpt	3	arguments.count	0	needed() called with 0 arguments; 1 required, 1 accepted.
+tests/fixtures/exceptions/error_reporting_count.phpt	2	arguments.count	1	error_reporting() called with 2 arguments; 0 required, 1 accepted.
+tests/fixtures/exceptions/fatal_throwable_interface.phpt	2	method.abstract	0	Class Invalid must implement method __tostring().
+tests/fixtures/exceptions/fatal_throwable_interface.phpt	2	method.abstract	0	Class Invalid must implement method getcode().
+tests/fixtures/exceptions/fatal_throwable_interface.phpt	2	method.abstract	0	Class Invalid must implement method getfile().
+tests/fixtures/exceptions/fatal_throwable_interface.phpt	2	method.abstract	0	Class Invalid must implement method getline().
+tests/fixtures/exceptions/fatal_throwable_interface.phpt	2	method.abstract	0	Class Invalid must implement method getmessage().
+tests/fixtures/exceptions/fatal_throwable_interface.phpt	2	method.abstract	0	Class Invalid must implement method getprevious().
+tests/fixtures/exceptions/fatal_throwable_interface.phpt	2	method.abstract	0	Class Invalid must implement method gettrace().
+tests/fixtures/exceptions/fatal_throwable_interface.phpt	2	method.abstract	0	Class Invalid must implement method gettraceasstring().
+tests/fixtures/exceptions/handler_return_warning.phpt	2	variable.undefined	0	Undefined variable: $missing
+tests/fixtures/exceptions/sweep_router.phpt	25	function.notFound	0	Function undefined_service not found.
+tests/fixtures/exceptions/trace_extra_arguments.phpt	2	arguments.count	1	create() called with 3 arguments; 1 required, 1 accepted.
+tests/fixtures/execution/suppression.phpt	2	variable.undefined	1	Undefined variable: $missing
+tests/fixtures/includes/include-values5.phpt	1	function.notFound	0	Function included5 not found.
+tests/fixtures/native-classes/constant-case-sensitive.phpt	3	classConstant.notFound	0	Constant PDO::fetch_assoc not found.
+tests/fixtures/native-classes/constant-undefined.phpt	3	classConstant.notFound	0	Constant PDO::NOPE not found.
+tests/fixtures/procedural/default-variable5.phpt	1	variable.undefined	1	Undefined variable: $variable
