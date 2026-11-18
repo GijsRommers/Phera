@@ -13,10 +13,10 @@ $foo = function() {
 
 try {
     $foo();
-} catch (Throwable $e) {
-    echo $e::class, ': ', $e->getMessage(), "\n";
+} catch (Exception $e) {
+    var_dump($e->getMessage());
 }
 
 ?>
 --EXPECT--
-Exception: test!
+string(5) "test!"

@@ -12,12 +12,12 @@ function foo () {
 
 try {
   foo();
-} catch (Throwable $e) {
+} catch (Exception $e) {
   do {
-    echo $e::class, ': ', $e->getMessage(), "\n";
+    var_dump($e->getMessage());
   } while ($e = $e->getPrevious());
 }
 ?>
 --EXPECT--
-Exception: finally
-Exception: try
+string(7) "finally"
+string(3) "try"

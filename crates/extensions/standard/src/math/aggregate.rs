@@ -1,9 +1,9 @@
-//! Array arithmetic shares scalar operators but recovers from unsupported entries.
+//! `array_sum` and `array_product`, which use PHP's `+` and `*`.
 
 use phera_extension_api::value::{add, mul};
-use phera_extension_api::{
-    Context, FunctionEntry, NativeResult, Param, ParamType, Registry, Value, args,
-};
+use phera_extension_api::{Context, FunctionEntry, NativeResult, Param, ParamType, Value};
+
+use crate::arguments::required_array;
 
 #[derive(Clone, Copy)]
 enum Operation {
@@ -21,49 +21,61 @@ impl Operation {
     }
 }
 
-const ARRAY_PARAMS: &[Param] = &[Param::new("array", ParamType::Array)];
+pub(super) const FUNCTIONS: &[FunctionEntry] = &[ARRAY_SUM, ARRAY_PRODUCT];
 
-pub(crate) fn register(registry: &mut Registry) {
-    registry.function(FunctionEntry::sync("array_sum", ARRAY_PARAMS, array_sum));
-    registry.function(FunctionEntry::sync(
-        "array_product",
-        ARRAY_PARAMS,
-        array_product,
-    ));
-}
+/// `array_sum(array $array): int|float`, the values added with `+`.
+///
+/// ```php
+/// array_sum([1, 2.5, "3"]); // 6.5
+/// array_sum([1, [2]]);      // 1, with a warning: arrays are skipped
+/// ```
+const ARRAY_SUM: FunctionEntry = FunctionEntry::sync(
+    "array_sum",
+    &[Param::new("array", ParamType::Array)],
+    array_sum,
+);
 
 fn array_sum(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     aggregate(context, arguments, Operation::Sum)
 }
 
+/// `array_product(array $array): int|float`, the values multiplied.
+///
+/// ```php
+/// array_product([2, "3", 4.0]); // 24.0
+/// array_product([]);            // 1
+/// ```
+const ARRAY_PRODUCT: FunctionEntry = FunctionEntry::sync(
+    "array_product",
+    &[Param::new("array", ParamType::Array)],
+    array_product,
+);
+
 fn array_product(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     aggregate(context, arguments, Operation::Product)
 }
 
-/// PHP 8.3 warns for unsupported operands. Non-numeric strings still act as
-/// zero for compatibility, while arrays are skipped rather than cast to one.
-fn aggregate(context: &mut dyn Context, arguments: &[Value], kind: Operation) -> NativeResult {
-    let (initial, name, description) = match kind {
+/// Since PHP 8.3 an entry the operator rejects is skipped with a warning,
+/// except that a string still counts as 0 (and arrays are no longer cast
+/// to 1).
+fn aggregate(context: &mut dyn Context, arguments: &[Value], operation: Operation) -> NativeResult {
+    let (initial, function, description) = match operation {
         Operation::Sum => (0, "array_sum", "Addition"),
         Operation::Product => (1, "array_product", "Multiplication"),
     };
     let mut result = Value::Int(initial);
-    if let Some(array) = args::array(arguments, 0) {
-        for value in array.values() {
-            match kind.apply(context, &result, value) {
-                Ok(value) => result = value,
-                Err(_) => {
-                    let value = value.deref();
-                    if matches!(&*value, Value::String(_)) {
-                        result = kind.apply(context, &result, &Value::Int(0))?;
-                    }
-                    context.warning(format!(
-                        "{}(): {} is not supported on type {}",
-                        name,
-                        description,
-                        value.type_name()
-                    ));
+    for value in required_array(arguments, 0).values() {
+        match operation.apply(context, &result, value) {
+            Ok(value) => result = value,
+            Err(_) => {
+                let value = value.deref();
+                if value.is_string() {
+                    result = operation.apply(context, &result, &Value::Int(0))?;
                 }
+                context.warning(format!(
+                    "{function}(): {description} is not supported on type {}",
+                    value.type_name()
+                ));
             }
         }
     }

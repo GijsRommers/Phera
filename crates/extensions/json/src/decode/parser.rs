@@ -1,38 +1,54 @@
-//! Explicit grammar frames avoid dependence on the native thread stack.
-use super::scanner::{Scanner, Token};
-use crate::{error::Error, flags::Flags};
+//! The JSON grammar over the tokens, with a stack of open containers
+//! instead of recursion, so that `json_decode(str_repeat('[', 100000) ...)`
+//! cannot overflow the Rust stack.
+//!
+//! ```php
+//! json_decode('[1,]');                // null, JSON_ERROR_SYNTAX
+//! json_decode('[}');                  // null, JSON_ERROR_STATE_MISMATCH
+//! json_decode('{"a":1,"a":2}', true); // ['a' => 2]: a repeated key replaces
+//! json_decode('[[1]]', true, 2);      // null, JSON_ERROR_DEPTH
+//! ```
+
+use super::scanner::{Container, Scanner, Token};
+use crate::{error::Error, flags::DecodeFlags};
 use phera_extension_api::{ArrayKey, PhpArray, Value};
+
 /// Turns the members of a JSON object into a PHP object. The parser does
 /// not know how objects are made: the caller passes this in.
 pub(super) type ObjectFactory<'a> = &'a mut dyn FnMut(PhpArray) -> Value;
-/// A precise grammar state prevents trailing commas and mismatched delimiters.
+/// What an open container expects next.
 enum State {
+    /// The first entry, or the closing bracket of an empty container.
     First,
+    /// An array entry, after a comma.
     Value,
+    /// An object key, after a comma.
     Key,
+    /// The colon after a key.
     Colon,
+    /// The value after a colon.
     Member,
+    /// A comma, or the closing bracket.
     Comma,
 }
-/// One open container; properties retain insertion order and duplicate-key replacement.
+
+/// An open container.
 struct Frame {
-    object: bool,
+    container: Container,
     state: State,
     key: Option<ArrayKey>,
     values: PhpArray,
 }
-/// Parse a complete document; factory is used only for object mode.
+
+/// Parses a whole document. `factory` makes the objects, unless
+/// `flags.associative` asks for arrays.
 pub(super) fn parse(
     bytes: &[u8],
     depth: usize,
-    flags: Flags,
+    flags: DecodeFlags,
     factory: ObjectFactory<'_>,
 ) -> Result<Value, Error> {
-    let mut scanner = Scanner {
-        bytes,
-        pos: 0,
-        flags,
-    };
+    let mut scanner = Scanner::new(bytes, flags);
     let mut frames: Vec<Frame> = Vec::new();
     let mut root = None;
     loop {
@@ -54,23 +70,23 @@ pub(super) fn parse(
         };
 
         match token {
-            Token::Open(object) => {
+            Token::Open(container) => {
                 if frames.len().saturating_add(1) >= depth {
                     return Err(Error::Depth);
                 }
                 frames.push(Frame {
-                    object,
+                    container,
                     state: State::First,
                     key: None,
                     values: PhpArray::new(),
                 });
             }
-            Token::Close(object) => {
+            Token::Close(container) => {
                 let frame = frames.pop().ok_or(Error::Syntax)?;
-                if object != frame.object {
+                if container != frame.container {
                     return Err(Error::State);
                 }
-                let value = if object && !flags.associative {
+                let value = if container == Container::Object && !flags.associative {
                     factory(frame.values)
                 } else {
                     Value::from(frame.values)
@@ -82,15 +98,16 @@ pub(super) fn parse(
         }
     }
 }
-/// Attach a finished value to its parent without recursive tree rebuilding.
+
+/// Adds a finished value to the open container, or makes it the document.
 fn accept(
     frames: &mut [Frame],
     root: &mut Option<Value>,
     value: Value,
-    flags: Flags,
+    flags: DecodeFlags,
 ) -> Result<(), Error> {
     if let Some(frame) = frames.last_mut() {
-        if frame.object {
+        if frame.container == Container::Object {
             let key = frame.key.take().ok_or(Error::Syntax)?;
             if !flags.associative
                 && matches!(&key, ArrayKey::String(name) if name.as_bytes().first() == Some(&0))
@@ -109,13 +126,15 @@ fn accept(
 }
 
 impl Frame {
-    /// Consume separators and keys before allowing the parser to read a value.
-    fn advance(&mut self, token: Token, flags: Flags) -> Result<Option<Token>, Error> {
+    /// Takes the token if it is a comma, colon or key, which only move the
+    /// state on; returns it if it is for the parser (a value, an opening or
+    /// a closing bracket); fails if it does not belong here.
+    fn advance(&mut self, token: Token, flags: DecodeFlags) -> Result<Option<Token>, Error> {
         match self.state {
             State::First if matches!(token, Token::Close(_)) => {}
             State::Comma => match token {
                 Token::Comma => {
-                    self.state = if self.object {
+                    self.state = if self.container == Container::Object {
                         State::Key
                     } else {
                         State::Value
@@ -132,7 +151,7 @@ impl Frame {
                 self.state = State::Member;
                 return Ok(None);
             }
-            State::Key | State::First if self.object => {
+            State::Key | State::First if self.container == Container::Object => {
                 let Token::Value(Value::String(name)) = token else {
                     return Err(Error::Syntax);
                 };

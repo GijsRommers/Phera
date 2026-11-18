@@ -30,7 +30,7 @@ impl Vm {
         );
         let context = self
             .current()
-            .and_then(|frame| frame.method.as_ref())
+            .and_then(|frame| frame.method())
             .cloned()
             .ok_or_else(|| {
                 NativeError::error(format!(

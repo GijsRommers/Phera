@@ -8,7 +8,8 @@ license.workspace = true
 [dependencies]
 phera-extension-api.workspace = true
 pcre2.workspace = true
-# Pin the bundled engine version; this crate never calls the sys API.
+# Pins the bundled engine version. Only its error-code constants are used;
+# this crate calls no function of the sys API.
 pcre2-sys.workspace = true
 
 [dev-dependencies]

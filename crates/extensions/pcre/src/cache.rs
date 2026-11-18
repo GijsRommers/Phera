@@ -1,4 +1,9 @@
-//! Repeated `preg_match('/a/', $s)` calls reuse a worker's compiled pattern.
+//! The compiled patterns of a worker thread, so that `preg_match('/a/', $s)`
+//! in a loop compiles `/a/` once.
+//!
+//! Phera runs one single-threaded runtime per core, so each worker thread
+//! has its own cache, without locks, shared by the requests it serves. As
+//! in PHP, it holds 4096 patterns and drops the oldest eighth when full.
 
 use crate::compile::{self, Compiled};
 use crate::errors::{self, Error};
@@ -13,11 +18,13 @@ struct Cache {
     patterns: HashMap<Vec<u8>, Rc<Compiled>>,
     insertion_order: VecDeque<Vec<u8>>,
 }
+
 thread_local! {
-    // Phera runs one single-threaded runtime per core. Sharing this cache across
-    // requests on that worker avoids locks and never holds a borrow across await.
     static CACHE: RefCell<Cache> = RefCell::new(Cache::default());
 }
+
+/// The compiled pattern, or `None` after PHP's warning for a pattern that
+/// does not compile (which also sets `PREG_INTERNAL_ERROR`).
 pub(crate) fn get(
     context: &mut dyn Context,
     function: &str,
@@ -33,6 +40,7 @@ pub(crate) fn get(
     }
 }
 
+/// The compiled pattern, or the text of the warning.
 pub(crate) fn lookup(pattern: &[u8]) -> Result<Rc<Compiled>, String> {
     let cached = CACHE.with(|cache| cache.borrow().patterns.get(pattern).cloned());
     if let Some(compiled) = cached {
@@ -42,7 +50,6 @@ pub(crate) fn lookup(pattern: &[u8]) -> Result<Rc<Compiled>, String> {
     CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         if cache.patterns.len() == CAPACITY {
-            // PHP evicts the oldest eighth when its 4096-entry cache fills.
             for _ in 0..CAPACITY / 8 {
                 if let Some(key) = cache.insertion_order.pop_front() {
                     cache.patterns.remove(&key);
