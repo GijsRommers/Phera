@@ -239,7 +239,7 @@ impl Vm {
 
 /// By-value, unkeyed iteration retains the current
 /// register window and local IP. Live reference iteration uses iter_next instead.
-pub(crate) fn snapshot_step(
+pub(crate) fn snapshot_step<const NATIVE: bool>(
     iterator: IterId,
     destination: Reg,
     end: Target,
@@ -254,7 +254,7 @@ pub(crate) fn snapshot_step(
         return false;
     }
     let Some(array) = &state.snapshot else {
-        return native_step(state, None, destination, slots);
+        return NATIVE && native_step(state, None, destination, slots);
     };
     let position = if state.started {
         state

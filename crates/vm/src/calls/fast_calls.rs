@@ -47,19 +47,15 @@ impl Machine<'_> {
         }
         let from = caller.frame.base() + args.index();
         let arguments = self.registers.window(from, count);
-        if arguments.len() != count {
+        let acceptable = arguments.iter().enumerate().all(|(index, argument)| {
+            argument.as_ref().is_some_and(|value| {
+                !value.is_reference()
+                    && (!facts.is_typed(index)
+                        || facts.parameter_masks[index].intersects(crate::types::own_type(value)))
+            })
+        });
+        if !acceptable {
             return Step::Slow;
-        }
-        for (index, argument) in arguments.iter().enumerate() {
-            let Some(value) = argument else {
-                return Step::Slow;
-            };
-            if value.is_reference()
-                || facts.is_typed(index)
-                    && !facts.parameter_masks[index].intersects(crate::types::own_type(value))
-            {
-                return Step::Slow;
-            }
         }
         let base = self.registers.len();
         self.registers.grow_to(base + facts.registers as usize);
@@ -216,16 +212,21 @@ impl Machine<'_> {
     /// arguments all arrived positionally and passed their checks: push the
     /// frame. `$this` and a closure's captures are in the window already.
     #[inline(always)]
-    pub(super) fn enter_prepared(&mut self, position: Position, destination: Reg) -> Step {
+    pub(super) fn enter_prepared<const NATIVE: bool>(
+        &mut self,
+        position: Position,
+        destination: Reg,
+    ) -> Step {
         let Some(call) = self.stack.last_call().copied() else {
             return Step::Slow;
         };
         let function = match call.callee {
             PreparedCallee::Php(function) => function,
             PreparedCallee::Constructed => return self.finish_construction(position, destination),
-            PreparedCallee::General => {
+            PreparedCallee::General if NATIVE => {
                 return self.finish_direct_method(position, destination, call);
             }
+            PreparedCallee::General => return Step::Slow,
         };
         let facts = self.code.facts(function);
         let sent = call.sent as usize;

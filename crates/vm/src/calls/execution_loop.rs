@@ -95,6 +95,7 @@ impl Vm {
         work: &mut usize,
     ) -> Result<BatchExit, NativeError> {
         loop {
+            let has_fast_objects = self.classes.has_fast_objects;
             let mut machine = Machine {
                 code: &self.code,
                 classes: &mut self.classes,
@@ -105,7 +106,13 @@ impl Vm {
                 stop,
                 frame_limit: self.frame_limit,
             };
-            let exit = machine.run();
+            // Native-capable classes are registered in every request. Activate their
+            // dispatch only after a request constructs an object that can use it.
+            let exit = if has_fast_objects {
+                machine.run::<true>()
+            } else {
+                machine.run::<false>()
+            };
             *work = machine.work;
             self.executed_instructions += machine.executed;
             let instruction = match exit {
@@ -130,7 +137,7 @@ impl Vm {
 impl Machine<'_> {
     /// The loop itself. Simple instructions run in [`Machine::run_simple`];
     /// this loop takes the others and switches frames on calls and returns.
-    fn run(&mut self) -> LoopExit {
+    fn run<const NATIVE: bool>(&mut self) -> LoopExit {
         let Some(frame) = self.stack.current().copied() else {
             return LoopExit::Invalid;
         };
@@ -144,7 +151,7 @@ impl Machine<'_> {
                 Ok(instruction) => instruction,
                 Err(exit) => return exit,
             };
-            match self.step(instruction, position) {
+            match self.step::<NATIVE>(instruction, position) {
                 Step::Done(ip) => position.ip = ip,
                 Step::Switched(next) => {
                     position = next;
@@ -212,14 +219,16 @@ impl Machine<'_> {
     /// The instructions that are not simple but need only the borrowed
     /// state: `foreach` over a snapshot, direct calls and plain returns.
     #[inline(always)]
-    fn step(&mut self, instruction: Instruction, position: Position) -> Step {
+    fn step<const NATIVE: bool>(&mut self, instruction: Instruction, position: Position) -> Step {
         let base = position.frame.base();
         let mut ip = position.ip;
         match instruction {
             Instruction::IterNext { iter, value, end } if position.frame.has_extras() => {
                 let iterators = &mut self.stack.current_extras_mut().iterators;
                 let slots = self.registers.tail_mut(base);
-                match crate::iteration::snapshot_step(iter, value, end, iterators, slots, &mut ip) {
+                match crate::iteration::snapshot_step::<NATIVE>(
+                    iter, value, end, iterators, slots, &mut ip,
+                ) {
                     true => Step::Done(ip),
                     false => Step::Slow,
                 }
@@ -231,7 +240,7 @@ impl Machine<'_> {
                 dst,
             } => self.enter_direct(position, function, (args, count), dst),
             Instruction::InitMethodCall { receiver, method } => {
-                self.prepare_method(position, receiver, method)
+                self.prepare_method::<NATIVE>(position, receiver, method)
             }
             Instruction::InitStaticCall {
                 class,
@@ -248,7 +257,7 @@ impl Machine<'_> {
             }
             Instruction::LoadConst { dst, constant } => self.load_constant(position, dst, constant),
             Instruction::CheckType { local, ty } => self.check_type(position, local, ty),
-            Instruction::Call { dst } => self.enter_prepared(position, dst),
+            Instruction::Call { dst } => self.enter_prepared::<NATIVE>(position, dst),
             Instruction::New { class } => self.new_object(position, class),
             Instruction::InitDynamicCall { callee } => self.prepare_closure(position, callee),
             Instruction::FetchThis { dst } | Instruction::ThisOrNull { dst } => {
@@ -259,7 +268,11 @@ impl Machine<'_> {
             Instruction::IterNextKeyed { .. }
             | Instruction::FetchIndex { .. }
             | Instruction::AppendLocal { .. }
-            | Instruction::AssignPath { .. } => self.step_native_object(instruction, position),
+            | Instruction::AssignPath { .. }
+                if NATIVE =>
+            {
+                self.step_native_object(instruction, position)
+            }
             _ => Step::Slow,
         }
     }
