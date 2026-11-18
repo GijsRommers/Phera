@@ -219,6 +219,12 @@ impl Compiler<'_> {
             }
             for parameter in &method.parameters {
                 if parameter.modifiers.visibility.is_some() {
+                    if !method.name.name.eq_ignore_ascii_case("__construct") {
+                        return Err(self.error(
+                            "Cannot declare promoted property outside a constructor",
+                            self.lines.line(parameter.span.start),
+                        ));
+                    }
                     if declaration.name.is_none()
                         && declaration.modifiers.is_readonly
                         && parameter.ty.is_none()

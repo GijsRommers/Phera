@@ -79,6 +79,7 @@ mod handler_installation;
 mod include_scope;
 mod include_state;
 mod includes;
+mod initializer_tasks;
 mod initializers;
 mod inline_stack;
 mod instructions;
@@ -144,7 +145,6 @@ pub struct Vm {
     /// Pure defaults retain lexical class scope while running outside a method frame.
     initializer_scope: Option<String>,
     initializer_class: Option<initializers::InitializerClass>,
-    initializer_depth: usize,
     argument_origin: calls::callback_binding::ArgumentOrigin,
     prelinked_classes: std::collections::HashSet<(usize, usize)>,
     function_table: function_table::FunctionTable,
@@ -194,7 +194,6 @@ impl Vm {
             closure_captures: Vec::new(),
             initializer_scope: None,
             initializer_class: None,
-            initializer_depth: 0,
             argument_origin: calls::callback_binding::ArgumentOrigin::Php,
             prelinked_classes: std::collections::HashSet::new(),
             function_table: function_table::FunctionTable::new(),

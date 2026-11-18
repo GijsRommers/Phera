@@ -111,10 +111,7 @@ impl Vm {
                 self.fetch_class_constant(dst, class, name)?
             }
             I::FetchDynamicClassConstant { dst, class, name } => {
-                let class = self.class_target(class)?;
-                let name = self.read_local(name);
-                let value = self.dynamic_class_constant(&class, &name)?;
-                self.set(dst, value);
+                self.fetch_dynamic_class_constant(dst, class, name)?;
             }
             I::FetchClassName { dst, class } => self.fetch_class_name(dst, class)?,
             I::FetchThis { dst } => self.fetch_this(dst)?,

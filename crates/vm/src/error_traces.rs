@@ -28,18 +28,7 @@ impl NativeTrace {
 
 /// Exception traces label arrays and objects without recursively dumping their contents.
 fn argument(value: &Value) -> String {
-    match &*value.deref() {
-        Value::Array(_) => "Array".into(),
-        Value::Object(object)
-            if object.class.is_enum()
-                && let Some(Value::String(name)) =
-                    object.get(&phera_value::ArrayKey::str("name")) =>
-        {
-            format!("{}::{}", object.class.name(), name.to_string_lossy())
-        }
-        Value::Object(object) => format!("Object({})", object.class.name()),
-        _ => crate::error_values::describe(value),
-    }
+    crate::error_values::trace_argument(value, 15)
 }
 
 /// Read user parameter slots after coercion, as PHP's stack traces do.

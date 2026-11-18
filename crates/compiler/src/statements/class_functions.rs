@@ -1,4 +1,4 @@
-//! \`class C { const N = 1; function read() { return self::N; } }\` keeps methods
+//! `class C { const N = 1; function read() { return self::N; } }` keeps methods
 //! and constant initializers in the file's ordinary function table.
 
 use phera_ast as ast;

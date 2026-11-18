@@ -10,7 +10,10 @@ use phera_extension_api::{Context, NativeError, NativeResult, Param, ParamType};
 use phera_value::{ArrayKey, Object, PhpArray, Value};
 
 use super::{Class, ClassIndex, class::ConstantInitializer, enums::EnumMethod};
-use crate::{Vm, code_table::FunctionIndex};
+use crate::{
+    Vm,
+    initializer_tasks::{CaseLookup, Continuation, InitializerTask, Progress},
+};
 
 type BackingTable = HashMap<ArrayKey, Rc<Object>>;
 
@@ -22,36 +25,58 @@ pub(crate) struct EnumCases {
     validating: HashSet<ClassIndex>,
 }
 
+/// The request stores one object per case and indexes backing values separately.
+pub(crate) struct BackingBuilder {
+    pub(crate) class: Rc<Class>,
+    backing: EnumBacking,
+    next: usize,
+    table: BackingTable,
+}
+
 impl Vm {
-    pub(crate) fn enum_case(
-        &mut self,
-        class: &Rc<Class>,
-        name: &str,
-        initializer: Option<FunctionIndex>,
-        spelling: Option<&str>,
-    ) -> Result<Rc<Object>, NativeError> {
+    pub(crate) fn start_enum_case(&mut self, lookup: CaseLookup) -> Result<Progress, NativeError> {
+        let CaseLookup {
+            class,
+            name,
+            initializer,
+            spelling,
+        } = lookup;
         if let Some(object) = self
             .enum_cases
             .objects
             .get(&class.index)
-            .and_then(|cases| cases.get(name))
+            .and_then(|cases| cases.get(&name))
         {
-            return Ok(object.clone());
+            return Ok(Progress::Done(Value::Object(object.clone())));
         }
-        let identity = (class.index, name.to_owned());
-        if !self.enum_cases.initializing.insert(identity.clone()) {
+        let Some(function) = initializer else {
+            return Ok(Progress::Done(self.finish_enum_case(class, name, None)));
+        };
+        if !self
+            .enum_cases
+            .initializing
+            .insert((class.index, name.clone()))
+        {
+            let receiver = spelling.as_deref().unwrap_or(&class.name);
             return Err(NativeError::error(format!(
-                "Cannot declare self-referencing constant {}::{name}",
-                spelling.unwrap_or(&class.name)
+                "Cannot declare self-referencing constant {receiver}::{name}"
             )));
         }
-        let backing = initializer
-            .map(|initializer| self.evaluate_initializer(&initializer, &class.name))
-            .transpose();
-        self.enum_cases.initializing.remove(&identity);
-        let backing = backing?;
+        Ok(Progress::Await(
+            InitializerTask::Expression(function, class.name.clone()),
+            Continuation::Case(class, name),
+        ))
+    }
+
+    pub(crate) fn finish_enum_case(
+        &mut self,
+        class: Rc<Class>,
+        name: String,
+        backing: Option<Value>,
+    ) -> Value {
+        self.cancel_enum_case(&class, name.clone());
         let object = self.classes.allocate(class.clone());
-        object.set(ArrayKey::str("name"), Value::from(name));
+        object.set(ArrayKey::str("name"), Value::from(name.as_str()));
         if let Some(value) = backing {
             object.set(ArrayKey::str("value"), value);
         }
@@ -59,83 +84,146 @@ impl Vm {
             .objects
             .entry(class.index)
             .or_default()
-            .insert(identity.1, object.clone());
-        Ok(object)
+            .insert(name, object.clone());
+        Value::Object(object)
     }
 
-    pub(crate) fn validate_enum_backing(&mut self, class: &Rc<Class>) -> Result<(), NativeError> {
-        let Some(info) = &class.enum_info else {
-            return Ok(());
-        };
-        let Some(backing) = info.backing else {
-            return Ok(());
-        };
-        if self.enum_cases.backed.contains_key(&class.index)
-            || !self.enum_cases.validating.insert(class.index)
-        {
-            return Ok(());
+    pub(crate) fn cancel_enum_case(&mut self, class: &Class, name: String) {
+        self.enum_cases.initializing.remove(&(class.index, name));
+    }
+
+    pub(crate) fn needs_enum_backing(&self, class: &Class) -> bool {
+        class
+            .enum_info
+            .as_ref()
+            .is_some_and(|info| info.backing.is_some())
+            && !self.enum_cases.backed.contains_key(&class.index)
+            && !self.enum_cases.validating.contains(&class.index)
+    }
+
+    pub(crate) fn start_enum_backing(&mut self, class: Rc<Class>) -> Result<Progress, NativeError> {
+        if !self.needs_enum_backing(&class) {
+            return Ok(Progress::Done(Value::Null));
         }
-        let result = self.build_enum_table(class, backing, &info.names);
-        self.enum_cases.validating.remove(&class.index);
-        self.enum_cases.backed.insert(class.index, result?);
-        Ok(())
+        let info = class
+            .enum_info
+            .as_ref()
+            .ok_or_else(|| internal_error!("enum backing metadata"))?;
+        let backing = info
+            .backing
+            .ok_or_else(|| internal_error!("enum backing type"))?;
+        let table = HashMap::with_capacity(info.names.len());
+        self.enum_cases.validating.insert(class.index);
+        self.next_enum_backing(BackingBuilder {
+            class,
+            backing,
+            next: 0,
+            table,
+        })
     }
 
-    fn build_enum_table(
+    pub(crate) fn resume_enum_backing(
         &mut self,
-        class: &Rc<Class>,
-        backing: EnumBacking,
-        names: &[String],
-    ) -> Result<BackingTable, NativeError> {
-        let mut table: BackingTable = HashMap::with_capacity(names.len());
-        for name in names {
-            let object = self.enum_case_named(class, name)?;
-            let value = object
-                .get(&ArrayKey::str("value"))
-                .ok_or_else(|| internal_error!("backed enum value"))?;
-            let key = match (backing, value) {
-                (EnumBacking::Int, Value::Int(number)) => ArrayKey::Int(number),
-                (EnumBacking::String, Value::String(string)) => ArrayKey::String(string),
-                (backing, value) => {
-                    let expected = match backing {
-                        EnumBacking::Int => "int",
-                        EnumBacking::String => "string",
-                    };
-                    return Err(NativeError::type_error(format!(
-                        "Enum case type {} does not match enum backing type {expected}",
-                        value.type_name(),
-                    )));
+        mut builder: BackingBuilder,
+        value: Value,
+    ) -> Result<Progress, NativeError> {
+        if let Err(error) = builder.add(value) {
+            self.cancel_enum_backing(&builder.class);
+            return Err(error);
+        }
+        builder.next += 1;
+        self.next_enum_backing(builder)
+    }
+
+    fn next_enum_backing(&mut self, builder: BackingBuilder) -> Result<Progress, NativeError> {
+        let name = builder
+            .class
+            .enum_info
+            .as_ref()
+            .and_then(|info| info.names.get(builder.next));
+        if let Some(name) = name {
+            return match case_lookup(&builder.class, name) {
+                Ok(lookup) => Ok(Progress::Await(
+                    InitializerTask::Case(lookup),
+                    Continuation::Backing(builder),
+                )),
+                Err(error) => {
+                    self.cancel_enum_backing(&builder.class);
+                    Err(error)
                 }
             };
-            if let Some(previous) = table.insert(key, object) {
-                let previous_name = previous.get(&ArrayKey::str("name")).unwrap_or_default();
-                let Value::String(previous_name) = previous_name else {
-                    return Err(internal_error!("enum case name"));
+        }
+        self.cancel_enum_backing(&builder.class);
+        self.enum_cases
+            .backed
+            .insert(builder.class.index, builder.table);
+        Ok(Progress::Done(Value::Null))
+    }
+
+    pub(crate) fn cancel_enum_backing(&mut self, class: &Class) {
+        self.enum_cases.validating.remove(&class.index);
+    }
+}
+
+impl BackingBuilder {
+    fn add(&mut self, value: Value) -> Result<(), NativeError> {
+        let Value::Object(object) = value else {
+            return Err(internal_error!("backed enum object"));
+        };
+        let backing = object
+            .get(&ArrayKey::str("value"))
+            .ok_or_else(|| internal_error!("backed enum value"))?;
+        let key = match (self.backing, backing) {
+            (EnumBacking::Int, Value::Int(number)) => ArrayKey::Int(number),
+            (EnumBacking::String, Value::String(string)) => ArrayKey::String(string),
+            (backing, value) => {
+                let expected = match backing {
+                    EnumBacking::Int => "int",
+                    EnumBacking::String => "string",
                 };
-                return Err(NativeError::error(format!(
-                    "Duplicate value in enum {} for cases {} and {name}",
-                    class.name,
-                    previous_name.to_string_lossy(),
+                return Err(NativeError::type_error(format!(
+                    "Enum case type {} does not match enum backing type {expected}",
+                    value.type_name(),
                 )));
             }
+        };
+        if let Some(previous) = self.table.get(&key) {
+            let first = name_of(previous)?;
+            let second = name_of(&object)?;
+            return Err(NativeError::error(format!(
+                "Duplicate value in enum {} for cases {first} and {second}",
+                self.class.name
+            )));
         }
-        Ok(table)
+        self.table.insert(key, object);
+        Ok(())
     }
+}
 
-    fn enum_case_named(
-        &mut self,
-        class: &Rc<Class>,
-        name: &str,
-    ) -> Result<Rc<Object>, NativeError> {
-        let Some(constant) = class.constants.get(name) else {
-            return Err(internal_error!("enum case constant"));
-        };
-        let ConstantInitializer::EnumCase { backing, .. } = constant.initializer else {
-            return Err(internal_error!("enum case constant initializer"));
-        };
-        self.enum_case(class, name, backing, None)
+fn name_of(object: &Object) -> Result<String, NativeError> {
+    if let Some(Value::String(name)) = object.get(&ArrayKey::str("name")) {
+        Ok(name.to_string_lossy())
+    } else {
+        Err(internal_error!("enum case name"))
     }
+}
 
+fn case_lookup(class: &Rc<Class>, name: &str) -> Result<CaseLookup, NativeError> {
+    let Some(constant) = class.constants.get(name) else {
+        return Err(internal_error!("enum case constant"));
+    };
+    let ConstantInitializer::EnumCase { backing, .. } = constant.initializer else {
+        return Err(internal_error!("enum case constant initializer"));
+    };
+    Ok(CaseLookup {
+        class: class.clone(),
+        name: name.to_owned(),
+        initializer: backing,
+        spelling: None,
+    })
+}
+
+impl Vm {
     pub(crate) fn call_enum_method(
         &mut self,
         operation: EnumMethod,
@@ -150,7 +238,9 @@ impl Vm {
             self.prepare_call_with_trace(name, &[], arguments)?;
             let mut result = PhpArray::new();
             for case in &info.names {
-                result.push(Value::Object(self.enum_case_named(class, case)?))?;
+                result.push(
+                    self.run_initializer(InitializerTask::Case(case_lookup(class, case)?))?,
+                )?;
             }
             return Ok(Value::Array(Rc::new(result)));
         }
@@ -184,7 +274,7 @@ impl Vm {
             (EnumBacking::String, Value::String(string)) => ArrayKey::String(string.clone()),
             _ => return Err(internal_error!("enum backing conversion")),
         };
-        self.validate_enum_backing(class)?;
+        self.run_initializer(InitializerTask::ValidateEnum(class.clone()))?;
         if let Some(object) = self
             .enum_cases
             .backed

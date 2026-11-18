@@ -1,20 +1,15 @@
 //! Class constants evaluate once in their declaring scope and reject dependency cycles.
 
-use crate::{Vm, classes::ConstantState};
+use crate::{
+    Vm,
+    classes::{ConstantState, LinkedConstant, class::ConstantInitializer},
+    initializer_tasks::{CaseLookup, ConstantLookup, Continuation, InitializerTask, Progress},
+};
 use phera_bytecode::{ClassKind, Reg, Visibility};
 use phera_extension_api::{NativeError, NativeResult};
 use phera_value::Value;
 
 impl Vm {
-    pub(crate) fn dynamic_class_constant(&mut self, class: &str, name: &Value) -> NativeResult {
-        let Value::String(name) = name else {
-            return Err(NativeError::type_error(format!(
-                "Cannot use value of type {} as class constant name",
-                name.type_name()
-            )));
-        };
-        self.class_constant(class, &name.to_string_lossy())
-    }
     /// Both objects and strings are valid dynamic class targets.
     pub(crate) fn class_target(&mut self, register: Reg) -> Result<String, NativeError> {
         match self.read_local(register) {
@@ -33,23 +28,30 @@ impl Vm {
         name: Reg,
     ) -> Result<(), NativeError> {
         let class = self.class_target(class)?;
-        let name = self.read_local(name);
-        let value = self.dynamic_class_constant(&class, &name)?;
+        let name = constant_name(self.read_local(name))?;
+        let value = self.class_constant(&class, &name)?;
         self.set(destination, value);
         Ok(())
     }
 
     /// Resolve inherited constants while retaining the scope of their original declaration.
     pub(crate) fn class_constant(&mut self, class: &str, name: &str) -> NativeResult {
-        self.class_constant_written(class, name, None)
+        self.run_initializer(InitializerTask::Constant(ConstantLookup {
+            class: class.to_owned(),
+            name: name.to_owned(),
+            spelling: None,
+        }))
     }
 
-    pub(crate) fn class_constant_written(
+    pub(crate) fn start_class_constant(
         &mut self,
-        class: &str,
-        name: &str,
-        spelling: Option<&str>,
-    ) -> NativeResult {
+        lookup: ConstantLookup,
+    ) -> Result<Progress, NativeError> {
+        let ConstantLookup {
+            class,
+            name,
+            spelling,
+        } = &lookup;
         let linked = self.classes.get(class);
         let (display, constants) = if let Some(linked) = &linked {
             (&linked.name, &linked.constants)
@@ -63,7 +65,7 @@ impl Vm {
             return Err(Self::class_miss(class, "Class"));
         };
         let constant = constants
-            .get(name)
+            .get(name.as_str())
             .cloned()
             .ok_or_else(|| NativeError::error(format!("Undefined constant {display}::{name}")))?;
         if let Some(linked) = &linked {
@@ -72,8 +74,11 @@ impl Vm {
                     "Cannot access trait constant {display}::{name} directly"
                 )));
             }
-            if linked.kind == ClassKind::Enum {
-                self.validate_enum_backing(linked)?;
+            if self.needs_enum_backing(linked) {
+                return Ok(Progress::Await(
+                    InitializerTask::ValidateEnum(linked.clone()),
+                    Continuation::AfterValidation(lookup, self.initializer_scope.clone()),
+                ));
             }
         }
         if !self.can_read_class_constant(&constant) {
@@ -90,17 +95,37 @@ impl Vm {
         if let Some(message) = constant.deprecated {
             self.diagnostic("Deprecated", message.into());
         }
-        if let crate::classes::class::ConstantInitializer::EnumCase { name, backing } =
-            &constant.initializer
-        {
-            let class = linked
-                .as_ref()
-                .ok_or_else(|| internal_error!("unlinked enum"))?;
-            return self
-                .enum_case(class, name, *backing, spelling)
-                .map(Value::Object);
+        match &constant.initializer {
+            ConstantInitializer::EnumCase { name, backing } => {
+                let class = linked.ok_or_else(|| internal_error!("unlinked enum"))?;
+                Ok(Progress::Next(InitializerTask::Case(CaseLookup {
+                    class,
+                    name: name.clone(),
+                    initializer: *backing,
+                    spelling: spelling.clone(),
+                })))
+            }
+            ConstantInitializer::Value(value) => Ok(Progress::Done(value.clone())),
+            ConstantInitializer::Compiled { function, state } => {
+                match &*state.borrow() {
+                    ConstantState::Ready(value) => return Ok(Progress::Done(value.clone())),
+                    ConstantState::Evaluating => {
+                        let receiver = spelling.as_deref().unwrap_or(&constant.declaring);
+                        return Err(NativeError::error(format!(
+                            "Cannot declare self-referencing constant {receiver}::{name}"
+                        )));
+                    }
+                    ConstantState::Uninitialized => {}
+                }
+                *state.borrow_mut() = ConstantState::Evaluating;
+                let initializer =
+                    InitializerTask::Expression(*function, constant.declaring.clone());
+                Ok(Progress::Await(
+                    initializer,
+                    Continuation::Constant(constant, name.to_owned()),
+                ))
+            }
         }
-        self.evaluate_class_constant(&constant, name)
     }
 
     pub(crate) fn can_read_class_constant(
@@ -128,58 +153,52 @@ impl Vm {
         }
     }
 
-    fn evaluate_class_constant(
+    pub(crate) fn finish_class_constant(
         &mut self,
-        constant: &crate::classes::LinkedConstant,
+        constant: &LinkedConstant,
         name: &str,
+        value: Value,
     ) -> NativeResult {
-        let (initializer, state) = match &constant.initializer {
-            crate::classes::class::ConstantInitializer::EnumCase { .. } => {
-                return Err(internal_error!(
-                    "enum case reached ordinary constant evaluation"
-                ));
-            }
-            crate::classes::class::ConstantInitializer::Value(value) => return Ok(value.clone()),
-            crate::classes::class::ConstantInitializer::Compiled { function, state } => {
-                (function, state)
-            }
+        let ConstantInitializer::Compiled { state, .. } = &constant.initializer else {
+            return Err(internal_error!("class constant completion"));
         };
-        match &*state.borrow() {
-            ConstantState::Ready(value) => return Ok(value.clone()),
-            ConstantState::Evaluating => {
-                return Err(NativeError::error(format!(
-                    "Cannot declare self-referencing constant {}::{name}",
-                    constant.declaring
-                )));
-            }
-            ConstantState::Uninitialized => {}
-        }
-        *state.borrow_mut() = ConstantState::Evaluating;
-        let result = self
-            .evaluate_initializer(initializer, &constant.declaring)
-            .and_then(|value| {
-                if let Some(declaration_type) = &constant.ty {
-                    let actual = value.type_name();
-                    crate::types::coerce(
-                        value,
-                        declaration_type,
-                        crate::types::TypeChecking::Strict,
-                        self,
-                    )
-                    .map_err(|_| {
-                        NativeError::type_error(format!(
-                            "Cannot assign {actual} to class constant {}::{name} of type {}",
-                            constant.declaring, declaration_type.display
-                        ))
-                    })
-                } else {
-                    Ok(value)
-                }
-            });
+        let result = if let Some(declaration_type) = &constant.ty {
+            let actual = value.type_name();
+            crate::types::coerce(
+                value,
+                declaration_type,
+                crate::types::TypeChecking::Strict,
+                self,
+            )
+            .map_err(|_| {
+                NativeError::type_error(format!(
+                    "Cannot assign {actual} to class constant {}::{name} of type {}",
+                    constant.declaring, declaration_type.display,
+                ))
+            })
+        } else {
+            Ok(value)
+        };
         *state.borrow_mut() = match &result {
             Ok(value) => ConstantState::Ready(value.clone()),
             Err(_) => ConstantState::Uninitialized,
         };
         result
+    }
+
+    pub(crate) fn cancel_class_constant(constant: &LinkedConstant) {
+        if let ConstantInitializer::Compiled { state, .. } = &constant.initializer {
+            *state.borrow_mut() = ConstantState::Uninitialized;
+        }
+    }
+}
+
+pub(crate) fn constant_name(name: Value) -> Result<String, NativeError> {
+    match name {
+        Value::String(name) => Ok(name.to_string_lossy()),
+        value => Err(NativeError::type_error(format!(
+            "Cannot use value of type {} as class constant name",
+            value.type_name(),
+        ))),
     }
 }

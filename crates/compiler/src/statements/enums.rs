@@ -48,6 +48,17 @@ impl Compiler<'_> {
                         line,
                     ));
                 }
+                ClassMemberKind::Method(method)
+                    if let Some(promoted) = method
+                        .parameters
+                        .iter()
+                        .find(|parameter| parameter.modifiers.visibility.is_some()) =>
+                {
+                    return Err(self.error(
+                        format!("Enum {name} cannot include properties"),
+                        self.lines.line(promoted.span.start),
+                    ));
+                }
                 ClassMemberKind::EnumCase {
                     name: case, value, ..
                 } => {

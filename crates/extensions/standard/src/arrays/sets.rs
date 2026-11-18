@@ -4,6 +4,7 @@
 
 use std::cmp::Ordering;
 use std::collections::HashSet;
+use std::rc::Rc;
 
 use phera_extension_api::value::to_php_string;
 use phera_extension_api::{
@@ -280,7 +281,7 @@ fn array_unique(context: &mut dyn Context, arguments: &[Value]) -> NativeResult 
     let flags = SortFlags::from_flags(flags);
     let entries: Vec<_> = array.iter().collect();
     let order = zend_sort::order(entries.len(), |left, right| {
-        flags.compare(context, entries[left].1, entries[right].1)
+        unique_comparison(flags, context, entries[left].1, entries[right].1)
     })?;
     // Walk the sorted entries; of a run of equal values, the one that came
     // first in the array stays.
@@ -288,7 +289,8 @@ fn array_unique(context: &mut dyn Context, arguments: &[Value]) -> NativeResult 
     let mut kept: Option<usize> = None;
     for index in order {
         if let Some(last) = kept
-            && flags.compare(context, entries[last].1, entries[index].1)? == Ordering::Equal
+            && unique_comparison(flags, context, entries[last].1, entries[index].1)?
+                == Ordering::Equal
         {
             if last > index {
                 result.remove(&entries[last].0);
@@ -301,4 +303,25 @@ fn array_unique(context: &mut dyn Context, arguments: &[Value]) -> NativeResult 
         kept = Some(index);
     }
     Ok(Value::from(result))
+}
+
+/// PHP groups enum cases by object identity for `array_unique(..., SORT_REGULAR)`.
+fn unique_comparison(
+    flags: SortFlags,
+    context: &mut dyn Context,
+    left: &Value,
+    right: &Value,
+) -> Result<Ordering, NativeError> {
+    let order = flags.compare(context, left, right)?;
+    if matches!(flags, SortFlags::Regular)
+        && order == Ordering::Greater
+        && let Value::Object(right) = &*right.deref()
+        && right.class.is_enum()
+    {
+        return Ok(match &*left.deref() {
+            Value::Object(left) if left.class.is_enum() => Rc::as_ptr(left).cmp(&Rc::as_ptr(right)),
+            _ => Ordering::Less,
+        });
+    }
+    Ok(order)
 }
