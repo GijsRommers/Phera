@@ -14,8 +14,8 @@ impl Compiler<'_> {
         declaration: &ast::ClassDeclaration,
         timing: DeclarationTiming,
         line: usize,
-    ) -> Result<(), CompileError> {
-        if self.function.name.contains("::") {
+    ) -> Result<String, CompileError> {
+        if declaration.name.is_some() && self.function.name.contains("::") {
             return Err(self.error("Class declarations may not be nested", line));
         }
         if !matches!(
@@ -24,15 +24,13 @@ impl Compiler<'_> {
         ) {
             return Err(self.error("Traits and enums not supported yet", line));
         }
-        let Some(identifier) = &declaration.name else {
-            return Err(self.error("Anonymous classes not supported yet", line));
+        let name = match &declaration.name {
+            Some(identifier) if self.namespace.is_empty() => identifier.name.clone(),
+            Some(identifier) => format!("{}\\{}", self.namespace, identifier.name),
+            None => self.anonymous_class_name(declaration),
         };
-        let name = if self.namespace.is_empty() {
-            identifier.name.clone()
-        } else {
-            format!("{}\\{}", self.namespace, identifier.name)
-        };
-        self.validate_class_declaration(declaration, &name)?;
+        let display = name.split('\0').next().unwrap_or(&name);
+        self.validate_class_declaration(declaration, display)?;
         if declaration.attributes.iter().any(|attribute| {
             attribute.name.text.trim_start_matches('\\') != "AllowDynamicProperties"
         }) {
@@ -89,7 +87,7 @@ impl Compiler<'_> {
                     }) {
                         return Err(self.error(
                             format!(
-                                "Property {name}::${} cannot have type {}",
+                                "Property {display}::${} cannot have type {}",
                                 property.name,
                                 ty.as_ref()
                                     .map(|ty| self.declaration_type(ty))
@@ -102,7 +100,7 @@ impl Compiler<'_> {
                     if readonly && modifiers.is_static {
                         return Err(self.error(
                             format!(
-                                "Static property {name}::${} cannot be readonly",
+                                "Static property {display}::${} cannot be readonly",
                                 property.name
                             ),
                             self.lines.line(property.span.start),
@@ -111,7 +109,7 @@ impl Compiler<'_> {
                     if readonly && ty.is_none() {
                         return Err(self.error(
                             format!(
-                                "Readonly property {name}::${} must have type",
+                                "Readonly property {display}::${} must have type",
                                 property.name
                             ),
                             self.lines.line(property.span.start),
@@ -147,7 +145,7 @@ impl Compiler<'_> {
                 .any(|entry: &ClassMethod| entry.name.eq_ignore_ascii_case(&method.name.name))
             {
                 return Err(self.error(
-                    format!("Cannot redeclare {name}::{}()", method.name.name),
+                    format!("Cannot redeclare {display}::{}()", method.name.name),
                     self.lines.line(method.name.span.start),
                 ));
             }
@@ -190,7 +188,7 @@ impl Compiler<'_> {
         }
         let index = self.classes.len();
         self.classes.push(ClassDeclaration {
-            name,
+            name: name.clone(),
             parent: declaration
                 .extends
                 .first()
@@ -208,10 +206,10 @@ impl Compiler<'_> {
                 ))
                 .map(|interface| self.resolve(interface, NameKind::Class).0)
                 .collect(),
-            kind: if declaration.kind == ast::ClassKind::Interface {
-                ClassKind::Interface
-            } else {
-                ClassKind::Class
+            kind: match (declaration.kind, &declaration.name) {
+                (ast::ClassKind::Interface, _) => ClassKind::Interface,
+                (_, None) => ClassKind::Anonymous,
+                _ => ClassKind::Class,
             },
             is_abstract: declaration.modifiers.is_abstract,
             is_final: declaration.modifiers.is_final,
@@ -228,7 +226,21 @@ impl Compiler<'_> {
             self.hoisted_classes.push(index);
         }
         self.emit(Instruction::DeclareClass(index), line);
-        Ok(())
+        Ok(name)
+    }
+
+    /// The first named ancestor supplies the prefix of PHP's anonymous class name.
+    fn anonymous_class_name(&self, declaration: &ast::ClassDeclaration) -> String {
+        let prefix = declaration
+            .extends
+            .first()
+            .or_else(|| declaration.implements.first())
+            .map(|ancestor| self.resolve(ancestor, NameKind::Class).0)
+            .unwrap_or_else(|| "class".into());
+        let number = self.anonymous_classes.get();
+        self.anonymous_classes.set(number + 1);
+        let line = self.lines.line(declaration.span.start);
+        format!("{prefix}@anonymous\0{}:{line}${number:x}", self.file)
     }
 
     /// A separate pure function retains expression evaluation order without storing AST nodes.
@@ -247,23 +259,7 @@ impl Compiler<'_> {
         builder.imports = self.imports.clone();
         let result = builder.compile_expression(expression)?;
         builder.emit(Instruction::Return(result), line);
-        let index = self.functions.len();
-        let mut function = builder.finish();
-        for instruction in function.instructions.iter_mut().chain(
-            builder
-                .functions
-                .iter_mut()
-                .flat_map(|function| function.instructions.iter_mut()),
-        ) {
-            if let Instruction::Closure { function, .. } | Instruction::Declare(function) =
-                instruction
-            {
-                *function += index + 1;
-            }
-        }
-        self.functions.push(function);
-        self.functions.extend(builder.functions);
-        Ok(index)
+        Ok(self.append_function_body(&mut builder))
     }
 
     /// Reuse parameter/default lowering while keeping method names out of the function table.

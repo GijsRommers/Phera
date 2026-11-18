@@ -58,7 +58,11 @@ impl<'ast> Compiler<'ast> {
             Instruction::Return(register)
         };
         builder.emit(implicit_return, line);
-        if !builder.classes.is_empty() {
+        if builder
+            .classes
+            .iter()
+            .any(|class| class.kind != phera_bytecode::ClassKind::Anonymous)
+        {
             return Err(self.error("Nested class declarations not supported yet", line));
         }
         self.append_function(builder, timing, line);
@@ -72,7 +76,18 @@ impl<'ast> Compiler<'ast> {
         timing: DeclarationTiming,
         line: usize,
     ) {
+        let id = self.append_function_body(&mut builder);
+        if timing == DeclarationTiming::Hoisted {
+            self.hoisted.push(id)
+        } else {
+            self.emit(Instruction::Declare(id), line);
+        }
+    }
+
+    /// Relocate code and metadata compiled in a separate lexical frame.
+    pub(crate) fn append_function_body(&mut self, builder: &mut Compiler<'_>) -> usize {
         let id = self.functions.len();
+        let class_offset = self.classes.len();
         let mut function = builder.finish();
         for instruction in function.instructions.iter_mut().chain(
             builder
@@ -80,18 +95,36 @@ impl<'ast> Compiler<'ast> {
                 .iter_mut()
                 .flat_map(|declaration| declaration.instructions.iter_mut()),
         ) {
-            if let Instruction::Declare(i) | Instruction::Closure { function: i, .. } = instruction
-            {
-                *i += id + 1;
+            match instruction {
+                Instruction::Declare(index)
+                | Instruction::Closure {
+                    function: index, ..
+                } => {
+                    *index += id + 1;
+                }
+                Instruction::DeclareClass(index) => *index += class_offset,
+                _ => {}
+            }
+        }
+        for class in &mut builder.classes {
+            for method in &mut class.methods {
+                method.function += id + 1;
+            }
+            for constant in &mut class.constants {
+                constant.initializer += id + 1;
+            }
+            for property in &mut class.properties {
+                if let Some(default) = &mut property.default {
+                    *default += id + 1;
+                }
             }
         }
         self.functions.push(function);
-        self.functions.extend(builder.functions);
-        if timing == DeclarationTiming::Hoisted {
-            self.hoisted.push(id)
-        } else {
-            self.emit(Instruction::Declare(id), line);
-        }
+        self.functions.append(&mut builder.functions);
+        self.classes.append(&mut builder.classes);
+        self.declaration_warnings
+            .append(&mut builder.declaration_warnings);
+        id
     }
 
     /// Independent builders keep captured locals ahead of ordinary body temporaries.
@@ -103,6 +136,7 @@ impl<'ast> Compiler<'ast> {
         line: usize,
     ) -> Result<Compiler<'ast>, CompileError> {
         let mut builder = Compiler::new(self.file, self.lines, name, &self.namespace);
+        builder.anonymous_classes = self.anonymous_classes.clone();
         builder.class_scope = if !name.starts_with("{closure:") {
             name.split_once("::")
                 .map(|(class, _)| class.to_owned())

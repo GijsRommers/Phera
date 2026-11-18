@@ -11,11 +11,12 @@ pub enum Visibility {
     Private,
 }
 
-/// Interfaces cannot be instantiated; traits and enums belong to later milestones.
+/// Anonymous declarations are linked once per source occurrence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClassKind {
     Class,
     Interface,
+    Anonymous,
 }
 
 /// A default is either immutable literal data or lazily evaluated bytecode.

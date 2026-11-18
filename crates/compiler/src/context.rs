@@ -2,7 +2,7 @@
 //!
 //! AST nodes lower to compiler IR here; final interning belongs to `lower`.
 
-use std::collections::HashMap;
+use std::{cell::Cell, collections::HashMap, rc::Rc};
 
 use phera_ast as ast;
 use phera_bytecode::Reg;
@@ -27,6 +27,7 @@ pub(super) struct Compiler<'ast> {
     pub(super) hoisted: Vec<usize>,
     pub(super) classes: Vec<crate::ir::ClassDeclaration>,
     pub(super) hoisted_classes: Vec<usize>,
+    pub(super) anonymous_classes: Rc<Cell<usize>>,
     pub(super) next: usize,
     pub(super) peak: usize,
     pub(super) locals: HashMap<String, Reg>,
@@ -58,6 +59,7 @@ impl<'ast> Compiler<'ast> {
             hoisted: vec![],
             classes: vec![],
             hoisted_classes: vec![],
+            anonymous_classes: Rc::default(),
             next: 0,
             peak: 0,
             locals: HashMap::new(),

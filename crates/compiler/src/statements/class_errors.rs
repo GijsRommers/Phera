@@ -11,6 +11,21 @@ impl Compiler<'_> {
         name: &str,
     ) -> Result<(), CompileError> {
         let is_interface = declaration.kind == ast::ClassKind::Interface;
+        if declaration.name.is_none() {
+            let modifier = if declaration.modifiers.is_abstract {
+                Some("abstract")
+            } else if declaration.modifiers.is_final {
+                Some("final")
+            } else {
+                None
+            };
+            if let Some(modifier) = modifier {
+                return Err(self.error(
+                    format!("Cannot use the {modifier} modifier on an anonymous class"),
+                    self.lines.line(declaration.span.start),
+                ));
+            }
+        }
         if let Some(identifier) = &declaration.name
             && matches!(
                 identifier.name.to_ascii_lowercase().as_str(),
@@ -89,7 +104,11 @@ impl Compiler<'_> {
         let line = self.lines.line(method.name.span.start);
         let name = &method.name.name;
         let is_interface = declaration.kind == ast::ClassKind::Interface;
-        let message = if matches!(
+        let message = if declaration.name.is_none() && method.modifiers.is_abstract {
+            Some(format!(
+                "Anonymous class method {name}() must not be abstract"
+            ))
+        } else if matches!(
             name.to_ascii_lowercase().as_str(),
             "__construct" | "__invoke"
         ) && method.modifiers.is_static

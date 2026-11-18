@@ -47,7 +47,9 @@ impl Compiler<'_> {
                 finally,
             } => self.compile_try(body, catches, finally, line)?,
             StatementKind::Return(expression) => self.compile_return(expression, line)?,
-            StatementKind::Class(declaration) => self.compile_class(declaration, timing, line)?,
+            StatementKind::Class(declaration) => {
+                self.compile_class(declaration, timing, line)?;
+            }
             StatementKind::Function(declaration) => {
                 self.compile_function(declaration, timing, line)?
             }

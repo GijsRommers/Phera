@@ -87,6 +87,13 @@ pub(crate) fn check_abstract(
     }
     let count = missing.len();
     let plural = if count == 1 { "" } else { "s" };
+    if kind == ClassKind::Anonymous {
+        let class = class.split('\0').next().unwrap_or(class);
+        return Err(NativeError::error(format!(
+            "Class {class} must implement {count} abstract method{plural} ({})",
+            missing.join(", ")
+        )));
+    }
     Err(NativeError::error(format!(
         "Class {class} contains {count} abstract method{plural} and must therefore be declared abstract or implement the remaining methods ({})",
         missing.join(", ")

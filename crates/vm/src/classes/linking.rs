@@ -56,6 +56,11 @@ impl Vm {
         {
             return Ok(());
         }
+        let declaration = &unit.classes[index.index()];
+        if declaration.kind == ClassKind::Anonymous && self.classes.get(&declaration.name).is_some()
+        {
+            return Ok(());
+        }
         self.link_class(unit, index)
     }
 
@@ -89,15 +94,27 @@ impl Vm {
             })
             .transpose()?;
         if let Some(parent) = &parent {
+            let display = name.split('\0').next().unwrap_or(name);
             if parent.is_final {
                 return Err(NativeError::error(format!(
-                    "Class {name} cannot extend final class {}",
+                    "Class {display} cannot extend final class {}",
                     parent.name
                 )));
             }
             if parent.kind == ClassKind::Interface {
                 return Err(NativeError::error(format!(
-                    "Class {name} cannot extend interface {}",
+                    "Class {display} cannot extend interface {}",
+                    parent.name
+                )));
+            }
+            if declaration.is_readonly != parent.is_readonly {
+                let (child, inherited) = if declaration.is_readonly {
+                    ("Readonly", "non-readonly")
+                } else {
+                    ("Non-readonly", "readonly")
+                };
+                return Err(NativeError::error(format!(
+                    "{child} class {display} cannot extend {inherited} class {}",
                     parent.name
                 )));
             }
