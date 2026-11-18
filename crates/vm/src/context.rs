@@ -90,6 +90,11 @@ impl Context for Vm {
         purpose == phera_extension_api::PropertyPurpose::Debug && self.has_debug_info(object)
     }
 
+    fn has_visible_property(&self, object: &phera_value::Object, name: &str) -> bool {
+        self.property_key(object, name)
+            .is_ok_and(|key| object.has(&key))
+    }
+
     fn property_view(
         &mut self,
         object: std::rc::Rc<phera_value::Object>,

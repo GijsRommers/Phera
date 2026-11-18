@@ -191,6 +191,11 @@ pub trait Context {
         false
     }
 
+    /// Whether a stored property exists and is visible to the current PHP caller.
+    fn has_visible_property(&self, object: &Object, name: &str) -> bool {
+        object.has(&phera_value::ArrayKey::str(name))
+    }
+
     /// Retrieves a property view for an inspector that can await a PHP hook.
     fn property_view(
         &mut self,

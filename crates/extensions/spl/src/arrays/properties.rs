@@ -79,11 +79,11 @@ pub(super) fn clone_state(original: &Rc<Object>, copy: &Object) -> Result<(), Na
     crate::store(copy, state)
 }
 
-fn use_backing(object: &Object, name: &str) -> Result<bool, NativeError> {
+fn use_backing(context: &dyn Context, object: &Object, name: &str) -> Result<bool, NativeError> {
     let enabled = state::read(object, |state| {
         state.flags.array_as_properties() && !matches!(state.storage, Storage::OwnProperties)
     })?;
-    Ok(enabled && !object.class.has_property(name) && !object.has(&ArrayKey::str(name)))
+    Ok(enabled && !context.has_visible_property(object, name))
 }
 
 fn read(
@@ -92,7 +92,7 @@ fn read(
     name: &str,
     mode: NativePropertyRead,
 ) -> Result<Option<Value>, NativeError> {
-    if !use_backing(object, name)? {
+    if !use_backing(context, object, name)? {
         return Ok(None);
     }
     if matches!(mode, NativePropertyRead::Read) {
@@ -114,7 +114,7 @@ fn mutate(
     name: &str,
     mutation: NativePropertyMutation<'_>,
 ) -> Result<bool, NativeError> {
-    if !use_backing(object, name)? {
+    if !use_backing(context, object, name)? {
         return Ok(false);
     }
     let name = Value::from(name);
