@@ -13,6 +13,7 @@ mod registry;
 mod state;
 pub mod testing;
 
+pub use phera_source::{CompileDiagnostic, CompileDiagnosticKind, CompileDiagnosticSite};
 pub use phera_value as value;
 pub use phera_value::{ArrayKey, Diagnostics, Object, PhpArray, PhpString, Value};
 

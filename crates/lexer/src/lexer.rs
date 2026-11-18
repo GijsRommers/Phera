@@ -10,7 +10,12 @@
 //! The token stream for strings matches `token_get_all()` exactly, so that
 //! the comparison harness in `crates/phpt` can check every file in php-src.
 
+mod diagnostics;
+mod nesting;
 mod tokenizer;
+
+pub use diagnostics::{ScanMode, ScanReport};
+pub use nesting::ScannerError;
 
 use phera_source::Span;
 
@@ -127,20 +132,27 @@ pub struct Lexer<'src> {
     previous: TokenKind,
     tokenizer: bool,
     short_open_tags: bool,
+    diagnostics: Option<diagnostics::ScannerDiagnostics>,
 }
 
 impl<'src> Lexer<'src> {
     /// Creates a lexer for a PHP file, which starts as inline HTML until the
     /// first `<?php` or `<?=` tag.
     pub fn new(source: &'src str) -> Self {
+        Self::new_bytes(source.as_bytes())
+    }
+
+    /// Lexes a PHP file without requiring an encoding for its source bytes.
+    pub fn new_bytes(source: &'src [u8]) -> Self {
         Self {
-            source: source.as_bytes(),
+            source,
             position: 0,
             modes: vec![Mode::Html],
             halt_countdown: None,
             previous: TokenKind::Eof,
             tokenizer: false,
             short_open_tags: false,
+            diagnostics: None,
         }
     }
 
@@ -153,8 +165,20 @@ impl<'src> Lexer<'src> {
         }
     }
 
+    /// Collect PHP scanner warnings and deprecations with source offsets.
+    pub fn with_diagnostics(mut self, scan: ScanMode) -> Self {
+        self.diagnostics = Some(diagnostics::ScannerDiagnostics::new(self.source, scan));
+        self
+    }
+
+    pub fn into_diagnostics(self) -> ScanReport {
+        self.diagnostics
+            .map_or_else(ScanReport::default, diagnostics::ScannerDiagnostics::finish)
+    }
+
     pub fn next_token(&mut self) -> Result<Token, LexError> {
-        let token = match self.mode() {
+        let mode = self.mode();
+        let token = match mode {
             Mode::Html => Ok(self.lex_html()),
             Mode::Php => self.lex_php_counting_halt(),
             Mode::DoubleQuotes => self.lex_encapsed('"', TokenKind::DoubleQuote),
@@ -166,6 +190,9 @@ impl<'src> Lexer<'src> {
             Mode::Property => Ok(self.lex_property()),
             Mode::Halted => Ok(self.lex_halted()),
         }?;
+        if let Some(diagnostics) = &mut self.diagnostics {
+            diagnostics.inspect(mode, &token, self.source);
+        }
         if self.tokenizer {
             self.count_tokenizer_halt(&token);
         }

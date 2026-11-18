@@ -9,13 +9,8 @@ impl<'src> Lexer<'src> {
     /// Produces PHP's raw tokenizer stream, including trivia and bad characters.
     pub fn for_tokenizer(source: &'src [u8]) -> Self {
         Self {
-            source,
-            position: 0,
-            modes: vec![Mode::Html],
-            halt_countdown: None,
-            previous: TokenKind::Eof,
             tokenizer: true,
-            short_open_tags: false,
+            ..Self::new_bytes(source)
         }
     }
 

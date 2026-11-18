@@ -1,6 +1,9 @@
 //! Native extensions use Context; callbacks are bounded independently of PHP frames.
 
-use phera_extension_api::{Context, LocalFuture, NativeResult, RequestState};
+use phera_extension_api::{
+    CompileDiagnostic, CompileDiagnosticKind, CompileDiagnosticSite, Context, LocalFuture,
+    NativeResult, RequestState,
+};
 use phera_value::{Diagnostics, Value};
 
 use crate::Vm;
@@ -26,6 +29,40 @@ impl Context for Vm {
 
     fn diagnostics(&mut self) -> &mut dyn Diagnostics {
         self
+    }
+
+    fn compile_diagnostic(
+        &mut self,
+        diagnostic: &CompileDiagnostic,
+        site: CompileDiagnosticSite<'_>,
+    ) {
+        let location = match site {
+            CompileDiagnosticSite::Caller => self.location(),
+            CompileDiagnosticSite::Source(file) => crate::diagnostics::SourceLocation {
+                file: file.to_owned(),
+                line: diagnostic.line,
+            },
+        };
+        match diagnostic.kind {
+            CompileDiagnosticKind::Warning => {
+                // E_COMPILE_WARNING never invokes the PHP error handler.
+                if self.error_handlers.reporting & diagnostic.kind.error_level() != 0
+                    && let Some(bytes) = self.diagnostic_reporter.report(
+                        diagnostic.kind.label(),
+                        diagnostic.message.clone(),
+                        &location.file,
+                        location.line,
+                    )
+                {
+                    self.out(&bytes);
+                }
+            }
+            CompileDiagnosticKind::Deprecated => {
+                let previous = self.diagnostic_location.replace(location);
+                self.diagnostic("Deprecated", diagnostic.message.clone());
+                self.diagnostic_location = previous;
+            }
+        }
     }
 
     /// Native decoders construct linked objects without running PHP constructors.
