@@ -17,32 +17,38 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use phera_extension_api::{
     Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, PhpArray,
-    Registry, Value, args,
+    Value, args,
 };
 
-pub(crate) fn register(registry: &mut Registry) {
-    registry.function(FunctionEntry::sync("time", &[], time));
-    registry.function(FunctionEntry::sync(
-        "microtime",
-        const { &[Param::new("as_float", ParamType::Bool).optional()] },
-        microtime,
-    ));
-    registry.function(FunctionEntry::sync(
-        "hrtime",
-        const { &[Param::new("as_number", ParamType::Bool).optional()] },
-        hrtime,
-    ));
-    registry.function(FunctionEntry::asynchronous(
-        "sleep",
-        const { &[Param::new("seconds", ParamType::Int)] },
-        sleep,
-    ));
-    registry.function(FunctionEntry::asynchronous(
-        "usleep",
-        const { &[Param::new("microseconds", ParamType::Int)] },
-        usleep,
-    ));
-}
+pub(crate) const FUNCTIONS: &[FunctionEntry] = &[TIME, MICROTIME, HRTIME, SLEEP, USLEEP];
+
+/// `time(): int`
+const TIME: FunctionEntry = FunctionEntry::sync("time", &[], time);
+
+/// `microtime(bool $as_float = false): string|float`
+const MICROTIME: FunctionEntry = FunctionEntry::sync(
+    "microtime",
+    &[Param::new("as_float", ParamType::Bool).optional()],
+    microtime,
+);
+
+/// `hrtime(bool $as_number = false): array|int`
+const HRTIME: FunctionEntry = FunctionEntry::sync(
+    "hrtime",
+    &[Param::new("as_number", ParamType::Bool).optional()],
+    hrtime,
+);
+
+/// `sleep(int $seconds): int`
+const SLEEP: FunctionEntry =
+    FunctionEntry::asynchronous("sleep", &[Param::new("seconds", ParamType::Int)], sleep);
+
+/// `usleep(int $microseconds): void`
+const USLEEP: FunctionEntry = FunctionEntry::asynchronous(
+    "usleep",
+    &[Param::new("microseconds", ParamType::Int)],
+    usleep,
+);
 
 /// Time since 1 January 1970 according to the system clock.
 fn since_unix_epoch() -> Duration {

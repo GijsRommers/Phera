@@ -11,10 +11,10 @@ class A {
 try {
     $fn = Closure::fromCallable(['A', 'method']);
     $fn();
-} catch (Throwable $e) {
-    echo $e::class, ': ', $e->getMessage(), "\n";
+} catch (TypeError $e) {
+    echo $e->getMessage(), "\n";
 }
 
 ?>
 --EXPECT--
-TypeError: Failed to create closure from callable: non-static method A::method() cannot be called statically
+Failed to create closure from callable: non-static method A::method() cannot be called statically

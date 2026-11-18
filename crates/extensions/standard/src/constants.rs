@@ -1,57 +1,132 @@
-//! PHP constants for implemented string, math and array operations.
+//! The constants of ext/standard: the flags its functions take, and the
+//! mathematical ones.
+//!
+//! Every flag is a Rust constant as well, so the code that reads a flag
+//! argument names it the way PHP code does: `flags & SORT_FLAG_CASE` rather
+//! than `flags & 8`. Each flag is turned into an enum where its argument is
+//! read, so no other code sees the integers.
+
+use std::f64::consts;
 
 use phera_extension_api::Registry;
 
-/// Exact binary64 constants used by PHP.
+/// `str_pad`'s `$pad_type`.
+pub(crate) const STR_PAD_LEFT: i64 = 0;
+pub(crate) const STR_PAD_RIGHT: i64 = 1;
+pub(crate) const STR_PAD_BOTH: i64 = 2;
+
+/// The `$flags` of `htmlspecialchars` and `htmlspecialchars_decode`. The
+/// quote flags are two bits; `ENT_HTML401` is the absence of the two
+/// document bits, which `ENT_HTML5` sets both of.
+pub(crate) const ENT_COMPAT: i64 = 2;
+pub(crate) const ENT_QUOTES: i64 = 3;
+pub(crate) const ENT_NOQUOTES: i64 = 0;
+pub(crate) const ENT_IGNORE: i64 = 4;
+pub(crate) const ENT_SUBSTITUTE: i64 = 8;
+pub(crate) const ENT_HTML401: i64 = 0;
+pub(crate) const ENT_XML1: i64 = 16;
+pub(crate) const ENT_XHTML: i64 = 32;
+pub(crate) const ENT_HTML5: i64 = 48;
+pub(crate) const ENT_DISALLOWED: i64 = 128;
+
+/// `round`'s `$mode`, in its integer form. PHP 8.4 added the
+/// `RoundingMode` enum, whose four other cases have no constant.
+pub(crate) const PHP_ROUND_HALF_UP: i64 = 1;
+pub(crate) const PHP_ROUND_HALF_DOWN: i64 = 2;
+pub(crate) const PHP_ROUND_HALF_EVEN: i64 = 3;
+pub(crate) const PHP_ROUND_HALF_ODD: i64 = 4;
+
+/// The `$flags` of `sort` and its relatives: one comparison, optionally
+/// with `SORT_FLAG_CASE` added.
+pub(crate) const SORT_REGULAR: i64 = 0;
+pub(crate) const SORT_NUMERIC: i64 = 1;
+pub(crate) const SORT_STRING: i64 = 2;
+pub(crate) const SORT_LOCALE_STRING: i64 = 5;
+pub(crate) const SORT_NATURAL: i64 = 6;
+pub(crate) const SORT_FLAG_CASE: i64 = 8;
+
+/// `array_multisort`'s order arguments; registered for code that names them.
+const SORT_ASC: i64 = 4;
+const SORT_DESC: i64 = 3;
+
+/// `array_filter`'s `$mode`; 0, the default, passes the value only.
+pub(crate) const ARRAY_FILTER_USE_BOTH: i64 = 1;
+pub(crate) const ARRAY_FILTER_USE_KEY: i64 = 2;
+
+/// Flags of functions that live elsewhere: `array_change_key_case`,
+/// `extract` (a VM intrinsic) and `get_html_translation_table`.
+const OTHER_FLAGS: &[(&str, i64)] = &[
+    ("CASE_LOWER", 0),
+    ("CASE_UPPER", 1),
+    ("EXTR_OVERWRITE", 0),
+    ("EXTR_SKIP", 1),
+    ("EXTR_PREFIX_SAME", 2),
+    ("EXTR_PREFIX_ALL", 3),
+    ("EXTR_PREFIX_INVALID", 4),
+    ("EXTR_PREFIX_IF_EXISTS", 5),
+    ("EXTR_IF_EXISTS", 6),
+    ("EXTR_REFS", 256),
+    ("HTML_SPECIALCHARS", 0),
+    ("HTML_ENTITIES", 1),
+];
+
+/// PHP's `M_*` constants are the C library's, so they are the same doubles
+/// as Rust's where Rust has one. The three Rust has no stable constant for
+/// are spelled as their exact bits.
+const MATH: &[(&str, f64)] = &[
+    ("M_PI", consts::PI),
+    ("M_E", consts::E),
+    ("M_LOG2E", consts::LOG2_E),
+    ("M_LOG10E", consts::LOG10_E),
+    ("M_LN2", consts::LN_2),
+    ("M_LN10", consts::LN_10),
+    ("M_PI_2", consts::FRAC_PI_2),
+    ("M_PI_4", consts::FRAC_PI_4),
+    ("M_1_PI", consts::FRAC_1_PI),
+    ("M_2_PI", consts::FRAC_2_PI),
+    ("M_SQRTPI", f64::from_bits(0x3ffc5bf891b4ef6b)),
+    ("M_2_SQRTPI", consts::FRAC_2_SQRT_PI),
+    ("M_SQRT2", consts::SQRT_2),
+    ("M_SQRT3", f64::from_bits(0x3ffbb67ae8584caa)),
+    ("M_SQRT1_2", consts::FRAC_1_SQRT_2),
+    ("M_LNPI", f64::from_bits(0x3ff250d048e7a1bd)),
+    ("M_EULER", f64::from_bits(0x3fe2788cfc6fb619)),
+];
+
 pub(crate) fn register(registry: &mut Registry) {
-    for (name, value) in [
-        ("STR_PAD_LEFT", 0i64),
-        ("STR_PAD_RIGHT", 1),
-        ("STR_PAD_BOTH", 2),
-        ("CASE_LOWER", 0),
-        ("CASE_UPPER", 1),
-        ("EXTR_OVERWRITE", 0),
-        ("EXTR_SKIP", 1),
-        ("EXTR_PREFIX_SAME", 2),
-        ("EXTR_PREFIX_ALL", 3),
-        ("EXTR_PREFIX_INVALID", 4),
-        ("EXTR_PREFIX_IF_EXISTS", 5),
-        ("EXTR_IF_EXISTS", 6),
-        ("EXTR_REFS", 256),
-        ("HTML_SPECIALCHARS", 0),
-        ("HTML_ENTITIES", 1),
-    ] {
+    let flags = [
+        ("STR_PAD_LEFT", STR_PAD_LEFT),
+        ("STR_PAD_RIGHT", STR_PAD_RIGHT),
+        ("STR_PAD_BOTH", STR_PAD_BOTH),
+        ("ENT_COMPAT", ENT_COMPAT),
+        ("ENT_QUOTES", ENT_QUOTES),
+        ("ENT_NOQUOTES", ENT_NOQUOTES),
+        ("ENT_IGNORE", ENT_IGNORE),
+        ("ENT_SUBSTITUTE", ENT_SUBSTITUTE),
+        ("ENT_HTML401", ENT_HTML401),
+        ("ENT_XML1", ENT_XML1),
+        ("ENT_XHTML", ENT_XHTML),
+        ("ENT_HTML5", ENT_HTML5),
+        ("ENT_DISALLOWED", ENT_DISALLOWED),
+        ("PHP_ROUND_HALF_UP", PHP_ROUND_HALF_UP),
+        ("PHP_ROUND_HALF_DOWN", PHP_ROUND_HALF_DOWN),
+        ("PHP_ROUND_HALF_EVEN", PHP_ROUND_HALF_EVEN),
+        ("PHP_ROUND_HALF_ODD", PHP_ROUND_HALF_ODD),
+        ("SORT_REGULAR", SORT_REGULAR),
+        ("SORT_NUMERIC", SORT_NUMERIC),
+        ("SORT_STRING", SORT_STRING),
+        ("SORT_LOCALE_STRING", SORT_LOCALE_STRING),
+        ("SORT_NATURAL", SORT_NATURAL),
+        ("SORT_FLAG_CASE", SORT_FLAG_CASE),
+        ("SORT_ASC", SORT_ASC),
+        ("SORT_DESC", SORT_DESC),
+        ("ARRAY_FILTER_USE_BOTH", ARRAY_FILTER_USE_BOTH),
+        ("ARRAY_FILTER_USE_KEY", ARRAY_FILTER_USE_KEY),
+    ];
+    for (name, value) in flags.into_iter().chain(OTHER_FLAGS.iter().copied()) {
         registry.constant(name, value);
     }
-    registry.constant("M_PI", f64::from_bits(0x400921fb54442d18));
-    registry.constant("M_E", f64::from_bits(0x4005bf0a8b145769));
-    registry.constant("M_LOG2E", f64::from_bits(0x3ff71547652b82fe));
-    registry.constant("M_LOG10E", f64::from_bits(0x3fdbcb7b1526e50e));
-    registry.constant("M_LN2", f64::from_bits(0x3fe62e42fefa39ef));
-    registry.constant("M_LN10", f64::from_bits(0x40026bb1bbb55516));
-    registry.constant("M_PI_2", f64::from_bits(0x3ff921fb54442d18));
-    registry.constant("M_PI_4", f64::from_bits(0x3fe921fb54442d18));
-    registry.constant("M_1_PI", f64::from_bits(0x3fd45f306dc9c883));
-    registry.constant("M_2_PI", f64::from_bits(0x3fe45f306dc9c883));
-    registry.constant("M_SQRTPI", f64::from_bits(0x3ffc5bf891b4ef6b));
-    registry.constant("M_2_SQRTPI", f64::from_bits(0x3ff20dd750429b6d));
-    registry.constant("M_SQRT2", f64::from_bits(0x3ff6a09e667f3bcd));
-    registry.constant("M_SQRT3", f64::from_bits(0x3ffbb67ae8584caa));
-    registry.constant("M_SQRT1_2", f64::from_bits(0x3fe6a09e667f3bcd));
-    registry.constant("M_LNPI", f64::from_bits(0x3ff250d048e7a1bd));
-    registry.constant("M_EULER", f64::from_bits(0x3fe2788cfc6fb619));
-    registry.constant("PHP_ROUND_HALF_UP", 1i64);
-    registry.constant("PHP_ROUND_HALF_DOWN", 2i64);
-    registry.constant("PHP_ROUND_HALF_EVEN", 3i64);
-    registry.constant("PHP_ROUND_HALF_ODD", 4i64);
-    registry.constant("SORT_REGULAR", 0i64);
-    registry.constant("SORT_NUMERIC", 1i64);
-    registry.constant("SORT_STRING", 2i64);
-    registry.constant("SORT_FLAG_CASE", 8i64);
-    registry.constant("SORT_LOCALE_STRING", 5i64);
-    registry.constant("SORT_NATURAL", 6i64);
-    registry.constant("SORT_ASC", 4i64);
-    registry.constant("SORT_DESC", 3i64);
-    registry.constant("ARRAY_FILTER_USE_KEY", 2i64);
-    registry.constant("ARRAY_FILTER_USE_BOTH", 1i64);
+    for &(name, value) in MATH {
+        registry.constant(name, value);
+    }
 }

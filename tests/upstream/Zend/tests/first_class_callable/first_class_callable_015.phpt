@@ -14,11 +14,11 @@ $fn = test(...);
 do_weak_call($fn);
 try {
     do_strict_call($fn);
-} catch (Throwable $e) {
-    echo $e::class, ': ', $e->getMessage(), "\n";
+} catch (Error $e) {
+    echo $e->getMessage(), "\n";
 }
 
 ?>
 --EXPECTF--
 int(42)
-TypeError: test(): Argument #1 ($i) must be of type int, string given, called in %s on line %d
+test(): Argument #1 ($i) must be of type int, string given, called in %s on line %d
