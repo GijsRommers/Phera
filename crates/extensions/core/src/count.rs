@@ -4,22 +4,23 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use phera_extension_api::{
-    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, PhpArray, Registry, Value,
-    args,
+    Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, PhpArray,
+    Registry, Value, args,
 };
 
 pub(crate) const COUNT_NORMAL: i64 = 0;
 pub(crate) const COUNT_RECURSIVE: i64 = 1;
 
 pub(crate) fn register(registry: &mut Registry) {
-    // PHP's type is `Countable|array`; objects are checked here because the
-    // declared types cannot name an interface.
+    // Keep PHP's union diagnostics and validate the mode before calling count().
     const PARAMS: &[Param] = &[
         Param::new("value", ParamType::Mixed),
         Param::new("mode", ParamType::Int).optional(),
     ];
-    registry.function(FunctionEntry::sync("count", PARAMS, count));
-    registry.function(FunctionEntry::sync("sizeof", PARAMS, sizeof));
+    registry
+        .function_with_object_handler(FunctionEntry::sync("count", PARAMS, count), count_object);
+    registry
+        .function_with_object_handler(FunctionEntry::sync("sizeof", PARAMS, sizeof), sizeof_object);
     registry.constant("COUNT_NORMAL", COUNT_NORMAL);
     registry.constant("COUNT_RECURSIVE", COUNT_RECURSIVE);
 }
@@ -32,14 +33,45 @@ fn sizeof(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     count_as("sizeof", context, arguments)
 }
 
-/// `name` is the name the function was called by, which PHP uses in errors.
-fn count_as(name: &str, context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn count_object(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(count_object_as("count", context, arguments))
+}
+
+fn sizeof_object(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    Box::pin(count_object_as("sizeof", context, arguments))
+}
+
+async fn count_object_as(
+    name: &str,
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+) -> NativeResult {
+    let Value::Object(object) = args::value(&arguments, 0) else {
+        return count_as(name, context, &arguments);
+    };
+    if !object.class.is_countable() {
+        return count_as(name, context, &arguments);
+    }
+    checked_mode(name, &arguments)?;
+    context.count_object(object.clone()).await
+}
+
+fn checked_mode(name: &str, arguments: &[Value]) -> Result<i64, NativeError> {
     let mode = args::int(arguments, 1).unwrap_or(COUNT_NORMAL);
     if mode != COUNT_NORMAL && mode != COUNT_RECURSIVE {
         return Err(NativeError::value_error(format!(
             "{name}(): Argument #2 ($mode) must be either COUNT_NORMAL or COUNT_RECURSIVE"
         )));
     }
+    Ok(mode)
+}
+
+/// `name` is the name the function was called by, which PHP uses in errors.
+fn count_as(name: &str, context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let mode = checked_mode(name, arguments)?;
     let value = args::value(arguments, 0);
     let Value::Array(array) = value else {
         let given = match value {

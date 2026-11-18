@@ -22,13 +22,16 @@ impl Vm {
         destination: Reg,
         path: PathId,
         mode: FetchMode,
-    ) -> Result<(), NativeError> {
+    ) -> Result<bool, NativeError> {
         let place = self.path(path)?;
         if mode == FetchMode::Read
             && let Some(value) = self.read_property_site(&place)?
         {
             self.set(destination, value);
-            return Ok(());
+            return Ok(true);
+        }
+        if self.classes.has_dimensions && self.prepare_dimension(&place)? {
+            return Ok(false);
         }
         if mode == FetchMode::Destructure {
             let root = self.read_place(
@@ -43,7 +46,7 @@ impl Vm {
                     self.warn(format!("Cannot use {} as array", root.type_name()));
                 }
                 self.set(destination, phera_value::Value::Null);
-                return Ok(());
+                return Ok(true);
             }
         }
         let value = self.read_place(
@@ -51,11 +54,11 @@ impl Vm {
             match mode {
                 FetchMode::Read | FetchMode::Destructure => crate::access_mode::Missing::Warn,
                 FetchMode::Quiet => crate::access_mode::Missing::Silent,
-                FetchMode::Isset => crate::access_mode::Missing::Isset,
+                FetchMode::Isset | FetchMode::Empty => crate::access_mode::Missing::Isset,
             },
         )?;
         self.set(destination, value);
-        Ok(())
+        Ok(true)
     }
 
     /// Implements PHP AssignOpPath semantics outside the dispatch loop.
@@ -65,8 +68,11 @@ impl Vm {
         destination: Reg,
         path: PathId,
         source: Reg,
-    ) -> Result<(), NativeError> {
+    ) -> Result<bool, NativeError> {
         let place = self.path(path)?;
+        if self.classes.has_dimensions && self.prepare_dimension(&place)? {
+            return Ok(false);
+        }
         let left = self.read_place(&place, crate::access_mode::Missing::Warn)?;
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let value = ops::binary(
@@ -79,7 +85,7 @@ impl Vm {
         let value = value?;
         self.write_place(&place, value.clone(), crate::access_mode::Binding::ByValue)?;
         self.set(destination, value);
-        Ok(())
+        Ok(true)
     }
 
     /// Implements PHP IncDecPath semantics outside the dispatch loop.
@@ -88,11 +94,14 @@ impl Vm {
         mode: IncDec,
         destination: Reg,
         path: PathId,
-    ) -> Result<(), NativeError> {
+    ) -> Result<bool, NativeError> {
         let place = self.path(path)?;
         if let Some(value) = self.increment_property_site(&place, mode)? {
             self.set(destination, value);
-            return Ok(());
+            return Ok(true);
+        }
+        if self.classes.has_dimensions && self.prepare_dimension(&place)? {
+            return Ok(false);
         }
         let old = self.read_place(&place, crate::access_mode::Missing::Warn)?;
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
@@ -112,15 +121,18 @@ impl Vm {
                 value
             },
         );
-        Ok(())
+        Ok(true)
     }
 
     /// Implements PHP AssignPath semantics outside the dispatch loop.
-    pub(crate) fn assign_path(&mut self, path: PathId, source: Reg) -> Result<(), NativeError> {
+    pub(crate) fn assign_path(&mut self, path: PathId, source: Reg) -> Result<bool, NativeError> {
         let value = self.read_local(source);
         let place = self.path(path)?;
         if self.assign_property_site(&place, &value)? {
-            return Ok(());
+            return Ok(true);
+        }
+        if self.classes.has_dimensions && self.prepare_dimension(&place)? {
+            return Ok(false);
         }
         if place.steps()?.next().is_none()
             && let phera_bytecode::PathBase::Register(register) = place.base()?
@@ -128,7 +140,7 @@ impl Vm {
             self.restart_subject_iterators(register);
         }
         self.write_place(&place, value, crate::access_mode::Binding::ByValue)?;
-        Ok(())
+        Ok(true)
     }
 
     /// Implements PHP MakeReference semantics outside the dispatch loop.

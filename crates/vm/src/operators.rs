@@ -1,9 +1,7 @@
 //! Borrowed arithmetic operands and amortised in-place string assignment.
 
-use std::rc::Rc;
-
 use phera_bytecode::{BinaryOp, CastKind, IncDec, Reg, UnaryOp};
-use phera_extension_api::NativeError;
+use phera_extension_api::{Context, NativeError, PropertyPurpose};
 use phera_value::{Value, to_php_string};
 
 use crate::integer_arithmetic::{OverflowOperation, overflow_value};
@@ -53,11 +51,25 @@ impl Vm {
         let null = Value::Null;
         let left = left.unwrap_or(&null).deref();
         let right = right.unwrap_or(&null).deref();
-        let result = fast_binary(operator, &left, &right)
-            .map(Ok)
-            .unwrap_or_else(|| {
-                ops::binary(operator, &left, &right, self.diagnostic_reporter.operator())
-            });
+        let fast = fast_binary(operator, &left, &right);
+        if fast.is_none()
+            && self.classes.has_property_views
+            && matches!(
+                (&*left, &*right),
+                (Value::Array(_), Value::Array(_)) | (Value::Object(_), Value::Object(_))
+            )
+            && crate::object_comparison::is_comparison(operator)
+        {
+            let (lhs, rhs) = ((*left).clone(), (*right).clone());
+            drop(left);
+            drop(right);
+            let result = self.compare_with_property_views(operator, &lhs, &rhs)?;
+            self.set(destination, result);
+            return Ok(());
+        }
+        let result = fast.map(Ok).unwrap_or_else(|| {
+            ops::binary(operator, &left, &right, self.diagnostic_reporter.operator())
+        });
         drop(left);
         drop(right);
         if self.diagnostic_reporter.has_pending() {
@@ -174,10 +186,12 @@ impl Vm {
                 Value::Float(phera_value::to_float(&value, &mut diagnostics.buffer)?)
             }
             CastKind::String => Value::String(to_php_string(&value, &mut diagnostics.buffer)?),
-            CastKind::Array => Value::Array(Rc::new(phera_value::to_array(
-                &value,
-                &mut diagnostics.buffer,
-            ))),
+            CastKind::Array => Value::from(match &value {
+                Value::Object(object) => diagnostics
+                    .vm
+                    .object_properties(object, PropertyPurpose::ArrayCast)?,
+                _ => phera_value::to_array(&value, &mut diagnostics.buffer),
+            }),
             CastKind::Void => Value::Null,
             CastKind::Object => {
                 if value.is_object() {

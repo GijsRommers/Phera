@@ -1617,6 +1617,7 @@ dependencies = [
 name = "phera-cli"
 version = "0.1.0"
 dependencies = [
+ "httpdate",
  "mimalloc",
  "phera-analyzer",
  "phera-dotenv",
@@ -1934,6 +1935,7 @@ dependencies = [
  "phera-bytecode",
  "phera-compiler",
  "phera-ext-core",
+ "phera-ext-json",
  "phera-extension-api",
  "phera-value",
  "tokio",

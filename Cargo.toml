@@ -100,8 +100,10 @@ hyper = { version = "1", default-features = false, features = ["http1", "server"
 hyper-util = { version = "0.1", default-features = false, features = ["tokio", "http1", "server-graceful"] }
 socket2 = { version = "0.6", features = ["all"] }
 tokio = { version = "1", features = [
-    "rt", "rt-multi-thread", "net", "time", "sync", "signal", "macros",
+    "rt", "rt-multi-thread", "net", "time", "sync", "signal", "macros", "fs",
 ] }
+# HTTP dates ("Sun, 06 Nov 1994 08:49:37 GMT"); hyper depends on it already.
+httpdate = "1"
 fluent-uri = "0.4.1"
 url = "2.5"
 foldhash = "0.2"

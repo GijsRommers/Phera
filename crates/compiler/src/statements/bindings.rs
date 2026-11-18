@@ -79,16 +79,6 @@ impl Compiler<'_> {
             },
             line,
         );
-        if let (Some(key), Some(key_register)) = (key, key_register) {
-            let place = self.place(key)?;
-            self.emit(
-                Instruction::Write {
-                    place,
-                    source: key_register,
-                },
-                line,
-            );
-        }
         if binding == crate::policies::IterationBinding::Reference {
             let place = self.place(value)?;
             self.emit(
@@ -114,6 +104,17 @@ impl Compiler<'_> {
                     line,
                 );
             }
+        }
+        // PHP publishes the value first, even when both targets are the same variable.
+        if let (Some(key), Some(key_register)) = (key, key_register) {
+            let place = self.place(key)?;
+            self.emit(
+                Instruction::Write {
+                    place,
+                    source: key_register,
+                },
+                line,
+            );
         }
         self.loops.push(Loop {
             breaks: vec![],

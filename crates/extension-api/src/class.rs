@@ -3,12 +3,20 @@
 //! An extension describes a class as data. The VM turns the description into
 //! one of its own classes at startup, so PHP code can extend it, catch it and
 //! call its methods exactly as with a class written in PHP.
+//!
+//! ```php
+//! $date->format('Y-m-d'); // a native method
+//! var_dump($date);       // a native property view
+//! ```
+//!
+//! [`ClassEntry`] declares members, [`MethodEntry`] describes call preparation,
+//! and [`ClassHooks`] groups optional object operations inherited by subclasses.
 
 use std::rc::Rc;
 
 use phera_value::{Object, Value};
 
-use crate::{ConstantValue, Context, LocalFuture, NativeError, NativeResult, Param};
+use crate::{ClassHooks, ConstantValue, Context, LocalFuture, NativeError, NativeResult, Param};
 
 /// An extension can preserve legacy parsing behavior while keeping its reflected signature.
 /// Most methods use Default; Prepared means the hook already checked and coerced arguments.
@@ -58,16 +66,26 @@ pub enum ClassKind {
     Interface,
 }
 
+/// Internal signatures can require a return type or give a tentative compatibility warning.
+#[derive(Clone, Copy)]
+pub enum MethodReturn {
+    Required(&'static str),
+    Tentative(&'static str),
+}
+
 #[derive(Clone, Copy)]
 pub struct MethodEntry {
     pub name: &'static str,
     pub params: &'static [Param],
     pub handler: NativeMethod,
+    /// Optional argument handling before the ordinary native signature check.
     pub preparation: Option<PrepareMethod>,
     pub visibility: Visibility,
     pub is_static: bool,
     /// Subclasses may not override it.
     pub is_final: bool,
+    /// PHP's compatibility contract for an internal method.
+    pub return_type: Option<MethodReturn>,
 }
 
 impl MethodEntry {
@@ -81,6 +99,7 @@ impl MethodEntry {
             visibility: Visibility::Public,
             is_static: false,
             is_final: false,
+            return_type: None,
         }
     }
 
@@ -100,6 +119,7 @@ impl MethodEntry {
             visibility: Visibility::Public,
             is_static: false,
             is_final: false,
+            return_type: None,
         }
     }
 
@@ -113,11 +133,22 @@ impl MethodEntry {
             visibility: Visibility::Public,
             is_static: false,
             is_final: false,
+            return_type: None,
         }
+    }
+
+    pub const fn tentative_return(mut self, ty: &'static str) -> Self {
+        self.return_type = Some(MethodReturn::Tentative(ty));
+        self
     }
 
     pub const fn with_preparation(mut self, preparation: PrepareMethod) -> Self {
         self.preparation = Some(preparation);
+        self
+    }
+
+    pub const fn returning(mut self, ty: &'static str) -> Self {
+        self.return_type = Some(MethodReturn::Required(ty));
         self
     }
 
@@ -137,11 +168,25 @@ impl MethodEntry {
     }
 }
 
+/// A type declared on a native instance property.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PropertyType {
+    Bool,
+    Int,
+    Float,
+    String,
+    Array,
+    Object,
+    Mixed,
+    NullableClass(&'static str),
+}
+
 /// A property every instance starts with.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PropertyEntry {
     pub name: &'static str,
-    pub default: ConstantValue,
+    pub default: Option<ConstantValue>,
+    pub ty: Option<PropertyType>,
     pub visibility: Visibility,
     pub is_static: bool,
     pub is_readonly: bool,
@@ -151,11 +196,29 @@ impl PropertyEntry {
     pub const fn new(name: &'static str, default: ConstantValue, visibility: Visibility) -> Self {
         PropertyEntry {
             name,
-            default,
+            default: Some(default),
+            ty: None,
             visibility,
             is_static: false,
             is_readonly: false,
         }
+    }
+
+    /// A typed property with no initial value, like PHP's `public int $id;`.
+    pub const fn typed(name: &'static str, ty: PropertyType, visibility: Visibility) -> Self {
+        Self {
+            name,
+            default: None,
+            ty: Some(ty),
+            visibility,
+            is_static: false,
+            is_readonly: false,
+        }
+    }
+
+    pub const fn with_default(mut self, default: ConstantValue) -> Self {
+        self.default = Some(default);
+        self
     }
 
     pub const fn readonly(mut self) -> Self {
@@ -206,10 +269,12 @@ pub struct ClassEntry {
     /// Linked immediately so `PDO::FETCH_ASSOC` also works in defaults.
     /// For example, PHP may declare `function rows($mode = PDO::FETCH_ASSOC) {}`.
     pub constants: &'static [(&'static str, ConstantValue)],
+    /// Names and PHP diagnostic messages, alongside the constants' declared values.
     pub deprecated_constants: &'static [(&'static str, &'static str)],
     pub properties: &'static [PropertyEntry],
-    pub property_access: Option<&'static NativePropertyAccess>,
     pub methods: &'static [MethodEntry],
+    /// Operations for state held outside ordinary PHP properties.
+    pub hooks: Option<&'static ClassHooks>,
 }
 
 impl ClassEntry {
@@ -225,8 +290,8 @@ impl ClassEntry {
             constants: &[],
             deprecated_constants: &[],
             properties: &[],
-            property_access: None,
             methods: &[],
+            hooks: None,
         }
     }
 

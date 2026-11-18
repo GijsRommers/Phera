@@ -49,6 +49,12 @@ pub enum ParamType {
     ArrayOrBool,
 }
 
+impl ParamType {
+    pub fn name(self) -> &'static str {
+        crate::arguments::type_text(self)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Param {
     /// Without the `$`. Used for named arguments and in error messages.
@@ -56,7 +62,8 @@ pub struct Param {
     pub ty: ParamType,
     pub nullable: bool,
     pub optional: bool,
-    pub named_default: Option<ConstantValue>,
+    /// Fills a skipped position when a later named argument is supplied.
+    pub default: Option<ConstantValue>,
     pub by_ref: bool,
     pub variadic: bool,
 }
@@ -68,7 +75,7 @@ impl Param {
             ty,
             nullable: false,
             optional: false,
-            named_default: None,
+            default: None,
             by_ref: false,
             variadic: false,
         }
@@ -86,10 +93,9 @@ impl Param {
         self
     }
 
-    /// The value used when a later named argument skips this parameter.
-    pub const fn with_default(mut self, value: ConstantValue) -> Self {
+    pub const fn with_default(mut self, default: ConstantValue) -> Self {
         self.optional = true;
-        self.named_default = Some(value);
+        self.default = Some(default);
         self
     }
 
