@@ -31,7 +31,7 @@ impl Machine<'_> {
     /// `InitMethodCall` of a public instance method written in PHP: reserve
     /// the method's window with the receiver in its first register.
     #[inline(always)]
-    pub(super) fn prepare_method<const NATIVE: bool>(
+    pub(super) fn prepare_method(
         &mut self,
         position: Position,
         receiver: Reg,
@@ -63,8 +63,7 @@ impl Machine<'_> {
                 self.prepare_php_method(function, receiver, None, position.ip)
             }
             MethodBody::Native(entry)
-                if NATIVE
-                    && entry.direct.is_some()
+                if entry.direct.is_some()
                     && method.visibility == Visibility::Public
                     && !self.caller_has_other_private(key, method) =>
             {

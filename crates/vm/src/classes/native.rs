@@ -174,7 +174,7 @@ impl ClassTable {
                 parent.as_deref(),
                 &interfaces,
             )
-            .with_native_handlers(hooks.as_deref(), &methods);
+            .with_native_dimensions(hooks.as_deref(), &methods);
             let index = table.next_index();
             table.insert(
                 entry.name.to_ascii_lowercase(),

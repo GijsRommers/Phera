@@ -57,11 +57,12 @@ impl Machine<'_> {
         if !acceptable {
             return Step::Slow;
         }
-        let base = self.registers.len();
-        self.registers.grow_to(base + facts.registers as usize);
-        for index in 0..count {
-            self.registers.move_slot(from + index, base + index);
-        }
+        let Some(base) = self
+            .registers
+            .enter_window(from, count, facts.registers as usize)
+        else {
+            return Step::Slow;
+        };
         self.publish(caller.ip);
         let mut frame = Frame::new(function, base, Some(destination));
         if count < facts.parameters as usize {
@@ -212,21 +213,16 @@ impl Machine<'_> {
     /// arguments all arrived positionally and passed their checks: push the
     /// frame. `$this` and a closure's captures are in the window already.
     #[inline(always)]
-    pub(super) fn enter_prepared<const NATIVE: bool>(
-        &mut self,
-        position: Position,
-        destination: Reg,
-    ) -> Step {
+    pub(super) fn enter_prepared(&mut self, position: Position, destination: Reg) -> Step {
         let Some(call) = self.stack.last_call().copied() else {
             return Step::Slow;
         };
         let function = match call.callee {
             PreparedCallee::Php(function) => function,
             PreparedCallee::Constructed => return self.finish_construction(position, destination),
-            PreparedCallee::General if NATIVE => {
+            PreparedCallee::General => {
                 return self.finish_direct_method(position, destination, call);
             }
-            PreparedCallee::General => return Step::Slow,
         };
         let facts = self.code.facts(function);
         let sent = call.sent as usize;

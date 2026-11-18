@@ -43,8 +43,7 @@ impl ClassOperations {
     pub(crate) const AGGREGATE: u16 = 4;
     pub(crate) const ARRAY_ACCESS: u16 = 8;
     pub(crate) const COUNTABLE: u16 = 16;
-    pub(crate) const NATIVE_FAST: u16 = 1 << 9;
-    pub(crate) const DIMENSIONS: u16 = 1 << 10;
+    pub(crate) const DIMENSIONS: u16 = 1 << 9;
 
     pub(crate) fn link(name: &str, parent: Option<&Class>, interfaces: &[Rc<Class>]) -> Self {
         let mut flags = match name {
@@ -64,7 +63,7 @@ impl ClassOperations {
         Self(flags)
     }
 
-    pub(crate) fn with_native_handlers(
+    pub(crate) fn with_native_dimensions(
         mut self,
         hooks: Option<&phera_extension_api::ClassHooks>,
         methods: &HashMap<String, Rc<super::Method>>,
@@ -72,18 +71,9 @@ impl ClassOperations {
         for kind in NativeDimension::ALL {
             self.0 &= !kind.bit();
         }
-        self.0 &= !(Self::NATIVE_FAST | Self::DIMENSIONS);
         let dimensions = hooks.and_then(|hooks| hooks.dimensions.as_ref());
         if dimensions.is_some() || self.has(Self::ARRAY_ACCESS) {
             self.0 |= Self::DIMENSIONS;
-        }
-        if dimensions.is_some_and(|dimensions| dimensions.direct.is_some())
-            || hooks.is_some_and(|hooks| hooks.iterator.is_some())
-            || methods.values().any(|method| {
-                matches!(method.body, super::MethodBody::Native(entry) if entry.direct.is_some())
-            })
-        {
-            self.0 |= Self::NATIVE_FAST;
         }
         let Some(dimensions) = dimensions else {
             return self;
