@@ -204,6 +204,10 @@ impl Compiler<'_> {
                         has_parent: !declaration.extends.is_empty(),
                         line: property_line,
                     })?;
+                    let is_final = modifiers.is_final
+                        || hooks
+                            .as_ref()
+                            .is_some_and(|hooks| hooks.set_visibility == Some(Visibility::Private));
                     properties.push(ClassProperty {
                         hooks,
                         name: property.name.clone(),
@@ -213,7 +217,7 @@ impl Compiler<'_> {
                             _ => Visibility::Public,
                         },
                         is_static: modifiers.is_static,
-                        is_final: modifiers.is_final,
+                        is_final,
                         is_readonly: modifiers.is_readonly || declaration.modifiers.is_readonly,
                         ty: ty
                             .as_ref()
@@ -276,13 +280,16 @@ impl Compiler<'_> {
                         has_parent: !declaration.extends.is_empty(),
                         line: self.lines.line(parameter.span.start),
                     })?;
+                    let is_final = parameter.modifiers.is_final
+                        || hooks
+                            .as_ref()
+                            .is_some_and(|hooks| hooks.set_visibility == Some(Visibility::Private));
                     properties.push(ClassProperty {
                         hooks,
                         name: parameter.name.clone(),
                         visibility: member_visibility(&parameter.modifiers),
                         is_static: false,
-                        is_final: parameter.modifiers.is_final
-                            || parameter.modifiers.set_visibility == Some(ast::Visibility::Private),
+                        is_final,
                         is_readonly: parameter.modifiers.is_readonly
                             || declaration.modifiers.is_readonly,
                         ty: parameter
