@@ -222,12 +222,11 @@ impl Parser<'_> {
     /// attached by the caller's `new`.
     pub(crate) fn parse_anonymous_class(
         &mut self,
-        start: Span,
         attributes: Vec<Attribute>,
         modifiers: Modifiers,
         arguments: &mut phera_ast::Arguments,
     ) -> Result<ClassDeclaration, ParseError> {
-        self.expect(TokenKind::Class, "'class'")?;
+        let start = self.expect(TokenKind::Class, "'class'")?.span;
         *arguments = if self.at(TokenKind::LeftParen) {
             self.parse_argument_list()?
         } else {

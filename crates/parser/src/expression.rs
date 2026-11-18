@@ -1043,7 +1043,7 @@ impl Parser<'_> {
 
         if self.at(TokenKind::Class) {
             let mut arguments = Arguments::List(vec![]);
-            let class = self.parse_anonymous_class(start, attributes, modifiers, &mut arguments)?;
+            let class = self.parse_anonymous_class(attributes, modifiers, &mut arguments)?;
             return Ok(Expression {
                 kind: ExpressionKind::New {
                     class: NewTarget::Anonymous(Box::new(class)),

@@ -37,6 +37,23 @@ fn expr(src: &str) -> Expression {
     }
 }
 
+#[test]
+fn anonymous_class_declaration_starts_at_class_keyword() {
+    let source = "new\nreadonly\nclass {}";
+    let expression = expr(source);
+    let ExpressionKind::New {
+        class: NewTarget::Anonymous(declaration),
+        ..
+    } = &expression.kind
+    else {
+        panic!("expected an anonymous class");
+    };
+    assert_eq!(
+        declaration.span.start - expression.span.start,
+        "new\nreadonly\n".len()
+    );
+}
+
 /// Parses a whole file, tags and all.
 fn file(src: &str) -> Program {
     parse(src).unwrap_or_else(|e| panic!("parse error in {src:?}: {e}"))
