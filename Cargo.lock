@@ -1475,6 +1475,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
+name = "phera-analyzer"
+version = "0.1.0"
+dependencies = [
+ "phera-ast",
+ "phera-lexer",
+ "phera-parser",
+ "phera-source",
+]
+
+[[package]]
 name = "phera-ast"
 version = "0.1.0"
 dependencies = [
@@ -1490,6 +1500,9 @@ name = "phera-cli"
 version = "0.1.0"
 dependencies = [
  "mimalloc",
+ "phera-analyzer",
+ "phera-dotenv",
+ "phera-extension-api",
  "phera-phpt",
  "phera-runtime",
  "phera-server",
@@ -1504,6 +1517,15 @@ dependencies = [
  "phera-bytecode",
  "phera-parser",
  "phera-source",
+]
+
+[[package]]
+name = "phera-dotenv"
+version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "regex",
+ "serde_json",
 ]
 
 [[package]]
@@ -1607,6 +1629,8 @@ dependencies = [
 name = "phera-ext-standard"
 version = "0.1.0"
 dependencies = [
+ "indexmap",
+ "phera-dotenv",
  "phera-extension-api",
  "tokio",
 ]
@@ -1657,6 +1681,7 @@ version = "0.1.0"
 dependencies = [
  "phera-bytecode",
  "phera-compiler",
+ "phera-dotenv",
  "phera-ext-core",
  "phera-ext-ctype",
  "phera-ext-hash",

@@ -229,8 +229,7 @@ impl Vm {
     fn this_or_null(&mut self, destination: Reg) {
         let value = self
             .current()
-            .and_then(|frame| frame.method())
-            .and_then(|context| context.receiver.clone())
+            .and_then(|frame| frame.this().cloned())
             .map(Value::Object)
             .unwrap_or_default();
         self.set(destination, value);

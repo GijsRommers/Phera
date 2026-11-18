@@ -63,6 +63,7 @@ mod exceptions;
 mod extract;
 mod fast;
 mod finally;
+mod function_facts;
 mod function_table;
 mod global_instructions;
 mod global_paths;
@@ -289,13 +290,15 @@ impl Vm {
             frame: *self.call_stack.at(depth)?,
             code: &self.code,
             extras: self.call_stack.extras(depth),
+            registers: &self.registers,
+            classes: &self.classes,
         })
     }
 
     /// Every frame, from the script's top-level code to the running one.
     fn frames(&self) -> impl DoubleEndedIterator<Item = FrameView<'_>> + ExactSizeIterator {
-        let code = &self.code;
-        let stack = &self.call_stack;
+        let (code, stack) = (&self.code, &self.call_stack);
+        let (registers, classes) = (&self.registers, &self.classes);
         stack
             .frames()
             .iter()
@@ -304,6 +307,8 @@ impl Vm {
                 frame: *frame,
                 code,
                 extras: stack.extras(depth),
+                registers,
+                classes,
             })
     }
 
