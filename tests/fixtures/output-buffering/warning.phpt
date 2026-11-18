@@ -5,7 +5,7 @@ Displayed warnings are part of the active output buffer
 ob_start();
 echo $missing;
 $value = ob_get_clean();
-echo 'caught: ', preg_replace('/ in .+ on line /', ' on line ', $value);
+echo 'caught:', preg_replace('/ in .+ on line /', ' on line ', $value);
 --EXPECT--
-caught: 
+caught:
 Warning: Undefined variable $missing on line 3
