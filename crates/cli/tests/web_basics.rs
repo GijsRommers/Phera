@@ -148,6 +148,9 @@ var_dump(PHP_SAPI, php_sapi_name(), function_exists('getallheaders'));
 var_dump(function_exists('apache_request_headers'));
 var_dump(error_log('type 0'), error_log('type 4', 4));
 var_dump(error_log("first\0", 3, $argv[1]), error_log("second\xff", 3, $argv[1]));
+var_dump(error_log("file", 3, "file://" . $argv[1]));
+chdir(dirname($argv[1]));
+var_dump(error_log("relative", 3, basename($argv[1])));
 "#,
     )
     .unwrap();
@@ -162,6 +165,9 @@ var_dump(error_log("first\0", 3, $argv[1]), error_log("second\xff", 3, $argv[1])
         })
         .unwrap();
     for log in logs {
-        assert_eq!(std::fs::read(log).unwrap(), b"first\0second\xff");
+        assert_eq!(
+            std::fs::read(log).unwrap(),
+            b"first\0second\xfffilerelative"
+        );
     }
 }

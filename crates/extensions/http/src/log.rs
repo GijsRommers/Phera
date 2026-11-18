@@ -1,13 +1,12 @@
 //! `error_log('saved')` writes to the SAPI log. Type 3 appends the exact
 //! message bytes to a named file.
 
-use std::{io::Write, path::PathBuf};
+use std::io::Write;
 
 use phera_extension_api::{
     ConstantValue, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param,
     ParamType, Registry, Value, args,
 };
-use tokio::io::AsyncWriteExt;
 
 use crate::request::{Sapi, sapi};
 
@@ -44,7 +43,7 @@ fn error_log(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_
             2 => Err(NativeError::value_error(
                 "TCP/IP option is not available for error logging",
             )),
-            3 => append(context, destination, message).await,
+            3 => phera_ext_streams::append_log(context, destination, message).await,
             _ => {
                 let prefix = match sapi(context) {
                     Sapi::Cli => b"".as_slice(),
@@ -58,46 +57,4 @@ fn error_log(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_
             }
         }
     })
-}
-
-async fn append(context: &mut dyn Context, destination: &[u8], message: &[u8]) -> NativeResult {
-    if destination.is_empty() {
-        return Err(NativeError::value_error("Path must not be empty"));
-    }
-    if destination.windows(3).any(|window| window == b"://") {
-        context.warning("error_log(): File stream wrappers are not supported by Phera".into());
-        return Ok(Value::Bool(false));
-    }
-    let path = file_path(destination);
-    let mut file = match tokio::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .await
-    {
-        Ok(file) => file,
-        Err(error) => {
-            let destination = String::from_utf8_lossy(destination);
-            let message = error.to_string();
-            let error = message.split(" (os error").next().unwrap_or(&message);
-            context.warning(format!(
-                "error_log({destination}): Failed to open stream: {error}"
-            ));
-            return Ok(Value::Bool(false));
-        }
-    };
-    Ok(Value::Bool(
-        file.write_all(message).await.is_ok() && file.flush().await.is_ok(),
-    ))
-}
-
-#[cfg(unix)]
-fn file_path(bytes: &[u8]) -> PathBuf {
-    use std::os::unix::ffi::OsStrExt;
-    std::ffi::OsStr::from_bytes(bytes).into()
-}
-
-#[cfg(not(unix))]
-fn file_path(bytes: &[u8]) -> PathBuf {
-    String::from_utf8_lossy(bytes).as_ref().into()
 }

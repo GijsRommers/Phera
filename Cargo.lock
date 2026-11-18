@@ -1755,6 +1755,7 @@ name = "phera-ext-http"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "phera-ext-streams",
  "phera-extension-api",
  "tokio",
 ]
