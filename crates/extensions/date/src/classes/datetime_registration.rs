@@ -185,7 +185,7 @@ fn immutable_format(context: &mut dyn Context, _: This<'_>, arguments: &[Value])
 
 fn mutable_timestamp(context: &mut dyn Context, _: This<'_>, arguments: &[Value]) -> NativeResult {
     let class = context.called_class().unwrap_or(MUTABLE).to_owned();
-    factory::from_timestamp(context, arguments, &class)
+    factory::from_timestamp(context, arguments, &class, MUTABLE)
 }
 
 fn immutable_timestamp(
@@ -194,7 +194,7 @@ fn immutable_timestamp(
     arguments: &[Value],
 ) -> NativeResult {
     let class = context.called_class().unwrap_or(IMMUTABLE).to_owned();
-    factory::from_timestamp(context, arguments, &class)
+    factory::from_timestamp(context, arguments, &class, IMMUTABLE)
 }
 
 fn mutable_object(context: &mut dyn Context, _: This<'_>, arguments: &[Value]) -> NativeResult {

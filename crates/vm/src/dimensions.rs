@@ -87,7 +87,7 @@ impl Vm {
         object: Rc<Object>,
         offset: Value,
     ) -> NativeResult {
-        if let Some(native) = native(&object) {
+        if let Some(native) = native(&object, "offsetget") {
             (native.get)(self, &object, offset)
         } else {
             self.call_method(object, "offsetGet", vec![offset]).await
@@ -99,7 +99,7 @@ impl Vm {
         object: Rc<Object>,
         offset: Value,
     ) -> Result<bool, NativeError> {
-        if let Some(native) = native(&object) {
+        if let Some(native) = native(&object, "offsetexists") {
             (native.exists)(self, &object, offset)
         } else {
             Ok(to_bool(
@@ -116,7 +116,7 @@ impl Vm {
         offset: Value,
         value: Value,
     ) -> Result<(), NativeError> {
-        if let Some(native) = native(&object) {
+        if let Some(native) = native(&object, "offsetset") {
             (native.set)(self, &object, offset, value)
         } else {
             self.call_method(object, "offsetSet", vec![offset, value])
@@ -130,7 +130,7 @@ impl Vm {
         object: Rc<Object>,
         offset: Value,
     ) -> Result<(), NativeError> {
-        if let Some(native) = native(&object) {
+        if let Some(native) = native(&object, "offsetunset") {
             (native.unset)(self, &object, offset)
         } else {
             self.call_method(object, "offsetUnset", vec![offset])
@@ -237,14 +237,17 @@ impl Vm {
     }
 }
 
-fn native(object: &Object) -> Option<NativeDimensions> {
-    object
-        .class
-        .as_any()
-        .downcast_ref::<Class>()?
-        .hooks
-        .as_ref()?
-        .dimensions
+fn native(object: &Object, method: &str) -> Option<NativeDimensions> {
+    let class = object.class.as_any().downcast_ref::<Class>()?;
+    let handler = class.hooks.as_ref()?.dimensions?;
+    if class
+        .methods
+        .get(method)
+        .is_some_and(|method| matches!(method.body, crate::classes::MethodBody::User(_)))
+    {
+        return None;
+    }
+    Some(handler)
 }
 
 fn has_dimension(object: &Object) -> bool {

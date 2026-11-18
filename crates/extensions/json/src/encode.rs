@@ -21,10 +21,11 @@ use phera_extension_api::value::{
     NumVal, PropertyScope, float_repr, parse_numeric, split_property_key,
 };
 use phera_extension_api::{
-    ArrayKey, Context, LocalFuture, NativeError, NativeResult, Object, PropertyPurpose, Value, args,
+    ArrayKey, Context, LocalFuture, NativeError, NativeResult, Object, PhpArray, PropertyPurpose,
+    Value, args,
 };
-use std::collections::HashSet;
 use std::rc::Rc;
+use std::{cell::RefCell, collections::HashSet};
 
 /// What is left to write, last item first.
 enum Work {
@@ -39,16 +40,30 @@ enum Work {
     Indent(usize),
     /// An object key, written as a JSON string.
     Key(ArrayKey),
-    /// The end of a container that `identity` opened at `level`.
+    /// Keep the container alive until its address leaves the recursion set.
     Close {
-        identity: usize,
+        owner: Owner,
         level: usize,
         closing: char,
         empty: bool,
     },
     /// The end of the value behind a reference.
-    Release(usize),
+    Release(Rc<RefCell<Value>>),
     ReleaseSerializer(Serializing),
+}
+
+enum Owner {
+    Array(Rc<PhpArray>),
+    Object(Rc<Object>),
+}
+
+impl Owner {
+    fn identity(&self) -> usize {
+        match self {
+            Self::Array(array) => Rc::as_ptr(array) as usize,
+            Self::Object(object) => Rc::as_ptr(object) as usize,
+        }
+    }
 }
 
 struct Encoder {
@@ -118,16 +133,16 @@ impl Encoder {
                 Work::Text(text) => self.output.push_str(text),
                 Work::Indent(level) => self.indent(level),
                 Work::Key(key) => self.key(key),
-                Work::Release(identity) => {
-                    self.active.remove(&identity);
+                Work::Release(reference) => {
+                    self.active.remove(&(Rc::as_ptr(&reference) as usize));
                 }
                 Work::Close {
-                    identity,
+                    owner,
                     level,
                     closing,
                     empty,
                 } => {
-                    self.active.remove(&identity);
+                    self.active.remove(&owner.identity());
                     if level as i64 > self.depth {
                         self.error = Error::Depth;
                     }
@@ -200,7 +215,7 @@ impl Encoder {
                 // A reference already borrowed for writing is one being
                 // changed further up: recursion too.
                 if let Ok(value) = reference.try_borrow() {
-                    self.work.push(Work::Release(identity));
+                    self.work.push(Work::Release(reference.clone()));
                     self.work.push(Work::Value {
                         value: value.clone(),
                         level,
@@ -215,7 +230,7 @@ impl Encoder {
                     .map(|(key, value)| (key, value.clone()))
                     .collect();
                 let object = !array.is_list() || self.flags.force_object;
-                self.container(Rc::as_ptr(&array) as usize, entries, object, level);
+                self.container(Owner::Array(array), entries, object, level);
             }
             Value::Object(_) => {}
         }
@@ -257,7 +272,7 @@ impl Encoder {
             })
             .map(|(key, value)| (key, value.clone()))
             .collect();
-        self.container(identity, entries, true, level);
+        self.container(Owner::Object(object), entries, true, level);
         Ok(())
     }
 
@@ -266,18 +281,18 @@ impl Encoder {
     /// pushed from the last entry back to the first.
     fn container(
         &mut self,
-        identity: usize,
+        owner: Owner,
         entries: Vec<(ArrayKey, Value)>,
         object: bool,
         level: usize,
     ) {
-        if !self.active.insert(identity) {
+        if !self.active.insert(owner.identity()) {
             self.failure(Error::Recursion);
             return;
         }
         self.output.push(if object { '{' } else { '[' });
         self.work.push(Work::Close {
-            identity,
+            owner,
             level: level + 1,
             closing: if object { '}' } else { ']' },
             empty: entries.is_empty(),

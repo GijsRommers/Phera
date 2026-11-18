@@ -28,7 +28,11 @@ impl Contract {
     /// Copy small declaration metadata without executing default expressions.
     fn from_method(method: &Method, code: &crate::code_table::CodeTable) -> Option<Self> {
         if let MethodBody::Native(entry) = method.body {
-            let returns = entry.tentative_return?;
+            use phera_extension_api::MethodReturn;
+            let (returns, tentative) = match entry.return_type? {
+                MethodReturn::Required(ty) => (ty, false),
+                MethodReturn::Tentative(ty) => (ty, true),
+            };
             return Some(Self {
                 parameters: entry
                     .params
@@ -43,7 +47,7 @@ impl Contract {
                     })
                     .collect(),
                 returns: Some(returns.into()),
-                tentative: true,
+                tentative,
                 returns_reference: false,
             });
         }

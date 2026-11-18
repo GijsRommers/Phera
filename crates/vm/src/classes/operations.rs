@@ -61,3 +61,36 @@ pub(super) fn inherit_hooks(
         count: own.count.or(base.count),
     }))
 }
+
+/// PHP uses a native iterator until a subclass replaces a method of its protocol.
+pub(super) fn user_hooks(
+    unit: &phera_bytecode::CompiledUnit,
+    declaration: &phera_bytecode::ClassDeclaration,
+    parent: Option<&Class>,
+    operations: ClassOperations,
+) -> Option<Rc<phera_extension_api::ClassHooks>> {
+    let hooks = parent?.hooks.as_ref()?;
+    if hooks.iterator.is_none() {
+        return Some(hooks.clone());
+    }
+    let methods: &[&str] = if operations.has(ClassOperations::AGGREGATE) {
+        &["getIterator"]
+    } else if operations.has(ClassOperations::ITERATOR) {
+        &["rewind", "valid", "current", "key", "next"]
+    } else {
+        &[]
+    };
+    if declaration.methods.iter().any(|method| {
+        let name = &unit.names[method.name.index()];
+        methods
+            .iter()
+            .any(|candidate| name.eq_ignore_ascii_case(candidate))
+    }) {
+        Some(Rc::new(phera_extension_api::ClassHooks {
+            iterator: None,
+            ..**hooks
+        }))
+    } else {
+        Some(hooks.clone())
+    }
+}

@@ -66,6 +66,13 @@ pub enum ClassKind {
     Interface,
 }
 
+/// Internal signatures can require a return type or give a tentative compatibility warning.
+#[derive(Clone, Copy)]
+pub enum MethodReturn {
+    Required(&'static str),
+    Tentative(&'static str),
+}
+
 #[derive(Clone, Copy)]
 pub struct MethodEntry {
     pub name: &'static str,
@@ -78,7 +85,7 @@ pub struct MethodEntry {
     /// Subclasses may not override it.
     pub is_final: bool,
     /// PHP's compatibility contract for an internal method.
-    pub tentative_return: Option<&'static str>,
+    pub return_type: Option<MethodReturn>,
 }
 
 impl MethodEntry {
@@ -92,7 +99,7 @@ impl MethodEntry {
             visibility: Visibility::Public,
             is_static: false,
             is_final: false,
-            tentative_return: None,
+            return_type: None,
         }
     }
 
@@ -112,7 +119,7 @@ impl MethodEntry {
             visibility: Visibility::Public,
             is_static: false,
             is_final: false,
-            tentative_return: None,
+            return_type: None,
         }
     }
 
@@ -126,17 +133,22 @@ impl MethodEntry {
             visibility: Visibility::Public,
             is_static: false,
             is_final: false,
-            tentative_return: None,
+            return_type: None,
         }
     }
 
     pub const fn tentative_return(mut self, ty: &'static str) -> Self {
-        self.tentative_return = Some(ty);
+        self.return_type = Some(MethodReturn::Tentative(ty));
         self
     }
 
     pub const fn with_preparation(mut self, preparation: PrepareMethod) -> Self {
         self.preparation = Some(preparation);
+        self
+    }
+
+    pub const fn returning(mut self, ty: &'static str) -> Self {
+        self.return_type = Some(MethodReturn::Required(ty));
         self
     }
 

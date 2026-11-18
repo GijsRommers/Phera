@@ -53,7 +53,7 @@ const METHODS: &[MethodEntry] = &[
     )
     .static_(),
     MethodEntry::public("getIterator", &[], super::period_dates::get_iterator)
-        .tentative_return("Iterator"),
+        .returning("Iterator"),
     MethodEntry::public("getStartDate", &[], period::start),
     MethodEntry::public("getEndDate", &[], period::end),
     MethodEntry::public("getDateInterval", &[], period::interval),

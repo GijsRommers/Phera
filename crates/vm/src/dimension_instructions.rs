@@ -224,6 +224,9 @@ impl Vm {
             }
         };
         let keys = self.property_keys_for(steps.iter().copied(), plain.clone())?;
+        if mutation == Mutation::Assign {
+            value = self.check_path_reference_assignment(&root, &keys, value)?;
+        }
         self.validate_property_mutation(plain, &keys, &mut value, mutation)?;
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         crate::path_update::update(

@@ -158,7 +158,16 @@ impl Context for Vm {
             .class
             .as_any()
             .downcast_ref::<crate::classes::Class>()
-            .and_then(|class| class.hooks.as_ref()?.count);
+            .and_then(|class| {
+                let count = class.hooks.as_ref()?.count?;
+                class
+                    .methods
+                    .get("count")
+                    .is_none_or(|method| {
+                        !matches!(method.body, crate::classes::MethodBody::User(_))
+                    })
+                    .then_some(count)
+            });
         if let Some(count) = count {
             return Box::pin(std::future::ready(count(self, &object).map(Value::Int)));
         }

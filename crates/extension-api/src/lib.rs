@@ -21,7 +21,7 @@ pub use phera_value::{ArrayKey, Diagnostics, Object, PhpArray, PhpString, Value}
 
 pub use arguments::{args, prepare_arguments, prepare_call};
 pub use class::{
-    AsyncMethod, ClassEntry, ClassKind, MethodEntry, MethodPreparation, NativeMethod,
+    AsyncMethod, ClassEntry, ClassKind, MethodEntry, MethodPreparation, MethodReturn, NativeMethod,
     NativePropertyAccess, NativePropertyMutation, NativePropertyRead, PrepareMethod, PropertyEntry,
     PropertyType, SyncMethod, Visibility,
 };
