@@ -258,25 +258,6 @@ pub const SCRIPT: MethodEntry = MethodEntry::public_async(
 )
 .with_preparation(|_, _, a| arguments::script(a));
 
-/// `$redis->slaveof(?string $host = null, int $port = 6379)`
-pub const SLAVEOF: MethodEntry = MethodEntry::public_async(
-    "slaveof",
-    &[
-        Param::new("host", ParamType::String).nullable().optional(),
-        Param::new("port", ParamType::Int).optional(),
-    ],
-    |c, o, a| dispatch("slaveof", c, o, a),
-)
-.with_preparation(|c, _, a| {
-    arguments::deprecated("Redis::slaveof", c);
-    arguments::object_not_null("Redis::slaveof", SLAVEOF_PARSED, c, a)
-});
-/// How phpredis parses `slaveof()` when it is given an object.
-const SLAVEOF_PARSED: &[Param] = &[
-    Param::new("host", ParamType::String).optional(),
-    Param::new("port", ParamType::Int).optional(),
-];
-
 /// `$redis->replicaof(?string $host = null, int $port = 6379)`
 pub const REPLICAOF: MethodEntry = MethodEntry::public_async(
     "replicaof",

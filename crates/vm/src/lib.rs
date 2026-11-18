@@ -44,6 +44,7 @@ mod closure_tests;
 mod closure_types;
 mod closures;
 mod code_table;
+mod constant_listings;
 mod constant_table;
 mod constants;
 mod context;
@@ -125,6 +126,7 @@ mod typed_references;
 mod types;
 mod unit_caches;
 mod unpacking;
+mod unsupported_items;
 
 /// Resolves PHP includes through the embedding runtime code cache.
 pub trait CodeLoader: Send + Sync {
@@ -192,8 +194,16 @@ impl Vm {
     /// Create isolated request state from an immutable native registry.
     pub fn new(registry: Arc<Registry>) -> Self {
         let constants = registry
-            .constants()
-            .map(|(name, value)| (name.to_owned(), value.to_value()))
+            .constant_entries()
+            .map(|(name, value, deprecated)| {
+                (
+                    name.to_owned(),
+                    constant_table::GlobalConstant {
+                        value: value.to_value(),
+                        deprecated,
+                    },
+                )
+            })
             .collect();
         Self {
             classes: classes::ClassTable::native(&registry),

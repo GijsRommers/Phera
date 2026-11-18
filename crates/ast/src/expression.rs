@@ -209,8 +209,15 @@ pub enum Literal {
 #[derive(Debug, Clone, PartialEq)]
 pub enum StringPart {
     /// Literal bytes, escape sequences resolved.
-    Literal(Vec<u8>),
+    Literal(Vec<u8>, Span),
     Expression(Expression),
+    DollarCurly(Expression, DollarCurlyForm),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DollarCurlyForm {
+    Name,
+    Expression,
 }
 
 #[derive(Debug, Clone, PartialEq)]

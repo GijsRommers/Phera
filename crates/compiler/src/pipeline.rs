@@ -5,7 +5,9 @@
 //! of an integer becomes a literal load followed by Echo. Final emission interns
 //! names and paths and translates IR targets to bytecode offsets.
 
-use phera_source::LineTable;
+use std::cell::RefCell;
+
+use phera_source::{CompileDiagnostic, LineTable};
 
 use crate::context::Compiler;
 use crate::ir::{CompiledUnit, Constant, Instruction};
@@ -26,8 +28,10 @@ pub(super) fn compile_on_stack(
     kind: SourceKind,
 ) -> Result<phera_bytecode::CompiledUnit, CompileError> {
     let lines = LineTable::from_bytes(source);
-    let (parsed, scanner_diagnostics) = phera_parser::parse_file_on_current_stack(source);
-    let result = compile_program(parsed, source, file, &lines, kind);
+    let (parsed, mut scanner_diagnostics) = phera_parser::parse_file_on_current_stack(source);
+    let compile_diagnostics = RefCell::new(Vec::new());
+    let result = compile_program(parsed, source, file, &lines, kind, &compile_diagnostics);
+    scanner_diagnostics.extend(compile_diagnostics.into_inner());
     match result {
         Ok(mut unit) => {
             unit.scanner_diagnostics = scanner_diagnostics;
@@ -46,8 +50,18 @@ fn compile_program(
     file: &str,
     lines: &LineTable,
     kind: SourceKind,
+    compile_diagnostics: &RefCell<Vec<CompileDiagnostic>>,
 ) -> Result<phera_bytecode::CompiledUnit, CompileError> {
     let ast = parsed.map_err(|error| {
+        if error.is_backtick_operator() {
+            return CompileError {
+                message: error.message,
+                file: file.into(),
+                line: lines.line(error.span.start),
+                parse: false,
+                scanner_diagnostics: Vec::new(),
+            };
+        }
         let display = String::from_utf8_lossy(source);
         let token = source
             .get(error.span.start..error.span.end)
@@ -74,7 +88,7 @@ fn compile_program(
             scanner_diagnostics: Vec::new(),
         }
     })?;
-    let mut compiler = Compiler::new(file, lines, "{main}", "");
+    let mut compiler = Compiler::new(file, lines, "{main}", "", compile_diagnostics);
     compiler.function.dynamic_scope = true;
     compiler.block(&ast.statements, DeclarationTiming::Hoisted)?;
     let default = match kind {

@@ -2,6 +2,7 @@
 //! Uncertain facts become mixed rather than producing a guessed diagnostic.
 
 use super::*;
+use phera_source::deprecations::ItemKind;
 
 impl Analyzer<'_> {
     pub fn member_expressions(
@@ -93,13 +94,6 @@ impl Analyzer<'_> {
         }
         if let (Some(class), MemberName::Identifier(name)) = (class, name)
             && !name.name.eq_ignore_ascii_case("class")
-            && self.index.class(&class).is_some()
-            && self.index.complete(&class)
-            && !(late_static
-                && self
-                    .index
-                    .class(&class)
-                    .is_some_and(|c| c.modifiers.is_abstract))
             && !scope
                 .known
                 .contains(&Symbol::Constant(Symbol::constant_name(&format!(
@@ -108,10 +102,23 @@ impl Analyzer<'_> {
                 ))))
             && !self.index.constant(&class, &name.name)
         {
-            self.report(
-                Finding::UnknownClassConstant(format!("{class}::{}", name.name)),
-                name.span,
-            );
+            if let Some(item) =
+                self.omitted_builtin_member(ItemKind::ClassConstant, &class, &name.name)
+            {
+                self.report(Finding::NotSupported(item), name.span);
+            } else if self.index.class(&class).is_some()
+                && self.index.complete(&class)
+                && !(late_static
+                    && self
+                        .index
+                        .class(&class)
+                        .is_some_and(|c| c.modifiers.is_abstract))
+            {
+                self.report(
+                    Finding::UnknownClassConstant(format!("{class}::{}", name.name)),
+                    name.span,
+                );
+            }
         }
         ValueType::Mixed
     }

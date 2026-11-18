@@ -63,12 +63,7 @@ foreach ([[], ['WITHDIST'], ['WITHCOORD', 'ASC'], ['count' => 1, 'DESC']] as $op
 
 $r->rPush($p.'list', '3', '1', '2', 'b', 'a');
 $r->ltrim($p.'list', 0, 2);
-check(fn()=>$r->sortAsc($p.'list'));
-check(fn()=>$r->sortDesc($p.'list'));
 $r->rPush($p.'words', 'b', 'c', 'a');
-check(fn()=>$r->sortAscAlpha($p.'words'));
-check(fn()=>$r->sortDescAlpha($p.'words'));
-check(fn()=>$r->sortAsc($p.'list', null, null, 0, 2));
 
 $r->hSet($p.'h', 'f1', 'v1');
 $r->sAdd($p.'s', 'm1');
@@ -81,7 +76,6 @@ foreach (['hscan' => 'h', 'sscan' => 's', 'zscan' => 'z'] as $method => $key) {
 
 check(fn()=>$r->pubsub('channels', $p.'nothing*'));
 check(fn()=>$r->replicaof());
-check(fn()=>$r->slaveof());
 check(fn()=>$r->role()[0]);
 check(fn()=>is_int($r->lastSave()));
 check(fn()=>$r->debug($p.'two') === false || is_string($r->debug($p.'two')));

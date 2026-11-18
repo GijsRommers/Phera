@@ -7,6 +7,7 @@ mod datetime;
 mod datetime_factory;
 mod datetime_functions;
 mod datetime_registration;
+pub(super) use datetime_registration::RFC7231_FORMAT;
 mod datetime_serialization;
 mod instant;
 mod interval;

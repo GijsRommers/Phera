@@ -2,11 +2,11 @@
 //!
 //! AST nodes lower to compiler IR here; final interning belongs to `lower`.
 
-use std::collections::HashMap;
+use std::{cell::RefCell, collections::HashMap};
 
 use phera_ast as ast;
 use phera_bytecode::Reg;
-use phera_source::LineTable;
+use phera_source::{CompileDiagnostic, LineTable};
 
 use crate::CompileError;
 use crate::ir::{Constant, Function, Instruction, Target};
@@ -21,6 +21,7 @@ pub(super) struct Loop {
 pub(super) struct Compiler<'ast> {
     pub(super) file: &'ast str,
     pub(super) declaration_warnings: Vec<phera_bytecode::DeclarationWarning>,
+    pub(super) compile_diagnostics: &'ast RefCell<Vec<CompileDiagnostic>>,
     pub(super) lines: &'ast LineTable,
     pub(super) function: Function,
     pub(super) functions: Vec<Function>,
@@ -45,10 +46,12 @@ impl<'ast> Compiler<'ast> {
         lines: &'ast LineTable,
         name: &str,
         namespace: &str,
+        compile_diagnostics: &'ast RefCell<Vec<CompileDiagnostic>>,
     ) -> Self {
         Self {
             file,
             declaration_warnings: Vec::new(),
+            compile_diagnostics,
             lines,
             function: Function {
                 name: name.into(),
