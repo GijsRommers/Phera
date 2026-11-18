@@ -33,7 +33,7 @@ impl Vm {
         let frame = self
             .current()
             .ok_or_else(|| internal_error!("property site"))?;
-        let scope = frame.method().map(|context| &context.scope);
+        let scope = frame.scope();
         if let Some(slot) = frame.site_cache()
             && let crate::unit_caches::CachedSite::Property(entry) = &*slot.borrow()
             && Rc::ptr_eq(&entry.class, &object.class)

@@ -9,9 +9,8 @@ use crate::Vm;
 impl Vm {
     /// Implements PHP MakeCallable semantics outside the dispatch loop.
     pub(crate) fn make_callable(&mut self, destination: Reg) -> Result<(), NativeError> {
-        let call = self.call_stack.take_pending()?;
-        self.registers.truncate(call.window.base);
-        let object = self.closure_from_callee(call.callee)?;
+        let callee = self.take_prepared_callee()?;
+        let object = self.closure_from_callee(callee)?;
         self.set(destination, Value::Object(object));
         Ok(())
     }

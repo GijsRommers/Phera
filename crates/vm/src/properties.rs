@@ -90,10 +90,7 @@ impl Vm {
                     class.name
                 ))
             })?;
-        let scope = self
-            .current()
-            .and_then(|frame| frame.method())
-            .map(|context| &context.scope);
+        let scope = self.current().and_then(|frame| frame.scope());
         let allowed = match property.visibility {
             Visibility::Public => true,
             Visibility::Private => scope.is_some_and(|scope| scope.name == property.declaring),
@@ -247,10 +244,7 @@ impl Vm {
             .as_any()
             .downcast_ref::<crate::classes::Class>()
             .ok_or_else(|| internal_error!("property class"))?;
-        let scope = self
-            .current()
-            .and_then(|frame| frame.method())
-            .map(|context| &context.scope);
+        let scope = self.current().and_then(|frame| frame.scope());
         let property = scope
             .and_then(|scope| {
                 class.defaults.iter().find(|property| {

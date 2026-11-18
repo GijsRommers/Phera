@@ -16,43 +16,40 @@ use std::rc::Rc;
 use phera_value::Value;
 
 use crate::Vm;
+use crate::calls::call_view::CallView;
 
 impl Vm {
     /// Warn about each value given to a by-reference parameter, and put it
     /// in a reference cell of its own, so that the callee finds a reference
     /// there as it does on every other path.
     pub(crate) fn warn_callback_references(&mut self) {
-        let count = self
-            .call_stack
-            .preparing
-            .last()
-            .map_or(0, |call| call.window.supplied);
-        for index in 0..count {
-            let warning = self.call_stack.preparing.last().and_then(|call| {
-                let parameter = call.callee.parameters.get(index).or_else(|| {
-                    call.callee
-                        .parameters
-                        .last()
-                        .filter(|parameter| parameter.variadic)
-                })?;
-                let slot = call.window.slot(index);
-                let value = self.registers.window(slot, 1).first()?.as_ref()?;
-                if !parameter.by_reference || value.is_reference() {
-                    return None;
-                }
+        let Ok(view) = CallView::top(&self.code, &self.call_stack) else {
+            return;
+        };
+        let (parameters, slots) = (view.parameters(), view.slots());
+        let mut warnings = Vec::new();
+        for index in 0..view.call.sent as usize {
+            let Some(parameter) = parameters.receiving(index) else {
+                continue;
+            };
+            let slot = slots.slot(index);
+            let Some(Some(value)) = self.registers.window(slot, 1).first() else {
+                continue;
+            };
+            if parameters.by_reference(parameter) && !value.is_reference() {
                 let warning = format!(
                     "{}(): Argument #{} (${}) must be passed by reference, value given",
-                    call.callee.name,
+                    view.name(),
                     index + 1,
-                    parameter.name,
+                    parameters.name(parameter),
                 );
-                Some((slot, warning))
-            });
-            if let Some((slot, warning)) = warning {
-                self.diagnostic("Warning", warning);
-                let temporary = Rc::new(RefCell::new(self.registers.take(slot)));
-                self.registers.put(slot, Value::Reference(temporary));
+                warnings.push((slot, warning));
             }
+        }
+        for (slot, warning) in warnings {
+            self.diagnostic("Warning", warning);
+            let temporary = Rc::new(RefCell::new(self.registers.take(slot)));
+            self.registers.put(slot, Value::Reference(temporary));
         }
     }
 }
