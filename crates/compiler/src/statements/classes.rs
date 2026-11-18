@@ -1,7 +1,9 @@
 //! Class declarations compile methods as ordinary functions so calls keep heap-frame execution.
 
+use super::builtin_attributes::AttributePlacement;
 use phera_ast as ast;
 use phera_bytecode::{ClassKind, Visibility};
+use phera_source::attributes::AttributeTarget;
 
 use crate::ir::{ClassDeclaration, ClassMethod, ClassProperty, Instruction};
 use crate::policies::{DeclarationTiming, NameKind};
@@ -38,7 +40,9 @@ impl Compiler<'_> {
             declaration.span,
             declaration.doc_comment,
             Some(&name),
+            AttributePlacement::Declaration(AttributeTarget::Class),
         )?;
+        self.validate_class_attributes(declaration, &name)?;
         let mut methods = Vec::new();
         let mut properties = Vec::new();
         let mut constants = Vec::new();
@@ -55,6 +59,12 @@ impl Compiler<'_> {
                     member.span,
                     member.doc_comment,
                     Some(&name),
+                    AttributePlacement::Declaration(AttributeTarget::ClassConstant),
+                )?;
+                self.reject_member_set_visibility(
+                    modifiers,
+                    "class constant",
+                    self.lines.line(member.span.start),
                 )?;
                 for constant in items {
                     if constant.name.name.eq_ignore_ascii_case("class") {
@@ -80,14 +90,12 @@ impl Compiler<'_> {
                 items,
             } = &member.kind
             {
-                if modifiers.set_visibility.is_some() {
-                    return Err(self.error("Asymmetric visibility not supported yet", line));
-                }
                 let metadata = self.declaration_metadata(
                     attributes,
                     member.span,
                     member.doc_comment,
                     Some(&name),
+                    AttributePlacement::Declaration(AttributeTarget::Property),
                 )?;
                 for property in items {
                     if !property.hooks.is_empty() {
@@ -133,8 +141,16 @@ impl Compiler<'_> {
                         .as_ref()
                         .map(|value| self.compile_initializer(value, line))
                         .transpose()?;
+                    let (set_visibility, is_final) = self.property_write_visibility(
+                        modifiers,
+                        (&name, &property.name, property.span),
+                        ty.is_some(),
+                        readonly,
+                    )?;
                     properties.push(ClassProperty {
                         name: property.name.clone(),
+                        set_visibility,
+                        is_final,
                         metadata: metadata.clone(),
                         promoted: false,
                         visibility: match modifiers.visibility {
@@ -155,6 +171,11 @@ impl Compiler<'_> {
             let ast::ClassMemberKind::Method(method) = &member.kind else {
                 return Err(self.error("Class properties and constants not supported yet", line));
             };
+            self.reject_member_set_visibility(
+                &method.modifiers,
+                "method",
+                self.lines.line(method.span.start),
+            )?;
             if methods
                 .iter()
                 .any(|entry: &ClassMethod| entry.name.eq_ignore_ascii_case(&method.name.name))
@@ -180,15 +201,26 @@ impl Compiler<'_> {
                     });
             }
             for parameter in &method.parameters {
-                if parameter.modifiers.visibility.is_some() {
+                if parameter.modifiers.promotes_property() {
                     let metadata = self.declaration_metadata(
                         &parameter.attributes,
                         parameter.span,
                         None,
                         Some(&name),
+                        AttributePlacement::Promoted(AttributeTarget::Property),
+                    )?;
+                    let readonly =
+                        parameter.modifiers.is_readonly || declaration.modifiers.is_readonly;
+                    let (set_visibility, is_final) = self.property_write_visibility(
+                        &parameter.modifiers,
+                        (&name, &parameter.name, parameter.span),
+                        parameter.ty.is_some(),
+                        readonly,
                     )?;
                     properties.push(ClassProperty {
                         name: parameter.name.clone(),
+                        set_visibility,
+                        is_final,
                         metadata,
                         promoted: true,
                         visibility: member_visibility(&parameter.modifiers),

@@ -88,9 +88,9 @@ impl Vm {
             )));
         }
         if access == ConstantAccess::Read
-            && let Some(message) = constant.deprecated
+            && let Some(message) = &constant.deprecated
         {
-            self.diagnostic("Deprecated", message.into());
+            self.diagnostic("Deprecated", message.clone());
         }
         self.evaluate_class_constant(&constant, name)
     }
@@ -117,7 +117,7 @@ impl Vm {
         }
     }
 
-    fn evaluate_class_constant(
+    pub(crate) fn evaluate_class_constant(
         &mut self,
         constant: &crate::classes::LinkedConstant,
         name: &str,

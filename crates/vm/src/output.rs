@@ -9,22 +9,13 @@ use crate::{OutputSink, Vm};
 impl Vm {
     /// Implements PHP Echo semantics outside the dispatch loop.
     pub(crate) fn echo_value(&mut self, source: Reg) -> Result<(), NativeError> {
-        let throwable_text = match &*self.operand(source) {
-            phera_value::Value::Object(object)
-                if self
-                    .classes
-                    .for_object(object)
-                    .is_some_and(|class| class.is_throwable) =>
-            {
-                self.throwable_method_result("__toString", object)
-                    .and_then(|value| match value {
-                        phera_value::Value::String(text) => Some(text),
-                        _ => None,
-                    })
-            }
+        let object = match &*self.operand(source) {
+            phera_value::Value::Object(object) => Some(object.clone()),
             _ => None,
         };
-        if let Some(text) = throwable_text {
+        if let Some(object) = object
+            && let Some(text) = self.native_object_string(&object)?
+        {
             self.out(text.as_bytes());
             return Ok(());
         }

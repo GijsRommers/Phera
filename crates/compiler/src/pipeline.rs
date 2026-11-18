@@ -100,6 +100,7 @@ fn compile_program(
     compiler.emit(Instruction::Return(register), 1);
     let unit = CompiledUnit {
         main: compiler.finish(),
+        constant_metadata: compiler.constant_metadata,
         declaration_warnings: compiler.declaration_warnings,
         functions: compiler.functions,
         hoisted: compiler.hoisted,

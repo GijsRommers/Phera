@@ -1,5 +1,6 @@
 //! Property writes enforce declaration types and readonly state before modifying storage.
 
+use crate::property_set_visibility::PropertyChange;
 use crate::{Vm, access_mode::Mutation, inline_stack::InlineStack, path_update::PathKey};
 use phera_extension_api::{NativeError, NativePropertyMutation};
 use phera_value::Value;
@@ -11,6 +12,29 @@ impl Vm {
         value: Value,
         property: &crate::classes::class::PropertyDefault,
         declaration_type: &phera_bytecode::Type,
+    ) -> Result<Value, NativeError> {
+        let strict = self
+            .current()
+            .is_some_and(|frame| frame.function().strict_types);
+        self.coerce_declared_property(value, property, declaration_type, strict)
+    }
+
+    /// Reflection assignment always uses weak coercion.
+    pub(crate) fn coerce_reflected_property(
+        &mut self,
+        value: Value,
+        property: &crate::classes::class::PropertyDefault,
+        declaration_type: &phera_bytecode::Type,
+    ) -> Result<Value, NativeError> {
+        self.coerce_declared_property(value, property, declaration_type, false)
+    }
+
+    fn coerce_declared_property(
+        &mut self,
+        value: Value,
+        property: &crate::classes::class::PropertyDefault,
+        declaration_type: &phera_bytecode::Type,
+        strict: bool,
     ) -> Result<Value, NativeError> {
         if crate::types::accepts_as_is(&value, declaration_type) {
             return Ok(value);
@@ -37,9 +61,6 @@ impl Vm {
                 return Ok(value.clone());
             }
         }
-        let strict = self
-            .current()
-            .is_some_and(|frame| frame.function().strict_types);
         let actual = value.type_name();
         crate::types::coerce(value.clone(), declaration_type, strict.into(), self).map_err(|_| {
             NativeError::type_error(format!(
@@ -55,6 +76,7 @@ impl Vm {
         class: phera_bytecode::Reg,
         name: phera_bytecode::Reg,
         value: &mut Value,
+        change: PropertyChange,
     ) -> Result<(), NativeError> {
         let (class_name, name) = self.static_property_names(class, name)?;
         let class = self
@@ -67,6 +89,10 @@ impl Vm {
             .rev()
             .find(|property| property.name == name)
             .ok_or_else(|| internal_error!("static property"))?;
+        self.check_set_visibility(property, change)?;
+        if !matches!(change, PropertyChange::Direct | PropertyChange::Bind) {
+            return Ok(());
+        }
         if let Some(declaration_type) = &property.ty {
             let converted = self.coerce_property(value.clone(), property, declaration_type)?;
             if !matches!(value, Value::Reference(_)) {
@@ -125,7 +151,6 @@ impl Vm {
                                     property.declaring
                                 )));
                             }
-                            let scope = self.current().and_then(|frame| frame.scope());
                             if crate::property_storage::read(object, key).is_some()
                                 || steps.peek().is_some()
                             {
@@ -139,20 +164,18 @@ impl Vm {
                                     property.declaring
                                 )));
                             }
-                            if scope.is_none_or(|scope| !scope.is_a(&property.declaring)) {
-                                let action = if mutation == Mutation::Unset {
-                                    "unset"
-                                } else {
-                                    "modify"
-                                };
-                                let from = scope
-                                    .map(|scope| format!("scope {}", scope.name))
-                                    .unwrap_or_else(|| "global scope".into());
-                                return Err(NativeError::error(format!(
-                                    "Cannot {action} protected(set) readonly property {}::${name} from {from}",
-                                    property.declaring
-                                )));
-                            }
+                        }
+                        let indirect = steps.peek().is_some();
+                        if !indirect
+                            || !crate::property_storage::read(object, key)
+                                .is_some_and(|value| value.deref().is_object())
+                        {
+                            let change = match mutation {
+                                Mutation::Unset if !indirect => PropertyChange::Unset,
+                                Mutation::Assign if !indirect => PropertyChange::Direct,
+                                _ => PropertyChange::Indirect,
+                            };
+                            self.check_set_visibility(property, change)?;
                         }
                         if steps.peek().is_none()
                             && mutation != Mutation::Unset

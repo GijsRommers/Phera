@@ -169,7 +169,7 @@ impl Vm {
 ///
 /// A class or interface is worked out after everything it builds on, with
 /// a list of work to do in place of recursion.
-fn interfaces_in_php_order(class: &Class) -> Vec<&Class> {
+pub(crate) fn interfaces_in_php_order(class: &Class) -> Vec<&Class> {
     let mut lists: std::collections::HashMap<&str, Vec<&Class>> = Default::default();
     let mut pending = vec![(class, false)];
     while let Some((current, parts_are_ready)) = pending.pop() {
@@ -210,7 +210,7 @@ fn interfaces_in_php_order(class: &Class) -> Vec<&Class> {
 
 /// PHP lists declared methods before inherited methods, retaining source order within each class.
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
-struct MethodOrder {
+pub(crate) struct MethodOrder {
     /// Zero denotes the requested class, then each successive parent.
     depth: usize,
     /// User function order or the native registration position.
@@ -219,7 +219,7 @@ struct MethodOrder {
 
 impl Vm {
     /// A method's declaring class determines its position independently of hash table order.
-    fn method_listing_order(&self, class: &Class, method: &Method) -> MethodOrder {
+    pub(crate) fn method_listing_order(&self, class: &Class, method: &Method) -> MethodOrder {
         let mut ancestor = Some(class);
         let mut depth = 0;
         while let Some(class) = ancestor {

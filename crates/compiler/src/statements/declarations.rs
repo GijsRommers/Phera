@@ -31,6 +31,7 @@ impl Compiler<'_> {
     pub(crate) fn compile_constants(
         &mut self,
         items: &[ast::ConstantDeclaration],
+        metadata: &phera_bytecode::reflection::DeclarationMetadata,
         line: usize,
     ) -> Result<(), CompileError> {
         for i in items {
@@ -43,6 +44,9 @@ impl Compiler<'_> {
             } else {
                 format!("{}\\{}", self.namespace, i.name.name)
             };
+            self.constant_metadata
+                .entry(name.clone())
+                .or_insert_with(|| metadata.clone());
             self.emit(
                 Instruction::Define {
                     name,

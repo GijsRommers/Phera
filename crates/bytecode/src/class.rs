@@ -59,6 +59,8 @@ pub struct ClassConstant {
 /// An absent default on a typed property means uninitialized, rather than null.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PropertyDeclaration {
+    pub set_visibility: Option<Visibility>,
+    pub is_final: bool,
     pub promoted: bool,
     pub metadata: crate::reflection::DeclarationMetadata,
     pub name: NameId,

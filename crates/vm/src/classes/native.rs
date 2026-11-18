@@ -113,6 +113,8 @@ impl ClassTable {
                     Visibility::Public => ArrayKey::str(property.name),
                 };
                 defaults.push(PropertyDefault {
+                    set_visibility: None,
+                    is_final: false,
                     static_storage: None,
                     key,
                     value: property
@@ -153,7 +155,7 @@ impl ClassTable {
                             .deprecated_constants
                             .iter()
                             .find(|(key, _)| key == name)
-                            .map(|(_, message)| *message),
+                            .map(|(_, message)| (*message).to_owned()),
                         declaring: entry.name.into(),
                         visibility: Visibility::Public,
                         is_final: false,
@@ -253,6 +255,7 @@ fn property_type(ty: phera_extension_api::PropertyType) -> Type {
         PropertyType::Int => (TypeMask::INT, "int"),
         PropertyType::Float => (TypeMask::FLOAT, "float"),
         PropertyType::String => (TypeMask::STRING, "string"),
+        PropertyType::NullableString => (TypeMask::STRING.union(TypeMask::NULL), "?string"),
         PropertyType::Array => (TypeMask::ARRAY, "array"),
         PropertyType::Object => (TypeMask::OBJECT, "object"),
         PropertyType::Mixed => (TypeMask::MIXED, "mixed"),

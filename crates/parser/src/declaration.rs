@@ -802,12 +802,17 @@ impl Parser<'_> {
         &mut self,
         attributes: Vec<Attribute>,
     ) -> Result<Statement, ParseError> {
+        let doc_comment = self.declaration_doc_comment(&attributes);
         let start = self.expect(TokenKind::Const, "'const'")?.span;
         let items = self.parse_const_items(true)?;
         self.expect_end()?;
 
         Ok(Statement {
-            kind: StatementKind::Const { attributes, items },
+            kind: StatementKind::Const {
+                doc_comment,
+                attributes,
+                items,
+            },
             span: self.span_since(start),
         })
     }

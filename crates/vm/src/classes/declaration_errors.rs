@@ -81,6 +81,24 @@ pub(crate) fn check_property_visibility(
     else {
         return Ok(());
     };
+    if inherited.is_final {
+        return Err(NativeError::error(format!(
+            "Cannot override final property {}::${name}",
+            inherited.declaring
+        )));
+    }
+    let inherited_set = inherited.set_visibility.unwrap_or(inherited.visibility);
+    let own_set = property.set_visibility.unwrap_or(property.visibility);
+    if matches!(
+        (inherited_set, own_set),
+        (Visibility::Protected, Visibility::Private)
+    ) && inherited.set_visibility.is_some()
+    {
+        return Err(NativeError::error(format!(
+            "Set access level of {class}::${name} must be protected(set) (as in class {}) or weaker",
+            inherited.declaring
+        )));
+    }
     let narrower = match inherited.visibility {
         Visibility::Public => property.visibility != Visibility::Public,
         Visibility::Protected => property.visibility == Visibility::Private,

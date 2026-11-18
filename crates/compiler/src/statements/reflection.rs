@@ -5,7 +5,9 @@ use std::collections::HashSet;
 use phera_ast::{Attribute, Expression, ExpressionKind, MemberName};
 use phera_bytecode::FunctionId;
 use phera_bytecode::reflection::{AttributeArgument, DeclarationMetadata, ParameterMetadata};
-use phera_source::Span;
+use phera_source::{Span, attributes::AttributeTarget};
+
+use super::builtin_attributes::AttributePlacement;
 
 use crate::{CompileError, Compiler, ir::Instruction};
 
@@ -16,6 +18,7 @@ impl Compiler<'_> {
         span: Span,
         doc_comment: Option<Span>,
         scope: Option<&str>,
+        placement: AttributePlacement,
     ) -> Result<DeclarationMetadata, CompileError> {
         Ok(DeclarationMetadata {
             start_line: self.lines.line(span.start) as u32,
@@ -25,7 +28,7 @@ impl Compiler<'_> {
                     .get(comment.start..comment.end)
                     .map(<[u8]>::to_vec)
             }),
-            attributes: self.compile_attributes(attributes, scope)?,
+            attributes: self.compile_attributes(attributes, scope, placement)?,
         })
     }
 
@@ -33,10 +36,11 @@ impl Compiler<'_> {
         &mut self,
         attributes: &[Attribute],
         scope: Option<&str>,
+        placement: AttributePlacement,
     ) -> Result<Vec<phera_bytecode::reflection::Attribute>, CompileError> {
-        attributes
-            .iter()
-            .map(|attribute| {
+        let mut compiled = Vec::with_capacity(attributes.len());
+        for attribute in attributes {
+            if self.attribute_includes_target(attribute, placement) {
                 let line = self.lines.line(attribute.span.start);
                 if attribute.first_class_callable {
                     return Err(self.error("Cannot create Closure as attribute argument", line));
@@ -72,9 +76,11 @@ impl Compiler<'_> {
                 let name = self
                     .resolve(&attribute.name, crate::policies::NameKind::Class)
                     .0;
-                Ok(phera_bytecode::reflection::Attribute { name, arguments })
-            })
-            .collect()
+                compiled.push(phera_bytecode::reflection::Attribute { name, arguments });
+            }
+        }
+        self.validate_attribute_list(attributes, placement)?;
+        Ok(compiled)
     }
 
     pub(super) fn reflected_parameter(
@@ -91,13 +97,21 @@ impl Compiler<'_> {
             })
             .transpose()?;
         Ok(ParameterMetadata {
-            attributes: self.compile_attributes(&parameter.attributes, scope.as_deref())?,
+            attributes: self.compile_attributes(
+                &parameter.attributes,
+                scope.as_deref(),
+                if parameter.modifiers.promotes_property() {
+                    AttributePlacement::Promoted(AttributeTarget::Parameter)
+                } else {
+                    AttributePlacement::Declaration(AttributeTarget::Parameter)
+                },
+            )?,
             default,
             default_constant: parameter
                 .default
                 .as_ref()
                 .and_then(|expr| self.default_constant(expr)),
-            promoted: parameter.modifiers.visibility.is_some(),
+            promoted: parameter.modifiers.promotes_property(),
         })
     }
 

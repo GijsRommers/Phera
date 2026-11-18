@@ -55,7 +55,22 @@ impl Compiler<'_> {
                 name, statements, ..
             } => self.compile_namespace(name, statements, timing)?,
             StatementKind::Use(items) => self.compile_use(items)?,
-            StatementKind::Const { items, .. } => self.compile_constants(items, line)?,
+            StatementKind::Const {
+                items,
+                attributes,
+                doc_comment,
+            } => {
+                let metadata = self.declaration_metadata(
+                    attributes,
+                    statement.span,
+                    *doc_comment,
+                    None,
+                    builtin_attributes::AttributePlacement::Declaration(
+                        phera_source::attributes::AttributeTarget::Constant,
+                    ),
+                )?;
+                self.compile_constants(items, &metadata, line)?;
+            }
             StatementKind::Declare { directives, body } => {
                 self.compile_declare(directives, body, timing, line)?
             }
@@ -90,12 +105,14 @@ impl Compiler<'_> {
 }
 
 pub(crate) mod bindings;
+mod builtin_attributes;
 pub(crate) mod classes;
 pub(crate) mod control;
 pub(crate) mod declarations;
 mod function_parameters;
 pub(crate) mod functions;
 pub(crate) mod loops;
+mod property_visibility;
 mod reflection;
 pub(crate) mod switching;
 

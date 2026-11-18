@@ -1,6 +1,8 @@
 //! Function declarations, parameter prologues, and nested declarations.
 
+use super::builtin_attributes::AttributePlacement;
 use phera_ast as ast;
+use phera_source::attributes::AttributeTarget;
 
 use crate::ir::{Constant, Instruction, Parameter};
 use crate::policies::DeclarationTiming;
@@ -44,6 +46,11 @@ impl<'ast> Compiler<'ast> {
             return Err(self.error(format!("Cannot redeclare function {name}()"), line));
         }
         let mut builder = self.function_builder(declaration, &name, captures, line)?;
+        if builder.has_builtin(&declaration.attributes, "Deprecated")
+            || builder.has_builtin(&declaration.attributes, "NoDiscard")
+        {
+            builder.emit(Instruction::AttributeDiagnostics, line);
+        }
         builder.compile_parameter_defaults(&declaration.parameters, line)?;
         let scope = builder.class_scope.clone();
         builder.function.metadata.declaration = builder.declaration_metadata(
@@ -51,7 +58,17 @@ impl<'ast> Compiler<'ast> {
             declaration.span,
             declaration.doc_comment,
             scope.as_deref(),
+            AttributePlacement::Declaration(
+                if declaration.name.name.contains("::")
+                    && !declaration.name.name.starts_with("{closure:")
+                {
+                    AttributeTarget::Method
+                } else {
+                    AttributeTarget::Function
+                },
+            ),
         )?;
+        builder.validate_nodiscard(declaration, line)?;
         for parameter in &declaration.parameters {
             let metadata = builder.reflected_parameter(parameter, line)?;
             builder.function.metadata.parameters.push(metadata);

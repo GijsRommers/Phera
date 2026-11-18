@@ -65,6 +65,7 @@ pub struct Registry {
     /// Only calls already holding a first-argument object need to check this table.
     object_handlers: HashMap<&'static str, crate::AsyncFn>,
     callback_frames: HashSet<&'static str>,
+    function_modules: HashMap<&'static str, &'static str>,
     function_order: Vec<&'static str>,
     extensions: Vec<&'static str>,
     /// Modules whose version is not PHP's, by lowercase name.
@@ -75,6 +76,7 @@ pub struct Registry {
     registering_module: Option<&'static str>,
     /// In registration order, which puts every parent before its children.
     classes: Vec<ClassEntry>,
+    class_modules: HashMap<&'static str, &'static str>,
 }
 
 struct NativeConstant {
@@ -132,6 +134,9 @@ impl Registry {
             "function {}() is already registered",
             entry.name
         );
+        if let Some(module) = self.registering_module {
+            self.function_modules.insert(entry.name, module);
+        }
         self.function_order.push(entry.name);
         self.functions.insert(key, entry);
     }
@@ -187,7 +192,21 @@ impl Registry {
                 entry.name
             );
         }
+        if let Some(module) = self.registering_module {
+            self.class_modules.insert(entry.name, module);
+        }
         self.classes.push(entry);
+    }
+
+    /// Registers a class implemented by a bundle on behalf of a PHP module.
+    pub fn class_in_module(&mut self, module: &'static str, entry: ClassEntry) {
+        self.class(entry);
+        self.class_modules.insert(entry.name, module);
+    }
+
+    /// PHP extension name for a native class's canonical name.
+    pub fn class_module(&self, name: &str) -> Option<&'static str> {
+        self.class_modules.get(name).copied()
     }
 
     /// Class names ignore case, like function names.
@@ -200,6 +219,11 @@ impl Registry {
     /// Every class, parents before children.
     pub fn classes(&self) -> impl Iterator<Item = &ClassEntry> {
         self.classes.iter()
+    }
+
+    /// PHP module owning a native function's canonical name.
+    pub fn function_module(&self, name: &str) -> Option<&'static str> {
+        self.function_modules.get(name).copied()
     }
 
     pub fn get_function(&self, name: &str) -> Option<&FunctionEntry> {

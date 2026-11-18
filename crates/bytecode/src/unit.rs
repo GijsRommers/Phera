@@ -5,6 +5,9 @@ use crate::{Function, FunctionId, NameId};
 /// One compiled PHP file.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct CompiledUnit {
+    /// Cold metadata for constants declared with `const`.
+    pub constant_metadata:
+        std::collections::HashMap<String, crate::reflection::DeclarationMetadata>,
     /// The path the file was compiled from, as `__FILE__` reports it.
     pub file: String,
     /// Non-fatal declaration diagnostics are emitted when this file is compiled for execution.

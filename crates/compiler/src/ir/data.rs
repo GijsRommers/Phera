@@ -125,6 +125,8 @@ pub struct Function {
 /// The top-level function and declarations awaiting final bytecode emission.
 #[derive(Debug, Clone)]
 pub struct CompiledUnit {
+    pub constant_metadata:
+        std::collections::HashMap<String, phera_bytecode::reflection::DeclarationMetadata>,
     pub declaration_warnings: Vec<phera_bytecode::DeclarationWarning>,
     pub main: Function,
     pub functions: Vec<Function>,
@@ -165,6 +167,8 @@ pub struct ClassMethod {
 /// Property metadata keeps source names until bytecode interning.
 #[derive(Debug, Clone)]
 pub struct ClassProperty {
+    pub set_visibility: Option<phera_bytecode::Visibility>,
+    pub is_final: bool,
     pub promoted: bool,
     pub metadata: phera_bytecode::reflection::DeclarationMetadata,
     pub name: String,

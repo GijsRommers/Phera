@@ -1,6 +1,7 @@
 //! Property and array mutations share iterative path reconstruction and PHP reference binding.
 
 use crate::access_mode::{Binding, Creation, Missing, Mutation};
+use crate::property_set_visibility::PropertyChange;
 use crate::{
     AccessPath, Vm,
     path_update::{PathKey, update},
@@ -32,11 +33,15 @@ impl Vm {
             Rc::make_mut(array).push(value)?;
             return Ok(());
         }
-        if let PathBase::StaticProperty { class, name, .. } = place.base()?
-            && place.steps()?.next().is_none()
-        {
-            self.validate_static_mutation(class, name, &mut value)?;
-            if binding == Binding::ByReference {
+        if let PathBase::StaticProperty { class, name, .. } = place.base()? {
+            let direct = place.steps()?.next().is_none();
+            let change = match (direct, binding) {
+                (true, Binding::ByValue) => PropertyChange::Direct,
+                (true, Binding::ByReference) => PropertyChange::Bind,
+                (false, _) => PropertyChange::Indirect,
+            };
+            self.validate_static_mutation(class, name, &mut value, change)?;
+            if direct && binding == Binding::ByReference {
                 self.bind_static_property_reference(class, name, value)?;
                 return Ok(());
             }
@@ -152,6 +157,12 @@ impl Vm {
             if let PathBase::StaticProperty { class, name, .. } = place.base()?
                 && place.steps()?.next().is_none()
             {
+                self.validate_static_mutation(
+                    class,
+                    name,
+                    &mut Value::Null,
+                    PropertyChange::Indirect,
+                )?;
                 self.track_static_property_reference(class, name)?;
             }
             return Ok(raw);

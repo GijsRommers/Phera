@@ -42,10 +42,18 @@ fn frame_arguments(vm: &Vm, frame: FrameView<'_>) -> String {
         let Some(Some(value)) = frame.slots(&vm.registers).get(index) else {
             continue;
         };
+        let sensitive = crate::sensitive_parameters::is_sensitive(frame, index);
+        let describe = |value: &Value| {
+            if sensitive {
+                "Object(SensitiveParameterValue)".into()
+            } else {
+                argument(value)
+            }
+        };
         if parameter.variadic {
             if let Value::Array(values) = &*value.deref() {
                 for (key, value) in values.iter() {
-                    let text = argument(value);
+                    let text = describe(value);
                     arguments.push(match key {
                         phera_value::ArrayKey::String(name) => {
                             format!("{}: {text}", name.to_string_lossy())
@@ -55,7 +63,7 @@ fn frame_arguments(vm: &Vm, frame: FrameView<'_>) -> String {
                 }
             }
         } else {
-            arguments.push(argument(value));
+            arguments.push(describe(value));
         }
     }
     arguments.join(", ")

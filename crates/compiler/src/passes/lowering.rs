@@ -22,6 +22,7 @@ impl Tables {
     ) {
         use ir::Instruction as Old;
         let instruction = match source {
+            Old::AttributeDiagnostics => Instruction::AttributeDiagnostics,
             Old::ThisOrNull { destination: dst } => Instruction::ThisOrNull { dst },
             Old::Capture { source: src, kind } => Instruction::Capture { src, kind },
             Old::Closure {
@@ -167,7 +168,10 @@ impl Tables {
                 function: self.symbol(&name, fallback, crate::policies::NameKind::Function),
             },
             Old::StartDynamicCall { callee } => Instruction::InitDynamicCall { callee },
-            Old::FinishCall { destination: dst } => Instruction::Call { dst },
+            Old::FinishCall {
+                destination: dst,
+                result,
+            } => Instruction::Call { dst, result },
             Old::FinishCallable { destination: dst } => Instruction::MakeCallable { dst },
             Old::Send { argument } => self.send_argument(function, argument),
             Old::IncPlace {
@@ -398,11 +402,12 @@ impl Tables {
                 detail: subject,
             },
             Old::Call {
+                result,
                 destination: dst,
                 name,
                 fallback,
                 arguments,
-            } => self.dynamic_call(function, dst, name, fallback, arguments),
+            } => self.dynamic_call(function, dst, name, fallback, arguments, result),
         };
         function.instructions.push(instruction);
     }

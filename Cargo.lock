@@ -1805,6 +1805,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "phera-ext-reflection"
+version = "0.1.0"
+dependencies = [
+ "phera-extension-api",
+]
+
+[[package]]
 name = "phera-ext-sqlite3"
 version = "0.1.0"
 dependencies = [
@@ -1893,6 +1900,7 @@ dependencies = [
  "phera-ext-pdo",
  "phera-ext-random",
  "phera-ext-redis",
+ "phera-ext-reflection",
  "phera-ext-sqlite3",
  "phera-ext-standard",
  "phera-ext-tokenizer",

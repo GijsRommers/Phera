@@ -59,6 +59,15 @@ pub struct Modifiers {
     pub is_readonly: bool,
 }
 
+impl Modifiers {
+    pub fn promotes_property(&self) -> bool {
+        self.visibility.is_some()
+            || self.set_visibility.is_some()
+            || self.is_readonly
+            || self.is_final
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClassKind {
     Class,

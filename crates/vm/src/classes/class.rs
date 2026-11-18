@@ -49,12 +49,14 @@ pub(crate) struct Class {
     pub(crate) property_template: Option<phera_value::PhpArray>,
     pub(crate) static_properties: Vec<PropertyDefault>,
     pub(crate) constants: HashMap<String, Rc<LinkedConstant>>,
-    pub(crate) declaration: Option<(crate::code_table::FunctionIndex, u32)>,
+    pub(crate) declaration: Option<(crate::code_table::FunctionIndex, phera_bytecode::ClassId)>,
 }
 
 /// Defaults retain their mangled keys so private ancestors do not collide.
 #[derive(Clone)]
 pub(crate) struct PropertyDefault {
+    pub(crate) set_visibility: Option<Visibility>,
+    pub(crate) is_final: bool,
     pub(crate) key: ArrayKey,
     pub(crate) value: Value,
     pub(crate) static_storage: Option<Rc<crate::reference_holders::StaticProperty>>,
@@ -154,7 +156,7 @@ pub(crate) enum Invocation {
 
 /// Lazy constants retain declaring scope and detect recursive initializers before borrowing values.
 pub(crate) struct LinkedConstant {
-    pub(crate) deprecated: Option<&'static str>,
+    pub(crate) deprecated: Option<String>,
     pub(crate) declaring: String,
     pub(crate) visibility: Visibility,
     pub(crate) is_final: bool,

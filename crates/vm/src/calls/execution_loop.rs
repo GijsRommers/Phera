@@ -225,6 +225,7 @@ impl Machine<'_> {
                 args,
                 count,
                 dst,
+                ..
             } => self.enter_direct(position, function, (args, count), dst),
             Instruction::InitMethodCall { receiver, method } => {
                 self.prepare_method(position, receiver, method)
@@ -244,7 +245,7 @@ impl Machine<'_> {
             }
             Instruction::LoadConst { dst, constant } => self.load_constant(position, dst, constant),
             Instruction::CheckType { local, ty } => self.check_type(position, local, ty),
-            Instruction::Call { dst } => self.enter_prepared(position, dst),
+            Instruction::Call { dst, .. } => self.enter_prepared(position, dst),
             Instruction::New { class } => self.new_object(position, class),
             Instruction::InitDynamicCall { callee } => self.prepare_closure(position, callee),
             Instruction::FetchThis { dst } | Instruction::ThisOrNull { dst } => {

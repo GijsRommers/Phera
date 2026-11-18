@@ -185,6 +185,32 @@ impl Vm {
                 is_abstract: method.is_abstract,
                 body: MethodBody::User(self.code.index_in(&unit, Some(method.function.index()))),
             });
+            let key = method_name.to_ascii_lowercase();
+            if unit
+                .function_metadata
+                .get(method.function.index())
+                .is_some_and(|metadata| {
+                    crate::attribute_diagnostics::attribute(
+                        &metadata.declaration.attributes,
+                        "Override",
+                    )
+                    .is_some()
+                })
+                && methods
+                    .get(&key)
+                    .is_none_or(|method| method.visibility == Visibility::Private)
+                && !interfaces
+                    .iter()
+                    .any(|interface| interface.methods.contains_key(&key))
+            {
+                return Err(super::declaration_errors::method_failure(
+                    &self.code,
+                    &linked,
+                    NativeError::error(format!(
+                        "{name}::{method_name}() has #[\\Override] attribute, but no matching parent method exists"
+                    )),
+                ));
+            }
             if let Some(inherited) = methods.get(&method_name.to_ascii_lowercase()) {
                 super::inheritance_checks::check_override(name, inherited, &linked)?;
                 self.check_method_contract(inherited, &linked, &unit)?;
@@ -289,7 +315,17 @@ impl Vm {
             constants.insert(
                 constant_name,
                 Rc::new(super::LinkedConstant {
-                    deprecated: None,
+                    deprecated: crate::attribute_diagnostics::attribute(
+                        &constant.metadata.attributes,
+                        "Deprecated",
+                    )
+                    .map(|attr| {
+                        self.deprecation_message(
+                            self.code.index_in(&unit, None),
+                            attr,
+                            &format!("Constant {name}::{}", unit.names[constant.name.index()]),
+                        )
+                    }),
                     declaring: name.clone(),
                     visibility: constant.visibility,
                     is_final: constant.is_final,
@@ -321,6 +357,8 @@ impl Vm {
                 _ => phera_value::Value::Null,
             };
             let mut linked = PropertyDefault {
+                set_visibility: property.set_visibility,
+                is_final: property.is_final,
                 key: key.clone(),
                 static_storage: property
                     .is_static
@@ -359,6 +397,24 @@ impl Vm {
             } else {
                 &defaults
             };
+            if crate::attribute_diagnostics::attribute(&property.metadata.attributes, "Override")
+                .is_some()
+                && !inherited.iter().any(|candidate| {
+                    candidate.name == *property_name
+                        && candidate.declaring != *name
+                        && candidate.visibility != Visibility::Private
+                })
+            {
+                return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
+                    crate::error_traces::DeclarationFailure {
+                        message: format!(
+                            "{name}::${property_name} has #[\\Override] attribute, but no matching parent property exists"
+                        ),
+                        file: unit.file.clone(),
+                        line: property.metadata.start_line as usize,
+                    },
+                ))));
+            }
             super::declaration_errors::check_property_visibility(
                 name,
                 property,
@@ -388,7 +444,7 @@ impl Vm {
             let function = self.code.index_in(&unit, Some(method.function.index()));
             self.code.set_declaring_class(function, index);
         }
-        let declaration_location = Some((self.code.index_in(&unit, None), declaration.line));
+        let declaration_location = Some((self.code.index_in(&unit, None), declaration_index));
         self.classes.insert(
             name.to_ascii_lowercase(),
             Rc::new_cyclic(|identity| Class {

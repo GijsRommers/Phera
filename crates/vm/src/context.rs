@@ -23,6 +23,12 @@ impl Diagnostics for Vm {
 }
 
 impl Context for Vm {
+    fn reflection(
+        &mut self,
+    ) -> Option<&mut dyn phera_extension_api::reflection::ReflectionContext> {
+        Some(self)
+    }
+
     fn write(&mut self, bytes: &[u8]) {
         self.out(bytes)
     }

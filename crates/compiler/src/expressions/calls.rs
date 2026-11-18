@@ -81,7 +81,13 @@ impl Compiler<'_> {
             );
         }
         let dst = self.allocate_register()?;
-        self.emit(Instruction::FinishCall { destination: dst }, line);
+        self.emit(
+            Instruction::FinishCall {
+                destination: dst,
+                result: phera_bytecode::CallResult::Used,
+            },
+            line,
+        );
         Ok(dst)
     }
 }

@@ -38,13 +38,13 @@ impl Vm {
             entry.insert(ArrayKey::str("args"), native.arguments);
             let _ = trace.push(Value::Array(Rc::new(entry)));
         }
-        for ((_, caller), (callee_index, callee)) in self
-            .frames()
-            .enumerate()
-            .rev()
-            .skip(1)
-            .zip(self.frames().enumerate().rev())
-        {
+        for callee_index in (1..self.call_stack.depth()).rev() {
+            let arguments = self.trace_arguments(callee_index);
+            let (Some(caller), Some(callee)) =
+                (self.frame_at(callee_index - 1), self.frame_at(callee_index))
+            else {
+                continue;
+            };
             let mut entry = PhpArray::new();
             entry.insert(
                 ArrayKey::str("file"),
@@ -78,7 +78,7 @@ impl Vm {
                 let kind = if callee.this().is_some() { "->" } else { "::" };
                 entry.insert(ArrayKey::str("type"), Value::from(kind));
             }
-            entry.insert(ArrayKey::str("args"), trace_arguments(self, callee));
+            entry.insert(ArrayKey::str("args"), arguments);
             let warning = self
                 .error_handlers
                 .warning_site
@@ -117,66 +117,71 @@ impl Vm {
                 }
             }
         }
-        if let Some(frame) = self.frames().next()
-            && frame.function_id().is_some()
+        if let Some(name) = self
+            .frame_at(0)
+            .filter(|frame| frame.function_id().is_some())
+            .map(|frame| frame.function().name.clone())
         {
             let mut entry = PhpArray::new();
-            entry.insert(
-                ArrayKey::str("function"),
-                Value::from(frame.function().name.clone()),
-            );
-            entry.insert(ArrayKey::str("args"), trace_arguments(self, frame));
+            entry.insert(ArrayKey::str("function"), Value::from(name));
+            entry.insert(ArrayKey::str("args"), self.trace_arguments(0));
             let _ = trace.push(Value::Array(Rc::new(entry)));
         }
         Value::Array(Rc::new(trace))
     }
 }
 
-/// PHP snapshots live, coerced parameters and flattens a variadic argument array.
-fn trace_arguments(vm: &Vm, frame: FrameView<'_>) -> Value {
-    let mut arguments = PhpArray::new();
-    for (index, parameter) in frame
-        .function()
-        .parameters
-        .iter()
-        .enumerate()
-        .take(frame.supplied_arguments())
-    {
-        let Some(Some(value)) = frame.slots(&vm.registers).get(index) else {
-            continue;
+impl Vm {
+    /// PHP snapshots live parameter values, flattening variadics and wrapping secrets.
+    fn trace_arguments(&mut self, depth: usize) -> Value {
+        let Some(frame) = self.frame_at(depth) else {
+            return Value::from(PhpArray::new());
         };
-        if parameter.variadic {
-            if let Value::Array(values) = &*value.deref() {
-                for (key, value) in values.iter() {
-                    match key {
-                        ArrayKey::Int(_) => {
-                            let _ = arguments.push(value.deref().clone());
-                        }
-                        key => {
-                            arguments.insert(key, value.deref().clone());
-                        }
+        let mut snapshot = Vec::new();
+        let params = &frame.function().parameters;
+        for (index, parameter) in params.iter().enumerate().take(frame.supplied_arguments()) {
+            let Some(Some(value)) = frame.slots(&self.registers).get(index) else {
+                continue;
+            };
+            let sensitive = crate::sensitive_parameters::is_sensitive(frame, index);
+            if parameter.variadic {
+                if let Value::Array(items) = &*value.deref() {
+                    for (key, value) in items.iter() {
+                        let name = match key {
+                            ArrayKey::String(_) => Some(key),
+                            _ => None,
+                        };
+                        snapshot.push((name, value.deref().clone(), sensitive));
                     }
                 }
+            } else {
+                snapshot.push((None, value.deref().clone(), sensitive));
             }
-        } else {
-            let _ = arguments.push(value.deref().clone());
         }
-    }
-    if !frame
-        .function()
-        .parameters
-        .iter()
-        .any(|parameter| parameter.variadic)
-    {
-        for value in vm
-            .registers
-            .window(frame.base() + frame.count(), frame.extras.arguments.extra)
-        {
-            let value = value.as_ref().unwrap_or(&Value::Null);
-            let _ = arguments.push(value.deref().clone());
+        if !params.iter().any(|parameter| parameter.variadic) {
+            for value in self
+                .registers
+                .window(frame.base() + frame.count(), frame.extras.arguments.extra)
+            {
+                let value = value.as_ref().unwrap_or(&Value::Null);
+                snapshot.push((None, value.deref().clone(), false));
+            }
         }
+        let mut arguments = PhpArray::new();
+        for (key, value, sensitive) in snapshot {
+            let value = if sensitive {
+                self.sensitive_trace_value(value)
+            } else {
+                value
+            };
+            if let Some(key) = key {
+                arguments.insert(key, value);
+            } else {
+                let _ = arguments.push(value);
+            }
+        }
+        Value::from(arguments)
     }
-    Value::Array(Rc::new(arguments))
 }
 
 /// A native warning invokes a PHP handler through an internal frame at this stack boundary.

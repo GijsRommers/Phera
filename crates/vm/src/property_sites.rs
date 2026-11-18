@@ -70,10 +70,12 @@ impl Vm {
         });
         let slot = property.map(|(slot, _)| slot);
         let write_rule = match property {
-            Some((_, property)) if !property.is_readonly => match &property.ty {
-                None => WriteRule::Untyped,
-                Some(declared) => WriteRule::Typed(declared.mask),
-            },
+            Some((_, property)) if !property.is_readonly && property.set_visibility.is_none() => {
+                match &property.ty {
+                    None => WriteRule::Untyped,
+                    Some(declared) => WriteRule::Typed(declared.mask),
+                }
+            }
             _ => WriteRule::General,
         };
         let entry = Rc::new(PropertyEntry {

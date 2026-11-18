@@ -21,6 +21,7 @@ mod access_mode;
 mod array_map;
 mod array_slots;
 mod arrays;
+mod attribute_diagnostics;
 mod autoload;
 mod callable_classes;
 mod callable_introspection;
@@ -95,6 +96,7 @@ mod iterator_instructions;
 mod iterators;
 mod locals;
 mod native_diagnostics;
+mod native_strings;
 mod object_comparison;
 mod object_iteration;
 mod operators;
@@ -107,12 +109,15 @@ mod place_mutation;
 mod places;
 mod properties;
 mod property_mutation;
+mod property_set_visibility;
 mod property_sites;
 mod property_storage;
 mod property_targets;
 mod reference_holders;
 mod references;
+mod reflection;
 mod scope_intrinsics;
+mod sensitive_parameters;
 mod spl_autoload;
 mod static_variables;
 mod string_offsets;
@@ -196,7 +201,7 @@ impl Vm {
                     name.to_owned(),
                     constant_table::GlobalConstant {
                         value: value.to_value(),
-                        deprecated,
+                        deprecated: deprecated.map(std::rc::Rc::from),
                     },
                 )
             })

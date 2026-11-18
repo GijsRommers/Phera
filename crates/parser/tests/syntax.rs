@@ -208,7 +208,9 @@ fn sexp_stmt_kind(kind: &StatementKind) -> String {
                 .collect::<Vec<_>>()
                 .join(" ")
         ),
-        StatementKind::Const { attributes, items } => format!(
+        StatementKind::Const {
+            attributes, items, ..
+        } => format!(
             "(const attrs={} {})",
             attributes.len(),
             items

@@ -16,8 +16,17 @@ impl Compiler<'_> {
             if !parameter.hooks.is_empty() {
                 return Err(self.error("Property hooks not supported yet", line));
             }
-            if parameter.modifiers.set_visibility.is_some() {
-                return Err(self.error("Asymmetric visibility not supported yet", line));
+            if parameter.modifiers.promotes_property()
+                && !declaration
+                    .name
+                    .name
+                    .rsplit_once("::")
+                    .is_some_and(|(_, method)| method.eq_ignore_ascii_case("__construct"))
+            {
+                return Err(self.error(
+                    "Cannot declare promoted property outside a constructor",
+                    self.lines.line(parameter.span.start),
+                ));
             }
         }
         Ok(())
@@ -30,7 +39,7 @@ impl Compiler<'_> {
         line: usize,
     ) -> Result<(), CompileError> {
         for parameter in parameters {
-            if parameter.modifiers.visibility.is_some() {
+            if parameter.modifiers.promotes_property() {
                 let scratch = self.allocate_register()?;
                 let source = self.local(&parameter.name)?;
                 let place = Place {

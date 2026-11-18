@@ -281,6 +281,7 @@ pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
         ..Tables::default()
     };
     tables.unit.file = source.file;
+    tables.unit.constant_metadata = source.constant_metadata;
     tables.unit.declaration_warnings = source.declaration_warnings;
     tables.unit.main = tables.function(source.main);
     tables.unit.functions = source
@@ -337,6 +338,8 @@ pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
                 .map(|property| phera_bytecode::PropertyDeclaration {
                     metadata: property.metadata,
                     promoted: property.promoted,
+                    set_visibility: property.set_visibility,
+                    is_final: property.is_final,
                     name: tables.name(&property.name),
                     visibility: property.visibility,
                     is_static: property.is_static,
