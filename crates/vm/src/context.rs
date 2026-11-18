@@ -40,6 +40,14 @@ impl Context for Vm {
         Box::pin(self.register_callback(phase, arguments))
     }
 
+    fn include_path(&self) -> phera_value::PhpString {
+        Vm::include_path(self)
+    }
+
+    fn script_path(&self) -> Option<std::path::PathBuf> {
+        Some(self.location().file.into())
+    }
+
     fn diagnostics(&mut self) -> &mut dyn Diagnostics {
         self
     }

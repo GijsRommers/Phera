@@ -189,7 +189,7 @@ pub struct Vm {
     state: RequestState,
     property_references: std::rc::Rc<std::cell::RefCell<reference_holders::ReferenceHolders>>,
     autoload: autoload::Autoloaders,
-    include_path: Option<String>,
+    include_path: Option<phera_value::PhpString>,
 }
 
 impl Vm {
@@ -249,6 +249,11 @@ impl Vm {
 
     pub fn set_sink(&mut self, sink: Box<dyn OutputSink>) {
         self.output_writer.set_sink(sink)
+    }
+
+    /// Defines a request-local constant, such as a CLI stream.
+    pub fn set_constant(&mut self, name: &str, value: Value) {
+        self.constants.insert(name.to_owned(), value);
     }
 
     /// Defines a global variable before the script starts, such as a

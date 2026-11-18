@@ -68,6 +68,7 @@ impl Runtime {
         registry.load(&phera_ext_standard::Standard);
         registry.php_module("SPL");
         registry.load(&phera_ext_tokenizer::Tokenizer);
+        registry.load(&phera_ext_streams::Streams);
         registry.load(&phera_ext_ctype::Ctype);
         registry.load(&phera_ext_date::Date);
         registry.load(&phera_ext_filter::Filter);
@@ -119,6 +120,10 @@ impl Runtime {
         let server =
             environment::cli_server(php_array(self.environment.iter()), path.as_ref(), arguments);
         vm.set_global("_SERVER", Value::from(server));
+        for (name, stream) in phera_ext_streams::standard_constants() {
+            phera_ext_streams::track_standard(vm.state_mut(), &stream);
+            vm.set_constant(name, stream);
+        }
         if let Some(sink) = sink {
             vm.set_sink(sink);
         }
@@ -159,6 +164,11 @@ impl Runtime {
         );
         *vm.state_mut().get_or_default::<RequestHeaders>() = RequestHeaders(request.headers);
         vm.prepare_web_headers_with(ResponseHead::prepare);
+        phera_ext_streams::set_request(
+            vm.state_mut(),
+            script.parent().map(Path::to_path_buf),
+            request.body.into(),
+        );
         let exit_status = vm.run(unit).await;
 
         let head = vm.state_mut().take::<ResponseHead>().unwrap_or_default();

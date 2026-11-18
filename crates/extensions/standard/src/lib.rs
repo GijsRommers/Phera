@@ -9,7 +9,6 @@ pub mod environment;
 mod math;
 mod natural;
 mod offsets;
-mod path_metadata;
 mod strings;
 mod time;
 mod version_compare;
@@ -26,9 +25,6 @@ impl Extension for Standard {
 
     fn register(&self, registry: &mut Registry) {
         registry.function(version_compare::ENTRY);
-        for entry in path_metadata::FUNCTIONS {
-            registry.function(*entry);
-        }
         strings::register(registry);
         url::register(registry);
         math::register(registry);
@@ -44,3 +40,5 @@ impl Extension for Standard {
 /// Exposes PHP comparison traversal for adversarial comparator regression tests.
 #[doc(hidden)]
 pub use arrays::zend_sort::order as php_sort_order;
+
+pub use strings::format::{Values as FormatValues, render as render_format};

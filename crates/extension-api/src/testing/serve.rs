@@ -104,6 +104,11 @@ impl Server {
         self.get(path)
     }
 
+    /// The raw response to one POST with a byte body.
+    pub fn post_one(&self, path: &str, body: &[u8]) -> String {
+        self.retry_request(path, || self.try_request("POST", path, &[], body))
+    }
+
     /// One request with optional additional headers and a body, as raw HTTP.
     pub fn request(
         &self,
@@ -133,6 +138,10 @@ impl Server {
     }
 
     fn get(&self, path: &str) -> String {
+        self.retry_request(path, || self.try_request("GET", path, &[], &[]))
+    }
+
+    fn retry_request(&self, path: &str, send: impl Fn() -> std::io::Result<String>) -> String {
         // macOS queues at most 128 connections a server has not accepted
         // yet (`kern.ipc.somaxconn`), and resets the rest of a burst; PHP's
         // built-in server queues fewer still. A request reset before any of
@@ -141,7 +150,7 @@ impl Server {
         // without a byte, so an empty response counts as a reset: no HTTP
         // server answers a request with nothing.
         for attempt in 1..=RESETS_RETRIED {
-            match self.try_get(path) {
+            match send() {
                 Err(error) if error.kind() == ErrorKind::ConnectionReset => {}
                 Ok(response) if response.is_empty() => {}
                 response => return response.expect("send the request and read its response"),
@@ -150,15 +159,6 @@ impl Server {
             std::thread::sleep(RESET_PAUSE * attempt);
         }
         panic!("{path}: the connection was reset or closed unanswered {RESETS_RETRIED} times");
-    }
-
-    fn try_get(&self, path: &str) -> std::io::Result<String> {
-        let mut stream = self.connect()?;
-        write!(
-            stream,
-            "GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
-        )?;
-        read_response(stream, path)
     }
 
     fn try_request(
@@ -178,7 +178,7 @@ impl Server {
         for (name, value) in headers {
             write!(request, "{name}: {value}\r\n")?;
         }
-        if !body.is_empty() {
+        if method == "POST" || !body.is_empty() {
             write!(request, "Content-Length: {}\r\n", body.len())?;
         }
         request.extend_from_slice(b"\r\n");
