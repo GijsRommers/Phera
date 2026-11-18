@@ -1,12 +1,38 @@
 //! The HTTP response a handler returns.
 
-/// A fully buffered HTTP response. Repeated header names (Set-Cookie) are
-/// allowed and sent in order.
-#[derive(Debug, Clone, Default)]
+use std::fs::File;
+
+/// An HTTP response. Repeated header names (Set-Cookie) are allowed and
+/// sent in order.
+#[derive(Debug, Default)]
 pub struct Response {
     pub status: u16,
     pub headers: Vec<(String, Vec<u8>)>,
-    pub body: Vec<u8>,
+    pub body: Body,
+}
+
+/// What a response sends after its headers.
+#[derive(Debug)]
+pub enum Body {
+    /// Bytes already in memory, such as everything a PHP script printed.
+    Bytes(Vec<u8>),
+    /// Part of a file, read from disk a chunk at a time while it is sent,
+    /// so that a large download never sits in memory.
+    File(FileSlice),
+}
+
+impl Default for Body {
+    fn default() -> Self {
+        Body::Bytes(Vec::new())
+    }
+}
+
+/// The next `length` bytes of an open file.
+#[derive(Debug)]
+pub struct FileSlice {
+    /// Positioned at the first byte to send.
+    pub file: File,
+    pub length: u64,
 }
 
 impl Response {
@@ -15,7 +41,7 @@ impl Response {
         Self {
             status,
             headers: Vec::new(),
-            body: Vec::new(),
+            body: Body::default(),
         }
     }
 
@@ -27,7 +53,13 @@ impl Response {
     }
 
     pub fn with_body(mut self, body: impl Into<Vec<u8>>) -> Self {
-        self.body = body.into();
+        self.body = Body::Bytes(body.into());
+        self
+    }
+
+    /// Send `length` bytes of `file`, starting where it is positioned.
+    pub fn with_file(mut self, file: File, length: u64) -> Self {
+        self.body = Body::File(FileSlice { file, length });
         self
     }
 

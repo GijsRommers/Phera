@@ -1599,6 +1599,7 @@ dependencies = [
 name = "phera-cli"
 version = "0.1.0"
 dependencies = [
+ "httpdate",
  "mimalloc",
  "phera-analyzer",
  "phera-dotenv",
