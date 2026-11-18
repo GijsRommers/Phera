@@ -94,12 +94,17 @@ pub(crate) enum HookContinuation {
         crate::hooked_property_views::ObjectVars,
         phera_value::ArrayKey,
     ),
+    NativeView(
+        Box<crate::native_property_views::NativeView>,
+        phera_value::ArrayKey,
+    ),
 }
 
 impl HookContinuation {
     pub(crate) fn native_trace(&self) -> Option<&crate::error_traces::NativeTrace> {
         match self {
             Self::ObjectVars(view, _) => Some(&view.native),
+            Self::NativeView(view, _) => Some(&view.native),
             _ => None,
         }
     }
@@ -186,6 +191,9 @@ impl Vm {
             }
             HookContinuation::ObjectVars(view, key) => {
                 self.resume_object_vars(view, key, returned.value).await
+            }
+            HookContinuation::NativeView(view, key) => {
+                self.resume_native_view(view, key, returned.value).await
             }
         }
     }

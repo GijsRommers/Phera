@@ -106,6 +106,7 @@ mod magic_properties;
 mod magic_property_write;
 mod magic_references;
 mod native_diagnostics;
+mod native_property_views;
 mod object_comparison;
 mod object_iteration;
 mod operators;
@@ -183,6 +184,7 @@ pub struct Vm {
     native_called_class: Option<std::rc::Rc<classes::Class>>,
     pending_dimension: Option<dimensions::DimensionPath>,
     returned_hook: Option<property_hook_continuation::ReturnedHook>,
+    native_view_depth: Option<usize>,
     prelinked_classes: std::collections::HashSet<(usize, usize)>,
     function_table: function_table::FunctionTable,
     /// Every loaded file and function of the request, by number.
@@ -251,6 +253,7 @@ impl Vm {
             native_called_class: None,
             pending_dimension: None,
             returned_hook: None,
+            native_view_depth: None,
             prelinked_classes: std::collections::HashSet::new(),
             function_table: function_table::FunctionTable::new(),
             code: code_table::CodeTable::default(),

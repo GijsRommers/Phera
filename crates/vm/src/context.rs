@@ -116,6 +116,20 @@ impl Context for Vm {
         }
     }
 
+    fn property_view_can_suspend(
+        &self,
+        object: &phera_value::Object,
+        purpose: phera_extension_api::PropertyPurpose,
+    ) -> bool {
+        self.native_view_depth == Some(self.call_stack.depth())
+            && matches!(
+                purpose,
+                phera_extension_api::PropertyPurpose::Json
+                    | phera_extension_api::PropertyPurpose::Export
+            )
+            && self.hooked_property_class(object).is_some()
+    }
+
     fn property_view(
         &mut self,
         object: std::rc::Rc<phera_value::Object>,

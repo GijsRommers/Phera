@@ -141,6 +141,7 @@ impl Vm {
     /// Include symbol-table changes survive exceptional exit just as normal return.
     fn discard_exception_frame(&mut self) -> Result<(), NativeError> {
         self.finish_include_scope()?;
+        self.abandon_native_view();
         if let Some(frame) = self.call_stack.pop() {
             self.closure_captures
                 .retain(|capture| capture.base < frame.base());

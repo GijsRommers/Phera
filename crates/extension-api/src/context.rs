@@ -307,6 +307,15 @@ pub trait Context {
         false
     }
 
+    /// Whether the caller can return a `PropertyViewRequest` and resume later.
+    fn property_view_can_suspend(
+        &self,
+        _object: &Object,
+        _purpose: crate::PropertyPurpose,
+    ) -> bool {
+        false
+    }
+
     /// Retrieves a property view for an inspector that can await a PHP hook.
     fn property_view(
         &mut self,
