@@ -1,7 +1,10 @@
 //! Request-local values made once per loaded file: names, literals, call
 //! links and the per-instruction site caches.
 
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::{OnceCell, RefCell},
+    rc::Rc,
+};
 
 use phera_bytecode::{CompiledUnit, Constant};
 use phera_value::{PhpArray, Value};
@@ -10,6 +13,8 @@ use phera_value::{PhpArray, Value};
 /// Keyed by constant/symbol index in a retained unit; populated at first unit use.
 /// Bytecode literals never mutate, and VM-local ownership prevents cross-request reuse.
 pub(crate) struct UnitCache {
+    /// Throwable properties and trace entries share the unit's immutable filename.
+    trace_file: OnceCell<phera_value::PhpString>,
     pub(crate) names: Vec<phera_value::PhpString>,
     /// What each function symbol of the file was linked to, once its first call
     /// resolved it.
@@ -44,6 +49,14 @@ pub(crate) enum CachedSite {
 }
 
 impl UnitCache {
+    pub(crate) fn trace_file(&self, unit: &CompiledUnit) -> Value {
+        Value::String(
+            self.trace_file
+                .get_or_init(|| unit.file.as_str().into())
+                .clone(),
+        )
+    }
+
     /// IP has already advanced; the extra terminal cell covers the last instruction.
     pub(crate) fn site(&self, function: Option<usize>, ip: usize) -> Option<&RefCell<CachedSite>> {
         match function {
@@ -64,6 +77,7 @@ impl UnitCache {
     /// Make the request-local values of a file when the code table loads it.
     pub(crate) fn new(unit: &CompiledUnit) -> Self {
         Self {
+            trace_file: OnceCell::new(),
             names: unit.names.iter().map(|name| name.as_str().into()).collect(),
             symbols: RefCell::new(vec![None; unit.symbols.len()]),
             constants: unit

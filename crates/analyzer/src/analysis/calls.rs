@@ -2,6 +2,7 @@
 //! Spread arguments make counts uncertain, and variadics accept extra named arguments.
 
 use super::*;
+use phera_source::deprecations::{ItemKind, omitted};
 
 struct ResolvedCall {
     signature: Option<crate::index::Signature>,
@@ -70,17 +71,22 @@ impl Analyzer<'_> {
                 .get(&name.to_ascii_lowercase())
                 .map(|signature| (name, signature))
         });
-        if found.is_none()
-            && !candidates.iter().any(|name| {
+        if found.is_none() {
+            let excluded = candidates
+                .last()
+                .and_then(|name| omitted(ItemKind::Function, name));
+            if let Some(item) = excluded {
+                self.report(Finding::NotSupported(item), name.span);
+            } else if !candidates.iter().any(|name| {
                 self.context
                     .known
                     .contains(&Symbol::Function(name.to_ascii_lowercase()))
                     || scope
                         .known
                         .contains(&Symbol::Function(name.to_ascii_lowercase()))
-            })
-        {
-            self.report(Finding::UnknownFunction(candidates[0].clone()), name.span);
+            }) {
+                self.report(Finding::UnknownFunction(candidates[0].clone()), name.span);
+            }
         }
         let intrinsic = found
             .filter(|(name, _)| {
@@ -126,7 +132,24 @@ impl Analyzer<'_> {
             };
         };
         let signature = self.index.method(class, &method.name).cloned();
-        self.validate_method(class, &method.name, signature.as_ref(), span, access);
+        if signature.is_none()
+            && let Some(item) = self.omitted_builtin_member(ItemKind::Method, class, &method.name)
+            && self
+                .index
+                .method(
+                    class,
+                    if access.static_call() {
+                        "__callStatic"
+                    } else {
+                        "__call"
+                    },
+                )
+                .is_none()
+        {
+            self.report(Finding::NotSupported(item), span);
+        } else {
+            self.validate_method(class, &method.name, signature.as_ref(), span, access);
+        }
         // The engine synthesizes Closure::__invoke from each actual closure. The stub
         // placeholder has no usable parameter list; inferred closures use their own signature.
         let parameters = if class.eq_ignore_ascii_case("Closure")

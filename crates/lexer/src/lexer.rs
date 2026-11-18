@@ -396,7 +396,7 @@ impl<'src> Lexer<'src> {
         } else if c == '`' {
             self.advance();
             if !self.tokenizer {
-                return self.unsupported(start, "backtick shell execution");
+                return self.unsupported(start, crate::BACKTICK_OPERATOR_ERROR);
             }
             self.begin(Mode::Backquotes);
             TokenKind::Backquote
@@ -767,14 +767,8 @@ impl<'src> Lexer<'src> {
 
         if self.starts_with("${") {
             self.position += 2;
-            if self.tokenizer {
-                self.push(Mode::Varname);
-                return Ok(Some(self.token(TokenKind::DollarCurlyOpen, start)));
-            }
-            return self.unsupported(
-                start,
-                "`${...}` string interpolation (deprecated in PHP 8.2)",
-            );
+            self.push(Mode::Varname);
+            return Ok(Some(self.token(TokenKind::DollarCurlyOpen, start)));
         }
 
         self.advance();

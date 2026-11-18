@@ -251,7 +251,7 @@ nullsafe, destructuring, alternative control syntax, heredoc and nowdoc,
 `declare(strict_types=1)` with parameter and return type checks, `include` and
 autoloading, `eval`, property hooks, asymmetric visibility, the pipe operator.
 
-**Language, left out:** backticks, `${expr}` interpolation, `(real)`, short and
+**Language, left out:** backticks, `(real)`, short and
 ASP tags, `goto`, `declare(ticks)`, `__halt_compiler` data access, and
 `assert()` with side effects (assertions compile to nothing, as in production).
 Fibers come after everything else works.
@@ -293,8 +293,8 @@ What it needs most that Phera lacks, in order of use:
   `readonly` (5,000), generators (1,450 `yield`, 113 `yield from`), traits
   (415 declarations), enums (147), `match`, `?->`, first-class callables,
   asymmetric visibility. `goto` (35 uses) and `eval` (25) occur in
-  dependencies, so they are in scope after all; `${expr}` interpolation
-  does not occur and stays out.
+  dependencies, so they are in scope after all. The deprecated `"${name}"`
+  and `"${expression}"` forms remain supported with PHP’s diagnostics.
 - **Classes:** `JsonSerializable`, `ArrayAccess`, `Traversable`, `Iterator`,
   `IteratorAggregate`, `Countable` (engine interfaces); `DateTimeImmutable`
   and the date classes; `Generator`; the Reflection classes; `Redis`; the SPL

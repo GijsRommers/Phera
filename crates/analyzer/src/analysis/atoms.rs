@@ -2,6 +2,7 @@
 //! Uncertain facts become mixed rather than producing a guessed diagnostic.
 
 use super::*;
+use phera_source::deprecations::{ItemKind, omitted};
 
 impl Analyzer<'_> {
     pub fn atoms(&mut self, expression: &Expression, scope: &mut Scope, quiet: bool) -> ValueType {
@@ -55,7 +56,12 @@ impl Analyzer<'_> {
                     .known
                     .contains(&Symbol::Constant(Symbol::constant_name(n)))
         }) {
-            if name.text.starts_with("__") && name.text.ends_with("__") {
+            if let Some(item) = candidates
+                .last()
+                .and_then(|name| omitted(ItemKind::Constant, name))
+            {
+                self.report(Finding::NotSupported(item), name.span);
+            } else if name.text.starts_with("__") && name.text.ends_with("__") {
                 self.report(Finding::MagicConstant(name.text.clone()), name.span);
             } else {
                 self.report(Finding::UnknownConstant(candidates[0].clone()), name.span);
