@@ -7,6 +7,7 @@ mod plain;
 
 use std::{borrow::Cow, rc::Rc};
 
+use phera_extension_api::serialization::SerializationClass;
 use phera_extension_api::{
     ArrayKey, Context, NativeError, NativeResult, Object, PhpString, Value, args,
 };
@@ -21,6 +22,7 @@ struct Decoder<'a> {
     frames: Vec<Frame>,
     delayed: Vec<Delayed>,
     options: Options,
+    last_class: Option<(&'a [u8], Rc<SerializationClass>)>,
 }
 
 struct Frame {
@@ -79,6 +81,7 @@ pub async fn unserialize(context: &mut dyn Context, arguments: Vec<Value>) -> Na
         frames: Vec::new(),
         delayed: Vec::new(),
         options,
+        last_class: None,
     };
     let root = decoder.graph.new_place();
     let build = decoder.build(context, root).await;
