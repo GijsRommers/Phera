@@ -30,15 +30,6 @@ impl Compiler<'_> {
                 self.lines.line(identifier.span.start),
             ));
         }
-        if let Some(modifier) = &declaration.anonymous_modifier {
-            return Err(self.error(
-                format!(
-                    "Cannot use the {} modifier on an anonymous class",
-                    modifier.name
-                ),
-                self.lines.line(modifier.span.start),
-            ));
-        }
         if let Some(identifier) = &declaration.name
             && matches!(
                 identifier.name.to_ascii_lowercase().as_str(),

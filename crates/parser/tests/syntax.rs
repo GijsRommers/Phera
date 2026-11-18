@@ -108,18 +108,15 @@ fn class_modifiers_are_rejected_on_traits_and_enums() {
 }
 
 #[test]
-fn anonymous_class_keeps_illegal_modifier_location() {
-    let expression = expr("new\nabstract\nclass {}");
-    let ExpressionKind::New {
-        class: NewTarget::Anonymous(declaration),
-        ..
-    } = &expression.kind
-    else {
-        panic!("expected an anonymous class");
-    };
-    let modifier = declaration.anonymous_modifier.as_ref().unwrap();
-    assert_eq!(modifier.name, "abstract");
-    assert_eq!(modifier.span.start - expression.span.start, "new\n".len());
+fn anonymous_class_reports_illegal_modifiers_at_the_keyword() {
+    let source = "new\nabstract\nclass {}";
+    let error = err(&format!("{source};"));
+    assert!(error.is_compile_error());
+    assert_eq!(error.span.start, "<?php\nnew\n".len());
+    assert_eq!(
+        error.message,
+        "Cannot use the abstract modifier on an anonymous class"
+    );
 }
 
 /// The parse error for `<?php ...` source.

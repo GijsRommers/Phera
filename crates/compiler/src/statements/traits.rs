@@ -63,13 +63,9 @@ impl Compiler<'_> {
                     } => {
                         if let Some(modifier) = invalid_modifier {
                             let spelling = modifier.name.to_ascii_lowercase();
-                            let message = if spelling == "readonly" {
-                                "Cannot use the readonly modifier on a method".to_owned()
-                            } else {
-                                format!(
-                                    "Cannot use \"{spelling}\" as method modifier in trait alias"
-                                )
-                            };
+                            let message = format!(
+                                "Cannot use \"{spelling}\" as method modifier in trait alias"
+                            );
                             return Err(self.error(message, self.lines.line(span.start)));
                         }
                         TraitAdaptation::Alias {

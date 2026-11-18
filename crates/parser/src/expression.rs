@@ -1029,39 +1029,32 @@ impl Parser<'_> {
         };
 
         let mut modifiers = Modifiers::default();
-        let mut anonymous_modifier = None;
         loop {
             let modifier = match self.kind() {
-                TokenKind::Abstract => {
-                    modifiers.is_abstract = true;
-                    "abstract"
-                }
-                TokenKind::Final => {
-                    modifiers.is_final = true;
-                    "final"
-                }
+                TokenKind::Abstract => "abstract",
+                TokenKind::Final => "final",
                 TokenKind::Readonly => {
+                    if modifiers.is_readonly {
+                        return Err(ParseError::compile(
+                            "Multiple readonly modifiers are not allowed",
+                            self.peek_span(),
+                        ));
+                    }
                     self.bump()?;
                     modifiers.is_readonly = true;
                     continue;
                 }
                 _ => break,
             };
-            let span = self.bump()?.span;
-            anonymous_modifier.get_or_insert(phera_ast::Identifier {
-                name: modifier.into(),
-                span,
-            });
+            return Err(ParseError::compile(
+                format!("Cannot use the {modifier} modifier on an anonymous class"),
+                self.peek_span(),
+            ));
         }
 
-        if self.at(TokenKind::Class) {
+        if modifiers.is_readonly || self.at(TokenKind::Class) {
             let mut arguments = Arguments::List(vec![]);
-            let class = self.parse_anonymous_class(
-                attributes,
-                modifiers,
-                anonymous_modifier,
-                &mut arguments,
-            )?;
+            let class = self.parse_anonymous_class(attributes, modifiers, &mut arguments)?;
             return Ok(Expression {
                 kind: ExpressionKind::New {
                     class: NewTarget::Anonymous(Box::new(class)),

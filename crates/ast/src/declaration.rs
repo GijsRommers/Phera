@@ -75,8 +75,6 @@ pub struct ClassDeclaration {
     pub attributes: Vec<Attribute>,
     pub kind: ClassKind,
     pub modifiers: Modifiers,
-    /// Span of an illegal modifier in an anonymous class header.
-    pub anonymous_modifier: Option<Identifier>,
     /// `None` for an anonymous class.
     pub name: Option<Identifier>,
     /// One parent for a class; any number for an interface.

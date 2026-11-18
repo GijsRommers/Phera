@@ -48,6 +48,15 @@ fn compile_program(
     kind: SourceKind,
 ) -> Result<phera_bytecode::CompiledUnit, CompileError> {
     let ast = parsed.map_err(|error| {
+        if error.is_compile_error() {
+            return CompileError {
+                message: error.message,
+                file: file.into(),
+                line: lines.line(error.span.start),
+                parse: false,
+                scanner_diagnostics: Vec::new(),
+            };
+        }
         let display = String::from_utf8_lossy(source);
         let token = source
             .get(error.span.start..error.span.end)

@@ -228,7 +228,6 @@ impl Parser<'_> {
             attributes,
             kind,
             modifiers,
-            anonymous_modifier: None,
             name,
             extends,
             implements,
@@ -245,7 +244,6 @@ impl Parser<'_> {
         &mut self,
         attributes: Vec<Attribute>,
         modifiers: Modifiers,
-        anonymous_modifier: Option<Identifier>,
         arguments: &mut phera_ast::Arguments,
     ) -> Result<ClassDeclaration, ParseError> {
         let start = self.expect(TokenKind::Class, "'class'")?.span;
@@ -276,7 +274,6 @@ impl Parser<'_> {
             attributes,
             kind: ClassKind::Class,
             modifiers,
-            anonymous_modifier,
             name: None,
             extends,
             implements,
@@ -512,8 +509,14 @@ impl Parser<'_> {
                 TokenKind::Protected => visibility = Some(Visibility::Protected),
                 TokenKind::Private => visibility = Some(Visibility::Private),
                 TokenKind::Final => is_final = true,
-                TokenKind::Abstract | TokenKind::Static | TokenKind::Readonly => {
+                TokenKind::Abstract | TokenKind::Static => {
                     invalid_modifier = Some(self.parse_identifier()?);
+                }
+                TokenKind::Readonly => {
+                    return Err(ParseError::compile(
+                        "Cannot use the readonly modifier on a method",
+                        self.peek_span(),
+                    ));
                 }
                 _ => {}
             }
