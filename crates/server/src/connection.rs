@@ -14,6 +14,7 @@ use hyper_util::rt::{TokioIo, TokioTimer};
 use hyper_util::server::graceful::Watcher;
 use tokio::net::TcpStream;
 
+use crate::config::ConnectionLimits;
 use crate::file_body::WireBody;
 use crate::handler::Handler;
 use crate::request::{HttpVersion, Request};
@@ -27,44 +28,65 @@ pub(super) async fn handle_connection(
     local_addr: SocketAddr,
     handler: Rc<dyn Handler>,
     graceful: Watcher,
-    max_body_bytes: usize,
-    header_read_timeout: Duration,
+    limits: ConnectionLimits,
 ) {
     let service = service_fn(move |hyper_request: HyperRequest<Incoming>| {
         let handler = handler.clone();
         async move {
-            let request =
-                match to_request(hyper_request, peer, local_addr, max_body_bytes).await {
-                    Ok(request) => request,
-                    Err(BodyError::TooLarge) => {
-                        return Ok::<_, std::convert::Infallible>(to_hyper_response(
-                            Response::text(413, "request body too large\n"),
-                        ));
-                    }
-                    Err(BodyError::Read) => {
-                        return Ok::<_, std::convert::Infallible>(to_hyper_response(
-                            Response::text(400, "malformed request body\n"),
-                        ));
-                    }
-                };
-            // Run the handler on its own task so a panic becomes a 500
-            // instead of tearing down the connection task or the worker.
-            let task = tokio::task::spawn_local(async move { handler.handle(request).await });
-            let response = match task.await {
-                Ok(response) => response,
-                Err(error) if error.is_panic() => Response::text(500, "internal server error\n"),
-                Err(_) => Response::text(500, "internal server error\n"),
+            let response = match to_request(hyper_request, peer, local_addr, limits).await {
+                Ok(request) => answer(handler, request, limits.request_timeout).await,
+                Err(BodyError::TooLarge) => Response::text(413, "request body too large\n"),
+                Err(BodyError::Read) => Response::text(400, "malformed request body\n"),
+                // Part of the body is still on its way, or never comes:
+                // the connection cannot carry another request.
+                Err(BodyError::Stalled) => Response::text(408, "the request body stopped\n")
+                    .with_header("connection", "close"),
             };
-            Ok(to_hyper_response(response))
+            Ok::<_, std::convert::Infallible>(to_hyper_response(response))
         }
     });
     let connection = http1::Builder::new()
-        .header_read_timeout(header_read_timeout)
+        // hyper's one timer for "waiting for a request head" covers a new
+        // connection, a kept-alive one between requests, and a slow head.
+        .header_read_timeout(limits.idle_timeout)
         .timer(TokioTimer::new())
         .serve_connection(TokioIo::new(stream), service);
-    if let Err(error) = graceful.watch(connection).await {
+    if let Err(error) = graceful.watch(connection).await
+        && !is_ordinary_end(&error)
+    {
         eprintln!("phera-server: connection error: {error}");
     }
+}
+
+/// A connection that sat idle until its time was up, or whose client left
+/// in the middle of a request, is everyday traffic and not worth a log line.
+fn is_ordinary_end(error: &hyper::Error) -> bool {
+    error.is_timeout() || error.is_incomplete_message()
+}
+
+/// Runs the handler for one request, for at most `time_limit`.
+async fn answer(
+    handler: Rc<dyn Handler>,
+    request: Request,
+    time_limit: Option<Duration>,
+) -> Response {
+    // The handler runs on its own task so that a panic becomes a 500
+    // instead of tearing down the connection task or the worker.
+    let mut task = tokio::task::spawn_local(async move { handler.handle(request).await });
+    let finished = match time_limit {
+        None => (&mut task).await,
+        Some(limit) => match tokio::time::timeout(limit, &mut task).await {
+            Ok(finished) => finished,
+            Err(_too_long) => {
+                // Stopping the task drops everything the request held. It
+                // takes effect the next time the handler waits or yields,
+                // which a running PHP script does regularly.
+                task.abort();
+                return Response::text(504, "the request took too long\n");
+            }
+        },
+    };
+    finished.unwrap_or_else(|_| Response::text(500, "internal server error\n"))
 }
 
 /// Turn a hyper request into a [`Request`] for the handler, buffering the
@@ -73,7 +95,7 @@ async fn to_request(
     request: HyperRequest<Incoming>,
     peer: SocketAddr,
     local_addr: SocketAddr,
-    max_body_bytes: usize,
+    limits: ConnectionLimits,
 ) -> Result<Request, BodyError> {
     let (parts, body) = request.into_parts();
     let version = match parts.version {
@@ -92,7 +114,7 @@ async fn to_request(
         .iter()
         .map(|(name, value)| (name.as_str().to_string(), value.as_bytes().to_vec()))
         .collect();
-    let body = read_body(body, max_body_bytes).await?;
+    let body = read_body(body, limits).await?;
     Ok(Request {
         method: parts.method.as_str().to_string(),
         target,
@@ -135,19 +157,28 @@ fn to_hyper_response(response: Response) -> HyperResponse<WireBody> {
 enum BodyError {
     TooLarge,
     Read,
+    /// The client stopped sending in the middle of the body.
+    Stalled,
 }
 
 /// Read the whole body into memory. Once the limit is hit, remaining chunks
 /// are drained (up to a small cap) rather than buffered, so the 413 the
 /// client gets is clean and the connection stays reusable.
-async fn read_body(mut body: Incoming, limit: usize) -> Result<Vec<u8>, BodyError> {
+async fn read_body(mut body: Incoming, limits: ConnectionLimits) -> Result<Vec<u8>, BodyError> {
     const DRAIN_CAP: usize = 1024 * 1024;
     let mut buffer = Vec::new();
     let mut drained = 0usize;
-    while let Some(frame) = body.frame().await {
-        let frame = frame.map_err(|_| BodyError::Read)?;
+    loop {
+        // The clock starts again with every piece: a slow upload is fine, a
+        // silent one is not.
+        let next = tokio::time::timeout(limits.body_idle_timeout, body.frame()).await;
+        let frame = match next {
+            Err(_silent_too_long) => return Err(BodyError::Stalled),
+            Ok(None) => break,
+            Ok(Some(frame)) => frame.map_err(|_| BodyError::Read)?,
+        };
         if let Some(data) = frame.data_ref() {
-            if buffer.len() + data.len() <= limit {
+            if buffer.len() + data.len() <= limits.max_body_bytes {
                 buffer.extend_from_slice(data);
             } else {
                 drained += data.len();

@@ -60,6 +60,9 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
     if let Some(workers) = options.workers {
         config.workers = workers;
     }
+    if let Some(request_timeout) = options.request_timeout {
+        config.request_timeout = request_timeout;
+    }
     let workers = config.workers;
 
     let factory = SiteHandlerFactory {

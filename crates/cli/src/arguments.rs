@@ -3,15 +3,20 @@
 use phera_dotenv::FileSelection;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::time::Duration;
 
 pub(crate) const USAGE: &str = "\
 Usage:
   phera [run] [ENV OPTIONS] <file.php> [arguments...]   run a script
   phera serve [ENV OPTIONS] [--listen ADDRESS] [--workers N] [--compress]
-              [PATH]                      serve PATH (a directory, or one
+              [--request-timeout SECONDS] [PATH]
+                                          serve PATH (a directory, or one
                                           script that answers every request);
                                           --compress sends gzip or brotli to
-                                          clients that accept it
+                                          clients that accept it;
+                                          a request is stopped after 60
+                                          seconds unless --request-timeout
+                                          says otherwise (0: never)
   phera --dump <file.php>                 print the compiled bytecode
   phera check [--level 0|1] [--format text|json|github] [--no-progress]
               [--generate-baseline FILE] <paths...>
@@ -42,6 +47,9 @@ pub(crate) struct ServeOptions {
     /// `--compress`: gzip or brotli for clients that accept it. Off unless
     /// given, since the proxy in front usually compresses.
     pub compress: bool,
+    /// `--request-timeout`: `None` keeps the server's default, and
+    /// `Some(None)` (given as 0) lets a request run without a limit.
+    pub request_timeout: Option<Option<Duration>>,
     pub path: PathBuf,
 }
 
@@ -123,6 +131,7 @@ fn parse_serve(
         listen: SocketAddr::from(([127, 0, 0, 1], 8080)),
         workers: None,
         compress: false,
+        request_timeout: None,
         path: PathBuf::from("."),
     };
     while let Some(argument) = arguments.next() {
@@ -146,6 +155,15 @@ fn parse_serve(
                 options.workers = Some(workers);
             }
             "--compress" => options.compress = true,
+            "--request-timeout" => {
+                let value = arguments
+                    .next()
+                    .ok_or("--request-timeout needs a number of seconds.")?;
+                let seconds: u64 = value
+                    .parse()
+                    .map_err(|_| format!("Not a number of seconds: {value}"))?;
+                options.request_timeout = Some((seconds > 0).then(|| Duration::from_secs(seconds)));
+            }
             option if option.starts_with("--") => {
                 return Err(format!("Unknown option: {option}"));
             }

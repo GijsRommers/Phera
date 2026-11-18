@@ -152,16 +152,21 @@ what is missing (docs/security/http-findings.md, F3, F4, F5, F7). The limits,
 each with a default that a `[server]` section in `phera.toml` or a flag can
 change:
 
-| Limit | Default | Where it is enforced |
-| --- | --- | --- |
-| Running time of a script (`max_execution_time`, `set_time_limit()`) | 30 s under `serve`, none on the command line | at the interpreter's hand-over points (every 65,536 loop rounds or calls), which already exist; the check is one clock read there, and the request ends with PHP's "Maximum execution time of N seconds exceeded" |
-| Whole request, waiting included | 60 s | a timer around the request's task; the client gets 504 |
-| Time to send the request head | 10 s | hyper's header read timeout |
-| Idle time between body chunks, and of a kept-alive connection | 30 s and 5 s | a timer on the body stream and on the connection |
-| Size of a request body (`post_max_size`) | 8 MiB | while reading; 413 beyond it |
-| Open connections per worker | 10,000 | at accept; beyond it connections wait in the listen queue |
-| Memory of one request (`memory_limit`) | 128 MiB | to be decided: see the options weighed in pull request `fix/deep-source-and-class-chains` |
-| Buffered response | 64 KiB, then it streams | output is handed to the connection in chunks once the buffer passes the threshold, and the script waits while the client is slow (so a slow reader costs a suspended task, not memory) |
+| Limit | Default | Where it is enforced | Built |
+| --- | --- | --- | --- |
+| Whole request, waiting included (`--request-timeout`) | 60 s | a timer around the request's task. The task is stopped at its next wait or hand-over point and the client gets 504 | yes |
+| A silent connection: before its first request, between two requests, and while a request head arrives | 75 s | hyper's header read timer, which covers all three. Longer than the 60 s after which proxies commonly drop idle connections, so that Phera is never the side that closes a connection the proxy is about to reuse | yes |
+| Pause between two pieces of a request body | 30 s | a timer on each read; 408 and the connection is closed | yes |
+| Size of a request body (`post_max_size`) | 8 MiB | while reading; 413 beyond it | yes |
+| Open connections per worker | 10,000 | a worker takes a free slot before it accepts; beyond the limit, connections wait in the operating system's queue | yes |
+| Running time of a script (`max_execution_time`, `set_time_limit()`) | 30 s under `serve`, none on the command line | at the interpreter's hand-over points (every 65,536 loop rounds or calls), which already exist; the check is one clock read there, and the request ends with PHP's "Maximum execution time of N seconds exceeded" | no |
+| Memory of one request (`memory_limit`) | 128 MiB | to be decided | no |
+| Buffered response | 64 KiB, then it streams | output is handed to the connection in chunks once the buffer passes the threshold, and the script waits while the client is slow (so a slow reader costs a suspended task, not memory) | no; static files are sent in pieces already |
+
+The request timeout and PHP's own `max_execution_time` are two limits, as
+with nginx and PHP-FPM: the first counts everything, waiting for a database
+included, and ends in a plain 504; the second counts running time and ends
+in PHP's fatal error, which a shutdown function can still see.
 
 Errors: under `serve`, an uncaught error answers 500 with a generic body and
 writes the message, file and line to the log; `display_errors=1` shows them in
