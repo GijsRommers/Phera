@@ -19,6 +19,10 @@ impl OutputSink for Stdout {
         let _ = stdout.write_all(bytes);
         let _ = stdout.flush();
     }
+
+    fn flush(&mut self) {
+        let _ = io::stdout().flush();
+    }
 }
 
 pub(crate) fn script(script: &str, arguments: &[String], files: FileSelection) -> ExitCode {

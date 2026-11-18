@@ -6,7 +6,10 @@ use crate::Vm;
 
 impl Vm {
     pub(crate) fn defined_constants(&self, categorize: bool) -> Value {
-        let native = self.registry.constant_names();
+        let output = crate::output_buffer::CONSTANTS
+            .iter()
+            .map(|&(name, _)| (name, "Core"));
+        let native = self.registry.constant_names().chain(output);
         let user = self.constants.user_names().map(|name| (name, "user"));
         let constants = native.chain(user).filter_map(|(name, module)| {
             self.constants

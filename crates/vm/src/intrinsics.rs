@@ -5,6 +5,7 @@
 pub(crate) enum Intrinsic {
     /// Callback mapping needs the request callable resolver.
     ArrayMap,
+    Output(crate::output_buffer::OutputFunction),
     Clone,
     /// Request-level PHP handlers use VM callable resolution.
     Handler(crate::error_handlers::HandlerFunction),
@@ -99,6 +100,8 @@ impl Intrinsic {
                     Self::Class(function)
                 } else if let Some(function) = crate::spl_autoload::SplAutoload::resolve(name) {
                     Self::SplAutoload(function)
+                } else if let Some(function) = crate::output_buffer::OutputFunction::resolve(name) {
+                    Self::Output(function)
                 } else {
                     Self::Runtime(crate::function_introspection::RuntimeFunction::resolve(
                         name,
@@ -142,6 +145,7 @@ impl Intrinsic {
             Self::Class(function) => Some(function.parameters()),
             Self::SplAutoload(function) => Some(function.parameters()),
             Self::Runtime(function) => Some(function.parameters()),
+            Self::Output(function) => Some(function.parameters()),
             _ => None,
         }
     }
@@ -189,6 +193,11 @@ impl Intrinsic {
                 .map(|function| function.name()),
         )
         .chain(
+            crate::output_buffer::OutputFunction::ALL
+                .iter()
+                .map(|function| function.name()),
+        )
+        .chain(
             crate::function_introspection::RuntimeFunction::ALL
                 .iter()
                 .map(|function| function.name()),
@@ -199,6 +208,7 @@ impl Intrinsic {
     pub(crate) fn named_default(self, position: usize) -> phera_value::Value {
         use phera_value::Value;
         match (self, position) {
+            (Self::Output(crate::output_buffer::OutputFunction::Start), 1) => Value::Int(0),
             (Self::IsCallable, 1) => Value::Bool(false),
             (Self::SplAutoload(crate::spl_autoload::SplAutoload::Register), 1) => Value::Bool(true),
             _ => Value::Null,
