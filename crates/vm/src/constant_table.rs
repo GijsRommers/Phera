@@ -43,14 +43,14 @@ impl ConstantTable {
             ("EXTR_PREFIX_IF_EXISTS", 5),
             ("EXTR_IF_EXISTS", 6),
             ("EXTR_REFS", 256),
-        ] {
+        ]
+        .into_iter()
+        .chain(crate::output_buffer::CONSTANTS.iter().copied())
+        {
             values.entry(name.into()).or_insert(GlobalConstant {
                 value: Value::Int(number),
                 deprecated: None,
             });
-        }
-        for &(name, value) in crate::output_buffer::CONSTANTS {
-            values.insert(name.into(), Value::Int(value));
         }
         Self {
             values,

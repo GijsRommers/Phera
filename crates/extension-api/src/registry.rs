@@ -77,6 +77,7 @@ pub struct Registry {
     classes: Vec<ClassEntry>,
 }
 
+#[derive(Clone)]
 struct NativeConstant {
     value: ConstantValue,
     module: &'static str,
