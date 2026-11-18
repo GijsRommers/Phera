@@ -169,7 +169,7 @@ impl Vm {
             .ok_or_else(|| internal_error!("native target"))?;
         if !details.extra_named.is_empty()
             && let CallTarget::Native(mut entry) = callee.target
-            && let Some(handler) = entry.extra_named_handler
+            && let Some(handler) = self.registry.extra_named_handler(entry.name)
         {
             let mut arguments = self.call_stack.native_arguments();
             let mut extra = details.extra_named.iter().map(|(slot, _)| *slot).peekable();

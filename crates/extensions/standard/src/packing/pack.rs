@@ -19,12 +19,7 @@ pub const PACK: FunctionEntry = FunctionEntry::asynchronous(
             result.map_err(|error| context.native_call_error("pack", &arguments, error))
         })
     },
-)
-.on_extra_named(|_, _| {
-    Err(NativeError::argument_count_error(
-        "pack() does not accept unknown named parameters",
-    ))
-});
+);
 
 struct Field {
     symbol: u8,

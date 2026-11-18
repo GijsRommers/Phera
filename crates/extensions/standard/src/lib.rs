@@ -30,8 +30,7 @@ impl Extension for Standard {
         url::register(registry);
         math::register(registry);
         arrays::register(registry);
-        registry.function(packing::PACK);
-        registry.function(packing::UNPACK);
+        packing::register(registry);
         constants::register(registry);
         for entry in natural::FUNCTIONS.iter().chain(time::FUNCTIONS) {
             registry.function(*entry);
