@@ -7,6 +7,16 @@ use phera_value::{ArrayKey, PhpArray, Value};
 use crate::{Vm, calls::frame::FrameView};
 
 impl Vm {
+    pub(crate) fn exception_location(&self) -> (Value, usize) {
+        if let Some(location) = &self.diagnostic_location {
+            (Value::from(location.file.as_str()), location.line)
+        } else if let Some(frame) = self.current() {
+            (frame.cache().trace_file(frame.unit()), frame.line())
+        } else {
+            (Value::from("Unknown"), 0)
+        }
+    }
+
     /// Frame entries point at the caller's call instruction and omit the main frame.
     pub(crate) fn throwable_trace(&mut self, origin: crate::exceptions::TraceOrigin) -> Value {
         let mut trace = PhpArray::new();
@@ -14,10 +24,10 @@ impl Vm {
             .then(|| self.failed_native.take())
             .flatten()
         {
-            let location = self.location();
+            let (file, line) = self.exception_location();
             let mut entry = PhpArray::new();
-            entry.insert(ArrayKey::str("file"), Value::from(location.file));
-            entry.insert(ArrayKey::str("line"), Value::Int(location.line as i64));
+            entry.insert(ArrayKey::str("file"), file);
+            entry.insert(ArrayKey::str("line"), Value::Int(line as i64));
             if let Some((class, method)) = native.name.split_once("::") {
                 entry.insert(ArrayKey::str("function"), Value::from(method));
                 entry.insert(ArrayKey::str("class"), Value::from(class));
@@ -38,7 +48,7 @@ impl Vm {
             let mut entry = PhpArray::new();
             entry.insert(
                 ArrayKey::str("file"),
-                Value::from(caller.unit().file.clone()),
+                caller.cache().trace_file(caller.unit()),
             );
             entry.insert(ArrayKey::str("line"), Value::Int(caller.line() as i64));
             if callee.function_id().is_none()
