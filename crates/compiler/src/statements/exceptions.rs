@@ -15,7 +15,7 @@ use crate::policies::{DeclarationTiming, NameKind};
 use crate::{CompileError, Compiler};
 
 /// Whether an exit must call finally or discard a continuation already executing it.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FinallyPhase {
     Pending,
     Running,
@@ -23,6 +23,7 @@ pub(crate) enum FinallyPhase {
 
 /// Lexical cleanup state is compile-only; entering a PHP try emits no instruction.
 pub(crate) struct FinallyScope {
+    pub(crate) start: usize,
     pub(crate) state: Reg,
     pub(crate) loop_depth: usize,
     pub(crate) phase: FinallyPhase,
@@ -47,6 +48,7 @@ impl Compiler<'_> {
             .transpose()?;
         if let Some(state) = state {
             self.finalies.push(FinallyScope {
+                start: self.position(),
                 state,
                 loop_depth: self.loops.len(),
                 phase: FinallyPhase::Pending,
@@ -191,24 +193,13 @@ impl Compiler<'_> {
         Ok(())
     }
 
-    /// Structured exits run only finally scopes inside the loop being exited.
-    pub(crate) fn emit_finally_exits(
-        &mut self,
-        loop_depth: Option<usize>,
-        reason: FinallyEntry,
-        line: usize,
-    ) {
-        for index in (0..self.finalies.len()).rev() {
-            if loop_depth.is_none_or(|depth| self.finalies[index].loop_depth > depth) {
-                self.emit_finally_exit(index, reason, line);
-            }
-        }
-    }
-
     /// An exit from the currently executing finally supersedes its saved exception or return.
-    fn emit_finally_exit(&mut self, index: usize, reason: FinallyEntry, line: usize) {
-        let state = self.finalies[index].state;
-        match self.finalies[index].phase {
+    pub(super) fn emit_finally_exit(&mut self, index: usize, reason: FinallyEntry, line: usize) {
+        let Some(scope) = self.finalies.get(index) else {
+            return;
+        };
+        let state = scope.state;
+        match scope.phase {
             FinallyPhase::Pending => {
                 let call = self.emit(
                     Instruction::FinallyCall {
