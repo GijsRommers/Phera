@@ -110,14 +110,14 @@ impl Vm {
         }
         cloned.update(|properties| {
             let mut copied = original.to_array();
-            if copied.values().any(|value| matches!(value, Value::Reference(cell) if Rc::strong_count(cell) == 1 && !value.is_object())) {
-                for (_, value) in copied.iter_mut() {
-                    if let Value::Reference(cell) = value
-                        && Rc::strong_count(cell) == 2 && !cell.borrow().is_object()
-                    {
-                        let detached = cell.borrow().clone();
-                        *value = detached;
-                    }
+            for (_, value) in copied.iter_mut() {
+                // The two holders are the old and new slots. With no PHP alias,
+                // assigning the new slot must leave the old property alone.
+                if let Value::Reference(cell) = value
+                    && Rc::strong_count(cell) == 2
+                {
+                    let detached = cell.borrow().clone();
+                    *value = detached;
                 }
             }
             *properties = copied;
