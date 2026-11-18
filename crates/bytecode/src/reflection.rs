@@ -61,9 +61,8 @@ pub struct AttributeArgument {
 /// Source information shared by declarations and reflected members.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DeclarationMetadata {
-    pub start_line: u32,
-    pub end_line: u32,
-    pub doc_comment: Option<Vec<u8>>,
+    pub span: Span,
+    pub doc_comment: Span,
     pub attributes: Vec<Attribute>,
 }
 

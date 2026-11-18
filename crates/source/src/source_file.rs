@@ -1,7 +1,7 @@
 //! Efficient source offset to line conversion for generated PHP.
 
 /// Byte offsets of line beginnings; lookup is logarithmic even in generated files.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LineTable {
     starts: Vec<usize>,
     first_line: usize,

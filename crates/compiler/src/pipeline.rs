@@ -35,6 +35,12 @@ pub(super) fn compile_on_stack(
     match result {
         Ok(mut unit) => {
             unit.scanner_diagnostics = scanner_diagnostics;
+            if !unit.classes.is_empty()
+                || !unit.function_metadata.is_empty()
+                || !unit.constant_metadata.is_empty()
+            {
+                unit.reflection_lines = Some(lines);
+            }
             Ok(unit)
         }
         Err(mut error) => {
@@ -90,7 +96,7 @@ fn compile_program(
             scanner_diagnostics: Vec::new(),
         }
     })?;
-    let reflection_initializers = RefCell::new(Vec::new());
+    let reflection = crate::context::ReflectionInputs::default();
     let mut compiler = Compiler::new(
         file,
         source,
@@ -98,7 +104,7 @@ fn compile_program(
         "{main}",
         "",
         compile_diagnostics,
-        &reflection_initializers,
+        &reflection,
     );
     if let SourceKind::Eval { anonymous_seed } = kind {
         compiler.anonymous_classes.set(anonymous_seed);
@@ -129,12 +135,15 @@ pub(super) fn finish(
     mut compiler: Compiler<'_>,
     source: &[u8],
 ) -> Result<phera_bytecode::CompiledUnit, CompileError> {
-    let reflection_initializers = compiler.reflection_initializers.take();
+    let reflection_initializers = compiler.reflection.initializers.take();
+    let keep_source =
+        !reflection_initializers.is_empty() || compiler.reflection.has_doc_comments.get();
     let unit = CompiledUnit {
         main: compiler.finish(),
-        reflection_source: (!reflection_initializers.is_empty()).then(|| source.into()),
+        reflection_source: keep_source.then(|| source.into()),
         reflection_initializers,
         constant_metadata: compiler.constant_metadata,
+        has_link_attributes: compiler.reflection.has_link_attributes.get(),
         declaration_warnings: compiler.declaration_warnings,
         functions: compiler.functions,
         hoisted: compiler.hoisted,

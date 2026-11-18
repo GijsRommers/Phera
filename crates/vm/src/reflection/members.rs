@@ -100,7 +100,7 @@ impl Vm {
                         .find(|candidate| unit.names[candidate.name.index()] == property.name)
                 {
                     info.promoted = declared.promoted;
-                    info.source = Some(source_info(&unit.file, &declared.metadata));
+                    info.source = Some(source_info(unit, &declared.metadata));
                     info.attributes = self.reflection_attributes(
                         first,
                         &declared.metadata.attributes,
@@ -164,7 +164,7 @@ impl Vm {
                         .iter()
                         .find(|candidate| &unit.names[candidate.name.index()] == name)
                 {
-                    info.source = Some(source_info(&unit.file, &declared.metadata));
+                    info.source = Some(source_info(unit, &declared.metadata));
                     info.attributes = self.reflection_attributes(
                         first,
                         &declared.metadata.attributes,

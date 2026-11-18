@@ -284,6 +284,7 @@ pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
     tables.unit.reflection_initializers = source.reflection_initializers;
     tables.unit.reflection_source = source.reflection_source;
     tables.unit.constant_metadata = source.constant_metadata;
+    tables.unit.has_link_attributes = source.has_link_attributes;
     tables.unit.declaration_warnings = source.declaration_warnings;
     tables.unit.main = tables.function(source.main);
     tables.unit.functions = source

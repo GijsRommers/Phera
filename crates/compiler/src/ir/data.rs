@@ -127,6 +127,7 @@ pub struct Function {
 pub struct CompiledUnit {
     pub reflection_initializers: Vec<phera_bytecode::reflection::InitializerSource>,
     pub reflection_source: Option<Box<[u8]>>,
+    pub has_link_attributes: bool,
     pub constant_metadata:
         std::collections::HashMap<String, phera_bytecode::reflection::DeclarationMetadata>,
     pub declaration_warnings: Vec<phera_bytecode::DeclarationWarning>,

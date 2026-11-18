@@ -327,7 +327,7 @@ impl Vm {
         if let Some((first, index)) = class.declaration {
             let unit = self.code.unit(first);
             if let Some(declaration) = unit.classes.get(index.index()) {
-                source = Some(source_info(&unit.file, &declaration.metadata));
+                source = Some(source_info(unit, &declaration.metadata));
                 attributes = self.reflection_attributes(
                     first,
                     &declaration.metadata.attributes,
@@ -522,13 +522,27 @@ impl Vm {
 }
 
 fn source_info(
-    file: &str,
+    unit: &phera_bytecode::CompiledUnit,
     metadata: &phera_bytecode::reflection::DeclarationMetadata,
 ) -> SourceInfo {
+    let line = |offset| {
+        unit.reflection_lines
+            .as_ref()
+            .map_or(0, |lines| lines.line(offset) as u32)
+    };
+    let comment = metadata.doc_comment;
+    let doc_comment = (comment.start < comment.end)
+        .then(|| {
+            unit.reflection_source
+                .as_deref()?
+                .get(comment.start..comment.end)
+        })
+        .flatten()
+        .map(<[u8]>::to_vec);
     SourceInfo {
-        file: file.to_owned(),
-        start_line: metadata.start_line,
-        end_line: metadata.end_line,
-        doc_comment: metadata.doc_comment.clone(),
+        file: unit.file.clone(),
+        start_line: line(metadata.span.start),
+        end_line: line(metadata.span.end.saturating_sub(1)),
+        doc_comment,
     }
 }

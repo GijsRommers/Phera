@@ -219,7 +219,7 @@ impl Vm {
                 end_line: body.definition_line,
                 doc_comment: None,
             },
-            |metadata| source_info(&unit.file, &metadata.declaration),
+            |metadata| source_info(unit, &metadata.declaration),
         ));
         if let Some(metadata) = metadata {
             reflected.attributes = self.reflection_attributes(

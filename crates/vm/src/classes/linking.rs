@@ -200,6 +200,7 @@ impl Vm {
                 ))));
             }
         }
+        let unit_first = self.code.index_in(&unit, None);
         let mut methods = parent
             .as_ref()
             .map(|class| class.methods.clone())
@@ -214,19 +215,20 @@ impl Vm {
                 is_static: method.is_static,
                 is_final: method.is_final,
                 is_abstract: method.is_abstract,
-                body: MethodBody::User(self.code.index_in(&unit, Some(method.function.index()))),
+                body: MethodBody::User(self.code.declared(unit_first, method.function.index())),
             });
             let key = method_name.to_ascii_lowercase();
-            if unit
-                .function_metadata
-                .get(method.function.index())
-                .is_some_and(|metadata| {
-                    crate::attribute_diagnostics::attribute(
-                        &metadata.declaration.attributes,
-                        "Override",
-                    )
-                    .is_some()
-                })
+            if unit.has_link_attributes
+                && unit
+                    .function_metadata
+                    .get(method.function.index())
+                    .is_some_and(|metadata| {
+                        crate::attribute_diagnostics::attribute(
+                            &metadata.declaration.attributes,
+                            "Override",
+                        )
+                        .is_some()
+                    })
                 && methods
                     .get(&key)
                     .is_none_or(|method| method.visibility == Visibility::Private)
@@ -330,10 +332,15 @@ impl Vm {
             &self.registry,
         )?;
         let hooks = super::operations::user_hooks(&methods, parent.as_deref(), operations);
-        let mut constants =
-            self.link_class_constants(declaration, &unit, parent.as_ref(), &interfaces)?;
+        let mut constants = self.link_class_constants(
+            declaration,
+            &unit,
+            unit_first,
+            parent.as_ref(),
+            &interfaces,
+        )?;
         let (mut defaults, mut static_properties) =
-            self.link_class_properties(declaration, &unit, parent.as_ref())?;
+            self.link_class_properties(declaration, &unit, unit_first, parent.as_ref())?;
         if !traits.is_empty() {
             self.compose_trait_members(
                 declaration,
@@ -363,10 +370,10 @@ impl Vm {
         self.classes.order.push(name.clone());
         let index = self.classes.next_index();
         for method in &declaration.methods {
-            let function = self.code.index_in(&unit, Some(method.function.index()));
+            let function = self.code.declared(unit_first, method.function.index());
             self.code.set_declaring_class(function, index);
         }
-        let declaration_location = Some((self.code.index_in(&unit, None), declaration_index));
+        let declaration_location = Some((unit_first, declaration_index));
         self.classes.insert(
             name.to_ascii_lowercase(),
             Rc::new_cyclic(|identity| Class {

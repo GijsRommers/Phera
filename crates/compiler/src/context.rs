@@ -22,6 +22,14 @@ pub(super) struct Loop {
     pub(super) breaks: Vec<usize>,
     pub(super) continues: Vec<usize>,
 }
+/// Source retained only for comments and initializer expressions that reflection may read.
+#[derive(Default)]
+pub(crate) struct ReflectionInputs {
+    pub(crate) initializers: RefCell<Vec<InitializerSource>>,
+    pub(crate) has_doc_comments: Cell<bool>,
+    pub(crate) has_link_attributes: Cell<bool>,
+}
+
 /// Mutable AST-to-IR state for one PHP function, sharing source locations.
 pub(super) struct Compiler<'ast> {
     pub(super) file: &'ast str,
@@ -48,7 +56,7 @@ pub(super) struct Compiler<'ast> {
     pub(super) class_scope: Option<String>,
     pub(super) trait_scope: Option<String>,
     pub(super) imports: Option<Imports>,
-    pub(super) reflection_initializers: &'ast RefCell<Vec<InitializerSource>>,
+    pub(super) reflection: &'ast ReflectionInputs,
 }
 impl<'ast> Compiler<'ast> {
     /// Start an independent function builder in the current namespace.
@@ -59,7 +67,7 @@ impl<'ast> Compiler<'ast> {
         name: &str,
         namespace: &str,
         compile_diagnostics: &'ast RefCell<Vec<CompileDiagnostic>>,
-        reflection_initializers: &'ast RefCell<Vec<InitializerSource>>,
+        reflection: &'ast ReflectionInputs,
     ) -> Self {
         Self {
             file,
@@ -86,7 +94,7 @@ impl<'ast> Compiler<'ast> {
             class_scope: None,
             trait_scope: None,
             imports: None,
-            reflection_initializers,
+            reflection,
         }
     }
 

@@ -55,7 +55,7 @@ fn compile_on_stack(
         return Err(error());
     };
     let diagnostics = RefCell::new(Vec::new());
-    let nested_initializers = RefCell::new(Vec::new());
+    let reflection = crate::context::ReflectionInputs::default();
     let mut compiler = Compiler::new(
         file,
         &fragment,
@@ -63,7 +63,7 @@ fn compile_on_stack(
         &initializer.function,
         &initializer.namespace,
         &diagnostics,
-        &nested_initializers,
+        &reflection,
     );
     compiler.class_scope.clone_from(&initializer.scope);
     compiler.imports.clone_from(&initializer.imports);
@@ -82,7 +82,8 @@ fn compile_on_stack(
     let result = compiler.compile_expression(expression)?;
     compiler.function.name = "{reflection initializer}".into();
     compiler.emit(Instruction::Return(result), initializer.first_line);
-    let unit = crate::pipeline::finish(compiler, &fragment)?;
+    let mut unit = crate::pipeline::finish(compiler, &fragment)?;
+    unit.reflection_lines = Some(lines);
     Ok(CompiledInitializer {
         unit,
         class_constant,

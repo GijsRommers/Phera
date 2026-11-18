@@ -209,7 +209,7 @@ impl<'ast> Compiler<'ast> {
             name,
             &self.namespace,
             self.compile_diagnostics,
-            self.reflection_initializers,
+            self.reflection,
         );
         builder.anonymous_classes = self.anonymous_classes.clone();
         if name.starts_with("{closure:") || name.contains("::") {

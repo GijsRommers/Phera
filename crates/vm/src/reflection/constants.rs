@@ -25,7 +25,7 @@ impl Vm {
                         AttributeTarget::Constant,
                         None,
                     );
-                    source_info(&unit.file, metadata)
+                    source_info(unit, metadata)
                 })
             }
             Some(ConstantOrigin::Define(function)) => Some(SourceInfo {

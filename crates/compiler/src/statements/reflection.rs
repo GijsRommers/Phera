@@ -22,15 +22,18 @@ impl Compiler<'_> {
         scope: Option<&str>,
         placement: AttributePlacement,
     ) -> Result<DeclarationMetadata, CompileError> {
+        if doc_comment.is_some() {
+            self.reflection.has_doc_comments.set(true);
+        }
+        let attributes = if attributes.is_empty() {
+            Vec::new()
+        } else {
+            self.compile_attributes(attributes, scope, placement)?
+        };
         Ok(DeclarationMetadata {
-            start_line: self.lines.line(span.start) as u32,
-            end_line: self.lines.line(span.end.saturating_sub(1)) as u32,
-            doc_comment: doc_comment.and_then(|comment| {
-                self.source
-                    .get(comment.start..comment.end)
-                    .map(<[u8]>::to_vec)
-            }),
-            attributes: self.compile_attributes(attributes, scope, placement)?,
+            span,
+            doc_comment: doc_comment.unwrap_or_default(),
+            attributes,
         })
     }
 
@@ -40,6 +43,9 @@ impl Compiler<'_> {
         scope: Option<&str>,
         placement: AttributePlacement,
     ) -> Result<Vec<phera_bytecode::reflection::Attribute>, CompileError> {
+        if attributes.is_empty() {
+            return Ok(Vec::new());
+        }
         let mut compiled = Vec::with_capacity(attributes.len());
         for attribute in attributes {
             if self.attribute_includes_target(attribute, placement) {
@@ -84,6 +90,10 @@ impl Compiler<'_> {
                 let name = self
                     .resolve(&attribute.name, crate::policies::NameKind::Class)
                     .0;
+                if name.eq_ignore_ascii_case("Override") || name.eq_ignore_ascii_case("Deprecated")
+                {
+                    self.reflection.has_link_attributes.set(true);
+                }
                 compiled.push(phera_bytecode::reflection::Attribute {
                     name,
                     line: self.lines.line(attribute.span.start),
@@ -157,7 +167,7 @@ impl Compiler<'_> {
             ExpressionKind::Array(items) if items.is_empty() => return Initializer::EmptyArray,
             _ => {}
         }
-        let mut initializers = self.reflection_initializers.borrow_mut();
+        let mut initializers = self.reflection.initializers.borrow_mut();
         let index = initializers.len();
         initializers.push(InitializerSource {
             span: expression.span,
