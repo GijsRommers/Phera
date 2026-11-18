@@ -144,8 +144,8 @@ impl Vm {
         if let Some(frame) = self.call_stack.pop() {
             self.closure_captures
                 .retain(|capture| capture.base < frame.base());
-            self.registers.truncate(frame.base());
-            self.call_stack.abandon_calls_from(frame.base());
+            self.registers.truncate(frame.start());
+            self.call_stack.abandon_calls_from(frame.start());
         }
         Ok(())
     }

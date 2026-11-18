@@ -33,11 +33,7 @@ impl Vm {
         }
         extras.dynamic_count = Some(count + 1);
         extras.dynamic.insert(name.into(), register);
-        for call in &mut self.call_stack.preparing {
-            if call.window.base >= insertion {
-                call.window.base += 1;
-            }
-        }
+        self.call_stack.shift_calls_from(insertion);
         Ok(register)
     }
 

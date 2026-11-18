@@ -109,10 +109,7 @@ impl Vm {
                                     property.declaring
                                 )));
                             }
-                            let scope = self
-                                .current()
-                                .and_then(|frame| frame.method())
-                                .map(|context| &context.scope);
+                            let scope = self.current().and_then(|frame| frame.scope());
                             if crate::property_storage::read(object, key).is_some()
                                 || steps.peek().is_some()
                             {
@@ -205,8 +202,8 @@ impl Vm {
         }
         let scope = self
             .current()
-            .and_then(|frame| frame.method())
-            .map(|context| context.scope.name.as_str());
+            .and_then(|frame| frame.scope())
+            .map(|scope| scope.name.as_str());
         if class.defaults.iter().any(|property| {
             property.name == name
                 && (property.visibility != phera_bytecode::Visibility::Private
