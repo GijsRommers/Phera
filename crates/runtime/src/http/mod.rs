@@ -27,6 +27,10 @@ pub struct HttpRequest {
     pub body: Vec<u8>,
     pub remote_addr: SocketAddr,
     pub local_addr: SocketAddr,
+    /// The client reached the site over HTTPS, as far as the server knows:
+    /// a trusted proxy in front said so. Scripts see it as
+    /// `$_SERVER['HTTPS'] === 'on'`.
+    pub https: bool,
 }
 
 impl HttpRequest {
