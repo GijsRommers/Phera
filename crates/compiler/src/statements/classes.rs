@@ -232,6 +232,7 @@ impl Compiler<'_> {
         }
         let mut builder = Compiler::new(
             self.file,
+            self.source,
             self.lines,
             "{initializer}",
             &self.namespace,

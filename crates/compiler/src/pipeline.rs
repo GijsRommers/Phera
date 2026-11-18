@@ -90,7 +90,7 @@ fn compile_program(
             scanner_diagnostics: Vec::new(),
         }
     })?;
-    let mut compiler = Compiler::new(file, lines, "{main}", "", compile_diagnostics);
+    let mut compiler = Compiler::new(file, source, lines, "{main}", "", compile_diagnostics);
     compiler.function.dynamic_scope = true;
     if let Err(mut error) = compiler.block(&ast.statements, DeclarationTiming::Hoisted) {
         error
