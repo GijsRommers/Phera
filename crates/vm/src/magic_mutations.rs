@@ -205,7 +205,7 @@ impl Vm {
                     if let Some(method) = self.property_hook(&class, object, name, hook) {
                         let value = self
                             .invoke_property_hook(
-                                class,
+                                class.clone(),
                                 object.clone(),
                                 hook,
                                 name.clone(),
@@ -223,6 +223,9 @@ impl Vm {
                             }
                             return Ok(OverloadedMutation::Handled);
                         }
+                        let value = self
+                            .validate_getter_value(&class, slot.as_ref(), value)
+                            .await?;
                         self.warn_indirect_magic_property(object, &display, &value);
                         if last {
                             return Err(NativeError::error(

@@ -270,19 +270,8 @@ impl Vm {
                 None,
             )
             .await?;
-        if let Some(slot) = accessible
-            && let Some(property) = class.defaults.iter().find(|property| property.key == slot)
-            && let Some(ty) = &property.ty
-        {
-            let converted = self.coerce_property(result.deref().clone(), property, ty)?;
-            if let Value::Reference(reference) = &result {
-                *reference
-                    .try_borrow_mut()
-                    .map_err(|_| internal_error!("magic property reference"))? = converted;
-            } else {
-                return Ok(ReadProperty::from_getter(converted));
-            }
-        }
-        Ok(ReadProperty::from_getter(result))
+        self.validate_getter_value(&class, accessible.as_ref(), result)
+            .await
+            .map(ReadProperty::from_getter)
     }
 }
