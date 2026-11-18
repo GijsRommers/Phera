@@ -36,7 +36,7 @@ impl Vm {
         while let Some(instruction) = function.instructions.get(position).copied() {
             position += 1;
             if crate::fast::scalar_step(instruction, &mut slots, &mut position)
-                != crate::fast::ScalarStep::Fallback
+                == crate::fast::ScalarStep::Complete
             {
                 continue;
             }

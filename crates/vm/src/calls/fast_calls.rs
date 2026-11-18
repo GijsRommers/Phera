@@ -145,10 +145,17 @@ impl Machine<'_> {
             Some(value)
         };
         self.stack.pop();
-        self.registers.release_frame(start, frame.base());
+        // PHP releases the variables first, then `$this` or the closure.
+        if kind != CallKind::Function {
+            self.registers.truncate(frame.base());
+        }
+        self.registers.truncate(start);
         if let Some(value) = value {
             self.registers
                 .put(caller.base() + destination.index(), value);
+        }
+        if self.classes.ids().has_doomed() {
+            return Step::Destructors;
         }
         Step::Switched(Position {
             frame: caller,

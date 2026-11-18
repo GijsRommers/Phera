@@ -84,35 +84,85 @@ impl Node {
         }
     }
 
-    /// The values this one holds directly, or `None` when they cannot be
-    /// seen (borrowed elsewhere, or kept in native state).
-    fn children(&self) -> Option<Vec<Node>> {
+    /// Calls `visit` with each value this one holds directly. `false` when
+    /// they cannot be seen (borrowed elsewhere, or kept in native state).
+    fn visit_children(&self, mut visit: impl FnMut(&Value)) -> bool {
         match self {
             Node::Object(object) => {
-                let native = object.native.try_borrow().ok()?;
+                let Ok(native) = object.native.try_borrow() else {
+                    return false;
+                };
                 if native.is_some() {
-                    return None;
+                    return false;
                 }
-                let properties = object.properties.try_borrow().ok()?;
-                Some(properties.values().filter_map(Node::of).collect())
+                let Ok(properties) = object.properties.try_borrow() else {
+                    return false;
+                };
+                properties.values().for_each(visit);
+                true
             }
-            Node::Array(array) => Some(array.values().filter_map(Node::of).collect()),
+            Node::Array(array) => {
+                array.values().for_each(visit);
+                true
+            }
             Node::Reference(cell) => {
-                let value = cell.try_borrow().ok()?;
-                Some(Node::of(&value).into_iter().collect())
+                let Ok(value) = cell.try_borrow() else {
+                    return false;
+                };
+                visit(&value);
+                true
             }
         }
+    }
+}
+
+/// The identity of a value that can own others, without a handle on it.
+fn key_of(value: &Value) -> Option<usize> {
+    match value {
+        Value::Object(object) => Some(Rc::as_ptr(object) as *const () as usize),
+        Value::Array(array) => Some(Rc::as_ptr(array) as *const () as usize),
+        Value::Reference(cell) => Some(Rc::as_ptr(cell) as *const () as usize),
+        _ => None,
     }
 }
 
 /// What the walk knows about one value.
 struct Entry {
     node: Node,
-    /// The values it holds; `None` when they cannot be seen.
-    children: Option<Vec<usize>>,
+    /// Where the values it holds are in the walk's list of edges; `None`
+    /// when they cannot be seen.
+    edges: Option<std::ops::Range<usize>>,
     /// How many of its owners the walk met.
     internal: usize,
     alive: bool,
+}
+
+/// The values walked so far.
+#[derive(Default)]
+struct Walk {
+    entries: Vec<Entry>,
+    index_of: HashMap<usize, usize>,
+    /// Who holds whom: the indexes of the values each entry holds.
+    edges: Vec<usize>,
+    work: Vec<usize>,
+}
+
+impl Walk {
+    /// The entry for `node`, made (and queued for walking) if it is new.
+    fn enter(&mut self, key: usize, node: impl FnOnce() -> Node) -> usize {
+        let next = self.entries.len();
+        let index = *self.index_of.entry(key).or_insert(next);
+        if index == next {
+            self.entries.push(Entry {
+                node: node(),
+                edges: None,
+                internal: 0,
+                alive: false,
+            });
+            self.work.push(index);
+        }
+        index
+    }
 }
 
 /// Finds the garbage among `objects` and what they hold. The caller passes
@@ -120,56 +170,49 @@ struct Entry {
 /// handles of a list of live objects one by one, for example), since every
 /// handle outside the walk counts as an owner.
 pub fn find_garbage(objects: impl IntoIterator<Item = Rc<Object>>) -> Garbage {
-    let mut entries: Vec<Entry> = Vec::new();
-    let mut index_of: HashMap<usize, usize> = HashMap::new();
-    let mut work: Vec<usize> = Vec::new();
+    let mut walk = Walk::default();
     for object in objects {
         let node = Node::Object(object);
-        if let std::collections::hash_map::Entry::Vacant(slot) = index_of.entry(node.key()) {
-            slot.insert(entries.len());
-            work.push(entries.len());
-            entries.push(Entry {
-                node,
-                children: None,
-                internal: 0,
-                alive: false,
-            });
-        }
+        walk.enter(node.key(), || node);
     }
     // 1. Walk everything the objects hold, counting internal owners.
-    while let Some(index) = work.pop() {
-        let Some(children) = entries[index].node.children() else {
-            continue;
-        };
-        let mut indexes = Vec::with_capacity(children.len());
-        for child in children {
-            let next = entries.len();
-            let child_index = *index_of.entry(child.key()).or_insert(next);
-            if child_index == next {
-                entries.push(Entry {
-                    node: child,
-                    children: None,
-                    internal: 0,
-                    alive: false,
-                });
-                work.push(child_index);
-            }
-            entries[child_index].internal += 1;
-            indexes.push(child_index);
-        }
-        entries[index].children = Some(indexes);
+    while let Some(index) = walk.work.pop() {
+        let node = walk.entries[index].node.clone();
+        let start = walk.edges.len();
+        let seen = node.visit_children(|value| {
+            let Some(key) = key_of(value) else {
+                return;
+            };
+            let child = match walk.index_of.get(&key) {
+                Some(&known) => known,
+                None => match Node::of(value) {
+                    Some(node) => walk.enter(key, || node),
+                    None => return,
+                },
+            };
+            walk.entries[child].internal += 1;
+            walk.edges.push(child);
+        });
+        let end = walk.edges.len();
+        walk.entries[index].edges = seen.then_some(start..end);
     }
+    let Walk {
+        mut entries,
+        edges,
+        mut work,
+        ..
+    } = walk;
     // 2. Values held from outside are alive, with all they hold. The walk
-    //    itself holds one clone of each value. A value whose contents could
-    //    not be seen keeps what it holds unseen: it stays alive.
+    //    holds one handle on each value. A value whose contents could not
+    //    be seen keeps what it holds unseen: it stays alive.
     for entry in &mut entries {
         let outside = entry.node.strong_count().saturating_sub(1 + entry.internal);
-        entry.alive = outside > 0 || entry.children.is_none();
+        entry.alive = outside > 0 || entry.edges.is_none();
     }
     work.extend((0..entries.len()).filter(|&index| entries[index].alive));
     while let Some(index) = work.pop() {
-        let children = entries[index].children.clone().unwrap_or_default();
-        for child in children {
+        let held = entries[index].edges.clone().unwrap_or_default();
+        for &child in &edges[held] {
             if !entries[child].alive {
                 entries[child].alive = true;
                 work.push(child);
