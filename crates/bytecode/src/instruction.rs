@@ -608,8 +608,10 @@ pub enum FetchMode {
     Read,
     /// For `??`: missing things are null, silently.
     Quiet,
-    /// For `isset` and `empty`: native properties can supply a presence check.
+    /// For `isset`: native properties and overloaded dimensions can check presence.
     Isset,
+    /// For `empty`: overloaded dimensions check presence and then read the value.
+    Empty,
     /// For `[$a, $b] = $value`: missing keys warn; null yields null silently,
     /// while other non-array values warn and yield null in PHP 8.5.
     Destructure,
