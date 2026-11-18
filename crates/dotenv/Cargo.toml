@@ -1,0 +1,16 @@
+[package]
+name = "phera-dotenv"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+indexmap.workspace = true
+regex.workspace = true
+
+[dev-dependencies]
+serde_json = "1"
+
+[lints]
+workspace = true
