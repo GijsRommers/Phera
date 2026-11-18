@@ -73,6 +73,10 @@ pub(crate) enum HandlerFunction {
     RestoreException,
     SetError,
     RestoreError,
+    /// `get_exception_handler()`, new in PHP 8.5.
+    GetException,
+    /// `get_error_handler()`, new in PHP 8.5.
+    GetError,
     TriggerError,
 }
 
@@ -133,6 +137,20 @@ impl Vm {
                 self.error_handlers.error = self.error_handlers.error_history.pop().flatten();
                 Ok(Value::Bool(true))
             }
+            // The callable as it was given to the set function, or null
+            // when PHP's own handler is in place.
+            HandlerFunction::GetException => Ok(self
+                .error_handlers
+                .exception
+                .as_ref()
+                .map(|handler| handler.callable.clone())
+                .unwrap_or_default()),
+            HandlerFunction::GetError => Ok(self
+                .error_handlers
+                .error
+                .as_ref()
+                .map(|handler| handler.callable.clone())
+                .unwrap_or_default()),
             HandlerFunction::TriggerError => self.trigger_error(&arguments).await,
         }
     }
