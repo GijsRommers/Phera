@@ -46,6 +46,15 @@ pub(crate) fn parse_pairs(
     }
 }
 
+/// Stores `value` under a form control name such as `user[address][]`.
+/// The name is taken as it is: a `multipart/form-data` body does not
+/// percent-encode names.
+pub(crate) fn store_named(variables: &mut PhpArray, name: &[u8], value: Value) {
+    if let Some(keys) = parse_name(name) {
+        store(variables, &keys, value, Duplicates::Replace);
+    }
+}
+
 /// Decodes `%41` to `A` and `+` to a space. A `%` that is not followed by two
 /// hex digits stays as it is.
 pub(crate) fn url_decode(input: &[u8]) -> Vec<u8> {

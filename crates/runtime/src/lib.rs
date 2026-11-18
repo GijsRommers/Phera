@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use phera_bytecode::CompiledUnit;
 use phera_dotenv::Environment;
-use phera_ext_http::ResponseHead;
+use phera_ext_http::{ResponseHead, UploadedFiles};
 use phera_ext_standard::environment::{RequestEnvironment, php_array};
 use phera_extension_api::{LocalFuture, Registry};
 use phera_value::Value;
@@ -149,20 +149,51 @@ impl Runtime {
             Err(error) => return HttpResponse::plain(500, error.to_string()),
         };
 
+        // A form with files is read before the script starts, as in PHP,
+        // and its files are written on a thread that may block. PHP gives
+        // such a request no raw body to read afterwards.
+        let mut request = request;
+        let form = match http::form_boundary(&request) {
+            Some(boundary) => {
+                let body = std::mem::take(&mut request.body);
+                tokio::task::spawn_blocking(move || http::receive_form(&body, &boundary))
+                    .await
+                    .ok()
+            }
+            None => None,
+        };
+
         let mut vm = self.new_vm();
-        http::define_superglobals(
+        let uploads = http::define_superglobals(
             &mut vm,
             &request,
             script,
             document_root,
             php_array(self.environment.iter()),
+            form,
         );
+        *vm.state_mut().get_or_default::<UploadedFiles>() = UploadedFiles::new(uploads);
         phera_ext_streams::set_request(
             vm.state_mut(),
             script.parent().map(Path::to_path_buf),
             request.body.into(),
         );
         let exit_status = vm.run(unit).await;
+
+        // What the script did not move is deleted, as PHP does.
+        let unclaimed = vm
+            .state_mut()
+            .take::<UploadedFiles>()
+            .map(UploadedFiles::into_unclaimed)
+            .unwrap_or_default();
+        if !unclaimed.is_empty() {
+            let _ = tokio::task::spawn_blocking(move || {
+                for file in unclaimed {
+                    let _ = std::fs::remove_file(file);
+                }
+            })
+            .await;
+        }
 
         let head = vm.state_mut().take::<ResponseHead>().unwrap_or_default();
         let mut response = HttpResponse {
