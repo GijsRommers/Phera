@@ -1,6 +1,6 @@
 --TEST--
 SPL array sorting uses object string conversions and protects storage during callbacks
---FILE__
+--FILE--
 <?php
 class SortLabel {
     public function __construct(public string $label) {}
