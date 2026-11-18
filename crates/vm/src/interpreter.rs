@@ -101,6 +101,7 @@ impl Vm {
                 }
                 BatchExit::Yield => tokio::task::yield_now().await,
                 BatchExit::Handlers => self.drain_error_handlers().await?,
+                BatchExit::GeneratorTracking => {}
                 BatchExit::NativeCall(destination) => {
                     let value = self.finish_native_window().await?;
                     self.set(destination, value);

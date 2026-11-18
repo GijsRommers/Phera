@@ -33,15 +33,17 @@ impl Vm {
                 value.type_name()
             )));
         };
-        if crate::generators::generator_object(&object) {
-            self.discard_generator_temporary(receiver);
-        }
         let class = self
             .classes
             .for_object(&object)
             .ok_or_else(|| internal_error!("receiver class"))?;
         let resolved = self.find_method(&class, name, Invocation::Method)?;
         if let Some(resolved) = resolved {
+            if matches!(resolved.method.body, super::MethodBody::Native(_))
+                && class.name == "Generator"
+            {
+                self.discard_generator_temporary(receiver);
+            }
             self.prepare_resolved_method(class, Some(object), resolved, Invocation::Method)?;
         } else {
             self.prepare_method(class, Some(object), name, Invocation::Method)?;

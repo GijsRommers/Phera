@@ -151,6 +151,7 @@ impl Vm {
         };
         let object = self.classes.allocate(class);
         let activation = self.suspend_generator_frame(activation::Storage::default())?;
+        let first_generator = self.generator_releases.is_none();
         *object.native.borrow_mut() = Some(Box::new(Generator {
             releases: self.generator_release_queue(),
             name,
@@ -169,7 +170,7 @@ impl Vm {
         if let Some(destination) = destination {
             self.set(destination, value);
         }
-        Ok(None)
+        Ok(first_generator.then_some(BatchExit::GeneratorTracking))
     }
 
     #[cold]
