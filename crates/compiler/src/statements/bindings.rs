@@ -120,6 +120,11 @@ impl Compiler<'_> {
             );
         }
         self.loops.push(Loop {
+            start: self.position(),
+            cleanup: Some(super::exits::LoopCleanup::Foreach {
+                iterator: id,
+                owned,
+            }),
             breaks: vec![],
             continues: vec![],
         });
@@ -127,7 +132,7 @@ impl Compiler<'_> {
         self.emit(Instruction::Jump(Target(start)), line);
         self.patch(jump, self.position());
         self.loop_end(start);
-        self.emit(Instruction::IterEnd { iterator: id }, line);
+        self.emit(Instruction::IterEnd(id), line);
         // PHP frees the loop's own copy of the subject and of the last
         // value when the loop ends (FE_FREE), so an object that only they
         // held is destroyed here.

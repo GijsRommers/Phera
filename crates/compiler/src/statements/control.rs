@@ -112,6 +112,8 @@ impl Compiler<'_> {
         );
         self.release_temporaries(&condition, line);
         self.loops.push(Loop {
+            start: self.position(),
+            cleanup: None,
             breaks: vec![],
             continues: vec![],
         });

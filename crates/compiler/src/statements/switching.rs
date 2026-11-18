@@ -57,6 +57,8 @@ impl Compiler<'_> {
         let comparisons = self.temporaries_since(mark);
         let miss = self.emit(Instruction::Jump(Target(0)), line);
         self.loops.push(Loop {
+            start: self.position(),
+            cleanup: Some(super::exits::LoopCleanup::Switch(value)),
             breaks: vec![],
             continues: vec![],
         });

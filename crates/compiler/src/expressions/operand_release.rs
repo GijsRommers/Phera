@@ -32,10 +32,22 @@ use crate::Compiler;
 use crate::ir::{ArgumentSource, Binary, Instruction, PlaceScope, Target, Unary};
 
 /// The temporaries of one expression: the registers allocated and the
-/// instructions emitted while it was compiled.
+/// instructions emitted while it was compiled (as `start..end` pairs, so
+/// that the value can be copied into a loop's cleanup).
+#[derive(Clone, Copy)]
 pub(crate) struct Temporaries {
-    registers: Range<usize>,
-    instructions: Range<usize>,
+    registers: (usize, usize),
+    instructions: (usize, usize),
+}
+
+impl Temporaries {
+    fn registers(&self) -> Range<usize> {
+        self.registers.0..self.registers.1
+    }
+
+    fn instructions(&self) -> Range<usize> {
+        self.instructions.0..self.instructions.1
+    }
 }
 
 impl Compiler<'_> {
@@ -47,8 +59,8 @@ impl Compiler<'_> {
     /// The temporaries of the expression compiled since `start`.
     pub(crate) fn temporaries_since(&self, (first, start): (usize, usize)) -> Temporaries {
         Temporaries {
-            registers: first..self.next,
-            instructions: start..self.position(),
+            registers: (first, self.next),
+            instructions: (start, self.position()),
         }
     }
 
@@ -80,15 +92,14 @@ impl Compiler<'_> {
         let code = self
             .function
             .instructions
-            .get(temporaries.instructions.clone())
+            .get(temporaries.instructions())
             .unwrap_or_default();
         temporaries
-            .registers
-            .clone()
+            .registers()
             .map(|index| Reg(index as u16))
             .filter(|register| Some(*register) != keep)
             .filter(|register| !self.locals.values().any(|local| local == register))
-            .filter(|register| !holds_a_scalar(code, temporaries.instructions.start, *register))
+            .filter(|register| !holds_a_scalar(code, temporaries.instructions.0, *register))
             .collect()
     }
 }

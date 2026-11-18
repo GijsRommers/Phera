@@ -248,7 +248,6 @@ impl Instruction {
                     *key_register = map(*key_register)
                 }
             }
-            Instruction::IterEnd { iterator } => *iterator = map(*iterator),
             Instruction::IterInit {
                 iterator: id,
                 source: src,
@@ -260,6 +259,7 @@ impl Instruction {
                     place(target, &mut map)
                 }
             }
+            Instruction::IterEnd(iterator) => *iterator = map(*iterator),
             Instruction::IterNext {
                 iterator: id,
                 key,
@@ -273,7 +273,8 @@ impl Instruction {
                 *value = map(*value)
             }
             Instruction::MatchError { subject } => *subject = map(*subject),
-            Instruction::Jump(_)
+            Instruction::Nop
+            | Instruction::Jump(_)
             | Instruction::Suppress(_)
             | Instruction::Declare(_)
             | Instruction::ReturnMissing => {}

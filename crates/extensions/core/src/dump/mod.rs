@@ -65,7 +65,7 @@ pub(crate) trait Style {
     }
 
     /// Anything that is not an array or object.
-    fn scalar(&mut self, out: &mut Vec<u8>, value: &Value, place: Place);
+    fn scalar(&mut self, out: &mut Vec<u8>, value: &Value, place: Place, context: &mut dyn Context);
 
     /// A case can be printed as one value or as a container of its readonly properties.
     fn enum_case(
@@ -201,7 +201,7 @@ async fn enter(
         }
         Value::Object(object) => Container::Object(object.clone()),
         scalar => {
-            style.scalar(out, scalar, place);
+            style.scalar(out, scalar, place, context);
             return Ok(None);
         }
     };
@@ -262,7 +262,13 @@ mod tests {
     }
 
     impl Style for Tally {
-        fn scalar(&mut self, _out: &mut Vec<u8>, _value: &Value, _place: Place) {
+        fn scalar(
+            &mut self,
+            _out: &mut Vec<u8>,
+            _value: &Value,
+            _place: Place,
+            _context: &mut dyn Context,
+        ) {
             self.scalars += 1;
         }
 
