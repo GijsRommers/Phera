@@ -119,6 +119,19 @@ impl Vm {
         let Some(register) = self.base_register(place, Creation::Existing, missing)? else {
             return Ok(Value::Null);
         };
+        self.check_static_read(place, missing)?;
+        let mut value = self.read_root(register, missing);
+        for step in place.steps()? {
+            value = self.ordinary_step(value, step, missing)?;
+        }
+        Ok(value)
+    }
+    /// An uninitialized static slot must remain distinct from a null value.
+    pub(crate) fn check_static_read(
+        &mut self,
+        place: &AccessPath,
+        missing: Missing,
+    ) -> Result<(), NativeError> {
         if let PathBase::StaticProperty { class, name, .. } = place.base()? {
             let (class_name, name) = self.static_property_names(class, name)?;
             if missing == Missing::Warn
@@ -135,58 +148,11 @@ impl Vm {
                 )));
             }
         }
-        let mut value = self.read_root(register, missing);
-        for key in self.keys(place)?.iter().cloned() {
-            if let PathKey::Property(key) = key {
-                value = self.read_property(value, key, missing)?;
-                continue;
-            }
-            let PathKey::Index(key) = key else {
-                return Err(internal_error!("path key"));
-            };
-            let key = key.ok_or_else(|| NativeError::error("Cannot use [] for reading"))?;
-            value = self.read_index(value, key, missing)?;
-        }
-        Ok(value)
-    }
-    pub(crate) fn read_index(
-        &mut self,
-        value: Value,
-        key: ArrayKey,
-        missing: Missing,
-    ) -> NativeResult {
-        Ok(match value {
-            Value::Array(array) => {
-                if let Some(value) = array.get(&key) {
-                    value.deref().clone()
-                } else {
-                    if missing == Missing::Warn {
-                        self.warn(format!("Undefined array key {}", display_key(&key)))
-                    }
-                    Value::Null
-                }
-            }
-            Value::String(string) => self.read_string_offset(&string, key, missing)?,
-            Value::Object(object) => {
-                return Err(NativeError::error(format!(
-                    "Cannot use object of type {} as array",
-                    object.class.name()
-                )));
-            }
-            other => {
-                if missing == Missing::Warn {
-                    self.warn(format!(
-                        "Trying to access array offset on {}",
-                        other.type_name()
-                    ))
-                }
-                Value::Null
-            }
-        })
+        Ok(())
     }
 }
 
-fn display_key(key: &ArrayKey) -> String {
+pub(crate) fn display_key(key: &ArrayKey) -> String {
     match key {
         ArrayKey::Int(index) => index.to_string(),
         ArrayKey::String(string) => format!("\"{}\"", string.to_string_lossy()),

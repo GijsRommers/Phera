@@ -91,39 +91,34 @@ pub(crate) fn compare(
 
 impl Vm {
     /// Views may allocate linked objects, so run them only after releasing register borrows.
-    pub(crate) fn compare_with_property_views(
+    pub(crate) fn step_comparison<T>(
         &mut self,
-        operator: BinaryOp,
-        left: &Value,
-        right: &Value,
-    ) -> Result<Value, NativeError> {
+        step: impl FnOnce(
+            &mut dyn Diagnostics,
+            &mut phera_value::ObjectComparator<'_>,
+        ) -> Result<T, OpError>,
+    ) -> Result<T, NativeError> {
         let mut diagnostics = self.diagnostic_reporter.take_operator();
         let mut projection_error = None;
-        let result = compare(
-            operator,
-            left,
-            right,
-            &mut diagnostics,
-            &mut |left, right, diagnostics| {
-                let result = compare_objects(left, right, diagnostics)?;
-                if matches!(result, ObjectComparison::Default)
-                    && left.class.name() == right.class.name()
-                    && hooks(left).is_some_and(|hooks| hooks.properties.is_some())
-                {
-                    let views = (|| {
-                        Ok(ObjectComparison::Projected(
-                            self.object_properties(left, PropertyPurpose::Comparison)?,
-                            self.object_properties(right, PropertyPurpose::Comparison)?,
-                        ))
-                    })();
-                    return views.map_err(|error| {
-                        projection_error = Some(error);
-                        OpError::error("Failed to project native properties")
-                    });
-                }
-                Ok(result)
-            },
-        );
+        let result = step(&mut diagnostics, &mut |left, right, diagnostics| {
+            let result = compare_objects(left, right, diagnostics)?;
+            if matches!(result, ObjectComparison::Default)
+                && left.class.name() == right.class.name()
+                && hooks(left).is_some_and(|hooks| hooks.properties.is_some())
+            {
+                let views = (|| {
+                    Ok(ObjectComparison::Projected(
+                        self.object_properties(left, PropertyPurpose::Comparison)?,
+                        self.object_properties(right, PropertyPurpose::Comparison)?,
+                    ))
+                })();
+                return views.map_err(|error| {
+                    projection_error = Some(error);
+                    OpError::error("Failed to project native properties")
+                });
+            }
+            Ok(result)
+        });
         self.diagnostics_flush_reuse(&mut diagnostics);
         self.diagnostic_reporter.restore_operator(diagnostics);
         match projection_error {

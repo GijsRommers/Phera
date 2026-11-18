@@ -95,7 +95,7 @@ impl Vm {
                 )));
             }
         }
-        let interfaces = declaration
+        let mut interfaces = declaration
             .interfaces
             .iter()
             .map(|symbol| {
@@ -186,10 +186,40 @@ impl Vm {
                 body: MethodBody::User(self.code.index_in(&unit, Some(method.function.index()))),
             });
             if let Some(inherited) = methods.get(&method_name.to_ascii_lowercase()) {
-                super::inheritance_checks::check_override(name, inherited, &linked)?;
+                super::inheritance_checks::check_override(name, inherited, &linked)
+                    .map_err(|error| self.magic_override_error(&linked, error))?;
                 self.check_method_contract(inherited, &linked, &unit)?;
             }
             methods.insert(method_name.to_ascii_lowercase(), linked);
+        }
+        if let Some(method) = methods.get("__tostring") {
+            if method.visibility != Visibility::Public
+                && let MethodBody::User(function) = method.body
+            {
+                let file = self.code.unit(function).file.clone();
+                let line = self.code.function(function).definition_line as usize;
+                let message = format!(
+                    "Access level to {}::{}() must be public (as in class Stringable)",
+                    method.declaring, method.name
+                );
+                return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
+                    crate::error_traces::DeclarationFailure {
+                        message,
+                        file,
+                        line,
+                    },
+                ))));
+            }
+            if !interfaces
+                .iter()
+                .any(|interface| interface.is_a("Stringable"))
+                && !parent
+                    .as_ref()
+                    .is_some_and(|parent| parent.is_a("Stringable"))
+                && let Some(stringable) = self.classes.get("Stringable")
+            {
+                interfaces.push(stringable);
+            }
         }
         for interface in &interfaces {
             for (method_name, method) in &interface.methods {
@@ -370,7 +400,12 @@ impl Vm {
             } else {
                 &mut defaults
             };
-            if let Some(inherited) = target.iter_mut().find(|entry| entry.key == key) {
+            if let Some(inherited) = target.iter_mut().find(|entry| {
+                entry.key == key
+                    || (entry.name == *property_name
+                        && entry.visibility != Visibility::Private
+                        && property.visibility != Visibility::Private)
+            }) {
                 *inherited = linked;
             } else {
                 target.push(linked);
@@ -412,6 +447,7 @@ impl Vm {
                 is_readonly: declaration.is_readonly,
                 allows_dynamic_properties,
                 constructor: methods.get("__construct").cloned(),
+                magic: super::magic::MagicMethods::link(&methods),
                 methods,
                 method_table: std::cell::OnceCell::new(),
                 property_template: super::class::property_template(&defaults),

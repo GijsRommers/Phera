@@ -59,6 +59,9 @@ fn callback_detail(error: NativeError) -> String {
             return format!("cannot access {visibility} method {name}()");
         }
     }
+    if let Some(keyword) = message.strip_prefix("Cannot access ") {
+        return format!("cannot access {keyword}");
+    }
     if let Some(class) = message.strip_prefix("Class ") {
         return format!("class {class}");
     }

@@ -42,6 +42,7 @@ pub(crate) enum CallTarget {
         context: crate::classes::MethodContext,
     },
     Closure(Rc<phera_value::Object>),
+    Magic(Rc<super::magic_dispatch::MagicCall>),
     /// A declared PHP function.
     User(crate::code_table::FunctionIndex),
     Native(FunctionEntry),

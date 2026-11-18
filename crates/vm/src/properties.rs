@@ -100,17 +100,36 @@ impl Vm {
             }
             return Ok(Value::Null);
         };
-        if let Some(access) = native_property_access(&object) {
-            let mode = match missing {
-                Missing::Warn => NativePropertyRead::Read,
-                Missing::Silent => NativePropertyRead::Quiet,
-                Missing::Isset => NativePropertyRead::Isset,
-            };
-            if let Some(value) = (access.read)(self, &object, &name, mode)? {
-                return Ok(value);
-            }
+        if let Some(value) = self.native_property_read(&object, &name, missing)? {
+            return Ok(value);
         }
-        let key = match self.property_key(&object, &name) {
+        self.read_declared_property(&object, &name, missing)
+    }
+
+    pub(crate) fn native_property_read(
+        &mut self,
+        object: &phera_value::Object,
+        name: &str,
+        missing: Missing,
+    ) -> Result<Option<Value>, NativeError> {
+        let Some(access) = native_property_access(object) else {
+            return Ok(None);
+        };
+        let mode = match missing {
+            Missing::Warn => NativePropertyRead::Read,
+            Missing::Silent => NativePropertyRead::Quiet,
+            Missing::Isset => NativePropertyRead::Isset,
+        };
+        (access.read)(self, object, name, mode)
+    }
+
+    pub(crate) fn read_declared_property(
+        &mut self,
+        object: &phera_value::Object,
+        name: &str,
+        missing: Missing,
+    ) -> NativeResult {
+        let key = match self.property_key(object, name) {
             Ok(key) => key,
             Err(_) if missing != Missing::Warn => return Ok(Value::Null),
             Err(error) => return Err(error),
@@ -121,9 +140,9 @@ impl Vm {
                 .as_any()
                 .downcast_ref::<crate::classes::Class>()
         {
-            self.notice_static_instance_access(class, &name);
+            self.notice_static_instance_access(class, name);
         }
-        if let Some(value) = crate::property_storage::read(&object, &key) {
+        if let Some(value) = crate::property_storage::read(object, &key) {
             return Ok(value.deref().clone());
         }
         if missing == Missing::Warn
@@ -234,6 +253,11 @@ impl Vm {
         object: &phera_value::Object,
         name: &str,
     ) -> Result<ArrayKey, NativeError> {
+        if name.starts_with('\0') {
+            return Err(NativeError::error(
+                "Cannot access property starting with \"\\0\"",
+            ));
+        }
         let class = object
             .class
             .as_any()

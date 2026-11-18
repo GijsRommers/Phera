@@ -18,7 +18,6 @@ use crate::flags::CaptureFlags;
 use crate::replace::{self, Splice};
 use crate::scan::Scanner;
 use crate::{cache, callable, errors, matches};
-use phera_extension_api::value::to_php_string;
 use phera_extension_api::{
     ArrayKey, Context, LocalFuture, NativeError, NativeResult, PhpArray, Value, args,
 };
@@ -41,11 +40,9 @@ impl Operation<'_> {
     /// Every pattern over one subject, in turn. Null when a pattern does not
     /// compile or a match fails.
     async fn subject(&mut self, context: &mut dyn Context, value: &Value) -> NativeResult {
-        let mut subject = to_php_string(value, context.diagnostics())?
-            .as_bytes()
-            .to_vec();
+        let mut subject = context.stringify(value).await?.as_bytes().to_vec();
         for pattern in &self.patterns {
-            let pattern = to_php_string(pattern, context.diagnostics())?;
+            let pattern = context.stringify(pattern).await?;
             let compiled = if self.exception.is_some() {
                 // While an exception is pending PHP gives no new warnings.
                 match cache::lookup(pattern.as_bytes()) {
@@ -93,7 +90,7 @@ impl Operation<'_> {
                         return Ok(Value::Null);
                     }
                 };
-                let replacement = to_php_string(&replacement, context.diagnostics())?;
+                let replacement = context.stringify(&replacement).await?;
                 splice
                     .replace(&captures)
                     .extend_from_slice(replacement.as_bytes());

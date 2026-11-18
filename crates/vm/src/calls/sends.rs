@@ -45,6 +45,44 @@ impl Vm {
         self.store_sent_value(index, value)
     }
 
+    /// Borrow the cached ordinary property before entering the magic send path.
+    pub(crate) fn send_path(&mut self, place: AccessPath) -> Result<bool, NativeError> {
+        if !place.has_properties()? {
+            self.send(SentArgument::Path(place))?;
+            return Ok(true);
+        }
+        let view = CallView::top(&self.code, &self.call_stack)?;
+        let index = view.argument_index()?;
+        let parameters = view.parameters();
+        let reference = parameters
+            .receiving(index)
+            .is_some_and(|parameter| parameters.by_reference(parameter))
+            || (index == 0 && view.is_extract());
+        if !reference && let Some(value) = self.read_property_site(&place)? {
+            self.store_sent_value(index, value)?;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    /// A property send can run __get, retaining its return reference if needed.
+    pub(crate) async fn send_magic_place(&mut self, place: &AccessPath) -> Result<(), NativeError> {
+        let view = CallView::top(&self.code, &self.call_stack)?;
+        let index = view.argument_index()?;
+        let parameters = view.parameters();
+        let reference = parameters
+            .receiving(index)
+            .is_some_and(|parameter| parameters.by_reference(parameter))
+            || (index == 0 && view.is_extract());
+        let value = if reference {
+            self.magic_reference(place).await?
+        } else {
+            self.read_magic_place(place, phera_bytecode::FetchMode::Read)
+                .await?
+        };
+        self.store_sent_value(index, value)
+    }
+
     /// Put an argument at position `index` of the innermost prepared call,
     /// after the checks a named argument needs. A value its parameter's type
     /// does not accept as it is waits for `Call` to be checked.
@@ -77,7 +115,7 @@ impl Vm {
                 )));
             }
         }
-        let mut deferred = false;
+        let mut deferred = None;
         if let Some(declaration) = parameters
             .receiving(index)
             .and_then(|parameter| parameters.ty(parameter))
@@ -85,7 +123,13 @@ impl Vm {
         {
             match crate::types::widen_int_to_float(&value, declaration.mask) {
                 Some(float) => value = float,
-                None => deferred = true,
+                None => {
+                    let string_argument = declaration
+                        .mask
+                        .intersects(phera_bytecode::TypeMask::STRING)
+                        && value.is_object();
+                    deferred = Some(string_argument);
+                }
             }
         }
         let was_named = named.is_some();
@@ -100,8 +144,11 @@ impl Vm {
         }
         let call = self.call_stack.top_call_mut()?;
         call.mark_sent(index, !extra);
-        if deferred {
+        if let Some(string_argument) = deferred {
             call.flags.insert(CallFlags::DEFERRED_CHECKS);
+            if string_argument {
+                call.flags.insert(CallFlags::STRING_ARGUMENT);
+            }
         }
         if was_named {
             call.flags.insert(CallFlags::NAMED);
