@@ -79,9 +79,9 @@ impl Vm {
         {
             (class.clone(), method, None)
         } else {
-            return Err(error.unwrap_or_else(|| {
-                NativeError::error(format!("Call to undefined method {}::{name}()", class.name))
-            }));
+            return Err(
+                error.unwrap_or_else(|| crate::unsupported_items::undefined_method(&class, name))
+            );
         };
         let scope = self
             .classes

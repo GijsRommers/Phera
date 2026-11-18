@@ -1,0 +1,158 @@
+# PHP stubs origin/PHP-8.5.12 (ef45c77f6ca856e9c023ba499e74207d436d5be3) and phpredis 6.3.0
+# kind	name	since	message	policy
+class-constant	DateTimeInterface::RFC7231	8.5	as this format ignores the associated timezone and always uses GMT	keep
+class-constant	NumberFormatter::TYPE_CURRENCY	8.3		keep
+class-constant	Pdo\Pgsql::TRANSACTION_ACTIVE	8.5	as it has no effect	omit
+class-constant	Pdo\Pgsql::TRANSACTION_IDLE	8.5	as it has no effect	omit
+class-constant	Pdo\Pgsql::TRANSACTION_INERROR	8.5	as it has no effect	omit
+class-constant	Pdo\Pgsql::TRANSACTION_INTRANS	8.5	as it has no effect	omit
+class-constant	Pdo\Pgsql::TRANSACTION_UNKNOWN	8.5	as it has no effect	omit
+class-constant	ZipArchive::FL_RECOMPRESS	8.3		omit
+constant	ASSERT_ACTIVE	8.3	as assert_options() is deprecated	omit
+constant	ASSERT_BAIL	8.3	as assert_options() is deprecated	omit
+constant	ASSERT_CALLBACK	8.3	as assert_options() is deprecated	omit
+constant	ASSERT_EXCEPTION	8.3	as assert_options() is deprecated	omit
+constant	ASSERT_WARNING	8.3	as assert_options() is deprecated	omit
+constant	CURLOPT_BINARYTRANSFER	8.4	as it had no effect since 5.1.2	omit
+constant	DATE_RFC7231	8.5	as this format ignores the associated timezone and always uses GMT	keep
+constant	DOM_PHP_ERR	8.4	as it is no longer used	keep
+constant	ENCHANT_ISPELL	8.0	as enchant_broker_get_dict_path() and enchant_broker_set_dict_path() are deprecated	omit
+constant	ENCHANT_MYSPELL	8.0	as enchant_broker_get_dict_path() and enchant_broker_set_dict_path() are deprecated	omit
+constant	E_STRICT	8.4	the error level was removed	keep
+constant	FILE_BINARY	8.1	as the constant has no effect	omit
+constant	FILE_TEXT	8.1	as the constant has no effect	omit
+constant	FILTER_SANITIZE_STRING	8.1	use htmlspecialchars() instead	omit
+constant	FILTER_SANITIZE_STRIPPED	8.1	use htmlspecialchars() instead	omit
+constant	GSLC_SSL_NO_AUTH	8.5	as it is broken since PHP 8.0	keep
+constant	GSLC_SSL_ONEWAY_AUTH	8.5	as it is broken since PHP 8.0	omit
+constant	GSLC_SSL_TWOWAY_AUTH	8.5	as it is broken since PHP 8.0	omit
+constant	MT_RAND_PHP	8.3	as it uses a biased non-standard variant of Mt19937	omit
+constant	MYSQLI_DATA_TRUNCATED	8.1	as it was unused	omit
+constant	MYSQLI_IS_MARIADB	8.2	as it is always false	omit
+constant	MYSQLI_NO_DATA	8.1	as it was unused	omit
+constant	MYSQLI_REFRESH_BACKUP_LOG	8.4	as mysqli_refresh() is deprecated	omit
+constant	MYSQLI_REFRESH_GRANT	8.4	as mysqli_refresh() is deprecated	omit
+constant	MYSQLI_REFRESH_HOSTS	8.4	as mysqli_refresh() is deprecated	omit
+constant	MYSQLI_REFRESH_LOG	8.4	as mysqli_refresh() is deprecated	omit
+constant	MYSQLI_REFRESH_MASTER	8.4	as mysqli_refresh() is deprecated	omit
+constant	MYSQLI_REFRESH_REPLICA	8.4	as mysqli_refresh() is deprecated	omit
+constant	MYSQLI_REFRESH_SLAVE	8.4	as mysqli_refresh() is deprecated	omit
+constant	MYSQLI_REFRESH_STATUS	8.4	as mysqli_refresh() is deprecated	omit
+constant	MYSQLI_REFRESH_TABLES	8.4	as mysqli_refresh() is deprecated	omit
+constant	MYSQLI_REFRESH_THREADS	8.4	as mysqli_refresh() is deprecated	omit
+constant	MYSQLI_SERVER_PS_OUT_PARAMS	8.1	as it was unused	omit
+constant	MYSQLI_SERVER_QUERY_NO_GOOD_INDEX_USED	8.1	as it was unused	omit
+constant	MYSQLI_SERVER_QUERY_NO_INDEX_USED	8.1	as it was unused	omit
+constant	MYSQLI_SERVER_QUERY_WAS_SLOW	8.1	as it was unused	omit
+constant	MYSQLI_STORE_RESULT_COPY_DATA	8.4	as the mysqli_store_result() parameter is unused since 8.1	omit
+constant	PGSQL_LIBPQ_VERSION_STR	8.0	as it is the same as PGSQL_LIBPQ_VERSION	omit
+constant	SOAP_FUNCTIONS_ALL	8.4	as enabling all functions is a possible security concern	omit
+constant	SUNFUNCS_RET_DOUBLE	8.4	as date_sunrise() and date_sunset() were deprecated in 8.1	omit
+constant	SUNFUNCS_RET_STRING	8.4	as date_sunrise() and date_sunset() were deprecated in 8.1	omit
+constant	SUNFUNCS_RET_TIMESTAMP	8.4	as date_sunrise() and date_sunset() were deprecated in 8.1	omit
+constant	U_MULTIPLE_DECIMAL_SEPERATORS	8.3	use U_MULTIPLE_DECIMAL_SEPARATORS instead	omit
+function	assert_options	8.3		omit
+function	curl_close	8.5	as it has no effect since PHP 8.0	keep
+function	curl_share_close	8.5	as it has no effect since PHP 8.0	keep
+function	date_sunrise	8.1	use date_sun_info() instead	omit
+function	date_sunset	8.1	use date_sun_info() instead	omit
+function	enchant_broker_free	8.0	as EnchantBroker objects are freed automatically	omit
+function	enchant_broker_free_dict	8.0	as EnchantDictionary objects are freed automatically	omit
+function	enchant_broker_get_dict_path	8.0		omit
+function	enchant_broker_set_dict_path	8.0		omit
+function	enchant_dict_add_to_personal	8.0	use enchant_dict_add() instead	omit
+function	enchant_dict_is_in_session	8.0	use enchant_dict_is_added() instead	omit
+function	finfo_close	8.5	as finfo objects are freed automatically	omit
+function	gmstrftime	8.1	use IntlDateFormatter::format() instead	omit
+function	imagedestroy	8.5	as it has no effect since PHP 8.0	keep
+function	intlcal_set	8.4	use IntlCalendar::set(), IntlCalendar::setDate(), or IntlCalendar::setDateTime() instead	omit
+function	intlgregcal_create_instance	8.4	use IntlGregorianCalendar::__construct(), IntlGregorianCalendar::createFromDate(), or IntlGregorianCalendar::createFromDateTime() instead	omit
+function	lcg_value	8.4	use \Random\Randomizer::getFloat() instead	omit
+function	ldap_connect	8.5	as it is broken since PHP 8.0	keep
+function	ldap_connect_wallet	8.5	as it is broken since PHP 8.0	omit
+function	libxml_disable_entity_loader	8.0	as external entity loading is disabled by default	keep
+function	mhash	8.1		omit
+function	mhash_count	8.1		omit
+function	mhash_get_block_size	8.1		omit
+function	mhash_get_hash_name	8.1		omit
+function	mhash_keygen_s2k	8.1		omit
+function	mysqli_execute	8.5	use mysqli_stmt_execute() instead	omit
+function	mysqli_kill	8.4	use KILL CONNECTION/QUERY SQL statement instead	omit
+function	mysqli_ping	8.4	because the reconnect feature has been removed in PHP 8.2 and this function is now redundant	omit
+function	mysqli_refresh	8.4	use FLUSH SQL statement instead	omit
+function	odbc_result_all	8.1		omit
+function	openssl_free_key	8.0	as OpenSSLAsymmetricKey objects are freed automatically	omit
+function	openssl_pkey_free	8.0	as OpenSSLAsymmetricKey objects are freed automatically	keep
+function	openssl_x509_free	8.0	as OpenSSLCertificate objects are freed automatically	omit
+function	pg_clientencoding	8.0	use pg_client_encoding() instead	omit
+function	pg_cmdtuples	8.0	use pg_affected_rows() instead	omit
+function	pg_errormessage	8.0	use pg_last_error() instead	omit
+function	pg_fieldisnull	8.0	use pg_field_is_null() instead	omit
+function	pg_fieldname	8.0	use pg_field_name() instead	omit
+function	pg_fieldnum	8.0	use pg_field_num() instead	omit
+function	pg_fieldprtlen	8.0	use pg_field_prtlen() instead	omit
+function	pg_fieldsize	8.0	use pg_field_size() instead	omit
+function	pg_fieldtype	8.0	use pg_field_type() instead	omit
+function	pg_freeresult	8.0	use pg_free_result() instead	omit
+function	pg_getlastoid	8.0	use pg_last_oid() instead	omit
+function	pg_loclose	8.0	use pg_lo_close() instead	omit
+function	pg_locreate	8.0	use pg_lo_create() instead	omit
+function	pg_loexport	8.0	use pg_lo_export() instead	omit
+function	pg_loimport	8.0	use pg_lo_import() instead	omit
+function	pg_loopen	8.0	use pg_lo_open() instead	omit
+function	pg_loread	8.0	use pg_lo_read() instead	omit
+function	pg_loreadall	8.0	use pg_lo_read_all() instead	omit
+function	pg_lounlink	8.0	use pg_lo_unlink() instead	omit
+function	pg_lowrite	8.0	use pg_lo_write() instead	omit
+function	pg_numfields	8.0	use pg_num_fields() instead	omit
+function	pg_numrows	8.0	use pg_num_rows() instead	omit
+function	pg_result	8.0	use pg_fetch_result() instead	omit
+function	pg_setclientencoding	8.0	use pg_set_client_encoding() instead	omit
+function	shmop_close	8.0	as Shmop objects are freed automatically	omit
+function	socket_set_timeout	8.5	use stream_set_timeout() instead	omit
+function	strftime	8.1	use IntlDateFormatter::format() instead	omit
+function	strptime	8.2	use date_parse_from_format() (for locale-independent parsing), or IntlDateFormatter::parse() (for locale-dependent parsing) instead	omit
+function	utf8_decode	8.2	visit the php.net documentation for various alternatives	omit
+function	utf8_encode	8.2	visit the php.net documentation for various alternatives	keep
+function	xml_parser_free	8.5	as it has no effect since PHP 8.0	keep
+function	xml_set_object	8.4	provide a proper method callable to xml_set_*_handler() functions	omit
+function	zip_close	8.0	use ZipArchive::close() instead	omit
+function	zip_entry_close	8.0		omit
+function	zip_entry_compressedsize	8.0	use ZipArchive::statIndex() instead	omit
+function	zip_entry_compressionmethod	8.0	use ZipArchive::statIndex() instead	omit
+function	zip_entry_filesize	8.0	use ZipArchive::statIndex() instead	omit
+function	zip_entry_name	8.0	use ZipArchive::statIndex() instead	omit
+function	zip_entry_open	8.0		omit
+function	zip_entry_read	8.0	use ZipArchive::getFromIndex() instead	omit
+function	zip_open	8.0	use ZipArchive::open() instead	omit
+function	zip_read	8.0	use ZipArchive::statIndex() instead	omit
+method	DateInterval::__wakeup	8.5	this method is obsolete, as serialization hooks are provided by __unserialize() and __serialize()	omit
+method	DatePeriod::__wakeup	8.5	this method is obsolete, as serialization hooks are provided by __unserialize() and __serialize()	omit
+method	DateTime::__wakeup	8.5	this method is obsolete, as serialization hooks are provided by __unserialize() and __serialize()	omit
+method	DateTimeImmutable::__wakeup	8.5	this method is obsolete, as serialization hooks are provided by __unserialize() and __serialize()	omit
+method	DateTimeInterface::__wakeup	8.5	this method is obsolete, as serialization hooks are provided by __unserialize() and __serialize()	omit
+method	DateTimeZone::__wakeup	8.5	this method is obsolete, as serialization hooks are provided by __unserialize() and __serialize()	omit
+method	Redis::delete			keep
+method	Redis::open			keep
+method	Redis::popen			keep
+method	Redis::slaveof			omit
+method	Redis::sortAsc			omit
+method	Redis::sortAscAlpha			omit
+method	Redis::sortDesc			omit
+method	Redis::sortDescAlpha			omit
+method	ReflectionFunction::isDisabled	8.0	as ReflectionFunction can no longer be constructed for disabled functions	omit
+method	ReflectionMethod::setAccessible	8.5	as it has no effect since PHP 8.1	keep
+method	ReflectionParameter::getClass	8.0	use ReflectionParameter::getType() instead	keep
+method	ReflectionParameter::isArray	8.0	use ReflectionParameter::getType() instead	keep
+method	ReflectionParameter::isCallable	8.0	use ReflectionParameter::getType() instead	keep
+method	ReflectionProperty::setAccessible	8.5	as it has no effect since PHP 8.1	keep
+method	SplFileInfo::_bad_state_ex	8.2		omit
+method	SplFixedArray::__wakeup	8.4	this method is obsolete, as serialization hooks are provided by __unserialize() and __serialize()	omit
+method	SplObjectStorage::attach	8.5	use method SplObjectStorage::offsetSet() instead	keep
+method	SplObjectStorage::contains	8.5	use method SplObjectStorage::offsetExists() instead	keep
+method	SplObjectStorage::detach	8.5	use method SplObjectStorage::offsetUnset() instead	keep
+method	mysqli::get_client_info	8.1	use mysqli_get_client_info() instead	omit
+method	mysqli::init	8.1	replace calls to parent::init() with parent::__construct()	omit
+method	mysqli::kill	8.4	use KILL CONNECTION/QUERY SQL statement instead	omit
+method	mysqli::ping	8.4	because the reconnect feature has been removed in PHP 8.2 and this method is now redundant	omit
+method	mysqli::refresh	8.4	use FLUSH SQL statement instead	omit

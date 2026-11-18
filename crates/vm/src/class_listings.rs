@@ -1,7 +1,5 @@
 //! `get_class_methods($object)` lists visible methods in declaration order.
 
-use std::{collections::HashSet, rc::Rc};
-
 use phera_bytecode::Visibility;
 use phera_extension_api::{NativeError, NativeResult};
 use phera_value::{ArrayKey, PhpArray, Value};
@@ -147,22 +145,67 @@ impl Vm {
                 );
             }
         } else {
-            let mut seen = HashSet::new();
-            for current in ancestors.into_iter().rev().chain([class]) {
-                let mut pending: Vec<_> = current.interfaces.iter().rev().map(Rc::as_ref).collect();
-                while let Some(interface) = pending.pop() {
-                    if seen.insert(&interface.name) {
-                        result.insert(
-                            ArrayKey::str(interface.name.as_str()),
-                            interface.name_value.clone(),
-                        );
-                        pending.extend(interface.interfaces.iter().rev().map(Rc::as_ref));
-                    }
-                }
+            for interface in interfaces_in_php_order(class) {
+                result.insert(
+                    ArrayKey::str(interface.name.as_str()),
+                    interface.name_value.clone(),
+                );
             }
         }
         Ok(Value::from(result))
     }
+}
+
+/// Every interface of `class`, in the order PHP keeps them: the parent
+/// class's list first, then the interfaces the class names itself, and
+/// only then what those interfaces extend, each interface's own list
+/// taken back to front.
+///
+/// ```php
+/// interface A {} interface B extends A {} interface C {}
+/// class K implements B, C {}
+/// class_implements('K');   // B, C, A: the two named ones, then B's parent
+/// ```
+///
+/// A class or interface is worked out after everything it builds on, with
+/// a list of work to do in place of recursion.
+fn interfaces_in_php_order(class: &Class) -> Vec<&Class> {
+    let mut lists: std::collections::HashMap<&str, Vec<&Class>> = Default::default();
+    let mut pending = vec![(class, false)];
+    while let Some((current, parts_are_ready)) = pending.pop() {
+        if lists.contains_key(current.name.as_str()) {
+            continue;
+        }
+        if !parts_are_ready {
+            pending.push((current, true));
+            pending.extend(current.parent.iter().map(|parent| (parent.as_ref(), false)));
+            pending.extend(
+                current
+                    .interfaces
+                    .iter()
+                    .map(|named| (named.as_ref(), false)),
+            );
+            continue;
+        }
+        let list_of = |part: &Class| lists.get(part.name.as_str()).cloned().unwrap_or_default();
+        let mut list = current.parent.as_deref().map(list_of).unwrap_or_default();
+        let inherited = list.len();
+        for named in &current.interfaces {
+            if !list.iter().any(|known| known.name == named.name) {
+                list.push(named);
+            }
+        }
+        for index in inherited..list.len() {
+            let extended = list_of(list[index]);
+            for interface in extended.into_iter().rev() {
+                if !list.iter().any(|known| known.name == interface.name) {
+                    list.push(interface);
+                }
+            }
+        }
+        lists.insert(current.name.as_str(), list);
+    }
+    lists.remove(class.name.as_str()).unwrap_or_default()
 }
 
 /// PHP lists declared methods before inherited methods, retaining source order within each class.

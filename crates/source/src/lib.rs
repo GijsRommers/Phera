@@ -1,5 +1,6 @@
 //! Source-code identity and positions.
 
+pub mod deprecations;
 mod diagnostic;
 mod source_file;
 mod span;

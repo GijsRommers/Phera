@@ -17,7 +17,7 @@ use phera_extension_api::{
 };
 
 use crate::engines::{self, Engine};
-use crate::mt19937::{Mode, Mt19937};
+use crate::mt19937::{Mt19937, reject_legacy_mode};
 
 pub const FUNCTIONS: &[FunctionEntry] = &[
     MT_SRAND,
@@ -28,7 +28,6 @@ pub const FUNCTIONS: &[FunctionEntry] = &[
     GETRANDMAX,
     RANDOM_INT,
     RANDOM_BYTES,
-    LCG_VALUE,
     UNIQID,
 ];
 
@@ -40,8 +39,6 @@ const MT_RAND_MAX: i64 = 0x7fff_ffff;
 struct RequestRandom {
     /// Mt19937, made on first use.
     engine: Option<Engine>,
-    /// The two states of `lcg_value()`'s generator, made on first use.
-    lcg: Option<[i64; 2]>,
     /// The microsecond of the last `uniqid()`, which must not repeat.
     last_id: u128,
 }
@@ -51,7 +48,7 @@ pub fn generator(context: &mut dyn Context) -> Result<&mut Engine, NativeError> 
     let state = context.state().get_or_default::<RequestRandom>();
     if state.engine.is_none() {
         let seed = engines::secure_u64()? as u32;
-        state.engine = Some(Engine::Mt(Box::new(Mt19937::new(seed, Mode::Standard))));
+        state.engine = Some(Engine::Mt(Box::new(Mt19937::new(seed))));
     }
     Ok(state.engine.as_mut().expect("made above"))
 }
@@ -70,17 +67,12 @@ const SEED: &[Param] = &[
 /// A null seed is random, and only the low 32 bits count. Unlike the
 /// engine's constructor, an unknown mode means the standard one.
 fn seed(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let mode = args::int(arguments, 1)
-        .and_then(Mode::from_flag)
-        .unwrap_or(Mode::Standard);
-    if mode == Mode::Legacy {
-        context.deprecated("The MT_RAND_PHP variant of Mt19937 is deprecated".to_string());
-    }
+    reject_legacy_mode(args::int(arguments, 1).unwrap_or_default())?;
     let seed = match args::int(arguments, 0) {
         Some(seed) => seed as u32,
         None => engines::secure_u64()? as u32,
     };
-    let engine = Engine::Mt(Box::new(Mt19937::new(seed, mode)));
+    let engine = Engine::Mt(Box::new(Mt19937::new(seed)));
     context.state().get_or_default::<RequestRandom>().engine = Some(engine);
     Ok(Value::Null)
 }
@@ -138,7 +130,7 @@ fn mt_rand(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
             "mt_rand(): Argument #2 ($max) must be greater than or equal to argument #1 ($min)",
         ));
     }
-    Ok(Value::Int(generator(context)?.integer(min, max)?))
+    Ok(Value::Int(generator(context)?.range(min, max)?))
 }
 
 /// Like `mt_rand()`, except that bounds in the wrong order are swapped.
@@ -147,7 +139,7 @@ fn rand(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         return unbounded(context);
     };
     let (min, max) = if min > max { (max, min) } else { (min, max) };
-    Ok(Value::Int(generator(context)?.integer(min, max)?))
+    Ok(Value::Int(generator(context)?.range(min, max)?))
 }
 
 /// `mt_getrandmax(): int`
@@ -212,43 +204,6 @@ fn random_bytes(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let mut bytes = zeroed(length as usize)?;
     engines::fill(&mut bytes)?;
     Ok(Value::from(bytes))
-}
-
-/// `lcg_value(): float`, deprecated since PHP 8.4: a float in (0, 1) from
-/// L'Ecuyer's combined generator, seeded at random per request.
-const LCG_VALUE: FunctionEntry = FunctionEntry::sync("lcg_value", &[], lcg_value);
-
-fn lcg_value(context: &mut dyn Context, _: &[Value]) -> NativeResult {
-    /// For each of the two generators `s = a * s % m`: `m / a`, `a`,
-    /// `m % a` and `m`. The quotient and remainder let Schrage's method
-    /// multiply without overflow.
-    const GENERATORS: [(i64, i64, i64, i64); 2] = [
-        (53668, 40014, 12211, 2147483563),
-        (52774, 40692, 3791, 2147483399),
-    ];
-    context.deprecated(
-        "Function lcg_value() is deprecated since 8.4, use \\Random\\Randomizer::getFloat() instead"
-            .to_string(),
-    );
-    let state = context.state().get_or_default::<RequestRandom>();
-    if state.lcg.is_none() {
-        let seed = engines::secure_u64()?;
-        state.lcg = Some([i64::from(seed as i32), i64::from((seed >> 32) as i32)]);
-    }
-    let states = state.lcg.as_mut().expect("made above");
-    for (s, (q, a, r, m)) in states.iter_mut().zip(GENERATORS) {
-        let k = *s / q;
-        *s = a * (*s - q * k) - r * k;
-        if *s < 0 {
-            *s += m;
-        }
-    }
-    let mut z = states[0] - states[1];
-    if z < 1 {
-        z += 2147483562;
-    }
-    // PHP's constant: just under 1 / 2147483563.
-    Ok(Value::Float(z as f64 * 4.656613e-10))
 }
 
 /// `uniqid(string $prefix = "", bool $more_entropy = false): string`

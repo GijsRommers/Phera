@@ -480,13 +480,42 @@ fn unterminated_interpolated_strings() {
 }
 
 #[test]
-fn deprecated_dollar_brace_interpolation_is_rejected() {
-    for source in [r#""${a}""#, r#""${a[1]}""#, r#""${expr()}""#] {
-        assert!(
-            matches!(first_error(source).kind, LexErrorKind::Unsupported(_)),
-            "in {source:?}"
-        );
-    }
+fn deprecated_dollar_brace_interpolation_has_php_tokens() {
+    assert_eq!(
+        kinds(r#""${a}""#),
+        [
+            DoubleQuote,
+            DollarCurlyOpen,
+            StringVarname,
+            RightBrace,
+            DoubleQuote
+        ]
+    );
+    assert_eq!(
+        kinds(r#""${a[1]}""#),
+        [
+            DoubleQuote,
+            DollarCurlyOpen,
+            StringVarname,
+            LeftBracket,
+            Integer,
+            RightBracket,
+            RightBrace,
+            DoubleQuote,
+        ]
+    );
+    assert_eq!(
+        kinds(r#""${expr()}""#),
+        [
+            DoubleQuote,
+            DollarCurlyOpen,
+            Identifier,
+            LeftParen,
+            RightParen,
+            RightBrace,
+            DoubleQuote,
+        ]
+    );
 }
 
 #[test]

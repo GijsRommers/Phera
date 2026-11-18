@@ -198,6 +198,9 @@ impl Vm {
             return Ok(Value::Object(object));
         }
         let callee = self.resolve_callable(value).map_err(|error| {
+            if crate::unsupported_items::is_unsupported(&error) {
+                return error;
+            }
             let reason = self.callback_reason(value, error);
             NativeError::type_error(format!("Failed to create closure from callable: {reason}"))
         })?;

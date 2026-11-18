@@ -45,6 +45,7 @@ consume facts established by the analyzer. There is no runtime evaluation.
 | 0 | `phpstan.parse` | Report a file's first syntax error and continue other files |
 | 0 | `class.notFound` | Unknown classes in construction, instanceof, catch, static references, types and inheritance |
 | 0 | `function.notFound` | Unknown functions, with PHP namespace fallback |
+| 0 | `phera.notSupported` | Deprecated functions, constants and members omitted by Phera |
 | 0 | `method.notFound` | Undefined methods on `$this`, class names, self/static/parent |
 | 0 | `property.notFound`, `staticProperty.notFound` | Undefined properties on those receivers |
 | 0 | `constant.notFound`, `classConstant.notFound` | Unknown global and class constants |

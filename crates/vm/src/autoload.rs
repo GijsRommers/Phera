@@ -28,6 +28,7 @@ pub(crate) struct ClassMiss {
 
 enum MissFailure {
     Lookup(&'static str),
+    Member(phera_source::deprecations::ItemKind, String),
     Signature(crate::error_traces::DeclarationFailure),
 }
 
@@ -61,6 +62,10 @@ impl ClassMiss {
             MissFailure::Lookup(kind) => {
                 NativeError::error(format!("{kind} \"{}\" not found", self.name))
             }
+            MissFailure::Member(kind, member) => crate::unsupported_items::omitted_member(
+                kind, &self.name, &member,
+            )
+            .unwrap_or_else(|| NativeError::error(format!("Class \"{}\" not found", self.name))),
             MissFailure::Signature(failure) => NativeError::Unwind(Unwind(Box::new(failure))),
         }
     }
@@ -79,6 +84,19 @@ impl Vm {
             failure: MissFailure::Lookup(kind),
         };
         NativeError::Unwind(Unwind(Box::new(miss)))
+    }
+
+    /// The member's policy matters only after autoload has declined the class.
+    #[cold]
+    pub(crate) fn class_member_miss(
+        name: &str,
+        kind: phera_source::deprecations::ItemKind,
+        member: &str,
+    ) -> NativeError {
+        NativeError::Unwind(Unwind(Box::new(ClassMiss {
+            name: name.into(),
+            failure: MissFailure::Member(kind, member.into()),
+        })))
     }
 
     /// Most lookups finish immediately. Each failed lookup gets one pass through the loaders.

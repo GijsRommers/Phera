@@ -20,8 +20,17 @@ impl Vm {
     ) -> Result<(), NativeError> {
         if usage != CallableUse::Callback || !matches!(name, "self" | "parent" | "static") {
             let class = self.classes.get(name).ok_or_else(|| match usage {
-                CallableUse::Callback => NativeError::error(format!("Class \"{name}\" not found")),
-                _ => Self::class_miss(name, "Class"),
+                CallableUse::Callback => crate::unsupported_items::omitted_member(
+                    phera_source::deprecations::ItemKind::Method,
+                    name,
+                    method,
+                )
+                .unwrap_or_else(|| NativeError::error(format!("Class \"{name}\" not found"))),
+                _ => Self::class_member_miss(
+                    name,
+                    phera_source::deprecations::ItemKind::Method,
+                    method,
+                ),
             })?;
             let receiver = if usage == CallableUse::Callback {
                 self.current()

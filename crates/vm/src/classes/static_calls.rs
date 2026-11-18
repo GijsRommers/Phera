@@ -56,10 +56,9 @@ impl Vm {
         method: &str,
         binding: ClassBinding,
     ) -> Result<(), NativeError> {
-        let class = self
-            .classes
-            .get(name)
-            .ok_or_else(|| Self::class_miss(name, "Class"))?;
+        let class = self.classes.get(name).ok_or_else(|| {
+            Self::class_member_miss(name, phera_source::deprecations::ItemKind::Method, method)
+        })?;
         let context = self.current().and_then(|frame| frame.method());
         let receiver = context
             .as_ref()

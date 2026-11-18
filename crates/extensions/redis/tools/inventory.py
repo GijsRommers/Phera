@@ -1,5 +1,5 @@
-"""Writes the method inventory in README.md: for each of phpredis 6.3.0's
-methods, which comparison scripts call it. Run from anywhere:
+"""Writes the method inventory in README.md for phpredis 6.3.0 methods in
+Phera's scope. Run from anywhere:
 
     python3 crates/extensions/redis/tools/inventory.py
 
@@ -14,7 +14,12 @@ import re
 
 root = pathlib.Path(__file__).resolve().parents[1]
 methods = list(json.loads((root / 'tools/phpredis-6.3.0.json').read_text())['methods'])
-known = {name.lower(): name for name in methods}
+policy = root.parents[1] / 'source/data/deprecations.tsv'
+omitted = set()
+for row in policy.read_text().splitlines():
+    if row.startswith('method\tRedis::') and row.endswith('\tomit'):
+        omitted.add(row.split('\t')[1].split('::')[1])
+methods = [name for name in methods if name not in omitted]
 
 unimplemented = set('failover gettransferredbytes cleartransferredbytes migrate vadd vsim vcard vdim '
                     'vinfo vismember vemb vrandmember vrange vrem vsetattr vgetattr vlinks'.split())

@@ -178,7 +178,7 @@ fn get_int(_: &mut dyn Context, this: Option<&Rc<Object>>, arguments: &[Value]) 
              argument #1 ($min)",
         ));
     }
-    with_engine(this, |engine| Ok(Value::Int(engine.integer(min, max)?)))
+    with_engine(this, |engine| Ok(Value::Int(engine.range(min, max)?)))
 }
 
 /// `getFloat(float $min, float $max, Random\IntervalBoundary $boundary =

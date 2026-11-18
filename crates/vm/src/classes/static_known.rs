@@ -33,10 +33,13 @@ impl Vm {
             .get(method.index())
             .ok_or_else(|| internal_error!("known method symbol"))?;
         let name = self.class_symbol(symbol)?;
-        let class = self
-            .classes
-            .get(&name)
-            .ok_or_else(|| Self::class_miss(&name, "Class"))?;
+        let class = self.classes.get(&name).ok_or_else(|| {
+            Self::class_member_miss(
+                &name,
+                phera_source::deprecations::ItemKind::Method,
+                &method.written,
+            )
+        })?;
         self.link_class_symbol(symbol, &class);
         let context = self.current().and_then(|frame| frame.method());
         let receiver = context

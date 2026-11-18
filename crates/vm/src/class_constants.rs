@@ -3,7 +3,14 @@
 use crate::{Vm, classes::ConstantState};
 use phera_bytecode::{Reg, Visibility};
 use phera_extension_api::{NativeError, NativeResult};
+use phera_source::deprecations::ItemKind;
 use phera_value::Value;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ConstantAccess {
+    Read,
+    Defined,
+}
 
 impl Vm {
     /// Both objects and strings are valid dynamic class targets.
@@ -24,10 +31,13 @@ impl Vm {
         name: Reg,
     ) -> Result<(), NativeError> {
         let class = self.class_target(class)?;
-        let linked = self
-            .classes
-            .get(&class)
-            .ok_or_else(|| Self::class_miss(&class, "Class"))?;
+        let linked = self.classes.get(&class).ok_or_else(|| {
+            if let Value::String(name) = self.read_local(name) {
+                Self::class_member_miss(&class, ItemKind::ClassConstant, &name.to_string_lossy())
+            } else {
+                Self::class_miss(&class, "Class")
+            }
+        })?;
         let name = self.read_local(name);
         let Value::String(name) = name else {
             return Err(NativeError::error(format!(
@@ -47,12 +57,24 @@ impl Vm {
 
     /// Resolve inherited constants while retaining the scope of their original declaration.
     pub(crate) fn class_constant(&mut self, class: &str, name: &str) -> NativeResult {
+        self.class_constant_with_access(class, name, ConstantAccess::Read)
+    }
+
+    pub(crate) fn class_constant_with_access(
+        &mut self,
+        class: &str,
+        name: &str,
+        access: ConstantAccess,
+    ) -> NativeResult {
         let class = self
             .classes
             .get(class)
-            .ok_or_else(|| Self::class_miss(class, "Class"))?;
+            .ok_or_else(|| Self::class_member_miss(class, ItemKind::ClassConstant, name))?;
         let constant = class.constants.get(name).cloned().ok_or_else(|| {
-            NativeError::error(format!("Undefined constant {}::{name}", class.name))
+            crate::unsupported_items::omitted_native_member(ItemKind::ClassConstant, &class, name)
+                .unwrap_or_else(|| {
+                    NativeError::error(format!("Undefined constant {}::{name}", class.name))
+                })
         })?;
         if !self.can_read_class_constant(&constant) {
             let visibility = if constant.visibility == Visibility::Private {
@@ -65,7 +87,9 @@ impl Vm {
                 constant.declaring
             )));
         }
-        if let Some(message) = constant.deprecated {
+        if access == ConstantAccess::Read
+            && let Some(message) = constant.deprecated
+        {
             self.diagnostic("Deprecated", message.into());
         }
         self.evaluate_class_constant(&constant, name)

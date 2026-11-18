@@ -230,7 +230,13 @@ impl Compiler<'_> {
         if !crate::parameter_defaults::constant_expression(expression) {
             return Err(self.error("Constant expression contains invalid operations", line));
         }
-        let mut builder = Compiler::new(self.file, self.lines, "{initializer}", &self.namespace);
+        let mut builder = Compiler::new(
+            self.file,
+            self.lines,
+            "{initializer}",
+            &self.namespace,
+            self.compile_diagnostics,
+        );
         builder.imports = self.imports.clone();
         let result = builder.compile_expression(expression)?;
         builder.emit(Instruction::Return(result), line);

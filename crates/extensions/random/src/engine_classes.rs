@@ -16,7 +16,7 @@ use phera_extension_api::{
 };
 
 use crate::engines::{self, Engine, XOSHIRO_JUMP, XOSHIRO_LONG_JUMP, fill, secure_u64};
-use crate::mt19937::{Mode, Mt19937};
+use crate::mt19937::{Mt19937, reject_legacy_mode};
 
 /// In registration order: interfaces before the classes that implement them.
 pub const CLASSES: &[ClassEntry] = &[
@@ -101,24 +101,23 @@ const MT19937: ClassEntry = ClassEntry {
 /// `__construct(?int $seed = null, int $mode = MT_RAND_MT19937)`; a null
 /// seed is random. Only the low 32 bits of the seed count.
 fn mt19937_construct(
-    context: &mut dyn Context,
+    _: &mut dyn Context,
     this: Option<&Rc<Object>>,
     arguments: &[Value],
 ) -> NativeResult {
-    let mode = Mode::from_flag(args::int(arguments, 1).unwrap_or(0)).ok_or_else(|| {
-        NativeError::value_error(
+    let mode = args::int(arguments, 1).unwrap_or_default();
+    reject_legacy_mode(mode)?;
+    if mode != crate::mt19937::MT_RAND_MT19937 {
+        return Err(NativeError::value_error(
             "Random\\Engine\\Mt19937::__construct(): Argument #2 ($mode) must be either \
              MT_RAND_MT19937 or MT_RAND_PHP",
-        )
-    })?;
-    if mode == Mode::Legacy {
-        context.deprecated("The MT_RAND_PHP variant of Mt19937 is deprecated".to_string());
+        ));
     }
     let seed = match args::int(arguments, 0) {
         Some(seed) => seed as u32,
         None => secure_u64()? as u32,
     };
-    store(this, Engine::Mt(Box::new(Mt19937::new(seed, mode))))
+    store(this, Engine::Mt(Box::new(Mt19937::new(seed))))
 }
 
 /// `final class Random\Engine\PcgOneseq128XslRr64`
