@@ -87,7 +87,13 @@ impl ConstantTable {
             })
             .cloned()
             .ok_or_else(|| {
-                NativeError::error(format!("Undefined constant \"{}\"", definition.name))
+                crate::unsupported_items::omitted_item(
+                    phera_source::deprecations::ItemKind::Constant,
+                    definition.fallback.as_deref().unwrap_or(&definition.name),
+                )
+                .unwrap_or_else(|| {
+                    NativeError::error(format!("Undefined constant \"{}\"", definition.name))
+                })
             })?;
         self.resolved.insert(
             site,

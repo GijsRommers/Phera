@@ -29,6 +29,9 @@ impl Vm {
         error: NativeError,
         nullable: bool,
     ) -> NativeError {
+        if crate::unsupported_items::is_unsupported(&error) {
+            return error;
+        }
         let detail = self.callback_reason(callable, error);
         let null = if nullable { " or null" } else { "" };
         NativeError::type_error(format!(

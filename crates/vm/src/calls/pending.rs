@@ -63,13 +63,17 @@ impl Vm {
             .cloned()
             .ok_or_else(|| internal_error!("invalid symbol"))?;
         let name = if self.exists(&definition.name) {
-            definition.name
-        } else if let Some(fallback) = definition.fallback.filter(|name| self.exists(name)) {
+            &definition.name
+        } else if let Some(fallback) = definition
+            .fallback
+            .as_ref()
+            .filter(|name| self.exists(name))
+        {
             fallback
         } else {
-            definition.written
+            &definition.written
         };
-        let callee = self.resolve_callee(&name)?;
+        let callee = self.resolve_callee_with_fallback(name, definition.fallback.as_deref())?;
         let linked = match callee.target {
             CallTarget::User(function) => LinkedFunction::Php(function),
             _ => LinkedFunction::Other(callee),
@@ -101,6 +105,14 @@ impl Vm {
 
     /// Snapshot the signature and target so argument evaluation cannot change resolution.
     pub(crate) fn resolve_callee(&self, name: &str) -> Result<Callee, NativeError> {
+        self.resolve_callee_with_fallback(name, None)
+    }
+
+    fn resolve_callee_with_fallback(
+        &self,
+        name: &str,
+        fallback: Option<&str>,
+    ) -> Result<Callee, NativeError> {
         let lower = name.trim_start_matches('\\').to_ascii_lowercase();
         if let Some(index) = self.function_table.get(&lower) {
             return Ok(self.function_callee(index));
@@ -132,9 +144,13 @@ impl Vm {
             };
             (lower.into(), CallTarget::Intrinsic(intrinsic), parameters)
         } else {
-            return Err(NativeError::error(format!(
-                "Call to undefined function {name}()"
-            )));
+            return Err(crate::unsupported_items::omitted_item(
+                phera_source::deprecations::ItemKind::Function,
+                fallback.unwrap_or(name),
+            )
+            .unwrap_or_else(|| {
+                NativeError::error(format!("Call to undefined function {name}()"))
+            }));
         };
         Ok(Callee {
             argument_binding: crate::calls::callback_binding::ArgumentBinding::Caller,

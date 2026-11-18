@@ -1902,6 +1902,7 @@ dependencies = [
  "phera-compiler",
  "phera-ext-core",
  "phera-extension-api",
+ "phera-source",
  "phera-value",
  "tokio",
 ]

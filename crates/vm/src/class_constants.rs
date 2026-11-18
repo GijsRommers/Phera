@@ -3,6 +3,7 @@
 use crate::{Vm, classes::ConstantState};
 use phera_bytecode::{Reg, Visibility};
 use phera_extension_api::{NativeError, NativeResult};
+use phera_source::deprecations::ItemKind;
 use phera_value::Value;
 
 impl Vm {
@@ -24,10 +25,13 @@ impl Vm {
         name: Reg,
     ) -> Result<(), NativeError> {
         let class = self.class_target(class)?;
-        let linked = self
-            .classes
-            .get(&class)
-            .ok_or_else(|| Self::class_miss(&class, "Class"))?;
+        let linked = self.classes.get(&class).ok_or_else(|| {
+            if let Value::String(name) = self.read_local(name) {
+                Self::class_member_miss(&class, ItemKind::ClassConstant, &name.to_string_lossy())
+            } else {
+                Self::class_miss(&class, "Class")
+            }
+        })?;
         let name = self.read_local(name);
         let Value::String(name) = name else {
             return Err(NativeError::error(format!(
@@ -50,9 +54,12 @@ impl Vm {
         let class = self
             .classes
             .get(class)
-            .ok_or_else(|| Self::class_miss(class, "Class"))?;
+            .ok_or_else(|| Self::class_member_miss(class, ItemKind::ClassConstant, name))?;
         let constant = class.constants.get(name).cloned().ok_or_else(|| {
-            NativeError::error(format!("Undefined constant {}::{name}", class.name))
+            crate::unsupported_items::omitted_native_member(ItemKind::ClassConstant, &class, name)
+                .unwrap_or_else(|| {
+                    NativeError::error(format!("Undefined constant {}::{name}", class.name))
+                })
         })?;
         if !self.can_read_class_constant(&constant) {
             let visibility = if constant.visibility == Visibility::Private {

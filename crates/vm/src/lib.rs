@@ -116,6 +116,7 @@ mod typed_references;
 mod types;
 mod unit_caches;
 mod unpacking;
+mod unsupported_items;
 
 /// Resolves PHP includes through the embedding runtime code cache.
 pub trait CodeLoader: Send + Sync {

@@ -1,6 +1,7 @@
 //! `function_exists('strlen')` sees native functions and declarations already made in this request.
 
 use phera_extension_api::{NativeError, NativeResult, Param, ParamType};
+use phera_source::deprecations::ItemKind;
 use phera_value::{ArrayKey, PhpArray, Value};
 
 use crate::{Vm, calls::callback_binding::ArgumentOrigin};
@@ -184,7 +185,12 @@ impl Vm {
                 return if predicate {
                     Ok(Value::Bool(false))
                 } else {
-                    Err(NativeError::error(format!("Class \"{class}\" not found")))
+                    Err(crate::unsupported_items::omitted_member(
+                        ItemKind::ClassConstant,
+                        &class,
+                        constant,
+                    )
+                    .unwrap_or_else(|| NativeError::error(format!("Class \"{class}\" not found"))))
                 };
             };
             let accessible = entry
@@ -195,9 +201,14 @@ impl Vm {
                 return Ok(Value::Bool(false));
             }
             if !entry.constants.contains_key(constant) {
-                return Err(NativeError::error(format!(
-                    "Undefined constant {written}::{constant}"
-                )));
+                return Err(crate::unsupported_items::omitted_native_member(
+                    ItemKind::ClassConstant,
+                    &entry,
+                    constant,
+                )
+                .unwrap_or_else(|| {
+                    NativeError::error(format!("Undefined constant {written}::{constant}"))
+                }));
             }
             loop {
                 match self.class_constant(&class, constant) {
@@ -223,10 +234,10 @@ impl Vm {
         if predicate {
             Ok(Value::Bool(self.constants.contains_key(&name)))
         } else {
-            self.constants
-                .get(&name)
-                .cloned()
-                .ok_or_else(|| NativeError::error(format!("Undefined constant \"{name}\"")))
+            self.constants.get(&name).cloned().ok_or_else(|| {
+                crate::unsupported_items::omitted_item(ItemKind::Constant, &name)
+                    .unwrap_or_else(|| NativeError::error(format!("Undefined constant \"{name}\"")))
+            })
         }
     }
 
