@@ -332,7 +332,7 @@ impl Vm {
             }
         }
         self.publish_declaration_warnings(&unit);
-        if let Err(error) = self.hoist_classes(&unit) {
+        if let Err(error) = self.hoist_classes(&unit, main) {
             self.unwind(error);
             return self.status;
         }

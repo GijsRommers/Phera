@@ -6,11 +6,15 @@ use phera_bytecode::{ClassId, ClassKind, CompiledUnit, Visibility};
 use phera_extension_api::NativeError;
 
 use super::{Class, Method, MethodBody};
-use crate::Vm;
+use crate::{Vm, code_table::FunctionIndex};
 
 impl Vm {
     /// Hoist only declarations whose dependencies are available; deferred ones execute normally.
-    pub(crate) fn hoist_classes(&mut self, unit: &Arc<CompiledUnit>) -> Result<(), NativeError> {
+    pub(crate) fn hoist_classes(
+        &mut self,
+        unit: &Arc<CompiledUnit>,
+        unit_first: FunctionIndex,
+    ) -> Result<(), NativeError> {
         for &index in &unit.hoisted_classes {
             let declaration = &unit.classes[index.index()];
             if declaration.interfaces.is_empty()
@@ -19,9 +23,12 @@ impl Vm {
                         .get(&unit.symbols[parent.index()].written)
                         .is_some()
                 })
-                && self.classes.get(&declaration.name).is_none()
             {
-                if let Err(error) = self.link_class(unit.clone(), index) {
+                let key = declaration.name.to_ascii_lowercase();
+                if self.classes.entries.contains_key(&key) {
+                    continue;
+                }
+                if let Err(error) = self.link_new_class(unit, unit_first, index, key) {
                     if crate::autoload::ClassMiss::is(&error) {
                         continue;
                     }
@@ -36,11 +43,11 @@ impl Vm {
 
     /// Runtime declarations are not idempotent; only the exact prelinked instruction is skipped.
     pub(crate) fn declare_class(&mut self, index: ClassId) -> Result<(), NativeError> {
-        let unit = self
+        let frame = self
             .current()
-            .ok_or_else(|| internal_error!("class frame"))?
-            .unit()
-            .clone();
+            .ok_or_else(|| internal_error!("class frame"))?;
+        let unit_first = self.code.facts(frame.frame.function).unit_first;
+        let unit = frame.unit().clone();
         if self
             .prelinked_classes
             .remove(&(Arc::as_ptr(&unit) as usize, index.index()))
@@ -48,33 +55,42 @@ impl Vm {
             return Ok(());
         }
         let declaration = &unit.classes[index.index()];
-        if declaration.kind == ClassKind::Anonymous && self.classes.get(&declaration.name).is_some()
-        {
-            return Ok(());
+        let key = declaration.name.to_ascii_lowercase();
+        if let Some(existing) = self.classes.entries.get(&key) {
+            if declaration.kind == ClassKind::Anonymous {
+                return Ok(());
+            }
+            return Err(super::declaration_errors::link_failure(
+                &unit,
+                index,
+                NativeError::error(format!("Cannot redeclare class {}", existing.name)),
+            ));
         }
-        self.link_class(unit, index)
+        self.link_new_class(&unit, unit_first, index, key)
     }
 
-    /// Copy inherited tables and validate structural dependencies before publishing a class.
-    fn link_class(&mut self, unit: Arc<CompiledUnit>, index: ClassId) -> Result<(), NativeError> {
-        self.link_class_body(unit.clone(), index)
-            .map_err(|error| super::declaration_errors::link_failure(&unit, index, error))
+    /// Both callers have checked the declaration's case-insensitive name.
+    fn link_new_class(
+        &mut self,
+        unit: &Arc<CompiledUnit>,
+        unit_first: FunctionIndex,
+        index: ClassId,
+        key: String,
+    ) -> Result<(), NativeError> {
+        self.link_class_body(unit, unit_first, index, key)
+            .map_err(|error| super::declaration_errors::link_failure(unit, index, error))
     }
 
     /// Structural declaration failures are fatal; missing dependencies remain catchable Errors.
     fn link_class_body(
         &mut self,
-        unit: Arc<CompiledUnit>,
+        unit: &Arc<CompiledUnit>,
+        unit_first: FunctionIndex,
         declaration_index: ClassId,
+        key: String,
     ) -> Result<(), NativeError> {
         let declaration = &unit.classes[declaration_index.index()];
         let name = &declaration.name;
-        if let Some(existing) = self.classes.get(name) {
-            return Err(NativeError::error(format!(
-                "Cannot redeclare class {}",
-                existing.name
-            )));
-        }
         let parent = declaration
             .parent
             .map(|symbol| {
@@ -200,7 +216,6 @@ impl Vm {
                 ))));
             }
         }
-        let unit_first = self.code.index_in(&unit, None);
         let mut methods = parent
             .as_ref()
             .map(|class| class.methods.clone())
@@ -247,14 +262,14 @@ impl Vm {
             if let Some(inherited) = methods.get(&key) {
                 super::inheritance_checks::check_override(name, inherited, &linked)
                     .map_err(|error| self.magic_override_error(&linked, error))?;
-                self.check_method_contract(inherited, &linked, &unit)?;
+                self.check_method_contract(inherited, &linked, unit)?;
             }
             methods.insert(key, linked);
         }
         let mut enum_info = self.install_enum_methods(declaration, &mut methods)?;
         let traits = self.resolve_traits(declaration)?;
         if !traits.is_empty() {
-            self.compose_trait_methods(declaration, &unit, &traits, &mut methods)?;
+            self.compose_trait_methods(declaration, unit, &traits, &mut methods)?;
         }
         if enum_info.is_some() {
             super::enums::check_magic_methods(name, &methods)?;
@@ -316,7 +331,7 @@ impl Vm {
                             }
                         })?;
                     }
-                    self.check_method_contract(method, implementation, &unit)?;
+                    self.check_method_contract(method, implementation, unit)?;
                 }
                 methods
                     .entry(method_name.clone())
@@ -332,19 +347,14 @@ impl Vm {
             &self.registry,
         )?;
         let hooks = super::operations::user_hooks(&methods, parent.as_deref(), operations);
-        let mut constants = self.link_class_constants(
-            declaration,
-            &unit,
-            unit_first,
-            parent.as_ref(),
-            &interfaces,
-        )?;
+        let mut constants =
+            self.link_class_constants(declaration, unit, unit_first, parent.as_ref(), &interfaces)?;
         let (mut defaults, mut static_properties) =
-            self.link_class_properties(declaration, &unit, unit_first, parent.as_ref())?;
+            self.link_class_properties(declaration, unit, unit_first, parent.as_ref())?;
         if !traits.is_empty() {
             self.compose_trait_members(
                 declaration,
-                &unit,
+                unit,
                 &traits,
                 &mut defaults,
                 &mut static_properties,
@@ -354,7 +364,7 @@ impl Vm {
         if let Some(enum_info) = &mut enum_info {
             self.link_enum_members(
                 declaration,
-                &unit,
+                unit,
                 enum_info,
                 &mut defaults,
                 &static_properties,
@@ -375,7 +385,7 @@ impl Vm {
         }
         let declaration_location = Some((unit_first, declaration_index));
         self.classes.insert(
-            name.to_ascii_lowercase(),
+            key,
             Rc::new_cyclic(|identity| Class {
                 index,
                 property_access: hooks.as_ref().and_then(|hooks| hooks.property_access),
