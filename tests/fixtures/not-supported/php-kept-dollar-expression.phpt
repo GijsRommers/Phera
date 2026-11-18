@@ -12,9 +12,9 @@ function show($key) {
 show($key);
 show($key);
 --EXPECTF--
-Deprecated: Using ${expr} (variable variables) in strings is deprecated, use {${expr}} instead in /private%s on line 7
+Deprecated: Using ${expr} (variable variables) in strings is deprecated, use {${expr}} instead in %s on line 7
 
-Deprecated: Using ${expr} (variable variables) in strings is deprecated, use {${expr}} instead in /private%s on line 7
+Deprecated: Using ${expr} (variable variables) in strings is deprecated, use {${expr}} instead in %s on line 7
 starting
 local local
 local local

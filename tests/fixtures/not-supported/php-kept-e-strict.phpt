@@ -15,11 +15,11 @@ bool(true)
 int(2048)
 int(2048)
 
-Deprecated: Constant E_STRICT is deprecated since 8.4, the error level was removed in /private%s on line 6
+Deprecated: Constant E_STRICT is deprecated since 8.4, the error level was removed in %s on line 6
 int(2048)
 
-Deprecated: Constant E_STRICT is deprecated since 8.4, the error level was removed in /private%s on line 6
+Deprecated: Constant E_STRICT is deprecated since 8.4, the error level was removed in %s on line 6
 int(2048)
 
-Deprecated: Constant E_STRICT is deprecated since 8.4, the error level was removed in /private%s on line 8
+Deprecated: Constant E_STRICT is deprecated since 8.4, the error level was removed in %s on line 8
 int(2048)

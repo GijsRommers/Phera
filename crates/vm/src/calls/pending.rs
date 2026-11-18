@@ -71,9 +71,13 @@ impl Vm {
         {
             fallback
         } else {
-            &definition.written
+            &definition.name
         };
-        let callee = self.resolve_callee_with_fallback(name, definition.fallback.as_deref())?;
+        let callee = self.resolve_named_callee(
+            name,
+            &definition.written,
+            definition.fallback.as_deref().unwrap_or(&definition.name),
+        )?;
         let linked = match callee.target {
             CallTarget::User(function) => LinkedFunction::Php(function),
             _ => LinkedFunction::Other(callee),
@@ -105,13 +109,14 @@ impl Vm {
 
     /// Snapshot the signature and target so argument evaluation cannot change resolution.
     pub(crate) fn resolve_callee(&self, name: &str) -> Result<Callee, NativeError> {
-        self.resolve_callee_with_fallback(name, None)
+        self.resolve_named_callee(name, name, name)
     }
 
-    fn resolve_callee_with_fallback(
+    fn resolve_named_callee(
         &self,
         name: &str,
-        fallback: Option<&str>,
+        written: &str,
+        policy_name: &str,
     ) -> Result<Callee, NativeError> {
         let lower = name.trim_start_matches('\\').to_ascii_lowercase();
         if let Some(index) = self.function_table.get(&lower) {
@@ -146,10 +151,10 @@ impl Vm {
         } else {
             return Err(crate::unsupported_items::omitted_item(
                 phera_source::deprecations::ItemKind::Function,
-                fallback.unwrap_or(name),
+                policy_name,
             )
             .unwrap_or_else(|| {
-                NativeError::error(format!("Call to undefined function {name}()"))
+                NativeError::error(format!("Call to undefined function {written}()"))
             }));
         };
         Ok(Callee {
