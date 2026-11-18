@@ -1,6 +1,11 @@
 //! Slot-owned leases keep the reference index exact without retaining PHP values or objects.
 
-use std::{cell::RefCell, collections::HashMap, rc::Rc, rc::Weak};
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, HashMap},
+    rc::Rc,
+    rc::Weak,
+};
 
 use phera_extension_api::NativeError;
 use phera_value::{ArrayKey, Object, Value};
@@ -10,11 +15,10 @@ use crate::classes::class::PropertyDefault;
 /// The weak cell also keeps its allocation identity reserved until the last slot leaves.
 struct ReferenceEntry {
     reference: Weak<RefCell<Value>>,
-    holders: Vec<ReferenceHolder>,
+    holders: HashMap<u64, ReferenceHolder>,
 }
 
 struct ReferenceHolder {
-    identity: u64,
     object: Option<Weak<Object>>,
     key: ArrayKey,
 }
@@ -23,7 +27,8 @@ struct ReferenceHolder {
 #[derive(Default)]
 pub(crate) struct ReferenceHolders {
     entries: HashMap<usize, ReferenceEntry>,
-    pub(crate) constraints: HashMap<usize, Vec<(u64, Rc<PropertyDefault>)>>,
+    // Identity order preserves which property is checked first.
+    pub(crate) constraints: HashMap<usize, BTreeMap<u64, Rc<PropertyDefault>>>,
     next_identity: u64,
 }
 
@@ -114,7 +119,6 @@ impl ReferenceHolders {
         let identity = index.next_identity;
         index.next_identity += 1;
         let holder = ReferenceHolder {
-            identity,
             object: object.map(Rc::downgrade),
             key: key.clone(),
         };
@@ -123,10 +127,10 @@ impl ReferenceHolders {
             .entry(address)
             .or_insert_with(|| ReferenceEntry {
                 reference: Rc::downgrade(reference),
-                holders: Vec::new(),
+                holders: HashMap::new(),
             })
             .holders
-            .push(holder);
+            .insert(identity, holder);
         if let Some(property) = property.filter(|property| property.ty.is_some()) {
             let mut declaration = property.clone();
             // Metadata must never own the indexed cell, static slot, or default object graph.
@@ -137,7 +141,7 @@ impl ReferenceHolders {
                 .constraints
                 .entry(address)
                 .or_default()
-                .push((identity, Rc::new(declaration)));
+                .insert(identity, Rc::new(declaration));
         }
         PropertyBinding {
             table: Rc::downgrade(table),
@@ -200,6 +204,30 @@ impl ReferenceHolders {
             return Ok(());
         };
         let property = class.defaults.iter().find(|property| property.key == *key);
+        Self::bind_object_property(table, object, key, reference, property)
+    }
+
+    /// Deserialization has already looked up the declaration for this key.
+    pub(crate) fn track_serialized_property(
+        table: &Rc<RefCell<Self>>,
+        object: &Rc<Object>,
+        key: &ArrayKey,
+        reference: &Rc<RefCell<Value>>,
+        property: Option<&PropertyDefault>,
+    ) -> Result<(), NativeError> {
+        if !Self::check_object_storage(object, key)? {
+            return Ok(());
+        }
+        Self::bind_object_property(table, object, key, reference, property)
+    }
+
+    fn bind_object_property(
+        table: &Rc<RefCell<Self>>,
+        object: &Rc<Object>,
+        key: &ArrayKey,
+        reference: &Rc<RefCell<Value>>,
+        property: Option<&PropertyDefault>,
+    ) -> Result<(), NativeError> {
         let mut native = object.native.borrow_mut();
         if native.is_none() {
             *native = Some(Box::<ObjectReferences>::default());
@@ -238,7 +266,7 @@ impl ReferenceHolders {
         if entry.holders.len() != 1 || !entry.reference.ptr_eq(&Rc::downgrade(reference)) {
             return None;
         }
-        let holder = entry.holders.first()?;
+        let holder = entry.holders.values().next()?;
         Some((holder.object.as_ref()?.upgrade()?, holder.key.clone()))
     }
 }
@@ -250,15 +278,13 @@ impl Drop for PropertyBinding {
         };
         let mut index = table.borrow_mut();
         if let Some(constraints) = index.constraints.get_mut(&self.reference) {
-            constraints.retain(|(identity, _)| *identity != self.identity);
+            constraints.remove(&self.identity);
             if constraints.is_empty() {
                 index.constraints.remove(&self.reference);
             }
         }
         if let Some(entry) = index.entries.get_mut(&self.reference) {
-            entry
-                .holders
-                .retain(|holder| holder.identity != self.identity);
+            entry.holders.remove(&self.identity);
             if entry.holders.is_empty() {
                 index.entries.remove(&self.reference);
             }

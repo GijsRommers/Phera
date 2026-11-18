@@ -47,7 +47,7 @@ impl Vm {
             .constraints
             .get(&(Rc::as_ptr(reference) as usize))
             .is_some_and(|properties| {
-                properties.iter().any(|(_, property)| {
+                properties.values().any(|property| {
                     property.ty.as_ref().is_some_and(|ty| {
                         self.needs_string_coercion(value, ty, crate::types::TypeChecking::Coerce)
                     })
@@ -70,7 +70,7 @@ impl Vm {
             return Ok(value);
         };
         let mut constraints = crate::inline_stack::InlineStack::new();
-        for (_, property) in holders {
+        for property in holders.values() {
             constraints.push(property.clone());
         }
         drop(index);
@@ -246,8 +246,8 @@ impl Vm {
                 return Ok(None);
             };
             properties
-                .iter()
-                .filter_map(|(_, property)| {
+                .values()
+                .filter_map(|property| {
                     property
                         .ty
                         .as_ref()

@@ -45,6 +45,13 @@ pub const RANDOMIZER: ClassEntry = ClassEntry {
             &[Param::new("engine", ParamType::Mixed).optional()],
             construct,
         ),
+        MethodEntry::public("__serialize", &[], serialize).returning("array"),
+        MethodEntry::public(
+            "__unserialize",
+            &[Param::new("data", ParamType::Array)],
+            unserialize,
+        )
+        .returning("void"),
         MethodEntry::public("nextInt", &[], next_int),
         MethodEntry::public("nextFloat", &[], next_float),
         MethodEntry::public(
@@ -149,6 +156,45 @@ fn construct(
     let object = this.expect("constructors are instance methods");
     object.set(ArrayKey::str("engine"), Value::Object(engine.clone()));
     *object.native.borrow_mut() = Some(Box::new(Randomizer { engine }));
+    Ok(Value::Null)
+}
+
+fn serialize(_: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
+    let object = this.ok_or_else(|| NativeError::error("Randomizer method needs a receiver"))?;
+    let members = Value::Array(Rc::new(object.to_array()));
+    Ok(Value::Array(Rc::new(
+        [(ArrayKey::Int(0), members)].into_iter().collect(),
+    )))
+}
+
+fn unserialize(
+    _: &mut dyn Context,
+    this: Option<&Rc<Object>>,
+    arguments: &[Value],
+) -> NativeResult {
+    fn invalid() -> NativeError {
+        NativeError::throw(
+            "Exception",
+            "Invalid serialization data for Random\\Randomizer object",
+        )
+    }
+    let object = this.ok_or_else(invalid)?;
+    let data = args::array(arguments, 0)
+        .filter(|data| data.len() == 1)
+        .ok_or_else(invalid)?;
+    let Some(Value::Array(members)) = data.get(&ArrayKey::Int(0)) else {
+        return Err(invalid());
+    };
+    let Some(Value::Object(engine)) = members.get(&ArrayKey::str("engine")) else {
+        return Err(invalid());
+    };
+    if !engine.class.is_instance_of("Random\\Engine") {
+        return Err(invalid());
+    }
+    *object.native.try_borrow_mut().map_err(|_| invalid())? = Some(Box::new(Randomizer {
+        engine: engine.clone(),
+    }));
+    object.update(|properties| *properties = (**members).clone());
     Ok(Value::Null)
 }
 

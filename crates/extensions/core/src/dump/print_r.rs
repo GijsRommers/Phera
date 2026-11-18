@@ -63,7 +63,13 @@ impl Style for PrintR<'_> {
         ("print_r", self.0)
     }
 
-    fn scalar(&mut self, out: &mut Vec<u8>, value: &Value, _place: Place) {
+    fn scalar(
+        &mut self,
+        out: &mut Vec<u8>,
+        value: &Value,
+        _place: Place,
+        _context: &mut dyn Context,
+    ) {
         // Scalars print as their string form, without the warnings a real
         // conversion would raise.
         if let Ok(text) = to_php_string(value, &mut NoDiagnostics) {
