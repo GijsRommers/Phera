@@ -24,16 +24,19 @@ const CONTEXT: Param = Param::new("context", ParamType::Mixed).optional();
 pub(in crate::files) const OPEN_PARAMS: &[Param] = &[MODE, USE_PATH, CONTEXT];
 const CONSTRUCT_PARAMS: &[Param] = &[NAME, MODE, USE_PATH, CONTEXT];
 const MAX_MEMORY: Param = Param::new("maxMemory", ParamType::Int).optional();
-const SEPARATOR: Param = Param::new("separator", ParamType::String).optional();
-const ENCLOSURE: Param = Param::new("enclosure", ParamType::String).optional();
-const ESCAPE: Param = Param::new("escape", ParamType::String).optional();
+const SEPARATOR: Param =
+    Param::new("separator", ParamType::String).with_default(ConstantValue::String(","));
+const ENCLOSURE: Param =
+    Param::new("enclosure", ParamType::String).with_default(ConstantValue::String("\""));
+const ESCAPE: Param =
+    Param::new("escape", ParamType::String).with_default(ConstantValue::String("\\"));
 const CSV: &[Param] = &[SEPARATOR, ENCLOSURE, ESCAPE];
 const WRITE_CSV: &[Param] = &[
     Param::new("fields", ParamType::Array),
     SEPARATOR,
     ENCLOSURE,
     ESCAPE,
-    Param::new("eol", ParamType::String).optional(),
+    Param::new("eol", ParamType::String).with_default(ConstantValue::String("\n")),
 ];
 const LOCK: &[Param] = &[
     Param::new("operation", ParamType::Int),
