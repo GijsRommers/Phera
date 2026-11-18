@@ -39,15 +39,25 @@ impl Vm {
                     .await
             }
             Intrinsic::Basename => {
-                let path = to_php_string(&argument, &mut diagnostics.buffer)?.to_string_lossy();
-                let name = path.trim_end_matches('/').rsplit('/').next().unwrap_or("");
+                let path = to_php_string(&argument, &mut diagnostics.buffer)?;
+                let path = path.as_bytes();
+                let separator = |byte| byte == b'/' || (cfg!(windows) && byte == b'\\');
+                let end = path
+                    .iter()
+                    .rposition(|&byte| !separator(byte))
+                    .map_or(0, |at| at + 1);
+                let name = path[..end]
+                    .rsplit(|&byte| separator(byte))
+                    .next()
+                    .unwrap_or_default();
                 let suffix = arguments
                     .get(1)
                     .map(|value| to_php_string(value, &mut diagnostics.buffer))
                     .transpose()?;
                 let name = suffix
                     .as_ref()
-                    .and_then(|suffix| name.strip_suffix(suffix.to_string_lossy().as_str()))
+                    .filter(|suffix| suffix.as_bytes().len() < name.len())
+                    .and_then(|suffix| name.strip_suffix(suffix.as_bytes()))
                     .unwrap_or(name);
                 Ok(Value::from(name))
             }
