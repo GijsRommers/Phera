@@ -143,9 +143,9 @@ impl Vm {
             let previous = if matches!(intrinsic, crate::intrinsics::Intrinsic::IniSet) {
                 let value = arguments.get(1).cloned().unwrap_or_default();
                 let text = phera_value::to_php_string(&value, &mut phera_value::NoDiagnostics)?;
-                self.set_include_path(text.to_string_lossy())
+                self.set_include_path(text)
             } else {
-                self.include_path().to_owned()
+                self.include_path()
             };
             return Ok(Value::from(previous));
         }

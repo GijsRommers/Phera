@@ -39,6 +39,16 @@ pub trait Context {
     /// Per-request storage for extensions; see [`RequestState`].
     fn state(&mut self) -> &mut RequestState;
 
+    /// The PHP file making this call, for include-path lookups.
+    fn script_path(&self) -> Option<std::path::PathBuf> {
+        None
+    }
+
+    /// The request's include path, used by the VM and by the file wrappers.
+    fn include_path(&self) -> phera_value::PhpString {
+        ".".into()
+    }
+
     /// Whether the PHP file making this call declared `strict_types=1`, which
     /// turns off scalar coercion of arguments.
     fn strict_types(&self) -> bool;

@@ -18,8 +18,9 @@ pub(super) const FUNCTIONS: &[FunctionEntry] = &[SPRINTF, PRINTF, VSPRINTF, VPRI
 
 /// Where the values come from: the arguments, or one array of them.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Values {
+pub enum Values {
     Arguments,
+    StreamArguments,
     Array,
 }
 
@@ -131,7 +132,7 @@ fn format(
     destination: Destination,
 ) -> NativeResult {
     let values: Cow<[Value]> = match source {
-        Values::Arguments => Cow::Borrowed(&arguments[1..]),
+        Values::Arguments | Values::StreamArguments => Cow::Borrowed(&arguments[1..]),
         Values::Array => Cow::Owned(
             crate::arguments::required_array(arguments, 1)
                 .values()
@@ -157,7 +158,7 @@ fn format(
 
 /// The whole result is built before anything is written, so `printf`
 /// writes nothing when a later specifier fails.
-fn render(
+pub fn render(
     context: &mut dyn Context,
     format: &[u8],
     values: &[Value],
@@ -198,10 +199,17 @@ fn too_few_values(source: Values, needed: usize, given: usize) -> NativeError {
         Values::Array => NativeError::value_error(format!(
             "The arguments array must contain {needed} items, {given} given"
         )),
-        Values::Arguments => NativeError::argument_count_error(format!(
-            "{} arguments are required, {} given",
-            needed + 1,
-            given + 1
-        )),
+        Values::Arguments | Values::StreamArguments => {
+            let preceding = if source == Values::StreamArguments {
+                2
+            } else {
+                1
+            };
+            NativeError::argument_count_error(format!(
+                "{} arguments are required, {} given",
+                needed + preceding,
+                given + preceding,
+            ))
+        }
     }
 }
