@@ -51,13 +51,13 @@ const COMMON: [Method; 20] = const {
         Method::public("count", &[], methods::count).tentative_return("int"),
         Method::public("getFlags", &[], methods::get_flags).tentative_return("int"),
         Method::public("setFlags", &[FLAGS], methods::set_flags).tentative_return("void"),
-        Method::public(
+        Method::public_async(
             "asort",
             const { &[FLAGS.with_default(ConstantValue::Int(0))] },
             sorting::asort,
         )
         .tentative_return("true"),
-        Method::public(
+        Method::public_async(
             "ksort",
             const { &[FLAGS.with_default(ConstantValue::Int(0))] },
             sorting::ksort,
@@ -65,8 +65,8 @@ const COMMON: [Method; 20] = const {
         .tentative_return("true"),
         Method::public_async("uasort", &[CALLBACK], sorting::uasort).tentative_return("true"),
         Method::public_async("uksort", &[CALLBACK], sorting::uksort).tentative_return("true"),
-        Method::public("natsort", &[], sorting::natsort).tentative_return("true"),
-        Method::public("natcasesort", &[], sorting::natcasesort).tentative_return("true"),
+        Method::public_async("natsort", &[], sorting::natsort).tentative_return("true"),
+        Method::public_async("natcasesort", &[], sorting::natcasesort).tentative_return("true"),
         Method::public("serialize", &[], serialization::legacy_serialize)
             .tentative_return("string"),
         Method::public(
