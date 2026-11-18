@@ -17,7 +17,7 @@ enum Mode {
 }
 
 pub(crate) struct ParserInput {
-    pub(crate) source: String,
+    pub(crate) source: Vec<u8>,
     starts: Vec<usize>,
 }
 
@@ -25,7 +25,7 @@ impl ParserInput {
     pub(crate) fn from_tokens(tokens: &[SourceToken<'_>]) -> Self {
         use TokenKind::*;
 
-        let mut source = std::string::String::new();
+        let mut source = Vec::new();
         let mut starts = Vec::with_capacity(tokens.len());
         let mut modes = Vec::new();
         let mut halt = false;
@@ -33,16 +33,16 @@ impl ParserInput {
             starts.push(source.len());
             let top = modes.last().copied();
             match token.kind {
-                OpenTag if token.text == b"<?" => source.push_str("<?php "),
+                OpenTag if token.text == b"<?" => source.extend_from_slice(b"<?php "),
                 // PHP parses parenthesized exit/die with the regular call grammar.
                 Exit if next_kind(&tokens[index + 1..]) == Some(LeftParen) => {
-                    source.push_str("__phera_tokenizer_exit");
+                    source.extend_from_slice(b"__phera_tokenizer_exit");
                 }
                 HaltCompiler => {
                     halt = true;
-                    append(&mut source, token.text);
+                    source.extend_from_slice(token.text);
                 }
-                CloseTag if halt && is_halt_end(&tokens[..index]) => source.push(';'),
+                CloseTag if halt && is_halt_end(&tokens[..index]) => source.push(b';'),
                 Backquote | DoubleQuote => {
                     let delimiter = if token.kind == Backquote {
                         Mode::Backquote
@@ -55,18 +55,18 @@ impl ParserInput {
                         modes.push(delimiter);
                     }
                     if token.kind == Backquote {
-                        source.push('"');
+                        source.push(b'"');
                     } else {
-                        append(&mut source, token.text);
+                        source.extend_from_slice(token.text);
                     }
                 }
                 StartHeredoc => {
                     modes.push(Mode::Heredoc);
-                    append(&mut source, token.text);
+                    source.extend_from_slice(token.text);
                 }
                 EndHeredoc => {
                     modes.pop();
-                    append(&mut source, token.text);
+                    source.extend_from_slice(token.text);
                 }
                 DollarCurlyOpen => {
                     if tokens
@@ -74,31 +74,31 @@ impl ParserInput {
                         .is_some_and(|token| token.kind == StringVarname)
                     {
                         modes.push(Mode::Expression);
-                        source.push_str("{$");
+                        source.extend_from_slice(b"{$");
                     } else {
                         modes.push(Mode::DynamicVariable);
-                        source.push_str("{${");
+                        source.extend_from_slice(b"{${");
                     }
                 }
                 CurlyOpen | LeftBrace => {
                     modes.push(Mode::Expression);
-                    append(&mut source, token.text);
+                    source.extend_from_slice(token.text);
                 }
                 RightBrace => {
                     if modes.pop() == Some(Mode::DynamicVariable) {
-                        source.push('}');
+                        source.push(b'}');
                     }
-                    append(&mut source, token.text);
+                    source.extend_from_slice(token.text);
                 }
                 StringPart if top == Some(Mode::Backquote) => {
-                    for character in std::string::String::from_utf8_lossy(token.text).chars() {
-                        if character == '"' {
-                            source.push('\\');
+                    for &byte in token.text {
+                        if byte == b'"' {
+                            source.push(b'\\');
                         }
-                        source.push(character);
+                        source.push(byte);
                     }
                 }
-                _ => append(&mut source, token.text),
+                _ => source.extend_from_slice(token.text),
             }
         }
         Self { source, starts }
@@ -114,10 +114,6 @@ impl ParserInput {
         }
         index.checked_sub(1)
     }
-}
-
-fn append(source: &mut String, bytes: &[u8]) {
-    source.push_str(&String::from_utf8_lossy(bytes));
 }
 
 fn next_kind(tokens: &[SourceToken<'_>]) -> Option<TokenKind> {

@@ -195,6 +195,9 @@ fn syntax_error(error: &ParseError, index: Option<usize>, tokens: &[SourceToken<
     let found = current.map_or_else(|| "end of file".to_owned(), unexpected_token);
     let mut message = format!("syntax error, unexpected {found}");
     let expected = match (current.map(|t| t.kind), previous.map(|t| t.kind)) {
+        (Some(Semicolon), _) if error.message == "expected a variable after '&'" => {
+            Some(r#""->" or "?->" or "[""#)
+        }
         (Some(LeftBrace), _) if error.message.starts_with("expected '}'") => {
             Some(r#""->" or "?->" or "[""#)
         }

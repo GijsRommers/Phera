@@ -11,7 +11,7 @@ use support::Matrix;
 
 #[test]
 fn constants_and_all_names_match_php() {
-    let mut matrix = Matrix::new();
+    let mut matrix = Matrix::new("tokenizer-names");
     let observed = oracle::run_php(
         "tokenizer-constants",
         r#"<?php
@@ -58,7 +58,7 @@ fn constants_and_all_names_match_php() {
 
 #[test]
 fn functions_and_methods_match_php() {
-    let mut matrix = Matrix::new();
+    let mut matrix = Matrix::new("tokenizer-api");
     let arguments = [
         Value::Null,
         Value::Bool(false),
@@ -166,7 +166,7 @@ fn list<const N: usize>(values: [Value; N]) -> Value {
 fn parse_errors_use_the_parsed_source_location() {
     use phera_extension_api::testing::call;
 
-    let matrix = Matrix::new();
+    let matrix = Matrix::new("tokenizer-locations");
     let examples: &[&[u8]] = &[
         b"<?php\r\n\r\necho ;",
         b"<?php\n/* unfinished",

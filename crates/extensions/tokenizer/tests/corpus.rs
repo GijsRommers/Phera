@@ -14,7 +14,7 @@ use support::Matrix;
 fn full_streams_match_php() {
     let root = phera_phpt::tests_dir();
     let mut files = 0;
-    let mut matrix = Matrix::new();
+    let mut matrix = Matrix::new("tokenizer-corpus");
     for file in phera_phpt::find_phpt_files(&root) {
         let bytes = fs::read(&file).unwrap();
         if let Some(source) = file_section(&bytes) {

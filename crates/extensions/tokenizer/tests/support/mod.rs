@@ -13,15 +13,23 @@ pub struct Matrix {
     pub labels: Vec<String>,
     pub token_count: usize,
     pub registry: Registry,
+    oracle_file: String,
+    next_line: usize,
 }
 
 impl Matrix {
-    pub fn new() -> Self {
+    pub fn new(oracle_name: &str) -> Self {
         let mut registry = Registry::new();
         Core.register(&mut registry);
         Tokenizer.register(&mut registry);
+        let php = format!("<?php\n{}", oracle::PHP_PREAMBLE);
+        let next_line = 1 + php.bytes().filter(|&byte| byte == b'\n').count();
         Self {
-            php: format!("<?php\n{}", oracle::PHP_PREAMBLE),
+            php,
+            next_line,
+            oracle_file: oracle::script_path(oracle_name)
+                .to_string_lossy()
+                .into_owned(),
             results: Vec::new(),
             labels: Vec::new(),
             token_count: 0,
@@ -36,7 +44,10 @@ impl Matrix {
             .collect::<Vec<_>>()
             .join(", ");
         let expression = format!("{name}({php_args})");
-        let mut context = TestContext::default();
+        let mut context = TestContext {
+            caller: Some((self.oracle_file.clone(), self.next_line)),
+            ..TestContext::default()
+        };
         let result = if let Some(method) = name.strip_prefix("PhpToken::") {
             let object = instantiate(&self.registry, "PhpToken").unwrap();
             call_method(&self.registry, &mut context, &object, method, arguments)
@@ -61,6 +72,7 @@ impl Matrix {
         self.labels.push(label);
         self.php
             .push_str(&format!("run('{index}', fn() => {expression});\n"));
+        self.next_line += 1 + expression.bytes().filter(|&byte| byte == b'\n').count();
         let result = result.map_err(|error| match error.into_exception_parts() {
             Ok((class, message, _, _)) => NativeError::throw(class, message),
             Err(error) => error,

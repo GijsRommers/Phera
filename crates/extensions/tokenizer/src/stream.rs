@@ -1,7 +1,9 @@
 //! `PhpToken::tokenize("<?php\r\necho 1;")` gives `echo` line 2 and byte position 7.
 
-use phera_extension_api::{Context, NativeError, NativeResult, Param, ParamType, PhpArray, Value};
-use phera_lexer::{Lexer, TokenKind};
+use phera_extension_api::{
+    CompileDiagnosticSite, Context, NativeError, NativeResult, Param, ParamType, PhpArray, Value,
+};
+use phera_lexer::{Lexer, ScanMode, ScanReport, TokenKind};
 
 use crate::{ids::TOKEN_PARSE, parse, token};
 
@@ -24,9 +26,20 @@ pub(crate) fn tokenize(
     flags: i64,
     mut make_token: impl FnMut(&mut dyn Context, SourceToken<'_>) -> NativeResult,
 ) -> NativeResult {
-    let mut tokens = scan(code)?;
-    if flags & TOKEN_PARSE != 0 {
-        parse::validate(context, code, &mut tokens)?;
+    let mode = if flags & TOKEN_PARSE != 0 {
+        ScanMode::Parsed
+    } else {
+        ScanMode::Raw
+    };
+    let scanned = scan(code, mode)?;
+    let mut tokens = scanned.tokens;
+    match mode {
+        ScanMode::Parsed => parse::validate(context, code, &mut tokens, scanned.report)?,
+        ScanMode::Raw => {
+            for (_, diagnostic) in scanned.report.diagnostics {
+                context.compile_diagnostic(&diagnostic, CompileDiagnosticSite::Caller);
+            }
+        }
     }
     let mut output = PhpArray::new();
     for token in tokens {
@@ -35,8 +48,15 @@ pub(crate) fn tokenize(
     Ok(Value::from(output))
 }
 
-fn scan(code: &[u8]) -> Result<Vec<SourceToken<'_>>, NativeError> {
-    let mut lexer = Lexer::for_tokenizer(code).with_short_open_tags(true);
+struct Scan<'a> {
+    tokens: Vec<SourceToken<'a>>,
+    report: ScanReport,
+}
+
+fn scan(code: &[u8], mode: ScanMode) -> Result<Scan<'_>, NativeError> {
+    let mut lexer = Lexer::for_tokenizer(code)
+        .with_short_open_tags(true)
+        .with_diagnostics(mode);
     let mut tokens = Vec::new();
     let mut line = 1;
     let mut halt_remaining = None;
@@ -47,7 +67,10 @@ fn scan(code: &[u8]) -> Result<Vec<SourceToken<'_>>, NativeError> {
             .map_err(|error| NativeError::error(format!("Tokenizer scanner failed: {error:?}")))?;
         let kind = token.kind;
         if kind == TokenKind::Eof {
-            return Ok(tokens);
+            return Ok(Scan {
+                tokens,
+                report: lexer.into_diagnostics(),
+            });
         }
         let pos = token.span.start;
         let text = &code[pos..token.span.end];
