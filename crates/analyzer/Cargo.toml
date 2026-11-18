@@ -1,0 +1,14 @@
+[package]
+name = "phera-analyzer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+phera-source.workspace = true
+phera-lexer.workspace = true
+phera-ast.workspace = true
+phera-parser.workspace = true
+
+[lints]
+workspace = true

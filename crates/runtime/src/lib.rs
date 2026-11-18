@@ -6,6 +6,7 @@
 //! and the same compiled code.
 
 mod cache;
+mod environment;
 mod error;
 #[cfg(test)]
 mod extension_introspection_tests;
@@ -15,8 +16,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use phera_bytecode::CompiledUnit;
+use phera_dotenv::Environment;
 use phera_ext_http::ResponseHead;
+use phera_ext_standard::environment::{RequestEnvironment, php_array};
 use phera_extension_api::{LocalFuture, Registry};
+use phera_value::Value;
 use phera_vm::{CodeLoader, Vm};
 
 use cache::CodeCache;
@@ -29,6 +33,7 @@ pub use phera_vm::OutputSink;
 pub struct Runtime {
     registry: Arc<Registry>,
     cache: CodeCache,
+    environment: Arc<Environment>,
 }
 
 /// What a command-line script did.
@@ -49,6 +54,10 @@ impl Default for Runtime {
 
 impl Runtime {
     pub fn new() -> Self {
+        Self::with_environment(Environment::process())
+    }
+
+    pub fn with_environment(environment: Environment) -> Self {
         let mut registry = Registry::new();
         registry.load(&phera_ext_core::Core);
         registry.class(phera_extension_api::ClassEntry {
@@ -67,6 +76,7 @@ impl Runtime {
         Runtime {
             registry: Arc::new(registry),
             cache: CodeCache::default(),
+            environment: Arc::new(environment),
         }
     }
 
@@ -92,9 +102,12 @@ impl Runtime {
         arguments: &[String],
         sink: Option<Box<dyn OutputSink>>,
     ) -> Result<RunResult, RuntimeError> {
-        let unit = self.compile_file(path).await?;
+        let unit = self.compile_file(path.as_ref()).await?;
         let mut vm = self.new_vm();
         vm.set_args(arguments);
+        let server =
+            environment::cli_server(php_array(self.environment.iter()), path.as_ref(), arguments);
+        vm.set_global("_SERVER", Value::from(server));
         if let Some(sink) = sink {
             vm.set_sink(sink);
         }
@@ -126,7 +139,13 @@ impl Runtime {
         };
 
         let mut vm = self.new_vm();
-        http::define_superglobals(&mut vm, &request, script, document_root);
+        http::define_superglobals(
+            &mut vm,
+            &request,
+            script,
+            document_root,
+            php_array(self.environment.iter()),
+        );
         let exit_status = vm.run(unit).await;
 
         let head = vm.state_mut().take::<ResponseHead>().unwrap_or_default();
@@ -171,6 +190,9 @@ impl Runtime {
 
     fn new_vm(&self) -> Vm {
         let mut vm = Vm::new(self.registry.clone());
+        vm.set_global("_ENV", Value::from(php_array(self.environment.iter())));
+        *vm.state_mut().get_or_default::<RequestEnvironment>() =
+            RequestEnvironment::new(self.environment.clone());
         vm.set_loader(Arc::new(self.clone()));
         vm
     }
