@@ -229,6 +229,7 @@ impl<'a> Reader<'a> {
             self.diagnostic = Some(Diagnostic::InsufficientCustomData {
                 required: length,
                 present: available,
+                length_overflow: self.diagnostic == Some(Diagnostic::NumberOutOfRange),
             });
             return Err(ParseError);
         };

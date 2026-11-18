@@ -82,6 +82,7 @@ fn unserialize_php_matrix() {
         b"C:4:\"Gone\":-1:{}",
         b"C:4:\"Gone\":6:{abc}",
         b"C:4:\"Gone\":0:{x}",
+        b"C:3:\"XYZ\":18446744075857035259:{}",
         b"E:6:\"Gone:A\";",
         b"E:4:\"Gone\";",
         b"E:1:\"a\";",

@@ -281,9 +281,18 @@ fn emit_diagnostic(context: &mut dyn Context, reader: &mut Reader<'_>) {
             context.deprecated("unserialize(): Unserializing the 'S' format is deprecated".into())
         }
         Some(Diagnostic::BadObjectData) => context.warning("Bad unserialize data".into()),
-        Some(Diagnostic::InsufficientCustomData { required, present }) => context.warning(format!(
-            "Insufficient data for unserializing - {required} required, {present} present"
-        )),
+        Some(Diagnostic::InsufficientCustomData {
+            required,
+            present,
+            length_overflow,
+        }) => {
+            if length_overflow {
+                context.warning("unserialize(): Numerical result out of range".into());
+            }
+            context.warning(format!(
+                "Insufficient data for unserializing - {required} required, {present} present"
+            ));
+        }
         None => {}
     }
 }

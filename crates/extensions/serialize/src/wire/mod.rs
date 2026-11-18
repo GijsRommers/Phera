@@ -38,7 +38,11 @@ pub enum Diagnostic {
     NumberOutOfRange,
     EscapedString,
     BadObjectData,
-    InsufficientCustomData { required: i64, present: usize },
+    InsufficientCustomData {
+        required: i64,
+        present: usize,
+        length_overflow: bool,
+    },
 }
 
 #[derive(Debug, Eq, PartialEq)]
