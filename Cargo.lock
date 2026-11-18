@@ -1833,6 +1833,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "phera-ext-serialize"
+version = "0.1.0"
+dependencies = [
+ "itoa",
+ "phera-extension-api",
+]
+
+[[package]]
 name = "phera-ext-sqlite3"
 version = "0.1.0"
 dependencies = [
@@ -1936,6 +1944,7 @@ dependencies = [
  "phera-ext-random",
  "phera-ext-redis",
  "phera-ext-reflection",
+ "phera-ext-serialize",
  "phera-ext-sqlite3",
  "phera-ext-standard",
  "phera-ext-streams",

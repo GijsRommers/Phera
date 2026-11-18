@@ -384,44 +384,48 @@ impl Vm {
             self.code.set_declaring_class(function, index);
         }
         let declaration_location = Some((unit_first, declaration_index));
-        self.classes.insert(
-            key,
-            Rc::new_cyclic(|identity| Class {
-                index,
-                property_access: hooks.as_ref().and_then(|hooks| hooks.property_access),
-                hooks,
-                operations,
-                origin: super::class::ClassOrigin::User,
-                identity: identity.clone(),
-                declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
-                ancestors: super::class::ancestor_names(&parent, &interfaces),
-                name_value: phera_value::Value::from(name.as_str()),
-                name: name.clone(),
-                has_native_layout: parent.as_ref().is_some_and(|class| class.has_native_layout),
-                parent,
-                interfaces,
-                traits: traits
-                    .into_iter()
-                    .map(|used_trait| used_trait.name.clone())
-                    .collect(),
-                enum_info,
-                kind: declaration.kind,
-                is_abstract: declaration.is_abstract,
-                is_throwable,
-                is_final: declaration.is_final,
-                is_readonly: declaration.is_readonly,
-                allows_dynamic_properties,
-                constructor: methods.get("__construct").cloned(),
-                magic: super::magic::MagicMethods::link(&methods),
-                methods,
-                method_table: std::cell::OnceCell::new(),
-                property_template: super::class::property_template(&defaults),
-                defaults,
-                static_properties,
-                constants,
-                declaration: declaration_location,
-            }),
-        );
+        let class = Rc::new_cyclic(|identity| Class {
+            index,
+            property_access: hooks.as_ref().and_then(|hooks| hooks.property_access),
+            hooks,
+            operations,
+            origin: super::class::ClassOrigin::User,
+            identity: identity.clone(),
+            declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
+            ancestors: super::class::ancestor_names(&parent, &interfaces),
+            name_value: phera_value::Value::from(name.as_str()),
+            name: name.clone(),
+            has_native_layout: parent.as_ref().is_some_and(|class| class.has_native_layout),
+            parent,
+            interfaces,
+            traits: traits
+                .into_iter()
+                .map(|used_trait| used_trait.name.clone())
+                .collect(),
+            enum_info,
+            kind: declaration.kind,
+            is_abstract: declaration.is_abstract,
+            is_throwable,
+            is_final: declaration.is_final,
+            is_readonly: declaration.is_readonly,
+            allows_dynamic_properties,
+            constructor: methods.get("__construct").cloned(),
+            magic: super::magic::MagicMethods::link(&methods),
+            methods,
+            method_table: std::cell::OnceCell::new(),
+            property_template: super::class::property_template(&defaults),
+            defaults,
+            static_properties,
+            constants,
+            declaration: declaration_location,
+        });
+        self.deprecate_legacy_serializable(&class, &unit.file, declaration.line as usize);
+        if class.kind == ClassKind::Enum && class.is_a("Serializable") {
+            return Err(NativeError::error(format!(
+                "Enum {name} cannot implement the Serializable interface"
+            )));
+        }
+        self.classes.insert(key, class);
         Ok(())
     }
 }

@@ -164,6 +164,10 @@ impl Vm {
             };
             return Ok(Value::from(previous));
         }
+        if let Some(result) = self.serialization_ini_setting(name.as_bytes(), intrinsic, arguments)
+        {
+            return result;
+        }
         if name.as_bytes() != b"zend.exception_string_param_max_len" {
             return Ok(Value::from("1"));
         }

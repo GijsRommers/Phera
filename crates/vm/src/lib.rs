@@ -130,6 +130,7 @@ mod reflection;
 mod request_callbacks;
 mod scope_intrinsics;
 mod sensitive_parameters;
+mod serialization;
 mod spl_autoload;
 mod static_variables;
 mod string_comparison;

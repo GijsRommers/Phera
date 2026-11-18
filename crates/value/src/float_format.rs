@@ -66,30 +66,42 @@ struct Digits {
 fn scientific_digits(value: f64, count: usize) -> Digits {
     let places = count - 1;
     let text = NumberText::formatted(format_args!("{:.places$e}", value.abs()));
-    let (mantissa, exponent) = text.as_str().split_once('e').expect("scientific notation");
-    let mut digits = Digits {
-        bytes: [0; 17],
-        len: count,
-        decpt: exponent.parse::<i32>().expect("decimal exponent") + 1,
-        negative: value.is_sign_negative(),
-    };
-    for (index, digit) in mantissa.bytes().filter(|&byte| byte != b'.').enumerate() {
-        digits.bytes[index] = digit;
-    }
-    digits
+    digits_from_scientific(&text, value.is_sign_negative())
 }
 
-/// Shortest round-tripping digits (dtoa mode 0). At a decimal tie, Rust
-/// and David Gay's dtoa can pick different shortest forms, so grow the
-/// digit count until the ties-even rounded form reads back to the input.
-fn shortest_digits(value: f64) -> Digits {
-    for count in 1..17 {
-        let digits = scientific_digits(value, count);
-        if gcvt_layout(&digits, 17).as_str().parse::<f64>() == Ok(value) {
-            return digits;
-        }
+fn digits_from_scientific(text: &NumberText, negative: bool) -> Digits {
+    let (mantissa, exponent) = text.as_str().split_once('e').expect("scientific notation");
+    let mut bytes = [0; 17];
+    let mut len = 0;
+    for (slot, digit) in bytes
+        .iter_mut()
+        .zip(mantissa.bytes().filter(|&byte| byte != b'.'))
+    {
+        *slot = digit;
+        len += 1;
     }
-    scientific_digits(value, 17)
+    Digits {
+        bytes,
+        len,
+        decpt: exponent.parse::<i32>().expect("decimal exponent") + 1,
+        negative,
+    }
+}
+
+/// Shortest round-tripping digits (dtoa mode 0). At a tie PHP uses the
+/// ties-even decimal if it fits; a power of two has a narrower interval
+/// toward zero and can need the other decimal at the same precision.
+fn shortest_digits(value: f64) -> Digits {
+    let text = NumberText::formatted(format_args!("{:e}", value.abs()));
+    let shortest = digits_from_scientific(&text, value.is_sign_negative());
+    let rounded = scientific_digits(value, shortest.len);
+    if (shortest.bytes == rounded.bytes && shortest.decpt == rounded.decpt)
+        || gcvt_layout(&rounded, 17).as_str().parse::<f64>() == Ok(value)
+    {
+        rounded
+    } else {
+        shortest
+    }
 }
 
 /// Digits rounded to `count` significant digits with trailing zeros
@@ -174,6 +186,47 @@ pub fn float_to_string_precision14(v: f64) -> String {
 /// `0.30000000000000004`, `1.0` gives `1`, `1e25` gives `1.0E+25`.
 pub fn float_repr(v: f64) -> String {
     gcvt(v, -1).as_str().to_owned()
+}
+
+/// The decimal format requested by PHP's `serialize_precision` INI setting.
+pub fn float_repr_with_precision(value: f64, precision: i32) -> String {
+    if precision < 0 || !value.is_finite() {
+        return float_repr(value);
+    }
+    if (1..=17).contains(&precision) {
+        return gcvt(value, precision).as_str().to_owned();
+    }
+    if precision == 0 {
+        return gcvt_layout(&rounded_digits(value, 1), 0)
+            .as_str()
+            .to_owned();
+    }
+    // A binary64 has at most 767 significant decimal digits in its exact expansion.
+    let places = (precision - 1).min(767) as usize;
+    let scientific = format!("{:.places$e}", value.abs());
+    let Some((coefficient, exponent)) = scientific.split_once('e') else {
+        return float_repr(value);
+    };
+    let point = exponent.parse::<i32>().unwrap_or(0) + 1;
+    let mut digits = coefficient.replace('.', "");
+    while digits.len() > 1 && digits.ends_with('0') {
+        digits.pop();
+    }
+    let sign = if value.is_sign_negative() { "-" } else { "" };
+    if point > precision || point < -3 {
+        let (first, rest) = digits.split_at(1);
+        let rest = if rest.is_empty() { "0" } else { rest };
+        return format!("{sign}{first}.{rest}E{:+}", point - 1);
+    }
+    if point <= 0 {
+        return format!("{sign}0.{}{digits}", "0".repeat((-point) as usize));
+    }
+    let point = point as usize;
+    if point >= digits.len() {
+        return format!("{sign}{digits}{}", "0".repeat(point - digits.len()));
+    }
+    let (whole, fraction) = digits.split_at(point);
+    format!("{sign}{whole}.{fraction}")
 }
 
 #[cfg(test)]

@@ -1,4 +1,6 @@
-use phera_extension_api::value::{PropertyScope, float_repr, split_property_key};
+//! `var_dump(1.2345)` uses the same decimal precision setting as `serialize(1.2345)`.
+
+use phera_extension_api::value::{PropertyScope, float_repr_with_precision, split_property_key};
 use phera_extension_api::{
     ArrayKey, Context, FunctionEntry, LocalFuture, NativeResult, Param, ParamType, Registry, Value,
 };
@@ -63,13 +65,28 @@ impl Style for VarDump<'_> {
         true
     }
 
-    fn scalar(&mut self, out: &mut Vec<u8>, value: &Value, place: Place) {
+    fn scalar(
+        &mut self,
+        out: &mut Vec<u8>,
+        value: &Value,
+        place: Place,
+        context: &mut dyn Context,
+    ) {
         Self::lead(out, place);
         match value {
             Value::Bool(flag) => out.extend_from_slice(format!("bool({flag})").as_bytes()),
             Value::Int(int) => out.extend_from_slice(format!("int({int})").as_bytes()),
             Value::Float(float) => {
-                out.extend_from_slice(format!("float({})", float_repr(*float)).as_bytes());
+                out.extend_from_slice(
+                    format!(
+                        "float({})",
+                        float_repr_with_precision(
+                            *float,
+                            phera_extension_api::serialization::precision(context)
+                        )
+                    )
+                    .as_bytes(),
+                );
             }
             Value::String(string) => {
                 out.extend_from_slice(format!("string({}) \"", string.len()).as_bytes());

@@ -78,7 +78,7 @@ impl Vm {
         let property = property_at(&class, slot).ok_or_else(|| missing_property(member))?;
         let value = value.deref().clone();
         let value = match &property.ty {
-            Some(ty) => self.coerce_reflected_property(value, property, ty)?,
+            Some(ty) => self.coerce_property_in_mode(value, property, ty, Some(false))?,
             None => value,
         };
         if let Some(storage) = &property.static_storage {
