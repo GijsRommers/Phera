@@ -194,10 +194,22 @@ impl Vm {
                 )));
             }
             info.names.push(name.clone());
+            let deprecated = unit
+                .has_link_attributes
+                .then(|| {
+                    crate::attribute_diagnostics::attribute(&case.metadata.attributes, "Deprecated")
+                        .map(|attribute| {
+                            crate::attribute_diagnostics::deprecation_message(
+                                attribute,
+                                &format!("Enum case {class}::{name}"),
+                            )
+                        })
+                })
+                .flatten();
             constants.insert(
                 name.clone(),
                 Rc::new(LinkedConstant {
-                    deprecated: None,
+                    deprecated,
                     declaring: class.clone(),
                     visibility: Visibility::Public,
                     is_final: false,
