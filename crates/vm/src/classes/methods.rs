@@ -80,10 +80,7 @@ impl Vm {
                 self.prepare_constructed_object(object);
                 return Ok(());
             }
-            return Err(NativeError::error(format!(
-                "Call to undefined method {}::{name}()",
-                phera_value::class_display_name(&class.name)
-            )));
+            return Err(crate::unsupported_items::undefined_method(&class, name));
         };
         self.prepare_resolved_method(
             class,

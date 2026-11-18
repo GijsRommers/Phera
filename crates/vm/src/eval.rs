@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use phera_bytecode::Reg;
-use phera_extension_api::NativeError;
+use phera_extension_api::{CompileDiagnosticSite, Context, NativeError};
 
 use crate::{Vm, diagnostics::SourceLocation};
 
@@ -31,6 +31,12 @@ impl Vm {
         })
         .await
         .map_err(|error| NativeError::error(format!("Eval compiler failed: {error}")))?;
+        if let Err(error) = &compiled {
+            for diagnostic in &error.scanner_diagnostics {
+                self.compile_diagnostic(diagnostic, CompileDiagnosticSite::Source(&error.file));
+            }
+            self.drain_error_handlers().await?;
+        }
         match compiled {
             Ok(unit) => self.enter_scoped_unit(Arc::new(unit), Some(destination)),
             Err(error) if error.parse => {

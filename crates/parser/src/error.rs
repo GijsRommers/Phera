@@ -1,6 +1,6 @@
 //! Syntax failures are parse errors, while `new final class {}` is a compile error.
 
-use phera_lexer::{LexError, LexErrorKind};
+use phera_lexer::{BACKTICK_OPERATOR_ERROR, LexError, LexErrorKind};
 use phera_source::Span;
 
 /// The first syntax or declaration error detected by the parser.
@@ -42,6 +42,7 @@ impl ParseError {
 
     pub(crate) fn from_lex(error: &LexError) -> Self {
         let message = match &error.kind {
+            LexErrorKind::Unsupported(BACKTICK_OPERATOR_ERROR) => BACKTICK_OPERATOR_ERROR.into(),
             LexErrorKind::Unsupported(feature) => format!("unsupported syntax: {feature}"),
             LexErrorKind::UnexpectedCharacter(c) => format!("unexpected character {c:?}"),
             LexErrorKind::UnterminatedString => "unterminated string".to_string(),
@@ -52,9 +53,13 @@ impl ParseError {
     }
 
     /// Whether this error came from the lexer rejecting syntax Phera does not
-    /// support on purpose (backticks, `${...}` interpolation, `(real)`, ...).
+    /// support on purpose, such as backticks and `(real)`.
     pub fn is_unsupported_lex(&self) -> bool {
-        self.message.starts_with("unsupported syntax:")
+        self.is_backtick_operator() || self.message.starts_with("unsupported syntax:")
+    }
+
+    pub fn is_backtick_operator(&self) -> bool {
+        self.message == BACKTICK_OPERATOR_ERROR
     }
 }
 

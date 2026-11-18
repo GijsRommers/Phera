@@ -25,6 +25,7 @@ pub(crate) struct ConstantLookup {
     pub(crate) class: String,
     pub(crate) name: String,
     pub(crate) spelling: Option<String>,
+    pub(crate) access: crate::class_constants::ConstantAccess,
 }
 
 pub(crate) struct CaseLookup {

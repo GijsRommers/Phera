@@ -34,8 +34,6 @@ const ERROR_LEVELS: &[(&str, i64)] = &[
     ("E_USER_ERROR", 256),
     ("E_USER_WARNING", 512),
     ("E_USER_NOTICE", 1024),
-    // No longer raised and no longer part of E_ALL, but old code names it.
-    ("E_STRICT", 2048),
     ("E_RECOVERABLE_ERROR", 4096),
     ("E_DEPRECATED", 8192),
     ("E_USER_DEPRECATED", 16384),
@@ -88,4 +86,5 @@ pub(crate) fn register(registry: &mut Registry) {
     for &(name, level) in ERROR_LEVELS {
         registry.constant(name, level);
     }
+    registry.deprecated_constant("E_STRICT", 2048);
 }

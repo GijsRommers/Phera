@@ -7,7 +7,8 @@
 //! strings, so `"\xff"` is a single byte.
 
 use phera_ast::{
-    Expression, ExpressionKind, Identifier, Literal, MemberName, StringPart, Variable,
+    DollarCurlyForm, Expression, ExpressionKind, Identifier, Literal, MemberName, StringPart,
+    Variable,
 };
 use phera_lexer::TokenKind;
 use phera_source::Span;
@@ -51,7 +52,7 @@ impl Parser<'_> {
                 TokenKind::StringPart => {
                     let token = self.bump()?;
                     let bytes = decode_double_quoted(self.bytes_of(&token), false, token.span)?;
-                    parts.push(StringPart::Literal(bytes));
+                    parts.push(StringPart::Literal(bytes, token.span));
                 }
                 TokenKind::Variable => {
                     parts.push(StringPart::Expression(self.parse_encaps_var()?));
@@ -62,6 +63,7 @@ impl Parser<'_> {
                     self.expect(TokenKind::RightBrace, "'}'")?;
                     parts.push(StringPart::Expression(expression));
                 }
+                TokenKind::DollarCurlyOpen => parts.push(self.parse_dollar_curly()?),
                 _ => {
                     return Err(
                         self.error(format!("unexpected {} in string", self.describe_current()))
@@ -92,13 +94,18 @@ impl Parser<'_> {
                     parts.push(RawPart::Literal(self.bytes_of(&token), token.span));
                 }
                 TokenKind::Variable if !nowdoc => {
-                    parts.push(RawPart::Expression(self.parse_encaps_var()?));
+                    parts.push(RawPart::Interpolation(StringPart::Expression(
+                        self.parse_encaps_var()?,
+                    )));
                 }
                 TokenKind::CurlyOpen if !nowdoc => {
                     self.bump()?;
                     let expression = self.parse_expr(0)?;
                     self.expect(TokenKind::RightBrace, "'}'")?;
-                    parts.push(RawPart::Expression(expression));
+                    parts.push(RawPart::Interpolation(StringPart::Expression(expression)));
+                }
+                TokenKind::DollarCurlyOpen if !nowdoc => {
+                    parts.push(RawPart::Interpolation(self.parse_dollar_curly()?));
                 }
                 _ => {
                     return Err(
@@ -113,6 +120,41 @@ impl Parser<'_> {
             kind: body.into_kind(),
             span: self.span_since(start_token.span),
         })
+    }
+
+    /// `${name}` (with optional index) names a variable directly. The expression
+    /// form computes the name, as `${$name}` does.
+    fn parse_dollar_curly(&mut self) -> Result<StringPart, ParseError> {
+        self.bump()?;
+        let (kind, span, form) = if self.kind() == TokenKind::StringVarname {
+            let token = self.bump()?;
+            let variable =
+                ExpressionKind::Variable(Variable::Named(self.text_of(&token).to_string()));
+            let kind = if self.eat(TokenKind::LeftBracket)? {
+                let index = self.parse_expr(0)?;
+                self.expect(TokenKind::RightBracket, "']'")?;
+                ExpressionKind::Index {
+                    target: Box::new(Expression {
+                        kind: variable,
+                        span: token.span,
+                    }),
+                    index: Some(Box::new(index)),
+                }
+            } else {
+                variable
+            };
+            (kind, token.span, DollarCurlyForm::Name)
+        } else {
+            let name = self.parse_expr(0)?;
+            let span = name.span;
+            (
+                ExpressionKind::Variable(Variable::Dynamic(Box::new(name))),
+                span,
+                DollarCurlyForm::Expression,
+            )
+        };
+        self.expect(TokenKind::RightBrace, "'}'")?;
+        Ok(StringPart::DollarCurly(Expression { kind, span }, form))
     }
 
     /// One interpolated variable inside a string: `$a`, `$a[...]`, `$a->b`,
@@ -228,11 +270,11 @@ impl Parser<'_> {
     fn finish_string_parts(&self, parts: Vec<StringPart>, start: Span) -> Expression {
         if parts
             .iter()
-            .all(|part| matches!(part, StringPart::Literal(_)))
+            .all(|part| matches!(part, StringPart::Literal(..)))
         {
             let mut bytes = Vec::new();
             for part in parts {
-                if let StringPart::Literal(literal) = part {
+                if let StringPart::Literal(literal, _) = part {
                     bytes.extend_from_slice(&literal);
                 }
             }
@@ -276,18 +318,23 @@ impl Parser<'_> {
 
         for (index, part) in parts.into_iter().enumerate() {
             match part {
-                RawPart::Expression(expression) => {
+                RawPart::Interpolation(part) => {
+                    let span = match &part {
+                        StringPart::Expression(expression)
+                        | StringPart::DollarCurly(expression, _) => expression.span,
+                        StringPart::Literal(_, span) => *span,
+                    };
                     if at_line_start && !indent.is_empty() {
                         return Err(ParseError::new(
                             format!(
                                 "invalid body indentation level (expecting an indentation level of at least {})",
                                 indent.len()
                             ),
-                            expression.span,
+                            span,
                         ));
                     }
                     at_line_start = false;
-                    result.push(StringPart::Expression(expression));
+                    result.push(part);
                 }
                 RawPart::Literal(raw, span) => {
                     let mut text =
@@ -305,7 +352,7 @@ impl Parser<'_> {
                     } else {
                         decode_double_quoted(&text, true, span)?
                     };
-                    result.push(StringPart::Literal(bytes));
+                    result.push(StringPart::Literal(bytes, span));
                 }
             }
         }
@@ -316,7 +363,7 @@ impl Parser<'_> {
 
 enum RawPart<'a> {
     Literal(&'a [u8], Span),
-    Expression(Expression),
+    Interpolation(StringPart),
 }
 
 /// Splits a `String` token's text into its quote character and body.

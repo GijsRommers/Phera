@@ -133,7 +133,13 @@ impl<'ast> Compiler<'ast> {
         captures: &[String],
         line: usize,
     ) -> Result<Compiler<'ast>, CompileError> {
-        let mut builder = Compiler::new(self.file, self.lines, name, &self.namespace);
+        let mut builder = Compiler::new(
+            self.file,
+            self.lines,
+            name,
+            &self.namespace,
+            self.compile_diagnostics,
+        );
         builder.anonymous_classes = self.anonymous_classes.clone();
         if name.starts_with("{closure:") || name.contains("::") {
             builder.trait_scope = self.trait_scope.clone();

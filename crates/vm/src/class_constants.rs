@@ -7,8 +7,15 @@ use crate::{
 };
 use phera_bytecode::{ClassKind, Reg, Visibility};
 use phera_extension_api::{NativeError, NativeResult};
+use phera_source::deprecations::ItemKind;
 use phera_value::Value;
 use std::rc::Rc;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ConstantAccess {
+    Read,
+    Defined,
+}
 
 impl Vm {
     /// Both objects and strings are valid dynamic class targets.
@@ -29,14 +36,34 @@ impl Vm {
         name: Reg,
     ) -> Result<(), NativeError> {
         let class = self.class_target(class)?;
+        let linked = self.classes.get(&class).ok_or_else(|| {
+            if let Value::String(name) = self.read_local(name) {
+                Self::class_member_miss(&class, ItemKind::ClassConstant, &name.to_string_lossy())
+            } else {
+                Self::class_miss(&class, "Class")
+            }
+        })?;
         let name = constant_name(self.read_local(name))?;
-        let value = self.class_constant(&class, &name)?;
+        let value = if name.eq_ignore_ascii_case("class") {
+            linked.name_value.clone()
+        } else {
+            self.class_constant(&class, &name)?
+        };
         self.set(destination, value);
         Ok(())
     }
 
     /// Resolve inherited constants while retaining the scope of their original declaration.
     pub(crate) fn class_constant(&mut self, class: &str, name: &str) -> NativeResult {
+        self.class_constant_with_access(class, name, ConstantAccess::Read)
+    }
+
+    pub(crate) fn class_constant_with_access(
+        &mut self,
+        class: &str,
+        name: &str,
+        access: ConstantAccess,
+    ) -> NativeResult {
         let (linked, constant) = self.resolve_class_constant(class, name)?;
         // A linked value can return directly. The dependency stack is needed
         // only for unfinished initializers or the initial backing-table build.
@@ -45,18 +72,24 @@ impl Vm {
             .is_some_and(|class| self.needs_enum_backing(class))
             && let Some(value) = ready_value(&constant.initializer)
         {
-            self.check_constant_access(&constant, name)?;
+            self.check_constant_access(&constant, name, access)?;
             return Ok(value);
         }
-        self.run_unresolved_constant(class, name)
+        self.run_unresolved_constant(class, name, access)
     }
 
     #[cold]
-    fn run_unresolved_constant(&mut self, class: &str, name: &str) -> NativeResult {
+    fn run_unresolved_constant(
+        &mut self,
+        class: &str,
+        name: &str,
+        access: ConstantAccess,
+    ) -> NativeResult {
         self.run_initializer(InitializerTask::Constant(ConstantLookup {
             class: class.to_owned(),
             name: name.to_owned(),
             spelling: None,
+            access,
         }))
     }
 
@@ -68,6 +101,7 @@ impl Vm {
             class,
             name,
             spelling,
+            access,
         } = &lookup;
         let (linked, constant) = self.resolve_class_constant(class, name)?;
         if let Some(linked) = &linked
@@ -78,7 +112,7 @@ impl Vm {
                 Continuation::AfterValidation(lookup, self.initializer_scope.clone()),
             ));
         }
-        self.check_constant_access(&constant, name)?;
+        self.check_constant_access(&constant, name, *access)?;
         match &constant.initializer {
             ConstantInitializer::EnumCase { name, backing } => {
                 let class = linked.ok_or_else(|| internal_error!("unlinked enum"))?;
@@ -127,12 +161,26 @@ impl Vm {
         {
             (&pending.name, &pending.constants)
         } else {
-            return Err(Self::class_miss(class, "Class"));
+            return Err(Self::class_member_miss(
+                class,
+                ItemKind::ClassConstant,
+                name,
+            ));
         };
-        let constant = constants
-            .get(name)
-            .cloned()
-            .ok_or_else(|| NativeError::error(format!("Undefined constant {display}::{name}")))?;
+        let constant = constants.get(name).cloned().ok_or_else(|| {
+            linked
+                .as_ref()
+                .and_then(|class| {
+                    crate::unsupported_items::omitted_native_member(
+                        ItemKind::ClassConstant,
+                        class,
+                        name,
+                    )
+                })
+                .unwrap_or_else(|| {
+                    NativeError::error(format!("Undefined constant {display}::{name}"))
+                })
+        })?;
         if let Some(linked) = &linked
             && linked.kind == ClassKind::Trait
         {
@@ -147,6 +195,7 @@ impl Vm {
         &mut self,
         constant: &LinkedConstant,
         name: &str,
+        access: ConstantAccess,
     ) -> Result<(), NativeError> {
         if !self.can_read_class_constant(constant) {
             let visibility = if constant.visibility == Visibility::Private {
@@ -159,7 +208,9 @@ impl Vm {
                 constant.declaring
             )));
         }
-        if let Some(message) = constant.deprecated {
+        if access == ConstantAccess::Read
+            && let Some(message) = constant.deprecated
+        {
             self.diagnostic("Deprecated", message.into());
         }
         Ok(())

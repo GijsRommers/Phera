@@ -312,9 +312,9 @@ fn sexp_expr(expression: &Expression) -> String {
             parts
                 .iter()
                 .map(|part| match part {
-                    StringPart::Literal(bytes) =>
+                    StringPart::Literal(bytes, _) =>
                         format!("lit {:?}", String::from_utf8_lossy(bytes)),
-                    StringPart::Expression(e) => sexp_expr(e),
+                    StringPart::Expression(e) | StringPart::DollarCurly(e, _) => sexp_expr(e),
                 })
                 .collect::<Vec<_>>()
                 .join(" ")

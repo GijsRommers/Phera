@@ -8,18 +8,24 @@
 //! POST /app.js                             405: a file takes no data
 //! ```
 //!
+//! With `--compress`, a text-like file that has no precompressed copy is
+//! compressed while the request waits, if it is small enough to hold in
+//! memory. A request for a part of it gets the plain file: cutting a range
+//! out of compressed bytes would mean compressing the whole file first.
+//!
 //! The file is opened once and everything is read from that open file: its
 //! length, its time, and later its bytes. A deploy that replaces the file
 //! meanwhile cannot make the headers describe one version and the body
 //! another.
 
 use std::fs::File;
-use std::io::{Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use phera_server::{Request, Response};
 
 use super::byte_range::{self, RangeRequest};
+use super::compress::{self, Compressor};
 use super::conditional::Validators;
 use super::precompressed::{self, Encoding};
 use super::site::Site;
@@ -32,7 +38,14 @@ pub(crate) struct Conditions {
     range: Option<String>,
     if_range: Option<String>,
     accept_encoding: Option<String>,
+    /// `--compress` was given.
+    compress: bool,
 }
+
+/// A file larger than this is not compressed while a request waits: it
+/// would have to be held in memory twice. Its build step should write a
+/// compressed copy next to it instead.
+const LARGEST_FILE_COMPRESSED: u64 = 4 * 1024 * 1024;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Method {
@@ -42,7 +55,7 @@ enum Method {
 }
 
 impl Conditions {
-    pub(crate) fn of(request: &Request) -> Conditions {
+    pub(crate) fn of(request: &Request, compress: bool) -> Conditions {
         let header = |name: &str| {
             request
                 .header(name)
@@ -59,6 +72,21 @@ impl Conditions {
             range: header("range"),
             if_range: header("if-range"),
             accept_encoding: header("accept-encoding"),
+            compress,
+        }
+    }
+
+    /// What to compress a plain file of this type and length with, if at
+    /// all, for this request.
+    fn compressor_for(&self, content_type: &str, length: u64) -> Option<Compressor> {
+        let wanted = self.compress
+            && self.range.is_none()
+            && length <= LARGEST_FILE_COMPRESSED
+            && compress::is_worthwhile(content_type, length);
+        if wanted {
+            Compressor::for_client(self.accept_encoding.as_deref())
+        } else {
+            None
         }
     }
 }
@@ -70,6 +98,9 @@ struct Representation {
     length: u64,
     validators: Validators,
     encoding: Option<Encoding>,
+    /// Set when the file is to be compressed now; `encoding` then names
+    /// what the client will receive, not what is on disk.
+    compress_with: Option<Compressor>,
 }
 
 /// Builds the response for `path`, a file of `site`. Reads the file system,
@@ -78,7 +109,8 @@ pub(crate) fn answer(site: &Site, path: &Path, conditions: &Conditions) -> Respo
     if conditions.method == Method::Other {
         return Response::text(405, "Method Not Allowed\n").with_header("Allow", "GET, HEAD");
     }
-    let Some(mut chosen) = choose(site, path, conditions.accept_encoding.as_deref()) else {
+    let content_type = super::content_type::of(path);
+    let Some(mut chosen) = choose(site, path, content_type, conditions) else {
         return Response::text(404, "Not Found\n");
     };
 
@@ -91,14 +123,21 @@ pub(crate) fn answer(site: &Site, path: &Path, conditions: &Conditions) -> Respo
         return with_validators(Response::new(304), validators);
     }
 
-    let mut response = Response::new(200)
-        .with_header("Content-Type", super::content_type::of(path))
-        .with_header("Accept-Ranges", "bytes");
+    let mut response = Response::new(200).with_header("Content-Type", content_type);
     if let Some(encoding) = chosen.encoding {
         response = response.with_header("Content-Encoding", encoding.token());
     }
     response = with_validators(response, validators);
 
+    if let Some(compressor) = chosen.compress_with {
+        let mut contents = Vec::with_capacity(chosen.length as usize);
+        if chosen.file.read_to_end(&mut contents).is_err() {
+            return Response::text(500, "Internal Server Error\n");
+        }
+        return response.with_body(compressor.compress(&contents));
+    }
+
+    response = response.with_header("Accept-Ranges", "bytes");
     match requested_range(conditions, &chosen) {
         RangeRequest::Whole => response.with_file(chosen.file, chosen.length),
         RangeRequest::Part { start, length } => {
@@ -140,15 +179,33 @@ fn requested_range(conditions: &Conditions, chosen: &Representation) -> RangeReq
     byte_range::parse(conditions.range.as_deref(), chosen.length)
 }
 
-/// Opens the best precompressed copy the client accepts, or the file.
-fn choose(site: &Site, path: &Path, accept_encoding: Option<&str>) -> Option<Representation> {
-    precompressed::accepted(accept_encoding)
+/// Opens the best precompressed copy the client accepts, or the file,
+/// which may then be marked for compressing now.
+fn choose(
+    site: &Site,
+    path: &Path,
+    content_type: &str,
+    conditions: &Conditions,
+) -> Option<Representation> {
+    let precompressed = precompressed::accepted(conditions.accept_encoding.as_deref())
         .into_iter()
         .find_map(|encoding| {
             let copy = site.plain_file(&with_suffix(path, encoding.file_suffix()))?;
             open(&copy, Some(encoding))
-        })
-        .or_else(|| open(path, None))
+        });
+    if precompressed.is_some() {
+        return precompressed;
+    }
+    let mut plain = open(path, None)?;
+    if let Some(compressor) = conditions.compressor_for(content_type, plain.length) {
+        let encoding = compressor.encoding();
+        plain.validators = plain
+            .validators
+            .of_variant(&format!("-{}", encoding.token()));
+        plain.encoding = Some(encoding);
+        plain.compress_with = Some(compressor);
+    }
+    Some(plain)
 }
 
 fn open(path: &Path, encoding: Option<Encoding>) -> Option<Representation> {
@@ -164,6 +221,7 @@ fn open(path: &Path, encoding: Option<Encoding>) -> Option<Representation> {
         length: metadata.len(),
         file,
         encoding,
+        compress_with: None,
     })
 }
 

@@ -28,7 +28,6 @@ impl Extension for Random {
 
     fn register(&self, registry: &mut Registry) {
         registry.constant("MT_RAND_MT19937", mt19937::MT_RAND_MT19937);
-        registry.constant("MT_RAND_PHP", mt19937::MT_RAND_PHP);
         // Error and Exception come from the core extension.
         for &class in ERRORS.iter().chain(engine_classes::CLASSES) {
             registry.class(class);

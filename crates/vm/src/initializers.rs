@@ -146,7 +146,7 @@ impl Vm {
                     return Ok(InitializerStep::Read(lookup, dst));
                 }
                 Instruction::FetchConstant { dst, constant } => {
-                    (dst, self.constants.fetch(unit.clone(), constant)?)
+                    (dst, self.fetch_global_constant(unit.clone(), constant)?)
                 }
                 Instruction::Fetch { dst, path, .. }
                 | Instruction::FetchIndex { dst, path, .. } => (
@@ -334,6 +334,7 @@ fn make_lookup(
         class,
         name,
         spelling,
+        access: crate::class_constants::ConstantAccess::Read,
     })
 }
 

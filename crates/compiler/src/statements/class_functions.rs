@@ -23,7 +23,13 @@ impl Compiler<'_> {
         if !crate::parameter_defaults::constant_expression(expression) {
             return Err(self.error("Constant expression contains invalid operations", line));
         }
-        let mut builder = Compiler::new(self.file, self.lines, "{initializer}", &self.namespace);
+        let mut builder = Compiler::new(
+            self.file,
+            self.lines,
+            "{initializer}",
+            &self.namespace,
+            self.compile_diagnostics,
+        );
         builder.anonymous_classes = self.anonymous_classes.clone();
         builder.class_scope = Some(class.to_owned());
         builder.trait_scope = trait_scope.map(str::to_owned);
