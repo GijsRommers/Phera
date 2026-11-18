@@ -134,7 +134,7 @@ impl Vm {
             }
             Instruction::Clone { dst, src, with } => self.clone_instruction(dst, src, with).await?,
             Instruction::Exit { src: source } => {
-                return self.exit_value(source).map(DispatchResult::Returned);
+                return self.exit_value(source).await.map(DispatchResult::Returned);
             }
             Instruction::Eval { dst, source } => self.eval(dst, source).await?,
             Instruction::Include {

@@ -14,7 +14,7 @@
 
 use phera_bytecode::{NameId, PathId, Reg, SymbolId};
 use phera_extension_api::{NativeError, NativeResult};
-use phera_value::{Value, to_php_string};
+use phera_value::Value;
 
 use crate::calls::call_state::{CallTarget, Callee, ParameterSpec};
 use crate::calls::prepared_call::{CallDetails, CallKind, PreparedCall, PreparedCallee};
@@ -211,19 +211,29 @@ impl Vm {
     }
 
     /// Numeric exit values set status; strings are output before unwinding the request.
-    pub(crate) fn exit_value(&mut self, register: Reg) -> NativeResult {
+    pub(crate) async fn exit_value(&mut self, register: Reg) -> NativeResult {
         let value = self.get(register);
-        let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
+        if value.is_object()
+            && (self
+                .current()
+                .is_some_and(|frame| frame.function().strict_types)
+                || !Self::has_string_conversion(&value))
+        {
+            return Err(NativeError::type_error(format!(
+                "exit(): Argument #1 ($status) must be of type string|int, {} given",
+                value.type_name(),
+            )));
+        }
         if matches!(
             value,
             Value::Int(_) | Value::Bool(_) | Value::Null | Value::Float(_)
         ) {
+            let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
             diagnostics.vm.status = phera_value::to_int(&value, &mut diagnostics.buffer)? as i32;
         } else {
-            let text = to_php_string(&value, &mut diagnostics.buffer)?;
-            diagnostics.vm.out(text.as_bytes());
+            let text = self.stringify_value(&value).await?;
+            self.out(text.as_bytes());
         }
-        drop(diagnostics);
         self.call_stack.clear();
         Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
             (),
