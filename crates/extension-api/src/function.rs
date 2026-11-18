@@ -30,6 +30,8 @@ pub enum ParamType {
     String,
     Array,
     Object,
+    /// `object|array`
+    ObjectOrArray,
     Class(&'static str),
     Callable,
     Iterable,
@@ -37,6 +39,8 @@ pub enum ParamType {
     Number,
     /// `int|string`
     IntOrString,
+    /// `array|int`
+    ArrayOrInt,
     /// `array|string`
     ArrayOrString,
     /// `object|string`

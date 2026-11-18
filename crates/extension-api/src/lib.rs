@@ -26,7 +26,7 @@ pub use class::{
     NativePropertyAccess, NativePropertyMutation, NativePropertyRead, PrepareMethod, PropertyEntry,
     PropertyType, SyncMethod, Visibility,
 };
-pub use context::{Context, LocalFuture, PropertyView};
+pub use context::{Context, LocalFuture, PropertyView, RequestCallback};
 pub use error::{NativeError, NativeResult, Unwind};
 pub use function::{AsyncFn, FunctionEntry, NativeFn, Param, ParamType, SyncFn};
 pub use object_handlers::{
@@ -34,7 +34,7 @@ pub use object_handlers::{
     NativeDimensions, NativeIterator, PropertyProjection, PropertyPurpose,
 };
 pub use registry::{ConstantValue, Registry};
-pub use state::RequestState;
+pub use state::{QuerySeparator, RequestState};
 pub use working_directory::WorkingDirectory;
 
 /// The PHP version exposed by the engine and its built-in modules.

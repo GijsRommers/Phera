@@ -38,6 +38,10 @@ impl Vm {
                     .handler_intrinsic(function, arguments, origin)
                     .await
             }
+            Intrinsic::Output(function) => {
+                drop(diagnostics);
+                Box::pin(self.output_function(function, arguments)).await
+            }
             Intrinsic::Basename => {
                 let path = to_php_string(&argument, &mut diagnostics.buffer)?;
                 let path = path.as_bytes();
