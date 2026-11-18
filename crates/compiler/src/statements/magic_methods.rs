@@ -68,7 +68,14 @@ impl Compiler<'_> {
         };
         let line = self.lines.line(method.name.span.start);
         let qualified = format!("{class}::{name}()");
-        let error = |message| self.error(message, line);
+        let file = self.file;
+        let error = |message| CompileError {
+            message,
+            file: file.into(),
+            line,
+            parse: false,
+            scanner_diagnostics: Vec::new(),
+        };
         let kind = match signature {
             Signature::Invoke => Instance,
             Signature::Fixed {
@@ -99,6 +106,17 @@ impl Compiler<'_> {
                 "cannot be static"
             };
             return Err(error(format!("Method {qualified} {message}")));
+        }
+        if kind != CloneMethod
+            && matches!(
+                method.modifiers.visibility,
+                Some(Visibility::Private | Visibility::Protected)
+            )
+        {
+            self.declaration_warnings.push(DeclarationWarning {
+                message: format!("The magic method {qualified} must have public visibility"),
+                line: line as u32,
+            });
         }
         if let Signature::Fixed {
             parameters,
@@ -133,17 +151,6 @@ impl Compiler<'_> {
                     "{qualified}: Return type must be {returns} when declared"
                 )));
             }
-        }
-        if kind != CloneMethod
-            && matches!(
-                method.modifiers.visibility,
-                Some(Visibility::Private | Visibility::Protected)
-            )
-        {
-            self.declaration_warnings.push(DeclarationWarning {
-                message: format!("The magic method {qualified} must have public visibility"),
-                line: line as u32,
-            });
         }
         Ok(())
     }

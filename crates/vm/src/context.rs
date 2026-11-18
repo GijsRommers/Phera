@@ -62,12 +62,16 @@ impl Context for Vm {
         Vm::has_debug_info(self, object)
     }
 
-    fn debug_properties(
-        &mut self,
+    fn debug_properties<'a>(
+        &'a mut self,
         object: std::rc::Rc<phera_value::Object>,
-    ) -> LocalFuture<'_, Result<std::rc::Rc<phera_value::PhpArray>, phera_extension_api::NativeError>>
-    {
-        Box::pin(Vm::debug_properties(self, object))
+        function: &'static str,
+        arguments: &[Value],
+    ) -> LocalFuture<
+        'a,
+        Result<phera_extension_api::DebugProperties, phera_extension_api::NativeError>,
+    > {
+        Vm::debug_properties(self, object, function, arguments)
     }
 
     fn compile_diagnostic(

@@ -3,7 +3,7 @@ use phera_extension_api::{
     ArrayKey, Context, FunctionEntry, LocalFuture, NativeResult, Param, ParamType, Registry, Value,
 };
 
-use super::{Container, Place, Style, spaces, walk};
+use super::{Container, Place, PropertyView, Style, spaces, walk};
 
 pub(crate) fn register(registry: &mut Registry) {
     const PARAMS: &[Param] = &[
@@ -17,16 +17,16 @@ fn var_dump(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_,
     Box::pin(async move {
         for value in &arguments {
             let mut out = Vec::new();
-            walk(&mut VarDump, &mut out, value, context).await?;
+            walk(&mut VarDump(&arguments), &mut out, value, context).await?;
             context.write(&out);
         }
         Ok(Value::Null)
     })
 }
 
-struct VarDump;
+struct VarDump<'a>(&'a [Value]);
 
-impl VarDump {
+impl VarDump<'_> {
     /// Two spaces per level, then `&` for a shared reference.
     fn lead(out: &mut Vec<u8>, place: Place) {
         spaces(out, 2 * place.depth);
@@ -36,7 +36,14 @@ impl VarDump {
     }
 }
 
-impl Style for VarDump {
+impl Style for VarDump<'_> {
+    fn properties(&self) -> PropertyView<'_> {
+        PropertyView::Debug {
+            function: "var_dump",
+            arguments: self.0,
+        }
+    }
+
     fn before_debug(&mut self, out: &mut Vec<u8>, place: Place, context: &mut dyn Context) {
         Self::lead(out, place);
         context.write(out);
@@ -132,7 +139,9 @@ impl Style for VarDump {
         place: Place,
         _context: &mut dyn Context,
     ) {
-        spaces(out, 2 * place.depth);
+        if !place.leading_written {
+            spaces(out, 2 * place.depth);
+        }
         out.extend_from_slice(b"*RECURSION*\n");
     }
 }

@@ -13,6 +13,12 @@ use crate::{
 /// reference counted with `Rc`, so nothing that holds one can be `Send`.
 pub type LocalFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
 
+/// A debug hook can inspect the same object again without re-entering itself.
+pub enum DebugProperties {
+    Properties(Rc<PhpArray>),
+    Recursive,
+}
+
 /// What a native function may ask of the runtime that called it.
 ///
 /// One context belongs to one running request. The VM implements it; tests use
@@ -68,11 +74,15 @@ pub trait Context {
     }
 
     /// Fetch inspection properties with the object's debug hook, if present.
-    fn debug_properties(
-        &mut self,
+    fn debug_properties<'a>(
+        &'a mut self,
         object: Rc<Object>,
-    ) -> LocalFuture<'_, Result<Rc<PhpArray>, NativeError>> {
-        Box::pin(std::future::ready(Ok(Rc::new(object.to_array()))))
+        _function: &'static str,
+        _arguments: &[Value],
+    ) -> LocalFuture<'a, Result<DebugProperties, NativeError>> {
+        Box::pin(std::future::ready(Ok(DebugProperties::Properties(
+            Rc::new(object.to_array()),
+        ))))
     }
 
     /// Creates an object of the named class with these properties, without

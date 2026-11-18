@@ -4,7 +4,7 @@ use phera_extension_api::{
     args,
 };
 
-use super::{Container, Place, Style, spaces, walk};
+use super::{Container, Place, PropertyView, Style, spaces, walk};
 
 pub(crate) fn register(registry: &mut Registry) {
     const PARAMS: &[Param] = &[
@@ -21,7 +21,13 @@ fn print_r(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, 
 async fn render(context: &mut dyn Context, arguments: Vec<Value>) -> NativeResult {
     let arguments = &arguments;
     let mut out = Vec::new();
-    walk(&mut PrintR, &mut out, args::value(arguments, 0), context).await?;
+    walk(
+        &mut PrintR(arguments),
+        &mut out,
+        args::value(arguments, 0),
+        context,
+    )
+    .await?;
     if args::bool(arguments, 1).unwrap_or(false) {
         Ok(Value::from(out))
     } else {
@@ -30,9 +36,9 @@ async fn render(context: &mut dyn Context, arguments: Vec<Value>) -> NativeResul
     }
 }
 
-struct PrintR;
+struct PrintR<'a>(&'a [Value]);
 
-impl PrintR {
+impl PrintR<'_> {
     fn head(container: &Container) -> String {
         match container {
             Container::Array(_) => "Array\n".to_string(),
@@ -41,7 +47,14 @@ impl PrintR {
     }
 }
 
-impl Style for PrintR {
+impl Style for PrintR<'_> {
+    fn properties(&self) -> PropertyView<'_> {
+        PropertyView::Debug {
+            function: "print_r",
+            arguments: self.0,
+        }
+    }
+
     fn scalar(&mut self, out: &mut Vec<u8>, value: &Value, _place: Place) {
         // Scalars print as their string form, without the warnings a real
         // conversion would raise.

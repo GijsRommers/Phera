@@ -4,7 +4,7 @@ use phera_extension_api::{
     args,
 };
 
-use super::{Container, Place, PropertyView, Style, spaces, walk};
+use super::{Container, Place, Style, spaces, walk};
 
 pub(crate) fn register(registry: &mut Registry) {
     const PARAMS: &[Param] = &[
@@ -64,10 +64,6 @@ fn float_source(float: f64) -> String {
 }
 
 impl Style for VarExport {
-    fn properties(&self) -> PropertyView {
-        PropertyView::Raw
-    }
-
     fn scalar(&mut self, out: &mut Vec<u8>, value: &Value, _place: Place) {
         match value {
             Value::Bool(flag) => out.extend_from_slice(flag.to_string().as_bytes()),

@@ -23,7 +23,7 @@ pub use class::{
     NativePropertyAccess, NativePropertyMutation, NativePropertyRead, PrepareMethod, PropertyEntry,
     SyncMethod, Visibility,
 };
-pub use context::{Context, LocalFuture};
+pub use context::{Context, DebugProperties, LocalFuture};
 pub use error::{NativeError, NativeResult, Unwind};
 pub use function::{AsyncFn, FunctionEntry, NativeFn, Param, ParamType, SyncFn};
 pub use registry::{ConstantValue, Registry};

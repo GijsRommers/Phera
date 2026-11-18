@@ -74,13 +74,12 @@ impl Vm {
                 .warning_site
                 .as_ref()
                 .filter(|site| site.boundary == callee_index);
-            let autoload = self
-                .autoload
-                .sites
+            let native_callback = self
+                .native_callback_sites
                 .iter()
                 .rev()
                 .find(|site| site.boundary == callee_index);
-            if warning.is_some() || autoload.is_some() {
+            if warning.is_some() || native_callback.is_some() {
                 entry.remove(&ArrayKey::str("file"));
                 entry.remove(&ArrayKey::str("line"));
             }
@@ -92,7 +91,7 @@ impl Vm {
                     &site.location.file,
                     site.location.line,
                 );
-            } else if let Some(site) = autoload {
+            } else if let Some(site) = native_callback {
                 append_native(&mut trace, &site.native, &caller.unit().file, caller.line());
             }
         }

@@ -147,6 +147,8 @@ pub const DEFAULT_FRAME_LIMIT: usize = 250_000;
 /// One request interpreter; PHP calls use heap frames rather than Rust recursion.
 pub struct Vm {
     classes: classes::ClassTable,
+    native_callback_sites: Vec<error_traces::NativeCallbackSite>,
+    debug_objects: Vec<u32>,
     property_guards: Vec<magic_properties::PropertyGuard>,
     unset_typed_properties: std::collections::HashMap<u32, magic_properties::UnsetProperties>,
     clone_scopes: Vec<classes::cloning::CloneScope>,
@@ -197,6 +199,8 @@ impl Vm {
             classes: classes::ClassTable::native(&registry),
             autoload: Default::default(),
             include_path: None,
+            native_callback_sites: Vec::new(),
+            debug_objects: Vec::new(),
             property_guards: Vec::new(),
             unset_typed_properties: Default::default(),
             clone_scopes: Vec::new(),
