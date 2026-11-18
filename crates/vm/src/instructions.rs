@@ -80,7 +80,7 @@ impl Vm {
             I::LoadConst { dst, constant } => self.load_constant(dst, constant)?,
             I::Move { dst, src } => self.move_local(dst, src)?,
             I::Clear { reg } | I::UnsetLocal { local: reg } => self.clear_local(reg)?,
-            I::Assign { local, src } => self.execute_assign(local, src)?,
+            I::Assign { local, src } => return self.execute_assign(local, src),
             I::AssignOp { op, local, src } => return self.execute_assign_op(op, local, src),
             I::CheckType { local, ty } => self.check_local_type(local, ty)?,
             I::IncDecLocal { mode, dst, local } => self.execute_inc_dec(mode, dst, local)?,

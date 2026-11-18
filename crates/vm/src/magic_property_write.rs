@@ -53,5 +53,6 @@ impl Vm {
         keys.push(PathKey::Property(key));
         self.write_detached_place(Value::Object(object), &keys, value, Mutation::Assign)
             .await
+            .map(|_| ())
     }
 }

@@ -18,6 +18,36 @@ use phera_value::Value;
 use std::{cell::RefCell, rc::Rc};
 
 impl Vm {
+    /// Only an object assigned through a typed reference can need a callback.
+    pub(crate) fn local_reference_needs_string(
+        &self,
+        local: phera_bytecode::Reg,
+        value: &Value,
+    ) -> bool {
+        let Some(frame) = self
+            .current()
+            .filter(|frame| !frame.function().strict_types)
+        else {
+            return false;
+        };
+        let Some(Some(Value::Reference(reference))) =
+            frame.slots(&self.registers).get(local.index())
+        else {
+            return false;
+        };
+        self.property_references
+            .borrow()
+            .constraints
+            .get(&(Rc::as_ptr(reference) as usize))
+            .is_some_and(|properties| {
+                properties.iter().any(|(_, property)| {
+                    property.ty.as_ref().is_some_and(|ty| {
+                        self.needs_string_coercion(value, ty, crate::types::TypeChecking::Coerce)
+                    })
+                })
+            })
+    }
+
     /// Look up only this cell; neither objects nor class declarations are scanned.
     #[inline(never)]
     pub(crate) fn check_reference_assignment(

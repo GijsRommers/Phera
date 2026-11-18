@@ -71,6 +71,12 @@ impl Vm {
                 let value = self.binary_with_strings(op, left, right).await?;
                 self.assign_local(local, value)?;
             }
+            Instruction::Assign { local, src } => {
+                let value = self.coerce_stringable(self.get(src)).await?;
+                self.restart_subject_iterators(local);
+                self.assign_local(local, value.clone())?;
+                self.set_cast_assignment_result(src, value);
+            }
             Instruction::CheckReturn { source } => {
                 let value = self.coerce_stringable(self.raw_local(source)).await?;
                 let value = self.check_return_value(value)?;
@@ -85,25 +91,35 @@ impl Vm {
             }
             Instruction::SendPath { path } => self.send_magic_place(&self.path(path)?).await?,
             Instruction::AssignPath { path, src } => {
+                let place = self.path(path)?;
                 let value = self.get(src).deref().clone();
-                self.mutate_magic_place(
-                    &self.path(path)?,
-                    PropertyMutation::Write(
-                        WriteValue::evaluated(value),
-                        crate::access_mode::Binding::ByValue,
-                    ),
-                )
-                .await?;
+                let static_cast = self.cast_static_property_value(&place, &value).await?;
+                let written = self
+                    .mutate_magic_place(
+                        &place,
+                        PropertyMutation::Write(
+                            WriteValue::evaluated(static_cast.clone().unwrap_or(value)),
+                            crate::access_mode::Binding::ByValue,
+                        ),
+                    )
+                    .await?;
+                if let Some(value) = written.or(static_cast) {
+                    self.set_cast_assignment_result(src, value);
+                }
             }
             Instruction::AssignPathFromLocal { path, src, dst } => {
-                self.mutate_magic_place(
-                    &self.path(path)?,
-                    PropertyMutation::Write(
-                        WriteValue::local(src, dst),
-                        crate::access_mode::Binding::ByValue,
-                    ),
-                )
-                .await?;
+                if let Some(value) = self
+                    .mutate_magic_place(
+                        &self.path(path)?,
+                        PropertyMutation::Write(
+                            WriteValue::local(src, dst),
+                            crate::access_mode::Binding::ByValue,
+                        ),
+                    )
+                    .await?
+                {
+                    self.set(dst, value);
+                }
             }
             Instruction::AssignOpPath { op, dst, path, src } => {
                 self.magic_assign_op_path(&self.path(path)?, op, dst, src)
@@ -130,7 +146,7 @@ impl Vm {
             }
             Instruction::UnsetPath { path } => {
                 self.mutate_magic_place(&self.path(path)?, PropertyMutation::Unset)
-                    .await?
+                    .await?;
             }
             Instruction::Clone { dst, src, with } => self.clone_instruction(dst, src, with).await?,
             Instruction::Exit { src: source } => {

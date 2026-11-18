@@ -68,20 +68,20 @@ impl Vm {
         value: Value,
     ) -> Result<(), NativeError> {
         match target {
-            Some(UpdateTarget::Indirect { root, keys }) => {
-                self.write_detached_place(root, &keys, value, Mutation::Assign)
-                    .await
-            }
+            Some(UpdateTarget::Indirect { root, keys }) => self
+                .write_detached_place(root, &keys, value, Mutation::Assign)
+                .await
+                .map(|_| ()),
             Some(UpdateTarget::Property { object, key }) => {
                 self.assign_selected_property(object, key, value).await
             }
-            None => {
-                self.mutate_magic_place(
+            None => self
+                .mutate_magic_place(
                     place,
                     PropertyMutation::Write(WriteValue::evaluated(value), Binding::ByValue),
                 )
                 .await
-            }
+                .map(|_| ()),
         }
     }
 }

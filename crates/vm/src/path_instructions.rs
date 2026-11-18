@@ -154,7 +154,15 @@ impl Vm {
         {
             self.restart_subject_iterators(register);
         }
-        if place.has_properties()? {
+        if place.has_properties()?
+            || (matches!(value, phera_value::Value::Object(_))
+                && matches!(
+                    place.base()?,
+                    phera_bytecode::PathBase::StaticProperty { .. }
+                )
+                && place.steps()?.next().is_none()
+                && Self::has_string_conversion(&value))
+        {
             return Ok(Some(BatchExit::Instruction(Instruction::AssignPath {
                 path,
                 src: source,

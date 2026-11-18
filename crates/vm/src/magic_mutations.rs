@@ -68,21 +68,21 @@ impl Vm {
         &mut self,
         place: &AccessPath,
         mut operation: PropertyMutation,
-    ) -> Result<(), NativeError> {
+    ) -> Result<Option<Value>, NativeError> {
         let plan = self.plan_magic_mutation(place, &mut operation).await?;
         match plan {
             OverloadedMutation::Ordinary => match operation {
                 PropertyMutation::Write(value, binding) => {
                     let value = value.into_value(self);
-                    self.write_place(place, value, binding)
+                    self.write_place(place, value, binding).map(|()| None)
                 }
-                PropertyMutation::Unset => self.unset_place(place),
+                PropertyMutation::Unset => self.unset_place(place).map(|()| None),
             },
             OverloadedMutation::Handled => {
                 if let PropertyMutation::Write(mut value, _) = operation {
                     value.read(self);
                 }
-                Ok(())
+                Ok(None)
             }
             OverloadedMutation::Detached(root, keys) => {
                 let (value, mutation) = match operation {
@@ -103,16 +103,21 @@ impl Vm {
         keys: &InlineStack<PathKey>,
         mut value: Value,
         mutation: Mutation,
-    ) -> Result<(), NativeError> {
+    ) -> Result<Option<Value>, NativeError> {
+        let mut converted = None;
         if mutation == Mutation::Assign
             && let Value::Object(object) = root.deref().clone()
             && let Some(PathKey::Property(key)) = keys.iter().next()
             && keys.iter().nth(1).is_none()
         {
+            let object_value = value.is_object();
             value = self.property_string(&object, key, value).await?;
+            if object_value && value.is_string() {
+                converted = Some(value.clone());
+            }
         }
         if self.validate_property_mutation(root.deref().clone(), keys, &mut value, mutation)? {
-            return Ok(());
+            return Ok(converted);
         }
         if mutation == Mutation::Assign {
             value = self.check_path_reference_assignment(&root, keys, value)?;
@@ -122,7 +127,7 @@ impl Vm {
             && !root.is_array()
         {
             if root.is_null() {
-                return Ok(());
+                return Ok(None);
             }
             return Err(NativeError::error(
                 "Cannot unset offset in a non-array variable",
@@ -136,7 +141,8 @@ impl Vm {
             mutation,
             &mut diagnostics.buffer,
             &diagnostics.vm.property_references,
-        )
+        )?;
+        Ok(converted)
     }
 
     async fn plan_magic_mutation(

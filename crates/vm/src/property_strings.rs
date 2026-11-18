@@ -1,13 +1,52 @@
 //! A weak typed property assignment performs the same Stringable conversion
 //! as a weak typed argument, for example `$object->label = $stringable`.
 
+use phera_bytecode::PathBase;
 use phera_extension_api::{NativeError, NativeResult};
 use phera_value::{ArrayKey, Object, Value};
 
-use crate::Vm;
 use crate::classes::Class;
+use crate::{AccessPath, Vm};
 
 impl Vm {
+    /// Static properties verify visibility before a weak string cast runs PHP.
+    pub(crate) async fn cast_static_property_value(
+        &mut self,
+        place: &AccessPath,
+        value: &Value,
+    ) -> Result<Option<Value>, NativeError> {
+        if !Self::has_string_conversion(value)
+            || self
+                .current()
+                .is_some_and(|frame| frame.function().strict_types)
+            || place.steps()?.next().is_some()
+        {
+            return Ok(None);
+        }
+        let PathBase::StaticProperty { class, name, .. } = place.base()? else {
+            return Ok(None);
+        };
+        let (class_name, property_name) = self.static_property_names(class, name)?;
+        let scope = self
+            .classes
+            .get(&class_name)
+            .ok_or_else(|| Self::class_miss(&class_name, "Class"))?;
+        let ty = scope
+            .static_properties
+            .iter()
+            .rev()
+            .find(|property| property.name == property_name)
+            .and_then(|property| property.ty.as_ref());
+        if ty.is_some_and(|ty| {
+            self.needs_string_coercion(value, ty, crate::types::TypeChecking::Coerce)
+        }) {
+            self.static_property(class, name)?;
+            self.coerce_stringable(value.clone()).await.map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+
     /// An explicitly unset typed property still checks a magic getter's result.
     pub(crate) async fn validate_getter_value(
         &mut self,
