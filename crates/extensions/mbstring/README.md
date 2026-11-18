@@ -52,6 +52,19 @@ means `iconv()` results can differ between Linux and macOS, as PHP's do.
   Phera on Linux. Apple's iconv transliterates by the state of the process:
   the same call gives different strings under `php -r` and in a script file,
   and may succeed or fail depending on earlier conversions.
+- `//IGNORE` is done by Phera on glibc. glibc's `iconv()` stops with
+  `EILSEQ` after each internal buffer in which it skipped something, and
+  expects to be called again; `iconv-native` calls it once, so a long string
+  came back cut to its first few kilobytes. Phera decodes the input strictly,
+  converts it strictly, and if the target refuses characters, finds them
+  (each distinct one is tried once), leaves them out and converts again;
+  invalid input is left out as glibc would. PHP itself calls again by
+  stepping one input byte forward, which loses a valid byte at each of
+  glibc's stops, so on glibc PHP's result for a long string has gaps that
+  Phera's does not: the tests compare the kind of result and the
+  diagnostics there, and check Phera's bytes against a clean conversion of
+  their own. Apple's iconv does not stop early and does the work itself, as
+  for PHP, with results identical to PHP's.
 - From 64 KiB on, `iconv`, `iconv_strlen` and `iconv_substr` convert on
   Tokio's blocking threads, since a large conversion can take long (a
   megabyte to `//IGNORE` takes about a quarter of a second on macOS).
@@ -75,8 +88,15 @@ What Phera does differently on purpose or by necessity:
   breaking the line before it. PHP breaks at the last space that fits:
   `mb_encode_mimeheader(str_repeat('a ', 50))` is `"a a ... a\r\n a ..."` in
   PHP and `"\r\n a a ..."` in Phera.
-- `iconv_mime_encode` folds between bytes, which can split a character
-  across two encoded words; PHP folds between characters.
+- `iconv_mime_encode` into a stateful charset (ISO-2022-JP, UTF-7, UTF-16
+  with a byte order mark): PHP's words depend on iconv's shift state carried
+  from word to word (its Q words even lack the escape sequences); Phera
+  splits the converted bytes, which can split a character. Stateless
+  charsets are folded as PHP does.
+- `iconv_mime_decode`: PHP calls a bare carriage return before the end
+  "Malformed string", and in some modes passes non-ASCII bytes outside
+  encoded words through; Phera converts both as ASCII, with a notice for the
+  bytes.
 - `mb_get_info('illegal_chars')` is always 0; PHP counts the characters it
   could not convert.
 - `"auto"` in an encoding list is always the detect order. In PHP it depends
@@ -107,19 +127,22 @@ warnings, notices and deprecations.
 | Every two-byte string as UTF-8, four functions (`tests/invalid.rs`) | 262,144 |
 | Scripts and invalid bytes × encodings × offsets (`tests/matrix.rs`) | 70,452 |
 | Kana flags × encodings (`tests/kana.rs`) | 9,330 |
-| Padding, entities, MIME, detection, iconv options (`tests/options.rs`) | 8,160 |
+| Padding, entities, MIME, detection, iconv options (`tests/options.rs`) | 8,449 |
 | Transfer encodings and their deprecations (`tests/transfers.rs`) | 1,605 |
 | Every function with hostile arguments (`tests/matrix.rs`) | 1,239 |
 | Settings, languages and mail defaults (`tests/options.rs`) | 306 |
 | Encoding names and aliases (`tests/encodings.rs`) | 179 |
-| 1 MB strings in six encodings, and through iconv (`tests/large.rs`) | 121 |
+| 1 MB strings in six encodings, and through every iconv function (`tests/large.rs`) | 172 |
 | By-reference results (`tests/request.rs`) | 9 |
 
-Two kinds of case are compared in a weaker form, as `tests/support/mod.rs`
-explains: `mb_list_encodings()` is PHP's list restricted to Phera's names,
-and a `//TRANSLIT` result must be of the same kind, ASCII, with the same
-diagnostics (on macOS a refusal counts as a result too). A literal passed to
-a by-reference parameter gets the error Phera's VM raises at the call site.
+Three kinds of case are compared in a weaker form, as `tests/support/mod.rs`
+explains: `mb_list_encodings()` is PHP's list restricted to Phera's names; a
+`//TRANSLIT` result must be of the same kind, ASCII, with the same
+diagnostics (on macOS a refusal counts as a result too); and on glibc a
+long `//IGNORE` result must be of the same kind with the same diagnostics,
+while `tests/large.rs` checks its bytes against a clean conversion. A
+literal passed to a by-reference parameter gets the error Phera's VM raises
+at the call site.
 
 `crates/runtime/tests/requests.rs` runs the functions in two requests to check
 that settings do not leak between them.
