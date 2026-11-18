@@ -132,6 +132,14 @@ Phase 1 is the classic PHP model made cheap: each request gets a fresh `Vm` and
 runs the front controller from the top. Parsing and compiling are paid once, in
 the shared code cache. This is correct for every application with no changes.
 
+Under `phera run`, `php_sapi_name()` and `PHP_SAPI` both report `cli`.
+Under `phera serve`, they report `phera`, while PHP's development server reports `cli-server`.
+
+`getallheaders()` and `apache_request_headers()` currently use the lower-case
+names in Hyper's header map. Preserving client spelling would require
+`crates/server` to capture the original names at HTTP/1 parsing and pass them
+alongside the normalized headers to the runtime.
+
 Phase 2 is snapshot and fork. A worker boots the application once (autoloader,
 container, routes), freezes that heap as a snapshot, and gives each request a
 fork of it. Arrays and strings are already copy-on-write, so a fork copies only
@@ -1130,6 +1138,38 @@ PHP passes stop at them.
 - **Confinement.** Under `serve`, an optional list of directories outside
   which no file function reads or writes (PHP's `open_basedir`, checked on the
   resolved path).
+
+### 11.8 `phera new`: start a project
+
+One command starts a project, the way `npm create vite` does for a front end:
+it asks for a name and a kind of project, and what it is not asked on the
+command line it asks on the terminal.
+
+```
+phera new                                   asks for both
+phera new shop --template symfony           asks nothing
+```
+
+| Template | What it makes |
+| --- | --- |
+| `plain` | A small JSON application without packages: a front controller, `src/` with a request, a response and the routes, `composer.json`, `.env`. The files are built into the binary (`crates/cli/templates/new/`). |
+| `symfony` | Symfony's official skeleton, 7.4 (the long-term support line, 6.1). |
+| `symfony-webapp` | The skeleton plus the `webapp` pack: Twig, Doctrine, forms, security. |
+| `laravel` | The official Laravel application. |
+
+- **Frameworks come from their own starting projects**, fetched with
+  Composer, not from copies kept in Phera: a copy would be out of date with
+  the next release of the framework. `phera install` (11.5) takes over from
+  Composer when it exists; until then a framework template needs Composer on
+  the machine, and the plain template only uses it to write the class loader.
+- **It never overwrites.** The directory must be missing or empty.
+- **The name** is the last part of the directory. It is put into PHP, JSON
+  and Markdown, so only letters, digits, `-`, `_` and `.` are accepted.
+- **Without a terminal** (a script, a pipeline) an unanswered question is an
+  error that names the options, not a wait.
+- **While Phera cannot run a framework**, the command says so after creating
+  the project and names the PHP command that serves it meanwhile. One
+  function, `Template::runs_on_phera`, holds that fact.
 
 ## 12. What to take from Hack and HHVM, and what not
 
