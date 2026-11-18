@@ -29,6 +29,7 @@ mod deferred_declarations;
 mod exceptions;
 mod expressions;
 mod finally;
+mod if_ladder;
 mod intrinsics;
 mod invocations;
 mod logical;

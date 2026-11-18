@@ -65,8 +65,11 @@ impl Analyzer<'_> {
             StatementKind::If {
                 condition,
                 then,
+                elseifs,
                 otherwise,
-            } => return self.if_statement(condition, then, otherwise.as_deref(), scope),
+            } => {
+                return self.if_statement(condition, then, elseifs, otherwise.as_deref(), scope);
+            }
             StatementKind::Switch { subject, cases } => {
                 return self.switch(subject, cases, scope);
             }
@@ -135,49 +138,5 @@ impl Analyzer<'_> {
         }
         self.record_return(scope);
         Flow::Terminal
-    }
-
-    fn if_statement(
-        &mut self,
-        condition: &Expression,
-        then: &[Statement],
-        otherwise: Option<&[Statement]>,
-        scope: &mut Scope,
-    ) -> Flow {
-        let truth = self.condition_truth(condition, scope);
-        if self.expression(condition, scope, false) == ValueType::Never {
-            return Flow::Terminal;
-        }
-        if let Some(truth) = truth {
-            return if truth {
-                self.block(then, scope)
-            } else {
-                otherwise.map_or(Flow::Next, |body| self.block(body, scope))
-            };
-        }
-        let mut left = scope.clone();
-        let mut right = scope.clone();
-        self.refine(condition, &mut left, true);
-        self.refine(condition, &mut right, false);
-        let a = self.block(then, &mut left);
-        let b = otherwise.map_or(Flow::Next, |body| self.block(body, &mut right));
-        let mut paths = Vec::new();
-        if a == Flow::Next {
-            paths.push(left);
-        }
-        if b == Flow::Next {
-            paths.push(right);
-        }
-        if !paths.is_empty() {
-            *scope = Scope::join(&paths);
-            return Flow::Next;
-        }
-        if a == Flow::Terminal && b == Flow::Terminal {
-            Flow::Terminal
-        } else if a == Flow::Break || b == Flow::Break {
-            Flow::Break
-        } else {
-            Flow::Continue
-        }
     }
 }

@@ -66,6 +66,12 @@ pub(crate) fn fuse_integer_operands(function: &mut Function) {
     }
 }
 
+/// How many instructions [`dead_after`] looks at before it gives up. Each
+/// query walks forward until the register is overwritten, so without a bound
+/// a generated function with thousands of `case` arms takes quadratic time;
+/// giving up only means an operand is not fused.
+const DEAD_AFTER_SCAN: usize = 2048;
+
 /// A deliberately conservative proof: only straight-line overwrites are accepted.
 pub(crate) fn dead_after(function: &Function, index: usize, register: phera_bytecode::Reg) -> bool {
     let mut pending = vec![index + 1];
@@ -74,6 +80,9 @@ pub(crate) fn dead_after(function: &Function, index: usize, register: phera_byte
         while let Some(instruction) = function.instructions.get(cursor) {
             if !visited.insert(cursor) {
                 break;
+            }
+            if visited.len() > DEAD_AFTER_SCAN {
+                return false;
             }
             cursor += 1;
             match *instruction {

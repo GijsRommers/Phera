@@ -58,25 +58,27 @@ impl Compiler<'_> {
         parts: &[ast::StringPart],
         line: usize,
     ) -> Result<Reg, CompileError> {
-        let mut dst = self.literal(Constant::Bytes(vec![]), line)?;
+        // One register accumulates the string; each part's temporaries are
+        // handed back once it has been appended.
+        let dst = self.literal(Constant::Bytes(vec![]), line)?;
         for part in parts {
+            let mark = self.mark_temporaries();
             let rhs = match part {
                 ast::StringPart::Literal(value) => {
                     self.literal(Constant::Bytes(value.clone()), line)?
                 }
                 ast::StringPart::Expression(expression) => self.compile_expression(expression)?,
             };
-            let next = self.allocate_register()?;
             self.emit(
                 Instruction::Binary {
-                    destination: next,
+                    destination: dst,
                     operator: Binary::Concat,
                     left: dst,
                     right: rhs,
                 },
                 line,
             );
-            dst = next;
+            self.release_temporaries(mark);
         }
         Ok(dst)
     }

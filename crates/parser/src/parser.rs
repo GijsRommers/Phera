@@ -12,15 +12,7 @@ use phera_lexer::{LexError, Lexer, ScanMode, ScanReport, Token, TokenKind};
 use phera_source::Span;
 
 use crate::error::ParseError;
-
-/// How deeply expressions and statements may nest before the parser gives up
-/// with an error. Real code stays under a hundred; PHP itself gives up
-/// somewhere in the tens of thousands. A recursive-descent parser needs stack
-/// in proportion to this depth, so the limit and [`crate::PARSER_STACK_BYTES`]
-/// go together: at this depth the parser must still fit in that stack, in a
-/// debug build too. Long chains such as `a . b . c ...` are parsed in loops and
-/// do not count.
-const MAX_DEPTH: u32 = 1000;
+use crate::nesting::Nesting;
 
 pub(crate) struct Parser<'src> {
     pub(crate) source: &'src [u8],
@@ -31,7 +23,7 @@ pub(crate) struct Parser<'src> {
     lex_error: Option<LexError>,
     /// End offset of the last consumed token, for building spans.
     pub(crate) prev_end: usize,
-    depth: u32,
+    pub(crate) nesting: Nesting,
     /// Set after `__halt_compiler();`: the rest of the file is raw data, so
     /// every open block is implicitly closed.
     pub(crate) halted: bool,
@@ -74,7 +66,7 @@ impl<'src> Parser<'src> {
             pos: 0,
             lex_error,
             prev_end: 0,
-            depth: 0,
+            nesting: Nesting::default(),
             halted: false,
         };
         (parser, lexer.into_diagnostics())
@@ -283,25 +275,11 @@ impl<'src> Parser<'src> {
         }
     }
 
-    // --- Spans and recursion ---------------------------------------------------
+    // --- Spans ------------------------------------------------------------------
 
     /// A span from `start` up to the end of the last consumed token.
     pub(crate) fn span_since(&self, start: Span) -> Span {
         Span::new(start.start, self.prev_end)
-    }
-
-    /// Enters a recursive parsing routine, refusing absurd nesting depth.
-    pub(crate) fn enter(&mut self) -> Result<(), ParseError> {
-        self.depth += 1;
-        if self.depth > MAX_DEPTH {
-            self.depth -= 1;
-            return Err(self.error("expression or statement nesting is too deep"));
-        }
-        Ok(())
-    }
-
-    pub(crate) fn leave(&mut self) {
-        self.depth -= 1;
     }
 }
 

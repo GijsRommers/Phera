@@ -167,7 +167,8 @@ impl Parser<'_> {
                     self.bump()?;
                     Rhs::Ref(self.parse_assign_ref_rhs()?)
                 } else {
-                    Rhs::Value(self.parse_expr(prec::ASSIGN)?)
+                    // PHP's stack holds the target and the `=`.
+                    Rhs::Value(self.with_php_slots(1, |parser| parser.parse_expr(prec::ASSIGN))?)
                 };
                 left = reassociate_assign(left, rhs, compound, assign_token.span, self)?;
                 banned = None;
@@ -222,7 +223,8 @@ impl Parser<'_> {
                 Assoc::Right => level,
             };
             let span = self.span_since(left.span);
-            let right = self.parse_expr(next_min)?;
+            // PHP's stack holds the left operand and the operator.
+            let right = self.with_php_slots(1, |parser| parser.parse_expr(next_min))?;
             left = Expression {
                 kind: ExpressionKind::Binary {
                     operator: op,
@@ -252,10 +254,14 @@ impl Parser<'_> {
         let then = if self.at(TokenKind::Colon) {
             None
         } else {
-            Some(Box::new(self.parse_expr(0)?))
+            // PHP's stack holds the condition and the `?`.
+            Some(Box::new(
+                self.with_php_slots(1, |parser| parser.parse_expr(0))?,
+            ))
         };
         self.expect(TokenKind::Colon, "':'")?;
-        let otherwise = self.parse_expr(prec::TERNARY + 1)?;
+        // ... and then the middle operand and the `:` too.
+        let otherwise = self.with_php_slots(3, |parser| parser.parse_expr(prec::TERNARY + 1))?;
         Ok(Expression {
             kind: ExpressionKind::Ternary {
                 condition: Box::new(condition),
@@ -1108,7 +1114,8 @@ impl Parser<'_> {
         }
 
         let arguments = if self.at(TokenKind::LeftParen) {
-            self.parse_argument_list()?
+            // `new` and the class name are one symbol more than a call's callee.
+            self.with_php_slots(1, Self::parse_argument_list)?
         } else {
             Arguments::List(vec![])
         };
@@ -1268,7 +1275,9 @@ impl Parser<'_> {
             };
             let return_type = self.parse_return_type()?;
             self.expect(TokenKind::LeftBrace, "'{'")?;
-            let body = self.parse_inner_statements()?;
+            // A closure's header is ten symbols on PHP's stack (`static` one more).
+            let body =
+                self.with_php_slots(10 + u32::from(is_static), Self::parse_inner_statements)?;
             self.close_brace()?;
             Ok(Expression {
                 kind: ExpressionKind::Closure(Box::new(Closure {
@@ -1288,7 +1297,9 @@ impl Parser<'_> {
             let parameters = self.parse_parameter_list()?;
             let return_type = self.parse_return_type()?;
             self.expect(TokenKind::FatArrow, "'=>'")?;
-            let body = self.parse_expr(0)?;
+            // An arrow function's header is nine symbols on PHP's stack.
+            let body =
+                self.with_php_slots(9 + u32::from(is_static), |parser| parser.parse_expr(0))?;
             Ok(Expression {
                 kind: ExpressionKind::ArrowFunction(Box::new(ArrowFunction {
                     attributes,
@@ -1369,12 +1380,13 @@ impl Parser<'_> {
             return Ok(Arguments::FirstClassCallable);
         }
 
-        let mut arguments = vec![self.parse_argument()?];
+        // PHP's stack holds the callee and the `(` while an argument is parsed.
+        let mut arguments = vec![self.with_php_slots(1, Self::parse_argument)?];
         while self.eat(TokenKind::Comma)? {
             if self.at(TokenKind::RightParen) {
                 break;
             }
-            arguments.push(self.parse_argument()?);
+            arguments.push(self.with_php_slots(1, Self::parse_argument)?);
         }
         self.expect(TokenKind::RightParen, "')'")?;
 

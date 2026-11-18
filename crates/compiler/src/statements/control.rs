@@ -46,30 +46,46 @@ impl Compiler<'_> {
         Ok(())
     }
 
-    /// Patch both branch exits after their bodies are emitted.
+    /// Test each condition in turn and run the first branch that holds;
+    /// every branch then jumps past the rest of the ladder.
     pub(crate) fn compile_if(
         &mut self,
         condition: &ast::Expression,
         then: &[ast::Statement],
+        elseifs: &[ast::ElseIf],
         otherwise: &Option<Vec<ast::Statement>>,
         line: usize,
     ) -> Result<(), CompileError> {
-        let register = self.compile_expression(condition)?;
-        let jump = self.emit(
-            Instruction::Branch {
-                value: register,
-                target: Target(0),
-                when: false,
-            },
-            line,
-        );
-        self.block(then, DeclarationTiming::AtExecution)?;
-        let end = self.emit(Instruction::Jump(Target(0)), line);
-        self.patch(jump, self.position());
+        let branches =
+            std::iter::once((condition, then, line)).chain(elseifs.iter().map(|elseif| {
+                (
+                    &elseif.condition,
+                    &elseif.body[..],
+                    self.lines.line(elseif.span.start),
+                )
+            }));
+        let mut ends = Vec::new();
+        for (condition, body, line) in branches {
+            let register = self.compile_expression(condition)?;
+            let skip = self.emit(
+                Instruction::Branch {
+                    value: register,
+                    target: Target(0),
+                    when: false,
+                },
+                line,
+            );
+            self.block(body, DeclarationTiming::AtExecution)?;
+            ends.push(self.emit(Instruction::Jump(Target(0)), line));
+            self.patch(skip, self.position());
+        }
         if let Some(body) = otherwise {
             self.block(body, DeclarationTiming::AtExecution)?
         }
-        self.patch(end, self.position());
+        let end = self.position();
+        for jump in ends {
+            self.patch(jump, end);
+        }
 
         Ok(())
     }
