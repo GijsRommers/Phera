@@ -157,7 +157,7 @@ pub(super) fn legacy_unserialize(
     arguments: &[Value],
 ) -> NativeResult {
     let object = receiver(this)?;
-    let input = args::string(arguments, 0).ok_or_else(|| invalid_serialization())?;
+    let input = args::string(arguments, 0).ok_or_else(invalid_serialization)?;
     let mut reader = Reader::new(input.as_bytes());
     if reader.is_empty() {
         return Ok(Value::Null);
