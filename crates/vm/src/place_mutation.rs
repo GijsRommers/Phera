@@ -56,6 +56,17 @@ impl Vm {
             }
             keys
         };
+        self.write_resolved_place(place, register, keys, value, binding)
+    }
+
+    pub(crate) fn write_resolved_place(
+        &mut self,
+        place: &AccessPath,
+        register: phera_bytecode::Reg,
+        keys: crate::inline_stack::InlineStack<PathKey>,
+        mut value: Value,
+        binding: Binding,
+    ) -> Result<(), NativeError> {
         let mut root = self
             .current_slot_mut(register)
             .and_then(Option::take)

@@ -97,6 +97,15 @@ impl Vm {
             Instruction::AssignPath { path, src } => {
                 let place = self.path(path)?;
                 let value = self.get(src).deref().clone();
+                if self.may_cast_typed_reference(&value)
+                    && place.steps()?.next().is_some()
+                    && !place.has_properties()?
+                {
+                    if let Some(value) = self.assign_indexed_stringable(&place, value).await? {
+                        self.set_cast_assignment_result(src, value);
+                    }
+                    return Ok(DispatchResult::Continue);
+                }
                 let static_cast = self.cast_static_property_value(&place, &value).await?;
                 let written = self
                     .mutate_magic_place(

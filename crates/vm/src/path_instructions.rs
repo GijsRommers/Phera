@@ -167,6 +167,7 @@ impl Vm {
         }
         if (self.classes.has_dimensions && self.prepare_dimension(&place)?)
             || place.has_properties()?
+            || (self.may_cast_typed_reference(&value) && place.steps()?.next().is_some())
             || (matches!(value, phera_value::Value::Object(_))
                 && matches!(
                     place.base()?,

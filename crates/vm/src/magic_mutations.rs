@@ -60,6 +60,7 @@ impl WriteValue {
 enum OverloadedMutation {
     Ordinary,
     Handled,
+    Converted(Value),
     Detached(Value, Box<InlineStack<PathKey>>),
 }
 
@@ -84,6 +85,7 @@ impl Vm {
                 }
                 Ok(None)
             }
+            OverloadedMutation::Converted(value) => Ok(Some(value)),
             OverloadedMutation::Detached(root, keys) => {
                 let (value, mutation) = match operation {
                     PropertyMutation::Write(value, binding) => {
@@ -268,6 +270,18 @@ impl Vm {
                     _ => Value::Null,
                 };
                 resolved.push(key);
+            }
+        }
+        if let Value::Reference(reference) = cursor
+            && matches!(resolved.iter().last(), Some(PathKey::Index(Some(_))))
+            && let PropertyMutation::Write(value, Binding::ByValue) = operation
+        {
+            let value = value.read(self).clone();
+            if self.may_cast_typed_reference(&value)
+                && let Some(converted) =
+                    self.assign_stringable_reference(&reference, &value).await?
+            {
+                return Ok(OverloadedMutation::Converted(converted));
             }
         }
         Ok(match detached {
