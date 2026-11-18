@@ -12,7 +12,7 @@ use std::{
     rc::{Rc, Weak},
 };
 
-use phera_extension_api::{NativeError, Unwind};
+use phera_extension_api::{LocalFuture, NativeError, Unwind};
 use phera_value::Value;
 
 use crate::{Vm, exception_unwind::append_previous, exceptions::Thrown, finally::Continuation};
@@ -64,35 +64,44 @@ impl Vm {
     }
 
     /// The queue keeps destruction iterative, including a chain of abandoned delegates.
-    pub(crate) async fn drain_generator_releases(&mut self) -> Result<(), NativeError> {
-        let Some(releases) = self.generator_releases.clone() else {
-            return Ok(());
-        };
-        self.draining_generators = true;
-        let result = self.run_generator_releases(&releases).await;
-        self.draining_generators = false;
-        result
+    #[cold]
+    pub(crate) fn drain_generator_releases(&mut self) -> LocalFuture<'_, Result<(), NativeError>> {
+        Box::pin(async move {
+            let Some(releases) = self.generator_releases.clone() else {
+                return Ok(());
+            };
+            self.draining_generators = true;
+            let result = self.run_generator_releases(&releases).await;
+            self.draining_generators = false;
+            result
+        })
     }
 
     /// Preserve the active exception unless releasing a frame raises a replacement.
-    pub(crate) async fn unwind_generator_releases(&mut self, error: NativeError) -> NativeError {
-        let previous = self.materialize_error(error);
-        match self.drain_generator_releases().await {
-            Ok(()) => previous,
-            Err(error) => {
-                let replacement = self.materialize_error(error);
-                if let (NativeError::Unwind(current), NativeError::Unwind(old)) =
-                    (&replacement, previous)
-                    && let (Some(current), Ok(old)) = (
-                        current.0.downcast_ref::<Thrown>(),
-                        old.0.downcast::<Thrown>(),
-                    )
-                {
-                    append_previous(&current.object, old.object);
+    #[cold]
+    pub(crate) fn unwind_generator_releases(
+        &mut self,
+        error: NativeError,
+    ) -> LocalFuture<'_, NativeError> {
+        Box::pin(async move {
+            let previous = self.materialize_error(error);
+            match self.drain_generator_releases().await {
+                Ok(()) => previous,
+                Err(error) => {
+                    let replacement = self.materialize_error(error);
+                    if let (NativeError::Unwind(current), NativeError::Unwind(old)) =
+                        (&replacement, previous)
+                        && let (Some(current), Ok(old)) = (
+                            current.0.downcast_ref::<Thrown>(),
+                            old.0.downcast::<Thrown>(),
+                        )
+                    {
+                        append_previous(&current.object, old.object);
+                    }
+                    replacement
                 }
-                replacement
             }
-        }
+        })
     }
 
     async fn run_generator_releases(&mut self, queue: &Releases) -> Result<(), NativeError> {
