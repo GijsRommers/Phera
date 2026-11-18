@@ -88,6 +88,7 @@ done
 
 # The selection: what was selected before, plus what passes now.
 selection=$root/tests/phpt/selected.txt
+{ grep -v -e '^#' -e '^$' "$selection" || true; } | LC_ALL=C sort >"$work/selected.before"
 {
   grep '^#' "$selection" || true
   echo
@@ -95,7 +96,33 @@ selection=$root/tests/phpt/selected.txt
 } >"$work/selected.txt"
 mv "$work/selected.txt" "$selection"
 
-# The scoreboard.
+# CI runs the debug build, which is many times slower than the release build
+# used above. A newly taken test that fails or times out there (heavy hashing,
+# long loops) is taken out again; a test that was selected before stays, so
+# that its failure is seen.
+cargo test -q -p phera-cli --test phpt >"$work/debug.log" 2>&1 || true
+grep '^FAIL ' "$work/debug.log" | awk '{print $2}' | sed 's#^upstream/##' | LC_ALL=C sort >"$work/debug.fail"
+LC_ALL=C comm -12 "$work/debug.fail" "$work/both.pass" | LC_ALL=C comm -23 - "$work/selected.before" >"$work/too-slow"
+while read -r test; do
+  echo "taken out again (fails on the debug build): $test"
+  rm -f "$upstream/$test"
+done <"$work/too-slow"
+grep -v -x -F -f "$work/too-slow" "$selection" >"$work/selected.txt" || true
+mv "$work/selected.txt" "$selection"
+LC_ALL=C comm -23 "$work/both.pass" "$work/too-slow" >"$work/both.kept"
+mv "$work/both.kept" "$work/both.pass"
+
+# The scoreboard. Results are kept per directory in a small table, so that a
+# sweep of some directories leaves the lines of the others as they were.
+results=$root/tests/phpt/sweep-results.tsv
+touch "$results"
+for directory in $directories; do
+  tests=$(grep -c "^$directory/" "$tree/phpt/selected.txt" || true)
+  usable=$(grep -c "^$directory/" "$work/php.pass" || true)
+  passing=$(grep -c "^$directory/" "$work/both.pass" || true)
+  { grep -v "^$directory	" "$results" || true; printf '%s\t%s\t%s\t%s\n' "$directory" "$tests" "$usable" "$passing"; } >"$work/results.tsv"
+  LC_ALL=C sort "$work/results.tsv" >"$results"
+done
 {
   echo "# Tests copied from php-src"
   echo
@@ -104,19 +131,13 @@ mv "$work/selected.txt" "$selection"
   echo "\`make phpt\` runs. Do not edit them; \`tests/phpt/sweep.sh\` copies them"
   echo "again and adds every test that newly passes."
   echo
-  echo "Last sweep: real PHP and Phera on every test of each directory."
+  echo "The last sweep of each directory: real PHP and Phera on every test in it."
   echo "\"Usable\" is what real PHP passes under our runner; the rest needs a"
   echo "section the runner does not implement or an extension that is not loaded."
   echo
   echo "| Directory | Tests | Usable | Phera passes | Share of usable |"
   echo "| --- | ---: | ---: | ---: | ---: |"
-  for directory in $directories; do
-    tests=$(grep -c "^$directory/" "$tree/phpt/selected.txt" || true)
-    usable=$(grep -c "^$directory/" "$work/php.pass" || true)
-    passing=$(grep -c "^$directory/" "$work/both.pass" || true)
-    share=$(awk -v p="$passing" -v u="$usable" 'BEGIN { printf "%d%%", u ? 100 * p / u : 0 }')
-    echo "| \`$directory\` | $tests | $usable | $passing | $share |"
-  done
+  awk -F'\t' '{ printf "| `%s` | %d | %d | %d | %d%% |\n", $1, $2, $3, $4, ($3 ? 100 * $4 / $3 : 0) }' "$results"
 } >"$upstream/README.md"
 
 echo "selected $(grep -c -v -e '^#' -e '^$' "$selection") tests; logs are in $work"

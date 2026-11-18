@@ -55,11 +55,13 @@ const ARRAY_POP: FunctionEntry = FunctionEntry::sync(
 );
 
 fn array_pop(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    change_array_argument(arguments, |array| {
+    let last = change_array_argument(arguments, |array| {
         let last = array.pop().unwrap_or(Value::Null);
         array.reset();
-        Ok(last.deref().clone())
-    })
+        Ok(last)
+    })?;
+    // A removed self-reference points to the array after the removal.
+    Ok(last.try_deref()?.clone())
 }
 
 /// `array_shift(array &$array): mixed`, the first value removed, or null;
@@ -76,9 +78,8 @@ const ARRAY_SHIFT: FunctionEntry = FunctionEntry::sync(
 );
 
 fn array_shift(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    change_array_argument(arguments, |array| {
-        Ok(array.shift().unwrap_or(Value::Null).deref().clone())
-    })
+    let first = change_array_argument(arguments, |array| Ok(array.shift().unwrap_or(Value::Null)))?;
+    Ok(first.try_deref()?.clone())
 }
 
 /// `array_unshift(array &$array, mixed ...$values): int`, the values put in

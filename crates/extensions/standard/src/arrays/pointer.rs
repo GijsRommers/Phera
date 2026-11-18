@@ -22,11 +22,9 @@ use crate::arguments::required_array;
 
 pub(super) const FUNCTIONS: &[FunctionEntry] = &[CURRENT, POS, KEY, NEXT, PREV, RESET, END];
 
-/// The value at the pointer, or `false`.
-fn current_value(array: &PhpArray) -> Value {
-    array
-        .current()
-        .map_or(Value::Bool(false), |value| value.deref().clone())
+/// Copy the entry itself so a self-reference can be resolved after mutation.
+fn pointed_entry(array: &PhpArray) -> Value {
+    array.current().cloned().unwrap_or(Value::Bool(false))
 }
 
 /// `current(array|object $array): mixed`, the value at the pointer.
@@ -38,7 +36,8 @@ const POS: FunctionEntry =
     FunctionEntry::sync("pos", &[Param::new("array", ParamType::Array)], current);
 
 fn current(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(current_value(required_array(arguments, 0)))
+    let entry = pointed_entry(required_array(arguments, 0));
+    Ok(entry.try_deref()?.clone())
 }
 
 /// `key(array|object $array): int|string|null`, the key at the pointer.
@@ -97,8 +96,9 @@ fn end(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
 
 /// Moves the pointer of the caller's array and returns the value there.
 fn move_pointer(arguments: &[Value], movement: fn(&mut PhpArray)) -> NativeResult {
-    change_array_argument(arguments, |array| {
+    let entry = change_array_argument(arguments, |array| {
         movement(array);
-        Ok(current_value(array))
-    })
+        Ok(pointed_entry(array))
+    })?;
+    Ok(entry.try_deref()?.clone())
 }
