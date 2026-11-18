@@ -5,7 +5,7 @@
 
 use phera_extension_api::testing::{oracle, serve::Server};
 
-use super::super::{Served, send_request};
+use super::super::{Served, raw_response};
 
 /// Prints what the headers of a request became.
 const SHOW: &str = r#"<?php
@@ -106,8 +106,14 @@ fn repeated_headers_and_form_bodies_match_php() {
 
     let mut differences = Vec::new();
     for (method, headers, body) in REQUESTS {
-        let expected = send_request(&theirs.address, method, "/show.php", headers, body);
-        let actual = ours.request(method, "/show.php", headers, body);
+        let expected = answer_from_php(&theirs.address, method, headers, body);
+        let actual = body_of(&raw_response(
+            &ours.address,
+            method,
+            "/show.php",
+            headers,
+            body,
+        ));
         if expected != actual {
             differences.push(format!(
                 "{method} {headers:?} {body:?}\n  PHP:   {expected:?}\n  Phera: {actual:?}"
@@ -115,6 +121,26 @@ fn repeated_headers_and_form_bodies_match_php() {
         }
     }
     assert!(differences.is_empty(), "{}", differences.join("\n"));
+}
+
+/// PHP's built-in server now and then closes a connection without
+/// answering, mostly right after it started. The request is sent again; our
+/// own server gets no such second chance.
+fn answer_from_php(address: &str, method: &str, headers: &str, body: &str) -> String {
+    for _ in 0..5 {
+        let response = raw_response(address, method, "/show.php", headers, body);
+        if !response.is_empty() {
+            return body_of(&response);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    panic!("php -S gave no answer to {method} {headers:?}");
+}
+
+/// The part of a response after its headers.
+fn body_of(response: &str) -> String {
+    let (_, body) = response.split_once("\r\n\r\n").unwrap_or_default();
+    body.to_string()
 }
 
 /// PHP's built-in server refuses a method it does not know, so there is
