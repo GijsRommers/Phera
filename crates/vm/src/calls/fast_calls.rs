@@ -47,15 +47,19 @@ impl Machine<'_> {
         }
         let from = caller.frame.base() + args.index();
         let arguments = self.registers.window(from, count);
-        let acceptable = arguments.iter().enumerate().all(|(index, argument)| {
-            argument.as_ref().is_some_and(|value| {
-                !value.is_reference()
-                    && (!facts.is_typed(index)
-                        || facts.parameter_masks[index].intersects(crate::types::own_type(value)))
-            })
-        });
-        if !acceptable {
+        if arguments.len() != count {
             return Step::Slow;
+        }
+        for (index, argument) in arguments.iter().enumerate() {
+            let Some(value) = argument else {
+                return Step::Slow;
+            };
+            if value.is_reference()
+                || facts.is_typed(index)
+                    && !facts.parameter_masks[index].intersects(crate::types::own_type(value))
+            {
+                return Step::Slow;
+            }
         }
         let base = self.registers.len();
         self.registers.grow_to(base + facts.registers as usize);

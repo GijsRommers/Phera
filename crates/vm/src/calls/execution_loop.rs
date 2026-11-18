@@ -256,7 +256,11 @@ impl Machine<'_> {
             }
             Instruction::Return { src } => self.leave_plain(Some(src)),
             Instruction::ReturnNull => self.leave_plain(None),
-            _ => self.step_native_object(instruction, position),
+            Instruction::IterNextKeyed { .. }
+            | Instruction::FetchIndex { .. }
+            | Instruction::AppendLocal { .. }
+            | Instruction::AssignPath { .. } => self.step_native_object(instruction, position),
+            _ => Step::Slow,
         }
     }
 
