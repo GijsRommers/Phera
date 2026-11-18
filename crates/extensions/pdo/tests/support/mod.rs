@@ -1,44 +1,31 @@
-//! Test database locations: `new PDO('pgsql:host=127.0.0.1;port=54329;dbname=phera_test')`.
+//! Where the test databases are: `new PDO('pgsql:host=127.0.0.1;port=54329;dbname=phera_test')`.
+//! Start them as described in ../README.md; never port 5432.
 
-use std::process::Command;
-
-pub fn php() -> std::path::PathBuf {
-    phera_extension_api::testing::oracle::find_php().expect("PHP 8.5 oracle required")
-}
-
-pub fn scratch() -> std::path::PathBuf {
-    let directory = std::env::temp_dir().join("phera-pdo-tests");
-    std::fs::create_dir_all(&directory).expect("create PDO test artifacts directory");
-    directory
-}
+use phera_extension_api::testing::oracle::run_php;
 
 pub fn dsn(driver: &str) -> String {
     let port = match driver {
         "pgsql" => 54329,
         "mysql" => 33069,
-        _ => panic!("Unknown driver"),
+        _ => panic!("unknown driver {driver}"),
     };
     format!("{driver}:host=127.0.0.1;port={port};dbname=phera_test")
 }
 
+/// Whether PHP and both databases are there; a test without them skips.
 pub fn databases_available() -> bool {
-    if phera_extension_api::testing::oracle::find_php().is_none() {
-        eprintln!("SKIP: PDO test databases or PHP 8.5 are unavailable");
-        return false;
-    }
-    let mut available = true;
-    for driver in ["pgsql", "mysql"] {
-        let script = format!(
-            "try {{new PDO('{}','phera','phera');}} catch (Throwable $e) {{exit(1);}}",
-            dsn(driver)
-        );
-        let result = Command::new(php()).args(["-r", &script]).output();
-        if !result.is_ok_and(|output| output.status.success()) {
-            available = false;
-        }
-    }
+    let probe = ["pgsql", "mysql"]
+        .map(|driver| {
+            format!(
+                "try {{ new PDO('{}','phera','phera'); echo 'ok'; }} catch (Throwable $e) {{}}",
+                dsn(driver)
+            )
+        })
+        .join("\n");
+    let available = run_php("pdo-databases", &format!("<?php\n{probe}"))
+        .is_some_and(|lines| lines.concat() == "okok");
     if !available {
-        eprintln!("SKIP: PDO test databases or PHP 8.5 are unavailable");
+        eprintln!("SKIP: PHP 8.5 or the PDO test databases are unavailable");
     }
     available
 }

@@ -25,6 +25,9 @@ fn native_inventory() -> String {
         }
         foreach (array_merge(get_declared_classes(), get_declared_interfaces(),
                  get_declared_traits()) as $name) {
+            // phpredis is a PECL extension, not part of php-src's stubs; the
+            // oracle loads it for the Redis comparisons.
+            if ((new ReflectionClass($name))->getExtensionName() === 'redis') { continue; }
             echo "C\t$name\n";
             foreach ((new ReflectionClass($name))->getMethods() as $method) {
                 echo "M\t$name::", $method->name, "\t",

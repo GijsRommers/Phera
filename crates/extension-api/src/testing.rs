@@ -1,9 +1,13 @@
 //! Test support: a stand-in [`Context`] for calling native functions without
-//! a VM, and [`oracle`] for comparing them against real PHP.
+//! a VM, [`oracle`] for comparing them against real PHP, [`scripts`] for
+//! comparing whole PHP files run by PHP and by the `phera` executable, and
+//! [`serve`] for sending requests to `phera serve`.
 
 mod classes;
 mod exceptions;
 pub mod oracle;
+pub mod scripts;
+pub mod serve;
 
 pub use classes::{call_method, instantiate};
 pub use exceptions::materialize_exception;

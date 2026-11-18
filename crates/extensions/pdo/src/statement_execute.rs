@@ -66,15 +66,13 @@ pub fn execute_named<'a>(
             Err(error) => return fail(&state, context, error, method),
         };
         let mut driver = connection.driver.lock().await;
-        let prepared = if let Prepared::PostgresDeferred(number) = prepared {
-            match driver.prepare(&sql).await {
-                Ok(Prepared::Postgres(statement, _)) => {
-                    let prepared = Prepared::Postgres(statement, number);
+        let prepared = if let Prepared::PostgresDeferred { number } = prepared {
+            match driver.prepare(&sql, number).await {
+                Ok(prepared) => {
                     state.borrow_mut().prepared = prepared.clone();
                     prepared
                 }
                 Err(error) => return fail(&state, context, error, method),
-                Ok(_) => unreachable!("PostgreSQL session prepares a PostgreSQL statement"),
             }
         } else {
             prepared

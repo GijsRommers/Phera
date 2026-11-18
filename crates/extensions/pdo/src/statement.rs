@@ -9,6 +9,7 @@ use phera_extension_api::{
 };
 
 use crate::connection::{Session, session};
+use crate::constants::PARAM_STR;
 use crate::drivers::{Prepared, Rows};
 use crate::errors::{DbError, ErrorState, unsupported};
 use crate::fetch::FetchMode;
@@ -115,9 +116,9 @@ async fn create(
     } else if connection.name == crate::dsn::DriverName::Postgres {
         let number = connection.statement_sequence.get() + 1;
         connection.statement_sequence.set(number);
-        Prepared::PostgresDeferred(number)
+        Prepared::PostgresDeferred { number }
     } else {
-        let result = connection.driver.lock().await.prepare(&sql).await;
+        let result = connection.driver.lock().await.prepare(&sql, 0).await;
         match result {
             Ok(prepared) => prepared,
             Err(error) => return connection.fail(context, error, method),
@@ -187,7 +188,7 @@ fn bind(
         let statement = state.borrow();
         if matches!(
             statement.prepared,
-            Prepared::PostgresDeferred(_) | Prepared::Postgres(_, _)
+            Prepared::PostgresDeferred { .. } | Prepared::Postgres { .. }
         ) {
             let valid = crate::native_parameters::valid_key(&statement.sql, &key)
                 || (statement.sql.parameters.is_empty() && key.parse::<usize>().is_ok());
@@ -207,7 +208,7 @@ fn bind(
     if let Some(error) = invalid {
         return fail(&state, context, error, method);
     }
-    let kind = ParameterType::parse(args::int(arguments, 2).unwrap_or(2))?;
+    let kind = ParameterType::parse(args::int(arguments, 2).unwrap_or(PARAM_STR))?;
     let binding = Binding {
         value: args::value(arguments, 1).clone(),
         kind,

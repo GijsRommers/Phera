@@ -6,6 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+phera-ext-redis.workspace = true
 phera-dotenv.workspace = true
 phera-bytecode.workspace = true
 phera-compiler.workspace = true

@@ -19,8 +19,8 @@ pub use phera_value::{ArrayKey, Diagnostics, Object, PhpArray, PhpString, Value}
 
 pub use arguments::{args, prepare_arguments, prepare_call};
 pub use class::{
-    AsyncMethod, ClassEntry, ClassKind, MethodEntry, NativeMethod, PropertyEntry, SyncMethod,
-    Visibility,
+    AsyncMethod, ClassEntry, ClassKind, MethodEntry, MethodPreparation, NativeMethod,
+    PrepareMethod, PropertyEntry, SyncMethod, Visibility,
 };
 pub use context::{Context, LocalFuture};
 pub use error::{NativeError, NativeResult, Unwind};

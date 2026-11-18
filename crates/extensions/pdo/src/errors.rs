@@ -18,6 +18,16 @@ pub struct DbError {
 }
 
 impl DbError {
+    /// `SQLSTATE[HY000]: General error: ...`, for failures that are not the
+    /// server's: a bad setting, a feature that is missing.
+    pub fn general(detail: impl Into<String>) -> Self {
+        Self {
+            state: "HY000".into(),
+            code: None,
+            detail: detail.into(),
+        }
+    }
+
     pub fn parameter(detail: &str) -> Self {
         Self {
             state: "HY093".into(),
