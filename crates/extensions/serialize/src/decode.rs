@@ -84,10 +84,7 @@ pub async fn unserialize(context: &mut dyn Context, arguments: &[Value]) -> Nati
         delayed: Vec::new(),
         options,
         last_class: None,
-        tracks_references: input
-            .as_bytes()
-            .windows(2)
-            .any(|pair| pair[1] == b':' && matches!(pair[0], b'R' | b'r' | b'C')),
+        tracks_references: has_wire_tags(input.as_bytes(), &[b"R:", b"r:", b"C:"]),
     };
     let root = decoder.graph.new_place();
     let build = decoder.build(context, root).await;
@@ -110,6 +107,12 @@ pub async fn unserialize(context: &mut dyn Context, arguments: &[Value]) -> Nati
     let value = decoder.graph.get(root);
     let result = value.try_deref()?.clone();
     Ok(result)
+}
+
+/// A tag inside a string may conservatively select the general graph builder.
+fn has_wire_tags(bytes: &[u8], tags: &[&[u8; 2]]) -> bool {
+    tags.iter()
+        .any(|tag| memchr::memmem::find(bytes, *tag).is_some())
 }
 
 impl Decoder<'_> {
