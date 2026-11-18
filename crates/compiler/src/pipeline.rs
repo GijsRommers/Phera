@@ -107,6 +107,9 @@ fn compile_program(
         file: file.into(),
     };
     validate_global_writes(&unit)?;
+    // The tree is not needed for lowering; a generated file's tree can be
+    // hundreds of megabytes, so it goes before the bytecode tables are built.
+    drop(ast);
     Ok(lower::lower(unit))
 }
 
