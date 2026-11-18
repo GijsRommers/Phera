@@ -9,6 +9,8 @@ use phera_value::{ArrayKey, ClassHandle, Object, Value};
 
 /// A linked class is immutable; its parent keeps inherited metadata alive.
 pub(crate) struct Class {
+    /// The class's number in the request's class table.
+    pub(crate) index: super::ClassIndex,
     /// Only user class scopes may be assigned freely by Closure::bind.
     pub(crate) origin: ClassOrigin,
     /// The owning Rc can be recovered from an object's borrowed ClassHandle without a name lookup.
@@ -40,8 +42,6 @@ pub(crate) struct Class {
     pub(crate) defaults: Vec<PropertyDefault>,
     /// Literal defaults are materialized once at linking; objects clone this COW table.
     pub(crate) property_template: Option<phera_value::PhpArray>,
-    /// An absent constructor still has a shared signature for argument diagnostics.
-    pub(crate) empty_constructor: MethodSignature,
     pub(crate) static_properties: Vec<PropertyDefault>,
     pub(crate) constants: HashMap<String, Rc<LinkedConstant>>,
 }
@@ -189,7 +189,7 @@ pub(crate) fn literal_initializer(
         },
         Instruction::LoadConst { dst, constant } => LiteralLoad {
             destination: dst,
-            value: crate::calls::frame::value(
+            value: crate::unit_caches::value(
                 code.unit(*reference).constants.get(constant.index())?,
             ),
         },
@@ -231,14 +231,6 @@ pub(crate) fn ancestor_names(
         names.extend(class.ancestors.iter().cloned());
     }
     names
-}
-
-/// Missing constructors have no parameters; their diagnostic name is linked once.
-pub(crate) fn empty_constructor(name: &str) -> MethodSignature {
-    MethodSignature {
-        name: format!("{name}::__construct").into(),
-        parameters: Rc::from([]),
-    }
 }
 
 impl Class {

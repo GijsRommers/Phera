@@ -265,7 +265,7 @@ impl Vm {
             };
             let value = match property.default {
                 Some(phera_bytecode::Initializer::Literal(index)) => {
-                    crate::calls::frame::value(&unit.constants[index.index()])
+                    crate::unit_caches::value(&unit.constants[index.index()])
                 }
                 _ => phera_value::Value::Null,
             };
@@ -335,14 +335,19 @@ impl Vm {
         let is_throwable = parent.as_ref().is_some_and(|parent| parent.is_throwable)
             || interfaces.iter().any(|interface| interface.is_throwable);
         self.classes.order.push(name.clone());
-        self.classes.entries.insert(
+        let index = self.classes.next_index();
+        for method in &declaration.methods {
+            let function = self.code.index_in(&unit, Some(method.function.index()));
+            self.code.set_declaring_class(function, index);
+        }
+        self.classes.insert(
             name.to_ascii_lowercase(),
             Rc::new_cyclic(|identity| Class {
+                index,
                 origin: super::class::ClassOrigin::User,
                 identity: identity.clone(),
                 declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
                 ancestors: super::class::ancestor_names(&parent, &interfaces),
-                empty_constructor: super::class::empty_constructor(name),
                 name_value: phera_value::Value::from(name.as_str()),
                 name: name.clone(),
                 parent,

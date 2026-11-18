@@ -1,7 +1,10 @@
 //! Request-local call stack state kept separate from register execution.
 
+use phera_extension_api::NativeError;
+
 use crate::calls::frame::Frame;
 use crate::calls::frame_extras::FrameExtras;
+use crate::calls::prepared_call::{CallDetails, CallFlags, PreparedCall};
 
 /// The running PHP functions of a request, innermost last, and the calls
 /// whose arguments are being evaluated.
@@ -11,11 +14,12 @@ pub(crate) struct CallStack {
     extras: Vec<FrameExtras>,
     /// What `extras` returns for a frame that stores nothing there.
     empty: FrameExtras,
-    /// Argument evaluation and native callbacks share this request-wide preparation stack.
-    pub(crate) preparing: Vec<crate::calls::call_state::PendingCall>,
+    /// The calls whose arguments are being evaluated, innermost last.
+    preparing: Vec<PreparedCall>,
+    /// The details of the prepared calls that have some, in the same order.
+    details: Vec<CallDetails>,
     /// Native callbacks have an independent bound because they await Rust futures.
     callback_depth: usize,
-    pub(crate) argument_names: Vec<Vec<(usize, phera_value::PhpString)>>,
     /// Sync natives return their temporary API buffers to this request-local pool.
     native_arguments: Vec<Vec<phera_value::Value>>,
 }
@@ -28,9 +32,9 @@ impl CallStack {
             extras: vec![],
             empty: FrameExtras::new(),
             callback_depth: 0,
-            argument_names: Vec::new(),
             native_arguments: Vec::new(),
             preparing: Vec::new(),
+            details: Vec::new(),
         }
     }
     /// The last activation owns the currently executing instruction.
@@ -59,7 +63,7 @@ impl CallStack {
     pub(crate) fn has_calls_from(&self, base: usize) -> bool {
         self.preparing
             .last()
-            .is_some_and(|call| call.window.base >= base)
+            .is_some_and(|call| call.start() >= base)
     }
 
     /// The frame at `depth` (0 is the script's top-level code).
@@ -92,7 +96,7 @@ impl CallStack {
 
     /// Exit discards preparations and all active activations.
     pub(crate) fn clear(&mut self) {
-        self.preparing.clear();
+        self.truncate_calls(0);
         while self.pop().is_some() {}
     }
 
@@ -100,7 +104,7 @@ impl CallStack {
     /// frame left while its arguments were being evaluated.
     pub(crate) fn abandon_calls_from(&mut self, base: usize) {
         while self.has_calls_from(base) {
-            self.preparing.pop();
+            let _ = self.pop_call();
         }
     }
 
@@ -135,31 +139,111 @@ impl CallStack {
         self.extras_mut(depth)
     }
 
-    /// Every Send must have a resolved target and reserved window.
-    pub(crate) fn pending(
-        &self,
-    ) -> Result<&crate::calls::call_state::PendingCall, phera_extension_api::NativeError> {
+    /// How many calls are being prepared.
+    pub(crate) fn call_depth(&self) -> usize {
+        self.preparing.len()
+    }
+
+    /// Start preparing a call, with its details if it has any.
+    #[inline]
+    pub(crate) fn push_call(&mut self, mut call: PreparedCall, details: Option<CallDetails>) {
+        if let Some(details) = details {
+            call.flags.insert(CallFlags::DETAILS);
+            self.details.push(details);
+        }
+        self.preparing.push(call);
+    }
+
+    /// The innermost prepared call, if there is one.
+    #[inline]
+    pub(crate) fn last_call(&self) -> Option<&PreparedCall> {
+        self.preparing.last()
+    }
+
+    /// The innermost prepared call, for writing.
+    #[inline]
+    pub(crate) fn last_call_mut(&mut self) -> Option<&mut PreparedCall> {
+        self.preparing.last_mut()
+    }
+
+    /// The innermost prepared call; every `Send` and `Call` has one.
+    pub(crate) fn top_call(&self) -> Result<&PreparedCall, NativeError> {
         self.preparing
             .last()
             .ok_or_else(|| internal_error!("call not initialized"))
     }
 
-    /// Routing changes only the most recently reserved window.
-    pub(crate) fn pending_mut(
-        &mut self,
-    ) -> Result<&mut crate::calls::call_state::PendingCall, phera_extension_api::NativeError> {
+    /// The innermost prepared call, for writing.
+    pub(crate) fn top_call_mut(&mut self) -> Result<&mut PreparedCall, NativeError> {
         self.preparing
             .last_mut()
             .ok_or_else(|| internal_error!("call not initialized"))
     }
 
-    /// Call consumes exactly one preparation; outer argument lists remain reserved.
-    pub(crate) fn take_pending(
-        &mut self,
-    ) -> Result<crate::calls::call_state::PendingCall, phera_extension_api::NativeError> {
-        self.preparing
+    /// The details of the innermost prepared call, if it has any.
+    #[inline]
+    pub(crate) fn top_details(&self) -> Option<&CallDetails> {
+        let call = self.preparing.last()?;
+        call.flags
+            .contains(CallFlags::DETAILS)
+            .then(|| self.details.last())
+            .flatten()
+    }
+
+    /// The details of the innermost prepared call, made empty if it has none.
+    pub(crate) fn top_details_mut(&mut self) -> Result<&mut CallDetails, NativeError> {
+        let call = self
+            .preparing
+            .last_mut()
+            .ok_or_else(|| internal_error!("call not initialized"))?;
+        if !call.flags.contains(CallFlags::DETAILS) {
+            call.flags.insert(CallFlags::DETAILS);
+            self.details.push(CallDetails::default());
+        }
+        self.details
+            .last_mut()
+            .ok_or_else(|| internal_error!("call details"))
+    }
+
+    /// Finish preparing the innermost call: `Call` runs it, or it is abandoned.
+    pub(crate) fn pop_call(&mut self) -> Result<(PreparedCall, Option<CallDetails>), NativeError> {
+        let call = self
+            .preparing
             .pop()
-            .ok_or_else(|| internal_error!("call not initialized"))
+            .ok_or_else(|| internal_error!("call not initialized"))?;
+        let details = match call.flags.contains(CallFlags::DETAILS) {
+            true => self.details.pop(),
+            false => None,
+        };
+        Ok((call, details))
+    }
+
+    /// A register was inserted at `insertion`: every prepared call whose
+    /// window starts there or above moves up by one.
+    pub(crate) fn shift_calls_from(&mut self, insertion: usize) {
+        for call in &mut self.preparing {
+            if call.base() >= insertion {
+                call.shift_up();
+            }
+        }
+    }
+
+    /// Finish preparing the innermost call when the caller does not need
+    /// its details (the interpreter loop enters only calls without any).
+    #[inline]
+    pub(crate) fn pop_plain(&mut self) -> Option<PreparedCall> {
+        let call = self.preparing.pop()?;
+        if call.flags.contains(CallFlags::DETAILS) {
+            self.details.pop();
+        }
+        Some(call)
+    }
+
+    /// Abandon the prepared calls above the first `depth`.
+    pub(crate) fn truncate_calls(&mut self, depth: usize) {
+        while self.preparing.len() > depth {
+            let _ = self.pop_call();
+        }
     }
 
     /// Only the extension boundary needs a Vec; user calls never borrow this pool.
@@ -174,11 +258,9 @@ impl CallStack {
     }
 
     /// Native callbacks use Rust futures, so bound this nesting independently of PHP calls.
-    pub(crate) fn enter_callback(&mut self) -> Result<(), phera_extension_api::NativeError> {
+    pub(crate) fn enter_callback(&mut self) -> Result<(), NativeError> {
         if self.callback_depth >= 32 {
-            return Err(phera_extension_api::NativeError::error(
-                "Maximum native callback depth exceeded",
-            ));
+            return Err(NativeError::error("Maximum native callback depth exceeded"));
         }
         self.callback_depth += 1;
         Ok(())
@@ -192,11 +274,14 @@ impl CallStack {
 
 #[cfg(test)]
 impl CallStack {
-    /// Stress tests ensure inactive depths retain no closure owners.
+    /// Stress tests ensure that the side-table entries of depths no frame
+    /// uses hold nothing (closures and `$this` live in the registers, which
+    /// returning empties).
     pub(crate) fn retained_exception_values(&self) -> usize {
         self.extras
             .iter()
-            .map(|extra| usize::from(extra.closure.is_some()))
+            .skip(self.frames.len())
+            .map(|extra| usize::from(extra.called.is_some() || !extra.holds_only_called_class()))
             .sum()
     }
 

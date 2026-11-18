@@ -42,10 +42,7 @@ impl Vm {
         lower: &str,
         invocation: Invocation,
     ) -> Result<Option<ResolvedMethod>, NativeError> {
-        let caller = self
-            .current()
-            .and_then(|frame| frame.method())
-            .map(|context| context.scope.clone());
+        let caller = self.current().and_then(|frame| frame.scope().cloned());
         let private = caller
             .as_ref()
             .filter(|scope| invocation == Invocation::Method && class.is_a(&scope.name))

@@ -3,6 +3,8 @@ resolver = "3"
 
 members = [
     "crates/cli",
+    "crates/dotenv",
+    "crates/analyzer",
     "crates/lexer",
     "crates/parser",
     "crates/ast",
@@ -36,6 +38,10 @@ rustls-rustcrypto = "=0.1.0-pre.0"
 redis = { version = "=1.0.5", default-features = false, features = ["tokio-comp", "tokio-rustls-comp", "tls-rustls-webpki-roots"] }
 phera-ext-redis = { path = "crates/extensions/redis" }
 phera-io-pool = { path = "crates/io-pool" }
+phera-dotenv = { path = "crates/dotenv" }
+indexmap = "2"
+regex = "1"
+phera-analyzer = { path = "crates/analyzer" }
 phera-lexer = { path = "crates/lexer" }
 phera-parser = { path = "crates/parser" }
 phera-ast = { path = "crates/ast" }

@@ -1,6 +1,10 @@
 //! `phera serve` from the outside: start the real binary, talk HTTP to it
 //! over a socket, and check what comes back.
 
+mod scenarios {
+    mod environment;
+}
+
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::path::PathBuf;
@@ -20,6 +24,16 @@ impl Served {
     }
 
     fn start_with_workers(name: &str, workers: usize, files: &[(&str, &str)]) -> Served {
+        Self::start_in(name, workers, files, ".", &[])
+    }
+
+    fn start_in(
+        name: &str,
+        workers: usize,
+        files: &[(&str, &str)],
+        directory: &str,
+        flags: &[&str],
+    ) -> Served {
         let root = std::env::temp_dir().join(format!("phera-serve-{name}-{}", std::process::id()));
         for (path, contents) in files {
             let file = root.join(path);
@@ -30,7 +44,9 @@ impl Served {
         let mut process = Command::new(env!("CARGO_BIN_EXE_phera"))
             .args(["serve", "--listen", "127.0.0.1:0", "--workers"])
             .arg(workers.to_string())
-            .arg(&root)
+            .current_dir(&root)
+            .args(flags)
+            .arg(root.join(directory))
             .stdout(Stdio::piped())
             .spawn()
             .expect("start phera serve");

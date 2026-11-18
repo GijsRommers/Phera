@@ -128,22 +128,18 @@ impl Vm {
         mut value: Value,
         stop: usize,
     ) -> Result<Option<Value>, NativeError> {
-        if let Some(context) = self.current().and_then(|frame| frame.method())
-            && context.invocation == crate::classes::Invocation::Constructor
+        if let Some(frame) = self.current()
+            && frame.frame.kind() == crate::calls::prepared_call::CallKind::Constructor
         {
-            value = context
-                .receiver
-                .clone()
-                .map(Value::Object)
-                .unwrap_or_default();
+            value = frame.this().cloned().map(Value::Object).unwrap_or_default();
         }
         self.finish_include_scope()?;
         let frame = self
             .call_stack
             .pop()
             .ok_or_else(|| internal_error!("return without frame"))?;
-        self.call_stack.abandon_calls_from(frame.base());
-        self.registers.truncate(frame.base());
+        self.call_stack.abandon_calls_from(frame.start());
+        self.registers.truncate(frame.start());
         if self.call_stack.depth() == stop {
             return Ok(Some(value));
         }

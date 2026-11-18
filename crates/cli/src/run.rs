@@ -4,6 +4,7 @@ use std::io::{self, Write};
 use std::path::Path;
 use std::process::ExitCode;
 
+use phera_dotenv::{Environment, FileSelection};
 use phera_runtime::{OutputSink, Runtime};
 
 /// Writes a script's output to the terminal as it is produced, so a long
@@ -20,13 +21,25 @@ impl OutputSink for Stdout {
     }
 }
 
-pub(crate) fn script(script: &str, arguments: &[String]) -> ExitCode {
+pub(crate) fn script(script: &str, arguments: &[String], files: FileSelection) -> ExitCode {
     if !Path::new(script).is_file() {
         // PHP's own wording, on standard output as PHP prints it.
         println!("Could not open input file: {script}");
         return ExitCode::FAILURE;
     }
-    match Runtime::new().run_file_blocking(script, arguments, Some(Box::new(Stdout))) {
+    let root = Path::new(script).parent().unwrap_or_else(|| Path::new("."));
+    let loaded = match files.load(root, Environment::process()) {
+        Ok(loaded) => loaded,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match Runtime::with_environment(loaded.environment).run_file_blocking(
+        script,
+        arguments,
+        Some(Box::new(Stdout)),
+    ) {
         Ok(result) => {
             if std::env::var_os("PHERA_INSTRUCTION_COUNT").is_some() {
                 eprintln!("Executed instructions: {}", result.executed_instructions);
