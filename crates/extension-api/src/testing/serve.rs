@@ -163,18 +163,21 @@ impl Server {
         let mut stream = TcpStream::connect(&self.address)?;
         // A server that hangs fails the test instead of stalling it.
         stream.set_read_timeout(Some(Duration::from_secs(30)))?;
+        // Write the complete frame together so both test servers see the same request.
+        let mut request = Vec::new();
         write!(
-            stream,
+            request,
             "{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n"
         )?;
         for (name, value) in headers {
-            write!(stream, "{name}: {value}\r\n")?;
+            write!(request, "{name}: {value}\r\n")?;
         }
         if !body.is_empty() {
-            write!(stream, "Content-Length: {}\r\n", body.len())?;
+            write!(request, "Content-Length: {}\r\n", body.len())?;
         }
-        stream.write_all(b"\r\n")?;
-        stream.write_all(body)?;
+        request.extend_from_slice(b"\r\n");
+        request.extend_from_slice(body);
+        stream.write_all(&request)?;
         let mut response = String::new();
         match stream.read_to_string(&mut response) {
             Err(error) if !response.is_empty() => {

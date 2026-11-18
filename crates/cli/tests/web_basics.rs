@@ -1,5 +1,7 @@
 //! Compare the same API script under PHP's development server and Phera.
 
+mod web_support;
+
 use std::path::{Path, PathBuf};
 
 use phera_extension_api::testing::{oracle, scripts::Comparison, serve::Server};
@@ -75,8 +77,8 @@ fn api_status_headers_and_body_match_php() {
         ),
         ("GET", "/unknown", &[], b"", 404),
     ] {
-        let expected = php.request(method, target, headers, body);
-        let actual = phera.request(method, target, headers, body);
+        let expected = web_support::request(&php, "PHP", method, target, headers, body);
+        let actual = web_support::request(&phera, "Phera", method, target, headers, body);
         let expected = application_response(&expected);
         let actual = application_response(&actual);
         assert_eq!(expected.0, status, "{method} {target}");

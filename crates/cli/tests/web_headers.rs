@@ -1,5 +1,7 @@
 //! Cookie return values, diagnostics and response lines under the two web SAPIs.
 
+mod web_support;
+
 use std::path::Path;
 
 use phera_extension_api::testing::{oracle, serve::Server};
@@ -108,16 +110,7 @@ fn compare(body: &str, name: &str, targets: &[&str], headers: &[(&str, &str)]) -
     let [expected, actual] = [("PHP", &php), ("Phera", &phera)].map(|(runtime, server)| {
         let mut output = String::new();
         for target in targets {
-            let mut response = server.request("GET", target, headers, &[]);
-            // The two scripts are read-only requests. Retry only a close
-            // before any response bytes arrive.
-            for _ in 0..2 {
-                if !response.is_empty() {
-                    break;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(50));
-                response = server.request("GET", target, headers, &[]);
-            }
+            let response = web_support::request(server, runtime, "GET", target, headers, &[]);
             output.push_str(response_body(runtime, target, &response));
             output.push('\n');
         }
