@@ -3,13 +3,39 @@
 use phera_ast as ast;
 use phera_bytecode::Reg;
 
-use crate::ir::{Argument, Instruction, Target, Unary};
+use crate::ir::{Argument, Constant, Instruction, Target, Unary};
 use crate::{CompileError, Compiler, binary};
 /// One deferred right operand, retaining its operator and source location.
 struct BinaryStep<'ast> {
     operator: ast::BinaryOperator,
     right: &'ast ast::Expression,
     line: usize,
+}
+
+/// Joins the string literals a concatenation chain starts with, as PHP does
+/// while compiling: `'a' . 'b' . $c` loads `'ab'` and appends `$c`. The
+/// folded steps are taken off `spine` (top first, so the start is its end).
+///
+/// Generated templates concatenate thousands of literal pieces; appending
+/// them one by one at run time would copy the growing string each time.
+fn fold_leading_strings(
+    start: &ast::Expression,
+    spine: &mut Vec<BinaryStep<'_>>,
+) -> Option<Vec<u8>> {
+    let ast::ExpressionKind::Literal(ast::Literal::String(first)) = &start.kind else {
+        return None;
+    };
+    let mut bytes = None;
+    while let Some(step) = spine.last()
+        && step.operator == ast::BinaryOperator::Concat
+        && let ast::ExpressionKind::Literal(ast::Literal::String(piece)) = &step.right.kind
+    {
+        bytes
+            .get_or_insert_with(|| first.clone())
+            .extend_from_slice(piece);
+        spine.pop();
+    }
+    bytes
 }
 
 impl Compiler<'_> {
@@ -37,7 +63,9 @@ impl Compiler<'_> {
                 });
                 node = left;
             }
-            let mut lhs = if spine
+            let mut lhs = if let Some(bytes) = fold_leading_strings(node, &mut spine) {
+                self.literal(Constant::Bytes(bytes), self.lines.line(node.span.start))?
+            } else if spine
                 .last()
                 .is_some_and(|step| step.operator == ast::BinaryOperator::NullCoalesce)
             {
