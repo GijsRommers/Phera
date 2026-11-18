@@ -3,12 +3,41 @@
 
 use phera_bytecode::{FetchMode, PathBase, Step};
 use phera_extension_api::{NativeError, NativeResult};
-use phera_value::{ArrayKey, Value};
+use phera_value::{ArrayKey, Object, Value};
+use std::rc::Rc;
 
 use crate::access_mode::{Creation, Missing};
-use crate::magic_properties::PropertyRead;
+use crate::inline_stack::InlineStack;
+use crate::magic_properties::{PropertyRead, PropertyReadSource};
 use crate::path_update::PathKey;
 use crate::{AccessPath, Vm};
+
+pub(crate) struct ReadPlace {
+    pub(crate) value: Value,
+    pub(crate) target: Option<UpdateTarget>,
+}
+
+pub(crate) enum UpdateTarget {
+    Indirect {
+        root: Value,
+        keys: Box<InlineStack<PathKey>>,
+    },
+    Property {
+        object: Rc<Object>,
+        key: ArrayKey,
+    },
+}
+
+struct IndirectPath {
+    root: Value,
+    keys: InlineStack<PathKey>,
+}
+
+#[derive(PartialEq, Eq)]
+enum ReadPurpose {
+    Value,
+    Update,
+}
 
 impl AccessPath {
     pub(crate) fn has_properties(&self) -> Result<bool, NativeError> {
@@ -24,6 +53,28 @@ impl Vm {
         place: &AccessPath,
         mode: FetchMode,
     ) -> NativeResult {
+        Ok(self
+            .read_magic_path(place, mode, ReadPurpose::Value)
+            .await?
+            .value)
+    }
+
+    pub(crate) async fn read_for_path_update(
+        &mut self,
+        place: &AccessPath,
+    ) -> Result<ReadPlace, NativeError> {
+        self.read_magic_path(place, FetchMode::Read, ReadPurpose::Update)
+            .await
+    }
+
+    async fn read_magic_path(
+        &mut self,
+        place: &AccessPath,
+        mode: FetchMode,
+        purpose: ReadPurpose,
+    ) -> Result<ReadPlace, NativeError> {
+        let mut indirect: Option<IndirectPath> = None;
+        let mut target = None;
         let quiet = matches!(mode, FetchMode::Quiet | FetchMode::Isset | FetchMode::Empty);
         let missing = if quiet {
             Missing::Silent
@@ -31,7 +82,10 @@ impl Vm {
             Missing::Warn
         };
         let Some(register) = self.base_register(place, Creation::Existing, missing)? else {
-            return Ok(Value::Null);
+            return Ok(ReadPlace {
+                value: Value::Null,
+                target,
+            });
         };
         if matches!(place.base()?, PathBase::StaticProperty { .. }) {
             self.check_static_read(place, missing)?;
@@ -43,9 +97,32 @@ impl Vm {
                 && !value.is_object()
                 && matches!(step, Step::Property(_) | Step::DynamicProperty(_))
             {
-                return Ok(Value::Null);
+                return Ok(ReadPlace {
+                    value: Value::Null,
+                    target,
+                });
             }
-            let (key, _) = self.magic_path_key(step).await?;
+            let (key, converted) = self.magic_path_key(step).await?;
+            let last = steps.peek().is_none();
+            if purpose == ReadPurpose::Update && converted && !last {
+                indirect = Some(IndirectPath {
+                    root: value.clone(),
+                    keys: InlineStack::new(),
+                });
+            }
+            if let Some(indirect) = &mut indirect {
+                let resolved = match (&key, &value) {
+                    (PathKey::Property(key), Value::Object(object)) => {
+                        let name = crate::path_update::property_name(key);
+                        PathKey::Property(
+                            self.property_key(object, &name)
+                                .unwrap_or_else(|_| key.clone()),
+                        )
+                    }
+                    _ => key.clone(),
+                };
+                indirect.keys.push(resolved);
+            }
             value = match key {
                 PathKey::Property(key) => {
                     let read = match (mode, steps.peek()) {
@@ -54,8 +131,37 @@ impl Vm {
                         _ if quiet => PropertyRead::Coalesce,
                         _ => PropertyRead::Read,
                     };
-                    let result = self.read_overloaded_property(value, key, read).await?;
-                    match result {
+                    let owner = match &value {
+                        Value::Object(object) if purpose == ReadPurpose::Update && !last => {
+                            Some(object.clone())
+                        }
+                        _ => None,
+                    };
+                    if purpose == ReadPurpose::Update
+                        && last
+                        && (converted || indirect.is_some())
+                        && let Value::Object(object) = &value
+                    {
+                        target = Some(UpdateTarget::Property {
+                            object: object.clone(),
+                            key: key.clone(),
+                        });
+                        indirect = None;
+                    }
+                    let name = owner
+                        .as_ref()
+                        .map(|_| crate::path_update::property_name(&key));
+                    let result = self.resolve_property_read(value, key, read).await?;
+                    if result.source == PropertyReadSource::Getter
+                        && let (Some(owner), Some(name)) = (owner, name)
+                    {
+                        self.warn_indirect_magic_property(&owner, &name, &result.value);
+                        indirect = Some(IndirectPath {
+                            root: result.value.clone(),
+                            keys: InlineStack::new(),
+                        });
+                    }
+                    match result.value {
                         Value::Reference(reference) => {
                             let value = reference.borrow().clone();
                             self.release_property_reference(reference);
@@ -70,7 +176,13 @@ impl Vm {
                 }
             };
         }
-        Ok(value)
+        let target = target.or_else(|| {
+            indirect.map(|path| UpdateTarget::Indirect {
+                root: path.root,
+                keys: Box::new(path.keys),
+            })
+        });
+        Ok(ReadPlace { value, target })
     }
 
     /// Resolve dynamic property names as strings. A dimension key keeps

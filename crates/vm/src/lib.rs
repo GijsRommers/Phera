@@ -96,6 +96,7 @@ mod magic_mutations;
 mod magic_path_instructions;
 mod magic_places;
 mod magic_properties;
+mod magic_property_write;
 mod magic_references;
 mod native_diagnostics;
 mod object_iteration;

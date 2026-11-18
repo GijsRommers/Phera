@@ -41,6 +41,33 @@ pub(crate) enum PropertyRead {
     Empty,
 }
 
+pub(crate) struct ReadProperty {
+    pub(crate) value: Value,
+    pub(crate) source: PropertyReadSource,
+}
+
+#[derive(PartialEq, Eq)]
+pub(crate) enum PropertyReadSource {
+    Storage,
+    Getter,
+}
+
+impl ReadProperty {
+    fn stored(value: Value) -> Self {
+        Self {
+            value,
+            source: PropertyReadSource::Storage,
+        }
+    }
+
+    fn from_getter(value: Value) -> Self {
+        Self {
+            value,
+            source: PropertyReadSource::Getter,
+        }
+    }
+}
+
 impl Vm {
     /// Returns the ordinary slot when present, or the accessible declaration
     /// governing a missing slot. Inaccessible declarations use the magic path.
@@ -161,17 +188,28 @@ impl Vm {
         key: ArrayKey,
         mode: PropertyRead,
     ) -> NativeResult {
+        Ok(self.resolve_property_read(value, key, mode).await?.value)
+    }
+
+    pub(crate) async fn resolve_property_read(
+        &mut self,
+        value: Value,
+        key: ArrayKey,
+        mode: PropertyRead,
+    ) -> Result<ReadProperty, phera_extension_api::NativeError> {
         let missing = match mode {
             PropertyRead::Read => Missing::Warn,
             PropertyRead::Coalesce => Missing::Silent,
             PropertyRead::Isset | PropertyRead::Empty => Missing::Isset,
         };
         let Value::Object(object) = &value else {
-            return self.read_property(value, key, missing);
+            return self
+                .read_property(value, key, missing)
+                .map(ReadProperty::stored);
         };
         let name = property_name(&key);
         if let Some(value) = self.native_property_read(object, &name, missing)? {
-            return Ok(value);
+            return Ok(ReadProperty::stored(value));
         }
         let Some(class) = self.classes.for_object(object).filter(|class| {
             class
@@ -179,17 +217,21 @@ impl Vm {
                 .as_ref()
                 .is_some_and(|hooks| hooks.has_properties())
         }) else {
-            return self.read_declared_property(object, &name, missing);
+            return self
+                .read_declared_property(object, &name, missing)
+                .map(ReadProperty::stored);
         };
         let (stored, accessible) = self.property_slot(object, &name);
         if let Some(stored) = stored {
-            return Ok(stored);
+            return Ok(ReadProperty::stored(stored));
         }
         if accessible
             .as_ref()
             .is_some_and(|slot| self.typed_property_uninitialized(&class, object, slot))
         {
-            return self.read_declared_property(object, &name, missing);
+            return self
+                .read_declared_property(object, &name, missing)
+                .map(ReadProperty::stored);
         }
         if mode != PropertyRead::Read {
             if let Some(method) = self.property_hook(&class, object, &key, PropertyHook::Isset) {
@@ -204,17 +246,19 @@ impl Vm {
                     )
                     .await?;
                 if !to_bool(&exists) {
-                    return Ok(Value::Null);
+                    return Ok(ReadProperty::stored(Value::Null));
                 }
                 if mode == PropertyRead::Isset {
-                    return Ok(Value::Bool(true));
+                    return Ok(ReadProperty::stored(Value::Bool(true)));
                 }
             } else if mode != PropertyRead::Coalesce {
-                return Ok(Value::Null);
+                return Ok(ReadProperty::stored(Value::Null));
             }
         }
         let Some(method) = self.property_hook(&class, object, &key, PropertyHook::Get) else {
-            return self.read_declared_property(object, &name, missing);
+            return self
+                .read_declared_property(object, &name, missing)
+                .map(ReadProperty::stored);
         };
         let result = self
             .invoke_property_hook(
@@ -236,9 +280,9 @@ impl Vm {
                     .try_borrow_mut()
                     .map_err(|_| internal_error!("magic property reference"))? = converted;
             } else {
-                return Ok(converted);
+                return Ok(ReadProperty::from_getter(converted));
             }
         }
-        Ok(result)
+        Ok(ReadProperty::from_getter(result))
     }
 }

@@ -7,12 +7,8 @@ use phera_bytecode::Reg;
 use phera_extension_api::{NativeClone, NativeError, NativeResult};
 use phera_value::{ArrayKey, Object, PhpArray, Value};
 
-use crate::Vm;
-use crate::access_mode::Mutation;
-use crate::inline_stack::InlineStack;
-use crate::path_update::PathKey;
-
 use super::class::ClassOrigin;
+use crate::Vm;
 
 /// PHP unlocks each readonly slot once for the hook, and again for clone-with.
 pub(crate) struct CloneScope {
@@ -218,50 +214,12 @@ impl Vm {
                     "Cannot access property starting with \"\\0\"",
                 ));
             }
-            let class = self
-                .classes
-                .for_object(object)
-                .ok_or_else(|| internal_error!("clone properties class"))?;
-            let hook = crate::magic_properties::PropertyHook::Set;
-            let written = ArrayKey::str(name.as_str());
-            let (stored, slot) = self.property_slot(object, &name);
-            if stored.is_none()
-                && !slot
-                    .as_ref()
-                    .is_some_and(|slot| self.typed_property_uninitialized(&class, object, slot))
-                && let Some(method) = self.property_hook(&class, object, &written, hook)
-            {
-                self.invoke_property_hook(
-                    class,
-                    object.clone(),
-                    hook,
-                    written,
-                    method,
-                    Some(value.deref().clone()),
-                )
-                .await?;
-                continue;
-            }
-            let key = self.property_key(object, &name)?;
-            let mut value = self
-                .property_string(object, &key, value.deref().clone())
-                .await?;
-            let mut keys = InlineStack::new();
-            keys.push(PathKey::Property(key));
-            let mut root = Value::Object(object.clone());
-            if self.validate_property_mutation(root.clone(), &keys, &mut value, Mutation::Assign)? {
-                continue;
-            }
-            let value = self.check_path_reference_assignment(&root, &keys, value)?;
-            let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
-            crate::path_update::update(
-                &mut root,
-                &keys,
-                value,
-                Mutation::Assign,
-                &mut diagnostics.buffer,
-                &diagnostics.vm.property_references,
-            )?;
+            self.assign_selected_property(
+                object.clone(),
+                ArrayKey::str(name),
+                value.deref().clone(),
+            )
+            .await?;
         }
         Ok(())
     }

@@ -84,53 +84,59 @@ impl Vm {
                 }
                 Ok(())
             }
-            OverloadedMutation::Detached(mut root, keys) => {
-                let (mut value, mutation) = match operation {
+            OverloadedMutation::Detached(root, keys) => {
+                let (value, mutation) = match operation {
                     PropertyMutation::Write(value, binding) => {
                         (value.into_value(self), binding.into())
                     }
                     PropertyMutation::Unset => (Value::Null, Mutation::Unset),
                 };
-                if mutation == Mutation::Assign
-                    && let Value::Object(object) = root.deref().clone()
-                    && let Some(PathKey::Property(key)) = keys.iter().next()
-                    && keys.iter().nth(1).is_none()
-                {
-                    value = self.property_string(&object, key, value).await?;
-                }
-                if self.validate_property_mutation(
-                    root.deref().clone(),
-                    &keys,
-                    &mut value,
-                    mutation,
-                )? {
-                    return Ok(());
-                }
-                if mutation == Mutation::Assign {
-                    value = self.check_path_reference_assignment(&root, &keys, value)?;
-                }
-                if mutation == Mutation::Unset
-                    && matches!(keys.iter().next(), Some(PathKey::Index(_)))
-                    && !root.is_array()
-                {
-                    if root.is_null() {
-                        return Ok(());
-                    }
-                    return Err(NativeError::error(
-                        "Cannot unset offset in a non-array variable",
-                    ));
-                }
-                let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
-                crate::path_update::update(
-                    &mut root,
-                    &keys,
-                    value,
-                    mutation,
-                    &mut diagnostics.buffer,
-                    &diagnostics.vm.property_references,
-                )
+                self.write_detached_place(root, &keys, value, mutation)
+                    .await
             }
         }
+    }
+
+    pub(crate) async fn write_detached_place(
+        &mut self,
+        mut root: Value,
+        keys: &InlineStack<PathKey>,
+        mut value: Value,
+        mutation: Mutation,
+    ) -> Result<(), NativeError> {
+        if mutation == Mutation::Assign
+            && let Value::Object(object) = root.deref().clone()
+            && let Some(PathKey::Property(key)) = keys.iter().next()
+            && keys.iter().nth(1).is_none()
+        {
+            value = self.property_string(&object, key, value).await?;
+        }
+        if self.validate_property_mutation(root.deref().clone(), keys, &mut value, mutation)? {
+            return Ok(());
+        }
+        if mutation == Mutation::Assign {
+            value = self.check_path_reference_assignment(&root, keys, value)?;
+        }
+        if mutation == Mutation::Unset
+            && matches!(keys.iter().next(), Some(PathKey::Index(_)))
+            && !root.is_array()
+        {
+            if root.is_null() {
+                return Ok(());
+            }
+            return Err(NativeError::error(
+                "Cannot unset offset in a non-array variable",
+            ));
+        }
+        let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
+        crate::path_update::update(
+            &mut root,
+            keys,
+            value,
+            mutation,
+            &mut diagnostics.buffer,
+            &diagnostics.vm.property_references,
+        )
     }
 
     async fn plan_magic_mutation(
