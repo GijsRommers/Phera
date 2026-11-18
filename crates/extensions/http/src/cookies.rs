@@ -199,9 +199,16 @@ fn set_cookie(
     Box::pin(async move {
         let mut exception = None;
         let result = write_cookie(context, &arguments, kind, &mut exception).await;
-        result
-            .and_then(|value| exception.map_or(Ok(value), Err))
-            .map_err(|error| context.native_call_error(kind.name(), &arguments, error))
+        match (result, exception) {
+            (Err(error), Some(previous)) if context.is_exception(&error) => {
+                let error = context.native_call_error(kind.name(), &arguments, error);
+                Err(context.chain_exception(error, previous))
+            }
+            (Err(error), _) | (Ok(_), Some(error)) => {
+                Err(context.native_call_error(kind.name(), &arguments, error))
+            }
+            (Ok(value), None) => Ok(value),
+        }
     })
 }
 

@@ -78,6 +78,10 @@ impl Context for Vm {
         }
     }
 
+    fn chain_exception(&mut self, error: NativeError, previous: NativeError) -> NativeError {
+        self.exception_with_previous(error, previous)
+    }
+
     fn compare<'a>(
         &'a mut self,
         left: &'a Value,

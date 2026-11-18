@@ -163,7 +163,7 @@ fn cookie_option_string_conversion_matches_php() {
         &["/"],
         &[],
     );
-    assert_eq!(expected.lines().count(), 8);
+    assert_eq!(expected.lines().count(), 10);
     assert_eq!(actual, expected);
 }
 

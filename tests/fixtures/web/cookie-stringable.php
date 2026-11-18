@@ -21,13 +21,15 @@ foreach (['setcookie', 'setrawcookie'] as $function) {
         ['path' => new CookieOption('bad;path')],
         ['path' => new CookieOption('throw'), 'domain' => 'example.test',
             'samesite' => new CookieOption('skipped')],
+        ['path' => new CookieOption('throw'), 'invalid' => true],
     ] as $options) {
         header_remove();
         $GLOBALS['conversions'] = [];
         try {
             $result = $function('session', 'value', $options);
         } catch (Throwable $exception) {
-            $result = [get_class($exception), $exception->getMessage()];
+            $result = [get_class($exception), $exception->getMessage(),
+                $exception->getPrevious()?->getMessage()];
         }
         $results[] = json_encode([$function, $result, $GLOBALS['conversions'], headers_list()]);
     }

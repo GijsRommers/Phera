@@ -107,6 +107,11 @@ pub trait Context {
         matches!(error, NativeError::Throw { .. })
     }
 
+    /// Link a new exception to the PHP exception that was already pending.
+    fn chain_exception(&mut self, error: NativeError, _previous: NativeError) -> NativeError {
+        error
+    }
+
     /// Loose comparisons may invoke __toString on mixed string/object pairs.
     fn compare<'a>(
         &'a mut self,
