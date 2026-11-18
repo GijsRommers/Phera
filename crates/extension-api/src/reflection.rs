@@ -3,7 +3,7 @@
 //! Extensions see owned snapshots and opaque initializer handles. The runtime
 //! keeps ownership of linked classes, function bytecode and access checks.
 
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use phera_value::{Object, PhpArray, Value};
 
@@ -94,6 +94,9 @@ pub trait ReflectionContext {
     /// Gets a declared global constant without emitting its read-time deprecation.
     fn reflect_constant(&self, name: &str) -> Result<ConstantInfo, crate::NativeError>;
 
+    /// Returns a constant's PHP value without changing its metadata or emitting a diagnostic.
+    fn reflect_constant_value(&self, name: &str) -> NativeResult;
+
     /// Gets the signature of a resolved function, method, or closure.
     fn reflect_function(&self, target: &FunctionTarget)
     -> Result<FunctionInfo, crate::NativeError>;
@@ -112,6 +115,9 @@ pub trait ReflectionContext {
         target: FunctionTarget,
         receiver: Option<Rc<Object>>,
     ) -> NativeResult;
+
+    /// Reads a closure's current lexical captures.
+    fn reflect_closure_uses(&self, function: &FunctionTarget) -> NativeResult;
 
     /// Reads static variables and closure captures for a callable.
     fn reflect_statics(&mut self, target: &FunctionTarget) -> NativeResult;
@@ -191,7 +197,7 @@ pub struct ExtensionInfo {
 pub enum FunctionTarget {
     Named(String),
     Method { class: String, name: String },
-    Closure(Rc<Object>),
+    Closure(Weak<Object>),
 }
 
 #[derive(Clone)]
@@ -230,17 +236,15 @@ pub struct FunctionInfo {
     pub is_static: bool,
     pub is_generator: bool,
     pub deprecated: bool,
-    pub closure_this: Option<Rc<Object>>,
+    pub closure_this: Option<Weak<Object>>,
     pub closure_scope: Option<String>,
     pub closure_called: Option<String>,
-    pub closure_uses: PhpArray,
     pub attributes: Vec<AttributeInfo>,
 }
 
 #[derive(Clone)]
 pub struct ConstantInfo {
     pub name: String,
-    pub value: Value,
     pub source: Option<SourceInfo>,
     pub extension: Option<String>,
     pub deprecated: bool,

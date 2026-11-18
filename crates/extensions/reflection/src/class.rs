@@ -1,6 +1,6 @@
 //! `ReflectionClass` exposes class identity, source locations and construction.
 
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use phera_extension_api::reflection::{ClassInfo, ReflectedClassKind};
 use phera_extension_api::{
@@ -16,7 +16,7 @@ pub(crate) const NAME_PROPERTY: PropertyEntry =
 #[derive(Clone)]
 pub(crate) struct ReflectedClass {
     pub info: Rc<ClassInfo>,
-    pub object: Option<Rc<Object>>,
+    pub object: Option<Weak<Object>>,
 }
 
 pub(crate) fn register(registry: &mut Registry) {
@@ -261,7 +261,10 @@ fn construct(
         let info = engine(context)?.reflect_class(&name).await?;
         let object = if this.class.is_instance_of("ReflectionObject") {
             match argument {
-                Value::Object(object) => Some(object.clone()),
+                Value::Object(object) => {
+                    crate::keep(this, Value::Object(object.clone()));
+                    Some(Rc::downgrade(object))
+                }
                 _ => None,
             }
         } else {

@@ -23,7 +23,10 @@ impl Vm {
         let mut callee = match target {
             FunctionTarget::Named(name) => self.resolve_callee(name)?,
             FunctionTarget::Closure(object) => {
-                self.resolve_callable(&Value::Object(object.clone()))?
+                let object = object
+                    .upgrade()
+                    .ok_or_else(|| exception("Closure is unavailable"))?;
+                self.resolve_callable(&Value::Object(object))?
             }
             FunctionTarget::Method { class, name } => {
                 let (class, method) = self.reflection_method(class, name)?;
@@ -108,6 +111,9 @@ impl Vm {
                 method_function(&self.reflection_method(class, name)?.1)
             }
             FunctionTarget::Closure(object) => {
+                let object = object
+                    .upgrade()
+                    .ok_or_else(|| exception("Closure is unavailable"))?;
                 let stored = object
                     .native
                     .try_borrow()
@@ -152,6 +158,28 @@ impl Vm {
             }
         }
         Ok(Value::from(values))
+    }
+
+    pub(super) fn reflection_closure_uses(&self, target: &FunctionTarget) -> NativeResult {
+        let FunctionTarget::Closure(object) = target else {
+            return Ok(Value::from(PhpArray::new()));
+        };
+        let object = object
+            .upgrade()
+            .ok_or_else(|| exception("Closure is unavailable"))?;
+        let storage = object
+            .native
+            .try_borrow()
+            .map_err(|_| exception("Closure is in use"))?;
+        let closure = storage
+            .as_ref()
+            .and_then(|state| state.downcast_ref::<ClosureState>())
+            .ok_or_else(|| exception("Closure is uninitialized"))?;
+        Ok(Value::from(
+            function_of(&closure.callee.target).map_or_else(PhpArray::new, |function| {
+                self.reflection_captures(function, closure)
+            }),
+        ))
     }
 
     pub(super) fn reflection_captures(

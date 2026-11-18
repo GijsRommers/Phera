@@ -154,7 +154,11 @@ pub(crate) fn make(
 ) -> NativeResult {
     let value = ReflectedParameter { function, position };
     let name = value.info()?.name.clone();
-    allocate(context, "ReflectionParameter", Some(&name), value)
+    let reflected = allocate(context, "ReflectionParameter", Some(&name), value.clone())?;
+    if let Value::Object(object) = &reflected {
+        crate::function::keep_closure(object, &value.function.target);
+    }
+    Ok(reflected)
 }
 
 fn construct(
@@ -191,7 +195,9 @@ fn construct(
         };
         let state = ReflectedParameter { function, position };
         let name = state.info()?.name.clone();
-        bind(receiver(this.as_ref())?, Some(&name), state)
+        let object = receiver(this.as_ref())?;
+        crate::function::keep_closure(object, &state.function.target);
+        bind(object, Some(&name), state)
     })
 }
 
@@ -199,7 +205,7 @@ fn function_target(value: &Value) -> Result<FunctionTarget, phera_extension_api:
     match value {
         Value::String(name) => Ok(FunctionTarget::Named(name.to_string_lossy())),
         Value::Object(object) if object.class.name() == "Closure" => {
-            Ok(FunctionTarget::Closure(object.clone()))
+            Ok(FunctionTarget::Closure(Rc::downgrade(object)))
         }
         Value::Object(object) => Ok(FunctionTarget::Method {
             class: object.class.name().into(),

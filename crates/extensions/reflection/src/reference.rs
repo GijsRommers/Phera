@@ -114,6 +114,6 @@ fn from_array(
 }
 
 fn get_id(_: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
-    let (id, _) = load::<([u8; 20], Rc<RefCell<Value>>)>(this)?;
+    let id = load::<[u8; 20]>(this)?;
     Ok(Value::from(id.to_vec()))
 }

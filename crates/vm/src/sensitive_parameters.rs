@@ -1,7 +1,7 @@
 //! `#[SensitiveParameter]` replaces values with wrappers in exception traces.
 
 use crate::{Vm, calls::frame::FrameView};
-use phera_value::Value;
+use phera_value::{Object, Value};
 
 pub(crate) fn is_sensitive(frame: FrameView<'_>, position: usize) -> bool {
     frame
@@ -21,7 +21,10 @@ impl Vm {
             return Value::Null;
         };
         let wrapped = self.classes.allocate(class);
-        *wrapped.native.borrow_mut() = Some(Box::new(value));
+        wrapped.set(
+            Object::private_key("SensitiveParameterValue", "value"),
+            value,
+        );
         Value::Object(wrapped)
     }
 }

@@ -107,7 +107,10 @@ const ABSTRACT_METHODS: &[MethodEntry] = &[
     }),
     MethodEntry::public("getClosureThis", &[], |_, o, _| {
         data(o, |f| {
-            f.closure_this.clone().map_or(Value::Null, Value::Object)
+            f.closure_this
+                .as_ref()
+                .and_then(std::rc::Weak::upgrade)
+                .map_or(Value::Null, Value::Object)
         })
     }),
     MethodEntry::public_async("getClosureScopeClass", &[], |c, o, _| {
@@ -116,8 +119,8 @@ const ABSTRACT_METHODS: &[MethodEntry] = &[
     MethodEntry::public_async("getClosureCalledClass", &[], |c, o, _| {
         class(c, o, |f| f.closure_called.as_deref())
     }),
-    MethodEntry::public("getClosureUsedVariables", &[], |_, o, _| {
-        data(o, |f| Value::from(f.closure_uses.clone()))
+    MethodEntry::public("getClosureUsedVariables", &[], |c, o, _| {
+        engine(c)?.reflect_closure_uses(&reflected(o)?.target)
     }),
     MethodEntry::public("getFileName", &[], |_, o, _| {
         data(o, |f| {
@@ -200,8 +203,11 @@ pub(crate) fn make(context: &mut dyn Context, target: FunctionTarget) -> NativeR
         "ReflectionFunction"
     };
     let value = allocate(context, class, Some(&name), function.clone())?;
-    if let (Value::Object(object), Some(member)) = (&value, &function.member) {
-        set_class(object, member);
+    if let Value::Object(object) = &value {
+        keep_closure(object, &function.target);
+        if let Some(member) = &function.member {
+            set_class(object, member);
+        }
     }
     Ok(value)
 }
@@ -213,7 +219,7 @@ pub(crate) fn set_class(object: &Object, member: &MemberInfo) {
 fn construct(context: &mut dyn Context, this: Option<&Rc<Object>>, args: &[Value]) -> NativeResult {
     let target = match args.first() {
         Some(Value::Object(object)) if object.class.name() == "Closure" => {
-            FunctionTarget::Closure(object.clone())
+            FunctionTarget::Closure(Rc::downgrade(object))
         }
         Some(Value::String(name)) => FunctionTarget::Named(name.to_string_lossy()),
         other => {
@@ -224,7 +230,22 @@ fn construct(context: &mut dyn Context, this: Option<&Rc<Object>>, args: &[Value
         }
     };
     let function = Rc::new(engine(context)?.reflect_function(&target)?);
-    bind(receiver(this)?, Some(&function.name.clone()), function)
+    let object = receiver(this)?;
+    keep_closure(object, &function.target);
+    bind(object, Some(&function.name.clone()), function)
+}
+
+pub(crate) fn keep_closure(object: &Object, target: &FunctionTarget) {
+    match target {
+        FunctionTarget::Closure(closure) => {
+            if let Some(closure) = closure.upgrade() {
+                crate::keep(object, Value::Object(closure));
+            }
+        }
+        _ => {
+            object.remove(&ArrayKey::str(crate::RETAINED));
+        }
+    }
 }
 
 pub(crate) fn reflected(

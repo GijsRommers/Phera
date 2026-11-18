@@ -39,7 +39,7 @@ impl Parser<'_> {
                     arguments,
                     span: self.span_since(start),
                 });
-                if !self.eat(TokenKind::Comma)? {
+                if !self.eat(TokenKind::Comma)? || self.at(TokenKind::RightBracket) {
                     break;
                 }
             }

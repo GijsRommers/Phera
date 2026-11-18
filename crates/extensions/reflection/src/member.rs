@@ -98,7 +98,7 @@ pub(crate) fn construct(
         let name = target_class(argument)?;
         let info = Rc::new(engine(context)?.reflect_class(&name).await?);
         let object = match argument {
-            Value::Object(object) => Some(object.clone()),
+            Value::Object(object) => Some(Rc::downgrade(object)),
             _ => None,
         };
         let class = crate::class::ReflectedClass { info, object };

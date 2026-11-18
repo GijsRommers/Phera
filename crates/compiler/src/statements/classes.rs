@@ -312,21 +312,7 @@ impl Compiler<'_> {
         let result = builder.compile_expression(expression)?;
         builder.emit(Instruction::Return(result), line);
         let index = self.functions.len();
-        let mut function = builder.finish();
-        for instruction in function.instructions.iter_mut().chain(
-            builder
-                .functions
-                .iter_mut()
-                .flat_map(|function| function.instructions.iter_mut()),
-        ) {
-            if let Instruction::Closure { function, .. } | Instruction::Declare(function) =
-                instruction
-            {
-                *function += index + 1;
-            }
-        }
-        self.functions.push(function);
-        self.functions.extend(builder.functions);
+        self.append_function(builder, DeclarationTiming::Hidden, line);
         Ok(index)
     }
 

@@ -45,6 +45,13 @@ impl ReflectionContext for Vm {
         self.reflection_constant(name)
     }
 
+    fn reflect_constant_value(&self, name: &str) -> NativeResult {
+        self.constants
+            .get(name)
+            .map(|constant| constant.value.clone())
+            .ok_or_else(|| exception(format!("Constant \"{name}\" does not exist")))
+    }
+
     fn reflect_function(
         &self,
         target: &phera_extension_api::reflection::FunctionTarget,
@@ -71,6 +78,13 @@ impl ReflectionContext for Vm {
     ) -> NativeResult {
         let callee = self.reflection_function_callee(&target, receiver)?;
         self.closure_from_callee(callee).map(Value::Object)
+    }
+
+    fn reflect_closure_uses(
+        &self,
+        target: &phera_extension_api::reflection::FunctionTarget,
+    ) -> NativeResult {
+        self.reflection_closure_uses(target)
     }
 
     fn reflect_statics(

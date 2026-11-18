@@ -50,16 +50,14 @@ fn drain_state(state: &mut ClosureState, pending: &mut Vec<Value>) {
     }
     if let Some(context) = &mut state.context
         && let Some(receiver) = context.receiver.take()
+        && Rc::strong_count(&receiver) == 1
     {
-        if Rc::strong_count(&receiver) == 1 {
-            pending.push(Value::Object(receiver));
-        }
+        pending.push(Value::Object(receiver));
     }
     if let CallTarget::Method { context, .. } = &mut state.callee.target
         && let Some(receiver) = context.receiver.take()
+        && Rc::strong_count(&receiver) == 1
     {
-        if Rc::strong_count(&receiver) == 1 {
-            pending.push(Value::Object(receiver));
-        }
+        pending.push(Value::Object(receiver));
     }
 }

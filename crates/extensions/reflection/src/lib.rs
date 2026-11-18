@@ -56,8 +56,26 @@ impl Extension for Reflection {
 
 static UNCLONEABLE: phera_extension_api::ClassHooks = phera_extension_api::ClassHooks {
     clone: Some(NativeClone::Forbidden),
+    properties: Some(reflected_properties),
     ..phera_extension_api::ClassHooks::EMPTY
 };
+
+// PHP values live in normal object storage so iterative object teardown can reach them.
+const RETAINED: &[u8] = b"\0Reflection\0retained";
+
+fn keep(object: &Object, value: Value) {
+    object.set(ArrayKey::str(RETAINED), value);
+}
+
+fn reflected_properties(
+    _: &mut dyn Context,
+    object: &Object,
+    _: phera_extension_api::PropertyPurpose,
+) -> Result<PhpArray, NativeError> {
+    let mut properties = object.to_array();
+    properties.remove(&ArrayKey::str(RETAINED));
+    Ok(properties)
+}
 
 fn engine(context: &mut dyn Context) -> Result<&mut dyn ReflectionContext, NativeError> {
     context

@@ -6,7 +6,7 @@ use phera_extension_api::{
 };
 use std::rc::Rc;
 
-use crate::{bind, load, receiver};
+use crate::receiver;
 
 pub(crate) fn register(registry: &mut Registry) {
     use ConstantValue::Int;
@@ -132,19 +132,31 @@ pub(crate) fn register(registry: &mut Registry) {
                         "__construct",
                         const { &[Param::new("value", ParamType::Mixed)] },
                         |_, object, args| {
-                            bind(
-                                receiver(object)?,
-                                None,
-                                args.first().cloned().unwrap_or_default(),
-                            )
+                            let object = receiver(object)?;
+                            let key = Object::private_key("SensitiveParameterValue", "value");
+                            if object.has(&key) {
+                                return Err(phera_extension_api::NativeError::error(
+                                    "Cannot modify readonly property SensitiveParameterValue::$value",
+                                ));
+                            }
+                            object.set(key, args.first().cloned().unwrap_or_default());
+                            Ok(Value::Null)
                         },
                     ),
-                    MethodEntry::public("getValue", &[], |_, object, _| load(object)),
+                    MethodEntry::public("getValue", &[], |_, object, _| {
+                        receiver(object)?.get(&Object::private_key("SensitiveParameterValue", "value"))
+                            .ok_or_else(|| phera_extension_api::NativeError::error(
+                                "Typed property SensitiveParameterValue::$value must not be accessed before initialization"
+                            ))
+                    }),
                     MethodEntry::public("__debugInfo", &[], |_, _, _| {
                         Ok(Value::from(PhpArray::new()))
                     }),
                 ]
             },
+            properties: const { &[PropertyEntry::typed(
+                "value", PropertyType::Mixed, Visibility::Private
+            ).readonly()] },
             hooks: Some(&SENSITIVE_HOOKS),
             ..builtin("SensitiveParameterValue")
         },

@@ -77,7 +77,11 @@ impl Vm {
             None => value,
         };
         if let Some(storage) = &property.static_storage {
-            *storage.reference.borrow().borrow_mut() = value;
+            let reference = storage.reference.borrow().clone();
+            let converted = self.check_reference_assignment(&reference, value)?;
+            *reference
+                .try_borrow_mut()
+                .map_err(|_| exception("Property value is already in use"))? = converted;
             property.static_initialized.set(true);
             property.value_initialized.set(true);
         } else {
@@ -88,7 +92,16 @@ impl Vm {
                     property.declaring, property.name
                 )));
             }
-            crate::property_storage::write(&object, property.key, value);
+            if let Some(Value::Reference(reference)) =
+                crate::property_storage::read(&object, &property.key)
+            {
+                let converted = self.check_reference_assignment(&reference, value)?;
+                *reference
+                    .try_borrow_mut()
+                    .map_err(|_| exception("Property value is already in use"))? = converted;
+            } else {
+                crate::property_storage::write(&object, property.key, value);
+            }
         }
         Ok(Value::Null)
     }

@@ -250,7 +250,7 @@ impl Vm {
 
     /// Defines a request-local constant, such as a CLI stream.
     pub fn set_constant(&mut self, name: &str, value: Value) {
-        self.constants.insert(name.to_owned(), value);
+        self.constants.insert(name.to_owned(), value, None, None);
     }
 
     /// Defines a global variable before the script starts, such as a

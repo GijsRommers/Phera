@@ -5,7 +5,7 @@ use phera_extension_api::reflection::{
     ParameterInfo,
 };
 use phera_extension_api::{MethodReturn, NativeError, Param};
-use phera_value::PhpArray;
+use std::rc::Rc;
 
 use crate::Vm;
 use crate::calls::call_state::CallTarget;
@@ -38,7 +38,6 @@ impl Vm {
             closure_this: None,
             closure_scope: None,
             closure_called: None,
-            closure_uses: PhpArray::new(),
             attributes: Vec::new(),
         };
         match target {
@@ -64,6 +63,9 @@ impl Vm {
                 });
             }
             FunctionTarget::Closure(object) => {
+                let object = object
+                    .upgrade()
+                    .ok_or_else(|| exception("Closure is unavailable"))?;
                 let storage = object
                     .native
                     .try_borrow()
@@ -78,12 +80,9 @@ impl Vm {
                 reflected.anonymous = closure.origin == ClosureOrigin::Lexical;
                 reflected.is_static = closure.binding == phera_bytecode::ClosureBinding::Static;
                 if let Some(context) = &closure.context {
-                    reflected.closure_this = context.receiver.clone();
+                    reflected.closure_this = context.receiver.as_ref().map(Rc::downgrade);
                     reflected.closure_scope = Some(context.scope.name.clone());
                     reflected.closure_called = Some(context.called.name.clone());
-                }
-                if let Some(function) = super::callables::function_of(&closure.callee.target) {
-                    reflected.closure_uses = self.reflection_captures(function, closure);
                 }
             }
         }

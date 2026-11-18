@@ -165,17 +165,19 @@ impl Vm {
                                 )));
                             }
                         }
-                        let indirect = steps.peek().is_some();
-                        if !indirect
-                            || !crate::property_storage::read(object, key)
-                                .is_some_and(|value| value.deref().is_object())
-                        {
-                            let change = match mutation {
-                                Mutation::Unset if !indirect => PropertyChange::Unset,
-                                Mutation::Assign if !indirect => PropertyChange::Direct,
-                                _ => PropertyChange::Indirect,
-                            };
-                            self.check_set_visibility(property, change)?;
+                        if property.set_visibility.is_some() {
+                            let indirect = steps.peek().is_some();
+                            if !indirect
+                                || !crate::property_storage::read(object, key)
+                                    .is_some_and(|value| value.deref().is_object())
+                            {
+                                let change = match mutation {
+                                    Mutation::Unset if !indirect => PropertyChange::Unset,
+                                    Mutation::Assign if !indirect => PropertyChange::Direct,
+                                    _ => PropertyChange::Indirect,
+                                };
+                                self.check_set_visibility(property, change)?;
+                            }
                         }
                         if steps.peek().is_none()
                             && mutation != Mutation::Unset

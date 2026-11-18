@@ -31,7 +31,9 @@ pub(crate) fn register(registry: &mut Registry) {
                 MethodEntry::public("getShortName", &[], |_, o, _| {
                     read(o, |c| Value::from(split(&c.name).1))
                 }),
-                MethodEntry::public("getValue", &[], |_, o, _| read(o, |c| c.value.clone())),
+                MethodEntry::public("getValue", &[], |c, o, _| {
+                    engine(c)?.reflect_constant_value(&constant(o)?.name)
+                }),
                 MethodEntry::public("isDeprecated", &[], |_, o, _| {
                     read(o, |c| Value::Bool(c.deprecated))
                 }),

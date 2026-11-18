@@ -91,7 +91,7 @@ pub(crate) fn members(
 ) -> Result<Vec<MemberInfo>, phera_extension_api::NativeError> {
     let mut result = engine(context)?.reflect_members(&class.info.name, kind);
     if matches!(kind, MemberKind::Property)
-        && let Some(object) = &class.object
+        && let Some(object) = class.object.as_ref().and_then(std::rc::Weak::upgrade)
     {
         for (key, _) in object.to_array().iter() {
             let ArrayKey::String(key) = key else { continue };

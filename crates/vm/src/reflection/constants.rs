@@ -41,7 +41,6 @@ impl Vm {
             .map(|(_, module)| module.to_owned());
         Ok(ConstantInfo {
             name: canonical.into(),
-            value: constant.value.clone(),
             source,
             extension,
             deprecated: constant.deprecated.is_some(),
