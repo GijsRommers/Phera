@@ -177,7 +177,13 @@ impl Vm {
                         | flags(property.static_storage.is_some(), 16)
                         | flags(property.is_readonly, 128)
                         | flags(property.is_final, 32)
-                        | flags(property.set_visibility == Some(Visibility::Protected), 2048)
+                        | flags(
+                            property.set_visibility == Some(Visibility::Protected)
+                                || property.is_readonly
+                                    && property.visibility == Visibility::Public
+                                    && property.set_visibility.is_none(),
+                            2048,
+                        )
                         | flags(property.set_visibility == Some(Visibility::Private), 4096),
                     declared_type: property.ty.as_ref().map(|ty| ty.display.clone()),
                     has_default: property.initialized,

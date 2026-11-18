@@ -294,9 +294,14 @@ pub(crate) fn reflected_class(
 
 pub(crate) async fn reflect_class(context: &mut dyn Context, name: &str) -> NativeResult {
     let info = engine(context)?.reflect_class(name).await?;
+    let reflector = if info.kind == ReflectedClassKind::Enum {
+        "ReflectionEnum"
+    } else {
+        "ReflectionClass"
+    };
     allocate(
         context,
-        "ReflectionClass",
+        reflector,
         Some(&info.name),
         ReflectedClass {
             info: info.clone(),

@@ -78,7 +78,7 @@ impl ReflectionContext for Vm {
         args: PhpArray,
     ) -> LocalFuture<'_, NativeResult> {
         Box::pin(async move {
-            let callee = self.reflection_function_callee(&target, receiver)?;
+            let callee = self.reflection_function_callee(&target, receiver, false)?;
             self.invoke_array_callback(callee, &args).await
         })
     }
@@ -101,7 +101,7 @@ impl ReflectionContext for Vm {
             }
             _ => {}
         }
-        let callee = self.reflection_function_callee(&target, receiver)?;
+        let callee = self.reflection_function_callee(&target, receiver, true)?;
         self.closure_from_callee(callee).map(Value::Object)
     }
 
@@ -423,6 +423,14 @@ impl Vm {
         args: Option<PhpArray>,
         construction: Construction,
     ) -> NativeResult {
+        use phera_bytecode::ClassKind;
+        if matches!(class.kind, ClassKind::Trait | ClassKind::Enum) {
+            return Err(NativeError::error(format!(
+                "Cannot instantiate {} {}",
+                class.kind.description().to_ascii_lowercase(),
+                class.name
+            )));
+        }
         let args = match args {
             Some(args) => args,
             None => {

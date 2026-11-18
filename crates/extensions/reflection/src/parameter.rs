@@ -251,7 +251,13 @@ fn default_value(
 ) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
         let parameter = parameter(this.as_ref())?;
-        match require_default(&parameter)?.default.clone() {
+        let info = require_default(&parameter)?;
+        match info.default.clone() {
+            Some(ParameterDefault::Literal(Value::Int(number)))
+                if info.declared_type.as_deref().is_some_and(default_is_float) =>
+            {
+                Ok(Value::Float(number as f64))
+            }
             Some(ParameterDefault::Literal(value)) => Ok(value),
             Some(ParameterDefault::Expression(initializer)) => {
                 engine(context)?.reflect_evaluate(initializer).await
@@ -261,6 +267,11 @@ fn default_value(
             )),
         }
     })
+}
+
+fn default_is_float(ty: &str) -> bool {
+    let mut members = ty.trim_start_matches('?').split('|');
+    members.clone().any(|member| member == "float") && !members.any(|member| member == "int")
 }
 
 fn declaring(

@@ -74,6 +74,7 @@ pub(crate) fn make(context: &mut dyn Context, declared: Option<&str>) -> NativeR
         let items = declared.split('|').collect::<Vec<_>>();
         if let [first, "null"] | ["null", first] = items.as_slice()
             && !first.contains('&')
+            && *first != "iterable"
         {
             (Kind::Named, format!("?{first}"))
         } else {
@@ -115,6 +116,10 @@ const BUILTIN_ORDER: &[&str] = &[
 ];
 
 fn normalize_union(mut members: Vec<&str>) -> String {
+    if let Some(index) = members.iter().position(|member| *member == "iterable") {
+        members[index] = "Traversable";
+        members.push("array");
+    }
     members.sort_by_key(|name| {
         BUILTIN_ORDER
             .iter()

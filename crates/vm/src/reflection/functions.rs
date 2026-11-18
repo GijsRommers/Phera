@@ -263,11 +263,15 @@ impl Vm {
                     let ty = &unit.types[id.index()].display;
                     if param.default_display.as_deref() == Some("null")
                         && !ty.starts_with('?')
-                        && !ty.contains('|')
-                        && ty != "mixed"
-                        && ty != "null"
+                        && !ty.split('|').any(|name| matches!(name, "null" | "mixed"))
                     {
-                        format!("?{ty}")
+                        if ty.contains('|') {
+                            format!("{ty}|null")
+                        } else if ty.contains('&') {
+                            format!("({ty})|null")
+                        } else {
+                            format!("?{ty}")
+                        }
                     } else {
                         ty.clone()
                     }

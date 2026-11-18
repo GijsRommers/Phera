@@ -33,8 +33,9 @@ impl Vm {
         &mut self,
         target: &FunctionTarget,
         receiver: Option<Rc<Object>>,
+        for_closure: bool,
     ) -> Result<Callee, NativeError> {
-        let mut callee = match target {
+        let callee = match target {
             FunctionTarget::Named(name) => self.resolve_callee(name)?,
             FunctionTarget::Closure(object) => {
                 let object = object
@@ -52,7 +53,7 @@ impl Vm {
                     .classes
                     .get(&method.declaring)
                     .ok_or_else(|| exception("Method scope does not exist"))?;
-                if method.is_abstract {
+                if method.is_abstract && !for_closure {
                     return Err(exception(format!(
                         "Trying to invoke abstract method {}::{}()",
                         method.declaring, method.name
@@ -74,7 +75,6 @@ impl Vm {
                 self.reflection_callee(called, scope, method, receiver)
             }
         };
-        callee.argument_binding = crate::calls::callback_binding::ArgumentBinding::Internal;
         Ok(callee)
     }
 
