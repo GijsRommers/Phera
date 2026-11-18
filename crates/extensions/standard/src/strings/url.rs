@@ -1,55 +1,91 @@
-//! Percent encoding works on bytes, without interpreting a character encoding.
+//! Percent encoding: `urlencode("a b&c")` is `"a+b%26c"`.
+//!
+//! These work on bytes: a UTF-8 `é` is two bytes and becomes `%C3%A9`.
 
-use phera_extension_api::{
-    Context, FunctionEntry, NativeResult, Param, ParamType, Registry, Value, args,
-};
+use phera_extension_api::{Context, FunctionEntry, NativeResult, Param, ParamType, Value, args};
 
-use super::{buffer, bytes};
+use super::buffer;
 
+pub(super) const FUNCTIONS: &[FunctionEntry] = &[URLENCODE, RAWURLENCODE, URLDECODE, RAWURLDECODE];
+
+/// Which of PHP's two percent encodings.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Encoding {
+    /// `application/x-www-form-urlencoded`: a space is `+`.
     Form,
+    /// RFC 3986: a space is `%20`, and `~` stays as it is.
     Raw,
 }
 
-const HEX: &[u8] = b"0123456789ABCDEF";
-
-const STRING_PARAMS: &[Param] = &[Param::new("string", ParamType::String)];
-
-pub(crate) fn register(registry: &mut Registry) {
-    registry.function(FunctionEntry::sync("urlencode", STRING_PARAMS, urlencode));
-    registry.function(FunctionEntry::sync(
-        "rawurlencode",
-        STRING_PARAMS,
-        rawurlencode,
-    ));
-    registry.function(FunctionEntry::sync("urldecode", STRING_PARAMS, urldecode));
-    registry.function(FunctionEntry::sync(
-        "rawurldecode",
-        STRING_PARAMS,
-        rawurldecode,
-    ));
+/// The value of a hexadecimal digit, either case.
+pub(super) fn hex_digit(byte: u8) -> Option<u8> {
+    char::from(byte).to_digit(16).map(|digit| digit as u8)
 }
 
-fn urlencode(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    encode(arguments, Encoding::Form)
+/// `urlencode(string $string): string`, for a query string.
+///
+/// ```php
+/// urlencode("a b&c~"); // "a+b%26c%7E"
+/// ```
+const URLENCODE: FunctionEntry = FunctionEntry::sync(
+    "urlencode",
+    &[Param::new("string", ParamType::String)],
+    urlencode,
+);
+
+fn urlencode(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    encode(args::bytes(arguments, 0), Encoding::Form)
 }
 
-fn rawurlencode(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    encode(arguments, Encoding::Raw)
+/// `rawurlencode(string $string): string`, for a URL path.
+///
+/// ```php
+/// rawurlencode("a b&c~"); // "a%20b%26c~"
+/// ```
+const RAWURLENCODE: FunctionEntry = FunctionEntry::sync(
+    "rawurlencode",
+    &[Param::new("string", ParamType::String)],
+    rawurlencode,
+);
+
+fn rawurlencode(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    encode(args::bytes(arguments, 0), Encoding::Raw)
 }
 
-fn urldecode(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    decode(arguments, Encoding::Form)
+/// `urldecode(string $string): string`
+///
+/// A `%` not followed by two hexadecimal digits is kept as it is.
+///
+/// ```php
+/// urldecode("a+b%26c%zz"); // "a b&c%zz"
+/// ```
+const URLDECODE: FunctionEntry = FunctionEntry::sync(
+    "urldecode",
+    &[Param::new("string", ParamType::String)],
+    urldecode,
+);
+
+fn urldecode(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    decode(args::bytes(arguments, 0), Encoding::Form)
 }
 
-fn rawurldecode(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    decode(arguments, Encoding::Raw)
+/// `rawurldecode(string $string): string`, which leaves `+` alone.
+///
+/// ```php
+/// rawurldecode("a+b%20c"); // "a+b c"
+/// ```
+const RAWURLDECODE: FunctionEntry = FunctionEntry::sync(
+    "rawurldecode",
+    &[Param::new("string", ParamType::String)],
+    rawurldecode,
+);
+
+fn rawurldecode(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    decode(args::bytes(arguments, 0), Encoding::Raw)
 }
 
-/// Form encoding uses '+' for spaces; RFC 3986 encoding preserves '~'.
-fn encode(arguments: &[Value], encoding: Encoding) -> NativeResult {
-    let string = args::bytes(arguments, 0);
+fn encode(string: &[u8], encoding: Encoding) -> NativeResult {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
     let mut result = buffer(string.len().saturating_mul(3))?;
     for &byte in string {
         if byte.is_ascii_alphanumeric()
@@ -62,35 +98,22 @@ fn encode(arguments: &[Value], encoding: Encoding) -> NativeResult {
         } else {
             result.extend_from_slice(&[
                 b'%',
-                HEX.get(usize::from(byte >> 4)).copied().unwrap_or_default(),
-                HEX.get(usize::from(byte & 15)).copied().unwrap_or_default(),
+                HEX[usize::from(byte >> 4)],
+                HEX[usize::from(byte & 0xf)],
             ]);
         }
     }
-    Ok(bytes(result))
+    Ok(Value::from(result))
 }
 
-pub(super) fn unhex(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
-    }
-}
-
-/// Malformed percent escapes are copied literally, rather than rejected.
-fn decode(arguments: &[Value], encoding: Encoding) -> NativeResult {
-    let string = args::bytes(arguments, 0);
+fn decode(string: &[u8], encoding: Encoding) -> NativeResult {
     let mut result = buffer(string.len())?;
     let mut cursor = 0;
-    while let Some(&byte) = string.get(cursor) {
+    while cursor < string.len() {
+        let byte = string[cursor];
         if byte == b'%'
-            && let Some(pair) = string.get(cursor + 1..cursor + 3)
-            && let (Some(high), Some(low)) = (
-                pair.first().copied().and_then(unhex),
-                pair.get(1).copied().and_then(unhex),
-            )
+            && let Some(&[high, low]) = string.get(cursor + 1..cursor + 3)
+            && let (Some(high), Some(low)) = (hex_digit(high), hex_digit(low))
         {
             result.push(high * 16 + low);
             cursor += 3;
@@ -103,5 +126,5 @@ fn decode(arguments: &[Value], encoding: Encoding) -> NativeResult {
         });
         cursor += 1;
     }
-    Ok(bytes(result))
+    Ok(Value::from(result))
 }
