@@ -13,14 +13,14 @@
 //! headers give one cookie string, and two `Content-Type` headers describe a
 //! form only when the form type comes first.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use phera_value::{ArrayKey, PhpArray, Value};
 use phera_vm::Vm;
 
-use super::HttpRequest;
 use super::query::{Duplicates, parse_pairs};
+use super::{Form, HttpRequest};
 
 /// Defines the superglobals for one request before its script starts.
 pub(crate) fn define_superglobals(
@@ -29,7 +29,8 @@ pub(crate) fn define_superglobals(
     script: &Path,
     document_root: &Path,
     environment: PhpArray,
-) {
+    form: Option<Form>,
+) -> Vec<PathBuf> {
     let mut get = PhpArray::new();
     parse_pairs(
         &mut get,
@@ -44,7 +45,12 @@ pub(crate) fn define_superglobals(
     // PHP fills `$_POST` for the method `POST` only, spelled exactly so. A
     // form body sent with `PUT`, `GET` or `post` stays in the raw request
     // body.
-    if request.method == "POST" && is_form(header(&headers, "content-type")) {
+    let mut files = PhpArray::new();
+    let mut temporary_files = Vec::new();
+    if let Some(form) = form {
+        // A form with files: already read, the files already on disk.
+        (post, files, temporary_files) = form.into_variables();
+    } else if request.method == "POST" && is_form(header(&headers, "content-type")) {
         parse_pairs(&mut post, &request.body, b'&', Duplicates::Replace);
     }
 
@@ -74,7 +80,8 @@ pub(crate) fn define_superglobals(
     vm.set_global("_POST", Value::from(post));
     vm.set_global("_COOKIE", Value::from(cookie));
     vm.set_global("_REQUEST", Value::from(merged));
-    vm.set_global("_FILES", Value::from(PhpArray::new()));
+    vm.set_global("_FILES", Value::from(files));
+    temporary_files
 }
 
 /// Whether the body is an HTML form in the default encoding. File uploads

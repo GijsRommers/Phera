@@ -1944,6 +1944,7 @@ dependencies = [
  "phera-extension-api",
  "phera-value",
  "phera-vm",
+ "tempfile",
  "tokio",
 ]
 

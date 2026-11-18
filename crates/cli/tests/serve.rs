@@ -8,6 +8,7 @@ mod scenarios {
     mod proxy;
     mod request_headers;
     mod static_files;
+    mod uploads;
 }
 
 use std::io::{BufRead, BufReader, Read, Write};
