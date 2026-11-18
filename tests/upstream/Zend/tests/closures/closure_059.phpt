@@ -19,21 +19,21 @@ call_user_func(array($f,"__invoke"), $a);
 
 try {
     $f($b);
-} catch (Throwable $e) {
-    echo $e::class, ': ', $e->getMessage(), "\n";
+} catch (Error $e) {
+    echo "Exception: " . $e->getMessage() . "\n";
 }
 try {
     $f->__invoke($b);
-} catch (Throwable $e) {
-    echo $e::class, ': ', $e->getMessage(), "\n";
+} catch (Error $e) {
+    echo "Exception: " . $e->getMessage() . "\n";
 }
 try {
     call_user_func(array($f,"__invoke"), $b);
-} catch (Throwable $e) {
-    echo $e::class, ': ', $e->getMessage(), "\n";
+} catch (Error $e) {
+    echo "Exception: " . $e->getMessage() . "\n";
 }
 ?>
 --EXPECTF--
-TypeError: {closure:%s:%d}(): Argument #1 ($a) must be of type A, B given, called in %s on line %d
-TypeError: {closure:%s:%d}(): Argument #1 ($a) must be of type A, B given
-TypeError: {closure:%s:%d}(): Argument #1 ($a) must be of type A, B given
+Exception: {closure:%s:%d}(): Argument #1 ($a) must be of type A, B given, called in %s on line %d
+Exception: {closure:%s:%d}(): Argument #1 ($a) must be of type A, B given
+Exception: {closure:%s:%d}(): Argument #1 ($a) must be of type A, B given

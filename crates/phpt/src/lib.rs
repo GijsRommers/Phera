@@ -67,9 +67,14 @@ fn section_header(line: &str) -> Option<&str> {
     valid.then_some(name)
 }
 
-/// The repository's top-level `tests/` directory.
+/// The directory holding `phpt/selected.txt`, `upstream/` and `fixtures/`: the
+/// repository's top-level `tests/`, or the tree `PHERA_PHPT_TESTS_DIR` names.
+/// `tests/phpt/sweep.sh` uses the override to try a whole php-src checkout.
 pub fn tests_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests")
+    match std::env::var_os("PHERA_PHPT_TESTS_DIR") {
+        Some(dir) if !dir.is_empty() => PathBuf::from(dir),
+        _ => Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests"),
+    }
 }
 
 /// Every test Phera should pass: the selected upstream tests, then all fixtures.
