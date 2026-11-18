@@ -15,7 +15,7 @@
 //! when it is unused. So a return looks at the caller's next instructions:
 //! if they are clears that include the result's register, the result is
 //! unused, and a temporary result is dropped before the frame's variables.
-//! Only a value that can own an object is worth the look.
+//! Only a value that this is the last handle on is worth the look.
 
 use phera_bytecode::{Instruction, Reg};
 use phera_value::Value;
@@ -33,11 +33,14 @@ pub(crate) fn result_discarded(caller: &[Instruction], ip: usize, destination: R
         .any(|register| register == destination)
 }
 
-/// Whether freeing `value` could run a destructor.
+/// Whether dropping `value` could free an object (and so run a
+/// destructor): it is the last handle on an array, object or reference.
 #[inline]
-pub(crate) fn may_own_objects(value: &Value) -> bool {
-    matches!(
-        value,
-        Value::Array(_) | Value::Object(_) | Value::Reference(_)
-    )
+pub(crate) fn frees_on_drop(value: &Value) -> bool {
+    match value {
+        Value::Array(array) => std::rc::Rc::strong_count(array) == 1,
+        Value::Object(object) => std::rc::Rc::strong_count(object) == 1,
+        Value::Reference(cell) => std::rc::Rc::strong_count(cell) == 1,
+        _ => false,
+    }
 }

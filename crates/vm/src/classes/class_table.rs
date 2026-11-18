@@ -139,6 +139,12 @@ impl ClassTable {
         }
     }
 
+    /// A handle on the request's object ids, for the interpreter loop.
+    #[inline]
+    pub(crate) fn ids_handle(&self) -> Rc<ObjectIds> {
+        self.ids.clone()
+    }
+
     /// The request's object ids, which also hold the objects whose
     /// destructor is due.
     #[inline]

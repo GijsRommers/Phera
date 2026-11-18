@@ -15,7 +15,7 @@ use phera_bytecode::{FunctionId, Instruction, Reg};
 use phera_value::Value;
 
 use crate::calls::call_state::CallTarget;
-use crate::calls::discarded_results::{may_own_objects, result_discarded};
+use crate::calls::discarded_results::{frees_on_drop, result_discarded};
 use crate::calls::execution_loop::{Machine, Position, Step};
 use crate::calls::frame::Frame;
 use crate::calls::prepared_call::{CallFlags, CallKind, PreparedCallee};
@@ -128,26 +128,16 @@ impl Machine<'_> {
             (_, Some(source)) => self.registers.take(frame.base() + source.index()),
             (_, None) => Value::Null,
         };
-        // An unused temporary result goes before the frame's variables
-        // (see `discarded_results`); only a value that can own an object
-        // is worth the look.
-        let value = if may_own_objects(&value)
-            && self.discards_result(frame, caller, source, destination)
+        // Where the order of releases can be seen, the slower way out.
+        if (kind != CallKind::Constructor && frees_on_drop(&value))
+            || (start != frame.base() && self.registers.holds_last_reference(start, frame.base()))
         {
-            drop(value);
-            None
-        } else {
-            Some(value)
-        };
+            return self.leave_in_order(frame, caller, (source, destination), value);
+        }
         self.stack.pop();
-        self.registers.release_frame(start, frame.base());
-        if let Some(value) = value {
-            self.registers
-                .put(caller.base() + destination.index(), value);
-        }
-        if self.classes.ids().has_doomed() {
-            return Step::Destructors;
-        }
+        self.registers.truncate(start);
+        self.registers
+            .put(caller.base() + destination.index(), value);
         Step::Switched(Position {
             frame: caller,
             ip: caller.ip(),
@@ -156,6 +146,36 @@ impl Machine<'_> {
 }
 
 impl Machine<'_> {
+    /// A plain return whose releases PHP orders visibly: an unused
+    /// temporary result is freed first (see `discarded_results`), then the
+    /// variables, then `$this` and the closure.
+    #[cold]
+    #[inline(never)]
+    fn leave_in_order(
+        &mut self,
+        frame: Frame,
+        caller: Frame,
+        (source, destination): (Option<Reg>, Reg),
+        value: Value,
+    ) -> Step {
+        let value = if self.discards_result(frame, caller, source, destination) {
+            drop(value);
+            None
+        } else {
+            Some(value)
+        };
+        self.stack.pop();
+        self.registers.release_frame(frame.start(), frame.base());
+        if let Some(value) = value {
+            self.registers
+                .put(caller.base() + destination.index(), value);
+        }
+        Step::Switched(Position {
+            frame: caller,
+            ip: caller.ip(),
+        })
+    }
+
     /// Whether the caller throws away the temporary that `frame` returns.
     #[inline(never)]
     fn discards_result(
@@ -177,26 +197,26 @@ impl Machine<'_> {
             )
     }
 
+}
+
+impl crate::Vm {
     /// A simple instruction that fell back only because the register it
-    /// writes holds an array or an object: do it here, release the old
-    /// value, and stop for its destructor if one is due (see `crate::fast`).
+    /// writes holds an array or an object: do it here, with the old value
+    /// taken out and dropped (see `crate::fast`). Kept out of the machine
+    /// loop, whose code a call here would slow down even where unused.
     #[inline(never)]
-    pub(super) fn release_and_step(
-        &mut self,
-        instruction: Instruction,
-        position: Position,
-    ) -> Step {
-        let slots = self.registers.tail_mut(position.frame.base());
-        let mut ip = position.ip;
-        let Some(released) = crate::fast::releasing_step(instruction, slots, &mut ip) else {
-            return Step::Slow;
+    pub(crate) fn release_and_store(&mut self, instruction: Instruction) -> bool {
+        let Some(frame) = self.call_stack.current().copied() else {
+            return false;
         };
-        drop(released);
-        if self.classes.ids().has_doomed() {
-            self.publish(ip);
-            return Step::Destructors;
+        let slots = self.registers.tail_mut(frame.base());
+        match crate::fast::releasing_step(instruction, slots) {
+            Some(released) => {
+                drop(released);
+                true
+            }
+            None => false,
         }
-        Step::Done(ip)
     }
 }
 

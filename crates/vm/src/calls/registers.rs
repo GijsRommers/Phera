@@ -141,7 +141,8 @@ impl Registers {
     /// with `$this` or the closure below `base`) up. PHP releases a
     /// function's variables first, in order, and `$this` after them, so a
     /// destructor of a local runs before the destructor of `$this`.
-    #[inline]
+    #[cold]
+    #[inline(never)]
     pub(crate) fn release_frame(&mut self, start: usize, base: usize) {
         let prefix = [start, start + 1].map(|slot| {
             if slot < base {
@@ -152,6 +153,18 @@ impl Registers {
         });
         self.truncate(start);
         drop(prefix);
+    }
+
+    /// Whether a slot from `start` up to `base` holds the only reference to
+    /// an object: `$this` or the closure of a frame that is the last to
+    /// hold it.
+    #[inline]
+    pub(crate) fn holds_last_reference(&self, start: usize, base: usize) -> bool {
+        self.slots
+            .get(start..base)
+            .unwrap_or_default()
+            .iter()
+            .any(|slot| matches!(slot, Some(Value::Object(object)) if std::rc::Rc::strong_count(object) == 1))
     }
 
     /// Move a value from one slot to another, leaving the first empty.

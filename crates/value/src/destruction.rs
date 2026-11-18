@@ -94,6 +94,12 @@ impl Object {
         self.destruction.set(Destruction::Due);
     }
 
+    /// The id pool of the object's request, which also says whether a
+    /// destructor is due there; `None` for an object made without one.
+    pub fn pool(&self) -> Option<Rc<ObjectIds>> {
+        self.lease.as_ref().map(|lease| lease.pool.clone())
+    }
+
     /// Records that the destructor has run (or must no longer run).
     pub fn mark_destructed(&self) {
         self.destruction.set(Destruction::Done);

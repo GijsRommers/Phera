@@ -52,8 +52,6 @@ pub(crate) enum BatchExit {
     Yield,
     /// Output or diagnostics queued a callback, which must run now.
     Handlers,
-    /// An instruction released an object whose destructor must run before
-    /// the next instruction (see `crate::destructors`).
     Destructors,
 }
 
@@ -62,8 +60,8 @@ enum LoopExit {
     /// This instruction needs the VM; the frame's position is published.
     Slow(Instruction),
     Yield,
-    /// A return released an object with a destructor; the caller's frame
-    /// is current.
+    /// A call or return released an object whose destructor is due; the
+    /// frame that runs next is current, with its position stored.
     Destructors,
     /// The instruction pointer left the function's code.
     Invalid,
@@ -82,6 +80,8 @@ pub(super) struct Machine<'a> {
     /// The depth at which the function that native code called returns.
     pub(super) stop: usize,
     pub(super) frame_limit: usize,
+    /// The request's object ids, which say whether a destructor is due.
+    pub(super) ids: &'a phera_value::ObjectIds,
 }
 
 /// Where the loop is: which function, its registers, its next instruction.
@@ -101,6 +101,7 @@ impl Vm {
         work: &mut usize,
     ) -> Result<BatchExit, NativeError> {
         loop {
+            let ids = self.classes.ids_handle();
             let mut machine = Machine {
                 code: &self.code,
                 classes: &mut self.classes,
@@ -110,6 +111,7 @@ impl Vm {
                 executed: 0,
                 stop,
                 frame_limit: self.frame_limit,
+                ids: &ids,
             };
             let exit = machine.run();
             *work = machine.work;
@@ -157,6 +159,12 @@ impl Machine<'_> {
             match self.step(instruction, position) {
                 Step::Done(ip) => position.ip = ip,
                 Step::Switched(next) => {
+                    // A return releases the frame's variables. Simple
+                    // instructions release nothing (see `crate::fast`), and
+                    // other steps write registers that hold nothing.
+                    if self.ids.has_doomed() {
+                        return destructors_due();
+                    }
                     position = next;
                     instructions = self.code.instructions(next.frame.function);
                 }
@@ -164,7 +172,6 @@ impl Machine<'_> {
                     self.publish(position.ip);
                     return LoopExit::Slow(instruction);
                 }
-                Step::Destructors => return LoopExit::Destructors,
             }
         }
     }
@@ -267,7 +274,7 @@ impl Machine<'_> {
             }
             Instruction::Return { src } => self.leave_plain(Some(src)),
             Instruction::ReturnNull => self.leave_plain(None),
-            _ => self.release_and_step(instruction, position),
+            _ => Step::Slow,
         }
     }
 
@@ -299,10 +306,11 @@ pub(super) enum Step {
     Switched(Position),
     /// Needs the VM.
     Slow,
-    /// Released an object whose destructor is due; the frame that runs
-    /// next has its position published. Only returns and the stores of
-    /// `release_and_step` release one: simple instructions never do (see
-    /// `crate::fast`), and the other steps write registers that hold
-    /// nothing to release.
-    Destructors,
+}
+
+/// Leaves the loop for due destructors; out of line, since it is rare.
+#[cold]
+#[inline(never)]
+fn destructors_due() -> LoopExit {
+    LoopExit::Destructors
 }

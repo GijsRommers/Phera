@@ -42,8 +42,20 @@ fn integer_at(slots: &[Option<Value>], register: Reg) -> Option<i64> {
 fn store_integer(slots: &mut [Option<Value>], register: Reg, integer: i64) -> ScalarStep {
     match slots.get_mut(register.index()) {
         Some(Some(Value::Int(target))) => *target = integer,
-        Some(slot) if !may_own_objects(slot) => *slot = Some(Value::Int(integer)),
-        _ => return ScalarStep::Fallback,
+        Some(slot @ None) => *slot = Some(Value::Int(integer)),
+        Some(slot) => return replace(slot, Value::Int(integer)),
+        None => return ScalarStep::Fallback,
+    }
+    ScalarStep::Complete
+}
+
+/// Stores an integer result whatever the register held.
+#[inline(always)]
+fn overwrite_integer(slots: &mut [Option<Value>], register: Reg, integer: i64) -> ScalarStep {
+    match slots.get_mut(register.index()) {
+        Some(Some(Value::Int(target))) => *target = integer,
+        Some(slot) => *slot = Some(Value::Int(integer)),
+        None => return ScalarStep::Fallback,
     }
     ScalarStep::Complete
 }
@@ -52,21 +64,65 @@ fn store_integer(slots: &mut [Option<Value>], register: Reg, integer: i64) -> Sc
 #[inline(always)]
 fn store(slots: &mut [Option<Value>], register: Reg, value: Value) -> ScalarStep {
     match slots.get_mut(register.index()) {
-        Some(slot) if !may_own_objects(slot) => {
+        Some(slot @ None) => {
             *slot = Some(value);
             ScalarStep::Complete
         }
-        _ => ScalarStep::Fallback,
+        Some(slot) => replace(slot, value),
+        None => ScalarStep::Fallback,
     }
 }
 
-/// Whether dropping what a register holds could free an object.
+/// Overwrites a register that holds a value, unless dropping that value
+/// could free an object. Out of line, so that the common writes (into an
+/// empty register, or an integer over an integer) stay as short as they
+/// can be.
+#[cold]
+#[inline(never)]
+fn replace(slot: &mut Option<Value>, value: Value) -> ScalarStep {
+    write_releasing(slot, Some(value))
+}
+
+/// Empties a register, unless dropping what it holds could free an object.
+#[cold]
+#[inline(never)]
+fn clear(slot: &mut Option<Value>) -> ScalarStep {
+    write_releasing(slot, None)
+}
+
+/// Writes a register that holds a value. An object that this was the last
+/// handle on is freed here; if that made a destructor due, the answer is
+/// `Fallback`, and the general handler runs the instruction once more (the
+/// stores that come here write the same value again) and then the
+/// destructor. A last handle on an array or PHP reference falls back
+/// before the write: what it frees cannot be told from here.
 #[inline(always)]
-fn may_own_objects(slot: &Option<Value>) -> bool {
-    matches!(
-        slot,
-        Some(Value::Array(_) | Value::Object(_) | Value::Reference(_))
-    )
+fn write_releasing(slot: &mut Option<Value>, value: Option<Value>) -> ScalarStep {
+    let pool = match slot {
+        Some(Value::Object(object)) if std::rc::Rc::strong_count(object) == 1 => object.pool(),
+        Some(Value::Array(_) | Value::Reference(_)) if frees_on_drop(slot) => {
+            return ScalarStep::Fallback;
+        }
+        _ => None,
+    };
+    *slot = value;
+    match pool {
+        Some(pool) if pool.has_doomed() => ScalarStep::Fallback,
+        _ => ScalarStep::Complete,
+    }
+}
+
+/// Whether dropping what a register holds could free an object: it holds
+/// the last handle on an array, object or PHP reference. Dropping a shared
+/// one only lowers its count.
+#[inline(always)]
+fn frees_on_drop(slot: &Option<Value>) -> bool {
+    match slot {
+        Some(Value::Array(array)) => std::rc::Rc::strong_count(array) == 1,
+        Some(Value::Object(object)) => std::rc::Rc::strong_count(object) == 1,
+        Some(Value::Reference(cell)) => std::rc::Rc::strong_count(cell) == 1,
+        _ => false,
+    }
 }
 
 /// `+`, `-`, `*` and `%` on two integers, when the result is an integer.
@@ -263,14 +319,13 @@ pub(crate) fn scalar_step(
                 IncDec::PostIncrement | IncDec::PostDecrement => old,
                 IncDec::PreIncrement | IncDec::PreDecrement => new,
             };
-            // The result first: it is the store that can fall back (when
-            // `dst` holds an array or object), and nothing may have changed
-            // when it does. The variable holds an integer, so its store
-            // cannot.
-            if store_integer(slots, dst, result) == ScalarStep::Fallback {
+            if store_integer(slots, local, new) == ScalarStep::Fallback {
                 return ScalarStep::Fallback;
             }
-            store_integer(slots, local, new)
+            // The variable has changed, so this store must not fall back.
+            // The result goes to a temporary that never holds an object;
+            // were it to, its destructor would run at the next check.
+            overwrite_integer(slots, dst, result)
         }
         Instruction::Jump { target } => {
             *ip = target.index();
@@ -290,15 +345,16 @@ pub(crate) fn scalar_step(
             }
             ScalarStep::Complete
         }
-        Instruction::Clear { reg: register } | Instruction::UnsetLocal { local: register } => {
-            match slots.get_mut(register.index()) {
-                Some(slot) if !may_own_objects(slot) => {
-                    *slot = None;
-                    ScalarStep::Complete
-                }
-                _ => ScalarStep::Fallback,
-            }
-        }
+        Instruction::Clear { reg: register } => match slots.get_mut(register.index()) {
+            Some(None) => ScalarStep::Complete,
+            Some(slot) => clear(slot),
+            None => ScalarStep::Fallback,
+        },
+        // Unsetting a variable bound to a PHP reference has more to undo.
+        Instruction::UnsetLocal { local } => match slots.get_mut(local.index()) {
+            Some(Some(Value::Reference(_))) | None => ScalarStep::Fallback,
+            Some(slot) => clear(slot),
+        },
         _ => ScalarStep::Fallback,
     }
 }
@@ -341,63 +397,39 @@ pub(crate) fn array_index_step(
     let Some(target) = slots.get_mut(destination.index()) else {
         return ScalarStep::Fallback;
     };
-    if may_own_objects(target) {
+    if frees_on_drop(target) {
         return ScalarStep::Fallback;
     }
     *target = Some(value);
     ScalarStep::Complete
 }
 
-/// The register a simple instruction overwrites.
-fn overwritten(instruction: Instruction) -> Option<Reg> {
-    match instruction {
-        Instruction::LoadInt { dst, .. }
-        | Instruction::LoadNull { dst }
-        | Instruction::LoadBool { dst, .. }
-        | Instruction::Move { dst, .. }
-        | Instruction::BinaryInt { dst, .. }
-        | Instruction::Binary { dst, .. }
-        | Instruction::IncDecLocal { dst, .. }
-        | Instruction::FetchIndex { dst, .. }
-        | Instruction::Cast {
-            to: phera_bytecode::CastKind::Bool,
-            dst,
-            ..
-        } => Some(dst),
-        Instruction::Assign { local, .. } => Some(local),
-        Instruction::Clear { reg } | Instruction::UnsetLocal { local: reg } => Some(reg),
-        _ => None,
-    }
-}
-
-/// Runs a simple instruction that fell back only because the register it
-/// writes holds an array or an object: the old value is taken out first and
-/// returned, for the caller to drop and then look for a due destructor.
-/// `None` when the instruction falls back for another reason too; the
-/// register then holds its old value again.
-pub(crate) fn releasing_step(
-    instruction: Instruction,
-    slots: &mut [Option<Value>],
-    ip: &mut usize,
-) -> Option<Value> {
-    let register = overwritten(instruction)?;
+/// Runs a simple store that fell back only because the register it writes
+/// holds an array or an object: the old value is taken out and returned,
+/// for the caller to drop and then look for a due destructor. `None` (and
+/// nothing changed) for any other instruction or case; the general handler
+/// then runs it. It does its few writes itself rather than through
+/// [`scalar_step`], whose code is best left with a single caller.
+pub(crate) fn releasing_step(instruction: Instruction, slots: &mut [Option<Value>]) -> Option<Value> {
+    let (register, value) = match instruction {
+        Instruction::LoadInt { dst, value } => (dst, Some(Value::Int(i64::from(value)))),
+        Instruction::LoadNull { dst } => (dst, Some(Value::Null)),
+        Instruction::LoadBool { dst, value } => (dst, Some(Value::Bool(value))),
+        Instruction::Clear { reg } => (reg, None),
+        Instruction::UnsetLocal { local } => (local, None),
+        Instruction::Move { dst, src } | Instruction::Assign { local: dst, src } => {
+            // A PHP reference or a missing value needs the general handler.
+            let value = match slots.get(src.index()) {
+                Some(Some(Value::Reference(_))) | Some(None) | None => return None,
+                Some(Some(value)) => value.clone(),
+            };
+            (dst, Some(value))
+        }
+        _ => return None,
+    };
     let slot = slots.get_mut(register.index())?;
-    if !matches!(slot, Some(Value::Array(_) | Value::Object(_))) {
+    if !matches!(slot, Some(Value::Array(_) | Value::Object(_))) || !frees_on_drop(slot) {
         return None;
     }
-    let old = slot.take();
-    let step = match instruction {
-        Instruction::FetchIndex {
-            dst, base, index, ..
-        } => array_index_step(dst, base, index, slots),
-        _ => scalar_step(instruction, slots, ip),
-    };
-    if step == ScalarStep::Complete {
-        old
-    } else {
-        if let Some(slot) = slots.get_mut(register.index()) {
-            *slot = old;
-        }
-        None
-    }
+    std::mem::replace(slot, value)
 }
