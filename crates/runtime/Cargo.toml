@@ -17,6 +17,7 @@ phera-ext-date.workspace = true
 phera-ext-filter.workspace = true
 phera-ext-hash.workspace = true
 phera-ext-http.workspace = true
+phera-ext-mbstring.workspace = true
 phera-ext-json.workspace = true
 phera-ext-pcre.workspace = true
 phera-ext-pdo.workspace = true
