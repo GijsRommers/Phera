@@ -38,11 +38,10 @@ impl Extension for Json {
             Param::new("flags", ParamType::Int).optional(),
             Param::new("depth", ParamType::Int).optional(),
         ];
-        registry.function(FunctionEntry::asynchronous(
-            "json_encode",
-            ENCODE,
-            encode::json_encode,
-        ));
+        registry.function(
+            FunctionEntry::asynchronous("json_encode", ENCODE, encode::json_encode)
+                .trace_async_errors(),
+        );
 
         const DECODE: &[Param] = &[
             Param::new("json", ParamType::String),

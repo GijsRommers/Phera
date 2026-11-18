@@ -126,16 +126,19 @@ impl Vm {
         if let Some(value) = crate::property_storage::read(&object, &key) {
             return Ok(value.deref().clone());
         }
-        let declared = self.classes.get(object.class.name()).is_some_and(|class| {
-            class
+        if missing == Missing::Warn
+            && let Some(class) = object
+                .class
+                .as_any()
+                .downcast_ref::<crate::classes::Class>()
+            && let Some(property) = class
                 .defaults
                 .iter()
-                .any(|property| property.key == key && property.ty.is_some())
-        });
-        if declared && missing == Missing::Warn {
+                .find(|property| property.key == key && property.ty.is_some())
+        {
             return Err(NativeError::error(format!(
                 "Typed property {}::${name} must not be accessed before initialization",
-                object.class.name()
+                property.declaring
             )));
         }
         if missing == Missing::Warn {

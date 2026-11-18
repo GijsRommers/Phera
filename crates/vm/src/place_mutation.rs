@@ -108,7 +108,12 @@ impl Vm {
 
     /// Promote a slot to a shared reference cell only when an alias is requested.
     pub(crate) fn reference(&mut self, place: &AccessPath) -> NativeResult {
-        let value = self.read_place(place, crate::access_mode::Missing::Silent)?;
+        let value = if place.steps()?.any(|step| matches!(step, Step::Append)) {
+            // A writable reference to [] creates an element rather than reading one.
+            Value::Null
+        } else {
+            self.read_place(place, Missing::Silent)?
+        };
         let register = self
             .base_register(place, Creation::Create, Missing::Silent)?
             .ok_or_else(|| internal_error!("reference missing"))?;

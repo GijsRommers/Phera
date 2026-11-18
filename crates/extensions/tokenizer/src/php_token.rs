@@ -168,7 +168,7 @@ fn matches_kind(this: &Object, kind: &Value, array_entry: bool) -> Result<bool, 
     }
 }
 
-fn receiver<'a>(this: Option<&'a Rc<Object>>) -> Result<&'a Object, NativeError> {
+fn receiver(this: Option<&Rc<Object>>) -> Result<&Object, NativeError> {
     this.map(Rc::as_ref)
         .ok_or_else(|| NativeError::error("Missing PhpToken receiver"))
 }

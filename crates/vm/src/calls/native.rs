@@ -87,6 +87,14 @@ impl Vm {
                 self.call_stack.recycle_native_arguments(arguments);
                 result
             }
+            NativeFn::Async(frame) if entry.trace_async_errors => {
+                let trace = crate::error_traces::NativeTrace::new(entry.name, &arguments);
+                let result = frame(self, arguments).await;
+                if result.is_err() {
+                    self.failed_native = Some(trace);
+                }
+                result
+            }
             NativeFn::Async(frame) => frame(self, arguments).await,
         }
     }

@@ -392,6 +392,7 @@ impl Vm {
                 ancestors: super::class::ancestor_names(&parent, &interfaces),
                 name_value: phera_value::Value::from(name.as_str()),
                 name: name.clone(),
+                has_native_layout: parent.as_ref().is_some_and(|class| class.has_native_layout),
                 parent,
                 interfaces,
                 kind: declaration.kind,

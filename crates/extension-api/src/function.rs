@@ -118,6 +118,7 @@ pub struct FunctionEntry {
     pub name: &'static str,
     pub params: &'static [Param],
     pub handler: NativeFn,
+    pub trace_async_errors: bool,
 }
 
 impl FunctionEntry {
@@ -126,6 +127,7 @@ impl FunctionEntry {
             name,
             params,
             handler: NativeFn::Sync(handler),
+            trace_async_errors: false,
         }
     }
 
@@ -138,7 +140,14 @@ impl FunctionEntry {
             name,
             params,
             handler: NativeFn::Async(handler),
+            trace_async_errors: false,
         }
+    }
+
+    /// Retains the native call in a trace when the handler itself returns an error.
+    pub const fn trace_async_errors(mut self) -> Self {
+        self.trace_async_errors = true;
+        self
     }
 
     /// How many arguments a call must pass at least.

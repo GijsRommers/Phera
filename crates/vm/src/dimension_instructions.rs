@@ -27,6 +27,7 @@ enum Write {
 }
 
 impl Vm {
+    #[cold]
     pub(crate) fn prepare_dimension_instruction(
         &mut self,
         instruction: Instruction,
