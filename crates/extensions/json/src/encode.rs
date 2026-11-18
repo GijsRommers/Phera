@@ -248,7 +248,7 @@ impl Encoder {
                 return Ok(());
             };
             let value = context
-                .call_method(object.clone(), "jsonSerialize", Vec::new())
+                .call_protocol_method(object.clone(), "jsonSerialize", Vec::new())
                 .await?;
             if !matches!(&*value.deref(), Value::Object(result) if Rc::ptr_eq(&object, result)) {
                 self.work.push(Work::ReleaseSerializer(guard));

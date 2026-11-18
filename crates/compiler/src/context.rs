@@ -20,6 +20,8 @@ pub(super) struct Loop {
 /// Mutable AST-to-IR state for one PHP function, sharing source locations.
 pub(super) struct Compiler<'ast> {
     pub(super) file: &'ast str,
+    /// The text being compiled. `assert()` quotes its condition from it.
+    pub(super) source: &'ast [u8],
     pub(super) declaration_warnings: Vec<phera_bytecode::DeclarationWarning>,
     pub(super) compile_diagnostics: &'ast RefCell<Vec<CompileDiagnostic>>,
     pub(super) lines: &'ast LineTable,
@@ -52,6 +54,7 @@ impl<'ast> Compiler<'ast> {
     /// Start an independent function builder in the current namespace.
     pub(super) fn new(
         file: &'ast str,
+        source: &'ast [u8],
         lines: &'ast LineTable,
         name: &str,
         namespace: &str,
@@ -59,6 +62,7 @@ impl<'ast> Compiler<'ast> {
     ) -> Self {
         Self {
             file,
+            source,
             declaration_warnings: Vec::new(),
             compile_diagnostics,
             lines,

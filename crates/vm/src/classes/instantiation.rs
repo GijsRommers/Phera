@@ -167,57 +167,6 @@ impl Vm {
         )
     }
 
-    /// Clone copies PHP properties and lets the native class copy its own state.
-    pub(crate) fn clone_object(
-        &mut self,
-        destination: Reg,
-        source: Reg,
-    ) -> Result<(), NativeError> {
-        let Value::Object(original) = self.read_local(source) else {
-            return Err(NativeError::error("__clone method called on non-object"));
-        };
-        let class = self
-            .classes
-            .get(original.class.name())
-            .ok_or_else(|| internal_error!("clone class"))?;
-        if class.is_throwable {
-            return Err(NativeError::error(format!(
-                "Trying to clone an uncloneable object of class {}",
-                class.name
-            )));
-        }
-        if class.origin == crate::classes::class::ClassOrigin::Closure {
-            let native = original.native.borrow();
-            let state = native
-                .as_ref()
-                .and_then(|state| state.downcast_ref::<crate::closures::ClosureState>())
-                .ok_or_else(|| internal_error!("clone closure"))?;
-            let cloned = self.allocate_closure(state.duplicate())?;
-            self.set(destination, Value::Object(cloned));
-            return Ok(());
-        }
-        use phera_extension_api::NativeClone;
-        let policy = class.hooks.as_ref().and_then(|hooks| hooks.clone);
-        if matches!(policy, Some(NativeClone::Forbidden))
-            || policy.is_none()
-                && class.has_native_layout
-                && crate::reference_holders::has_extension_state(&original)?
-        {
-            return Err(NativeError::error(format!(
-                "Trying to clone an uncloneable object of class {}",
-                class.name
-            )));
-        }
-        let cloned = self.classes.allocate(class);
-        cloned.update(|properties| *properties = original.to_array());
-        if let Some(NativeClone::Copy(copy)) = policy {
-            copy(&original, &cloned)?;
-        }
-        self.track_object_property_references(&cloned)?;
-        self.set(destination, Value::Object(cloned));
-        Ok(())
-    }
-
     /// Unknown names simply fail membership tests rather than raising a missing-class error.
     pub(crate) fn instance_of(
         &mut self,

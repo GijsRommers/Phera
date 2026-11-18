@@ -43,7 +43,6 @@ pub(crate) struct ErrorHandlers {
     /// Native warning sites are retained only while PHP error handlers are installed.
     pub(crate) native_site: Option<crate::error_traces::NativeTrace>,
     pub(crate) warning_site: Option<crate::exception_traces::WarningSite>,
-    pub(crate) callback_sites: Vec<crate::exception_traces::NativeCallbackSite>,
     pub(crate) pending: Vec<DiagnosticEvent>,
     pub(crate) reporting: i64,
     /// PHP formats saved trace strings using the current request limit, not creation-time text.
@@ -60,7 +59,6 @@ impl Default for ErrorHandlers {
             active: false,
             native_site: None,
             warning_site: None,
-            callback_sites: Vec::new(),
             pending: Vec::new(),
             reporting: 30719,
             trace_string_limit: 15,

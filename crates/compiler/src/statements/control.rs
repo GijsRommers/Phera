@@ -25,10 +25,12 @@ impl Compiler<'_> {
         line: usize,
     ) -> Result<(), CompileError> {
         for expression in expressions {
-            let mark = self.mark_temporaries();
-            let register = self.compile_expression(expression)?;
-            self.emit(Instruction::Echo(register), line);
-            self.release_temporaries(mark);
+            // Each item's temporaries are freed once it is printed, as in PHP.
+            self.clear_temporaries_after(line, |compiler| {
+                let register = compiler.compile_expression(expression)?;
+                compiler.emit(Instruction::Echo(register), line);
+                Ok(())
+            })?;
         }
 
         Ok(())

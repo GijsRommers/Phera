@@ -28,6 +28,14 @@ pub(crate) struct Thrown {
 }
 
 impl Thrown {
+    /// A throw that every enclosing `catch` may handle.
+    pub(crate) fn from_object(object: Rc<Object>) -> Self {
+        Thrown {
+            object,
+            skip_handlers: None,
+        }
+    }
+
     /// Native callbacks forward this payload without constructing another exception.
     pub(crate) fn into_error(self) -> NativeError {
         NativeError::Unwind(Unwind(Box::new(self)))

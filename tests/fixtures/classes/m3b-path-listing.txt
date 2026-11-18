@@ -17,10 +17,10 @@ function {initializer} (2 registers)
   0001  line 1    Return { src: r0 }
 
 function Counter::tick (5 registers)
-  path#0 = This { scratch: r1 } [Property(name#0)]
+  path#0 = This { scratch: r0 } [Property(name#0)]
   path#1 = StaticProperty { class: r0, name: r1, scratch: r2 } []
-  0000  line 1    LoadInt { dst: r0, value: 1 }
-  0001  line 1    AssignPath { path: path#0, src: r0 }
+  0000  line 1    LoadInt { dst: r1, value: 1 }
+  0001  line 1    AssignPath { path: path#0, src: r1 }
   0002  line 1    Clear { reg: r0 }
   0003  line 1    Clear { reg: r1 }
   0004  line 1    FetchClassName { dst: r0, class: symbol#0 }
