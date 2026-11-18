@@ -167,6 +167,48 @@ Errors: under `serve`, an uncaught error answers 500 with a generic body and
 writes the message, file and line to the log; `display_errors=1` shows them in
 the response, as PHP does, and is the default only on the command line.
 
+### 5.2 `phera serve` is the production server
+
+The goal is one binary that takes the place of nginx with PHP-FPM, the way
+FrankenPHP does: it answers HTTPS itself, serves the static files, and runs
+the PHP. Nothing else has to be installed next to it. `php -S` is only the
+yardstick for what a script sees in `$_SERVER`, `$_POST` and the response;
+it is not the model for the server.
+
+Today (2026-11-18) the server speaks HTTP/1.1 with keep-alive, runs one
+worker per core, serves static files and a front controller, reads `.env`
+files and shuts down gracefully. It has no TLS, so for now it stands behind
+a reverse proxy. What production needs, in the order it will be built:
+
+1. **Limits and timeouts** (5.1). Without them the server must not face the
+   internet.
+2. **HTTPS.** TLS through `rustls` (Rust, no C library), with certificates
+   from files or obtained and renewed automatically from Let's Encrypt
+   (ACME), a redirect from HTTP, and HTTP/2. HTTP/3 comes later.
+3. **Behind a proxy or load balancer.** A list of trusted proxies decides
+   when `X-Forwarded-For` and `X-Forwarded-Proto` set `REMOTE_ADDR` and
+   `HTTPS`; listening on a Unix socket.
+4. **Static files and compression.** `ETag`, `Last-Modified`, `Range`,
+   precompressed files, and gzip, zstd and brotli for PHP's responses.
+5. **Operations.** A `phera.toml`, an access log, a health endpoint,
+   metrics, reloading code and configuration without dropping connections.
+6. **Boot once.** Snapshot and fork (section 5, phase 2) is Phera's answer
+   to FrankenPHP's worker mode and Laravel Octane: the framework boots once
+   per worker and every request starts from that state. Because a request
+   works on a fork, it cannot leak state into the next one, which is the
+   known risk of those worker modes.
+7. **Finishing early.** `fastcgi_finish_request()` (send the response, keep
+   working), which Symfony calls when it exists, and Early Hints (103).
+
+`php_sapi_name()` answers `phera` under `serve`, as FrankenPHP answers
+`frankenphp` and FPM `fpm-fcgi`; code that asks "is this the command line?"
+tests for `cli` and keeps working.
+
+Not planned: speaking FastCGI, that is, being a drop-in for PHP-FPM behind
+an existing nginx `fastcgi_pass`. The point is to remove that hop; behind
+nginx, Phera is reached over HTTP like any other upstream. This can be
+revisited if someone needs to keep an nginx configuration unchanged.
+
 ## 6. Scope
 
 In: the PHP that Symfony and Laravel and their dependencies run in production.
