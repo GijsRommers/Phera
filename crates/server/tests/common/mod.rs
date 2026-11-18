@@ -119,6 +119,19 @@ impl Client {
         response
     }
 
+    /// Read until the server closes the connection or breaks it, and
+    /// return how many bytes arrived.
+    pub fn read_until_closed(&mut self) -> usize {
+        let mut received = 0;
+        let mut buffer = [0u8; 16 * 1024];
+        loop {
+            match self.reader.read(&mut buffer) {
+                Ok(0) | Err(_) => return received,
+                Ok(count) => received += count,
+            }
+        }
+    }
+
     /// Assert that no body bytes arrive within a short window: the server
     /// keeps the connection open (keep-alive) but sends nothing.
     pub fn assert_no_body(&mut self) {

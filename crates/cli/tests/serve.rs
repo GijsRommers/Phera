@@ -3,6 +3,7 @@
 
 mod scenarios {
     mod environment;
+    mod static_files;
 }
 
 use std::io::{BufRead, BufReader, Read, Write};

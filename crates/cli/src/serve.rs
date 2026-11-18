@@ -4,7 +4,12 @@
 //! HTTP server, which only knows a `Handler`, and the runtime, which only
 //! knows how to run a script for a request.
 
+mod byte_range;
+mod conditional;
+mod content_type;
+mod precompressed;
 mod site;
+mod static_file;
 
 use std::future::Future;
 use std::pin::Pin;
@@ -17,6 +22,7 @@ use phera_server::{Handler, HandlerFactory, HttpVersion, Request, Response, Serv
 
 use crate::arguments::ServeOptions;
 use site::{Resolved, Site};
+use static_file::Conditions;
 
 pub(crate) fn serve(options: ServeOptions) -> ExitCode {
     let mut site = match Site::open(&options.path) {
@@ -112,24 +118,35 @@ impl SiteHandler {
     async fn respond(&self, request: Request) -> Response {
         let site = self.site.clone();
         let path = request.path.clone();
+        let conditions = Conditions::of(&request);
         // Looking at the file system blocks, so it runs off the worker
         // thread, which must stay free for other requests.
-        let resolved = tokio::task::spawn_blocking(move || site.resolve(&path)).await;
-        match resolved {
-            Ok(Resolved::Script(script)) => {
+        let found = tokio::task::spawn_blocking(move || match site.resolve(&path) {
+            Resolved::Script(script) => Found::Script(script),
+            Resolved::File(file) => Found::Answer(static_file::answer(&site, &file, &conditions)),
+            Resolved::NotFound => Found::Answer(Response::text(404, "Not Found\n")),
+        })
+        .await;
+        match found {
+            Ok(Found::Script(script)) => {
                 let response = self
                     .runtime
                     .handle_request(&script, self.site.document_root(), to_runtime(request))
                     .await;
                 from_runtime(response)
             }
-            Ok(Resolved::File { content_type, body }) => Response::new(200)
-                .with_header("Content-Type", content_type)
-                .with_body(body),
-            Ok(Resolved::NotFound) => Response::text(404, "Not Found\n"),
+            Ok(Found::Answer(response)) => response,
             Err(_) => Response::text(500, "Internal Server Error\n"),
         }
     }
+}
+
+/// What looking up a request path on disk led to.
+enum Found {
+    /// A PHP file to run.
+    Script(std::path::PathBuf),
+    /// A response that is ready: a static file, or "not found".
+    Answer(Response),
 }
 
 fn to_runtime(request: Request) -> HttpRequest {
