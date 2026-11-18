@@ -29,6 +29,39 @@ impl Writer {
         self.0.push(b';');
     }
 
+    /// The exact decimal for a small dyadic fraction needs at most four places.
+    /// Below 2^38 the rounding interval is smaller than the gap to any
+    /// shorter decimal for these fractions.
+    pub fn short_float(&mut self, value: f64) -> bool {
+        let scaled = value.abs() * 16.0;
+        let units = scaled as u64;
+        if units >= 1 << 42 || units as f64 != scaled {
+            return false;
+        }
+        self.0.extend_from_slice(b"d:");
+        if value.is_sign_negative() {
+            self.0.push(b'-');
+        }
+        self.number(units / 16);
+        let fraction = units % 16;
+        if fraction != 0 {
+            let mut digits = [b'0'; 4];
+            let mut decimal = fraction * 625;
+            for digit in digits.iter_mut().rev() {
+                *digit += (decimal % 10) as u8;
+                decimal /= 10;
+            }
+            let mut length = digits.len();
+            while length > 0 && digits[length - 1] == b'0' {
+                length -= 1;
+            }
+            self.0.push(b'.');
+            self.0.extend_from_slice(&digits[..length]);
+        }
+        self.0.push(b';');
+        true
+    }
+
     pub fn string(&mut self, value: &[u8]) {
         self.quoted(b's', value);
         self.0.push(b';');

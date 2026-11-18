@@ -2,7 +2,7 @@
 
 use std::borrow::Cow;
 
-use super::numbers::{digits_end, float_end, signed, signed_end, unsigned};
+use super::numbers::{decimal, digits_end, float_end, signed, signed_end, unsigned};
 use super::{Diagnostic, ObjectFormat, ParseError, Token};
 
 #[derive(Clone)]
@@ -102,9 +102,16 @@ impl<'a> Reader<'a> {
                 if self.input.get(end) != Some(&b';') {
                     return Err(ParseError);
                 }
-                let digits =
-                    std::str::from_utf8(&self.input[start..end]).map_err(|_| ParseError)?;
-                (end - start, digits.parse().map_err(|_| ParseError)?)
+                let digits = &self.input[start..end];
+                let value = if let Some(value) = decimal(digits) {
+                    value
+                } else {
+                    std::str::from_utf8(digits)
+                        .map_err(|_| ParseError)?
+                        .parse()
+                        .map_err(|_| ParseError)?
+                };
+                (end - start, value)
             }
         };
         self.offset = start + len + 1;

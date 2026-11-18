@@ -178,7 +178,9 @@ impl Encoder {
             Value::Int(integer) => self.output.integer(integer),
             Value::Float(float) => {
                 let precision = *self.precision.get_or_insert_with(|| precision(context));
-                with_float_repr(float, precision, |decimal| self.output.float(decimal));
+                if precision >= 0 || !self.output.short_float(float) {
+                    with_float_repr(float, precision, |decimal| self.output.float(decimal));
+                }
             }
             Value::String(string) => self.output.string(string.as_bytes()),
             Value::Array(array) => {
