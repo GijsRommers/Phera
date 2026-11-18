@@ -50,8 +50,12 @@ impl Vm {
         mut arguments: Vec<Value>,
         origin: crate::calls::callback_binding::ArgumentOrigin,
     ) -> NativeResult {
-        self.autoload_native_parameters(entry.params, &arguments)
-            .await?;
+        // Asked here, not inside the call: without a registered loader a
+        // native call must not even build the future that would look.
+        if !self.autoload.callbacks.is_empty() {
+            self.autoload_native_parameters(entry.params, &arguments)
+                .await?;
+        }
         let previous = std::mem::replace(&mut self.argument_origin, origin);
         let prepared = self.prepare_call_with_trace(entry.name, entry.params, &mut arguments);
         self.argument_origin = previous;
@@ -118,7 +122,9 @@ impl Vm {
         match &callee.target {
             CallTarget::Native(entry) => self.native_entry_origin(*entry, arguments, origin).await,
             CallTarget::Intrinsic(intrinsic) => {
-                self.intrinsic_origin(*intrinsic, arguments, origin).await
+                // Boxed: an intrinsic such as `eval` runs code, and its future
+                // must not make the future of every ordinary native call larger.
+                Box::pin(self.intrinsic_origin(*intrinsic, arguments, origin)).await
             }
             CallTarget::Method { method, context } => {
                 self.native_method_window(method, context, arguments, named, origin)
@@ -149,8 +155,10 @@ impl Vm {
                 .await
             }
             MethodBody::Native(entry) => {
-                self.autoload_native_parameters(entry.params, &arguments)
-                    .await?;
+                if !self.autoload.callbacks.is_empty() {
+                    self.autoload_native_parameters(entry.params, &arguments)
+                        .await?;
+                }
                 self.with_argument_origin(origin, |vm| {
                     vm.prepare_native_method_arguments(method, entry.params, &mut arguments)
                 })?;
