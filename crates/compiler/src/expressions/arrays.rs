@@ -16,6 +16,7 @@ impl Compiler<'_> {
         let dst = self.allocate_register()?;
         self.emit(Instruction::Array(dst), line);
         for item in items {
+            let mark = self.mark_temporaries();
             let key = item
                 .key
                 .as_ref()
@@ -44,6 +45,7 @@ impl Compiler<'_> {
                 },
                 line,
             );
+            self.release_temporaries(mark);
         }
         Ok(dst)
     }

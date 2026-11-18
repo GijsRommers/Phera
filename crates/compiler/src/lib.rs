@@ -13,6 +13,7 @@ mod passes;
 mod pipeline;
 mod policies;
 mod statements;
+mod temporaries;
 
 #[cfg(test)]
 mod tests;

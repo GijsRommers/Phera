@@ -16,19 +16,19 @@ function {initializer} (2 registers)
   0000  line 1    LoadInt { dst: r0, value: 0 }
   0001  line 1    Return { src: r0 }
 
-function Counter::tick (8 registers)
+function Counter::tick (5 registers)
   path#0 = This { scratch: r1 } [Property(name#0)]
-  path#1 = StaticProperty { class: r2, name: r3, scratch: r4 } []
+  path#1 = StaticProperty { class: r0, name: r1, scratch: r2 } []
   0000  line 1    LoadInt { dst: r0, value: 1 }
   0001  line 1    AssignPath { path: path#0, src: r0 }
   0002  line 1    Clear { reg: r0 }
   0003  line 1    Clear { reg: r1 }
-  0004  line 1    FetchClassName { dst: r2, class: symbol#0 }
-  0005  line 1    LoadConst { dst: r3, constant: const#0 }
-  0006  line 1    IncDecPath { mode: PostIncrement, dst: r5, path: path#1 }
-  0007  line 1    Clear { reg: r2 }
-  0008  line 1    Clear { reg: r3 }
-  0009  line 1    Clear { reg: r4 }
-  0010  line 1    Clear { reg: r5 }
-  0011  line 1    LoadConst { dst: r6, constant: const#1 }
-  0012  line 1    Return { src: r6 }
+  0004  line 1    FetchClassName { dst: r0, class: symbol#0 }
+  0005  line 1    LoadConst { dst: r1, constant: const#0 }
+  0006  line 1    IncDecPath { mode: PostIncrement, dst: r3, path: path#1 }
+  0007  line 1    Clear { reg: r0 }
+  0008  line 1    Clear { reg: r1 }
+  0009  line 1    Clear { reg: r2 }
+  0010  line 1    Clear { reg: r3 }
+  0011  line 1    LoadConst { dst: r0, constant: const#1 }
+  0012  line 1    Return { src: r0 }

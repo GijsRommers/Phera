@@ -54,6 +54,7 @@ impl Compiler<'_> {
             return Ok(dst);
         };
         for argument in arguments {
+            let mark = self.mark_temporaries();
             let place = if !argument.spread && crate::helpers::reference_capable(&argument.value) {
                 Some(self.readable_place(&argument.value)?)
             } else {
@@ -79,6 +80,7 @@ impl Compiler<'_> {
                 },
                 line,
             );
+            self.release_temporaries(mark);
         }
         let dst = self.allocate_register()?;
         self.emit(Instruction::FinishCall { destination: dst }, line);

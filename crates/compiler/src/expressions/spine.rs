@@ -18,6 +18,9 @@ impl Compiler<'_> {
         &mut self,
         expression: &ast::Expression,
     ) -> Result<Reg, CompileError> {
+        if let Some(register) = self.take_compiled_operand(expression) {
+            return Ok(register);
+        }
         if matches!(expression.kind, ast::ExpressionKind::Binary { .. }) {
             let mut spine = vec![];
             let mut node = expression;
@@ -48,7 +51,7 @@ impl Compiler<'_> {
                 line,
             } in spine.into_iter().rev()
             {
-                let watermark = self.next;
+                let mark = self.mark_temporaries();
                 match operator {
                     ast::BinaryOperator::And
                     | ast::BinaryOperator::Or
@@ -73,15 +76,12 @@ impl Compiler<'_> {
                         );
                     }
                 }
-                if self
-                    .locals
-                    .values()
-                    .all(|register| (register.0 as usize) < watermark)
-                {
-                    self.next = watermark;
-                }
+                self.release_temporaries(mark);
             }
             return Ok(lhs);
+        }
+        if let Some(result) = self.compile_long_chain(expression) {
+            return result;
         }
         self.compile_expression_node(expression)
     }

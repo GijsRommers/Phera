@@ -1,7 +1,6 @@
 //! Compile statement constructs into ordered IR and patch their control-flow exits.
 
 use phera_ast as ast;
-use phera_bytecode::Reg;
 
 use crate::ir::{Constant, Instruction, Target};
 use crate::policies::DeclarationTiming;
@@ -14,17 +13,9 @@ impl Compiler<'_> {
         expression: &ast::Expression,
         line: usize,
     ) -> Result<(), CompileError> {
-        let first = self.next;
-        self.compile_expression(expression)?;
-        let temporaries: Vec<_> = (first..self.next)
-            .map(|index| Reg(index as u16))
-            .filter(|register| !self.locals.values().any(|local| local == register))
-            .collect();
-        for register in temporaries {
-            self.emit(Instruction::Clear { register }, line);
-        }
-
-        Ok(())
+        self.clear_temporaries_after(line, |compiler| {
+            compiler.compile_expression(expression).map(drop)
+        })
     }
 
     /// Evaluate and print each argument in source order.
@@ -34,8 +25,10 @@ impl Compiler<'_> {
         line: usize,
     ) -> Result<(), CompileError> {
         for expression in expressions {
+            let mark = self.mark_temporaries();
             let register = self.compile_expression(expression)?;
             self.emit(Instruction::Echo(register), line);
+            self.release_temporaries(mark);
         }
 
         Ok(())

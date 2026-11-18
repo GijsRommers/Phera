@@ -2,15 +2,15 @@ file golden.php
   const#0 = Null
   symbol#0 = identity
 
-function {main} (6 registers, dynamic scope)
+function {main} (5 registers, dynamic scope)
   r0 = $number
   0000  line 1    LoadInt { dst: r1, value: 3 }
   0001  line 1    Assign { local: r0, src: r1 }
-  0002  line 1    Move { dst: r5, src: r0 }
-  0003  line 1    CallDirect { function: function#0, args: r5, count: 1, dst: r2 }
+  0002  line 1    Move { dst: r4, src: r0 }
+  0003  line 1    CallDirect { function: function#0, args: r4, count: 1, dst: r2 }
   0004  line 1    Clear { reg: r2 }
-  0005  line 1    LoadInt { dst: r3, value: 1 }
-  0006  line 1    Return { src: r3 }
+  0005  line 1    LoadInt { dst: r2, value: 1 }
+  0006  line 1    Return { src: r2 }
 
 function identity (3 registers)
   r0 = $value
