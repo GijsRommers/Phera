@@ -14,3 +14,8 @@ var_dump(require 'message.php');
 chdir('library');
 var_dump(file_get_contents('content.txt'));
 var_dump(require './message.php');
+file_put_contents('include_path.php', 'working copy');
+set_include_path('nonexistent:');
+$stream = fopen('include_path.php', 'r', true);
+var_dump(fread($stream, 5));
+fclose($stream);

@@ -210,6 +210,11 @@ fn handle(
             )));
         }
     };
+    if handle.is_closed() {
+        return Err(NativeError::type_error(format!(
+            "{function}(): Argument #1 ($dir_handle) must be an open stream resource"
+        )));
+    }
     if !is_open(&handle) {
         return Err(NativeError::type_error(format!(
             "{function}(): Argument #1 ($dir_handle) must be a valid Directory resource"

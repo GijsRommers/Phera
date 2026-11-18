@@ -26,7 +26,11 @@ pub fn file_put_contents(
         let flags = args::int(&arguments, 2).unwrap_or(0);
         let data = args::value(&arguments, 1);
         let source = if matches!(data, Value::Resource(_)) {
-            Some(stream_argument(data, function, "#2 ($data)")?)
+            Some(stream_argument(data, function, "#2 ($data)").map_err(|_| {
+                NativeError::type_error(
+                    "file_put_contents(): supplied resource is not a valid stream resource",
+                )
+            })?)
         } else {
             None
         };

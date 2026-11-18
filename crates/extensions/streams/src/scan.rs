@@ -1,8 +1,8 @@
 //! `fscanf($file, '%d %s', $id, $name)` assigns fields from one input line.
 
 use phera_extension_api::{
-    Context, FunctionEntry, LocalFuture, NativeResult, Param, ParamType, PhpArray, Registry, Value,
-    args,
+    Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, PhpArray,
+    Registry, Value, args,
 };
 
 use crate::handles::{STREAM, read_amount, read_notice};
@@ -21,7 +21,15 @@ pub fn register(registry: &mut Registry) {
 
 fn scan(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
-        let resource = stream_arg(&arguments, "fscanf")?;
+        let resource = stream_arg(&arguments, "fscanf").map_err(|error| {
+            if matches!(args::value(&arguments, 0), Value::Resource(_)) {
+                NativeError::type_error(
+                    "fscanf(): supplied resource is not a valid File-Handle resource",
+                )
+            } else {
+                error
+            }
+        })?;
         let data = match line(resource, None).await? {
             Ok(data) if !data.is_empty() => data,
             Ok(_) => return Ok(Value::Bool(false)),

@@ -27,7 +27,7 @@ impl Default for Files {
             input: Arc::default(),
             stream_contexts: HashMap::new(),
             resources: Vec::new(),
-            next_id: 4,
+            next_id: 5,
         }
     }
 }
@@ -113,7 +113,8 @@ pub fn search(
     if name.is_absolute() || filename.starts_with(b"./") || filename.starts_with(b"../") {
         return canonical(&directory.resolve(name).ok()?).ok();
     }
-    for component in include.as_bytes().split(|byte| *byte == b':') {
+    let components = include.as_bytes().split(|byte| *byte == b':');
+    for component in components.filter(|component| !component.is_empty()) {
         let candidate = directory.resolve(&path(component).join(name)).ok()?;
         if let Ok(found) = canonical(&candidate) {
             return Some(found);

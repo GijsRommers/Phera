@@ -62,8 +62,11 @@ fn create(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         merge(&mut options, array)?;
     }
     if let Some(params) = args::array(arguments, 1)
-        && let Some(Value::Array(array)) = params.get(&ArrayKey::str("options"))
+        && let Some(input) = params.get(&ArrayKey::str("options"))
     {
+        let Value::Array(array) = input else {
+            return Err(NativeError::type_error("Invalid stream/context parameter"));
+        };
         merge(&mut options, array)?;
     }
     Ok(create_options(context, options))
@@ -143,6 +146,12 @@ fn set_option(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         if args::string(arguments, 2).is_some() {
             return Err(NativeError::value_error(concat!(
                 "stream_context_set_option(): Argument #3 ($option_name) must be null ",
+                "when argument #2 ($wrapper_or_options) is an array"
+            )));
+        }
+        if args::given(arguments, 3) {
+            return Err(NativeError::value_error(concat!(
+                "stream_context_set_option(): Argument #4 ($value) cannot be provided ",
                 "when argument #2 ($wrapper_or_options) is an array"
             )));
         }

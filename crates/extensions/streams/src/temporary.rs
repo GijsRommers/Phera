@@ -31,7 +31,7 @@ fn sys_get_temp_dir(_: &mut dyn Context, _: &[Value]) -> NativeResult {
 fn tmpfile(context: &mut dyn Context, _: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
         let result = IoPolicy::Blocking
-            .run(|| Builder::new().prefix("php").tempfile())
+            .run(|| Builder::new().prefix("php").rand_bytes(19).tempfile())
             .await?;
         match result {
             Ok(temp) => {
@@ -66,7 +66,7 @@ fn tempnam(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, 
         let (result, fallback) = IoPolicy::Blocking
             .run(move || {
                 let mut builder = Builder::new();
-                builder.prefix(&prefix);
+                builder.prefix(&prefix).rand_bytes(19);
                 let created = directory
                     .and_then(|path| path.canonicalize().ok())
                     .and_then(|path| builder.tempfile_in(path).ok());
