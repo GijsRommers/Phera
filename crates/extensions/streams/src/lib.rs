@@ -40,6 +40,7 @@ mod whole_write;
 mod wrapper;
 
 pub use request::{set_request, track_standard};
+pub use whole_write::append_log;
 pub use wrapper::standard_constants;
 
 use phera_extension_api::{Extension, Registry};
