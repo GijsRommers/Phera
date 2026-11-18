@@ -30,6 +30,7 @@ pub enum ParamType {
     String,
     Array,
     Object,
+    Class(&'static str),
     Callable,
     Iterable,
     /// `int|float`

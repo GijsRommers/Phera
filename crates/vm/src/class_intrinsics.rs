@@ -159,6 +159,21 @@ impl Vm {
             Operation::MethodExists | Operation::PropertyExists => {
                 check_object_or_class(function, &value)?;
                 let name = string(&arguments[1]);
+                // A native class answers for properties that live in its
+                // own state (DateInterval's `y`, `m`, `d` and so on).
+                if matches!(function, Operation::PropertyExists)
+                    && let Value::Object(object) = &value
+                    && let Some(access) = crate::properties::native_property_access(object)
+                    && (access.read)(
+                        self,
+                        object,
+                        &name,
+                        phera_extension_api::NativePropertyRead::Exists,
+                    )?
+                    .is_some()
+                {
+                    return Ok(Value::Bool(true));
+                }
                 Ok(Value::Bool(class.is_some_and(|class| {
                     if matches!(function, Operation::PropertyExists) {
                         self.class_property_exists(&value, &class, &name)

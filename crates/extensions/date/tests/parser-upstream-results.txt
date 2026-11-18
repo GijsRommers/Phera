@@ -1,0 +1,113 @@
+PHP 8.5.12, macOS ARM64, 2026-11-17; fixed procedural clock 1706704496.
+PASS 002.phpt: upstream expectation matches PHP
+UNSUPPORTED bug-gh11600.phpt: IntlDateFormatter
+UNSUPPORTED bug-gh18076.phpt: date_sun_
+UNSUPPORTED bug13142.phpt: putenv(
+PASS bug14561.phpt: upstream expectation matches PHP
+PASS bug17988.phpt: upstream expectation matches PHP
+PASS bug20382-1.phpt: upstream expectation matches PHP
+PASS bug20382-2.phpt: upstream expectation matches PHP
+PASS bug21399.phpt: upstream expectation matches PHP
+PASS bug26090.phpt: upstream expectation matches PHP
+PASS bug26198.phpt: upstream expectation matches PHP
+PASS bug26317.phpt: upstream expectation matches PHP
+PASS bug26320.phpt: upstream expectation matches PHP
+PASS bug26694.phpt: upstream expectation matches PHP
+PASS bug27780.phpt: upstream expectation matches PHP
+PASS bug28024.phpt: upstream expectation matches PHP
+PASS bug28088.phpt: upstream expectation matches PHP
+PASS bug28599.phpt: upstream expectation matches PHP
+PASS bug29150.phpt: upstream expectation matches PHP
+PASS bug29585.phpt: upstream expectation matches PHP
+PASS bug29595.phpt: upstream expectation matches PHP
+PASS bug30532.phpt: upstream expectation matches PHP
+PASS bug32086.phpt: upstream expectation matches PHP
+PASS bug32270.phpt: upstream expectation matches PHP
+PASS bug32555.phpt: upstream expectation matches PHP
+PASS bug32588.phpt: upstream expectation matches PHP
+PASS bug33056.phpt: upstream expectation matches PHP
+PASS bug33414-1.phpt: upstream expectation matches PHP
+PASS bug33414-2.phpt: upstream expectation matches PHP
+PASS bug33415-1.phpt: upstream expectation matches PHP
+PASS bug33415-2.phpt: upstream expectation matches PHP
+PASS bug33452.phpt: upstream expectation matches PHP
+UNSUPPORTED bug33532.phpt: putenv(
+PASS bug33536.phpt: upstream expectation matches PHP
+PASS bug33563.phpt: upstream expectation matches PHP
+PASS bug33578.phpt: upstream expectation matches PHP
+PASS bug33869.phpt: upstream expectation matches PHP
+PASS bug33957.phpt: upstream expectation matches PHP
+PASS bug34087.phpt: upstream expectation matches PHP
+PASS bug34304.phpt: upstream expectation matches PHP
+PASS bug34676.phpt: upstream expectation matches PHP
+PASS bug34771.phpt: upstream expectation matches PHP
+PASS bug35218.phpt: upstream expectation matches PHP
+PASS bug35414.phpt: upstream expectation matches PHP
+PASS bug35422.phpt: upstream expectation matches PHP
+PASS bug35456.phpt: upstream expectation matches PHP
+PASS bug35499.phpt: upstream expectation matches PHP
+PASS bug35624.phpt: upstream expectation matches PHP
+PASS bug35630.phpt: upstream expectation matches PHP
+PASS bug35699.phpt: upstream expectation matches PHP
+PASS bug35705.phpt: upstream expectation matches PHP
+PASS bug35885.phpt: upstream expectation matches PHP
+PASS bug35887.phpt: upstream expectation matches PHP
+PASS bug36224.phpt: upstream expectation matches PHP
+PASS bug36510.phpt: upstream expectation matches PHP
+PASS bug36599.phpt: upstream expectation matches PHP
+PASS bug37017.phpt: upstream expectation matches PHP
+PASS bug37368.phpt: upstream expectation matches PHP
+PASS bug37514.phpt: upstream expectation matches PHP
+PASS bug37616.phpt: upstream expectation matches PHP
+PASS bug37747.phpt: upstream expectation matches PHP
+PASS bug38229.phpt: upstream expectation matches PHP
+PASS bug40861.phpt: upstream expectation matches PHP
+CLASSES bug41523-64bit.phpt: DateTime API
+CLASSES bug41523.phpt: DateTime API
+PASS bug41709.phpt: upstream expectation matches PHP
+PASS bug41964.phpt: upstream expectation matches PHP
+CLASSES bug43452.phpt: DateTime API
+PASS bug43960.phpt: upstream expectation matches PHP
+PASS bug45081.phpt: upstream expectation matches PHP
+FAIL bug46111.phpt: missing runtime function timezone_identifiers_list(); upstream expectation matches PHP
+PASS bug50680.phpt: upstream expectation matches PHP
+CLASSES bug51096.phpt: DateTime API
+PASS bug51934.phpt: upstream expectation matches PHP
+CLASSES bug52290.phpt: DateTime API
+PASS bug52430.phpt: upstream expectation matches PHP
+CLASSES bug52577.phpt: DateTime API
+PASS bug53502.phpt: upstream expectation matches PHP
+CLASSES bug54851.phpt: DateTime API
+CLASSES bug62896.phpt: DateTime API
+PASS bug67109.phpt: upstream expectation matches PHP
+PASS bug69336.phpt: upstream expectation matches PHP
+CLASSES bug70245.phpt: DateTime API
+CLASSES bug73858.phpt: DateTime API
+PASS bug74057.phpt: upstream expectation matches PHP
+CLASSES bug81504.phpt: DateTime API
+CLASSES date_constants.phpt: DateTime API
+CLASSES date_create-relative.phpt: DateTime API
+UNSUPPORTED date_default_timezone_set-1.phpt: putenv(
+PASS date_parse_001.phpt: upstream expectation matches PHP
+PASS date_parse_basic1.phpt: upstream expectation matches PHP
+PASS date_parse_error.phpt: upstream expectation matches PHP
+UNSUPPORTED date_sun_info_001.phpt: date_sun_
+UNSUPPORTED date_sun_info_002.phpt: date_sun_
+UNSUPPORTED date_sun_info_003.phpt: date_sun_
+UNSUPPORTED default-timezone-1.phpt: putenv(
+UNSUPPORTED default-timezone-2.phpt: putenv(
+FAIL format-negative-timestamp.phpt: missing runtime function getrandmax(); upstream expectation matches PHP
+PASS oom_date_parse.phpt: upstream expectation matches PHP
+PASS oom_strtotime.phpt: upstream expectation matches PHP
+PASS strtotime-mysql-64bit.phpt: upstream expectation matches PHP
+SKIP strtotime-mysql.phpt: skip 32-bit only
+PASS strtotime-relative.phpt: upstream expectation matches PHP
+PASS strtotime.phpt: upstream expectation matches PHP
+PASS strtotime2.phpt: upstream expectation matches PHP
+PASS strtotime3-64bit.phpt: upstream expectation matches PHP
+SKIP strtotime3.phpt: skip 32-bit only
+PASS strtotime_basic.phpt: upstream expectation matches PHP
+PASS strtotime_basic2.phpt: upstream expectation matches PHP
+PASS strtotime_variation_scottish.phpt: upstream expectation matches PHP
+PASS timezone-configuration.phpt: upstream expectation matches PHP
+84 matched, 2 failed, 13 need classes, 10 other dependencies, 2 platform skips

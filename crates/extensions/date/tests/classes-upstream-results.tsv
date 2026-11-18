@@ -1,0 +1,706 @@
+file	result	reason
+002.phpt	passed
+003.phpt	passed
+004.phpt	passed
+005.phpt	passed
+006.phpt	passed
+007.phpt	passed
+008.phpt	passed
+009.phpt	deprecated	PHP 8.5 deprecated surface
+009_win32.phpt	skipped	PHP 8.5.12 upstream SKIPIF
+010.phpt	passed
+011.phpt	passed
+012.phpt	blocked	native-property-projection: PHP native object projection
+013.phpt	blocked	native-property-projection: PHP native object projection
+014.phpt	blocked	native-property-projection: PHP native object projection
+015.phpt	passed
+68062.phpt	passed
+DateInterval_construct_exceptions.phpt	passed
+DateInterval_createFromDateString_broken.phpt	passed
+DateInterval_days_prop1.phpt	passed
+DateInterval_format.phpt	passed
+DateInterval_format_a.phpt	passed
+DateInterval_serialize-001.phpt	blocked	native-object-serialization: General serialization entry point
+DateInterval_serialize-002.phpt	blocked	native-object-serialization: General serialization entry point
+DateInterval_serialize-003.phpt	blocked	native-object-serialization: General serialization entry point
+DateInterval_set_state_exception.phpt	passed
+DateInterval_uninitialised_exceptions.phpt	blocked	native-object-serialization: General serialization entry point
+DateInterval_write_property_return.phpt	passed
+DatePeriod_IteratorAggregate.phpt	deprecated	PHP 8.5 deprecated surface
+DatePeriod_by_ref_iterator.phpt	blocked	native-object-iterator: Iterate native DatePeriod entries
+DatePeriod_createFromISO8601String_static_return.phpt	blocked	native-property-projection: PHP native object projection
+DatePeriod_double_constructor_call.phpt	passed
+DatePeriod_getter.phpt	passed
+DatePeriod_modify_readonly_property.phpt	passed
+DatePeriod_no_advance_on_valid.phpt	blocked	native-object-iterator: Iterate native DatePeriod entries
+DatePeriod_properties1.phpt	passed
+DatePeriod_properties2.phpt	passed
+DatePeriod_serialize-001.phpt	blocked	native-object-serialization: General serialization entry point
+DatePeriod_serialize-002.phpt	blocked	native-object-serialization: General serialization entry point
+DatePeriod_serialize-003.phpt	blocked	native-object-serialization: General serialization entry point
+DatePeriod_serialize-004.phpt	blocked	native-property-projection: PHP native object fields
+DatePeriod_set_state.phpt	blocked	runtime: eval with var_export output
+DatePeriod_set_state_exception.phpt	passed
+DatePeriod_uninitialised_exceptions.phpt	blocked	native-object-serialization: General serialize entry point
+DatePeriod_wrong_arguments.phpt	deprecated	PHP 8.5 deprecated surface
+DatePeriod_wrong_constructor.phpt	passed
+DatePeriod_wrong_recurrence_on_constructor.phpt	passed
+DateTimeImmutable_constants.phpt	deprecated	PHP 8.5 deprecated surface
+DateTimeImmutable_createFromInterface-001.phpt	blocked	native-property-projection: PHP native object projection
+DateTimeImmutable_createFromInterface-002.phpt	blocked	native-property-projection: PHP native object projection
+DateTimeImmutable_createFromInterface_exceptions.phpt	passed
+DateTimeImmutable_createFromMutable-001.phpt	blocked	native-property-projection: PHP native object projection
+DateTimeImmutable_createFromMutable-002.phpt	blocked	native-property-projection: PHP native object projection
+DateTimeImmutable_createFromMutable_exceptions.phpt	passed
+DateTimeImmutable_inherited_serialization.phpt	blocked	native-object-serialization: General serialization entry point
+DateTimeImmutable_modify_invalid_format.phpt	passed
+DateTimeImmutable_serialization.phpt	blocked	native-object-serialization: General serialization entry point
+DateTimeImmutable_set_state.phpt	blocked	runtime: eval with var_export output
+DateTimeImmutable_set_state_exception.phpt	passed
+DateTimeImmutable_uninitialised_exceptions.phpt	blocked	native-object-serialization: General serialization entry point
+DateTimeInterface_constants.phpt	deprecated	PHP 8.5 deprecated surface
+DateTimeInterval_inherited_serialization.phpt	blocked	native-object-serialization: General serialization entry point
+DateTimePeriod_inherited_serialization.phpt	blocked	native-object-serialization: General serialization entry point
+DateTimeZone_clone_basic1.phpt	blocked	native-object-clone: Copy native object state
+DateTimeZone_clone_basic2.phpt	blocked	native-object-clone: Copy native object state
+DateTimeZone_clone_basic3.phpt	blocked	native-object-clone: Copy native object state
+DateTimeZone_clone_basic4.phpt	blocked	native-object-clone: Copy native object state
+DateTimeZone_compare.phpt	blocked	native-object-compare: Date object comparison semantics
+DateTimeZone_compare_basic1.phpt	blocked	native-object-compare: Date object comparison semantics
+DateTimeZone_construct_basic.phpt	blocked	native-property-projection: PHP native object projection
+DateTimeZone_construct_error.phpt	passed
+DateTimeZone_extends_basic1.phpt	blocked	runtime: User __toString dispatch
+DateTimeZone_getLocation.phpt	passed
+DateTimeZone_getName_basic1.phpt	passed
+DateTimeZone_getOffset_basic1.phpt	passed
+DateTimeZone_getTransitions_basic1.phpt	passed
+DateTimeZone_getTransitions_bug1.phpt	passed
+DateTimeZone_inherited_serialization.phpt	blocked	native-object-serialization: General serialization entry point
+DateTimeZone_listAbbreviations_basic1.phpt	passed
+DateTimeZone_listIdentifiers_basic1.phpt	passed
+DateTimeZone_serialization.phpt	blocked	native-property-projection: PHP native object fields
+DateTimeZone_serialize_errors.phpt	blocked	native-object-serialization: General serialization entry point
+DateTimeZone_serialize_type_1.phpt	blocked	native-object-serialization: General serialization entry point
+DateTimeZone_serialize_type_2.phpt	blocked	native-object-serialization: General serialization entry point
+DateTimeZone_serialize_type_3.phpt	blocked	native-object-serialization: General serialization entry point
+DateTimeZone_set_state.phpt	blocked	runtime: eval with var_export output
+DateTimeZone_set_state_exception.phpt	passed
+DateTimeZone_uninitialised_exceptions.phpt	blocked	native-object-serialization: General serialization entry point
+DateTime_add-dates.phpt	passed
+DateTime_add-fall-type2-type2.phpt	passed
+DateTime_add-fall-type2-type3.phpt	passed
+DateTime_add-fall-type3-type2.phpt	passed
+DateTime_add-fall-type3-type3.phpt	passed
+DateTime_add-february.phpt	passed
+DateTime_add-massive.phpt	passed
+DateTime_add-spring-type2-type2.phpt	passed
+DateTime_add-spring-type2-type3.phpt	passed
+DateTime_add-spring-type3-type2.phpt	passed
+DateTime_add-spring-type3-type3.phpt	passed
+DateTime_clone_basic1.phpt	blocked	native-object-clone: Copy native object state
+DateTime_clone_basic2.phpt	blocked	native-object-clone: Copy native object state
+DateTime_clone_basic3.phpt	blocked	native-object-clone: Copy native object state
+DateTime_clone_basic4.phpt	blocked	native-object-clone: Copy native object state
+DateTime_compare.phpt	blocked	native-object-compare: Date object comparison semantics
+DateTime_compare_basic1.phpt	blocked	native-object-compare: Date object comparison semantics
+DateTime_constants.phpt	deprecated	PHP 8.5 deprecated surface
+DateTime_construct-dst-overlap.phpt	passed
+DateTime_construct_basic1.phpt	blocked	native-property-projection: PHP native object projection
+DateTime_construct_error.phpt	passed
+DateTime_createFromImmutable-001.phpt	blocked	native-property-projection: PHP native object projection
+DateTime_createFromImmutable-002.phpt	blocked	native-property-projection: PHP native object projection
+DateTime_createFromInterface-001.phpt	blocked	native-property-projection: PHP native object projection
+DateTime_createFromInterface-002.phpt	blocked	native-property-projection: PHP native object projection
+DateTime_days-absolute.phpt	passed
+DateTime_days-dates.phpt	passed
+DateTime_days-fall-type2-type2.phpt	passed
+DateTime_days-fall-type2-type3.phpt	passed
+DateTime_days-fall-type3-type2.phpt	passed
+DateTime_days-fall-type3-type3.phpt	passed
+DateTime_days-february.phpt	passed
+DateTime_days-massive.phpt	passed
+DateTime_days-spring-type2-type2.phpt	passed
+DateTime_days-spring-type2-type3.phpt	passed
+DateTime_days-spring-type3-type2.phpt	passed
+DateTime_days-spring-type3-type3.phpt	passed
+DateTime_diff-absolute.phpt	passed
+DateTime_diff-dates.phpt	passed
+DateTime_diff-fall-type2-type2.phpt	passed
+DateTime_diff-fall-type2-type3.phpt	passed
+DateTime_diff-fall-type3-type2.phpt	passed
+DateTime_diff-fall-type3-type3.phpt	passed
+DateTime_diff-february.phpt	passed
+DateTime_diff-massive.phpt	passed
+DateTime_diff-spring-type2-type2.phpt	passed
+DateTime_diff-spring-type2-type3.phpt	passed
+DateTime_diff-spring-type3-type2.phpt	passed
+DateTime_diff-spring-type3-type3.phpt	passed
+DateTime_extends_basic1.phpt	blocked	runtime: User __toString dispatch
+DateTime_extends_basic2.phpt	passed
+DateTime_extends_basic3.phpt	passed
+DateTime_fix_createFromFormat.phpt	passed
+DateTime_format_basic1.phpt	passed
+DateTime_format_basic2.phpt	deprecated	PHP 8.5 deprecated surface
+DateTime_getOffset_basic1.phpt	passed
+DateTime_getTimeZone_basic1.phpt	passed
+DateTime_inherited_serialization.phpt	blocked	native-object-serialization: General serialization entry point
+DateTime_modify_basic1.phpt	passed
+DateTime_modify_invalid_format.phpt	passed
+DateTime_serialization.phpt	blocked	native-object-serialization: General serialization entry point
+DateTime_serialize.phpt	blocked	native-object-serialization: General serialization entry point
+DateTime_setDate_basic1.phpt	passed
+DateTime_setISODate_basic1.phpt	passed
+DateTime_setTime_basic1.phpt	passed
+DateTime_setTimezone_basic1.phpt	passed
+DateTime_set_state.phpt	blocked	runtime: eval with var_export output
+DateTime_set_state_exception.phpt	passed
+DateTime_sub-dates.phpt	passed
+DateTime_sub-fall-type2-type2.phpt	passed
+DateTime_sub-fall-type2-type3.phpt	passed
+DateTime_sub-fall-type3-type2.phpt	passed
+DateTime_sub-fall-type3-type3.phpt	passed
+DateTime_sub-february.phpt	passed
+DateTime_sub-massive.phpt	passed
+DateTime_sub-spring-type2-type2.phpt	passed
+DateTime_sub-spring-type2-type3.phpt	passed
+DateTime_sub-spring-type3-type2.phpt	passed
+DateTime_sub-spring-type3-type3.phpt	passed
+DateTime_uninitialised_exceptions.phpt	blocked	native-object-serialization: General serialization entry point
+DateTime_wakeup_exception.phpt	blocked	native-object-serialization: General serialization entry point
+ExtendDateTime.phpt	blocked	native-signatures: Magic method signature validation
+big_year.phpt	passed
+bug-gh11310-1.phpt	blocked	native-property-projection: PHP native object projection
+bug-gh11310-2.phpt	blocked	native-property-projection: PHP native object projection
+bug-gh11368.phpt	blocked	native-property-projection: PHP native object projection
+bug-gh11416.phpt	blocked	runtime: Reflection API
+bug-gh11600.phpt	blocked	runtime: intl extension
+bug-gh15582.phpt	passed
+bug-gh16037.phpt	passed
+bug-gh18076.phpt	passed
+bug-gh8471.phpt	blocked	runtime: Reflection API
+bug-gh8964-001.phpt	passed
+bug-gh8964-002.phpt	blocked	native-object-compare: Mixed mutable and immutable date comparisons
+bug-gh9106.phpt	passed
+bug-gh9763.phpt	passed
+bug13142.phpt	passed
+bug14561.phpt	passed
+bug17988.phpt	passed
+bug20382-1.phpt	passed
+bug20382-2.phpt	passed
+bug21399.phpt	passed
+bug21966.phpt	passed
+bug26090.phpt	passed
+bug26198.phpt	passed
+bug26317.phpt	passed
+bug26320.phpt	passed
+bug26694.phpt	passed
+bug27780.phpt	passed
+bug28024.phpt	passed
+bug28088.phpt	passed
+bug28599.phpt	passed
+bug29150.phpt	passed
+bug29585.phpt	passed
+bug29595.phpt	passed
+bug30096.phpt	passed
+bug30532.phpt	passed
+bug32086.phpt	passed
+bug32270.phpt	passed
+bug32555.phpt	passed
+bug32588.phpt	passed
+bug33056.phpt	passed
+bug33414-1.phpt	passed
+bug33414-2.phpt	passed
+bug33415-1.phpt	passed
+bug33415-2.phpt	passed
+bug33452.phpt	passed
+bug33532.phpt	skipped	PHP 8.5.12 upstream SKIPIF
+bug33536.phpt	passed
+bug33562.phpt	passed
+bug33563.phpt	passed
+bug33578.phpt	passed
+bug33869.phpt	passed
+bug33957.phpt	passed
+bug34087.phpt	passed
+bug34304.phpt	passed
+bug34676.phpt	passed
+bug34771.phpt	passed
+bug35143.phpt	blocked	runtime: Missing gettimeofday()
+bug35218.phpt	passed
+bug35414.phpt	passed
+bug35422.phpt	passed
+bug35425.phpt	passed
+bug35456.phpt	passed
+bug35499.phpt	passed
+bug35624.phpt	passed
+bug35630.phpt	passed
+bug35699.phpt	passed
+bug35705.phpt	passed
+bug35885.phpt	passed
+bug35887.phpt	passed
+bug36224.phpt	passed
+bug36510.phpt	passed
+bug36599.phpt	passed
+bug36988.phpt	skipped	PHP 8.5.12 upstream SKIPIF
+bug37017.phpt	passed
+bug37368.phpt	passed
+bug37514.phpt	passed
+bug37616.phpt	passed
+bug37747.phpt	passed
+bug38229.phpt	passed
+bug39782.phpt	passed
+bug40743.phpt	passed
+bug40861.phpt	passed
+bug41523-64bit.phpt	blocked	native-property-projection: PHP native object projection
+bug41523.phpt	skipped	PHP 8.5.12 upstream SKIPIF
+bug41599.phpt	passed
+bug41709.phpt	passed
+bug41842.phpt	passed
+bug41844.phpt	passed
+bug41964.phpt	passed
+bug42910.phpt	passed
+bug43003.phpt	passed
+bug43075.phpt	passed
+bug43452.phpt	passed
+bug43527.phpt	passed
+bug43808.phpt	passed
+bug43960.phpt	passed
+bug44562.phpt	deprecated	PHP 8.5 deprecated surface
+bug44742.phpt	passed
+bug44780.phpt	passed
+bug45081.phpt	passed
+bug45529.phpt	passed
+bug45543.phpt	passed
+bug45554.phpt	passed
+bug45682.phpt	blocked	native-property-projection: DateInterval dump exposes the duration shape
+bug45866.phpt	passed
+bug46108.phpt	blocked	native-object-serialization: General serialization entry point
+bug46111.phpt	passed
+bug46268.phpt	passed
+bug46874.phpt	blocked	native-object-iterator: Iterate native DatePeriod entries
+bug48058.phpt	passed
+bug48097.phpt	blocked	native-property-projection: PHP native object projection
+bug48276.phpt	passed
+bug48476.phpt	passed
+bug48678.phpt	blocked	native-object-serialization: General serialization entry point
+bug49059.phpt	passed
+bug49081.phpt	blocked	native-property-projection: PHP print/export object fields
+bug49585.phpt	passed
+bug49700.phpt	blocked	runtime: Missing gc_enable()
+bug49778.phpt	blocked	native-property-projection: DateInterval dump exposes the duration shape
+bug50055-001.phpt	passed
+bug50055-002.phpt	passed
+bug50392.phpt	passed
+bug50475.phpt	passed
+bug50680.phpt	passed
+bug51096.phpt	passed
+bug51393.phpt	passed
+bug51819.phpt	passed
+bug51866.phpt	blocked	native-property-projection: PHP native object projection
+bug51934.phpt	passed
+bug51987.phpt	blocked	native-property-projection: PHP native object fields
+bug51994.phpt	passed
+bug52062-64bit.phpt	passed
+bug52062.phpt	skipped	PHP 8.5.12 upstream SKIPIF
+bug52063.phpt	passed
+bug52113.phpt	blocked	native-object-serialization: General serialization entry point
+bug52290.phpt	passed
+bug52342.phpt	passed
+bug52430.phpt	passed
+bug52454.phpt	passed
+bug52480.phpt	blocked	native-property-projection: DateInterval array cast
+bug52577.phpt	passed
+bug52668.phpt	blocked	native-object-iterator: Iterate native DatePeriod entries
+bug52738.phpt	blocked	native-property-projection: DateInterval property order in print_r
+bug52808.phpt	blocked	native-property-projection: DateInterval dump exposes the duration shape
+bug53437_var0.phpt	blocked	native-object-iterator: Iterate native DatePeriod entries
+bug53437_var1.phpt	blocked	native-object-serialization: General serialization entry point
+bug53437_var2.phpt	blocked	native-object-serialization: General serialization entry point
+bug53437_var3.phpt	skipped	PHP 8.5.12 upstream SKIPIF
+bug53437_var4.phpt	blocked	native-property-projection: DateInterval dump exposes the duration shape
+bug53437_var5.phpt	blocked	native-object-serialization: General serialization entry point
+bug53437_var6.phpt	blocked	native-object-serialization: General serialization entry point
+bug53502.phpt	passed
+bug53879.phpt	blocked	native-property-projection: PHP native object fields
+bug54283.phpt	deprecated	PHP 8.5 deprecated surface
+bug54316.phpt	blocked	native-property-projection: PHP native object projection
+bug54340.phpt	blocked	native-property-projection: PHP native object projection
+bug54597.phpt	passed
+bug54851.phpt	passed
+bug55253.phpt	passed
+bug55397.phpt	blocked	native-object-serialization: General serialization entry point
+bug55407.phpt	passed
+bug60236.phpt	blocked	native-property-projection: PHP native object projection
+bug60302-001.phpt	blocked	native-called-class: Inherited createFromFormat returns the declaring class
+bug60302-002.phpt	blocked	native-called-class: Inherited createFromFormat returns the declaring class
+bug60774.phpt	blocked	native-property-projection: PHP native object fields
+bug61642.phpt	passed
+bug62326.phpt	passed
+bug62500.phpt	passed
+bug62561.phpt	passed
+bug62852.phpt	blocked	native-object-serialization: General serialization entry point
+bug62852_var2.phpt	blocked	native-object-serialization: General serialization entry point
+bug62852_var3.phpt	blocked	native-object-serialization: General serialization entry point
+bug62896.phpt	passed
+bug63391.phpt	passed
+bug63435.phpt	passed
+bug63740.phpt	passed
+bug64157.phpt	passed
+bug64653.phpt	passed
+bug64887.phpt	passed
+bug64992.phpt	passed
+bug65003.phpt	passed
+bug65184.phpt	skipped	PHP 8.5.12 upstream SKIPIF
+bug65371.phpt	deprecated	PHP 8.5 deprecated surface
+bug65502.phpt	passed
+bug65548.phpt	blocked	native-object-compare: DateTime and DateTimeImmutable comparison
+bug65672.phpt	blocked	runtime: Fatal error: Object expression not supported yet
+bug66019.phpt	passed
+bug66545.phpt	blocked	native-property-projection: PHP print/export object fields
+bug66721.phpt	blocked	native-object-serialization: General serialization entry point
+bug66836.phpt	passed
+bug66985.phpt	blocked	native-property-projection: PHP native object fields
+bug67109.phpt	passed
+bug67118.phpt	blocked	runtime: Additional object or exception behavior
+bug67118_2.phpt	blocked	native-property-projection: PHP native object projection
+bug67251.phpt	passed
+bug67253.phpt	passed
+bug67308.phpt	blocked	native-object-serialization: General serialization entry point
+bug68078.phpt	blocked	native-object-compare: Microseconds in instant comparisons
+bug68078_negative.phpt	blocked	native-object-compare: Pre-epoch microseconds in instant comparisons
+bug68406.phpt	blocked	native-property-projection: PHP native object projection
+bug68503.phpt	passed
+bug68549-dst-transition-DateTime-setTimestamp.phpt	passed
+bug68549-dst-transition-DateTime-setTimezone.phpt	passed
+bug68669.phpt	blocked	native-property-projection: PHP native object projection
+bug68942.phpt	blocked	native-object-serialization: General serialization entry point
+bug68942_2.phpt	blocked	native-object-serialization: General serialization entry point
+bug69089.phpt	passed
+bug69336.phpt	passed
+bug69587.phpt	passed
+bug69806.phpt	blocked	runtime: ini_set does not update the date timezone
+bug70153.phpt	blocked	native-object-serialization: General serialization entry point
+bug70245.phpt	passed
+bug70266.phpt	blocked	runtime: Reflection API
+bug70277.phpt	passed
+bug70810.phpt	blocked	native-object-compare: DateInterval comparison warning
+bug71525.phpt	blocked	native-property-projection: PHP native object projection
+bug71635.phpt	passed
+bug71700.phpt	blocked	native-property-projection: DateInterval dump exposes the duration shape
+bug71826.phpt	passed
+bug71889.phpt	passed
+bug72096.phpt	passed
+bug72719.phpt	passed
+bug72963.phpt	blocked	native-property-projection: PHP native object projection
+bug73091.phpt	blocked	native-object-serialization: General serialization entry point
+bug73239.phpt	blocked	native-signatures: DateTimeInterface user implementation restriction
+bug73294.phpt	passed
+bug73426.phpt	blocked	native-property-projection: PHP native object projection
+bug73460-001.phpt	passed
+bug73460-002.phpt	blocked	native-object-clone: Copy native object state
+bug73489.phpt	passed
+bug73837.phpt	passed
+bug73858.phpt	passed
+bug73942.phpt	passed
+bug74057.phpt	passed
+bug74173.phpt	passed
+bug74274.phpt	blocked	native-property-projection: PHP print/export object fields
+bug74524.phpt	blocked	native-property-projection: PHP print/export object fields
+bug74639.phpt	blocked	native-object-clone: Copy native object state
+bug74652.phpt	passed
+bug74671.phpt	blocked	native-property-projection: PHP native object fields
+bug74852.phpt	passed
+bug75002.phpt	blocked	native-object-iterator: Iterate native DatePeriod entries
+bug75035.phpt	blocked	native-object-serialization: General serialization entry point
+bug75167.phpt	blocked	native-object-clone: Copy native object state
+bug75222.phpt	blocked	native-property-projection: DateInterval fields in get_object_vars
+bug75232.phpt	blocked	native-property-projection: The date key appears only in print_r projection
+bug75577.phpt	blocked	native-property-projection: PHP native object projection
+bug75851.phpt	passed
+bug75857.phpt	passed
+bug75928.phpt	passed
+bug76032.phpt	passed
+bug76374.phpt	passed
+bug76462.phpt	passed
+bug76770.phpt	passed
+bug77097.phpt	passed
+bug77243-001.phpt	passed
+bug77243-002.phpt	passed
+bug77571.phpt	blocked	native-object-clone: Copy native object state
+bug78055.phpt	passed
+bug78139.phpt	blocked	native-property-projection: PHP native object projection
+bug78383.phpt	blocked	native-property-projection: Date and timezone array casts
+bug78452.phpt	blocked	native-property-projection: DateInterval dump exposes the duration shape
+bug78751.phpt	blocked	native-object-serialization: General serialization entry point
+bug79015.phpt	blocked	native-object-serialization: General serialization entry point
+bug79396-forward-transition-settime.phpt	passed
+bug79452.phpt	passed
+bug79580.phpt	passed
+bug79716.phpt	blocked	native-property-projection: PHP native object fields
+bug80047.phpt	blocked	native-object-iterator: Foreach must produce dates from the base class
+bug80057.phpt	passed
+bug80483.phpt	blocked	native-object-serialization: General serialization entry point
+bug80610.phpt	passed
+bug80664.phpt	passed
+bug80913.phpt	blocked	native-object-clone: Copy native object state
+bug80963.phpt	passed
+bug80974.phpt	passed
+bug80998.phpt	passed
+bug81097.phpt	blocked	native-property-projection: PHP native object fields
+bug81106.phpt	passed
+bug81263.phpt	blocked	native-property-projection: PHP print/export object fields
+bug81273.phpt	passed
+bug81458.phpt	passed
+bug81500.phpt	blocked	native-object-serialization: General serialization entry point
+bug81504.phpt	passed
+bug81565.phpt	blocked	native-property-projection: DateTime var_export fields
+call_function_from_method.phpt	passed
+checkdate_basic1.phpt	passed
+createFromTimestamp.phpt	blocked	native-property-projection: PHP native object projection
+createFromTimestamp_32bit.phpt	skipped	PHP 8.5.12 upstream SKIPIF
+date-lenient-create.phpt	blocked	native-property-projection: PHP native object fields
+date-lenient.phpt	passed
+date-parse-by-format001.phpt	passed
+date-set-timestamp.phpt	passed
+date-time-modify-times.phpt	passed
+date.phpt	passed
+date_add_basic.phpt	passed
+date_basic1.phpt	passed
+date_constants.phpt	deprecated	PHP 8.5 deprecated surface
+date_create-1.phpt	passed
+date_create-2.phpt	passed
+date_create-relative.phpt	passed
+date_create_basic.phpt	blocked	native-property-projection: PHP native object projection
+date_create_from_format_basic2.phpt	passed
+date_date_set_basic1.phpt	passed
+date_default_timezone_get-1.phpt	blocked	runtime: INI and environment handling
+date_default_timezone_get-2.phpt	blocked	runtime: INI and environment handling
+date_default_timezone_get-3.phpt	passed
+date_default_timezone_get-4.phpt	blocked	runtime: INI and environment handling
+date_default_timezone_set-1.phpt	blocked	runtime: INI and environment handling
+date_default_timezone_set_error.phpt	passed
+date_diff.phpt	blocked	native-object-clone: Copy native object state
+date_diff1.phpt	blocked	native-property-projection: PHP native object projection
+date_format_basic1.phpt	passed
+date_format_timezone.phpt	passed
+date_get_last_errors_basic.phpt	passed
+date_interval_bad_format_leak.phpt	deprecated	PHP 8.5 deprecated surface
+date_interval_create_from_date_string.phpt	passed
+date_interval_create_from_date_string_broken.phpt	passed
+date_interval_create_from_date_string_nullparam.phpt	passed
+date_interval_format.phpt	passed
+date_interval_non_relative_warning.phpt	passed
+date_interval_prop_dim.phpt	passed
+date_interval_set_state_error1.phpt	blocked	native-property-projection: DateInterval dump after restoration
+date_isodate_set_basic1.phpt	passed
+date_modify-1.phpt	passed
+date_modify-2.phpt	passed
+date_modify_basic1.phpt	passed
+date_offset_get_basic1.phpt	passed
+date_parse_001.phpt	passed
+date_parse_basic1.phpt	passed
+date_parse_error.phpt	passed
+date_period-immutable.phpt	blocked	native-object-iterator: Iterate native DatePeriod entries
+date_period.phpt	blocked	native-object-iterator: Iterate native DatePeriod entries
+date_period_bad_iso_format.phpt	deprecated	PHP 8.5 deprecated surface
+date_period_exclude_start_and_include_end.phpt	blocked	native-object-iterator: Iterate native DatePeriod entries
+date_period_include_end.phpt	blocked	native-object-iterator: Iterate native DatePeriod entries
+date_period_is_property.phpt	blocked	runtime: Reflection API
+date_period_microseconds.phpt	blocked	native-object-iterator: Iterate native DatePeriod entries
+date_period_properties.phpt	blocked	native-object-serialization: General serialization entry point
+date_period_set_state1.phpt	blocked	native-property-projection: PHP native object fields
+date_period_set_state2.phpt	passed
+date_period_unserialize1.phpt	blocked	native-property-projection: PHP native object fields
+date_period_unserialize2.phpt	passed
+date_period_unserialize3.phpt	blocked	native-property-projection: Dump after partial direct restoration
+date_period_unset_property.phpt	passed
+date_sub_basic.phpt	passed
+date_sun_info_001.phpt	passed
+date_sun_info_002.phpt	passed
+date_sun_info_003.phpt	passed
+date_sunrise_and_sunset_basic.phpt	deprecated	PHP 8.5 deprecated surface
+date_sunrise_and_sunset_error.phpt	deprecated	PHP 8.5 deprecated surface
+date_sunrise_variation7.phpt	deprecated	PHP 8.5 deprecated surface
+date_sunrise_variation8.phpt	deprecated	PHP 8.5 deprecated surface
+date_sunset_variation7.phpt	deprecated	PHP 8.5 deprecated surface
+date_sunset_variation8.phpt	deprecated	PHP 8.5 deprecated surface
+date_time_fractions.phpt	blocked	native-property-projection: DateInterval dump exposes the duration shape
+date_time_fractions_create_from_format.phpt	blocked	native-property-projection: PHP native object fields
+date_time_fractions_serialize.phpt	blocked	native-object-serialization: General serialization entry point
+date_time_immutable-inherited.phpt	passed
+date_time_immutable.phpt	passed
+date_time_immutable001.phpt	passed
+date_time_set_basic1.phpt	passed
+date_timestamp_get.phpt	passed
+date_timestamp_set.phpt	passed
+date_timestamp_set_nullparam2.phpt	blocked	native-property-projection: PHP native object projection
+date_timezone_get_basic1.phpt	passed
+date_timezone_set_basic1.phpt	passed
+default-timezone-1.phpt	passed
+default-timezone-2.phpt	passed
+format-negative-timestamp.phpt	passed
+forward-transition-construction.phpt	passed
+getSetMicroseconds.phpt	blocked	native-property-projection: PHP native object projection
+getdate_basic.phpt	passed
+getdate_variation2.phpt	passed
+getdate_variation3.phpt	passed
+getdate_variation4.phpt	passed
+getdate_variation5.phpt	passed
+gettimeofday_basic.phpt	blocked	runtime: Missing gettimeofday()
+gh-124.phpt	passed
+gh10152.phpt	blocked	native-object-serialization: General serialization entry point
+gh10218.phpt	blocked	native-property-projection: PHP native object fields
+gh10447.phpt	passed
+gh10583.phpt	passed
+gh10747-1.phpt	blocked	native-object-serialization: General serialization entry point
+gh10747-2.phpt	blocked	native-object-serialization: General serialization entry point
+gh10747-3.phpt	blocked	native-object-serialization: General serialization entry point
+gh10747-4.phpt	blocked	native-object-serialization: General serialization entry point
+gh10747-error.phpt	blocked	native-object-serialization: General serialization entry point
+gh11281.phpt	passed
+gh11455.phpt	blocked	native-object-serialization: General serialization entry point
+gh11854.phpt	blocked	native-property-projection: PHP native object projection
+gh14383.phpt	passed
+gh14709.phpt	passed
+gh14732.phpt	deprecated	PHP 8.5 deprecated surface
+gh16454.phpt	deprecated	PHP 8.5 deprecated surface
+gh18304.phpt	blocked	native-property-projection: PHP native object projection
+gh18422.phpt	passed
+gh18481.phpt	deprecated	PHP 8.5 deprecated surface
+gh20764.phpt	blocked	native-object-serialization: General serialization entry point
+gh20936.phpt	passed
+gh7758.phpt	blocked	native-property-projection: PHP native object fields
+gh8730.phpt	blocked	native-property-projection: PHP print/export object fields
+gh9699.phpt	passed
+gh9700.phpt	blocked	native-property-projection: PHP native object fields
+gh9866.phpt	passed
+gh9880.phpt	passed
+gh9891.phpt	blocked	native-object-clone: Copy native object state
+gmdate_basic.phpt	passed
+gmdate_variation10.phpt	passed
+gmdate_variation11.phpt	passed
+gmdate_variation12.phpt	skipped	PHP 8.5.12 upstream SKIPIF
+gmdate_variation12_64bits.phpt	passed
+gmdate_variation13.phpt	passed
+gmdate_variation3.phpt	passed
+gmdate_variation4.phpt	passed
+gmdate_variation5.phpt	passed
+gmdate_variation6.phpt	passed
+gmdate_variation7.phpt	passed
+gmdate_variation9.phpt	passed
+gmmktime_basic.phpt	passed
+gmmktime_variation7.phpt	passed
+gmmktime_variation8.phpt	passed
+gmstrftime_basic.phpt	deprecated	PHP 8.5 deprecated surface
+gmstrftime_variation10.phpt	deprecated	PHP 8.5 deprecated surface
+gmstrftime_variation11.phpt	deprecated	PHP 8.5 deprecated surface
+gmstrftime_variation12.phpt	deprecated	PHP 8.5 deprecated surface
+gmstrftime_variation13.phpt	deprecated	PHP 8.5 deprecated surface
+gmstrftime_variation14.phpt	deprecated	PHP 8.5 deprecated surface
+gmstrftime_variation15.phpt	deprecated	PHP 8.5 deprecated surface
+gmstrftime_variation16.phpt	deprecated	PHP 8.5 deprecated surface
+gmstrftime_variation17.phpt	deprecated	PHP 8.5 deprecated surface
+gmstrftime_variation18.phpt	deprecated	PHP 8.5 deprecated surface
+gmstrftime_variation19.phpt	deprecated	PHP 8.5 deprecated surface
+gmstrftime_variation20.phpt	deprecated	PHP 8.5 deprecated surface
+gmstrftime_variation21.phpt	deprecated	PHP 8.5 deprecated surface
+gmstrftime_variation22.phpt	deprecated	PHP 8.5 deprecated surface
+gmstrftime_variation3.phpt	deprecated	PHP 8.5 deprecated surface
+gmstrftime_variation4.phpt	deprecated	PHP 8.5 deprecated surface
+gmstrftime_variation5.phpt	deprecated	PHP 8.5 deprecated surface
+gmstrftime_variation6.phpt	deprecated	PHP 8.5 deprecated surface
+gmstrftime_variation7.phpt	deprecated	PHP 8.5 deprecated surface
+gmstrftime_variation8.phpt	deprecated	PHP 8.5 deprecated surface
+gmstrftime_variation9.phpt	deprecated	PHP 8.5 deprecated surface
+idate_basic.phpt	passed
+idate_variation4.phpt	passed
+idate_variation5.phpt	passed
+idate_variation6.phpt	passed
+ini_set_incorrect-002.phpt	blocked	runtime: INI and environment handling
+ini_set_incorrect.phpt	blocked	runtime: INI and environment handling
+instantiate_uninstantiable_classes.phpt	blocked	native-called-class: Inherited static factory class
+localtime_basic.phpt	passed
+localtime_variation4.phpt	passed
+localtime_variation5.phpt	passed
+microtime_basic.phpt	passed
+mktime-1.phpt	passed
+mktime-3-64bit.phpt	passed
+mktime-3.phpt	skipped	PHP 8.5.12 upstream SKIPIF
+mktime_basic1.phpt	passed
+mktime_error.phpt	passed
+multiple_calls_date_period_iterator_current.phpt	blocked	native-object-iterator: Iterate native DatePeriod entries
+oo_001.phpt	passed
+oo_002.phpt	blocked	native-object-clone: Copy native object state
+oom_date_create.phpt	passed
+oom_date_create_immutable.phpt	passed
+oom_date_interval_create_from_date_string.phpt	passed
+oom_date_modify.phpt	passed
+oom_date_parse.phpt	passed
+oom_dateinterval_construct.phpt	passed
+oom_dateinterval_createfromdatestring.phpt	passed
+oom_dateperiod_construct.phpt	deprecated	PHP 8.5 deprecated surface
+oom_datetime_construct.phpt	passed
+oom_datetime_modify.phpt	passed
+oom_datetimeimmutable_construct.phpt	passed
+oom_datetimeimmutable_modify.phpt	passed
+oom_strtotime.phpt	passed
+rfc-datetime_and_daylight_saving_time-type1.phpt	passed
+rfc-datetime_and_daylight_saving_time-type2.phpt	passed
+rfc-datetime_and_daylight_saving_time-type3-ba.phpt	passed
+rfc-datetime_and_daylight_saving_time-type3-bd1.phpt	passed
+rfc-datetime_and_daylight_saving_time-type3-bd2.phpt	passed
+rfc-datetime_and_daylight_saving_time-type3-bs.phpt	passed
+rfc-datetime_and_daylight_saving_time-type3-fa.phpt	passed
+rfc-datetime_and_daylight_saving_time-type3-fd.phpt	passed
+rfc-datetime_and_daylight_saving_time-type3-fs.phpt	passed
+strftime_basic.phpt	deprecated	PHP 8.5 deprecated surface
+strftime_variation10.phpt	deprecated	PHP 8.5 deprecated surface
+strftime_variation11.phpt	deprecated	PHP 8.5 deprecated surface
+strftime_variation12.phpt	deprecated	PHP 8.5 deprecated surface
+strftime_variation13.phpt	deprecated	PHP 8.5 deprecated surface
+strftime_variation14.phpt	deprecated	PHP 8.5 deprecated surface
+strftime_variation15.phpt	deprecated	PHP 8.5 deprecated surface
+strftime_variation16.phpt	deprecated	PHP 8.5 deprecated surface
+strftime_variation17.phpt	deprecated	PHP 8.5 deprecated surface
+strftime_variation18.phpt	deprecated	PHP 8.5 deprecated surface
+strftime_variation19.phpt	deprecated	PHP 8.5 deprecated surface
+strftime_variation20.phpt	deprecated	PHP 8.5 deprecated surface
+strftime_variation21.phpt	deprecated	PHP 8.5 deprecated surface
+strftime_variation22.phpt	deprecated	PHP 8.5 deprecated surface
+strftime_variation3.phpt	deprecated	PHP 8.5 deprecated surface
+strftime_variation4.phpt	deprecated	PHP 8.5 deprecated surface
+strftime_variation5.phpt	deprecated	PHP 8.5 deprecated surface
+strftime_variation6.phpt	deprecated	PHP 8.5 deprecated surface
+strftime_variation7.phpt	deprecated	PHP 8.5 deprecated surface
+strftime_variation8.phpt	deprecated	PHP 8.5 deprecated surface
+strftime_variation9.phpt	deprecated	PHP 8.5 deprecated surface
+strtotime-mysql-64bit.phpt	passed
+strtotime-mysql.phpt	skipped	PHP 8.5.12 upstream SKIPIF
+strtotime-relative.phpt	passed
+strtotime.phpt	passed
+strtotime2.phpt	passed
+strtotime3-64bit.phpt	passed
+strtotime3.phpt	skipped	PHP 8.5.12 upstream SKIPIF
+strtotime_basic.phpt	passed
+strtotime_basic2.phpt	passed
+strtotime_variation_scottish.phpt	passed
+sunfuncts.phpt	deprecated	PHP 8.5 deprecated surface
+sunfuncts_partial_hour_utc_offset.phpt	deprecated	PHP 8.5 deprecated surface
+test-parse-from-format.phpt	blocked	native-property-projection: PHP native object projection
+time_basic.phpt	passed
+timestamp-in-dst.phpt	passed
+timezone-configuration.phpt	passed
+timezone_abbreviations_list_basic1.phpt	passed
+timezone_identifiers_list_basic1.phpt	passed
+timezone_identifiers_list_wrong_constructor.phpt	passed
+timezone_location_get.phpt	passed
+timezone_name_from_abbr_basic1.phpt	passed
+timezone_offset_get_basic1.phpt	passed
+timezone_offset_get_error.phpt	passed
+timezone_open_basic1.phpt	blocked	native-property-projection: PHP native object projection
+timezone_open_warning.phpt	passed
+timezone_transitions_get_basic1.phpt	passed
+timezone_version_get.phpt	passed
+timezone_version_get_basic1.phpt	passed
+timezones-list.phpt	passed
+timezones.phpt	passed
+unserialize-test.phpt	blocked	runtime: Missing file_get_contents()

@@ -30,7 +30,7 @@ impl Vm {
                     Ok(reference) => reference,
                     Err(error)
                         if creation == Creation::Existing
-                            && missing == Missing::Silent
+                            && missing != Missing::Warn
                             && !crate::autoload::ClassMiss::is(&error) =>
                     {
                         return Ok(None);

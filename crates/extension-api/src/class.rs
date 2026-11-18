@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use phera_value::{Object, Value};
 
-use crate::{ConstantValue, Context, LocalFuture, NativeResult, Param};
+use crate::{ConstantValue, Context, LocalFuture, NativeError, NativeResult, Param};
 
 /// An extension can preserve legacy parsing behavior while keeping its reflected signature.
 /// Most methods use Default; Prepared means the hook already checked and coerced arguments.
@@ -144,6 +144,7 @@ pub struct PropertyEntry {
     pub default: ConstantValue,
     pub visibility: Visibility,
     pub is_static: bool,
+    pub is_readonly: bool,
 }
 
 impl PropertyEntry {
@@ -153,8 +154,44 @@ impl PropertyEntry {
             default,
             visibility,
             is_static: false,
+            is_readonly: false,
         }
     }
+
+    pub const fn readonly(mut self) -> Self {
+        self.is_readonly = true;
+        self
+    }
+}
+
+/// Instance access for native properties whose values live outside ordinary storage.
+pub enum NativePropertyRead {
+    Read,
+    Quiet,
+    Isset,
+    Exists,
+}
+
+/// A mutation reaching a native property before ordinary storage is changed.
+pub enum NativePropertyMutation<'a> {
+    Assign(&'a Value),
+    Bind,
+    Reference,
+    Unset,
+    Indirect,
+}
+
+/// Return `None` to use ordinary storage. For existence checks, any `Some` counts.
+pub type ReadNativeProperty =
+    fn(&mut dyn Context, &Object, &str, NativePropertyRead) -> Result<Option<Value>, NativeError>;
+
+/// Return `true` when the mutation has already been handled.
+pub type MutateNativeProperty =
+    fn(&mut dyn Context, &Object, &str, NativePropertyMutation<'_>) -> Result<bool, NativeError>;
+
+pub struct NativePropertyAccess {
+    pub read: ReadNativeProperty,
+    pub mutate: MutateNativeProperty,
 }
 
 /// A class or interface provided by an extension.
@@ -170,6 +207,7 @@ pub struct ClassEntry {
     /// For example, PHP may declare `function rows($mode = PDO::FETCH_ASSOC) {}`.
     pub constants: &'static [(&'static str, ConstantValue)],
     pub properties: &'static [PropertyEntry],
+    pub property_access: Option<&'static NativePropertyAccess>,
     pub methods: &'static [MethodEntry],
 }
 
@@ -185,6 +223,7 @@ impl ClassEntry {
             interfaces: &[],
             constants: &[],
             properties: &[],
+            property_access: None,
             methods: &[],
         }
     }
