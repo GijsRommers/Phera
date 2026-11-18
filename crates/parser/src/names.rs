@@ -17,6 +17,7 @@ impl Parser<'_> {
     pub(crate) fn parse_name(&mut self) -> Result<Name, ParseError> {
         let token = self.peek_span();
         let text = self.text();
+        let text = text.as_ref();
 
         let (kind, text) = match self.kind() {
             TokenKind::Identifier => (NameKind::Unqualified, text),
@@ -47,6 +48,9 @@ impl Parser<'_> {
     pub(crate) fn parse_identifier(&mut self) -> Result<Identifier, ParseError> {
         let span = self.peek_span();
 
+        if self.at(TokenKind::OpenTagWithEcho) {
+            return Err(self.error("Cannot use \"<?=\" as an identifier"));
+        }
         if !is_word_token(self.kind()) {
             return Err(self.error(format!(
                 "expected an identifier, found {}",

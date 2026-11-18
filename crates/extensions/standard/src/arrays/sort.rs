@@ -5,9 +5,12 @@
 //! make the same comparisons, and like PHP 8 they are stable: entries that
 //! compare equal keep their order, also when sorting in reverse.
 
+use std::cmp::Ordering;
+
+use phera_extension_api::value::compare_after_error;
 use phera_extension_api::{
-    ArrayKey, Context, FunctionEntry, LocalFuture, NativeResult, Param, ParamType, PhpArray, Value,
-    args,
+    ArrayKey, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType,
+    PhpArray, Value, args,
 };
 
 use super::ordering::SortFlags;
@@ -226,6 +229,7 @@ async fn sort_array(
     flags: SortFlags,
 ) -> NativeResult {
     let variable = args::reference(&arguments, 0).ok_or_else(super::not_a_variable)?;
+    // Entries may refer to this variable, so comparison needs it unborrowed.
     let entries: Vec<(ArrayKey, Value)> = match &*variable
         .try_borrow()
         .map_err(|_| super::variable_in_use())?
@@ -238,49 +242,59 @@ async fn sort_array(
     };
     let mut failure = None;
     let order = zend_sort::order_async(entries.len(), async |left, right| {
-        let (left_entry, right_entry) = (&entries[left], &entries[right]);
-        let order = if failure.is_some() {
-            std::cmp::Ordering::Equal
-        } else {
-            let comparison = match sort.by {
-                SortBy::Values => {
-                    flags
-                        .compare_with_objects(context, &left_entry.1, &right_entry.1)
-                        .await
-                }
-                SortBy::Keys => flags.compare(
-                    context,
-                    &Value::from(left_entry.0.clone()),
-                    &Value::from(right_entry.0.clone()),
-                ),
-            };
-            match comparison {
-                Ok(order) => order,
-                Err(error) => {
-                    failure = Some(error);
-                    std::cmp::Ordering::Equal
-                }
+        let (Some(left_entry), Some(right_entry)) = (entries.get(left), entries.get(right)) else {
+            return Ok(Ordering::Equal);
+        };
+        let compared = match sort.by {
+            SortBy::Values if failure.is_some() && matches!(flags, SortFlags::Regular) => {
+                compare_after_error(&left_entry.1, &right_entry.1, context.diagnostics())
+                    .map(|result| result.cmp(&0))
+                    .map_err(NativeError::from)
+            }
+            SortBy::Values => {
+                flags
+                    .compare_with_objects(context, &left_entry.1, &right_entry.1)
+                    .await
+            }
+            SortBy::Keys => flags.compare(
+                context,
+                &Value::from(left_entry.0.clone()),
+                &Value::from(right_entry.0.clone()),
+            ),
+        };
+        let order = match compared {
+            Ok(order) => order,
+            Err(error) => {
+                // Zend continues sorting with an uncomparable result and throws afterward.
+                failure.get_or_insert(error);
+                Ordering::Greater
             }
         };
         let order = if sort.reverse { order.reverse() } else { order };
+        // PHP 8's stable sort: equal entries stay in their old order.
         Ok(order.then_with(|| left.cmp(&right)))
     })
     .await?;
     let mut result = PhpArray::with_capacity(entries.len());
     for index in order {
-        let (key, value) = &entries[index];
-        match sort.keys {
-            IntegerKeys::Preserve => {
-                result.insert(key.clone(), value.clone());
-            }
-            IntegerKeys::Renumber => {
-                result.push(value.clone())?;
-            }
+        let Some((key, value)) = entries.get(index) else {
+            return Err(NativeError::error(
+                "Internal error: invalid array sort position",
+            ));
+        };
+        if sort.keys == IntegerKeys::Preserve {
+            result.insert(key.clone(), value.clone());
+        } else {
+            result.push(value.clone())?;
         }
     }
     result.reset();
-    *variable
-        .try_borrow_mut()
-        .map_err(|_| super::variable_in_use())? = Value::from(result);
-    failure.map_or(Ok(Value::Bool(true)), Err)
+    super::change_array_argument(&arguments, |array| {
+        *array = result;
+        Ok(())
+    })?;
+    match failure {
+        Some(error) => Err(error),
+        None => Ok(Value::Bool(true)),
+    }
 }

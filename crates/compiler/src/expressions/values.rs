@@ -1,7 +1,7 @@
 //! Lower AST expression constructs to IR while preserving PHP evaluation order.
 
 use phera_ast as ast;
-use phera_bytecode::Reg;
+use phera_bytecode::{FetchMode, Reg};
 
 use crate::ir::{Constant, Instruction, Target, Unary};
 use crate::policies::NameKind;
@@ -30,6 +30,12 @@ impl Compiler<'_> {
         line: usize,
     ) -> Result<Reg, CompileError> {
         let (name, fallback) = self.resolve(name, NameKind::Constant);
+        match name.to_ascii_lowercase().as_str() {
+            "true" => return self.literal(Constant::Bool(true), line),
+            "false" => return self.literal(Constant::Bool(false), line),
+            "null" => return self.literal(Constant::Null, line),
+            _ => {}
+        }
         let dst = self.allocate_register()?;
         self.emit(
             Instruction::Constant {
@@ -48,7 +54,7 @@ impl Compiler<'_> {
         value: &ast::Expression,
         line: usize,
     ) -> Result<Reg, CompileError> {
-        let src = self.quiet_mode(value, phera_bytecode::FetchMode::Empty)?;
+        let src = self.quiet_access(value, FetchMode::Empty)?;
         let dst = self.allocate_register()?;
         self.emit(
             Instruction::Unary {
@@ -70,7 +76,7 @@ impl Compiler<'_> {
         let dst = self.literal(Constant::Bool(false), line)?;
         let mut ends = vec![];
         for value in values {
-            let register = self.quiet_mode(value, phera_bytecode::FetchMode::Isset)?;
+            let register = self.quiet_access(value, FetchMode::Isset)?;
             ends.push(self.emit(
                 Instruction::BranchNull {
                     value: register,

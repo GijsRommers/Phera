@@ -15,7 +15,7 @@ impl Compiler<'_> {
         timing: DeclarationTiming,
         line: usize,
     ) -> Result<(), CompileError> {
-        if self.function.name.contains("::") {
+        if self.class_scope.is_some() {
             return Err(self.error("Class declarations may not be nested", line));
         }
         if !matches!(
@@ -176,6 +176,7 @@ impl Compiler<'_> {
         }
         let index = self.classes.len();
         self.classes.push(ClassDeclaration {
+            line: line as u32,
             name,
             parent: declaration
                 .extends

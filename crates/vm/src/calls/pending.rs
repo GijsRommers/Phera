@@ -105,15 +105,19 @@ impl Vm {
         if let Some(index) = self.function_table.get(&lower) {
             return Ok(self.function_callee(index));
         }
-        let (name, target, parameters): (_, _, Vec<_>) =
-            if let Some(entry) = self.registry.get_function(name.trim_start_matches('\\')) {
-                (
-                    entry.name.into(),
-                    CallTarget::Native(*entry),
-                    entry.params.iter().map(ParameterSpec::native).collect(),
-                )
-            } else if let Some(intrinsic) = crate::intrinsics::Intrinsic::resolve(name) {
-                let parameters = intrinsic
+        let (name, target, parameters): (_, _, Vec<_>) = if let Some(entry) =
+            self.registry.get_function(name.trim_start_matches('\\'))
+        {
+            (
+                entry.name.into(),
+                CallTarget::Native(*entry),
+                entry.params.iter().map(ParameterSpec::native).collect(),
+            )
+        } else if let Some(intrinsic) = crate::intrinsics::Intrinsic::resolve(name) {
+            let parameters = if let Some(parameters) = intrinsic.parameters() {
+                parameters.iter().map(ParameterSpec::native).collect()
+            } else {
+                intrinsic
                     .parameter_names()
                     .iter()
                     .map(|name| ParameterSpec {
@@ -124,13 +128,14 @@ impl Vm {
                         variadic: matches!(intrinsic, crate::intrinsics::Intrinsic::CallUserFunc)
                             && *name == "args",
                     })
-                    .collect();
-                (lower.into(), CallTarget::Intrinsic(intrinsic), parameters)
-            } else {
-                return Err(NativeError::error(format!(
-                    "Call to undefined function {name}()"
-                )));
+                    .collect()
             };
+            (lower.into(), CallTarget::Intrinsic(intrinsic), parameters)
+        } else {
+            return Err(NativeError::error(format!(
+                "Call to undefined function {name}()"
+            )));
+        };
         Ok(Callee {
             argument_binding: crate::calls::callback_binding::ArgumentBinding::Caller,
             name,

@@ -72,7 +72,9 @@ fn sexp_stmt_kind(kind: &StatementKind) -> String {
                 exprs.iter().map(sexp_expr).collect::<Vec<_>>().join(" ")
             )
         }
-        StatementKind::InlineHtml(html) => format!("(html {html:?})"),
+        StatementKind::InlineHtml(html) => {
+            format!("(html {:?})", std::str::from_utf8(html).unwrap())
+        }
         StatementKind::Block(block) => format!("(block {})", sexp_stmt_list(block)),
         StatementKind::If {
             condition,

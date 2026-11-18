@@ -2,6 +2,10 @@
 
 use phera_extension_api::{NativeError, Value, args};
 
+use crate::constants::{
+    FETCH_CLASS, FETCH_CLASS_FLAGS, FETCH_GROUPING, FETCH_KEY_PAIR, FETCH_KNOWN_BITS,
+    FETCH_MODE_BITS,
+};
 use crate::fetch::FetchMode;
 
 #[derive(Clone, Copy)]
@@ -42,23 +46,23 @@ pub fn validate(
     } else {
         "#1 ($mode)"
     };
-    if number < 0 || number & !0x3ff != 0 || number & 0x1f > 12 {
+    if number < 0 || number & !FETCH_KNOWN_BITS != 0 || number & FETCH_MODE_BITS > FETCH_KEY_PAIR {
         return Err(NativeError::value_error(format!(
             "{name}(): Argument {argument} must be a bitmask of PDO::FETCH_* constants"
         )));
     }
-    if number & 0x380 != 0 && number & 0x1f != 8 {
+    if number & FETCH_CLASS_FLAGS != 0 && number & FETCH_MODE_BITS != FETCH_CLASS {
         return Err(NativeError::value_error(format!(
             "{name}(): Argument {argument} cannot use PDO::FETCH_CLASSTYPE, \
              PDO::FETCH_PROPS_LATE, or PDO::FETCH_SERIALIZE fetch flags with a fetch \
              mode other than PDO::FETCH_CLASS"
         )));
     }
-    let mode = FetchMode::parse(number & 0x1f, default)?;
+    let mode = FetchMode::parse(number & FETCH_MODE_BITS, default)?;
     let flags = if number == 0 {
         default_flags
     } else {
-        number & 0x60
+        number & FETCH_GROUPING
     };
     let expected = offset + 1 + usize::from(matches!(mode, FetchMode::Column));
     let count = arguments.len();

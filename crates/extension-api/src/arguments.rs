@@ -164,11 +164,16 @@ fn type_text(ty: ParamType) -> &'static str {
         ParamType::String => "string",
         ParamType::Array => "array",
         ParamType::Object => "object",
+        ParamType::Class(name) => name,
         ParamType::Callable => "callable",
         ParamType::Iterable => "Traversable|array",
         ParamType::Number => "int|float",
         ParamType::IntOrString => "string|int",
         ParamType::ArrayOrString => "array|string",
+        ParamType::StringOrNumber => "string|int|float",
+        ParamType::ArrayOrNumber => "array|int|float",
+        ParamType::ArrayOrFloat => "array|float",
+        ParamType::ArrayOrBool => "array|bool",
     }
 }
 
@@ -205,6 +210,9 @@ fn convert(
         // exist, which only the VM knows; `Context::call` reports it.
         ParamType::Mixed | ParamType::Callable => return Ok(()),
         ParamType::Array => matches!(value, Value::Array(_)).then_some(None),
+        ParamType::Class(name) => {
+            matches!(value, Value::Object(obj) if obj.class.is_instance_of(name)).then_some(None)
+        }
         ParamType::Object => matches!(value, Value::Object(_)).then_some(None),
         ParamType::Iterable => matches!(value, Value::Array(_) | Value::Object(_)).then_some(None),
         ParamType::Bool => match value {
@@ -242,6 +250,27 @@ fn convert(
                 to_string(value, site, context).map(Some)
             }
             _ => to_int(value, site, context).map(Some),
+        },
+        ParamType::StringOrNumber => match value {
+            Value::String(_) | Value::Int(_) | Value::Float(_) => Some(None),
+            _ if strict => None,
+            _ => to_number(value, site, context).map(Some),
+        },
+        ParamType::ArrayOrNumber => match value {
+            Value::Array(_) | Value::Int(_) | Value::Float(_) => Some(None),
+            _ if strict => None,
+            _ => to_number(value, site, context).map(Some),
+        },
+        ParamType::ArrayOrFloat => match value {
+            Value::Array(_) | Value::Float(_) => Some(None),
+            Value::Int(i) => Some(Some(Value::Float(*i as f64))),
+            _ if strict => None,
+            _ => to_float(value, site, context).map(Some),
+        },
+        ParamType::ArrayOrBool => match value {
+            Value::Array(_) | Value::Bool(_) => Some(None),
+            _ if strict => None,
+            _ => to_bool(value, site, context).map(Some),
         },
         ParamType::ArrayOrString => match value {
             Value::Array(_) | Value::String(_) => Some(None),

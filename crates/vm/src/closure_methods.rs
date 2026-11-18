@@ -81,6 +81,7 @@ impl Vm {
             )
         })?;
         if matches!(operation, ClosureMethod::FromCallable) {
+            self.autoload_callable(&arguments[0]).await?;
             return self.closure_from_value(&arguments[0]);
         }
         let object = self.closure_receiver(operation, receiver, &mut arguments)?;

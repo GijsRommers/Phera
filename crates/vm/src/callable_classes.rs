@@ -19,10 +19,10 @@ impl Vm {
         usage: CallableUse,
     ) -> Result<(), NativeError> {
         if usage != CallableUse::Callback || !matches!(name, "self" | "parent" | "static") {
-            let class = self
-                .classes
-                .get(name)
-                .ok_or_else(|| NativeError::error(format!("Class \"{name}\" not found")))?;
+            let class = self.classes.get(name).ok_or_else(|| match usage {
+                CallableUse::Callback => NativeError::error(format!("Class \"{name}\" not found")),
+                _ => Self::class_miss(name, "Class"),
+            })?;
             let receiver = if usage == CallableUse::Callback {
                 self.current()
                     .and_then(|frame| frame.this())
@@ -35,6 +35,9 @@ impl Vm {
             } else {
                 None
             };
+            if usage == CallableUse::Callback && method.contains("::") {
+                return self.prepare_callback_method(class, receiver, method, usage);
+            }
             return self.prepare_class_callback(class, receiver, method);
         }
         let context = self

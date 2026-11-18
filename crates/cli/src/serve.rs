@@ -19,13 +19,33 @@ use crate::arguments::ServeOptions;
 use site::{Resolved, Site};
 
 pub(crate) fn serve(options: ServeOptions) -> ExitCode {
-    let site = match Site::open(&options.path) {
-        Ok(site) => Arc::new(site),
+    let mut site = match Site::open(&options.path) {
+        Ok(site) => site,
         Err(error) => {
             eprintln!("Cannot serve {}: {error}", options.path.display());
             return ExitCode::FAILURE;
         }
     };
+    let root = site.document_root();
+    let project = if root.join("composer.json").is_file() {
+        root
+    } else {
+        root.parent()
+            .filter(|p| p.join("composer.json").is_file())
+            .unwrap_or(root)
+    };
+    let loaded = match options
+        .files
+        .load(project, phera_dotenv::Environment::process())
+    {
+        Ok(loaded) => loaded,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    site.exclude_files(loaded.paths);
+    let site = Arc::new(site);
     let mut config = ServerConfig {
         addr: options.listen,
         ..ServerConfig::default()
@@ -36,7 +56,7 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
     let workers = config.workers;
 
     let factory = SiteHandlerFactory {
-        runtime: Runtime::new(),
+        runtime: Runtime::with_environment(loaded.environment),
         site: site.clone(),
     };
     let server = match Server::bind(config, factory) {

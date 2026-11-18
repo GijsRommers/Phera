@@ -78,6 +78,44 @@ impl Compiler<'_> {
             return Ok(src);
         }
         let source = self.readable_place(value)?;
+        if place
+            .path
+            .iter()
+            .any(|step| matches!(step, crate::ir::PathStep::Append))
+        {
+            // In `$a[] =& $a`, the result is the bound value after the append.
+            // The append path is write-only, so read it through the bound cell.
+            let reference = self.allocate_register()?;
+            self.emit(
+                Instruction::Reference {
+                    destination: reference,
+                    place: source,
+                },
+                line,
+            );
+            self.emit(
+                Instruction::Rebind {
+                    place,
+                    source: reference,
+                },
+                line,
+            );
+            let destination = self.allocate_register()?;
+            self.emit(
+                Instruction::Move {
+                    destination,
+                    source: reference,
+                },
+                line,
+            );
+            self.emit(
+                Instruction::Clear {
+                    register: reference,
+                },
+                line,
+            );
+            return Ok(destination);
+        }
         self.emit(
             Instruction::Bind {
                 place: place.clone(),

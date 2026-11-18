@@ -161,23 +161,26 @@ impl Vm {
         key: ArrayKey,
         mode: PropertyRead,
     ) -> NativeResult {
-        let missing = if mode == PropertyRead::Read {
-            Missing::Warn
-        } else {
-            Missing::Silent
+        let missing = match mode {
+            PropertyRead::Read => Missing::Warn,
+            PropertyRead::Coalesce => Missing::Silent,
+            PropertyRead::Isset | PropertyRead::Empty => Missing::Isset,
         };
         let Value::Object(object) = &value else {
             return self.read_property(value, key, missing);
         };
+        let name = property_name(&key);
+        if let Some(value) = self.native_property_read(object, &name, missing)? {
+            return Ok(value);
+        }
         let Some(class) = self.classes.for_object(object).filter(|class| {
             class
                 .magic
                 .as_ref()
                 .is_some_and(|hooks| hooks.has_properties())
         }) else {
-            return self.read_property(value, key, missing);
+            return self.read_declared_property(object, &name, missing);
         };
-        let name = property_name(&key);
         let (stored, accessible) = self.property_slot(object, &name);
         if let Some(stored) = stored {
             return Ok(stored);
@@ -186,7 +189,7 @@ impl Vm {
             .as_ref()
             .is_some_and(|slot| self.typed_property_uninitialized(&class, object, slot))
         {
-            return self.read_property(value, key, missing);
+            return self.read_declared_property(object, &name, missing);
         }
         if mode != PropertyRead::Read {
             if let Some(method) = self.property_hook(&class, object, &key, PropertyHook::Isset) {
@@ -211,7 +214,7 @@ impl Vm {
             }
         }
         let Some(method) = self.property_hook(&class, object, &key, PropertyHook::Get) else {
-            return self.read_property(value, key, missing);
+            return self.read_declared_property(object, &name, missing);
         };
         let result = self
             .invoke_property_hook(

@@ -67,7 +67,14 @@ impl Vm {
         }
         let entered = self.with_argument_origin(origin, |vm| vm.enter_prepared_call(None));
         match entered {
-            Ok(true) => self.interpret(stop).await,
+            Ok(true) => {
+                // A PHP callback may return before it needs any async service.
+                let mut work = 0;
+                match self.run_batch(stop, &mut work) {
+                    Ok(crate::calls::execution_loop::BatchExit::Returned(value)) => Ok(value),
+                    pending => self.continue_execution(stop, work, Some(pending)).await,
+                }
+            }
             Ok(false) => {
                 let previous = std::mem::replace(&mut self.argument_origin, origin);
                 let result = Box::pin(self.finish_native_window()).await;

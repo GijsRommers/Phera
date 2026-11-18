@@ -56,6 +56,7 @@ PHP source ─▶ lexer ─▶ parser ─▶ AST ─▶ compiler ─▶ bytecode
 | `phera-compiler` | Lowers the AST to bytecode                                           |
 | `phera-bytecode` | The instruction format, independent of PHP parsing                   |
 | `phera-vm`       | Executes bytecode, with no dependency on the frontend                |
+| [`phera-dotenv`](crates/dotenv/README.md) | Native environment files, syntax and startup options |
 | `phera-runtime`  | Ties compilation and execution together and owns execution policy    |
 | `phera-server`   | HTTP transport on top of the runtime                                 |
 | `phera-cli`      | The `phera` binary, for running scripts and `phera serve`            |

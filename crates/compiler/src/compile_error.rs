@@ -11,10 +11,15 @@ pub struct CompileError {
     pub line: usize,
     /// Selects Parse error rather than Fatal error in Display.
     pub parse: bool,
+    /// Scanner diagnostics PHP emitted before reaching the fatal error.
+    pub scanner_diagnostics: Vec<phera_source::CompileDiagnostic>,
 }
 
 impl std::fmt::Display for CompileError {
     fn fmt(&self, function: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for diagnostic in &self.scanner_diagnostics {
+            function.write_str(&diagnostic.render(&self.file, diagnostic.line))?;
+        }
         write!(
             function,
             "\n{}: {} in {} on line {}\n",

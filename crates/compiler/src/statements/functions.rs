@@ -67,9 +67,6 @@ impl<'ast> Compiler<'ast> {
             }
         };
         builder.emit(implicit_return, line);
-        if !builder.classes.is_empty() {
-            return Err(self.error("Nested class declarations not supported yet", line));
-        }
         self.append_function(builder, timing, line);
         Ok(())
     }
@@ -82,6 +79,7 @@ impl<'ast> Compiler<'ast> {
         line: usize,
     ) {
         let id = self.functions.len();
+        let class_base = self.classes.len();
         let mut function = builder.finish();
         for instruction in function.instructions.iter_mut().chain(
             builder
@@ -89,13 +87,30 @@ impl<'ast> Compiler<'ast> {
                 .iter_mut()
                 .flat_map(|declaration| declaration.instructions.iter_mut()),
         ) {
-            if let Instruction::Declare(i) | Instruction::Closure { function: i, .. } = instruction
-            {
-                *i += id + 1;
+            match instruction {
+                Instruction::Declare(i) | Instruction::Closure { function: i, .. } => *i += id + 1,
+                Instruction::DeclareClass(i) => *i += class_base,
+                _ => {}
             }
         }
         self.functions.push(function);
         self.functions.extend(builder.functions);
+        for mut class in builder.classes {
+            for method in &mut class.methods {
+                method.function += id + 1;
+            }
+            for constant in &mut class.constants {
+                constant.initializer += id + 1;
+            }
+            for property in &mut class.properties {
+                if let Some(initializer) = &mut property.default {
+                    *initializer += id + 1;
+                }
+            }
+            self.classes.push(class);
+        }
+        self.declaration_warnings
+            .extend(builder.declaration_warnings);
         if timing == DeclarationTiming::Hoisted {
             self.hoisted.push(id)
         } else {

@@ -3,6 +3,7 @@ resolver = "3"
 
 members = [
     "crates/cli",
+    "crates/dotenv",
     "crates/analyzer",
     "crates/lexer",
     "crates/parser",
@@ -16,6 +17,8 @@ members = [
     "crates/server",
     "crates/phpt",
     "crates/extension-api",
+    "crates/sqlite",
+    "crates/io-pool",
     "crates/extensions/*",
 ]
 
@@ -31,6 +34,13 @@ license = "MIT OR Apache-2.0"
 unsafe_code = "forbid"
 
 [workspace.dependencies]
+rustls-rustcrypto = "=0.1.0-pre.0"
+redis = { version = "=1.0.5", default-features = false, features = ["tokio-comp", "tokio-rustls-comp", "tls-rustls-webpki-roots"] }
+phera-ext-redis = { path = "crates/extensions/redis" }
+phera-io-pool = { path = "crates/io-pool" }
+phera-dotenv = { path = "crates/dotenv" }
+indexmap = "2"
+regex = "1"
 phera-analyzer = { path = "crates/analyzer" }
 phera-lexer = { path = "crates/lexer" }
 phera-parser = { path = "crates/parser" }
@@ -46,13 +56,24 @@ phera-phpt = { path = "crates/phpt" }
 phera-extension-api = { path = "crates/extension-api" }
 phera-ext-core = { path = "crates/extensions/core" }
 phera-ext-ctype = { path = "crates/extensions/ctype" }
+phera-ext-date = { path = "crates/extensions/date" }
+phera-ext-filter = { path = "crates/extensions/filter" }
 phera-ext-hash = { path = "crates/extensions/hash" }
 phera-ext-http = { path = "crates/extensions/http" }
+phera-ext-mbstring = { path = "crates/extensions/mbstring" }
+iconv-native = "0.1"
+encoding_rs = "0.8.35"
+base64 = "0.22"
 phera-ext-json = { path = "crates/extensions/json" }
 phera-ext-pcre = { path = "crates/extensions/pcre" }
+phera-sqlite = { path = "crates/sqlite" }
+phera-ext-sqlite3 = { path = "crates/extensions/sqlite3" }
+rusqlite = { version = "=0.43.0", default-features = false, features = ["bundled", "column_metadata", "column_decltype", "backup"] }
 phera-ext-pdo = { path = "crates/extensions/pdo" }
 phera-ext-random = { path = "crates/extensions/random" }
 phera-ext-standard = { path = "crates/extensions/standard" }
+tempfile = "3"
+phera-ext-tokenizer = { path = "crates/extensions/tokenizer" }
 digest = "0.10"
 md2 = "0.10"
 md4 = "0.10"
@@ -77,6 +98,8 @@ socket2 = { version = "0.6", features = ["all"] }
 tokio = { version = "1", features = [
     "rt", "rt-multi-thread", "net", "time", "sync", "signal", "macros",
 ] }
+fluent-uri = "0.4.1"
+url = "2.5"
 foldhash = "0.2"
 hashbrown = { version = "0.17", default-features = false }
 mimalloc = { version = "0.1", default-features = false }
@@ -88,6 +111,9 @@ pcre2-sys = "=0.2.10"
 tokio-postgres = "0.7.18"
 mysql_async = { version = "0.37.1", default-features = false, features = ["minimal-rust"] }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
+tz-rs = { version = "=0.7.3", default-features = false, features = ["alloc"] }
+jiff-tzdb = "=0.1.9"
+tzdb_data = "=0.2.5"
 
 # Release builds are what gets measured and deployed. Whole-program
 # optimisation lets the compiler inline across crates (the value type lives in

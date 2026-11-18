@@ -71,10 +71,10 @@ impl Compiler<'_> {
 
     /// Read variables and indexes without undefined-value warnings; evaluate other expressions normally.
     pub(crate) fn quiet(&mut self, expression: &ast::Expression) -> Result<Reg, CompileError> {
-        self.quiet_mode(expression, phera_bytecode::FetchMode::Quiet)
+        self.quiet_access(expression, phera_bytecode::FetchMode::Quiet)
     }
 
-    pub(super) fn quiet_mode(
+    pub(crate) fn quiet_access(
         &mut self,
         expression: &ast::Expression,
         mode: phera_bytecode::FetchMode,

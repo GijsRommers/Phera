@@ -47,7 +47,14 @@ impl Vm {
                 {
                     value = self.property_string(&object, key, value).await?;
                 }
-                self.validate_property_mutation(root.deref().clone(), &keys, &mut value, mutation)?;
+                if self.validate_property_mutation(
+                    root.deref().clone(),
+                    &keys,
+                    &mut value,
+                    mutation,
+                )? {
+                    return Ok(());
+                }
                 if mutation == Mutation::Assign {
                     value = self.check_path_reference_assignment(&root, &keys, value)?;
                 }
@@ -100,8 +107,24 @@ impl Vm {
                     .for_object(object)
                     .ok_or_else(|| internal_error!("property class"))?;
                 let display = crate::path_update::property_name(name);
-                let (stored, slot) = self.property_slot(object, &display);
                 let last = steps.peek().is_none();
+                if let Some(access) = class.property_access {
+                    use phera_extension_api::NativePropertyMutation as NativeMutation;
+                    let change = match (last, operation) {
+                        (false, _) => NativeMutation::Indirect,
+                        (true, PropertyMutation::Write(value, Binding::ByValue)) => {
+                            NativeMutation::Assign(value)
+                        }
+                        (true, PropertyMutation::Write(_, Binding::ByReference)) => {
+                            NativeMutation::Bind
+                        }
+                        (true, PropertyMutation::Unset) => NativeMutation::Unset,
+                    };
+                    if (access.mutate)(self, object, &display, change)? {
+                        return Ok(OverloadedMutation::Handled);
+                    }
+                }
+                let (stored, slot) = self.property_slot(object, &display);
                 if stored.is_none()
                     && class
                         .magic

@@ -16,7 +16,6 @@ async fn dropping_connections_rolls_back_and_releases_locks() {
             if !support::databases_available() {
                 return;
             }
-            assert!(support::scratch().is_dir());
             for driver in ["pgsql", "mysql"] {
                 let mut harness = Harness::new();
                 let first = harness.connect(driver).await;

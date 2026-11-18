@@ -29,7 +29,7 @@ impl Vm {
         &mut self,
         object: &Object,
         name: NameId,
-    ) -> Result<Rc<PropertyEntry>, NativeError> {
+    ) -> Result<Option<Rc<PropertyEntry>>, NativeError> {
         let frame = self
             .current()
             .ok_or_else(|| internal_error!("property site"))?;
@@ -43,7 +43,10 @@ impl Vm {
                 _ => false,
             }
         {
-            return Ok(entry.clone());
+            return Ok(Some(entry.clone()));
+        }
+        if crate::properties::native_property_access(object).is_some() {
+            return Ok(None);
         }
         let scope = scope.cloned();
         let unit = frame.unit().clone();
@@ -51,7 +54,11 @@ impl Vm {
             .names
             .get(name.index())
             .ok_or_else(|| internal_error!("property name"))?;
-        let key = self.property_key(object, name)?;
+        let key = match self.property_key(object, name) {
+            Ok(key) => key,
+            Err(_) if has_magic_properties(object) => return Ok(None),
+            Err(error) => return Err(error),
+        };
         let property = object
             .class
             .as_any()
@@ -81,7 +88,7 @@ impl Vm {
         if let Some(slot) = self.current().and_then(|frame| frame.site_cache()) {
             *slot.borrow_mut() = crate::unit_caches::CachedSite::Property(entry.clone());
         }
-        Ok(entry)
+        Ok(Some(entry))
     }
 
     /// Mirrors read_place/read_property for an existing single property. Missing
@@ -93,10 +100,8 @@ impl Vm {
         let Some(PropertyTarget { object, name }) = self.read_property_target(place)? else {
             return Ok(None);
         };
-        let entry = match self.property_entry(&object, name) {
-            Ok(entry) => entry,
-            Err(_) if has_magic_properties(&object) => return Ok(None),
-            Err(error) => return Err(error),
+        let Some(entry) = self.property_entry(&object, name)? else {
+            return Ok(None);
         };
         let class = object
             .class
@@ -127,10 +132,8 @@ impl Vm {
         else {
             return Ok(None);
         };
-        let entry = match self.property_entry(&object, name) {
-            Ok(entry) => entry,
-            Err(_) if has_magic_properties(&object) => return Ok(None),
-            Err(error) => return Err(error),
+        let Some(entry) = self.property_entry(&object, name)? else {
+            return Ok(None);
         };
         if !entry.write_rule.allows(TypeMask::INT) {
             return Ok(None);
@@ -196,10 +199,8 @@ impl Vm {
         else {
             return Ok(false);
         };
-        let entry = match self.property_entry(&object, name) {
-            Ok(entry) => entry,
-            Err(_) if has_magic_properties(&object) => return Ok(false),
-            Err(error) => return Err(error),
+        let Some(entry) = self.property_entry(&object, name)? else {
+            return Ok(false);
         };
         // `public float $x` assigned an int stores the float, as PHP does.
         let widened = match entry.write_rule {
@@ -234,10 +235,8 @@ impl Vm {
         else {
             return Ok(false);
         };
-        let entry = match self.property_entry(&object, name) {
-            Ok(entry) => entry,
-            Err(_) if has_magic_properties(&object) => return Ok(false),
-            Err(error) => return Err(error),
+        let Some(entry) = self.property_entry(&object, name)? else {
+            return Ok(false);
         };
         if !entry.write_rule.allows(TypeMask::ARRAY) {
             return Ok(false);

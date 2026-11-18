@@ -139,6 +139,16 @@ impl Vm {
         let Some(Value::String(name)) = arguments.first() else {
             return Ok(Value::from("1"));
         };
+        if name.as_bytes() == b"include_path" {
+            let previous = if matches!(intrinsic, crate::intrinsics::Intrinsic::IniSet) {
+                let value = arguments.get(1).cloned().unwrap_or_default();
+                let text = phera_value::to_php_string(&value, &mut phera_value::NoDiagnostics)?;
+                self.set_include_path(text.to_string_lossy())
+            } else {
+                self.include_path().to_owned()
+            };
+            return Ok(Value::from(previous));
+        }
         if name.as_bytes() != b"zend.exception_string_param_max_len" {
             return Ok(Value::from("1"));
         }

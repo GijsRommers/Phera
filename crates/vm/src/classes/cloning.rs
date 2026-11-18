@@ -240,7 +240,9 @@ impl Vm {
             let mut keys = InlineStack::new();
             keys.push(PathKey::Property(key));
             let mut root = Value::Object(object.clone());
-            self.validate_property_mutation(root.clone(), &keys, &mut value, Mutation::Assign)?;
+            if self.validate_property_mutation(root.clone(), &keys, &mut value, Mutation::Assign)? {
+                continue;
+            }
             let value = self.check_path_reference_assignment(&root, &keys, value)?;
             let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
             crate::path_update::update(

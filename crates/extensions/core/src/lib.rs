@@ -14,7 +14,7 @@ pub struct Core;
 
 impl Extension for Core {
     fn name(&self) -> &'static str {
-        "core"
+        "Core"
     }
 
     fn register(&self, registry: &mut Registry) {

@@ -223,3 +223,28 @@ async fn compiled_code_is_shared_and_output_is_streamed() {
     assert_eq!(result.output, b"hello world");
     assert_eq!(*streamed.borrow(), b"hello world");
 }
+
+/// `mb_internal_encoding('ASCII')` affects one request; the next starts with UTF-8.
+#[tokio::test(flavor = "current_thread")]
+async fn multibyte_functions_and_settings_run_in_each_request() {
+    let site = Site::new("mbstring");
+    let script = site.file(
+        "text.php",
+        r#"<?php
+echo mb_internal_encoding(), '|', mb_substitute_character(), '|', mb_language(), '|';
+echo mb_strtoupper('Straße'), '|', mb_strlen('👩🏽‍💻'), '|';
+mb_parse_str('name=%C3%A9', $result);
+echo $result['name'], '|', iconv('UTF-8', 'UTF-8', '日本語');
+mb_internal_encoding('ASCII');
+mb_substitute_character('none');
+mb_language('Japanese');
+"#,
+    );
+    let runtime = Runtime::new();
+    for _ in 0..2 {
+        let response = runtime
+            .handle_request(&script, &site.root, request("GET", "/text.php"))
+            .await;
+        assert_eq!(body(&response), "UTF-8|63|neutral|STRASSE|4|é|日本語");
+    }
+}

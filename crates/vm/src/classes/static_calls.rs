@@ -59,7 +59,7 @@ impl Vm {
         let class = self
             .classes
             .get(name)
-            .ok_or_else(|| NativeError::error(format!("Class \"{name}\" not found")))?;
+            .ok_or_else(|| Self::class_miss(name, "Class"))?;
         let context = self.current().and_then(|frame| frame.method());
         let receiver = context
             .as_ref()
@@ -67,7 +67,7 @@ impl Vm {
             .filter(|object| {
                 self.classes
                     .for_object(object)
-                    .is_some_and(|receiver_class| receiver_class.is_a(name))
+                    .is_some_and(|receiver_class| self.class_matches(&receiver_class, name))
             });
         let resolved = self.find_method(&class, method, Invocation::Method);
         self.prepare_method_lookup(class, receiver, method, MethodSyntax::Static, resolved)?;
@@ -93,7 +93,7 @@ impl Vm {
             Value::Object(object) => self
                 .classes
                 .for_object(&object)
-                .is_some_and(|class| class.is_a(&name)),
+                .is_some_and(|class| self.class_matches(&class, &name)),
             _ => false,
         };
         self.set(destination, Value::Bool(matches));

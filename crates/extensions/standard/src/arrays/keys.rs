@@ -72,7 +72,8 @@ async fn collect_keys(context: &mut dyn Context, arguments: Vec<Value>) -> Nativ
     let equality = Equality::from_strict_argument(arguments);
     let mut result = PhpArray::new();
     for (key, value) in array.iter() {
-        if equality.equal(context, value, filter).await? {
+        // The filter is the left operand, which matters for a recursive array.
+        if equality.equal(context, filter, value).await? {
             result.push(Value::from(key))?;
         }
     }
