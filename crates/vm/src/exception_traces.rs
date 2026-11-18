@@ -87,11 +87,27 @@ impl Vm {
                 .rev()
                 .filter(|site| site.boundary == callee_index)
                 .peekable();
-            if warning.is_some() || autoload.is_some() || callbacks.peek().is_some() {
-                entry.remove(&ArrayKey::str("file"));
-                entry.remove(&ArrayKey::str("line"));
+            let via_callback =
+                warning.is_some() || autoload.is_some() || callbacks.peek().is_some();
+            if let Some(site) = self
+                .generator_traces
+                .iter()
+                .rfind(|site| site.boundary == callee_index)
+            {
+                self.append_generator_trace(
+                    site,
+                    &mut trace,
+                    entry,
+                    (&caller.unit().file, caller.line()),
+                    via_callback,
+                );
+            } else {
+                if via_callback {
+                    entry.remove(&ArrayKey::str("file"));
+                    entry.remove(&ArrayKey::str("line"));
+                }
+                let _ = trace.push(Value::Array(Rc::new(entry)));
             }
-            let _ = trace.push(Value::Array(Rc::new(entry)));
             if let Some(site) = warning {
                 append_native(
                     &mut trace,
@@ -124,15 +140,24 @@ impl Vm {
 
 /// PHP snapshots live, coerced parameters and flattens a variadic argument array.
 fn trace_arguments(vm: &Vm, frame: FrameView<'_>) -> Value {
+    argument_values(
+        frame.function(),
+        frame.supplied_arguments(),
+        frame.slots(&vm.registers),
+        vm.registers
+            .window(frame.base() + frame.count(), frame.extras.arguments.extra),
+    )
+}
+
+pub(crate) fn argument_values(
+    function: &phera_bytecode::Function,
+    supplied: usize,
+    slots: &[Option<Value>],
+    extra: &[Option<Value>],
+) -> Value {
     let mut arguments = PhpArray::new();
-    for (index, parameter) in frame
-        .function()
-        .parameters
-        .iter()
-        .enumerate()
-        .take(frame.supplied_arguments())
-    {
-        let Some(Some(value)) = frame.slots(&vm.registers).get(index) else {
+    for (parameter, value) in function.parameters.iter().zip(slots).take(supplied) {
+        let Some(value) = value else {
             continue;
         };
         if parameter.variadic {
@@ -152,16 +177,12 @@ fn trace_arguments(vm: &Vm, frame: FrameView<'_>) -> Value {
             let _ = arguments.push(value.deref().clone());
         }
     }
-    if !frame
-        .function()
+    if !function
         .parameters
         .iter()
         .any(|parameter| parameter.variadic)
     {
-        for value in vm
-            .registers
-            .window(frame.base() + frame.count(), frame.extras.arguments.extra)
-        {
+        for value in extra {
             let value = value.as_ref().unwrap_or(&Value::Null);
             let _ = arguments.push(value.deref().clone());
         }

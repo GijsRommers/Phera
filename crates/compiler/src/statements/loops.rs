@@ -165,7 +165,9 @@ impl Compiler<'_> {
                 (_, false) => Some("A function with return type must return a value"),
             };
             if let Some(message) = message {
-                return Err(self.error(message, line));
+                if self.return_error.is_none() {
+                    self.return_error = Some(self.error(message, line));
+                }
             }
         }
         let source = if let Some(expression) = expression {
@@ -175,7 +177,8 @@ impl Compiler<'_> {
                 && name != "this"
             {
                 self.local(name)?
-            } else if self.function.returns_reference
+            } else if !self.function.is_generator
+                && self.function.returns_reference
                 && crate::helpers::reference_capable(expression)
             {
                 let place = self.readable_place(expression)?;

@@ -137,6 +137,30 @@ impl Registers {
         }
     }
 
+    /// Move the active tail into a generator without retaining the stack's capacity.
+    pub(crate) fn detach(
+        &mut self,
+        start: usize,
+        registers: &mut Vec<Option<Value>>,
+    ) -> Result<(), NativeError> {
+        let window = self
+            .slots
+            .get_mut(start..self.top)
+            .ok_or_else(|| internal_error!("generator register window"))?;
+        registers.extend(window.iter_mut().map(Option::take));
+        self.top = start;
+        Ok(())
+    }
+
+    /// Restore a generator's registers above the caller's prepared calls.
+    pub(crate) fn attach(&mut self, slots: &mut Vec<Option<Value>>) {
+        let start = self.top;
+        self.grow_to(start + slots.len());
+        for (slot, value) in self.slots[start..self.top].iter_mut().zip(slots.drain(..)) {
+            *slot = value;
+        }
+    }
+
     /// Move a value from one slot to another, leaving the first empty.
     #[inline]
     pub(crate) fn move_slot(&mut self, from: usize, to: usize) {

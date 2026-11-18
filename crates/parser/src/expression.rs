@@ -946,7 +946,7 @@ impl Parser<'_> {
 
         let key = self.parse_expr(prec::YIELD + 1)?;
         let value = if self.eat(TokenKind::FatArrow)? {
-            Some(Box::new(self.parse_expr(0)?))
+            Some(Box::new(self.parse_expr(prec::YIELD + 1)?))
         } else {
             None
         };

@@ -171,6 +171,12 @@ impl Frame {
         }
     }
 
+    /// A resumed frame returns to the generator driver.
+    pub(crate) fn as_callback(mut self) -> Self {
+        self.flags.0 |= FrameFlags::CALLBACK;
+        self
+    }
+
     /// The caller's register for the result; `None` when native code called.
     #[inline]
     pub(crate) fn destination(&self) -> Option<Reg> {

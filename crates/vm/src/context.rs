@@ -128,6 +128,30 @@ impl Context for Vm {
         }
     }
 
+    fn generator_operation(
+        &mut self,
+        object: std::rc::Rc<phera_value::Object>,
+        operation: phera_extension_api::GeneratorOperation,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(async move {
+            self.call_stack.enter_callback()?;
+            self.generator_traces
+                .push(crate::generators::trace::Site::new(
+                    self.call_stack.depth(),
+                    &operation,
+                ));
+            let result = self.operate_generator(object, operation).await;
+            if let Some(site) = self.generator_traces.pop() {
+                self.failed_native = self
+                    .failed_native
+                    .take()
+                    .or_else(|| site.failed_call(&result));
+            }
+            self.call_stack.leave_callback();
+            result
+        })
+    }
+
     fn called_class(&self) -> Option<&str> {
         self.native_called_class
             .as_ref()

@@ -66,7 +66,7 @@ impl Vm {
         if let Some((key, index)) = key.zip(index) {
             self.set(key, index.deref().clone());
         }
-        self.set(destination, value.deref().clone());
+        self.set(destination, value);
         state.started = true;
         self.call_stack
             .current_extras_mut()

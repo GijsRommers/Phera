@@ -161,6 +161,7 @@ impl Tables {
                 phera_bytecode::ArgumentLayout::Fixed
             },
             returns_reference: source.returns_reference,
+            is_generator: source.is_generator,
             return_type: source.return_type.as_deref().map(|ty| self.ty(ty)),
             dynamic_scope: source.dynamic_scope,
             strict_types: source.strict_types,

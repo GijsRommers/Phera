@@ -26,22 +26,27 @@ impl Traversal for Cursor {
         operation: IteratorStep,
     ) -> LocalFuture<'a, NativeResult> {
         match self {
-            Self::Php(object) => context.call_method(
-                object.clone(),
-                match operation {
-                    IteratorStep::Rewind => "rewind",
-                    IteratorStep::Advance => "next",
-                    IteratorStep::Valid => "valid",
-                    IteratorStep::Current => "current",
-                    IteratorStep::Key => "key",
-                },
-                Vec::new(),
-            ),
-            Self::Native(iterator) => Box::pin(std::future::ready(native_step(
-                iterator.as_mut(),
-                context,
-                operation,
-            ))),
+            Self::Php(object) => Box::pin(async move {
+                Ok(context
+                    .call_method(
+                        object.clone(),
+                        match operation {
+                            IteratorStep::Rewind => "rewind",
+                            IteratorStep::Advance => "next",
+                            IteratorStep::Valid => "valid",
+                            IteratorStep::Current => "current",
+                            IteratorStep::Key => "key",
+                        },
+                        Vec::new(),
+                    )
+                    .await?
+                    .deref()
+                    .clone())
+            }),
+            Self::Native(iterator) => Box::pin(std::future::ready(
+                native_step(iterator.as_mut(), context, operation)
+                    .map(|value| value.deref().clone()),
+            )),
         }
     }
 }
@@ -76,6 +81,12 @@ impl Vm {
                 .classes
                 .for_object(&object)
                 .ok_or_else(|| internal_error!("traversal class"))?;
+            if crate::generators::generator_object(&object) {
+                return Ok(Box::new(crate::generators::class::Cursor::open(
+                    object,
+                    by_reference,
+                )?));
+            }
             let factory = class.hooks.as_ref().and_then(|hooks| hooks.iterator);
             if let Some(factory) = factory {
                 if by_reference {

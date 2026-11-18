@@ -74,6 +74,7 @@ mod finally;
 mod function_facts;
 mod function_introspection;
 mod function_table;
+mod generators;
 mod global_instructions;
 mod global_paths;
 mod globals;
@@ -164,6 +165,11 @@ pub struct Vm {
     call_stack: calls::call_stack::CallStack,
     /// Only entered finally subroutines allocate continuation storage.
     finally_stack: Vec<finally::SavedFinally>,
+    generator_suspension: Option<generators::Suspension>,
+    generator_traces: Vec<generators::trace::Site>,
+    generator_releases: Option<std::rc::Rc<generators::cleanup::Releases>>,
+    draining_generators: bool,
+    closing_generator: Option<usize>,
     /// Number of dispatched instructions, for reproducible benchmark reports.
     pub executed_instructions: u64,
     registry: Arc<Registry>,
@@ -211,6 +217,11 @@ impl Vm {
             include_state: include_state::IncludeState::new(),
             call_stack: calls::call_stack::CallStack::new(),
             finally_stack: Vec::new(),
+            generator_suspension: None,
+            generator_traces: Vec::new(),
+            generator_releases: None,
+            draining_generators: false,
+            closing_generator: None,
             executed_instructions: 0,
             registry,
             output: vec![],

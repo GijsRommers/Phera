@@ -71,7 +71,23 @@ impl Vm {
                 None => self.run_batch(stop, work)?,
             };
             match exit {
-                BatchExit::Returned(value) => return Ok(value),
+                BatchExit::Returned(value) => {
+                    if self.generator_releases_pending() {
+                        self.drain_generator_releases().await?;
+                    }
+                    return Ok(value);
+                }
+                BatchExit::GeneratorSuspended => {
+                    let suspension = self.generator_suspension.take();
+                    if !self.error_handlers.pending.is_empty() {
+                        self.drain_error_handlers().await?;
+                    }
+                    if self.generator_releases_pending() {
+                        self.drain_generator_releases().await?;
+                    }
+                    self.generator_suspension = suspension;
+                    return Ok(phera_value::Value::Null);
+                }
                 BatchExit::Yield => tokio::task::yield_now().await,
                 BatchExit::Handlers => self.drain_error_handlers().await?,
                 BatchExit::NativeCall(destination) => {
@@ -88,6 +104,9 @@ impl Vm {
             }
             if !self.error_handlers.pending.is_empty() {
                 self.drain_error_handlers().await?;
+            }
+            if self.generator_releases_pending() {
+                self.drain_generator_releases().await?;
             }
         }
     }

@@ -44,6 +44,8 @@ pub(crate) enum BatchExit {
     NativeCall(Reg),
     /// The frame that native code called has returned this value.
     Returned(Value),
+    /// A PHP yield published a suspension for the generator driver.
+    GeneratorSuspended,
     /// The work budget is spent; other tasks get a turn.
     Yield,
     /// A warning queued a user error handler, which must run now.
@@ -112,7 +114,7 @@ impl Vm {
             if let Some(exit) = self.execute(instruction, stop, work)? {
                 return Ok(exit);
             }
-            if !self.error_handlers.pending.is_empty() {
+            if !self.error_handlers.pending.is_empty() || self.generator_releases_pending() {
                 return Ok(BatchExit::Handlers);
             }
             if *work >= YIELD_AFTER_STEPS {

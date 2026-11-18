@@ -25,7 +25,7 @@ pub use class::{
     NativePropertyAccess, NativePropertyMutation, NativePropertyRead, PrepareMethod, PropertyEntry,
     PropertyType, SyncMethod, Visibility,
 };
-pub use context::{Context, LocalFuture};
+pub use context::{Context, GeneratorOperation, LocalFuture};
 pub use error::{NativeError, NativeResult, Unwind};
 pub use function::{AsyncFn, FunctionEntry, NativeFn, Param, ParamType, SyncFn};
 pub use object_handlers::{

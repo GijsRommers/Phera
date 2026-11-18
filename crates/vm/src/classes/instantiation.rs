@@ -114,6 +114,11 @@ impl Vm {
                 "Instantiation of class Closure is not allowed",
             ));
         }
+        if class.name == "Generator" {
+            return Err(NativeError::error(
+                "The \"Generator\" class is reserved for internal use and cannot be manually instantiated",
+            ));
+        }
         if class.kind == ClassKind::Interface {
             return Err(NativeError::error(format!(
                 "Cannot instantiate interface {}",

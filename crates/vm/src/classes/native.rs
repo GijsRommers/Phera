@@ -56,6 +56,16 @@ impl ClassTable {
             .classes()
             .chain(std::iter::once(&closure))
             .chain(internal_iterator)
+            .chain(
+                registry
+                    .get_class("Iterator")
+                    .map(|_| &crate::generators::class::ENTRY),
+            )
+            .chain(
+                registry
+                    .get_class("Exception")
+                    .map(|_| &crate::generators::class::CLOSED_EXCEPTION),
+            )
         {
             let parent = entry.parent.and_then(|name| table.get(name));
             let mut methods = parent

@@ -143,6 +143,12 @@ impl PreparedCall {
         self.base() - self.kind.prefix()
     }
 
+    /// A suspended caller moved this prepared argument window with its own.
+    pub(crate) fn moved_to(mut self, base: usize) -> Self {
+        self.base = base as u32;
+        self
+    }
+
     /// The register stack moved up by one below this call's window (a
     /// variable was created by name in the frame that prepares it).
     pub(crate) fn shift_up(&mut self) {
