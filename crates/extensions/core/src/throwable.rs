@@ -8,7 +8,7 @@ use std::rc::Rc;
 use phera_extension_api::value::{float_to_string_precision14, to_php_string};
 use phera_extension_api::{
     ArrayKey, ClassEntry, ClassKind, ConstantValue, Context, MethodEntry, NativeResult, Object,
-    Param, ParamType, PhpArray, PropertyEntry, Registry, Value, Visibility, args,
+    Param, ParamType, PhpArray, PropertyEntry, PropertyType, Registry, Value, Visibility, args,
 };
 
 /// The two classes that declare the private properties. A method inherited
@@ -41,19 +41,28 @@ const ERROR_EXCEPTION_PARAMS: &[Param] = &[
 /// In PHP's declaration order, which is the order `var_dump` shows.
 const PROPERTIES: &[PropertyEntry] = &[
     PropertyEntry::new("message", ConstantValue::String(""), Visibility::Protected),
-    PropertyEntry::new("string", ConstantValue::String(""), Visibility::Private),
+    PropertyEntry::typed("string", PropertyType::String, Visibility::Private)
+        .with_default(ConstantValue::String("")),
     PropertyEntry::new("code", ConstantValue::Int(0), Visibility::Protected),
-    PropertyEntry::new("file", ConstantValue::String(""), Visibility::Protected),
-    PropertyEntry::new("line", ConstantValue::Int(0), Visibility::Protected),
-    PropertyEntry::new("trace", ConstantValue::EmptyArray, Visibility::Private),
-    PropertyEntry::new("previous", ConstantValue::Null, Visibility::Private),
+    PropertyEntry::typed("file", PropertyType::String, Visibility::Protected)
+        .with_default(ConstantValue::String("")),
+    PropertyEntry::typed("line", PropertyType::Int, Visibility::Protected)
+        .with_default(ConstantValue::Int(0)),
+    PropertyEntry::typed("trace", PropertyType::Array, Visibility::Private)
+        .with_default(ConstantValue::EmptyArray),
+    PropertyEntry::typed(
+        "previous",
+        PropertyType::NullableClass("Throwable"),
+        Visibility::Private,
+    )
+    .with_default(ConstantValue::Null),
 ];
 
-const SEVERITY: &[PropertyEntry] = &[PropertyEntry::new(
-    "severity",
-    ConstantValue::Int(1),
-    Visibility::Protected,
-)];
+const SEVERITY: &[PropertyEntry] =
+    &[
+        PropertyEntry::typed("severity", PropertyType::Int, Visibility::Protected)
+            .with_default(ConstantValue::Int(1)),
+    ];
 
 const THROWABLE_METHODS: &[MethodEntry] = &[
     MethodEntry::required("getMessage", NO_PARAMS),
@@ -79,6 +88,7 @@ const METHODS: &[MethodEntry] = &[
     MethodEntry::public("getPrevious", NO_PARAMS, get_previous).final_(),
     MethodEntry::public("getTraceAsString", NO_PARAMS, get_trace_as_string).final_(),
     MethodEntry::public("__toString", NO_PARAMS, to_string),
+    MethodEntry::public("__wakeup", NO_PARAMS, wakeup).tentative_return("void"),
 ];
 
 const ERROR_EXCEPTION_METHODS: &[MethodEntry] = &[
@@ -148,6 +158,27 @@ pub(crate) fn register(registry: &mut Registry) {
             ..ClassEntry::class(name)
         });
     }
+}
+
+/// PHP checks the historical untyped fields after deserialization.
+fn wakeup(_: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
+    if let Some(object) = this {
+        let message = Object::protected_key("message");
+        if object
+            .get(&message)
+            .is_some_and(|value| !matches!(value, Value::String(_) | Value::Null))
+        {
+            object.remove(&message);
+        }
+        let code = Object::protected_key("code");
+        if object
+            .get(&code)
+            .is_some_and(|value| !matches!(value, Value::Int(_) | Value::Null))
+        {
+            object.remove(&code);
+        }
+    }
+    Ok(Value::Null)
 }
 
 /// Reads a protected property.

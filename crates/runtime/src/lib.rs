@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use phera_bytecode::CompiledUnit;
 use phera_dotenv::Environment;
-use phera_ext_http::{ResponseHead, UploadedFiles};
+use phera_ext_http::{RequestHeaders, ResponseHead, Sapi, UploadedFiles};
 use phera_ext_standard::environment::{RequestEnvironment, php_array};
 use phera_extension_api::{LocalFuture, Registry};
 use phera_value::Value;
@@ -32,6 +32,7 @@ pub use phera_vm::OutputSink;
 #[derive(Clone)]
 pub struct Runtime {
     registry: Arc<Registry>,
+    web_registry: Arc<Registry>,
     cache: CodeCache,
     environment: Arc<Environment>,
 }
@@ -80,7 +81,12 @@ impl Runtime {
         registry.load(&phera_ext_http::Http);
         registry.load(&phera_ext_hash::Hash);
         registry.load(&phera_ext_random::Random);
+        registry.load(&phera_ext_serialize::Serialize);
+        let mut web_registry = registry.clone();
+        phera_ext_http::register_web(&mut web_registry);
+        registry.constant("PHP_SAPI", Sapi::Cli.name());
         Runtime {
+            web_registry: Arc::new(web_registry),
             registry: Arc::new(registry),
             cache: CodeCache::default(),
             environment: Arc::new(environment),
@@ -110,7 +116,7 @@ impl Runtime {
         sink: Option<Box<dyn OutputSink>>,
     ) -> Result<RunResult, RuntimeError> {
         let unit = self.compile_file(path.as_ref()).await?;
-        let mut vm = self.new_vm();
+        let mut vm = self.new_vm(Sapi::Cli);
         vm.set_args(arguments);
         let server =
             environment::cli_server(php_array(self.environment.iter()), path.as_ref(), arguments);
@@ -163,7 +169,7 @@ impl Runtime {
             None => None,
         };
 
-        let mut vm = self.new_vm();
+        let mut vm = self.new_vm(Sapi::Web);
         let uploads = http::define_superglobals(
             &mut vm,
             &request,
@@ -172,6 +178,8 @@ impl Runtime {
             php_array(self.environment.iter()),
             form,
         );
+        *vm.state_mut().get_or_default::<RequestHeaders>() = RequestHeaders(request.headers);
+        vm.prepare_web_headers_with(ResponseHead::prepare);
         *vm.state_mut().get_or_default::<UploadedFiles>() = UploadedFiles::new(uploads);
         phera_ext_streams::set_request(
             vm.state_mut(),
@@ -179,6 +187,7 @@ impl Runtime {
             request.body.into(),
         );
         let exit_status = vm.run(unit).await;
+        let head = vm.state_mut().take::<ResponseHead>().unwrap_or_default();
 
         // What the script did not move is deleted, as PHP does.
         let unclaimed = vm
@@ -195,7 +204,6 @@ impl Runtime {
             .await;
         }
 
-        let head = vm.state_mut().take::<ResponseHead>().unwrap_or_default();
         let mut response = HttpResponse {
             status: head.status,
             headers: head.headers,
@@ -205,12 +213,6 @@ impl Runtime {
         // chosen a status of its own.
         if exit_status == 255 && response.status == 200 {
             response.status = 500;
-        }
-        if response.header("Content-Type").is_none() {
-            response.headers.push((
-                "Content-Type".to_string(),
-                b"text/html; charset=UTF-8".to_vec(),
-            ));
         }
         response
     }
@@ -235,8 +237,13 @@ impl Runtime {
         Ok(unit.to_string())
     }
 
-    fn new_vm(&self) -> Vm {
-        let mut vm = Vm::new(self.registry.clone());
+    fn new_vm(&self, sapi: Sapi) -> Vm {
+        let registry = match sapi {
+            Sapi::Cli => &self.registry,
+            Sapi::Web => &self.web_registry,
+        };
+        let mut vm = Vm::new(registry.clone());
+        *vm.state_mut().get_or_default::<Sapi>() = sapi;
         vm.set_global("_ENV", Value::from(php_array(self.environment.iter())));
         *vm.state_mut().get_or_default::<RequestEnvironment>() =
             RequestEnvironment::new(self.environment.clone());

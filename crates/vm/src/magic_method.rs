@@ -12,13 +12,13 @@ use crate::calls::callback_binding::{ArgumentBinding, ArgumentOrigin};
 use crate::classes::{Class, Invocation, Method, MethodContext};
 
 impl Vm {
-    pub(crate) fn invoke_magic_method(
-        &mut self,
+    pub(crate) fn invoke_magic_method<'a>(
+        &'a mut self,
         method: Rc<Method>,
         called: Rc<Class>,
         object: Rc<Object>,
-        arguments: impl IntoIterator<Item = Value>,
-    ) -> LocalFuture<'_, NativeResult> {
+        arguments: impl IntoIterator<Item = Value> + 'a,
+    ) -> LocalFuture<'a, NativeResult> {
         let Some(scope) = self.classes.get(&method.declaring) else {
             return Box::pin(std::future::ready(Err(internal_error!(
                 "magic method scope"
@@ -39,6 +39,6 @@ impl Vm {
                 },
             },
         };
-        self.invoke_callable_origin(callee, arguments, ArgumentOrigin::Callback)
+        Box::pin(self.invoke_callable_origin(callee, arguments, ArgumentOrigin::Callback))
     }
 }

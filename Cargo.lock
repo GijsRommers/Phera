@@ -1754,7 +1754,10 @@ dependencies = [
 name = "phera-ext-http"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "phera-ext-streams",
  "phera-extension-api",
+ "tokio",
 ]
 
 [[package]]
@@ -1820,6 +1823,14 @@ dependencies = [
  "redis",
  "rustls-rustcrypto",
  "tokio",
+]
+
+[[package]]
+name = "phera-ext-serialize"
+version = "0.1.0"
+dependencies = [
+ "itoa",
+ "phera-extension-api",
 ]
 
 [[package]]
@@ -1925,6 +1936,7 @@ dependencies = [
  "phera-ext-pdo",
  "phera-ext-random",
  "phera-ext-redis",
+ "phera-ext-serialize",
  "phera-ext-sqlite3",
  "phera-ext-standard",
  "phera-ext-streams",

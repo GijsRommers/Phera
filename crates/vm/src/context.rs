@@ -2,7 +2,7 @@
 
 use phera_extension_api::{
     CompileDiagnostic, CompileDiagnosticKind, CompileDiagnosticSite, Context, LocalFuture,
-    NativeError, NativeResult, RequestState,
+    NativeError, NativeResult, RequestCallback, RequestState,
 };
 use phera_value::{Diagnostics, Value};
 
@@ -25,6 +25,19 @@ impl Diagnostics for Vm {
 impl Context for Vm {
     fn write(&mut self, bytes: &[u8]) {
         self.out(bytes)
+    }
+
+    fn output_origin(&self) -> Option<(&str, usize)> {
+        let origin = self.output_writer.origin.as_ref()?;
+        Some((&origin.file, origin.line))
+    }
+
+    fn register_request_callback(
+        &mut self,
+        phase: RequestCallback,
+        arguments: Vec<Value>,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(self.register_callback(phase, arguments))
     }
 
     fn include_path(&self) -> phera_value::PhpString {
@@ -56,6 +69,17 @@ impl Context for Vm {
         value: &'a Value,
     ) -> LocalFuture<'a, Result<phera_value::PhpString, phera_extension_api::NativeError>> {
         Box::pin(self.stringify_value(value))
+    }
+
+    fn is_exception(&self, error: &NativeError) -> bool {
+        match error {
+            NativeError::Throw { .. } => true,
+            NativeError::Unwind(payload) => payload.0.is::<crate::exceptions::Thrown>(),
+        }
+    }
+
+    fn chain_exception(&mut self, error: NativeError, previous: NativeError) -> NativeError {
+        self.exception_with_previous(error, previous)
     }
 
     fn compare<'a>(
@@ -130,7 +154,7 @@ impl Context for Vm {
         // queued a callback, publish later warnings only if that callback returns.
         if calls_handler || (!self.error_handlers.active && !self.error_handlers.pending.is_empty())
         {
-            self.error_handlers.pending.push(event);
+            self.enqueue_diagnostic(event);
         } else {
             self.report_event(&event);
         }
@@ -180,11 +204,8 @@ impl Context for Vm {
         parameter: &str,
         callable: &Value,
     ) -> Result<(), phera_extension_api::NativeError> {
-        self.resolve_callable(callable)
+        self.resolve_native_callback(function, number, parameter, callable)
             .map(|_| ())
-            .map_err(|error| {
-                self.invalid_callback(function, number, parameter, callable, error, false)
-            })
     }
 
     fn call_array(
@@ -218,7 +239,7 @@ impl Context for Vm {
             self.take_resolved_callable()
         })();
         match callee {
-            Ok(callee) => self.invoke_resolved_callable(callee, arguments),
+            Ok(callee) => Box::pin(self.invoke_resolved_callable(callee, arguments)),
             Err(error) => Box::pin(std::future::ready(Err(error))),
         }
     }
@@ -230,9 +251,114 @@ impl Context for Vm {
         arguments: Vec<Value>,
     ) -> LocalFuture<'_, NativeResult> {
         match self.protocol_method(object, name) {
-            Ok(callee) => self.invoke_resolved_callable(callee, arguments),
+            Ok(callee) => Box::pin(self.invoke_resolved_callable(callee, arguments)),
             Err(error) => Box::pin(std::future::ready(Err(error))),
         }
+    }
+
+    fn serialization_class<'a>(
+        &'a mut self,
+        name: &'a str,
+    ) -> LocalFuture<
+        'a,
+        Result<Option<phera_extension_api::serialization::SerializationClass>, NativeError>,
+    > {
+        Box::pin(async move {
+            Ok(self
+                .lookup_class(name)
+                .await?
+                .as_deref()
+                .map(Self::serialization_class_info))
+        })
+    }
+
+    fn unserialize_class_callback<'a>(
+        &'a mut self,
+        name: &'a str,
+    ) -> LocalFuture<
+        'a,
+        Result<Option<phera_extension_api::serialization::SerializationClass>, NativeError>,
+    > {
+        Box::pin(self.run_unserialize_class_callback(name))
+    }
+
+    fn unserialize_enum_case<'a>(
+        &'a mut self,
+        class: &'a str,
+        case: &'a str,
+    ) -> LocalFuture<'a, Result<phera_extension_api::serialization::EnumCaseLookup, NativeError>>
+    {
+        Box::pin(self.lookup_unserialized_enum(class, case))
+    }
+
+    fn serialization_forbidden(&self, object: &phera_value::Object) -> bool {
+        self.classes
+            .for_object(object)
+            .is_some_and(|class| Self::class_forbids_serialization(&class))
+    }
+
+    fn has_serialization_method(&self, object: &phera_value::Object, name: &str) -> bool {
+        self.classes
+            .for_object(object)
+            .is_some_and(|class| Self::serialization_method(&class, name).is_some())
+    }
+
+    fn call_serialization_method(
+        &mut self,
+        object: std::rc::Rc<phera_value::Object>,
+        name: &str,
+        arguments: Vec<Value>,
+    ) -> LocalFuture<'_, NativeResult> {
+        self.invoke_serialization_method(object, name, arguments)
+    }
+
+    fn create_unserialized_object(&mut self, name: &str) -> NativeResult {
+        let class = self.factory_class(name)?;
+        self.allocate_unserialized_object(class)
+    }
+
+    fn serialization_properties(
+        &mut self,
+        object: &phera_value::Object,
+    ) -> Result<phera_value::PhpArray, NativeError> {
+        self.ordered_serialization_properties(object)
+    }
+
+    fn has_uninitialized_serialized_property(
+        &self,
+        object: &phera_value::Object,
+        key: &phera_value::ArrayKey,
+    ) -> bool {
+        self.classes.for_object(object).is_some_and(|class| {
+            class
+                .defaults
+                .iter()
+                .any(|prop| prop.key == *key && prop.ty.is_some())
+        })
+    }
+
+    fn unserialized_property_key(
+        &mut self,
+        object: &phera_value::Object,
+        key: phera_value::ArrayKey,
+    ) -> Result<Option<phera_value::ArrayKey>, NativeError> {
+        Ok(self.resolve_serialized_property(object, key))
+    }
+
+    fn unserialized_dynamic_property(
+        &mut self,
+        object: &phera_value::Object,
+        key: &phera_value::ArrayKey,
+    ) -> Result<(), NativeError> {
+        self.check_serialized_dynamic_property(object, key)
+    }
+
+    fn finish_unserialized_object(
+        &mut self,
+        object: &std::rc::Rc<phera_value::Object>,
+        properties: phera_value::PhpArray,
+    ) -> Result<(), NativeError> {
+        self.write_unserialized_properties(object, properties)
     }
 
     fn called_class(&self) -> Option<&str> {
@@ -312,6 +438,14 @@ impl Context for Vm {
         self.factory_class(name).map(drop)
     }
 
+    fn diagnostic_function(&self) -> Option<&str> {
+        self.current()
+            .map(|frame| match frame.function().name.as_str() {
+                "{main}" => "main",
+                function => function,
+            })
+    }
+
     fn state(&mut self) -> &mut RequestState {
         &mut self.state
     }
@@ -354,6 +488,16 @@ impl Vm {
                 class.name
             )));
         }
+        if matches!(
+            class.kind,
+            phera_bytecode::ClassKind::Enum | phera_bytecode::ClassKind::Trait
+        ) {
+            return Err(NativeError::error(format!(
+                "Cannot instantiate {} {}",
+                class.kind.description().to_ascii_lowercase(),
+                class.name
+            )));
+        }
         if class.is_abstract {
             return Err(phera_extension_api::NativeError::error(format!(
                 "Cannot instantiate abstract class {}",
@@ -368,7 +512,7 @@ impl Vm {
         &mut self,
         callee: crate::calls::call_state::Callee,
         arguments: impl IntoIterator<Item = Value>,
-    ) -> LocalFuture<'_, NativeResult> {
+    ) -> impl Future<Output = NativeResult> {
         self.invoke_callable_origin(
             callee,
             arguments,

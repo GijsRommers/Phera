@@ -2,7 +2,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
 
-use phera_value::{Diagnostics, Object, PhpArray, PhpString, Value};
+use phera_value::{ArrayKey, Diagnostics, Object, PhpArray, PhpString, Value};
 
 use crate::{
     CompileDiagnostic, CompileDiagnosticKind, CompileDiagnosticSite, NativeError, NativeResult,
@@ -12,6 +12,13 @@ use crate::{
 /// A future that stays on the worker thread it was created on. PHP values are
 /// reference counted with `Rc`, so nothing that holds one can be `Send`.
 pub type LocalFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
+
+/// When a callback registered by PHP runs.
+#[derive(Clone, Copy)]
+pub enum RequestCallback {
+    Headers,
+    Shutdown,
+}
 
 /// Properties provided to an inspection operation that may run PHP code.
 pub enum PropertyView {
@@ -30,6 +37,11 @@ pub trait Context {
 
     /// Where warnings, notices and deprecations go.
     fn diagnostics(&mut self) -> &mut dyn Diagnostics;
+
+    /// Current PHP scope for diagnostics emitted by object handlers.
+    fn diagnostic_function(&self) -> Option<&str> {
+        None
+    }
 
     /// Per-request storage for extensions; see [`RequestState`].
     fn state(&mut self) -> &mut RequestState;
@@ -71,6 +83,20 @@ pub trait Context {
         arguments: Vec<Value>,
     ) -> LocalFuture<'a, NativeResult>;
 
+    /// The location of the first write that committed the response headers.
+    fn output_origin(&self) -> Option<(&str, usize)> {
+        None
+    }
+
+    /// Resolves a callable in the registering scope and keeps it until the given request phase.
+    fn register_request_callback(
+        &mut self,
+        _phase: RequestCallback,
+        _arguments: Vec<Value>,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(async { Err(NativeError::error("This context has no request lifecycle")) })
+    }
+
     /// Convert a value to a PHP string. A VM context may run __toString.
     fn stringify<'a>(
         &'a mut self,
@@ -78,6 +104,17 @@ pub trait Context {
     ) -> LocalFuture<'a, Result<PhpString, NativeError>> {
         let result = phera_value::to_php_string(value, self.diagnostics()).map_err(Into::into);
         Box::pin(std::future::ready(result))
+    }
+
+    /// Whether an operation raised a PHP exception. Some PHP functions finish
+    /// a native side effect before propagating the exception to their caller.
+    fn is_exception(&self, error: &NativeError) -> bool {
+        matches!(error, NativeError::Throw { .. })
+    }
+
+    /// Link a new exception to the PHP exception that was already pending.
+    fn chain_exception(&mut self, error: NativeError, _previous: NativeError) -> NativeError {
+        error
     }
 
     /// Loose comparisons may invoke __toString on mixed string/object pairs.
@@ -137,6 +174,97 @@ pub trait Context {
         arguments: Vec<Value>,
     ) -> LocalFuture<'_, NativeResult> {
         self.call_method(object, name, arguments)
+    }
+
+    /// Resolve an object header, invoking autoload when the class is missing.
+    fn serialization_class<'a>(
+        &'a mut self,
+        _name: &'a str,
+    ) -> LocalFuture<'a, Result<Option<crate::serialization::SerializationClass>, NativeError>>
+    {
+        Box::pin(std::future::ready(Ok(None)))
+    }
+
+    /// Consult the configured fallback after ordinary object autoload fails.
+    fn unserialize_class_callback<'a>(
+        &'a mut self,
+        _name: &'a str,
+    ) -> LocalFuture<'a, Result<Option<crate::serialization::SerializationClass>, NativeError>>
+    {
+        Box::pin(std::future::ready(Ok(None)))
+    }
+
+    /// Resolve an enum case through the runtime's canonical case table.
+    fn unserialize_enum_case<'a>(
+        &'a mut self,
+        _class: &'a str,
+        _case: &'a str,
+    ) -> LocalFuture<'a, Result<crate::serialization::EnumCaseLookup, NativeError>> {
+        Box::pin(std::future::ready(Ok(
+            crate::serialization::EnumCaseLookup::MissingClass,
+        )))
+    }
+
+    /// Read serialization metadata from an object's linked class.
+    fn serialization_forbidden(&self, _object: &Object) -> bool {
+        false
+    }
+
+    /// Serialization invokes linked magic methods even if declared non-public.
+    fn has_serialization_method(&self, _object: &Object, _method: &str) -> bool {
+        false
+    }
+
+    fn call_serialization_method(
+        &mut self,
+        object: Rc<Object>,
+        name: &str,
+        arguments: Vec<Value>,
+    ) -> LocalFuture<'_, NativeResult> {
+        self.call_method(object, name, arguments)
+    }
+
+    /// Allocate with declaration defaults but without constructor side effects.
+    fn create_unserialized_object(&mut self, name: &str) -> NativeResult {
+        self.create_object(name, PhpArray::new())
+    }
+
+    /// Enumerate stored properties in declaration order, including mangled names.
+    fn serialization_properties(&mut self, object: &Object) -> Result<PhpArray, NativeError> {
+        self.object_properties(object, crate::PropertyPurpose::Serialize)
+    }
+
+    fn has_uninitialized_serialized_property(&self, _object: &Object, _key: &ArrayKey) -> bool {
+        false
+    }
+
+    /// Map a serialized property's spelling to the destination declaration.
+    fn unserialized_property_key(
+        &mut self,
+        _object: &Object,
+        key: ArrayKey,
+    ) -> Result<Option<ArrayKey>, NativeError> {
+        Ok(Some(key))
+    }
+
+    fn unserialized_dynamic_property(
+        &mut self,
+        _object: &Object,
+        _key: &ArrayKey,
+    ) -> Result<(), NativeError> {
+        Ok(())
+    }
+
+    /// Install raw properties without dispatching __set or checking caller visibility.
+    fn finish_unserialized_object(
+        &mut self,
+        object: &Rc<Object>,
+        properties: PhpArray,
+    ) -> Result<(), NativeError> {
+        for (key, value) in properties.iter() {
+            object.set(key, value.clone());
+        }
+        Ok(())
     }
 
     /// Throws an exception object the script itself made, as `throw $object`

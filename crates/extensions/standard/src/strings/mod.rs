@@ -26,7 +26,7 @@ mod substring;
 mod tags;
 mod text;
 mod trim;
-mod url;
+pub(crate) mod url;
 
 /// The longest string a function here builds before failing as PHP fails
 /// for a string past its memory limit.
