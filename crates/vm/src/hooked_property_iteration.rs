@@ -11,6 +11,7 @@ use crate::Vm;
 use crate::access_mode::Binding;
 use crate::calls::frame::IteratorState;
 use crate::classes::{Class, property_hooks::property_error};
+use crate::path_update::property_name;
 
 pub(crate) struct HookedPropertyIterator {
     object: Rc<Object>,
@@ -45,14 +46,19 @@ impl HookedPropertyIterator {
     ) -> Result<Option<(ArrayKey, Value)>, NativeError> {
         let by_reference = self.binding == Binding::ByReference;
         let public_only = purpose == PropertyPurpose::Json;
+        let scoped = matches!(
+            purpose,
+            PropertyPurpose::Foreach | PropertyPurpose::ObjectVars
+        );
         while let Some(property) = self.class.defaults.get(self.next_declaration) {
             self.next_declaration += 1;
             if public_only && property.visibility != Visibility::Public {
                 continue;
             }
-            if !vm
-                .property_key(&self.object, &property.name)
-                .is_ok_and(|key| key == property.key)
+            if scoped
+                && !vm
+                    .property_key(&self.object, &property.name)
+                    .is_ok_and(|key| key == property.key)
             {
                 continue;
             }
@@ -78,16 +84,24 @@ impl HookedPropertyIterator {
                     .read_declared_hook(&self.object, property, hooks, by_reference)
                     .await?
                 {
-                    return Ok(Some((ArrayKey::str(property.name.as_str()), value)));
+                    return Ok(Some((enumeration_key(purpose, property), value)));
                 }
             }
-            if let Some(value) = self.object.get(&property.key) {
+            let stored = self.object.get(&property.key).or_else(|| {
+                (purpose != PropertyPurpose::Foreach
+                    && property
+                        .hooks
+                        .as_ref()
+                        .is_some_and(|hooks| hooks.hooks.set.is_some()))
+                .then_some(Value::Null)
+            });
+            if let Some(value) = stored {
                 let value = if by_reference {
                     vm.object_iteration_cell(&self.object, &property.key, value)?
                 } else {
                     value
                 };
-                return Ok(Some((ArrayKey::str(property.name.as_str()), value)));
+                return Ok(Some((enumeration_key(purpose, property), value)));
             }
         }
         let properties = self.object.to_array();
@@ -99,6 +113,10 @@ impl HookedPropertyIterator {
             self.next_dynamic = Some(index);
             if let Some((key, value)) = properties.entry_at(index)
                 && !self.declared.contains(&key)
+                && (!scoped
+                    || vm
+                        .property_key(&self.object, &property_name(&key))
+                        .is_ok_and(|resolved| resolved == key))
             {
                 let value = if by_reference {
                     vm.object_iteration_cell(&self.object, &key, value.clone())?
@@ -113,13 +131,26 @@ impl HookedPropertyIterator {
     }
 }
 
+fn enumeration_key(
+    purpose: PropertyPurpose,
+    property: &crate::classes::class::PropertyDefault,
+) -> ArrayKey {
+    if purpose == PropertyPurpose::Export {
+        property.key.clone()
+    } else {
+        ArrayKey::str(property.name.as_str())
+    }
+}
+
 impl Vm {
     pub(crate) fn hooked_property_class(&self, object: &Object) -> Option<Rc<Class>> {
         self.classes.for_object(object).filter(|class| {
-            class
-                .defaults
-                .iter()
-                .any(|property| property.hooks.is_some())
+            class.defaults.iter().any(|property| {
+                property
+                    .hooks
+                    .as_ref()
+                    .is_some_and(|hooks| hooks.has_hooks())
+            })
         })
     }
 
@@ -192,7 +223,26 @@ impl Vm {
         Ok(true)
     }
 
-    pub(crate) async fn enumerate_hooked_properties(
+    pub(crate) async fn enumerate_hooked_native(
+        &mut self,
+        object: Rc<Object>,
+        class: Rc<Class>,
+        purpose: PropertyPurpose,
+        native: crate::error_traces::NativeTrace,
+    ) -> Result<PhpArray, NativeError> {
+        self.native_callback_sites
+            .push(crate::error_traces::NativeCallbackSite {
+                boundary: self.call_stack.depth(),
+                native,
+            });
+        let result = self
+            .enumerate_hooked_properties(object, class, purpose)
+            .await;
+        self.native_callback_sites.pop();
+        result
+    }
+
+    async fn enumerate_hooked_properties(
         &mut self,
         object: Rc<Object>,
         class: Rc<Class>,
@@ -208,6 +258,21 @@ impl Vm {
 }
 
 impl Vm {
+    pub(crate) fn raw_hooked_slots(&self, object: &Object, class: &Class) -> PhpArray {
+        let mut slots = PhpArray::new();
+        for property in &class.defaults {
+            if let Some(value) = object.get(&property.key) {
+                slots.insert(property.key.clone(), value);
+            }
+        }
+        for (key, value) in object.to_array().iter() {
+            if !slots.contains_key(&key) {
+                slots.insert(key, value.clone());
+            }
+        }
+        slots
+    }
+
     pub(crate) fn dump_hooked_slots(
         &self,
         object: &Object,

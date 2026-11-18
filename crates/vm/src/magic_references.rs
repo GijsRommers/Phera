@@ -25,6 +25,18 @@ impl Vm {
         let mut steps = place.steps()?.peekable();
         while let Some(step) = steps.next() {
             let current = cursor.deref().clone();
+            if let Step::Index(index) = step
+                && let Value::Object(object) = &current
+                && crate::dimensions::has_dimension(object)
+            {
+                return self
+                    .reference_property_dimension(crate::dimensions::DimensionPath {
+                        object: object.clone(),
+                        offset: self.get(index),
+                        suffix: steps.collect(),
+                    })
+                    .await;
+            }
             let key = if let Step::Index(index) = step {
                 PathKey::Index(Some(self.write_index_key(&current, index)?))
             } else {

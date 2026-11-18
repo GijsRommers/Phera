@@ -14,12 +14,20 @@ impl Compiler<'_> {
         arguments: &Arguments,
         line: usize,
     ) -> Result<Option<Reg>, CompileError> {
-        let ExpressionKind::StaticProperty {
-            class,
-            name: Variable::Named(property),
-        } = &target.kind
-        else {
+        let ExpressionKind::StaticProperty { class, name } = &target.kind else {
             return Ok(None);
+        };
+        let property = match name {
+            Variable::Named(name) => std::borrow::Cow::Borrowed(name.as_str()),
+            Variable::Dynamic(name) => match &name.kind {
+                ExpressionKind::Literal(phera_ast::Literal::Int(value)) => {
+                    std::borrow::Cow::Owned(value.to_string())
+                }
+                ExpressionKind::Literal(phera_ast::Literal::String(value)) => {
+                    String::from_utf8_lossy(value)
+                }
+                _ => return Ok(None),
+            },
         };
         let MemberName::Identifier(method) = method else {
             return Ok(None);
@@ -44,7 +52,7 @@ impl Compiler<'_> {
                 line,
             ));
         };
-        if active != property {
+        if active.as_str() != property {
             return Err(self.error(format!("Must not use parent::${property}::{written}() in a different property (${active})"), line));
         }
         if let Some((_, current)) = self.function.name.rsplit_once("::")

@@ -20,8 +20,7 @@ pub(crate) struct PropertyEntry {
     scope: Option<Rc<crate::classes::Class>>,
     key: ArrayKey,
     write_rule: WriteRule,
-    pub(crate) hook_slot: Option<usize>,
-    slot: Option<usize>,
+    pub(crate) slot: Option<usize>,
     /// An immutable class fact, so a property-site hit avoids a class downcast.
     read_without_static_notice: bool,
 }
@@ -32,7 +31,6 @@ impl Vm {
         &mut self,
         object: &Object,
         name: NameId,
-        place: &AccessPath,
     ) -> Result<Option<Rc<PropertyEntry>>, NativeError> {
         let frame = self
             .current()
@@ -75,19 +73,17 @@ impl Vm {
                 .find(|(_, property)| property.key == key)
         });
         let slot = property.map(|(slot, _)| slot);
-        let mut hook_slot = None;
-        let mut invokes_getter = false;
-        if let Some((slot, property)) = property
-            && let Some(hooks) = &property.hooks
-            && (hooks.hooks.is_virtual
-                || !matches!(place.base()?, phera_bytecode::PathBase::This { .. })
+        let dispatched = property.and_then(|(_, property)| {
+            let hooks = property.hooks.as_ref()?;
+            (hooks.hooks.is_virtual
+                || !this_property_site(frame)
                 || !self.uses_property_backing(object, property, hooks))
-        {
-            invokes_getter = hooks.hooks.is_virtual || hooks.hooks.get.is_some();
-            hook_slot = Some(slot);
-        }
+            .then_some(hooks)
+        });
+        let invokes_getter =
+            dispatched.is_some_and(|hooks| hooks.hooks.is_virtual || hooks.hooks.get.is_some());
         let write_rule = match property {
-            Some((_, property)) if !property.is_readonly && hook_slot.is_none() => {
+            Some((_, property)) if !property.is_readonly && dispatched.is_none() => {
                 match &property.ty {
                     None => WriteRule::Untyped,
                     Some(declared) => WriteRule::Typed(declared.mask),
@@ -101,7 +97,6 @@ impl Vm {
             key,
             write_rule,
             slot,
-            hook_slot,
             read_without_static_notice: !invokes_getter
                 && class.is_none_or(|class| {
                     class
@@ -125,15 +120,19 @@ impl Vm {
         let Some(PropertyTarget { object, name }) = self.read_property_target(place)? else {
             return Ok(None);
         };
-        let Some(entry) = self.property_entry(&object, name, place)? else {
+        let Some(entry) = self.property_entry(&object, name)? else {
             return Ok(None);
         };
         if !entry.read_without_static_notice {
             return Ok(None);
         }
         Ok(
-            crate::property_storage::read_at(&object, &entry.key, entry.slot)
-                .map(|value| value.deref().clone()),
+            crate::property_storage::read_at(&object, &entry.key, entry.slot).map(|value| {
+                match value {
+                    Value::Reference(_) => value.deref().clone(),
+                    value => value,
+                }
+            }),
         )
     }
 
@@ -151,7 +150,7 @@ impl Vm {
         else {
             return Ok(None);
         };
-        let Some(entry) = self.property_entry(&object, name, place)? else {
+        let Some(entry) = self.property_entry(&object, name)? else {
             return Ok(None);
         };
         if !entry.write_rule.allows(TypeMask::INT) {
@@ -218,7 +217,7 @@ impl Vm {
         else {
             return Ok(false);
         };
-        let Some(entry) = self.property_entry(&object, name, place)? else {
+        let Some(entry) = self.property_entry(&object, name)? else {
             return Ok(false);
         };
         // `public float $x` assigned an int stores the float, as PHP does.
@@ -254,7 +253,7 @@ impl Vm {
         else {
             return Ok(false);
         };
-        let Some(entry) = self.property_entry(&object, name, place)? else {
+        let Some(entry) = self.property_entry(&object, name)? else {
             return Ok(false);
         };
         if !entry.write_rule.allows(TypeMask::ARRAY) {
@@ -291,4 +290,26 @@ fn has_magic_properties(object: &Object) -> bool {
         .downcast_ref::<crate::classes::Class>()
         .and_then(|class| class.magic.as_ref())
         .is_some_and(|hooks| hooks.has_properties())
+}
+
+/// Cache filling can prove that a literal receiver is the current hook's own
+/// $this. Arbitrary register or indexed receivers still check object identity.
+fn this_property_site(frame: crate::calls::frame::FrameView<'_>) -> bool {
+    use phera_bytecode::{Instruction, PathBase};
+    let function = frame.function();
+    let path = match function.instructions.get(frame.ip().saturating_sub(1)) {
+        Some(
+            Instruction::Fetch { path, .. }
+            | Instruction::FetchIndex { path, .. }
+            | Instruction::AssignPath { path, .. }
+            | Instruction::AssignPathFromLocal { path, .. }
+            | Instruction::IncDecPath { path, .. }
+            | Instruction::SendPath { path },
+        ) => path,
+        _ => return false,
+    };
+    function
+        .paths
+        .get(path.index())
+        .is_some_and(|path| matches!(path.base, PathBase::This { .. }))
 }

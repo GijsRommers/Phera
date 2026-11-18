@@ -318,6 +318,12 @@ impl Vm {
                 &mut constants,
             )?;
         }
+        for property in defaults
+            .iter()
+            .filter(|property| property.declaring == *name)
+        {
+            self.check_hook_overrides(property, parent.as_deref(), &interfaces)?;
+        }
         self.link_property_contracts(declaration, &unit, &interfaces, &mut defaults)?;
         if let Some(enum_info) = &mut enum_info {
             self.link_enum_members(

@@ -24,6 +24,7 @@ enum OverloadedMutation {
     Unresolved,
     Handled,
     Converted(Value),
+    Dimension(crate::dimensions::DimensionPath),
     Detached(Value, Box<InlineStack<PathKey>>),
 }
 
@@ -67,6 +68,10 @@ impl Vm {
                 Ok(None)
             }
             OverloadedMutation::Converted(value) => Ok(Some(value)),
+            OverloadedMutation::Dimension(path) => {
+                self.mutate_property_dimension(path, operation).await?;
+                Ok(None)
+            }
             OverloadedMutation::Detached(root, keys) => {
                 let (value, mutation) = match operation {
                     PropertyMutation::Write(value, binding) => {
@@ -153,6 +158,22 @@ impl Vm {
         let mut steps = place.steps()?.peekable();
         while let Some(step) = steps.next() {
             let current = cursor.deref().clone();
+            if matches!(step, Step::Index(_) | Step::Append)
+                && let Value::Object(object) = &current
+                && crate::dimensions::has_dimension(object)
+            {
+                let offset = match step {
+                    Step::Index(index) => self.get(index),
+                    _ => Value::Null,
+                };
+                return Ok(OverloadedMutation::Dimension(
+                    crate::dimensions::DimensionPath {
+                        object: object.clone(),
+                        offset,
+                        suffix: steps.collect(),
+                    },
+                ));
+            }
             let key = match (step, &operation) {
                 (Step::Index(index), PropertyMutation::Unset) => {
                     let Some(key) = self.unset_index_key(&current, index)? else {

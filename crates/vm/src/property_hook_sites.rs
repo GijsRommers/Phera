@@ -20,8 +20,8 @@ impl Vm {
             return Ok(false);
         };
         let Some(slot) = self
-            .property_entry(&object, name, place)?
-            .and_then(|entry| entry.hook_slot)
+            .property_entry(&object, name)?
+            .and_then(|entry| entry.slot)
         else {
             return Ok(false);
         };
@@ -32,7 +32,7 @@ impl Vm {
             return Err(internal_error!("cached hooked property"));
         };
         let Some(hooks) = &property.hooks else {
-            return Err(internal_error!("cached property hooks"));
+            return Ok(false);
         };
         let Some(getter) = &hooks.hooks.get else {
             return Ok(false);
@@ -50,10 +50,27 @@ impl Vm {
         }
     }
 
+    pub(crate) fn start_setter_from_local(
+        &mut self,
+        path: phera_bytecode::PathId,
+        local: Reg,
+        result: Reg,
+    ) -> Result<bool, NativeError> {
+        // A hook can change an aliased source before PHP copies the assignment's result.
+        let Some(value) = self.read_defined_local(local) else {
+            return Ok(false);
+        };
+        if self.raw_local(local).is_reference() {
+            return Ok(false);
+        }
+        self.start_cached_setter(&self.path(path)?, &value, Some(result))
+    }
+
     pub(crate) fn start_cached_setter(
         &mut self,
         place: &AccessPath,
         value: &Value,
+        assignment_result: Option<Reg>,
     ) -> Result<bool, NativeError> {
         let Some(PropertyTarget { object, name }) =
             self.property_target(place, PropertyShape::Single)?
@@ -61,8 +78,8 @@ impl Vm {
             return Ok(false);
         };
         let Some(slot) = self
-            .property_entry(&object, name, place)?
-            .and_then(|entry| entry.hook_slot)
+            .property_entry(&object, name)?
+            .and_then(|entry| entry.slot)
         else {
             return Ok(false);
         };
@@ -73,7 +90,7 @@ impl Vm {
             return Err(internal_error!("cached hooked property"));
         };
         let Some(hooks) = &property.hooks else {
-            return Err(internal_error!("cached property hooks"));
+            return Ok(false);
         };
         let HookWrite::Setter(function) = self.declared_hook_write(&object, property, hooks)?
         else {
@@ -82,6 +99,9 @@ impl Vm {
         // Object-to-string coercion can call back into PHP before entering the setter.
         if value.is_object() {
             return Ok(false);
+        }
+        if let Some(assignment_result) = assignment_result {
+            self.set(assignment_result, value.clone());
         }
         self.prepare_declared_hook(function, object, Some(value.clone()))?;
         match self.enter_prepared_call(None)? {

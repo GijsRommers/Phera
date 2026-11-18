@@ -102,12 +102,16 @@ impl Context for Vm {
         if purpose == phera_extension_api::PropertyPurpose::Debug && self.has_debug_info(&object) {
             return self.debug_properties(object, function, arguments);
         }
-        if purpose == phera_extension_api::PropertyPurpose::Json
-            && let Some(class) = self.hooked_property_class(&object)
+        if matches!(
+            purpose,
+            phera_extension_api::PropertyPurpose::Json
+                | phera_extension_api::PropertyPurpose::Export
+        ) && let Some(class) = self.hooked_property_class(&object)
         {
+            let native = crate::error_traces::NativeTrace::new(function, arguments);
             return Box::pin(async move {
                 let properties = self
-                    .enumerate_hooked_properties(object, class, purpose)
+                    .enumerate_hooked_native(object, class, purpose, native)
                     .await?;
                 Ok(phera_extension_api::PropertyView::Snapshot(
                     std::rc::Rc::new(properties),
@@ -270,6 +274,11 @@ impl Context for Vm {
         object: &phera_value::Object,
         purpose: phera_extension_api::PropertyPurpose,
     ) -> Result<phera_value::PhpArray, phera_extension_api::NativeError> {
+        if purpose == phera_extension_api::PropertyPurpose::ArrayCast
+            && let Some(class) = self.hooked_property_class(object)
+        {
+            return Ok(self.raw_hooked_slots(object, &class));
+        }
         let projection = object
             .class
             .as_any()

@@ -137,7 +137,7 @@ impl Vm {
                     && self.assign_property_site(&self.path(path)?, &value)?
                 {
                     self.set(dst, value);
-                } else {
+                } else if !self.start_setter_from_local(path, src, dst)? {
                     return Ok(Some(BatchExit::Instruction(instruction)));
                 }
             }

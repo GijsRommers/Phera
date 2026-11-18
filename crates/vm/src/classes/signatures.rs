@@ -82,7 +82,9 @@ impl Contract {
     fn display(&self, method: &Method, type_name: impl Fn(&str) -> String) -> String {
         let declared = |name: &str| {
             let name = type_name(name);
-            if super::magic::MagicMethods::is_linked_magic(&method.name) {
+            if super::magic::MagicMethods::is_linked_magic(&method.name)
+                || method.name.starts_with('$')
+            {
                 ordered_magic_union(&name)
             } else {
                 name
@@ -471,7 +473,7 @@ fn is_class_type_name(name: &str) -> bool {
 
 /// PHP's declaration diagnostics list nominal members first and builtins
 /// in a fixed order, independent of the written union order.
-fn ordered_magic_union(ty: &str) -> String {
+pub(super) fn ordered_magic_union(ty: &str) -> String {
     if !ty.contains('|') {
         return ty.into();
     }

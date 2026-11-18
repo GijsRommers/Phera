@@ -30,6 +30,7 @@ pub(crate) enum UpdateTarget {
         object: Rc<Object>,
         key: ArrayKey,
     },
+    Dimension(Rc<Object>, Value),
 }
 
 struct IndirectPath {
@@ -98,6 +99,19 @@ impl Vm {
         let mut value = self.read_root(register, missing);
         let mut steps = place.steps()?.peekable();
         while let Some(step) = steps.next() {
+            if let Step::Index(index) = step
+                && let Value::Object(object) = &value
+                && crate::dimensions::has_dimension(object)
+            {
+                let offset = self.get(index);
+                let object = object.clone();
+                let last = steps.peek().is_none();
+                if purpose == ReadPurpose::Update && last {
+                    target = Some(UpdateTarget::Dimension(object.clone(), offset.clone()));
+                }
+                value = self.read_dimension_mode(object, offset, mode, last).await?;
+                continue;
+            }
             if quiet
                 && !value.is_object()
                 && matches!(step, Step::Property(_) | Step::DynamicProperty(_))

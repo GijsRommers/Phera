@@ -38,7 +38,12 @@ impl Vm {
             self.set(destination, value);
             return Ok(None);
         }
-        if mode == FetchMode::Read && self.start_cached_getter(&place, destination)? {
+        if mode != FetchMode::Destructure
+            && (mode == FetchMode::Read
+                || !matches!(place.base()?, phera_bytecode::PathBase::This { .. })
+                || self.current().is_some_and(|frame| frame.this().is_some()))
+            && self.start_cached_getter(&place, destination)?
+        {
             return Ok(None);
         }
         if self.classes.has_dimensions && self.prepare_dimension(&place)? {
@@ -212,7 +217,7 @@ impl Vm {
         if self.assign_property_site(&place, &value)? {
             return Ok(None);
         }
-        if self.start_cached_setter(&place, &value)? {
+        if self.start_cached_setter(&place, &value, None)? {
             return Ok(None);
         }
         if place.steps()?.next().is_none()

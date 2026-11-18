@@ -41,7 +41,7 @@ impl WriteValue {
         &self.value
     }
 
-    pub(super) fn into_value(mut self, vm: &mut Vm) -> Value {
+    pub(crate) fn into_value(mut self, vm: &mut Vm) -> Value {
         self.read(vm);
         self.value
     }

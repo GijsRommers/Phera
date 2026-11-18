@@ -96,7 +96,7 @@ impl Vm {
     }
 
     pub(super) fn link_class_properties(
-        &self,
+        &mut self,
         declaration: &ClassDeclaration,
         unit: &Arc<CompiledUnit>,
         parent: Option<&Rc<Class>>,

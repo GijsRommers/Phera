@@ -80,6 +80,9 @@ impl Vm {
                 .write_detached_place(root, &keys, value, Mutation::Assign)
                 .await
                 .map(|_| ()),
+            Some(UpdateTarget::Dimension(object, offset)) => {
+                self.dimension_set(object, offset, value).await
+            }
             Some(UpdateTarget::Property { object, key }) => {
                 self.assign_selected_property(object, key, value).await
             }

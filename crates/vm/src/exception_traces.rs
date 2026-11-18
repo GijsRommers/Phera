@@ -61,13 +61,16 @@ impl Vm {
                 continue;
             }
             let function = &callee.function().name;
+            let function = if function.contains("::$") && !function.starts_with("{closure:") {
+                self.code.function_name(callee.frame.function)
+            } else {
+                function.as_str()
+            };
             let closure = function.starts_with("{closure:");
             let name = if closure {
-                function.as_str()
-            } else {
                 function
-                    .split_once("::")
-                    .map_or(function.as_str(), |(_, name)| name)
+            } else {
+                function.split_once("::").map_or(function, |(_, name)| name)
             };
             entry.insert(ArrayKey::str("function"), Value::from(name));
             let class = if closure {

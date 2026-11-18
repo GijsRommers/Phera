@@ -16,6 +16,18 @@ impl Compiler<'_> {
             return Err(self.error("Attributes not supported yet", line));
         }
         for parameter in &declaration.parameters {
+            if parameter.is_promoted()
+                && !declaration
+                    .name
+                    .name
+                    .split_once("::")
+                    .is_some_and(|(_, name)| name.eq_ignore_ascii_case("__construct"))
+            {
+                return Err(self.error(
+                    "Cannot declare promoted property outside a constructor",
+                    self.lines.line(parameter.span.start),
+                ));
+            }
             if !parameter.attributes.is_empty() {
                 return Err(self.error("Attributes not supported yet", line));
             }

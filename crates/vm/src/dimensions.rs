@@ -71,6 +71,15 @@ impl Vm {
                     let Ok(key) = self.property_key(&object, &name) else {
                         return Ok(None);
                     };
+                    if let Some(class) = self.classes.for_object(&object)
+                        && let Some(property) =
+                            crate::classes::property_hooks::for_key(&class, &key)
+                        && let Some(hooks) = &property.hooks
+                        && (hooks.hooks.get.is_some() || hooks.hooks.is_virtual)
+                        && !self.uses_property_backing(&object, property, hooks)
+                    {
+                        return Ok(None);
+                    }
                     let Some(value) = object.get(&key) else {
                         return Ok(None);
                     };
@@ -173,7 +182,7 @@ impl Vm {
         Ok(value.deref().clone())
     }
 
-    async fn read_dimension_mode(
+    pub(crate) async fn read_dimension_mode(
         &mut self,
         object: Rc<Object>,
         offset: Value,
@@ -250,7 +259,7 @@ fn native(object: &Object, method: &str) -> Option<NativeDimensions> {
     Some(handler)
 }
 
-fn has_dimension(object: &Object) -> bool {
+pub(crate) fn has_dimension(object: &Object) -> bool {
     object
         .class
         .as_any()

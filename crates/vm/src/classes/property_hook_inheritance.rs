@@ -58,7 +58,7 @@ impl Vm {
     }
 
     pub(super) fn inherit_property_hooks(
-        &self,
+        &mut self,
         property: &mut PropertyDefault,
         inherited: &PropertyDefault,
         unit: &CompiledUnit,
@@ -72,6 +72,7 @@ impl Vm {
         if property.hooks.is_none() && inherited.hooks.is_none() {
             return Ok(());
         }
+        self.check_property_hook_signatures(property, inherited, unit)?;
         self.check_hook_property_type(property, inherited, unit)?;
         let virtual_property = is_virtual(property) && is_virtual(inherited);
         let mut linked =
@@ -96,39 +97,17 @@ impl Vm {
                 ("set", &mut linked.hooks.set, &parent.hooks.set),
             ] {
                 let Some(parent) = parent else { continue };
-                if let Some(child) = child {
-                    if parent.is_final {
-                        return Err(hook_declaration_error(
-                            self,
-                            child.function,
-                            format!(
-                                "Cannot override final property hook {}()",
-                                self.code.function(parent.function).name
-                            ),
-                        ));
-                    }
-                    if self.code.function(parent.function).returns_reference
-                        && !self.code.function(child.function).returns_reference
-                    {
-                        return Err(hook_declaration_error(
-                            self,
-                            child.function,
-                            format!(
-                                "Declaration of {}() must be compatible with &{}()",
-                                self.code.function(child.function).name,
-                                self.code.function(parent.function).name
-                            ),
-                        ));
-                    }
-                } else if !parent.is_abstract
-                    || virtual_property
-                    || (operation == "set" && property.is_readonly)
+                if child.is_none()
+                    && (!parent.is_abstract
+                        || virtual_property
+                        || (operation == "set" && property.is_readonly))
                 {
                     *child = Some(parent.clone());
                 }
             }
         }
-        if linked.has_hooks() || linked.hooks.set_visibility.is_some() {
+        if linked.has_hooks() || linked.hooks.set_visibility.is_some() || inherited.hooks.is_some()
+        {
             property.hooks = Some(Rc::new(linked));
         }
         if !virtual_property && property.ty.is_none() {
@@ -187,7 +166,7 @@ impl Vm {
     }
 
     pub(super) fn link_property_contracts(
-        &self,
+        &mut self,
         declaration: &ClassDeclaration,
         unit: &Arc<CompiledUnit>,
         interfaces: &[Rc<Class>],
@@ -225,8 +204,10 @@ impl Vm {
                 {
                     self.inherit_property_hooks(property, requirement, unit)?;
                 } else {
+                    self.check_property_hook_signatures(property, requirement, unit)?;
                     self.check_hook_property_type(property, requirement, unit)?;
                 }
+                self.check_plain_set_contract(property, requirement, "interface", unit)?;
             }
         }
         let mut missing = Vec::new();
@@ -240,13 +221,14 @@ impl Vm {
                     property.declaring, property.name
                 )));
             }
+            self.verify_linked_property_hooks(property, linked, &declaration.name)?;
             if declaration.is_abstract
                 || matches!(declaration.kind, ClassKind::Interface | ClassKind::Trait)
             {
                 continue;
             }
             for hook in linked.methods().filter(|hook| hook.is_abstract) {
-                missing.push(self.code.function(hook.function).name.as_str());
+                missing.push(self.code.function_name(hook.function));
             }
         }
         if !missing.is_empty() {
@@ -275,7 +257,7 @@ impl Vm {
     }
 }
 
-fn is_virtual(property: &PropertyDefault) -> bool {
+pub(super) fn is_virtual(property: &PropertyDefault) -> bool {
     property
         .hooks
         .as_ref()
@@ -292,11 +274,15 @@ fn has_hook(property: &PropertyDefault, operation: &str) -> bool {
         })
 }
 
-fn property_type(property: &PropertyDefault) -> Option<&str> {
+pub(super) fn property_type(property: &PropertyDefault) -> Option<&str> {
     property.ty.as_ref().map(|ty| ty.display.as_str())
 }
 
-fn hook_declaration_error(vm: &Vm, function: FunctionIndex, message: String) -> NativeError {
+pub(super) fn hook_declaration_error(
+    vm: &Vm,
+    function: FunctionIndex,
+    message: String,
+) -> NativeError {
     NativeError::Unwind(phera_extension_api::Unwind(Box::new(
         crate::error_traces::DeclarationFailure {
             message,

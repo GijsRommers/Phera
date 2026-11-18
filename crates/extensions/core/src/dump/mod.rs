@@ -255,7 +255,9 @@ async fn enter(
             }
         }
     };
-    let initialized = entries.len() - uninitialized.as_ref().map_or(0, |slots| slots.len());
+    let initialized = entries
+        .len()
+        .saturating_sub(uninitialized.as_ref().map_or(0, |slots| slots.len()));
     style.open(out, &container, initialized, place);
     Ok(Some(Frame {
         container,

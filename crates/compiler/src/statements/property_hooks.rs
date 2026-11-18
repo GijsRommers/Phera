@@ -4,8 +4,7 @@
 use phera_ast as ast;
 use phera_bytecode::{PropertyHook, PropertyHooks, Visibility};
 
-use crate::ir::{Constant, Instruction, PathStep, Place, PlaceScope};
-use crate::policies::{DeclarationTiming, NameKind};
+use crate::policies::NameKind;
 use crate::{CompileError, Compiler};
 
 pub(super) struct HookedDeclaration<'a> {
@@ -170,6 +169,13 @@ impl Compiler<'_> {
             } else {
                 declaration.ty.map(|ty| self.declaration_type(ty))
             };
+            if setter && hook.by_reference {
+                self.compile_diagnostics.borrow_mut().push(phera_source::CompileDiagnostic {
+                    kind: phera_source::CompileDiagnosticKind::Deprecated,
+                    message: format!("{property}::{name}(): Returning by reference from a void function is deprecated"),
+                    line,
+                });
+            }
             body.compile_hook_body(&hook.body, setter, self.lines.line(hook.span.end))?;
             result.is_virtual &= !body.uses_hook_backing;
             let function = self.append_function_body(&mut body);
@@ -193,12 +199,13 @@ impl Compiler<'_> {
             }
             if !result.is_virtual
                 && result.set.is_some()
-                && result
-                    .get
-                    .as_ref()
-                    .is_some_and(|get| self.functions[get.function].returns_reference)
+                && result.get.as_ref().is_some_and(|get| {
+                    self.functions
+                        .get(get.function)
+                        .is_some_and(|function| function.returns_reference)
+                })
             {
-                return Err(self.error(format!("Get hook of backed property {property} with set hook may not return by reference"), declaration.line));
+                return Err(self.error(format!("Get hook of backed property {}::{} with set hook may not return by reference", declaration.class, declaration.property), declaration.line));
             }
         }
         if declaration.modifiers.is_abstract
@@ -250,67 +257,6 @@ impl Compiler<'_> {
             return Err(self.error(format!("Type of parameter ${parameter_name} of hook {property}::set must be compatible with property type"), line));
         }
         Ok(())
-    }
-
-    fn compile_hook_body(
-        &mut self,
-        body: &ast::HookBody,
-        setter: bool,
-        end_line: usize,
-    ) -> Result<(), CompileError> {
-        match body {
-            ast::HookBody::Expression(expression) if setter => {
-                let line = self.lines.line(expression.span.start);
-                let name = self.hooked_property.clone().unwrap_or_default();
-                self.uses_hook_backing = true;
-                let base = self.allocate_register()?;
-                let source = self.compile_expression(expression)?;
-                self.emit(
-                    Instruction::Write {
-                        place: Place {
-                            base,
-                            scope: PlaceScope::This,
-                            path: vec![PathStep::Property(name)],
-                        },
-                        source,
-                    },
-                    line,
-                );
-            }
-            ast::HookBody::Expression(expression) => {
-                self.compile_return(Some(expression), self.lines.line(expression.span.start))?;
-            }
-            ast::HookBody::Block(block) => self.block(block, DeclarationTiming::AtExecution)?,
-            ast::HookBody::None => {}
-        }
-        if !setter && self.function.return_type.is_some() {
-            self.emit(Instruction::ReturnMissing, end_line);
-        } else {
-            let register = self.literal(Constant::Null, end_line)?;
-            self.emit(Instruction::Return(register), end_line);
-        }
-        Ok(())
-    }
-
-    /// Only a literal access on `$this` in the hook body declares backing storage.
-    pub(crate) fn note_hook_backing(&mut self, expression: &ast::Expression) {
-        let Some(property) = &self.hooked_property else {
-            return;
-        };
-        let ast::ExpressionKind::Property { target, name, .. } = &expression.kind else {
-            return;
-        };
-        if matches!(&target.kind, ast::ExpressionKind::Variable(ast::Variable::Named(name)) if name == "this")
-            && match name {
-                ast::MemberName::Identifier(name) => &name.name == property,
-                ast::MemberName::Expression(expression) => matches!(
-                    &expression.kind, ast::ExpressionKind::Literal(ast::Literal::String(name))
-                        if name.as_slice() == property.as_bytes()
-                ),
-            }
-        {
-            self.uses_hook_backing = true;
-        }
     }
 }
 

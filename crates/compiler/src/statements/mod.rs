@@ -100,7 +100,8 @@ mod function_parameters;
 pub(crate) mod functions;
 pub(crate) mod loops;
 mod magic_methods;
-pub(crate) mod property_hooks;
+mod property_hook_bodies;
+mod property_hooks;
 pub(crate) mod switching;
 mod traits;
 

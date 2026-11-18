@@ -244,6 +244,12 @@ impl Compiler<'_> {
                             self.lines.line(parameter.span.start),
                         ));
                     }
+                    if method.body.is_none() {
+                        return Err(self.error(
+                            "Cannot declare promoted property in an abstract constructor",
+                            self.lines.line(parameter.span.start),
+                        ));
+                    }
                     if (declaration.modifiers.is_readonly || parameter.modifiers.is_readonly)
                         && parameter.ty.is_none()
                     {
