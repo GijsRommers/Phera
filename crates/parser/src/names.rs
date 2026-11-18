@@ -70,12 +70,7 @@ impl Parser<'_> {
 
         // `true`, `false` and `null` are plain `T_STRING`s in PHP's lexer, so
         // they are valid wherever a strict identifier is expected.
-        if self.kind() != TokenKind::Identifier
-            && !matches!(
-                self.kind(),
-                TokenKind::True | TokenKind::False | TokenKind::Null
-            )
-        {
+        if !self.at_strict_identifier() {
             return Err(self.error(format!(
                 "expected an identifier, found {}",
                 self.describe_current()
@@ -85,6 +80,13 @@ impl Parser<'_> {
         let name = self.text().to_string();
         self.bump()?;
         Ok(Identifier { name, span })
+    }
+
+    pub(crate) fn at_strict_identifier(&self) -> bool {
+        matches!(
+            self.kind(),
+            TokenKind::Identifier | TokenKind::True | TokenKind::False | TokenKind::Null
+        )
     }
 
     /// Parses a class name: `static` or a plain name. Keywords other than
