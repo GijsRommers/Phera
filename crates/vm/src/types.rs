@@ -125,7 +125,7 @@ pub(crate) fn coerce(
     }
     Err(NativeError::type_error(format!(
         "must be of type {}, {} given",
-        declaration_type.display,
+        php_type_display(declaration_type),
         match &value {
             Value::Object(object) => object.class.name().to_owned(),
             _ => value.type_name(),
@@ -172,4 +172,23 @@ fn coerce_scalar(
         }
     }
     Ok(None)
+}
+
+/// PHP expands its iterable alias when reporting a type mismatch.
+fn php_type_display(declaration: &Type) -> String {
+    if declaration.mask.intersects(TypeMask::ITERABLE) {
+        declaration
+            .display
+            .split('|')
+            .flat_map(|name| match name {
+                "iterable" => ["Traversable", "array", ""],
+                "?iterable" => ["Traversable", "array", "null"],
+                name => [name, "", ""],
+            })
+            .filter(|name| !name.is_empty())
+            .collect::<Vec<_>>()
+            .join("|")
+    } else {
+        declaration.display.clone()
+    }
 }

@@ -376,6 +376,7 @@ impl Vm {
             name.to_ascii_lowercase(),
             Rc::new_cyclic(|identity| Class {
                 index,
+                hooks: parent.as_ref().and_then(|class| class.hooks.clone()),
                 operations,
                 origin: super::class::ClassOrigin::User,
                 identity: identity.clone(),

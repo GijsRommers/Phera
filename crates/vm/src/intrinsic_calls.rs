@@ -45,9 +45,10 @@ impl Vm {
                         "get_object_vars(): Argument #1 ($object) must be of type object",
                     ));
                 };
-                Ok(Value::Array(Rc::new(
-                    diagnostics.vm.visible_properties(&object),
-                )))
+                Ok(Value::Array(Rc::new(diagnostics.vm.visible_properties(
+                    &object,
+                    phera_extension_api::PropertyPurpose::ObjectVars,
+                )?)))
             }
             Intrinsic::GetClassVars => {
                 let name = to_php_string(&argument, &mut diagnostics.buffer)?.to_string_lossy();

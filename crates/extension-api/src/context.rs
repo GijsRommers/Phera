@@ -40,6 +40,30 @@ pub trait Context {
         arguments: Vec<Value>,
     ) -> LocalFuture<'a, NativeResult>;
 
+    /// Validates a callable before a native operation starts its work.
+    fn validate_callback(
+        &mut self,
+        _function: &str,
+        _number: usize,
+        _parameter: &str,
+        _callable: &Value,
+    ) -> Result<(), NativeError> {
+        Err(NativeError::error(
+            "Cannot resolve a PHP callback without a runtime",
+        ))
+    }
+
+    /// Passes numeric arguments positionally and string keys as names.
+    fn call_array(
+        &mut self,
+        _callable: &Value,
+        _arguments: &PhpArray,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(std::future::ready(Err(NativeError::error(
+            "Cannot call a PHP callback without a runtime",
+        ))))
+    }
+
     /// Invokes a public instance method selected by a language protocol.
     fn call_method(
         &mut self,
@@ -61,6 +85,36 @@ pub trait Context {
             let value = self.call_method(object, "count", Vec::new()).await?;
             Ok(Value::Int(phera_value::to_int(&value, self.diagnostics())?))
         })
+    }
+
+    /// The class selected by a static or instance method call, including inherited factories.
+    fn called_class(&self) -> Option<&str> {
+        None
+    }
+
+    /// Projects a native object's properties for the requesting PHP operation.
+    fn object_properties(
+        &mut self,
+        object: &Object,
+        _purpose: crate::PropertyPurpose,
+    ) -> Result<PhpArray, NativeError> {
+        Ok(object.to_array())
+    }
+
+    /// Acquires a cursor for an object that implements Traversable.
+    fn traverse(
+        &mut self,
+        object: Rc<Object>,
+    ) -> LocalFuture<'_, crate::traversal::TraversalResult> {
+        let message = format!("Cannot iterate {} without a runtime", object.class.name());
+        Box::pin(std::future::ready(Err(NativeError::error(message))))
+    }
+
+    /// Wraps a native cursor in PHP's InternalIterator class.
+    fn create_iterator(&mut self, _iterator: Box<dyn crate::NativeIterator>) -> NativeResult {
+        Err(NativeError::error(
+            "Cannot create an InternalIterator without a runtime",
+        ))
     }
 
     /// Creates an object of the named class with these properties, without

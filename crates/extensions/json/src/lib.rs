@@ -7,13 +7,13 @@
 //! json_last_error_msg();                  // "No error"
 //! ```
 //!
-//! Not done yet: `JsonSerializable`, which needs method calls from native
-//! code, and enums, which Phera does not have.
+//! Encodes JsonSerializable through runtime method calls.
 
 mod decode;
 mod encode;
 mod error;
 mod flags;
+mod recursion;
 mod string;
 
 use error::Error;
@@ -38,7 +38,7 @@ impl Extension for Json {
             Param::new("flags", ParamType::Int).optional(),
             Param::new("depth", ParamType::Int).optional(),
         ];
-        registry.function(FunctionEntry::sync(
+        registry.function(FunctionEntry::asynchronous(
             "json_encode",
             ENCODE,
             encode::json_encode,

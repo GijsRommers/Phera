@@ -9,21 +9,27 @@ mod class;
 mod context;
 mod error;
 mod function;
+mod object_handlers;
 mod registry;
 mod state;
 pub mod testing;
+pub mod traversal;
 
 pub use phera_value as value;
 pub use phera_value::{ArrayKey, Diagnostics, Object, PhpArray, PhpString, Value};
 
 pub use arguments::{args, prepare_arguments, prepare_call};
 pub use class::{
-    AsyncMethod, ClassEntry, ClassKind, MethodEntry, NativeMethod, PropertyEntry, SyncMethod,
-    Visibility,
+    AsyncMethod, ClassEntry, ClassKind, MethodEntry, NativeMethod, PropertyEntry, PropertyType,
+    SyncMethod, Visibility,
 };
 pub use context::{Context, LocalFuture};
 pub use error::{NativeError, NativeResult, Unwind};
 pub use function::{AsyncFn, FunctionEntry, NativeFn, Param, ParamType, SyncFn};
+pub use object_handlers::{
+    ClassHooks, IteratorFactory, NativeClone, NativeCompare, NativeComparison, NativeCount,
+    NativeDimensions, NativeIterator, PropertyProjection, PropertyPurpose,
+};
 pub use registry::{ConstantValue, Registry};
 pub use state::RequestState;
 

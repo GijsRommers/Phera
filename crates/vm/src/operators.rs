@@ -1,9 +1,7 @@
 //! Borrowed arithmetic operands and amortised in-place string assignment.
 
-use std::rc::Rc;
-
 use phera_bytecode::{BinaryOp, CastKind, IncDec, Reg, UnaryOp};
-use phera_extension_api::NativeError;
+use phera_extension_api::{Context, NativeError, PropertyPurpose};
 use phera_value::{Value, to_php_string};
 
 use crate::integer_arithmetic::{OverflowOperation, overflow_value};
@@ -174,10 +172,12 @@ impl Vm {
                 Value::Float(phera_value::to_float(&value, &mut diagnostics.buffer)?)
             }
             CastKind::String => Value::String(to_php_string(&value, &mut diagnostics.buffer)?),
-            CastKind::Array => Value::Array(Rc::new(phera_value::to_array(
-                &value,
-                &mut diagnostics.buffer,
-            ))),
+            CastKind::Array => Value::from(match &value {
+                Value::Object(object) => diagnostics
+                    .vm
+                    .object_properties(object, PropertyPurpose::ArrayCast)?,
+                _ => phera_value::to_array(&value, &mut diagnostics.buffer),
+            }),
             CastKind::Void => Value::Null,
             CastKind::Object => {
                 if value.is_object() {

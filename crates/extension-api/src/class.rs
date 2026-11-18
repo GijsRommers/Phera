@@ -127,11 +127,24 @@ impl MethodEntry {
     }
 }
 
+/// A type declared on a native instance property.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PropertyType {
+    Bool,
+    Int,
+    Float,
+    String,
+    Array,
+    Object,
+    Mixed,
+}
+
 /// A property every instance starts with.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PropertyEntry {
     pub name: &'static str,
-    pub default: ConstantValue,
+    pub default: Option<ConstantValue>,
+    pub ty: Option<PropertyType>,
     pub visibility: Visibility,
     pub is_static: bool,
     pub is_readonly: bool,
@@ -141,11 +154,29 @@ impl PropertyEntry {
     pub const fn new(name: &'static str, default: ConstantValue, visibility: Visibility) -> Self {
         PropertyEntry {
             name,
-            default,
+            default: Some(default),
+            ty: None,
             visibility,
             is_static: false,
             is_readonly: false,
         }
+    }
+
+    /// A typed property with no initial value, like PHP's `public int $id;`.
+    pub const fn typed(name: &'static str, ty: PropertyType, visibility: Visibility) -> Self {
+        Self {
+            name,
+            default: None,
+            ty: Some(ty),
+            visibility,
+            is_static: false,
+            is_readonly: false,
+        }
+    }
+
+    pub const fn with_default(mut self, default: ConstantValue) -> Self {
+        self.default = Some(default);
+        self
     }
 
     pub const fn readonly(mut self) -> Self {
@@ -168,6 +199,7 @@ pub struct ClassEntry {
     pub constants: &'static [(&'static str, ConstantValue)],
     pub properties: &'static [PropertyEntry],
     pub methods: &'static [MethodEntry],
+    pub hooks: Option<&'static crate::ClassHooks>,
 }
 
 impl ClassEntry {
@@ -183,6 +215,7 @@ impl ClassEntry {
             constants: &[],
             properties: &[],
             methods: &[],
+            hooks: None,
         }
     }
 

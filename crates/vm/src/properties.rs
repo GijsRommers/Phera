@@ -2,14 +2,18 @@
 
 use crate::{Vm, access_mode::Missing};
 use phera_bytecode::Visibility;
-use phera_extension_api::{NativeError, NativeResult};
+use phera_extension_api::{Context, NativeError, NativeResult, PropertyPurpose};
 use phera_value::{ArrayKey, Value};
 
 impl Vm {
     /// User-facing property enumeration strips visibility prefixes after checking the current scope.
-    pub(crate) fn visible_properties(&self, object: &phera_value::Object) -> phera_value::PhpArray {
+    pub(crate) fn visible_properties(
+        &mut self,
+        object: &phera_value::Object,
+        purpose: PropertyPurpose,
+    ) -> Result<phera_value::PhpArray, NativeError> {
         let mut result = phera_value::PhpArray::new();
-        for (key, value) in object.to_array().iter() {
+        for (key, value) in self.object_properties(object, purpose)?.iter() {
             let name = crate::path_update::property_name(&key);
             if self
                 .property_key(object, &name)
@@ -18,7 +22,7 @@ impl Vm {
                 result.insert(ArrayKey::str(name), value.deref().clone());
             }
         }
-        result
+        Ok(result)
     }
 
     /// Class variables expose defaults rather than values modified on existing objects.
@@ -181,11 +185,19 @@ impl Vm {
     pub(crate) fn property_keys(
         &mut self,
         place: &crate::AccessPath,
+        current: Value,
+    ) -> Result<crate::inline_stack::InlineStack<crate::path_update::PathKey>, NativeError> {
+        self.property_keys_for(place.steps()?, current)
+    }
+
+    pub(crate) fn property_keys_for(
+        &mut self,
+        steps: impl Iterator<Item = phera_bytecode::Step>,
         mut current: Value,
     ) -> Result<crate::inline_stack::InlineStack<crate::path_update::PathKey>, NativeError> {
         use crate::path_update::PathKey;
         let mut keys = crate::inline_stack::InlineStack::new();
-        for step in place.steps()? {
+        for step in steps {
             let key = match step {
                 phera_bytecode::Step::Index(register) => {
                     let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);

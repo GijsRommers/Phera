@@ -73,6 +73,31 @@ impl Context for Vm {
         Ok(Value::Object(object))
     }
 
+    fn validate_callback(
+        &mut self,
+        function: &str,
+        number: usize,
+        parameter: &str,
+        callable: &Value,
+    ) -> Result<(), phera_extension_api::NativeError> {
+        self.resolve_callable(callable)
+            .map(|_| ())
+            .map_err(|error| {
+                self.invalid_callback(function, number, parameter, callable, error, false)
+            })
+    }
+
+    fn call_array(
+        &mut self,
+        callable: &Value,
+        arguments: &phera_value::PhpArray,
+    ) -> LocalFuture<'_, NativeResult> {
+        match self.resolve_callable(callable) {
+            Ok(callee) => self.invoke_array_callback(callee, arguments),
+            Err(error) => Box::pin(std::future::ready(Err(error))),
+        }
+    }
+
     fn call_method(
         &mut self,
         object: std::rc::Rc<phera_value::Object>,
@@ -83,6 +108,68 @@ impl Context for Vm {
             Ok(callee) => self.invoke_resolved_callable(callee, arguments),
             Err(error) => Box::pin(std::future::ready(Err(error))),
         }
+    }
+
+    fn called_class(&self) -> Option<&str> {
+        self.native_called_class
+            .as_ref()
+            .map(|class| class.name.as_str())
+    }
+
+    fn object_properties(
+        &mut self,
+        object: &phera_value::Object,
+        purpose: phera_extension_api::PropertyPurpose,
+    ) -> Result<phera_value::PhpArray, phera_extension_api::NativeError> {
+        let projection = object
+            .class
+            .as_any()
+            .downcast_ref::<crate::classes::Class>()
+            .and_then(|class| class.hooks.as_ref()?.properties);
+        match projection {
+            Some(project) => project(self, object, purpose),
+            None => Ok(object.to_array()),
+        }
+    }
+
+    fn count_object(
+        &mut self,
+        object: std::rc::Rc<phera_value::Object>,
+    ) -> LocalFuture<'_, NativeResult> {
+        let count = object
+            .class
+            .as_any()
+            .downcast_ref::<crate::classes::Class>()
+            .and_then(|class| class.hooks.as_ref()?.count);
+        if let Some(count) = count {
+            return Box::pin(std::future::ready(count(self, &object).map(Value::Int)));
+        }
+        Box::pin(async move {
+            let result = self.call_method(object, "count", Vec::new()).await?;
+            Ok(Value::Int(phera_value::to_int(&result, self)?))
+        })
+    }
+
+    fn traverse(
+        &mut self,
+        object: std::rc::Rc<phera_value::Object>,
+    ) -> LocalFuture<'_, phera_extension_api::traversal::TraversalResult> {
+        Box::pin(self.make_traversal(object, false))
+    }
+
+    fn create_iterator(
+        &mut self,
+        cursor: Box<dyn phera_extension_api::NativeIterator>,
+    ) -> NativeResult {
+        let value = self.create_object("InternalIterator", phera_value::PhpArray::new())?;
+        let Value::Object(object) = &value else {
+            return Err(internal_error!("InternalIterator allocation"));
+        };
+        *object.native.borrow_mut() = Some(Box::new(crate::internal_iterator::InternalIterator {
+            cursor,
+            initialized: false,
+        }));
+        Ok(value)
     }
 
     fn state(&mut self) -> &mut RequestState {

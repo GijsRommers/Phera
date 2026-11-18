@@ -595,8 +595,10 @@ pub enum IncDec {
 pub enum FetchMode {
     /// An ordinary read: missing variables, keys and offsets warn.
     Read,
-    /// For `??`, `isset` and `empty`: missing things are null, silently.
+    /// For `??` and `empty`: missing things are null, silently.
     Quiet,
+    /// For `isset`, an overloaded final offset checks existence only.
+    Isset,
     /// For `[$a, $b] = $value`: missing keys warn; null yields null silently,
     /// while other non-array values warn and yield null in PHP 8.5.
     Destructure,

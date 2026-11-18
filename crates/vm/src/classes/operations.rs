@@ -40,3 +40,23 @@ impl ClassOperations {
         self.0 & flag != 0
     }
 }
+
+/// Subclasses keep native handlers unless a native subclass replaces an operation.
+pub(super) fn inherit_hooks(
+    entry: Option<&phera_extension_api::ClassHooks>,
+    parent: Option<&Class>,
+) -> Option<Rc<phera_extension_api::ClassHooks>> {
+    let base = parent.and_then(|class| class.hooks.as_ref());
+    let Some(own) = entry else {
+        return base.cloned();
+    };
+    let base = base.map_or(phera_extension_api::ClassHooks::EMPTY, |hooks| **hooks);
+    Some(Rc::new(phera_extension_api::ClassHooks {
+        clone: own.clone.or(base.clone),
+        compare: own.compare.or(base.compare),
+        properties: own.properties.or(base.properties),
+        iterator: own.iterator.or(base.iterator),
+        dimensions: own.dimensions.or(base.dimensions),
+        count: own.count.or(base.count),
+    }))
+}

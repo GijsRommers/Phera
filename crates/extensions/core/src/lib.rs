@@ -6,6 +6,7 @@ mod constants;
 mod count;
 mod dump;
 mod interfaces;
+mod iterator_functions;
 mod throwable;
 mod types;
 
@@ -22,6 +23,7 @@ impl Extension for Core {
         interfaces::register(registry);
         constants::register(registry);
         count::register(registry);
+        iterator_functions::register(registry);
         dump::register(registry);
         throwable::register(registry);
         types::register(registry);

@@ -9,6 +9,7 @@ use std::rc::Rc;
 use crate::array::{ArrayKey, PhpArray};
 use crate::convert::{NumVal, parse_numeric};
 use crate::error::{Diagnostics, OpError};
+use crate::object::NativeComparison;
 use crate::ops::deref_clone;
 use crate::value::Value;
 
@@ -110,6 +111,20 @@ fn compare_resolved(a: &Value, b: &Value, d: &mut dyn Diagnostics) -> Result<i8,
                 if let (Value::Object(x), Value::Object(y)) = (obj, other) {
                     if Rc::ptr_eq(x, y) {
                         return Ok(0);
+                    }
+                    let mut comparison = x.class.native_compare(x, y, d)?;
+                    if comparison == NativeComparison::Default {
+                        comparison = match y.class.native_compare(y, x, d)? {
+                            NativeComparison::Ordered(order) => {
+                                NativeComparison::Ordered(order.reverse())
+                            }
+                            other => other,
+                        };
+                    }
+                    match comparison {
+                        NativeComparison::Ordered(order) => return Ok(cmp3(order)),
+                        NativeComparison::Uncomparable => return Ok(1),
+                        NativeComparison::Default => {}
                     }
                     if x.class.name() != y.class.name() {
                         return Ok(1);

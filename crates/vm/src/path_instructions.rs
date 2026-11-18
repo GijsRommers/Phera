@@ -48,7 +48,7 @@ impl Vm {
         }
         let value = self.read_place(
             &place,
-            if mode != FetchMode::Quiet {
+            if matches!(mode, FetchMode::Read | FetchMode::Destructure) {
                 crate::access_mode::Missing::Warn
             } else {
                 crate::access_mode::Missing::Silent

@@ -10,6 +10,7 @@ use phera_value::{ArrayKey, ClassHandle, Object, Value};
 /// A linked class is immutable; its parent keeps inherited metadata alive.
 pub(crate) struct Class {
     /// The class's number in the request's class table.
+    pub(crate) hooks: Option<std::rc::Rc<phera_extension_api::ClassHooks>>,
     pub(crate) operations: super::operations::ClassOperations,
     pub(crate) index: super::ClassIndex,
     /// Only user class scopes may be assigned freely by Closure::bind.
@@ -121,6 +122,18 @@ impl ClassHandle for Class {
     fn name(&self) -> &str {
         &self.name
     }
+    fn native_compare(
+        &self,
+        left: &Object,
+        right: &Object,
+        diagnostics: &mut dyn phera_value::Diagnostics,
+    ) -> Result<phera_value::NativeComparison, phera_value::OpError> {
+        match self.hooks.as_ref().and_then(|hooks| hooks.compare) {
+            Some(compare) => compare(left, right, diagnostics),
+            None => Ok(phera_value::NativeComparison::Default),
+        }
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }

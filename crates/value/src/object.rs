@@ -7,6 +7,14 @@ use std::rc::Rc;
 use crate::array::{ArrayKey, PhpArray};
 use crate::value::Value;
 
+/// An internal comparison can defer to stored PHP properties or refuse ordering.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeComparison {
+    Default,
+    Ordered(std::cmp::Ordering),
+    Uncomparable,
+}
+
 /// The VM's per-class data. Implemented by other crates; tests use a dummy.
 pub trait ClassHandle: Any {
     fn name(&self) -> &str;
@@ -20,6 +28,15 @@ pub trait ClassHandle: Any {
 
     fn is_countable(&self) -> bool {
         self.is_instance_of("Countable")
+    }
+
+    fn native_compare(
+        &self,
+        _left: &Object,
+        _right: &Object,
+        _diagnostics: &mut dyn crate::Diagnostics,
+    ) -> Result<NativeComparison, crate::OpError> {
+        Ok(NativeComparison::Default)
     }
 
     fn as_any(&self) -> &dyn Any;

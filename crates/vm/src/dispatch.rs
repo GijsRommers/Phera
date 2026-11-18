@@ -25,6 +25,10 @@ impl Vm {
         instruction: Instruction,
         stop: usize,
     ) -> Result<DispatchResult, NativeError> {
+        if self.pending_dimension.is_some() {
+            self.dispatch_dimension(instruction).await?;
+            return Ok(DispatchResult::Continue);
+        }
         match instruction {
             Instruction::ReturnChecked { source } => {
                 return self
@@ -48,6 +52,33 @@ impl Vm {
                     .await;
             }
 
+            Instruction::ArraySpread { array, src } => {
+                self.spread_traversable(src, crate::traversable_unpack::SpreadTarget::Array(array))
+                    .await?;
+            }
+            Instruction::SendSpread { src } => {
+                self.spread_traversable(src, crate::traversable_unpack::SpreadTarget::Arguments)
+                    .await?;
+            }
+            Instruction::IterStart { iter, src, .. } => {
+                self.start_traversable(iter, self.get(src), false).await?;
+            }
+            Instruction::IterStartReference { iter, subject, .. } => {
+                let value = self.get(subject);
+                self.set(subject, Value::Null);
+                self.start_traversable(iter, value, true).await?;
+            }
+            Instruction::IterNext { iter, value, end } => {
+                self.next_traversable(iter, None, value, end).await?;
+            }
+            Instruction::IterNextKeyed {
+                iter,
+                key,
+                value,
+                end,
+            } => {
+                self.next_traversable(iter, Some(key), value, end).await?;
+            }
             Instruction::Exit { src: source } => {
                 return self.exit_value(source).map(DispatchResult::Returned);
             }

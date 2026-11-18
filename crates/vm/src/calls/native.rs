@@ -156,7 +156,8 @@ impl Vm {
                 self.with_argument_origin(origin, |vm| {
                     vm.prepare_native_method_arguments(method, entry.params, &mut arguments)
                 })?;
-                match entry.handler {
+                let previous = self.native_called_class.replace(context.called.clone());
+                let result = match entry.handler {
                     phera_extension_api::NativeMethod::Sync(handler) => {
                         let result = handler(self, context.receiver.as_ref(), &arguments);
                         self.call_stack.recycle_native_arguments(arguments);
@@ -168,7 +169,9 @@ impl Vm {
                     phera_extension_api::NativeMethod::Abstract => {
                         Err(NativeError::error("Cannot call abstract method"))
                     }
-                }
+                };
+                self.native_called_class = previous;
+                result
             }
             MethodBody::User(_) => Err(internal_error!("user method in native call")),
         }?;
