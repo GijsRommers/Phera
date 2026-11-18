@@ -29,21 +29,11 @@ fn million_draws_per_engine_and_range() {
         Some((i64::MIN, 0)),
         Some((7, 7)),
     ];
-    // Mt19937's legacy mode is deprecated; that is compared in methods.rs.
     let mut script = "<?php\nerror_reporting(0);\n".to_string();
     let mut rust = vec![];
     let mut labels = vec![];
-    for (class, mode) in [
-        ("Mt19937", None),
-        ("PcgOneseq128XslRr64", None),
-        ("Xoshiro256StarStar", None),
-        ("Mt19937", Some(1)),
-    ] {
-        let constructor: Vec<Value> = [Some(42), mode]
-            .into_iter()
-            .flatten()
-            .map(Value::Int)
-            .collect();
+    for class in ["Mt19937", "PcgOneseq128XslRr64", "Xoshiro256StarStar"] {
+        let constructor = vec![Value::Int(42)];
         for range in ranges {
             let engine = engine(&registry, &mut context, class, constructor.clone());
             let randomizer = randomizer(&registry, &mut context, &engine);
@@ -85,14 +75,11 @@ fn million_draws_per_engine_and_range() {
                 .map(|byte| format!("{byte:02x}"))
                 .collect();
             rust.push(format!("{checksum}|{}", edges.join(",")));
-            labels.push(format!(
-                "{class}{} {range:?}",
-                if mode.is_some() { " legacy" } else { "" }
-            ));
+            labels.push(format!("{class} {range:?}"));
         }
     }
     let php = oracle::run_php("random-million-sequences", &script).expect("PHP 8.5 required");
-    oracle::compare("40 million random draws", &labels, &php, &rust);
+    oracle::compare("30 million random draws", &labels, &php, &rust);
 }
 
 #[test]
