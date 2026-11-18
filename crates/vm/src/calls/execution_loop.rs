@@ -44,6 +44,8 @@ pub(crate) enum BatchExit {
     NativeCall(Reg),
     /// A prepared PHP call whose weak string argument may invoke __toString.
     BindCall(Reg),
+    /// A comparison reached an object whose __toString must run.
+    Compare(crate::string_comparison::PendingComparison),
     /// The frame that native code called has returned this value.
     Returned(Value),
     /// The work budget is spent; other tasks get a turn.

@@ -3,9 +3,10 @@
 
 use phera_bytecode::{BinaryOp, Reg, Type, TypeMask};
 use phera_extension_api::{NativeError, NativeResult};
-use phera_value::{PhpString, Value, to_php_string};
+use phera_value::{PhpString, StringComparisonStep, Value, to_php_string};
 
 use crate::Vm;
+use crate::string_comparison::{begin_comparison, comparison_value, needs_comparison_step};
 use crate::types::TypeChecking;
 
 impl Vm {
@@ -103,12 +104,16 @@ impl Vm {
             let rhs = self.stringify_value(&right).await?;
             left = Value::String(lhs);
             right = Value::String(rhs);
-        } else if is_loose_comparison(op) && mixed_string_comparison(&left, &right) {
-            if left.is_object() {
-                left = self.coerce_stringable(left).await?;
-            } else {
-                right = self.coerce_stringable(right).await?;
-            }
+        } else if needs_comparison_step(op, &left, &right) {
+            let step = {
+                let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
+                begin_comparison(op, &left, &right, &mut diagnostics.buffer)?
+            };
+            let order = match step {
+                StringComparisonStep::Complete(order) => order,
+                StringComparisonStep::Cast(cast) => self.finish_string_comparison(cast).await?,
+            };
+            return Ok(comparison_value(op, order));
         }
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         Ok(crate::ops::binary(
@@ -118,35 +123,4 @@ impl Vm {
             &mut diagnostics.buffer,
         )?)
     }
-}
-
-#[inline]
-pub(crate) fn needs_binary_cast(op: BinaryOp, left: &Value, right: &Value) -> bool {
-    match (left, right) {
-        (Value::Object(_), Value::String(_)) | (Value::String(_), Value::Object(_)) => {
-            op == BinaryOp::Concat || is_loose_comparison(op)
-        }
-        (Value::Object(_), _) | (_, Value::Object(_)) => op == BinaryOp::Concat,
-        _ => false,
-    }
-}
-
-fn mixed_string_comparison(left: &Value, right: &Value) -> bool {
-    matches!(
-        (&*left.deref(), &*right.deref()),
-        (Value::Object(_), Value::String(_)) | (Value::String(_), Value::Object(_))
-    )
-}
-
-fn is_loose_comparison(op: BinaryOp) -> bool {
-    matches!(
-        op,
-        BinaryOp::Equal
-            | BinaryOp::NotEqual
-            | BinaryOp::Less
-            | BinaryOp::LessEqual
-            | BinaryOp::Greater
-            | BinaryOp::GreaterEqual
-            | BinaryOp::Spaceship
-    )
 }

@@ -119,6 +119,7 @@ mod references;
 mod scope_intrinsics;
 mod spl_autoload;
 mod static_variables;
+mod string_comparison;
 mod string_offsets;
 mod stringable;
 mod trigger_errors;

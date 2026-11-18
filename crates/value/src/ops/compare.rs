@@ -17,7 +17,9 @@ use crate::float_format::{NumberText, float_text_precision14};
 use crate::object::Object;
 use crate::value::Value;
 
+mod casting;
 mod structure;
+pub use casting::{StringComparison, StringComparisonStep, compare_with_string_objects};
 use structure::{Comparison, Table, compare_tables};
 
 /// `<=>` as an operator: -1, 0 or 1 in a `Value::Int`.
@@ -113,7 +115,7 @@ fn compare_resolved(
             if let Some(result) = comparison.object_equality(a, b) {
                 Ok(result)
             } else {
-                compare_tables(Table::object(a)?, Table::object(b)?, comparison, d)
+                compare_tables(Table::object(a), Table::object(b), comparison, d)
             }
         }
         _ => comparison.leaf(a, b, d),

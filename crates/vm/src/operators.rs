@@ -5,9 +5,12 @@ use std::rc::Rc;
 use crate::calls::execution_loop::BatchExit;
 use phera_bytecode::{BinaryOp, CastKind, IncDec, Instruction, Reg, UnaryOp};
 use phera_extension_api::NativeError;
-use phera_value::{Value, to_php_string};
+use phera_value::{StringComparisonStep, Value, to_php_string};
 
 use crate::integer_arithmetic::{OverflowOperation, overflow_value};
+use crate::string_comparison::{
+    PendingComparison, begin_comparison, comparison_value, needs_comparison_step,
+};
 use crate::{Vm, ops};
 
 impl Vm {
@@ -56,8 +59,29 @@ impl Vm {
         let right = right.unwrap_or(&null).deref();
         let result = match fast_binary(operator, &left, &right) {
             Some(value) => Ok(value),
+            None if needs_comparison_step(operator, &left, &right) => {
+                match begin_comparison(operator, &left, &right, self.diagnostic_reporter.operator())
+                {
+                    Ok(StringComparisonStep::Complete(order)) => {
+                        Ok(comparison_value(operator, order))
+                    }
+                    Ok(StringComparisonStep::Cast(cast)) => {
+                        drop(left);
+                        drop(right);
+                        if self.diagnostic_reporter.has_pending() {
+                            self.flush_operator_diagnostics();
+                        }
+                        return Ok(Some(BatchExit::Compare(PendingComparison {
+                            cast,
+                            operator,
+                            destination,
+                        })));
+                    }
+                    Err(error) => Err(error),
+                }
+            }
             None => {
-                if crate::stringable::needs_binary_cast(operator, &left, &right) {
+                if operator == BinaryOp::Concat && (left.is_object() || right.is_object()) {
                     return Ok(Some(BatchExit::Instruction(Instruction::Binary {
                         dst: destination,
                         op: operator,

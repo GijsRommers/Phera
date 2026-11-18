@@ -11,9 +11,14 @@ pub(crate) fn equal(
     right: &Value,
     diagnostics: &mut dyn Diagnostics,
 ) -> Result<Value, OpError> {
-    phera_value::loose_equals_with_objects(left, right, diagnostics, |left, right| {
-        (left.class.name() == "Closure").then(|| same_callable(left, right))
-    })
+    phera_value::loose_equals_with_objects(left, right, diagnostics, native_equal)
+}
+
+pub(crate) fn native_equal(
+    left: &phera_value::Object,
+    right: &phera_value::Object,
+) -> Option<bool> {
+    (left.class.name() == "Closure").then(|| same_callable(left, right))
 }
 
 /// PHP compares fake closure metadata without comparing captures or mutable static variables.
