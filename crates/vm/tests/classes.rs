@@ -23,8 +23,6 @@ fn later_milestones_remain_compile_errors() {
         "<?php goto target; target:",
         "<?php class Example {static function method(){}} Example::method(...);",
         "<?php class Example {function method(){}} (new Example)->method(...);",
-        "<?php class Example {public int $value {get => 1;}}",
-        "<?php class Example {public private(set) int $value;}",
         "<?php #[Other] class Example {}",
     ] {
         if matches!(
@@ -48,6 +46,32 @@ fn later_milestones_remain_compile_errors() {
             "{source}: {error}"
         );
     }
+}
+
+#[test]
+fn property_hooks_and_set_visibility_emit_access_metadata() {
+    let unit = phera_compiler::compile(
+        "<?php class Example {public int $value {get => 1;} public private(set) int $stored;}",
+        "supported-properties.php",
+    )
+    .unwrap();
+    let properties = &unit.classes[0].properties;
+    let hooked = properties[0].hooks.as_ref().unwrap();
+    assert!(hooked.is_virtual);
+    let getter = hooked.get.as_ref().unwrap();
+    assert_eq!(
+        unit.functions[getter.function.index()].name,
+        "Example::$value::get"
+    );
+    assert!(hooked.set.is_none());
+
+    let stored = properties[1].hooks.as_ref().unwrap();
+    assert!(!stored.is_virtual);
+    assert_eq!(
+        stored.set_visibility,
+        Some(phera_bytecode::Visibility::Private)
+    );
+    assert!(properties[1].is_final);
 }
 
 #[test]
