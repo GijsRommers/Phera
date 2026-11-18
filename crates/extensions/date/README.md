@@ -23,11 +23,11 @@ covers the PHP surface and the remaining engine integration.
 | `strtotime` | DONE | Timelib grammar, base filling and relative arithmetic. |
 | `date_parse` | DONE | Absolute and relative fields with parser diagnostics. |
 | `DateTimeInterface` | PARTIAL | Implemented by both classes with format constants and method declarations. The VM needs to restrict implementation by user classes and check native method types. |
-| `DateTime` | PARTIAL | Constructors, factories, mutators, getters, arithmetic and direct magic methods work. Inherited static factories and native object hooks are pending. |
-| `DateTimeImmutable` | PARTIAL | Mutators return new instances. Inherited static factories, ignored-return diagnostics and native object hooks are pending. |
-| `DateTimeZone` | PARTIAL | Constructors, groups, offsets, transition ranges, metadata, abbreviations and direct magic methods work. Native clone, comparison and property projection are pending. |
-| `DateInterval` | PARTIAL | ISO durations, relative strings, format codes, virtual arithmetic fields and direct magic methods work. Debug projection, clone and comparison need engine hooks. |
-| `DatePeriod` | PARTIAL | Object constructors, ISO factory, getters, readonly properties with fresh snapshots, direct magic methods and the recurrence calculation work. Iteration, inherited ISO factories and native object hooks are pending. |
+| `DateTime` | PARTIAL | Constructors, inherited factories, mutators, getters, arithmetic, clone, comparison, property views and direct magic methods work. General serialization is pending. |
+| `DateTimeImmutable` | PARTIAL | Mutators return new instances. Inherited factories, clone, comparison and property views work. Ignored-return diagnostics and general serialization are pending. |
+| `DateTimeZone` | PARTIAL | Constructors, groups, offsets, transition ranges, metadata, abbreviations, clone, comparison, property views and direct magic methods work. General serialization is pending. |
+| `DateInterval` | PARTIAL | ISO durations, relative strings, format codes, virtual arithmetic fields, clone, comparison diagnostics, property views and direct magic methods work. General serialization is pending. |
+| `DatePeriod` | PARTIAL | Constructors, inherited ISO factories, getters, readonly properties with fresh snapshots, clone, property views, lazy iteration and direct magic methods work. General serialization is pending. |
 | `DateError` | DONE | Extends Error. |
 | `DateObjectError` | DONE | Extends DateError and reports uninitialized objects. |
 | `DateRangeError` | DONE | Extends DateError and reports timestamp and microsecond bounds. |
@@ -37,8 +37,8 @@ covers the PHP surface and the remaining engine integration.
 | `DateMalformedStringException` | DONE | Extends DateException and reports date string errors. |
 | `DateMalformedIntervalStringException` | DONE | Extends DateException and reports ISO and relative interval errors. |
 | `DateMalformedPeriodStringException` | DONE | Extends DateException and reports ISO period and recurrence errors. |
-| `date_create` | PARTIAL | Mutable factory with false on parse failure. A named timezone with omitted datetime needs native defaults. |
-| `date_create_immutable` | PARTIAL | Immutable factory with false on parse failure. A named timezone with omitted datetime needs native defaults. |
+| `date_create` | DONE | Mutable factory with false on parse failure. A named timezone can omit the datetime. |
+| `date_create_immutable` | DONE | Immutable factory with false on parse failure. A named timezone can omit the datetime. |
 | `date_create_from_format` | DONE | Mutable format-directed factory. |
 | `date_create_immutable_from_format` | DONE | Immutable format-directed factory. |
 | `date_get_last_errors` | DONE | Request-local errors and warnings. |
@@ -330,7 +330,7 @@ names readable after a dump. The ISO view includes the arithmetic fields and
 `from_string = false`. The relative view contains `from_string = true` and the
 original string. DatePeriod declares seven readonly properties. Its object-valued
 reads produce fresh snapshots, and its dump view includes those snapshots and
-recurrence flags. The projection fixture covers the remaining dump behavior.
+recurrence flags.
 
 Class-typed arguments use `ParamType::Class`. DatePeriod declares its typed
 readonly fields with `PropertyEntry::typed(...).readonly()` and reads their
