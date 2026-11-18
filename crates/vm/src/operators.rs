@@ -323,13 +323,17 @@ impl Vm {
         local: Reg,
         source: Reg,
     ) -> Result<Option<BatchExit>, NativeError> {
-        // A compiler-elided local snapshot must retain its undefined-variable notice.
-        if self
-            .current()
-            .and_then(|frame| frame.slots(&self.registers).get(source.index()))
-            .is_some_and(Option::is_none)
-        {
-            self.read_local(source);
+        // A variable that was never assigned warns and counts as null, on
+        // either side: `$total += $missing` and `$missing += 1`. PHP reads
+        // the right side first, so its warning comes first.
+        for register in [source, local] {
+            if self
+                .current()
+                .and_then(|frame| frame.slots(&self.registers).get(register.index()))
+                .is_some_and(Option::is_none)
+            {
+                self.read_local(register);
+            }
         }
         let reference = self
             .current()
