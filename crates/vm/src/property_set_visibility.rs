@@ -37,6 +37,11 @@ impl Vm {
         if allowed {
             return Ok(());
         }
+        let readonly = if property.is_readonly && visibility == Visibility::Protected {
+            " readonly"
+        } else {
+            ""
+        };
         let visibility = match visibility {
             Visibility::Public => "public",
             Visibility::Protected => "protected",
@@ -46,11 +51,6 @@ impl Vm {
             PropertyChange::Direct => "modify",
             PropertyChange::Indirect | PropertyChange::Bind => "indirectly modify",
             PropertyChange::Unset => "unset",
-        };
-        let readonly = if property.is_readonly {
-            " readonly"
-        } else {
-            ""
         };
         let scope = scope.map_or_else(
             || "global scope".into(),

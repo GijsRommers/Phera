@@ -119,7 +119,6 @@ impl Vm {
                 property.declaring
             )));
         }
-        let scope = self.current().and_then(|frame| frame.scope());
         if crate::property_storage::read(object, key).is_some()
             && !self.clone_can_update(object, key)
         {
@@ -133,21 +132,12 @@ impl Vm {
                 property.declaring
             )));
         }
-        if scope.is_none_or(|scope| !scope.is_a(&property.declaring)) {
-            let action = if mutation == Mutation::Unset {
-                "unset"
-            } else {
-                "modify"
-            };
-            let from = scope
-                .map(|scope| format!("scope {}", scope.name))
-                .unwrap_or_else(|| "global scope".into());
-            return Err(NativeError::error(format!(
-                "Cannot {action} protected(set) readonly property {}::${name} from {from}",
-                property.declaring
-            )));
-        }
-        Ok(())
+        let change = if mutation == Mutation::Unset {
+            PropertyChange::Unset
+        } else {
+            PropertyChange::Direct
+        };
+        self.check_set_visibility(property, change)
     }
 
     /// Validate each object boundary, including indirect mutations of readonly arrays.
@@ -199,11 +189,13 @@ impl Vm {
                                 mutation,
                             )?;
                         }
-                        if property.set_visibility.is_some() {
+                        if !property.is_readonly && property.set_visibility.is_some() {
                             let indirect = steps.peek().is_some();
                             if !indirect
-                                || !crate::property_storage::read(object, key)
-                                    .is_some_and(|value| value.deref().is_object())
+                                || crate::property_storage::read(object, key)
+                                    .map_or(mutation != Mutation::Unset, |value| {
+                                        !value.deref().is_object()
+                                    })
                             {
                                 let change = match mutation {
                                     Mutation::Unset if !indirect => PropertyChange::Unset,

@@ -74,6 +74,7 @@ impl Vm {
     ) -> Result<(), NativeError> {
         if let PathBase::StaticProperty { class, name, .. } = place.base()?
             && keys.iter().next().is_some()
+            && !self.get(register).is_object()
         {
             self.validate_static_mutation(class, name, &mut value, PropertyChange::Indirect)?;
         }
@@ -179,12 +180,19 @@ impl Vm {
                             .as_any()
                             .downcast_ref::<crate::classes::Class>()
                         && let Some(property) = class.defaults.iter().find(|item| {
-                            item.key == key && !item.is_readonly && item.set_visibility.is_some()
+                            item.key == key && (item.is_readonly || item.set_visibility.is_some())
                         })
                     {
-                        // Readonly properties cannot hold references. The bind below
-                        // reports the readonly error before checking set visibility.
-                        self.check_set_visibility(property, PropertyChange::Indirect)?;
+                        let access = self.check_set_visibility(property, PropertyChange::Indirect);
+                        // A detached reference can still mutate the object without replacing the slot.
+                        if value.deref().is_object() && (property.is_readonly || access.is_err()) {
+                            return Ok(Value::Reference(Rc::new(RefCell::new(
+                                value.deref().clone(),
+                            ))));
+                        }
+                        if !property.is_readonly {
+                            access?;
+                        }
                     }
                     value
                 }
