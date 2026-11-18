@@ -157,11 +157,12 @@ impl Vm {
                             .class
                             .as_any()
                             .downcast_ref::<crate::classes::Class>()
-                        && let Some(property) = class
-                            .defaults
-                            .iter()
-                            .find(|item| item.key == key && item.set_visibility.is_some())
+                        && let Some(property) = class.defaults.iter().find(|item| {
+                            item.key == key && !item.is_readonly && item.set_visibility.is_some()
+                        })
                     {
+                        // Readonly properties cannot hold references. The bind below
+                        // reports the readonly error before checking set visibility.
                         self.check_set_visibility(property, PropertyChange::Indirect)?;
                     }
                     value
