@@ -111,6 +111,9 @@ impl Vm {
         value: Reg,
         end: Target,
     ) -> Result<bool, NativeError> {
+        if self.next_generator_element(iterator, key, value)? {
+            return Ok(true);
+        }
         let mut state = self
             .call_stack
             .current_extras_mut()

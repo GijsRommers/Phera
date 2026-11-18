@@ -9,7 +9,7 @@
 //! at that instruction, with the input to the preceding yield already bound.
 
 use phera_bytecode::{Instruction, Reg};
-use phera_extension_api::{GeneratorOperation, NativeResult, traversal::IteratorStep};
+use phera_extension_api::{GeneratorOperation, NativeError, NativeResult, traversal::IteratorStep};
 use phera_value::{Object, Value};
 
 use crate::{
@@ -19,6 +19,8 @@ use crate::{
 };
 
 use super::{Generator, State, state};
+
+pub(crate) type Element = (Value, Option<Value>);
 
 impl Vm {
     pub(crate) fn resume_generator_operation(
@@ -42,12 +44,29 @@ impl Vm {
         }
     }
 
+    pub(crate) fn resume_generator_element(
+        &mut self,
+        object: &Object,
+        with_key: bool,
+    ) -> Option<Result<Element, NativeError>> {
+        self.resume_in_place(object, &Value::Null, |generator| {
+            let item = generator.item.as_ref();
+            let value = item.map_or(Value::Null, |item| item.value.deref().clone());
+            let key = if with_key {
+                item.map(|item| item.key.clone())
+            } else {
+                None
+            };
+            (value, key)
+        })
+    }
+
     fn resume_in_place<T>(
         &mut self,
         object: &Object,
         sent: &Value,
         result: impl FnOnce(&Generator) -> T,
-    ) -> Option<Result<T, phera_extension_api::NativeError>> {
+    ) -> Option<Result<T, NativeError>> {
         if !self.error_handlers.pending.is_empty() || self.generator_releases_pending() {
             return None;
         }

@@ -140,14 +140,15 @@ impl Context for Vm {
         &mut self,
         object: std::rc::Rc<phera_value::Object>,
         operation: phera_extension_api::GeneratorOperation,
-    ) -> LocalFuture<'_, NativeResult> {
+    ) -> phera_extension_api::traversal::StepFuture<'_> {
+        use phera_extension_api::traversal::StepFuture;
         if let Some(result) = crate::generators::local_observation(&object, &operation) {
-            return Box::pin(std::future::ready(result));
+            return StepFuture::ready(result);
         }
         if let Some(result) = self.resume_generator_operation(&object, &operation) {
-            return Box::pin(std::future::ready(result));
+            return StepFuture::ready(result);
         }
-        Box::pin(async move {
+        StepFuture::Pending(Box::pin(async move {
             self.call_stack.enter_callback()?;
             self.generator_traces
                 .push(crate::generators::trace::Site::new(
@@ -163,7 +164,7 @@ impl Context for Vm {
             }
             self.call_stack.leave_callback();
             result
-        })
+        }))
     }
 
     fn called_class(&self) -> Option<&str> {

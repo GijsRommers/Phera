@@ -7,8 +7,8 @@
 use std::rc::Rc;
 
 use phera_extension_api::{
-    Context, LocalFuture, NativeError, NativeIterator, NativeResult,
-    traversal::{IteratorStep, Traversal, TraversalResult},
+    Context, NativeError, NativeIterator, NativeResult,
+    traversal::{IteratorStep, StepFuture, Traversal, TraversalResult},
 };
 use phera_value::{Object, Value};
 
@@ -24,9 +24,9 @@ impl Traversal for Cursor {
         &'a mut self,
         context: &'a mut dyn Context,
         operation: IteratorStep,
-    ) -> LocalFuture<'a, NativeResult> {
+    ) -> StepFuture<'a> {
         match self {
-            Self::Php(object) => context.call_method(
+            Self::Php(object) => StepFuture::Pending(context.call_method(
                 object.clone(),
                 match operation {
                     IteratorStep::Rewind => "rewind",
@@ -36,12 +36,10 @@ impl Traversal for Cursor {
                     IteratorStep::Key => "key",
                 },
                 Vec::new(),
-            ),
-            Self::Native(iterator) => Box::pin(std::future::ready(native_step(
-                iterator.as_mut(),
-                context,
-                operation,
-            ))),
+            )),
+            Self::Native(iterator) => {
+                StepFuture::ready(native_step(iterator.as_mut(), context, operation))
+            }
         }
     }
 }

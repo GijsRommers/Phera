@@ -10,7 +10,7 @@ use std::rc::Rc;
 use phera_extension_api::{
     ClassEntry, ClassHooks, ClassKind, Context, GeneratorOperation, LocalFuture, MethodEntry,
     NativeClone, NativeError, NativeResult, Param, ParamType, PropertyPurpose,
-    traversal::{IteratorStep, Traversal},
+    traversal::{IteratorStep, StepFuture, Traversal},
 };
 use phera_value::{ArrayKey, Object, PhpArray, Value};
 
@@ -92,7 +92,9 @@ fn run(
     operation: GeneratorOperation,
 ) -> LocalFuture<'_, NativeResult> {
     match object {
-        Some(object) => cx.generator_operation(object, operation),
+        Some(object) => cx
+            .generator_operation(object, operation)
+            .into_local_future(),
         None => Box::pin(std::future::ready(Err(internal_error!(
             "Generator method receiver"
         )))),
@@ -151,21 +153,11 @@ impl Cursor {
 }
 
 impl Traversal for Cursor {
-    fn observation(&self, step: IteratorStep) -> Option<NativeResult> {
-        super::local_observation(
-            &self.0,
-            &GeneratorOperation::Cursor {
-                step,
-                by_reference: self.1,
-            },
-        )
+    fn generator(&self) -> Option<&Rc<Object>> {
+        Some(&self.0)
     }
 
-    fn step<'a>(
-        &'a mut self,
-        context: &'a mut dyn Context,
-        step: IteratorStep,
-    ) -> LocalFuture<'a, NativeResult> {
+    fn step<'a>(&'a mut self, context: &'a mut dyn Context, step: IteratorStep) -> StepFuture<'a> {
         context.generator_operation(
             self.0.clone(),
             GeneratorOperation::Cursor {

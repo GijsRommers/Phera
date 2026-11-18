@@ -140,10 +140,10 @@ pub trait Context {
         &mut self,
         _object: Rc<Object>,
         _operation: GeneratorOperation,
-    ) -> LocalFuture<'_, NativeResult> {
-        Box::pin(std::future::ready(Err(NativeError::error(
+    ) -> crate::traversal::StepFuture<'_> {
+        crate::traversal::StepFuture::ready(Err(NativeError::error(
             "Cannot resume a Generator without a runtime",
-        ))))
+        )))
     }
 
     /// Wraps a native cursor in PHP's InternalIterator class.

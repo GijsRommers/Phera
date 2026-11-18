@@ -14,6 +14,36 @@ use phera_value::{Value, to_bool};
 use crate::{Vm, calls::frame::IteratorState};
 
 impl Vm {
+    /// A resumed generator either yields its next element here or enters the
+    /// ordinary cursor path at the first instruction that needs the VM.
+    pub(crate) fn next_generator_element(
+        &mut self,
+        iterator: IterId,
+        key: Option<Reg>,
+        destination: Reg,
+    ) -> Result<bool, NativeError> {
+        let generator = self
+            .call_stack
+            .current_extras_mut()
+            .iterators
+            .get_mut(iterator.0)
+            .filter(|state| state.started && !state.traversal_reference)
+            .and_then(|state| state.traversal.as_deref()?.generator())
+            .cloned();
+        let Some(generator) = generator else {
+            return Ok(false);
+        };
+        let Some(next) = self.resume_generator_element(&generator, key.is_some()) else {
+            return Ok(false);
+        };
+        let (element, index) = next?;
+        if let Some((key, index)) = key.zip(index) {
+            self.set(key, index.deref().clone());
+        }
+        self.set(destination, element);
+        Ok(true)
+    }
+
     pub(crate) async fn start_traversable(
         &mut self,
         iterator: IterId,
@@ -25,7 +55,7 @@ impl Vm {
         };
         let mut cursor = self.make_traversal(object, by_reference).await?;
         cursor.step(self, IteratorStep::Rewind).await?;
-        let valid = to_bool(&traversal::observe(cursor.as_mut(), self, IteratorStep::Valid).await?);
+        let valid = to_bool(&cursor.step(self, IteratorStep::Valid).await?);
         self.call_stack.current_extras_mut().iterators.insert(
             iterator.0,
             IteratorState {
@@ -59,7 +89,7 @@ impl Vm {
             .ok_or_else(|| internal_error!("missing Traversable cursor"))?;
         if state.started {
             cursor.step(self, IteratorStep::Advance).await?;
-            if !to_bool(&traversal::observe(cursor, self, IteratorStep::Valid).await?) {
+            if !to_bool(&cursor.step(self, IteratorStep::Valid).await?) {
                 return self.jump(end);
             }
         }
