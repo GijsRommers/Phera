@@ -1,0 +1,13 @@
+{
+    "name": "app/{{package}}",
+    "description": "{{name}}, a PHP application for the Phera runtime",
+    "type": "project",
+    "require": {
+        "php": ">=8.5"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "src/"
+        }
+    }
+}
