@@ -50,7 +50,7 @@ fn restore(data: &PhpArray) -> Result<Interval, NativeError> {
             .filter(|value| {
                 !matches!(
                     value,
-                    Value::Array(_) | Value::Object(_) | Value::Resource(_)
+                    Value::Array(_) | Value::Object(_) | Value::Resource(_) | Value::Reference(_)
                 )
             })
             .map_or(default, interval::integer)

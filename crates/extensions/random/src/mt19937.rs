@@ -37,6 +37,30 @@ pub struct Mt19937 {
     state: [u32; N],
     /// The next word to temper; `N` when the state needs a twist.
     index: usize,
+    mode: StateMode,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum StateMode {
+    Standard,
+    Legacy,
+}
+
+impl StateMode {
+    pub(crate) fn php_id(self) -> i64 {
+        match self {
+            Self::Standard => 0,
+            Self::Legacy => 1,
+        }
+    }
+
+    pub(crate) fn from_php_id(mode: u32) -> Option<Self> {
+        match mode {
+            0 => Some(Self::Standard),
+            1 => Some(Self::Legacy),
+            _ => None,
+        }
+    }
 }
 
 impl Mt19937 {
@@ -49,7 +73,22 @@ impl Mt19937 {
                 .wrapping_mul(previous ^ (previous >> 30))
                 .wrapping_add(i as u32);
         }
-        Self { state, index: N }
+        let mut engine = Self {
+            state,
+            index: N,
+            mode: StateMode::Standard,
+        };
+        engine.twist();
+        engine
+    }
+
+    pub(crate) fn snapshot(&self) -> (&[u32; N], usize, StateMode) {
+        (&self.state, self.index, self.mode)
+    }
+
+    pub(crate) fn from_snapshot(state: [u32; N], index: u32, mode: StateMode) -> Option<Self> {
+        let index = index as usize;
+        (index <= N).then_some(Self { state, index, mode })
     }
 
     pub fn next(&mut self) -> u32 {
@@ -68,7 +107,10 @@ impl Mt19937 {
         for i in 0..N {
             let word = self.state[i];
             let next = self.state[(i + 1) % N];
-            let low_bit = next & 1;
+            let low_bit = match self.mode {
+                StateMode::Standard => next,
+                StateMode::Legacy => word,
+            } & 1;
             // Mix in the matrix when the low bit is set, without a branch.
             self.state[i] = self.state[(i + M) % N]
                 ^ (((word & 0x80000000) | (next & 0x7fffffff)) >> 1)
