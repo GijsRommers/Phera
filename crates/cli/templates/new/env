@@ -1,0 +1,4 @@
+# Read by Phera when the application starts. Values for one machine only
+# belong in .env.local, which git ignores.
+APP_NAME="{{name}}"
+APP_ENV=dev
