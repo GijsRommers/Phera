@@ -1498,7 +1498,8 @@ enum Rhs {
 
 /// PHP's grammar only allows a `variable` on the left of `=`, but its parser
 /// reduces the rightmost operand to a variable when an assignment operator
-/// follows, so `$a + $b = 1` parses as `$a + ($b = 1)`. This re-associates
+/// follows, so `$a + $b = 1` parses as `$a + ($b = 1)` and `(bool) $a = 1` as
+/// `(bool) ($a = 1)`. This re-associates
 /// `left` accordingly: the assignment attaches to the rightmost assignable
 /// operand along the right spine.
 fn reassociate_assign(
@@ -1582,6 +1583,16 @@ fn reassociate_assign(
             Ok(Expression {
                 kind: ExpressionKind::Unary {
                     operator,
+                    operand: Box::new(operand),
+                },
+                span: left_span,
+            })
+        }
+        ExpressionKind::Cast { kind, operand } => {
+            let operand = reassociate_assign(*operand, rhs, compound, err_span, parser)?;
+            Ok(Expression {
+                kind: ExpressionKind::Cast {
+                    kind,
                     operand: Box::new(operand),
                 },
                 span: left_span,
