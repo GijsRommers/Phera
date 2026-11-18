@@ -85,3 +85,11 @@ fn list(values: impl IntoIterator<Item = Value>) -> Value {
             .collect::<PhpArray>(),
     )
 }
+
+fn warn_string_key(context: &mut dyn Context, key: &[u8]) {
+    let key = key.split(|byte| *byte == 0).next().unwrap_or_default();
+    let mut message = b"Undefined array key \"".to_vec();
+    message.extend_from_slice(key);
+    message.push(b'"');
+    context.warning_bytes(&message);
+}

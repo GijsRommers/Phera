@@ -53,6 +53,7 @@ impl Compiler<'_> {
             self.emit(Instruction::FinishCallable { destination: dst }, line);
             return Ok(dst);
         };
+        let mut temporary_objects = Vec::new();
         for argument in arguments {
             let place = if !argument.spread && crate::helpers::reference_capable(&argument.value) {
                 Some(self.readable_place(&argument.value)?)
@@ -69,6 +70,11 @@ impl Compiler<'_> {
             } else {
                 crate::ir::ArgumentSource::Value(self.compile_expression(&argument.value)?)
             };
+            if let crate::ir::ArgumentSource::Value(register) = &source
+                && matches!(argument.value.kind, ast::ExpressionKind::New { .. })
+            {
+                temporary_objects.push(*register);
+            }
             self.emit(
                 Instruction::Send {
                     argument: Argument {
@@ -82,6 +88,11 @@ impl Compiler<'_> {
         }
         let dst = self.allocate_register()?;
         self.emit(Instruction::FinishCall { destination: dst }, line);
+        // The argument window owns a constructed object for the duration of the call.
+        // Drop the compiler's copy before a following call can observe a weak reference.
+        for register in temporary_objects {
+            self.emit(Instruction::Clear { register }, line);
+        }
         Ok(dst)
     }
 }

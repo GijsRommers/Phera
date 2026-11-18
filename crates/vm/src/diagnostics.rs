@@ -51,7 +51,11 @@ impl Vm {
     }
 
     pub(crate) fn diagnostic(&mut self, kind: &str, message: String) {
-        if self.queue_diagnostic(kind, &message) {
+        self.diagnostic_bytes(kind, message.as_bytes());
+    }
+
+    pub(crate) fn diagnostic_bytes(&mut self, kind: &str, message: &[u8]) {
+        if self.queue_diagnostic(kind, message) {
             return;
         }
         let level = match kind {

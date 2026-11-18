@@ -61,12 +61,7 @@ fn get(context: &mut dyn Context, object: &Object, index: Value) -> NativeResult
     let entry = cache(object, |cache| cache.rows.get(&key).cloned())?;
     Ok(entry.unwrap_or_else(|| {
         if let Value::String(value) = value {
-            let bytes = value.as_bytes();
-            let bytes = bytes.split(|byte| *byte == 0).next().unwrap_or_default();
-            context.diagnostics().warning(format!(
-                "Undefined array key \"{}\"",
-                String::from_utf8_lossy(bytes)
-            ));
+            crate::warn_string_key(context, value.as_bytes());
         }
         Value::Null
     }))

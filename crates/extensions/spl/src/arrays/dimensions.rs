@@ -75,20 +75,10 @@ pub(super) fn get(context: &mut dyn Context, object: &Object, offset: Value) -> 
 }
 
 fn warn_missing(context: &mut dyn Context, key: &ArrayKey) {
-    let key = match key {
-        ArrayKey::Int(key) => key.to_string(),
-        ArrayKey::String(key) => {
-            let bytes = key.as_bytes();
-            let length = bytes
-                .iter()
-                .position(|byte| *byte == 0)
-                .unwrap_or(bytes.len());
-            format!("\"{}\"", String::from_utf8_lossy(&bytes[..length]))
-        }
-    };
-    context
-        .diagnostics()
-        .warning(format!("Undefined array key {key}"));
+    match key {
+        ArrayKey::Int(key) => context.warning(format!("Undefined array key {key}")),
+        ArrayKey::String(key) => crate::warn_string_key(context, key.as_bytes()),
+    }
 }
 
 fn exists(context: &mut dyn Context, object: &Object, offset: Value) -> Result<bool, NativeError> {

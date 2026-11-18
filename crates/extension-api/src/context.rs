@@ -184,6 +184,11 @@ pub trait Context {
         self.diagnostics().warning(message);
     }
 
+    /// Warnings containing PHP strings may need to preserve non-UTF-8 bytes.
+    fn warning_bytes(&mut self, message: &[u8]) {
+        self.warning(String::from_utf8_lossy(message).into_owned());
+    }
+
     fn notice(&mut self, message: String) {
         self.diagnostics().notice(message);
     }

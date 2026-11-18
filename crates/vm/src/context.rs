@@ -31,6 +31,10 @@ impl Context for Vm {
         self
     }
 
+    fn warning_bytes(&mut self, message: &[u8]) {
+        self.diagnostic_bytes("Warning", message);
+    }
+
     fn compile_diagnostic(
         &mut self,
         diagnostic: &CompileDiagnostic,
@@ -50,7 +54,7 @@ impl Context for Vm {
         let event = crate::error_handlers::DiagnosticEvent {
             level,
             kind: diagnostic.kind.label().into(),
-            message: diagnostic.message.clone(),
+            message: diagnostic.message.as_str().into(),
             location,
             native: self.error_handlers.native_site.clone(),
             trace_location: Some(caller),
