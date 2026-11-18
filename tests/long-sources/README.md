@@ -85,8 +85,6 @@ their length.
 - One function has at most 65,534 registers, so at most that many distinct
   variables: `global $g0, ..., $g99999;` or a 100,000-variable `list()` stop
   with "Phera register limit exceeded" where PHP runs them.
-- Concatenating at run time copies the growing string (`$s = $a . 'x' . 'y'
-  ...`); only the leading run of string literals is joined while compiling.
 - Attributes are not supported by the compiler yet, at any length.
 - Memory: a 1,000,000-term chain peaks at 594 MB where PHP needs 86 MB, and a
   1,000,000-statement file at 896 MB against 141 MB. A `Statement` is 336
