@@ -1,94 +1,103 @@
-//! Trig operations for PHP values.
+//! Trigonometric and hyperbolic functions, in radians: `sin(M_PI_2)` is 1.0.
+//! PHP calls the C library, and so does Rust's `f64`.
 
-use phera_extension_api::{
-    Context, FunctionEntry, NativeResult, Param, ParamType, Registry, Value, args,
-};
+use phera_extension_api::{Context, FunctionEntry, NativeResult, Param, ParamType, Value};
 
-const UNARY_FLOAT_PARAMS: &[Param] = &[Param::new("num", ParamType::Float)];
+use super::of_float;
 
-pub(crate) fn register(registry: &mut Registry) {
-    registry.function(FunctionEntry::sync("sin", UNARY_FLOAT_PARAMS, sin));
-    registry.function(FunctionEntry::sync("cos", UNARY_FLOAT_PARAMS, cos));
-    registry.function(FunctionEntry::sync("tan", UNARY_FLOAT_PARAMS, tan));
-    registry.function(FunctionEntry::sync("asin", UNARY_FLOAT_PARAMS, asin));
-    registry.function(FunctionEntry::sync("acos", UNARY_FLOAT_PARAMS, acos));
-    registry.function(FunctionEntry::sync("atan", UNARY_FLOAT_PARAMS, atan));
-    registry.function(FunctionEntry::sync("sinh", UNARY_FLOAT_PARAMS, sinh));
-    registry.function(FunctionEntry::sync("cosh", UNARY_FLOAT_PARAMS, cosh));
-    registry.function(FunctionEntry::sync("tanh", UNARY_FLOAT_PARAMS, tanh));
-    registry.function(FunctionEntry::sync("asinh", UNARY_FLOAT_PARAMS, asinh));
-    registry.function(FunctionEntry::sync("acosh", UNARY_FLOAT_PARAMS, acosh));
-    registry.function(FunctionEntry::sync("atanh", UNARY_FLOAT_PARAMS, atanh));
-}
+pub(super) const FUNCTIONS: &[FunctionEntry] = &[
+    SIN, COS, TAN, ASIN, ACOS, ATAN, SINH, COSH, TANH, ASINH, ACOSH, ATANH,
+];
+
+/// `sin(float $num): float`
+const SIN: FunctionEntry = FunctionEntry::sync("sin", &[Param::new("num", ParamType::Float)], sin);
 
 fn sin(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(Value::Float(
-        args::float(arguments, 0).unwrap_or_default().sin(),
-    ))
+    Ok(of_float(arguments, f64::sin))
 }
+
+/// `cos(float $num): float`
+const COS: FunctionEntry = FunctionEntry::sync("cos", &[Param::new("num", ParamType::Float)], cos);
 
 fn cos(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(Value::Float(
-        args::float(arguments, 0).unwrap_or_default().cos(),
-    ))
+    Ok(of_float(arguments, f64::cos))
 }
+
+/// `tan(float $num): float`
+const TAN: FunctionEntry = FunctionEntry::sync("tan", &[Param::new("num", ParamType::Float)], tan);
 
 fn tan(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(Value::Float(
-        args::float(arguments, 0).unwrap_or_default().tan(),
-    ))
+    Ok(of_float(arguments, f64::tan))
 }
+
+/// `asin(float $num): float`
+const ASIN: FunctionEntry =
+    FunctionEntry::sync("asin", &[Param::new("num", ParamType::Float)], asin);
 
 fn asin(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(Value::Float(
-        args::float(arguments, 0).unwrap_or_default().asin(),
-    ))
+    Ok(of_float(arguments, f64::asin))
 }
+
+/// `acos(float $num): float`
+const ACOS: FunctionEntry =
+    FunctionEntry::sync("acos", &[Param::new("num", ParamType::Float)], acos);
 
 fn acos(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(Value::Float(
-        args::float(arguments, 0).unwrap_or_default().acos(),
-    ))
+    Ok(of_float(arguments, f64::acos))
 }
+
+/// `atan(float $num): float`
+const ATAN: FunctionEntry =
+    FunctionEntry::sync("atan", &[Param::new("num", ParamType::Float)], atan);
 
 fn atan(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(Value::Float(
-        args::float(arguments, 0).unwrap_or_default().atan(),
-    ))
+    Ok(of_float(arguments, f64::atan))
 }
+
+/// `sinh(float $num): float`
+const SINH: FunctionEntry =
+    FunctionEntry::sync("sinh", &[Param::new("num", ParamType::Float)], sinh);
 
 fn sinh(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(Value::Float(
-        args::float(arguments, 0).unwrap_or_default().sinh(),
-    ))
+    Ok(of_float(arguments, f64::sinh))
 }
+
+/// `cosh(float $num): float`
+const COSH: FunctionEntry =
+    FunctionEntry::sync("cosh", &[Param::new("num", ParamType::Float)], cosh);
 
 fn cosh(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(Value::Float(
-        args::float(arguments, 0).unwrap_or_default().cosh(),
-    ))
+    Ok(of_float(arguments, f64::cosh))
 }
+
+/// `tanh(float $num): float`
+const TANH: FunctionEntry =
+    FunctionEntry::sync("tanh", &[Param::new("num", ParamType::Float)], tanh);
 
 fn tanh(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(Value::Float(
-        args::float(arguments, 0).unwrap_or_default().tanh(),
-    ))
+    Ok(of_float(arguments, f64::tanh))
 }
+
+/// `asinh(float $num): float`
+const ASINH: FunctionEntry =
+    FunctionEntry::sync("asinh", &[Param::new("num", ParamType::Float)], asinh);
 
 fn asinh(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(Value::Float(
-        args::float(arguments, 0).unwrap_or_default().asinh(),
-    ))
+    Ok(of_float(arguments, f64::asinh))
 }
+
+/// `acosh(float $num): float`
+const ACOSH: FunctionEntry =
+    FunctionEntry::sync("acosh", &[Param::new("num", ParamType::Float)], acosh);
 
 fn acosh(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(Value::Float(
-        args::float(arguments, 0).unwrap_or_default().acosh(),
-    ))
+    Ok(of_float(arguments, f64::acosh))
 }
 
+/// `atanh(float $num): float`
+const ATANH: FunctionEntry =
+    FunctionEntry::sync("atanh", &[Param::new("num", ParamType::Float)], atanh);
+
 fn atanh(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(Value::Float(
-        args::float(arguments, 0).unwrap_or_default().atanh(),
-    ))
+    Ok(of_float(arguments, f64::atanh))
 }

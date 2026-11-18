@@ -17,4 +17,4 @@ mod static_known;
 pub(crate) use class::{
     Class, ConstantState, Invocation, LinkedConstant, Method, MethodBody, MethodContext,
 };
-pub(crate) use class_table::ClassTable;
+pub(crate) use class_table::{ClassIndex, ClassTable};

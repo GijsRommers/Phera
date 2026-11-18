@@ -18,7 +18,9 @@
 
 use std::sync::Arc;
 
-use phera_bytecode::{CompiledUnit, Function, Instruction, Type, TypeMask};
+use phera_bytecode::{CompiledUnit, Function, Instruction};
+
+pub(crate) use crate::function_facts::{FunctionFacts, FunctionShape};
 
 use crate::unit_caches::UnitCache;
 
@@ -33,7 +35,7 @@ pub(crate) struct NameKey(pub(crate) u32);
 
 /// A loaded file's position in the request's code table.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct UnitIndex(u32);
+pub(crate) struct UnitIndex(pub(crate) u32);
 
 impl FunctionIndex {
     pub(crate) fn index(self) -> usize {
@@ -52,87 +54,6 @@ pub(crate) struct LoadedUnit {
     /// The key of each of the file's symbols (functions, classes, methods
     /// referred to by name), lowercased.
     symbol_keys: Box<[NameKey]>,
-}
-
-/// What a call needs to know about the function it enters, read on every
-/// call, so it is kept small and next to nothing else.
-pub(crate) struct FunctionFacts {
-    unit: UnitIndex,
-    /// `None` for a file's top-level code, else its number within the file.
-    local: Option<u32>,
-    /// The file's top-level code, from which `CallDirect` counts.
-    pub(crate) unit_first: FunctionIndex,
-    pub(crate) registers: u16,
-    pub(crate) parameters: u16,
-    /// Parameters before the last one without a default value.
-    pub(crate) required: u16,
-    /// One bit per parameter with a declared type (the first 64).
-    typed: u64,
-    /// The declared built-in types of each parameter, for the one-bit check.
-    pub(crate) parameter_masks: Box<[TypeMask]>,
-    /// The declared return type's built-in types, when there is a return type.
-    pub(crate) return_mask: Option<TypeMask>,
-    pub(crate) shape: FunctionShape,
-}
-
-/// Whether entering a function is just moving arguments into place.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FunctionShape {
-    /// At most 64 parameters, none of them variadic.
-    Plain,
-    /// A variadic parameter or more than 64 parameters: the general entry
-    /// collects or checks what the bit masks cannot describe.
-    General,
-}
-
-impl FunctionFacts {
-    /// Whether parameter `index` has a declared type.
-    pub(crate) fn is_typed(&self, index: usize) -> bool {
-        index < 64 && self.typed & (1 << index) != 0
-    }
-
-    fn new(
-        place: (UnitIndex, FunctionIndex, Option<u32>),
-        body: &Function,
-        types: &[Type],
-    ) -> Self {
-        let (unit, unit_first, local) = place;
-        let mask_of = |ty: phera_bytecode::TypeId| types[ty.index()].mask;
-        let masks = body
-            .parameters
-            .iter()
-            .map(|parameter| parameter.ty.map_or(TypeMask::MIXED, mask_of))
-            .collect();
-        let typed = body
-            .parameters
-            .iter()
-            .take(64)
-            .enumerate()
-            .filter(|(_, parameter)| parameter.ty.is_some())
-            .fold(0u64, |bits, (index, _)| bits | 1 << index);
-        let general = body.parameters.len() > 64
-            || body.argument_layout == phera_bytecode::ArgumentLayout::Variadic;
-        Self {
-            unit,
-            local,
-            unit_first,
-            registers: body.registers,
-            parameters: body.parameters.len() as u16,
-            required: body
-                .parameters
-                .iter()
-                .rposition(|parameter| !parameter.has_default && !parameter.variadic)
-                .map_or(0, |index| index as u16 + 1),
-            typed,
-            parameter_masks: masks,
-            return_mask: body.return_type.map(mask_of),
-            shape: if general {
-                FunctionShape::General
-            } else {
-                FunctionShape::Plain
-            },
-        }
-    }
 }
 
 /// The code of one request: every loaded file and every function in them.
@@ -247,6 +168,15 @@ impl CodeTable {
         let function = self.declared(first, local);
         let facts = self.functions.get(function.index())?;
         (facts.unit_first == first).then_some((function, facts))
+    }
+
+    /// Record that `function` is a method of `class`, once the class is linked.
+    pub(crate) fn set_declaring_class(
+        &mut self,
+        function: FunctionIndex,
+        class: crate::classes::ClassIndex,
+    ) {
+        self.functions[function.index()].class = Some(class);
     }
 
     #[inline]

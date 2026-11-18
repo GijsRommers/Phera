@@ -76,8 +76,8 @@ impl Vm {
                 if arguments.is_empty() {
                     return self
                         .current()
-                        .and_then(|frame| frame.method())
-                        .map(|context| Value::from(context.scope.name.clone()))
+                        .and_then(|frame| frame.scope())
+                        .map(|scope| Value::from(scope.name.clone()))
                         .ok_or_else(|| {
                             NativeError::error(
                                 "get_class() without arguments must be called from within a class",
@@ -92,9 +92,7 @@ impl Vm {
             Function::GetParentClass => {
                 let class = class.or_else(|| {
                     if arguments.is_empty() {
-                        self.current()
-                            .and_then(|frame| frame.method())
-                            .map(|context| context.scope.clone())
+                        self.current().and_then(|frame| frame.scope().cloned())
                     } else {
                         None
                     }
@@ -106,8 +104,8 @@ impl Vm {
             }
             Function::GetCalledClass => self
                 .current()
-                .and_then(|frame| frame.method())
-                .map(|context| Value::from(context.called.name.clone()))
+                .and_then(|frame| frame.called())
+                .map(|called| Value::from(called.name.clone()))
                 .ok_or_else(|| {
                     NativeError::error("get_called_class() must be called from within a class")
                 }),
