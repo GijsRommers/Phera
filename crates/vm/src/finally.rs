@@ -29,8 +29,19 @@ pub(crate) struct SavedFinally {
     pub(crate) frame_base: usize,
     pub(crate) state: Reg,
     pub(crate) start: usize,
-    pub(crate) end: usize,
     pub(crate) continuation: Continuation,
+}
+
+impl SavedFinally {
+    /// A catch inside the active finally does not replace its saved exit.
+    pub(crate) fn contains(&self, target: usize, instructions: &[Instruction]) -> bool {
+        self.start <= target
+            && instructions.get(self.start..target).is_some_and(|preceding| {
+                !preceding.iter().any(|instruction| {
+                    matches!(instruction, Instruction::FinallyReturn { state } if *state == self.state)
+                })
+            })
+    }
 }
 
 /// PHP distinguishes a saved structured exit from a pending thrown object.
@@ -48,34 +59,17 @@ impl Vm {
         target: Target,
         continuation: Continuation,
     ) -> Result<(), NativeError> {
-        let frame = self
+        let frame_base = self
             .current()
-            .ok_or_else(|| internal_error!("finally without frame"))?;
-        let end = frame
-            .function()
-            .instructions
-            .iter()
-            .enumerate()
-            .skip(target.index())
-            .find_map(|(index, instruction)| {
-                let returns = matches!(instruction,
-                    Instruction::FinallyReturn { state: found } if *found == state);
-                returns.then_some(index)
-            })
-            .ok_or_else(|| internal_error!("finally without return"))?;
+            .ok_or_else(|| internal_error!("finally without frame"))?
+            .base();
+        self.jump(target)?;
         self.finally_stack.push(SavedFinally {
-            frame_base: frame.base(),
+            frame_base,
             state,
             start: target.index(),
-            end,
             continuation,
         });
-        // Finding the matching return above already proved the entry target is in this frame.
-        let current = self
-            .call_stack
-            .current_mut()
-            .ok_or_else(|| internal_error!("finally frame"))?;
-        current.set_ip(target.index());
         Ok(())
     }
 
