@@ -103,7 +103,9 @@ jobs:
         run: cargo test --workspace --no-fail-fast
 
   pdo-end-to-end:
-    name: PDO and Redis end to end
+    name: PDO end to end
+    # The name is a required check in the branch protection, so it stays as it
+    # is although the job now runs the Redis comparisons too.
     # Runs the 110 PHP comparison scripts through the release binary against
     # both databases. All of them match real PHP since native class constants
     # and exception codes landed, so this job is part of the gate.
