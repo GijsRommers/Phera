@@ -4,20 +4,13 @@ use phera_extension_api::args;
 use phera_extension_api::{ClassEntry, Context, FunctionEntry, MethodEntry};
 use phera_extension_api::{NativeResult, Param, ParamType, Registry, Value};
 
-use super::{interval, interval_arithmetic, interval_properties, interval_serialization};
+use super::{interval, interval_arithmetic, interval_serialization};
 
 pub const INTERVAL: Param = Param::new("interval", ParamType::Class(interval::CLASS));
 
 pub fn register(registry: &mut Registry) {
     registry.class(ClassEntry {
-        hooks: Some(
-            const {
-                &phera_extension_api::ClassHooks {
-                    property_access: Some(&interval_properties::ACCESS),
-                    ..phera_extension_api::ClassHooks::EMPTY
-                }
-            },
-        ),
+        hooks: Some(&super::object_hooks::INTERVAL),
         methods: METHODS,
         ..ClassEntry::class(interval::CLASS)
     });

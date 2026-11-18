@@ -5,6 +5,16 @@ use std::process::Command;
 
 use phera_extension_api::testing::oracle::find_php;
 
+const ENGINE_HOOKS: &[&str] = &[
+    "native-called-class",
+    "native-named-defaults",
+    "native-object-clone",
+    "native-object-compare",
+    "native-object-iterator",
+    "native-property-projection",
+    "native-virtual-properties",
+];
+
 #[test]
 fn class_scripts_match_php() {
     let Some(binary) = std::env::var_os("PHERA_BIN") else {
@@ -23,6 +33,11 @@ fn class_scripts_match_php() {
             .expect("script directory")
             .map(|entry| entry.expect("script").path())
             .filter(|path| path.extension().is_some_and(|extension| extension == "php"))
+            .chain(
+                ENGINE_HOOKS
+                    .iter()
+                    .map(|hook| directory.join(format!("waiting/{hook}.php"))),
+            )
             .collect()
     };
     scripts.sort();
