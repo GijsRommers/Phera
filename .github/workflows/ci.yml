@@ -82,6 +82,8 @@ jobs:
             json, pcre, ctype, pdo, pdo_pgsql, mysqlnd, pdo_mysql, mbstring, tokenizer,
             timezonedb-2026.5
           coverage: none
+      - name: Build the slim date oracle when PHP uses system tzdata
+        run: bash .github/scripts/build-date-oracle.sh
       - name: Export PHP oracle
         run: |
           echo "PHERA_PHP_REAL=$(command -v php)" >> "$GITHUB_ENV"
@@ -137,6 +139,8 @@ jobs:
             json, pcre, ctype, pdo, pdo_pgsql, mysqlnd, pdo_mysql, mbstring, tokenizer,
             timezonedb-2026.5
           coverage: none
+      - name: Build the slim date oracle when PHP uses system tzdata
+        run: bash .github/scripts/build-date-oracle.sh
       - name: Export PHP oracle
         run: |
           echo "PHERA_PHP_REAL=$(command -v php)" >> "$GITHUB_ENV"

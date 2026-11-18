@@ -13,6 +13,9 @@ if [[ " $shared " != *" timezonedb "* ]] &&
 fi
 options=()
 for module in "${modules[@]}"; do
+    if [[ "$module" == timezonedb && -n "${PHERA_PHP_TIMEZONEDB:-}" ]]; then
+        module=$PHERA_PHP_TIMEZONEDB
+    fi
     options+=(-d "extension=$module")
 done
 # Some PDO probes omit -n; keep those on the same ini-free oracle too.
