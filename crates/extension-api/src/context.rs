@@ -157,16 +157,6 @@ pub trait Context {
         }
     }
 
-    /// A native handler that returns an error after awaiting can attach its call site.
-    fn native_call_error(
-        &mut self,
-        _function: &str,
-        _arguments: &[Value],
-        error: NativeError,
-    ) -> NativeError {
-        error
-    }
-
     fn warning(&mut self, message: String) {
         self.diagnostics().warning(message);
     }

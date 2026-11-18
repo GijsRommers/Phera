@@ -203,16 +203,6 @@ impl Context for Vm {
         self.factory_class(name).map(drop)
     }
 
-    fn native_call_error(
-        &mut self,
-        function: &str,
-        arguments: &[Value],
-        error: phera_extension_api::NativeError,
-    ) -> phera_extension_api::NativeError {
-        self.failed_native = Some(crate::error_traces::NativeTrace::new(function, arguments));
-        error
-    }
-
     fn state(&mut self) -> &mut RequestState {
         &mut self.state
     }

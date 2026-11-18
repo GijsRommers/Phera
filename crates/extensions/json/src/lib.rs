@@ -38,11 +38,7 @@ impl Extension for Json {
             Param::new("flags", ParamType::Int).optional(),
             Param::new("depth", ParamType::Int).optional(),
         ];
-        registry.function(FunctionEntry::asynchronous(
-            "json_encode",
-            ENCODE,
-            encode::json_encode,
-        ));
+        registry.function_with_callback_frame("json_encode", ENCODE, encode::json_encode);
 
         const DECODE: &[Param] = &[
             Param::new("json", ParamType::String),

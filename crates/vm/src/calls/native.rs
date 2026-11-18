@@ -92,8 +92,39 @@ impl Vm {
                 self.call_stack.recycle_native_arguments(arguments);
                 result
             }
-            NativeFn::Async(frame) => frame(self, arguments).await,
+            NativeFn::Async(handler) if self.registry.has_callback_frame(entry.name) => {
+                self.native_callback_frame(entry.name, handler, arguments)
+                    .await
+            }
+            NativeFn::Async(handler) => handler(self, arguments).await,
         }
+    }
+
+    /// Publish the native frame while PHP callbacks are active, for Throwable::getTrace().
+    fn native_callback_frame(
+        &mut self,
+        name: &str,
+        handler: phera_extension_api::AsyncFn,
+        arguments: Vec<Value>,
+    ) -> phera_extension_api::LocalFuture<'_, NativeResult> {
+        let native = crate::error_traces::NativeTrace::new(name, &arguments);
+        Box::pin(async move {
+            self.error_handlers
+                .callback_sites
+                .push(crate::exception_traces::NativeCallbackSite {
+                    boundary: self.call_stack.frames().len(),
+                    native,
+                });
+            let result = handler(self, arguments).await;
+            let site = self.error_handlers.callback_sites.pop();
+            if let Err(error) = &result
+                && !matches!(error, NativeError::Unwind(_))
+                && self.failed_native.is_none()
+            {
+                self.failed_native = site.map(|site| site.native);
+            }
+            result
+        })
     }
 }
 

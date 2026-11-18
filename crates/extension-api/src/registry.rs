@@ -1,6 +1,6 @@
 //! `extension_loaded('Core')` reflects PHP modules registered for this runtime.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use phera_value::Value;
 
@@ -64,6 +64,7 @@ pub struct Registry {
     functions: HashMap<String, FunctionEntry>,
     /// Only calls already holding a first-argument object need to check this table.
     object_handlers: HashMap<&'static str, crate::AsyncFn>,
+    callback_frames: HashSet<&'static str>,
     function_order: Vec<&'static str>,
     extensions: Vec<&'static str>,
     /// Modules whose version is not PHP's, by lowercase name.
@@ -181,6 +182,21 @@ impl Registry {
     /// The first argument is already bound and checked when the VM selects this handler.
     pub fn object_handler(&self, name: &str) -> Option<crate::AsyncFn> {
         self.object_handlers.get(name).copied()
+    }
+
+    /// Register an async function whose PHP callbacks run through an internal stack frame.
+    pub fn function_with_callback_frame(
+        &mut self,
+        name: &'static str,
+        params: &'static [crate::Param],
+        handler: crate::AsyncFn,
+    ) {
+        self.function(FunctionEntry::asynchronous(name, params, handler));
+        self.callback_frames.insert(name);
+    }
+
+    pub fn has_callback_frame(&self, name: &str) -> bool {
+        self.callback_frames.contains(name)
     }
 
     pub fn functions(&self) -> impl Iterator<Item = &FunctionEntry> {

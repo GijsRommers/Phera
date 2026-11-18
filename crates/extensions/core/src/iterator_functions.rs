@@ -7,8 +7,8 @@
 //! ```
 
 use phera_extension_api::{
-    ArrayKey, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType,
-    PhpArray, Registry, Value, args,
+    ArrayKey, Context, LocalFuture, NativeError, NativeResult, Param, ParamType, PhpArray,
+    Registry, Value, args,
     traversal::{self, IteratorStep},
     value::to_bool,
 };
@@ -26,13 +26,9 @@ pub(crate) fn register(registry: &mut Registry) {
         Param::new("callback", ParamType::Callable),
         Param::new("args", ParamType::Array).nullable().optional(),
     ];
-    registry.function(FunctionEntry::asynchronous(
-        "iterator_to_array",
-        ARRAY,
-        collect,
-    ));
-    registry.function(FunctionEntry::asynchronous("iterator_count", COUNT, count));
-    registry.function(FunctionEntry::asynchronous("iterator_apply", APPLY, apply));
+    registry.function_with_callback_frame("iterator_to_array", ARRAY, collect);
+    registry.function_with_callback_frame("iterator_count", COUNT, count);
+    registry.function_with_callback_frame("iterator_apply", APPLY, apply);
 }
 
 fn collect(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {

@@ -114,7 +114,6 @@ async fn encode(context: &mut dyn Context, arguments: Vec<Value>) -> NativeResul
         flags.throw_on_error && !flags.partial_output,
         result,
     )
-    .map_err(|error| context.native_call_error("json_encode", &arguments, error))
 }
 
 impl Encoder {
