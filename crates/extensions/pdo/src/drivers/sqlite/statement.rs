@@ -5,7 +5,9 @@ use crate::errors::{DbError, ErrorState};
 use crate::parameters;
 use crate::statement::Statement;
 use phera_extension_api::{ArrayKey, Context, NativeResult, PhpArray, Value};
-use phera_sqlite::Cell;
+use phera_sqlite::{Cell, kind};
+
+use crate::constants::{PARAM_INT, PARAM_NULL, PARAM_STR};
 use std::cell::RefCell;
 
 pub async fn execute(
@@ -20,7 +22,9 @@ pub async fn execute(
     let (handle, bindings, extended) = {
         let statement = state.borrow();
         let Prepared::Sqlite(handle) = &statement.prepared else {
-            unreachable!()
+            return Err(phera_extension_api::NativeError::error(
+                "this statement is not a SQLite statement",
+            ));
         };
         let mut bindings = Vec::new();
         for (key, binding) in &statement.bindings {
@@ -68,7 +72,10 @@ pub async fn execute(
                     name: column.name.clone(),
                     metadata: crate::metadata::Metadata::Sqlite(
                         column,
-                        execution.first.as_ref().map_or(5, |row| row[index].kind()),
+                        execution
+                            .first
+                            .as_ref()
+                            .map_or(kind::NULL, |row| row[index].kind()),
                     ),
                 })
                 .collect();
@@ -111,13 +118,15 @@ pub fn value(cell: Cell) -> Value {
     }
 }
 
-pub fn metadata(column: &phera_sqlite::Column, kind: i64) -> PhpArray {
+/// `getColumnMeta()` for SQLite; `type_code` is the type of the value in
+/// the current row, as pdo_sqlite reports it.
+pub fn metadata(column: &phera_sqlite::Column, type_code: i64) -> PhpArray {
     let mut result = PhpArray::new();
-    let (native, pdo) = match kind {
-        1 => ("integer", 1),
-        2 => ("double", 2),
-        3 | 4 => ("string", 2),
-        _ => ("null", 0),
+    let (native, pdo) = match type_code {
+        kind::INTEGER => ("integer", PARAM_INT),
+        kind::FLOAT => ("double", PARAM_STR),
+        kind::TEXT | kind::BLOB => ("string", PARAM_STR),
+        _ => ("null", PARAM_NULL),
     };
     for (key, value) in [
         ("native_type", Value::from(native)),
@@ -135,7 +144,7 @@ pub fn metadata(column: &phera_sqlite::Column, kind: i64) -> PhpArray {
         result.insert(ArrayKey::str("table"), Value::from(table.clone()));
     }
     let mut flags = PhpArray::new();
-    if kind == 4 {
+    if type_code == kind::BLOB {
         flags.insert(ArrayKey::Int(0), Value::from("blob"));
     }
     for (key, value) in [

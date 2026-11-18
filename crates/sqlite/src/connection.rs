@@ -6,6 +6,7 @@ use std::time::Duration;
 use rusqlite::{Connection, OpenFlags};
 use tokio::sync::{mpsc, oneshot};
 
+use crate::data::{SQLITE_ERROR, SQLITE_LOCKED, SQLITE_MISUSE};
 use crate::{Error, Statement};
 
 type Operation = Box<dyn FnOnce(&mut Rc<Connection>) + Send>;
@@ -39,7 +40,7 @@ impl Database {
                 .spawn(move || {
                     let connection = OpenFlags::from_bits(flags)
                         .ok_or_else(|| Error {
-                            code: 21,
+                            code: SQLITE_MISUSE,
                             message: "bad parameter or other API misuse".into(),
                         })
                         .and_then(|flags| {
@@ -60,7 +61,7 @@ impl Database {
                         Ok(runtime) => runtime,
                         Err(error) => {
                             let _ = ready.send(Err(Error {
-                                code: 1,
+                                code: SQLITE_ERROR,
                                 message: error.to_string(),
                             }));
                             return;
@@ -88,7 +89,7 @@ impl Database {
                     }
                 })
                 .map_err(|error| Error {
-                    code: 1,
+                    code: SQLITE_ERROR,
                     message: error.to_string(),
                 })
         })
@@ -98,10 +99,20 @@ impl Database {
         Ok(Self { sender })
     }
 
+    /// Runs `operation` with the connection on the database's thread and
+    /// waits for its result, without blocking the PHP worker.
     pub async fn call<T, F>(&self, operation: F) -> Result<T, Error>
     where
         T: Send + 'static,
         F: FnOnce(&Connection) -> Result<T, Error> + Send + 'static,
+    {
+        self.run(move |connection| operation(connection)).await
+    }
+
+    async fn run<T, F>(&self, operation: F) -> Result<T, Error>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut Rc<Connection>) -> Result<T, Error> + Send + 'static,
     {
         let (sender, receiver) = oneshot::channel();
         self.sender
@@ -136,25 +147,21 @@ impl Database {
         let _ = self.sender.send(Request::FinishCursor(task));
     }
 
+    /// Like `call`, with the connection mutable, which a backup needs; that
+    /// is only possible while no statement of this database is open.
     pub async fn exclusive<T, F>(&self, operation: F) -> Result<T, Error>
     where
         T: Send + 'static,
         F: FnOnce(&mut Connection) -> Result<T, Error> + Send + 'static,
     {
-        let (sender, receiver) = oneshot::channel();
-        self.sender
-            .send(Request::Call(Box::new(move |connection| {
-                let result = match Rc::get_mut(connection) {
-                    Some(connection) => operation(connection),
-                    None => Err(Error {
-                        code: 6,
-                        message: "destination has outstanding prepared statements".into(),
-                    }),
-                };
-                let _ = sender.send(result);
-            })))
-            .map_err(|_| Error::closed())?;
-        receiver.await.map_err(|_| Error::closed())?
+        self.run(move |connection| match Rc::get_mut(connection) {
+            Some(connection) => operation(connection),
+            None => Err(Error {
+                code: SQLITE_LOCKED,
+                message: "destination has outstanding prepared statements".into(),
+            }),
+        })
+        .await
     }
 
     pub fn same_connection(&self, other: &Self) -> bool {

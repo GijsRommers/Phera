@@ -9,7 +9,7 @@ mod lifetime;
 
 pub use connection::Database;
 pub use cursor::Statement;
-pub use data::{Cell, Column, Description, Error, Execution};
+pub use data::{Cell, Column, Description, Error, Execution, kind};
 pub use rusqlite::{version, version_number};
 
 /// Even version queries cross the blocking boundary when called by a PHP worker.

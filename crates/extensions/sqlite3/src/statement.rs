@@ -5,7 +5,7 @@ use phera_extension_api::value::{to_float, to_int, to_php_string};
 use phera_extension_api::{
     Context, LocalFuture, NativeError, NativeResult, Object, PhpArray, Value, args,
 };
-use phera_sqlite::Cell as SqlCell;
+use phera_sqlite::{Cell as SqlCell, kind};
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -70,7 +70,7 @@ pub fn prepare<'a>(
         session.success();
         let object = context.create_object("SQLite3Stmt", PhpArray::new())?;
         let Value::Object(instance) = &object else {
-            unreachable!()
+            return Err(NativeError::error("SQLite3Stmt could not be created"));
         };
         let state = Rc::new(RefCell::new(State {
             session: session.clone(),
@@ -126,26 +126,26 @@ pub fn bindings(
     state: &State,
 ) -> Result<Vec<(usize, SqlCell)>, NativeError> {
     let mut result = Vec::new();
-    for (index, (value, kind)) in &state.bindings {
+    for (index, (value, type_code)) in &state.bindings {
         let source = value;
         let value = value.deref().clone();
         let value = if value.is_null() {
             SqlCell::Null
         } else {
-            match kind {
-                1 => SqlCell::Integer(to_int(&value, context.diagnostics())?),
-                2 => SqlCell::Real(to_float(&value, context.diagnostics())?),
-                3 => SqlCell::Text(
+            match *type_code {
+                kind::INTEGER => SqlCell::Integer(to_int(&value, context.diagnostics())?),
+                kind::FLOAT => SqlCell::Real(to_float(&value, context.diagnostics())?),
+                kind::TEXT => SqlCell::Text(
                     to_php_string(&value, context.diagnostics())?
                         .as_bytes()
                         .to_vec(),
                 ),
-                4 => SqlCell::Blob(
+                kind::BLOB => SqlCell::Blob(
                     to_php_string(&value, context.diagnostics())?
                         .as_bytes()
                         .to_vec(),
                 ),
-                5 => SqlCell::Null,
+                kind::NULL => SqlCell::Null,
                 _ => return Err(NativeError::value_error("Unknown parameter type")),
             }
         };

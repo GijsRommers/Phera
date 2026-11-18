@@ -36,49 +36,37 @@ impl Statement {
     }
 
     pub async fn bind(&self, bindings: Vec<(usize, Cell)>) -> Result<(), Error> {
-        let (sender, receiver) = oneshot::channel();
-        self.sender
-            .send(Command::Bind(bindings, sender))
-            .map_err(|_| Error::closed())?;
-        receiver.await.map_err(|_| Error::closed())?
+        self.ask(|reply| Command::Bind(bindings, reply)).await
     }
 
+    /// Runs the statement and returns its first row, if any; the cursor
+    /// stays open for `fetch` until the last row.
     pub async fn execute(&self, bindings: Vec<(usize, Cell)>) -> Result<Execution, Error> {
-        let (sender, receiver) = oneshot::channel();
-        self.sender
-            .send(Command::Execute(bindings, sender))
-            .map_err(|_| Error::closed())?;
-        receiver.await.map_err(|_| Error::closed())?
+        self.ask(|reply| Command::Execute(bindings, reply)).await
     }
 
     pub async fn fetch(&self) -> Result<Option<Vec<Cell>>, Error> {
-        let (sender, receiver) = oneshot::channel();
-        self.sender
-            .send(Command::Fetch(sender))
-            .map_err(|_| Error::closed())?;
-        receiver.await.map_err(|_| Error::closed())?
+        self.ask(Command::Fetch).await
     }
 
     pub async fn reset(&self) -> Result<(), Error> {
-        let (sender, receiver) = oneshot::channel();
-        self.sender
-            .send(Command::Reset(sender))
-            .map_err(|_| Error::closed())?;
-        receiver.await.map_err(|_| Error::closed())?
+        self.ask(Command::Reset).await
     }
 
     pub async fn clear(&self) -> Result<(), Error> {
-        let (sender, receiver) = oneshot::channel();
-        self.sender
-            .send(Command::Clear(sender))
-            .map_err(|_| Error::closed())?;
-        receiver.await.map_err(|_| Error::closed())?
+        self.ask(Command::Clear).await
     }
 
     pub async fn expanded_sql(&self) -> Result<Option<String>, Error> {
+        self.ask(Command::Sql).await
+    }
+
+    /// Sends a command to the statement's task on the database thread and
+    /// waits for its reply. A closed database answers `Error::closed()`.
+    async fn ask<T>(&self, command: impl FnOnce(Reply<T>) -> Command) -> Result<T, Error> {
         let (sender, receiver) = oneshot::channel();
         self.sender
-            .send(Command::Sql(sender))
+            .send(command(sender))
             .map_err(|_| Error::closed())?;
         receiver.await.map_err(|_| Error::closed())?
     }

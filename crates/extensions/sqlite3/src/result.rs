@@ -20,7 +20,7 @@ pub fn create(
 ) -> NativeResult {
     let value = context.create_object("SQLite3Result", PhpArray::new())?;
     let Value::Object(object) = &value else {
-        unreachable!()
+        return Err(NativeError::error("SQLite3Result could not be created"));
     };
     *object.native.borrow_mut() = Some(Box::new(Rc::new(ResultState {
         statement,
@@ -178,7 +178,7 @@ pub fn kind(_: &mut dyn Context, this: Option<&Rc<Object>>, arguments: &[Value])
         usize::try_from(args::int(arguments, 0).unwrap_or(0))
             .ok()
             .and_then(|i| values.get(i))
-            .map_or(5, Cell::kind),
+            .map_or(phera_sqlite::kind::NULL, Cell::kind),
     ))
 }
 

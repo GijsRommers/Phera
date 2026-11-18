@@ -1,13 +1,15 @@
 //! `$source->backup($destination)` copies SQLite pages, including in-memory databases.
 //! Snapshot files are created and removed only on database threads.
 
+use crate::data::{SQLITE_CANTOPEN, SQLITE_ERROR};
 use crate::{Database, Error};
 
 struct Snapshot(Option<tempfile::NamedTempFile>);
 
 impl Snapshot {
-    fn path(&self) -> &std::path::Path {
-        self.0.as_ref().expect("live snapshot").path()
+    /// `None` only once `Drop` has taken the file away.
+    fn path(&self) -> Result<&std::path::Path, Error> {
+        self.0.as_ref().map(|file| file.path()).ok_or_else(Error::closed)
     }
 }
 
@@ -29,14 +31,14 @@ impl Database {
     ) -> Result<(), Error> {
         if self.same_connection(destination) {
             return Err(Error {
-                code: 1,
+                code: SQLITE_ERROR,
                 message: "source and destination must be distinct".into(),
             });
         }
         let snapshot = self
             .call(move |connection| {
                 let snapshot = tempfile::NamedTempFile::new().map_err(|e| Error {
-                    code: 14,
+                    code: SQLITE_CANTOPEN,
                     message: e.to_string(),
                 })?;
                 connection.backup(
@@ -51,7 +53,7 @@ impl Database {
             .exclusive(move |connection| {
                 connection.restore(
                     target.as_str(),
-                    snapshot.path(),
+                    snapshot.path()?,
                     rusqlite::backup::NO_PROGRESS,
                 )?;
                 Ok(())

@@ -11,8 +11,11 @@ pub fn backup<'a>(
 ) -> LocalFuture<'a, NativeResult> {
     Box::pin(async move {
         let source = session(this.as_ref())?;
+        // The signature lets only an object through.
         let Value::Object(object) = args::value(&arguments, 0) else {
-            unreachable!()
+            return Err(NativeError::type_error(
+                "SQLite3::backup(): Argument #1 ($destination) must be of type SQLite3",
+            ));
         };
         let target = session(Some(object)).map_err(|_| {
             NativeError::type_error(format!(
