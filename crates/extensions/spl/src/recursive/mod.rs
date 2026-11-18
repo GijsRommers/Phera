@@ -108,6 +108,10 @@ fn inner(object: &Object) -> Result<Rc<Object>, NativeError> {
     at(object, depth(object)?)?.ok_or_else(uninitialized)
 }
 
+fn forward_method(object: &Object) -> Result<Option<Rc<Object>>, NativeError> {
+    inner(object).map(Some)
+}
+
 async fn attach(
     context: &mut dyn Context,
     object: &Rc<Object>,

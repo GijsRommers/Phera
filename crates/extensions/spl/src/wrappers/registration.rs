@@ -25,6 +25,7 @@ const LENGTH: Param = Param::new("limit", ParamType::Int).with_default(ConstantV
 
 const NOT_CLONEABLE: ClassHooks = ClassHooks {
     clone: Some(NativeClone::Forbidden),
+    forward_method: Some(super::forward_method),
     ..ClassHooks::EMPTY
 };
 

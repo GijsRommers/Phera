@@ -125,6 +125,7 @@ pub(super) fn inherit_hooks(
         },
         dimensions: own.dimensions.or(base.dimensions),
         count: own.count.or(base.count),
+        forward_method: own.forward_method.or(base.forward_method),
     }))
 }
 

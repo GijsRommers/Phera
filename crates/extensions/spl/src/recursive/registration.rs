@@ -27,6 +27,7 @@ const MAX_DEPTH: Param =
 
 const HOOKS: ClassHooks = ClassHooks {
     clone: Some(NativeClone::Forbidden),
+    forward_method: Some(super::forward_method),
     ..ClassHooks::EMPTY
 };
 

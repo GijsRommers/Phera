@@ -127,6 +127,7 @@ pub type NativeCompare = fn(
 pub type PropertyProjection =
     fn(&mut dyn Context, &Object, PropertyPurpose) -> Result<PhpArray, NativeError>;
 pub type NativeCount = fn(&mut dyn Context, &Object) -> Result<i64, NativeError>;
+pub type MethodForwarder = fn(&Object) -> Result<Option<Rc<Object>>, NativeError>;
 
 #[derive(Clone, Copy, Default)]
 pub struct ClassHooks {
@@ -143,6 +144,8 @@ pub struct ClassHooks {
     pub iterator_fallback_if_overridden: &'static [&'static str],
     pub dimensions: Option<NativeDimensions>,
     pub count: Option<NativeCount>,
+    /// Resolve an otherwise missing instance method on a wrapped receiver.
+    pub forward_method: Option<MethodForwarder>,
 }
 
 impl ClassHooks {
@@ -156,5 +159,6 @@ impl ClassHooks {
         iterator_fallback_if_overridden: &[],
         dimensions: None,
         count: None,
+        forward_method: None,
     };
 }

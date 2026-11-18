@@ -130,6 +130,10 @@ fn inner(object: &Object) -> Result<Rc<Object>, NativeError> {
     read(object, |state| state.inner.clone())?.ok_or_else(uninitialized)
 }
 
+fn forward_method(object: &Object) -> Result<Option<Rc<Object>>, NativeError> {
+    Ok(inner(object).ok())
+}
+
 fn clear(object: &Object) -> Result<(), NativeError> {
     update(object, |state| {
         state.value = None;
