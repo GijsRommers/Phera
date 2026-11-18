@@ -694,6 +694,8 @@ Zend/tests/gc/bug47343.phpt
 Zend/tests/gc/bug63635.phpt
 Zend/tests/gc/bug67314.phpt
 Zend/tests/gc/gc_044.phpt
+Zend/tests/gc/gc_050.phpt
+Zend/tests/gc_051.phpt
 Zend/tests/gc_052.phpt
 Zend/tests/get_called_class_001.phpt
 Zend/tests/get_class_methods/bug32296.phpt
