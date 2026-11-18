@@ -1,7 +1,5 @@
 //! Intrinsics inspect the caller scope and request state directly.
 
-use std::rc::Rc;
-
 use phera_extension_api::{NativeError, NativeResult};
 use phera_value::{Value, to_php_string};
 
@@ -9,7 +7,21 @@ use crate::{Vm, calls::callback_binding::ArgumentOrigin, intrinsics::Intrinsic};
 
 impl Vm {
     /// Callback entry preserves weak scalar binding without changing the PHP body mode.
-    pub(crate) async fn intrinsic_origin(
+    pub(crate) fn intrinsic_origin(
+        &mut self,
+        intrinsic: Intrinsic,
+        arguments: Vec<Value>,
+        origin: ArgumentOrigin,
+    ) -> phera_extension_api::LocalFuture<'_, NativeResult> {
+        if matches!(intrinsic, Intrinsic::ArrayMap) {
+            Box::pin(self.map_arrays(arguments))
+        } else {
+            Box::pin(self.request_intrinsic(intrinsic, arguments, origin))
+        }
+    }
+
+    /// Other request services may suspend while loading classes or entering a callback.
+    async fn request_intrinsic(
         &mut self,
         intrinsic: Intrinsic,
         arguments: Vec<Value>,
@@ -18,7 +30,7 @@ impl Vm {
         let argument = arguments.first().cloned().unwrap_or_default();
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         match intrinsic {
-            Intrinsic::ArrayMap => diagnostics.vm.map_arrays(arguments).await,
+            Intrinsic::ArrayMap => Err(internal_error!("array map intrinsic routing")),
             Intrinsic::Handler(function) => {
                 diagnostics
                     .vm
@@ -38,60 +50,29 @@ impl Vm {
                     .unwrap_or(name);
                 Ok(Value::from(name))
             }
-            Intrinsic::Class(function) => diagnostics.vm.class_intrinsic(function, &arguments),
-            Intrinsic::GetObjectVars => {
-                let Value::Object(object) = argument else {
-                    return Err(NativeError::type_error(
-                        "get_object_vars(): Argument #1 ($object) must be of type object",
-                    ));
-                };
-                Ok(Value::Array(Rc::new(diagnostics.vm.visible_properties(
-                    &object,
-                    phera_extension_api::PropertyPurpose::ObjectVars,
-                )?)))
+            Intrinsic::Class(function) => {
+                drop(diagnostics);
+                Box::pin(self.class_intrinsic(function, arguments, origin)).await
             }
-            Intrinsic::GetClassVars => {
-                let name = to_php_string(&argument, &mut diagnostics.buffer)?.to_string_lossy();
-                diagnostics.vm.class_variables(&name)
+            Intrinsic::SplAutoload(function) => {
+                drop(diagnostics);
+                self.spl_autoload_intrinsic(function, arguments, origin)
+                    .await
             }
-            Intrinsic::PropertyExists => {
-                let name = to_php_string(
-                    arguments.get(1).unwrap_or(&Value::Null),
-                    &mut diagnostics.buffer,
-                )?
-                .to_string_lossy();
-                let (class_name, dynamic) = match &argument {
-                    Value::Object(object) => (
-                        object.class.name().to_owned(),
-                        object.has(&phera_value::ArrayKey::str(name.as_bytes())),
-                    ),
-                    Value::String(class) => (class.to_string_lossy(), false),
-                    _ => {
-                        return Err(NativeError::type_error(
-                            "property_exists(): Argument #1 ($object_or_class) must be of \
-                             type object|string",
-                        ));
-                    }
-                };
-                Ok(Value::Bool(
-                    dynamic
-                        || diagnostics
-                            .vm
-                            .classes
-                            .get(&class_name)
-                            .is_some_and(|class| {
-                                class
-                                    .defaults
-                                    .iter()
-                                    .chain(&class.static_properties)
-                                    .any(|property| property.name == name)
-                            }),
-                ))
+            Intrinsic::Runtime(function) => {
+                drop(diagnostics);
+                self.runtime_function(function, arguments, origin)
             }
-            Intrinsic::IsCallable => diagnostics
-                .vm
-                .with_argument_origin(origin, |vm| vm.callable_introspection(arguments)),
+            Intrinsic::GetIncludePath | Intrinsic::SetIncludePath => {
+                drop(diagnostics);
+                self.include_path_intrinsic(intrinsic, arguments, origin)
+            }
+            Intrinsic::IsCallable => {
+                drop(diagnostics);
+                Box::pin(self.callable_introspection(arguments, origin)).await
+            }
             Intrinsic::CallUserFunc => {
+                diagnostics.vm.autoload_callable(&argument).await?;
                 let callee = diagnostics
                     .vm
                     .resolve_callable(&argument)
@@ -124,30 +105,9 @@ impl Vm {
                     .vm
                     .define_argument(argument, arguments, &mut diagnostics.buffer)
             }
-            Intrinsic::Defined | Intrinsic::Constant => {
-                let name = to_php_string(&argument, &mut diagnostics.buffer)?.to_string_lossy();
-                if let Some((class, constant)) = name.split_once("::") {
-                    let result = diagnostics.vm.class_constant(class, constant);
-                    if matches!(intrinsic, Intrinsic::Defined) {
-                        Ok(Value::Bool(result.is_ok()))
-                    } else {
-                        result
-                    }
-                } else if matches!(intrinsic, Intrinsic::Defined) {
-                    Ok(Value::Bool(diagnostics.vm.constants.contains_key(&name)))
-                } else {
-                    diagnostics
-                        .vm
-                        .constants
-                        .get(&name)
-                        .cloned()
-                        .ok_or_else(|| NativeError::error(format!("Undefined constant \"{name}\"")))
-                }
-            }
-            Intrinsic::FunctionExists => {
-                Ok(Value::Bool(diagnostics.vm.exists(
-                    &to_php_string(&argument, &mut diagnostics.buffer)?.to_string_lossy(),
-                )))
+            Intrinsic::Defined | Intrinsic::Constant | Intrinsic::FunctionExists => {
+                drop(diagnostics);
+                Box::pin(self.name_intrinsic(intrinsic, arguments, origin)).await
             }
             Intrinsic::FuncNumArgs => diagnostics.vm.argument_intrinsic(
                 crate::calls::argument_errors::ArgumentFunction::Count,
@@ -183,6 +143,7 @@ impl Vm {
                 "call_user_func_array(): Argument #2 ($args) must be of type array",
             ));
         };
+        self.autoload_callable(&argument).await?;
         let callee = self.resolve_callable(&argument).map_err(|error| {
             self.invalid_callback(
                 "call_user_func_array",

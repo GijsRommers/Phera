@@ -8,6 +8,7 @@ use crate::code_table::FunctionIndex;
 pub(crate) struct FunctionTable {
     /// Request-owned functions.
     functions: HashMap<String, FunctionIndex>,
+    order: Vec<FunctionIndex>,
     /// Raw callable names retain resolved signatures until the declaration table changes.
     resolved: RefCell<HashMap<phera_value::PhpString, crate::calls::call_state::Callee>>,
 }
@@ -16,6 +17,7 @@ impl FunctionTable {
     pub(crate) fn new() -> Self {
         Self {
             functions: HashMap::new(),
+            order: Vec::new(),
             resolved: RefCell::new(HashMap::new()),
         }
     }
@@ -35,6 +37,11 @@ impl FunctionTable {
     pub(crate) fn insert(&mut self, lowercase_name: String, function: FunctionIndex) {
         self.resolved.get_mut().clear();
         self.functions.insert(lowercase_name, function);
+        self.order.push(function);
+    }
+
+    pub(crate) fn declaration_order(&self) -> impl Iterator<Item = FunctionIndex> + '_ {
+        self.order.iter().copied()
     }
 }
 

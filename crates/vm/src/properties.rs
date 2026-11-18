@@ -2,54 +2,10 @@
 
 use crate::{Vm, access_mode::Missing};
 use phera_bytecode::Visibility;
-use phera_extension_api::{Context, NativeError, NativeResult, PropertyPurpose};
+use phera_extension_api::{NativeError, NativePropertyRead, NativeResult};
 use phera_value::{ArrayKey, Value};
 
 impl Vm {
-    /// User-facing property enumeration strips visibility prefixes after checking the current scope.
-    pub(crate) fn visible_properties(
-        &mut self,
-        object: &phera_value::Object,
-        purpose: PropertyPurpose,
-    ) -> Result<phera_value::PhpArray, NativeError> {
-        let mut result = phera_value::PhpArray::new();
-        for (key, value) in self.object_properties(object, purpose)?.iter() {
-            let name = crate::path_update::property_name(&key);
-            if self
-                .property_key(object, &name)
-                .is_ok_and(|resolved| resolved == key)
-            {
-                result.insert(ArrayKey::str(name), value.deref().clone());
-            }
-        }
-        Ok(result)
-    }
-
-    /// Class variables expose defaults rather than values modified on existing objects.
-    pub(crate) fn class_variables(&mut self, name: &str) -> NativeResult {
-        let class = self
-            .classes
-            .get(name)
-            .ok_or_else(|| NativeError::error(format!("Class \"{name}\" not found")))?;
-        let temporary = self.classes.allocate(class.clone());
-        let mut result = phera_value::PhpArray::new();
-        for property in class.defaults.iter().chain(&class.static_properties) {
-            if !property.initialized || self.property_key(&temporary, &property.name).is_err() {
-                continue;
-            }
-            let value = if let Some(initializer) = &property.initializer {
-                self.evaluate_initializer(initializer, &property.declaring)?
-            } else {
-                property.static_storage.as_ref().map_or_else(
-                    || property.value.deref().clone(),
-                    |storage| storage.reference.borrow().borrow().deref().clone(),
-                )
-            };
-            result.insert(ArrayKey::str(property.name.as_bytes()), value);
-        }
-        Ok(Value::Array(std::rc::Rc::new(result)))
-    }
-
     /// Dynamic static targets accept either an object handle or a class-name string.
     pub(crate) fn static_property_names(
         &mut self,
@@ -82,7 +38,7 @@ impl Vm {
         let class = self
             .classes
             .get(&class_name)
-            .ok_or_else(|| NativeError::error(format!("Class \"{class_name}\" not found")))?;
+            .ok_or_else(|| Self::class_miss(&class_name, "Class"))?;
         let property = class
             .static_properties
             .iter()
@@ -144,9 +100,19 @@ impl Vm {
             }
             return Ok(Value::Null);
         };
+        if let Some(access) = native_property_access(&object) {
+            let mode = match missing {
+                Missing::Warn => NativePropertyRead::Read,
+                Missing::Silent => NativePropertyRead::Quiet,
+                Missing::Isset => NativePropertyRead::Isset,
+            };
+            if let Some(value) = (access.read)(self, &object, &name, mode)? {
+                return Ok(value);
+            }
+        }
         let key = match self.property_key(&object, &name) {
             Ok(key) => key,
-            Err(_) if missing == Missing::Silent => return Ok(Value::Null),
+            Err(_) if missing != Missing::Warn => return Ok(Value::Null),
             Err(error) => return Err(error),
         };
         if missing == Missing::Warn
@@ -224,7 +190,21 @@ impl Vm {
             let key = match (&current, key) {
                 (Value::Object(object), PathKey::Property(key)) => {
                     let name = crate::path_update::property_name(&key);
-                    PathKey::Property(self.property_key(object, &name)?)
+                    let resolved = match self.property_key(object, &name) {
+                        Ok(resolved) => resolved,
+                        Err(error) => {
+                            let Some(access) = native_property_access(object) else {
+                                return Err(error);
+                            };
+                            if (access.read)(self, object, &name, NativePropertyRead::Exists)?
+                                .is_none()
+                            {
+                                return Err(error);
+                            }
+                            key
+                        }
+                    };
+                    PathKey::Property(resolved)
                 }
                 (_, key) => key,
             };
@@ -320,4 +300,14 @@ impl Vm {
             Ok(ArrayKey::str(name))
         }
     }
+}
+
+pub(crate) fn native_property_access(
+    object: &phera_value::Object,
+) -> Option<&'static phera_extension_api::NativePropertyAccess> {
+    object
+        .class
+        .as_any()
+        .downcast_ref::<crate::classes::Class>()?
+        .property_access
 }

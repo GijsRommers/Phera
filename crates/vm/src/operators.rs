@@ -51,11 +51,25 @@ impl Vm {
         let null = Value::Null;
         let left = left.unwrap_or(&null).deref();
         let right = right.unwrap_or(&null).deref();
-        let result = fast_binary(operator, &left, &right)
-            .map(Ok)
-            .unwrap_or_else(|| {
-                ops::binary(operator, &left, &right, self.diagnostic_reporter.operator())
-            });
+        let fast = fast_binary(operator, &left, &right);
+        if fast.is_none()
+            && self.classes.has_property_views
+            && matches!(
+                (&*left, &*right),
+                (Value::Array(_), Value::Array(_)) | (Value::Object(_), Value::Object(_))
+            )
+            && crate::object_comparison::is_comparison(operator)
+        {
+            let (lhs, rhs) = ((*left).clone(), (*right).clone());
+            drop(left);
+            drop(right);
+            let result = self.compare_with_property_views(operator, &lhs, &rhs)?;
+            self.set(destination, result);
+            return Ok(());
+        }
+        let result = fast.map(Ok).unwrap_or_else(|| {
+            ops::binary(operator, &left, &right, self.diagnostic_reporter.operator())
+        });
         drop(left);
         drop(right);
         if self.diagnostic_reporter.has_pending() {

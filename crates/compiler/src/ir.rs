@@ -69,6 +69,11 @@ pub enum Instruction {
     },
 
     /// Fetch a constant using an evaluated class target.
+    DynamicClassConstant {
+        destination: Reg,
+        class: Reg,
+        name: Reg,
+    },
     ClassConstant {
         destination: Reg,
         class: Reg,
@@ -146,6 +151,8 @@ pub enum Instruction {
     Reference { destination: Reg, place: Place },
     /// Replace a binding with an existing cell; emits BindReference.
     Rebind { place: Place, source: Reg },
+    /// Execute PHP source in the current symbol table.
+    Eval { destination: Reg, source: Reg },
     /// Execute another file in this scope; emits Include.
     Include {
         destination: Reg,

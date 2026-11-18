@@ -23,6 +23,7 @@ pub(crate) struct ClassTable {
     /// Every class, by number.
     numbered: Vec<Rc<Class>>,
     pub(crate) has_dimensions: bool,
+    pub(crate) has_property_views: bool,
     pub(crate) objects: Vec<Weak<Object>>,
     ids: Rc<ObjectIds>,
 }
@@ -45,6 +46,10 @@ impl ClassTable {
                 .hooks
                 .as_ref()
                 .is_some_and(|hooks| hooks.dimensions.is_some());
+        self.has_property_views |= class
+            .hooks
+            .as_ref()
+            .is_some_and(|hooks| hooks.properties.is_some());
         self.numbered.push(class.clone());
         self.entries.insert(lowercase_name, class);
     }
@@ -57,7 +62,7 @@ impl ClassTable {
 
     /// Class identifiers ignore case, including names produced by dynamic expressions.
     pub(crate) fn get(&self, name: &str) -> Option<Rc<Class>> {
-        let name = name.trim_start_matches('\\');
+        let name = name.strip_prefix('\\').unwrap_or(name);
         if name.bytes().any(|byte| byte.is_ascii_uppercase()) {
             self.entries.get(&name.to_ascii_lowercase()).cloned()
         } else {

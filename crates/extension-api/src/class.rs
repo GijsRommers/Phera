@@ -8,7 +8,18 @@ use std::rc::Rc;
 
 use phera_value::{Object, Value};
 
-use crate::{ConstantValue, Context, LocalFuture, NativeResult, Param};
+use crate::{ConstantValue, Context, LocalFuture, NativeError, NativeResult, Param};
+
+/// An extension can preserve legacy parsing behavior while keeping its reflected signature.
+/// Most methods use Default; Prepared means the hook already checked and coerced arguments.
+pub enum MethodPreparation {
+    Default,
+    Prepared,
+    Return(Value),
+}
+
+pub type PrepareMethod =
+    fn(&mut dyn Context, &[Param], &mut [Value]) -> Result<MethodPreparation, crate::NativeError>;
 
 /// A method that finishes without waiting. `this` is `None` when the method
 /// is static.
@@ -52,6 +63,7 @@ pub struct MethodEntry {
     pub name: &'static str,
     pub params: &'static [Param],
     pub handler: NativeMethod,
+    pub preparation: Option<PrepareMethod>,
     pub visibility: Visibility,
     pub is_static: bool,
     /// Subclasses may not override it.
@@ -67,6 +79,7 @@ impl MethodEntry {
             name,
             params,
             handler: NativeMethod::Sync(handler),
+            preparation: None,
             visibility: Visibility::Public,
             is_static: false,
             is_final: false,
@@ -86,6 +99,7 @@ impl MethodEntry {
             name,
             params,
             handler: NativeMethod::Async(handler),
+            preparation: None,
             visibility: Visibility::Public,
             is_static: false,
             is_final: false,
@@ -99,6 +113,7 @@ impl MethodEntry {
             name,
             params,
             handler: NativeMethod::Abstract,
+            preparation: None,
             visibility: Visibility::Public,
             is_static: false,
             is_final: false,
@@ -108,6 +123,11 @@ impl MethodEntry {
 
     pub const fn tentative_return(mut self, ty: &'static str) -> Self {
         self.tentative_return = Some(ty);
+        self
+    }
+
+    pub const fn with_preparation(mut self, preparation: PrepareMethod) -> Self {
+        self.preparation = Some(preparation);
         self
     }
 
@@ -185,6 +205,36 @@ impl PropertyEntry {
     }
 }
 
+/// Instance access for native properties whose values live outside ordinary storage.
+pub enum NativePropertyRead {
+    Read,
+    Quiet,
+    Isset,
+    Exists,
+}
+
+/// A mutation reaching a native property before ordinary storage is changed.
+pub enum NativePropertyMutation<'a> {
+    Assign(&'a Value),
+    Bind,
+    Reference,
+    Unset,
+    Indirect,
+}
+
+/// Return `None` to use ordinary storage. For existence checks, any `Some` counts.
+pub type ReadNativeProperty =
+    fn(&mut dyn Context, &Object, &str, NativePropertyRead) -> Result<Option<Value>, NativeError>;
+
+/// Return `true` when the mutation has already been handled.
+pub type MutateNativeProperty =
+    fn(&mut dyn Context, &Object, &str, NativePropertyMutation<'_>) -> Result<bool, NativeError>;
+
+pub struct NativePropertyAccess {
+    pub read: ReadNativeProperty,
+    pub mutate: MutateNativeProperty,
+}
+
 /// A class or interface provided by an extension.
 #[derive(Clone, Copy)]
 pub struct ClassEntry {
@@ -197,7 +247,9 @@ pub struct ClassEntry {
     /// Linked immediately so `PDO::FETCH_ASSOC` also works in defaults.
     /// For example, PHP may declare `function rows($mode = PDO::FETCH_ASSOC) {}`.
     pub constants: &'static [(&'static str, ConstantValue)],
+    pub deprecated_constants: &'static [(&'static str, &'static str)],
     pub properties: &'static [PropertyEntry],
+    pub property_access: Option<&'static NativePropertyAccess>,
     pub methods: &'static [MethodEntry],
     pub hooks: Option<&'static crate::ClassHooks>,
 }
@@ -213,7 +265,9 @@ impl ClassEntry {
             parent: None,
             interfaces: &[],
             constants: &[],
+            deprecated_constants: &[],
             properties: &[],
+            property_access: None,
             methods: &[],
             hooks: None,
         }

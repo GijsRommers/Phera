@@ -9,7 +9,13 @@ use std::rc::Rc;
 
 use crate::{Context, NativeError, NativeResult, Object, PhpArray, Value};
 
-pub use phera_value::NativeComparison;
+/// PHP's three-way comparison. Uncomparable pairs fail every ordering test.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NativeComparison {
+    Default,
+    Ordered(std::cmp::Ordering),
+    Uncomparable,
+}
 
 /// A native object's property view can differ by consuming operation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

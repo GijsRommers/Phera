@@ -144,7 +144,7 @@ impl Vm {
         path: DimensionPath,
         mode: FetchMode,
     ) -> NativeResult {
-        let missing = if matches!(mode, FetchMode::Quiet | FetchMode::Isset) {
+        let missing = if matches!(mode, FetchMode::Quiet | FetchMode::Isset | FetchMode::Empty) {
             Missing::Silent
         } else {
             Missing::Warn
@@ -179,7 +179,7 @@ impl Vm {
         mode: FetchMode,
         final_step: bool,
     ) -> NativeResult {
-        if matches!(mode, FetchMode::Isset | FetchMode::Quiet) {
+        if matches!(mode, FetchMode::Isset | FetchMode::Quiet | FetchMode::Empty) {
             if !self
                 .dimension_exists(object.clone(), offset.clone())
                 .await?

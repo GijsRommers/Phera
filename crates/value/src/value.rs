@@ -5,6 +5,7 @@ use std::fmt;
 use std::rc::Rc;
 
 use crate::array::{ArrayKey, PhpArray};
+use crate::error::OpError;
 use crate::object::{Object, Resource};
 use crate::string::PhpString;
 
@@ -61,6 +62,17 @@ impl Value {
         match self {
             Value::Reference(r) => ValueRef::Indirect(r.borrow()),
             other => ValueRef::Direct(other),
+        }
+    }
+
+    /// Reads a reference in an operation that can report a borrow conflict to PHP.
+    pub fn try_deref(&self) -> Result<ValueRef<'_>, OpError> {
+        match self {
+            Value::Reference(cell) => cell
+                .try_borrow()
+                .map(ValueRef::Indirect)
+                .map_err(|_| OpError::error("Cannot read a reference while it is being modified")),
+            other => Ok(ValueRef::Direct(other)),
         }
     }
 

@@ -82,6 +82,7 @@ impl Vm {
             Instruction::Exit { src: source } => {
                 return self.exit_value(source).map(DispatchResult::Returned);
             }
+            Instruction::Eval { dst, source } => self.eval(dst, source).await?,
             Instruction::Include {
                 dst: destination,
                 path,

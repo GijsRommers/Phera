@@ -93,6 +93,8 @@ const ERROR_EXCEPTION_METHODS: &[MethodEntry] = &[
 /// Each class with its parent, parents first.
 const DERIVED: &[(&str, &str)] = &[
     ("TypeError", "Error"),
+    ("CompileError", "Error"),
+    ("ParseError", "CompileError"),
     ("ValueError", "Error"),
     ("ArithmeticError", "Error"),
     ("DivisionByZeroError", "ArithmeticError"),

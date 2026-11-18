@@ -1,0 +1,21 @@
+<?php
+$zone = timezone_open('Europe/Brussels');
+$format = 'Y-m-d\TH:i:s.uP e I';
+$a = date_create('2024-01-31 11:22:33.987654', $zone);
+$b = date_create_immutable('2024-01-31 11:22:33.987654', $zone);
+echo date_format($a, $format), "\n", date_format($b, $format), "\n";
+echo timezone_name_get(date_timezone_get($a)), ' ', date_offset_get($a), "\n";
+echo date_format(date_modify($a, '+1 day'), $format), "\n";
+echo date_format(date_add($a, new DateInterval('P1D')), $format), "\n";
+echo date_format(date_sub($a, new DateInterval('P1D')), $format), "\n";
+echo date_interval_format(date_diff($a, $b), '%R%d %s %f %a'), "\n";
+echo date_format(date_date_set($a, 2024, 4, 30), $format), "\n";
+echo date_format(date_isodate_set($a, 2024, 1, 3), $format), "\n";
+echo date_format(date_time_set($a, 25, 61, 30, 999999), $format), "\n";
+echo date_format(date_timestamp_set($a, 0), $format), "\n";
+echo date_format(date_timezone_set($a, timezone_open('+05:45')), $format), "\n";
+echo date_timestamp_get($a), "\n";
+echo date_format(date_create_from_format('!Y-m-d', '2024-03-28', $zone), $format), "\n";
+echo date_format(date_create_immutable_from_format('!Y-m-d', '2024-02-31'), $format), "\n";
+echo json_encode(date_get_last_errors()), "\n";
+echo date_interval_format(date_interval_create_from_date_string('-2 days'), '%d'), "\n";

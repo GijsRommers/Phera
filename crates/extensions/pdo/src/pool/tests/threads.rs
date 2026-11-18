@@ -6,18 +6,18 @@ use std::time::Duration;
 use phera_extension_api::Value;
 use tokio::sync::oneshot;
 
-use super::{TestPool, direct, dsn, id, options, rows, scalar};
-use crate::pool::{Policy, acquire};
+use super::{TestPool, USER, direct, dsn, id, options, rows, scalar};
+use crate::pool::{Key, POOL, Policy, acquire};
 
 #[tokio::main(flavor = "current_thread")]
 async fn worker(pool: Option<TestPool>, name: &'static str) -> i64 {
     let mut connection = match pool {
         Some(pool) => pool.connect().await,
-        None => acquire(&dsn(name), "phera_pool", "phera_pool", Policy::Enabled)
+        None => acquire(&dsn(name), USER, USER, Policy::Pooled)
             .await
             .unwrap(),
     };
-    let identity = id(&mut connection).await;
+    let identity = id(&mut connection, name).await;
     let query = if name == "pgsql" {
         "SELECT pg_sleep(0.05)"
     } else {
@@ -39,25 +39,9 @@ fn launch(pool: Option<TestPool>, name: &'static str) -> oneshot::Receiver<i64> 
 
 pub async fn shared_registry(name: &'static str) {
     let first = launch(None, name).await.unwrap();
-    // Return is asynchronous. Wait for all borrowed/resetting permits before
-    // testing reuse, rather than forcing a second socket during the reset.
-    let bucket = crate::pool::POOLS
-        .get()
-        .unwrap()
-        .lock()
-        .await
-        .iter()
-        .find(|(key, _)| key.driver.name() == name)
-        .unwrap()
-        .1
-        .clone();
-    let barrier = bucket
-        .capacity
-        .clone()
-        .acquire_many_owned(bucket.options.size as u32)
-        .await
-        .unwrap();
-    drop(barrier);
+    // The connection is returned in the background. Wait until it is back,
+    // rather than have the second worker open a socket during the reset.
+    POOL.settled(&Key::new(&dsn(name), USER, USER)).await;
     let second = launch(None, name).await.unwrap();
     assert_eq!(
         first, second,
@@ -69,7 +53,7 @@ pub async fn bounded_users(name: &'static str) {
     let mut settings = options(3);
     settings.wait = Duration::from_secs(3);
     settings.idle = Duration::from_secs(5);
-    let pool = TestPool::new(name, settings).await;
+    let pool = TestPool::new(name, settings);
     let mut observer = direct(name).await;
     let query = if name == "pgsql" {
         "SELECT count(*) FROM pg_stat_activity WHERE usename='phera_pool' AND pid<>pg_backend_pid()"

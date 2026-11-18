@@ -527,6 +527,17 @@ pub enum Instruction {
         function: FunctionId,
         binding: ClosureBinding,
     },
+    /// A class constant whose identifier is computed, e.g. `Foo::{$name}`.
+    FetchDynamicClassConstant {
+        dst: Reg,
+        class: Reg,
+        name: Reg,
+    },
+    /// Compile and execute a string in the caller's scope.
+    Eval {
+        dst: Reg,
+        source: Reg,
+    },
 }
 
 // The interpreter copies one instruction per step. Keep them register-sized;
@@ -595,10 +606,12 @@ pub enum IncDec {
 pub enum FetchMode {
     /// An ordinary read: missing variables, keys and offsets warn.
     Read,
-    /// For `??` and `empty`: missing things are null, silently.
+    /// For `??`: missing things are null, silently.
     Quiet,
-    /// For `isset`, an overloaded final offset checks existence only.
+    /// For `isset`: native properties and overloaded dimensions can check presence.
     Isset,
+    /// For `empty`: overloaded dimensions check presence and then read the value.
+    Empty,
     /// For `[$a, $b] = $value`: missing keys warn; null yields null silently,
     /// while other non-array values warn and yield null in PHP 8.5.
     Destructure,

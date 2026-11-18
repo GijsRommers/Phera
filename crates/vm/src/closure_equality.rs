@@ -1,73 +1,10 @@
 //! Lexical closures use identity; callable wrappers compare targets.
 //! For example, `strlen(...) == strlen(...)` is true.
 
-use std::collections::HashSet;
 use std::rc::Rc;
 
-use phera_value::{Diagnostics, OpError, Value};
-
-/// The value crate cannot inspect native state; compare composite values iteratively here.
-pub(crate) fn equal(
-    left: &Value,
-    right: &Value,
-    diagnostics: &mut dyn Diagnostics,
-) -> Result<Value, OpError> {
-    let mut pending = vec![(left.clone(), right.clone())];
-    let mut visited = HashSet::new();
-    while let Some((left, right)) = pending.pop() {
-        let left = left.deref();
-        let right = right.deref();
-        let arrays = match (&*left, &*right) {
-            (Value::Object(left), Value::Object(right)) => {
-                if Rc::ptr_eq(left, right) {
-                    continue;
-                }
-                if left.class.name() != right.class.name() {
-                    return Ok(Value::Bool(false));
-                }
-                if left.class.name() == "Closure" {
-                    if same_callable(left, right) {
-                        continue;
-                    }
-                    return Ok(Value::Bool(false));
-                }
-                if !visited.insert((Rc::as_ptr(left) as usize, Rc::as_ptr(right) as usize)) {
-                    continue;
-                }
-                (left.to_array(), right.to_array())
-            }
-            (Value::Array(left), Value::Array(right)) => {
-                if Rc::ptr_eq(left, right) {
-                    continue;
-                }
-                if !visited.insert((Rc::as_ptr(left) as usize, Rc::as_ptr(right) as usize)) {
-                    continue;
-                }
-                ((**left).clone(), (**right).clone())
-            }
-            _ => {
-                let result = phera_value::loose_equals(&left, &right, diagnostics)?;
-                if matches!(result, Value::Bool(false)) {
-                    return Ok(result);
-                }
-                continue;
-            }
-        };
-        if arrays.0.len() != arrays.1.len() {
-            return Ok(Value::Bool(false));
-        }
-        for (key, value) in arrays.0.iter() {
-            let Some(other) = arrays.1.get(&key) else {
-                return Ok(Value::Bool(false));
-            };
-            pending.push((value.clone(), other.clone()));
-        }
-    }
-    Ok(Value::Bool(true))
-}
-
 /// PHP compares fake closure metadata without comparing captures or mutable static variables.
-fn same_callable(left: &phera_value::Object, right: &phera_value::Object) -> bool {
+pub(crate) fn same_callable(left: &phera_value::Object, right: &phera_value::Object) -> bool {
     let left = left.native.borrow();
     let right = right.native.borrow();
     let left = left

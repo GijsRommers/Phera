@@ -44,10 +44,10 @@ impl Compiler<'_> {
     /// Emit literal output outside PHP tags.
     pub(crate) fn compile_inline_html(
         &mut self,
-        value: &str,
+        value: &[u8],
         line: usize,
     ) -> Result<(), CompileError> {
-        let register = self.literal(Constant::Bytes(value.as_bytes().to_vec()), line)?;
+        let register = self.literal(Constant::Bytes(value.to_vec()), line)?;
         self.emit(Instruction::Echo(register), line);
 
         Ok(())

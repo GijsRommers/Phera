@@ -8,6 +8,8 @@
 mod cache;
 mod environment;
 mod error;
+#[cfg(test)]
+mod extension_introspection_tests;
 mod http;
 
 use std::path::{Path, PathBuf};
@@ -58,11 +60,22 @@ impl Runtime {
     pub fn with_environment(environment: Environment) -> Self {
         let mut registry = Registry::new();
         registry.load(&phera_ext_core::Core);
+        registry.class(phera_extension_api::ClassEntry {
+            parent: Some("LogicException"),
+            ..phera_extension_api::ClassEntry::class("Phera\\NotSupportedException")
+        });
         registry.load(&phera_ext_standard::Standard);
+        registry.php_module("SPL");
+        registry.load(&phera_ext_tokenizer::Tokenizer);
         registry.load(&phera_ext_ctype::Ctype);
+        registry.load(&phera_ext_date::Date);
+        registry.load(&phera_ext_filter::Filter);
         registry.load(&phera_ext_json::Json);
+        registry.load(&phera_ext_mbstring::Mbstring);
         registry.load(&phera_ext_pcre::Pcre);
         registry.load(&phera_ext_pdo::Pdo);
+        registry.load(&phera_ext_sqlite3::Sqlite3);
+        registry.load(&phera_ext_redis::Redis);
         registry.load(&phera_ext_http::Http);
         registry.load(&phera_ext_hash::Hash);
         registry.load(&phera_ext_random::Random);

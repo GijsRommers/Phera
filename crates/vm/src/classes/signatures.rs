@@ -131,6 +131,7 @@ impl Vm {
         ) else {
             return Ok(());
         };
+        let mut unresolved = None;
         let mut compatible = !base.returns_reference || child.returns_reference;
         compatible &= child
             .parameters
@@ -156,37 +157,48 @@ impl Vm {
             compatible &= parameter.by_reference == implementation.by_reference;
             compatible &= !parameter.variadic || implementation.variadic;
             compatible &= !parameter.optional || implementation.optional || implementation.variadic;
-            compatible &= self.type_subset(
-                parameter.declaration.as_deref(),
+            let source = parameter.declaration.as_deref();
+            let target = implementation.declaration.as_deref();
+            if !self.type_subset(
+                source,
                 &inherited.declaring,
-                implementation.declaration.as_deref(),
+                target,
                 &method.declaring,
                 unit,
-            );
+            ) {
+                compatible = false;
+                unresolved =
+                    unresolved.or_else(|| self.unresolved_contract_type(source, target, unit));
+            }
         }
         if base.returns.is_some() && (!base.tentative || child.returns.is_some()) {
-            let compatible_return = self.type_subset(
-                child.returns.as_deref(),
+            let source = child.returns.as_deref();
+            let target = base.returns.as_deref();
+            if !self.type_subset(
+                source,
                 &method.declaring,
-                base.returns.as_deref(),
+                target,
                 &inherited.declaring,
                 unit,
-            );
-            if base.tentative && compatible && !compatible_return {
-                if let MethodBody::User(reference) = method.body {
-                    let location = crate::diagnostics::SourceLocation {
-                        file: self.code.unit(reference).file.clone(),
-                        line: self.code.function(reference).definition_line as usize,
-                    };
-                    let previous = self.diagnostic_location.replace(location);
-                    self.diagnostic("Deprecated", format!(
-                        "Return type of {} should either be compatible with {}, or the #[\\ReturnTypeWillChange] attribute should be used to temporarily suppress the notice",
-                        child.display(method), base.display(inherited)
-                    ));
-                    self.diagnostic_location = previous;
+            ) {
+                if base.tentative && compatible {
+                    if let MethodBody::User(reference) = method.body {
+                        let location = crate::diagnostics::SourceLocation {
+                            file: self.code.unit(reference).file.clone(),
+                            line: self.code.function(reference).definition_line as usize,
+                        };
+                        let previous = self.diagnostic_location.replace(location);
+                        self.diagnostic("Deprecated", format!(
+                            "Return type of {} should either be compatible with {}, or the #[\\ReturnTypeWillChange] attribute should be used to temporarily suppress the notice",
+                            child.display(method), base.display(inherited)
+                        ));
+                        self.diagnostic_location = previous;
+                    }
+                } else {
+                    compatible = false;
+                    unresolved =
+                        unresolved.or_else(|| self.unresolved_contract_type(source, target, unit));
                 }
-            } else {
-                compatible &= compatible_return;
             }
         }
         if compatible {
@@ -195,17 +207,58 @@ impl Vm {
         let MethodBody::User(reference) = &method.body else {
             return Ok(());
         };
+        let child = child.display(method);
+        let base = base.display(inherited);
+        let file = self.code.unit(*reference).file.clone();
+        let line = self.code.function(*reference).definition_line as usize;
+        if let Some(name) = unresolved {
+            let failure = crate::error_traces::DeclarationFailure {
+                message: format!(
+                    "Could not check compatibility between {child} and {base}, because class {name} is not available"
+                ),
+                file,
+                line,
+            };
+            return Err(crate::autoload::ClassMiss::signature(name, failure));
+        }
         Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
             crate::error_traces::DeclarationFailure {
-                message: format!(
-                    "Declaration of {} must be compatible with {}",
-                    child.display(method),
-                    base.display(inherited)
-                ),
-                file: self.code.unit(*reference).file.clone(),
-                line: self.code.function(*reference).definition_line as usize,
+                message: format!("Declaration of {child} must be compatible with {base}"),
+                file,
+                line,
             },
         ))))
+    }
+
+    /// Linking a method signature can require class identities even though passing arguments does not.
+    fn unresolved_contract_type<'a>(
+        &self,
+        source: Option<&'a str>,
+        target: Option<&'a str>,
+        unit: &phera_bytecode::CompiledUnit,
+    ) -> Option<&'a str> {
+        let members = |ty: &'a str| ty.split(['?', '|', '&', '(', ')']);
+        let may_have_ancestry = |ty: Option<&str>| {
+            ty.is_some_and(|ty| {
+                ty.split(['?', '|', '&', '(', ')'])
+                    .any(|name| name == "iterable" || name == "object" || is_class_type_name(name))
+            })
+        };
+        if !may_have_ancestry(source) || !may_have_ancestry(target) {
+            return None;
+        }
+        [source, target]
+            .into_iter()
+            .flatten()
+            .flat_map(members)
+            .find(|name| {
+                is_class_type_name(name)
+                    && self.classes.get(name).is_none()
+                    && !unit
+                        .classes
+                        .iter()
+                        .any(|class| class.name.eq_ignore_ascii_case(name))
+            })
     }
 
     /// Union members must each fit some destination member; intersections require all bounds.
@@ -286,7 +339,7 @@ impl Vm {
                 return true;
             }
             if let Some(class) = self.classes.get(&name)
-                && (target == "object" || class.is_a(target))
+                && (target == "object" || self.class_matches(&class, target))
             {
                 return true;
             }
@@ -335,4 +388,28 @@ impl Vm {
             _ => name.to_owned(),
         }
     }
+}
+
+/// Native type spellings cannot be supplied by an autoloader.
+fn is_class_type_name(name: &str) -> bool {
+    !matches!(
+        name,
+        "" | "null"
+            | "true"
+            | "false"
+            | "bool"
+            | "int"
+            | "float"
+            | "string"
+            | "array"
+            | "object"
+            | "mixed"
+            | "iterable"
+            | "callable"
+            | "void"
+            | "never"
+            | "self"
+            | "parent"
+            | "static"
+    )
 }

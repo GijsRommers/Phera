@@ -28,13 +28,18 @@ pub const PARSER_STACK_BYTES: usize = 256 * 1024 * 1024;
 /// overflow cannot be caught: it would take the whole process down. On its own
 /// stack the parser's nesting limit is guaranteed to trigger first.
 pub fn parse(source: &str) -> Result<phera_ast::Program, ParseError> {
+    parse_bytes(source.as_bytes())
+}
+
+/// Parse bytes on the same dedicated stack used for UTF-8 input.
+pub fn parse_bytes(source: &[u8]) -> Result<phera_ast::Program, ParseError> {
     let whole_file = phera_source::Span::new(0, source.len());
 
     std::thread::scope(|scope| {
         std::thread::Builder::new()
             .name("phera-parser".into())
             .stack_size(PARSER_STACK_BYTES)
-            .spawn_scoped(scope, || parse_on_current_stack(source))
+            .spawn_scoped(scope, || parse_bytes_on_current_stack(source))
             .map_err(|error| {
                 ParseError::new(
                     format!("cannot start the parser thread: {error}"),
@@ -50,5 +55,43 @@ pub fn parse(source: &str) -> Result<phera_ast::Program, ParseError> {
 /// run on a stack of at least [`PARSER_STACK_BYTES`], such as a compiler
 /// thread that parses and compiles in one go.
 pub fn parse_on_current_stack(source: &str) -> Result<phera_ast::Program, ParseError> {
-    parser::Parser::new(source).parse_program()
+    parse_bytes_on_current_stack(source.as_bytes())
+}
+
+/// Parses source bytes on an existing compiler stack.
+pub fn parse_bytes_on_current_stack(source: &[u8]) -> Result<phera_ast::Program, ParseError> {
+    let (parser, _) = parser::Parser::new(source, false);
+    parser.parse_program()
+}
+
+/// Parses a file and collects the diagnostics reached before its first parse error.
+pub fn parse_file_on_current_stack(
+    source: &[u8],
+) -> (
+    Result<phera_ast::Program, ParseError>,
+    Vec<phera_source::CompileDiagnostic>,
+) {
+    let (parser, report) = parser::Parser::new(source, true);
+    let parsed = parser.parse_program();
+    let parsed = if let Some(error) = report.nesting_error
+        && parsed
+            .as_ref()
+            .err()
+            .is_none_or(|previous| error.span.start <= previous.span.start)
+    {
+        Err(ParseError::new(error.message, error.span))
+    } else {
+        parsed
+    };
+    let end = parsed
+        .as_ref()
+        .err()
+        .map_or(source.len(), |error| error.span.end);
+    let diagnostics = report
+        .diagnostics
+        .into_iter()
+        .take_while(|(offset, _)| *offset < end)
+        .map(|(_, diagnostic)| diagnostic)
+        .collect();
+    (parsed, diagnostics)
 }
