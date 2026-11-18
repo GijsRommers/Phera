@@ -154,7 +154,10 @@ impl Index {
                 if matches!(ancestor.kind, ClassKind::Trait | ClassKind::Interface)
                     && (signature.abstract_body || signature.modifiers.is_abstract)
                 {
-                    contract = Some(signature);
+                    // The nearest declaration is the contract: an interface
+                    // may redeclare its parent's method with more optional
+                    // parameters (Doctrine's EntityManagerInterface::find()).
+                    contract = contract.or(Some(signature));
                 } else {
                     return Some(signature);
                 }

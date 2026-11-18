@@ -132,8 +132,12 @@ fn parse_worker(
 ) -> Result<(Vec<ParsedFile>, Vec<Diagnostic>), String> {
     let (mut files, mut diagnostics) = (Vec::new(), Vec::new());
     while let Some(path) = paths.get(next.fetch_add(1, Ordering::Relaxed)) {
-        let source =
-            std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        // PHP source is bytes: a string literal may hold any of them (Symfony's
+        // cache ships such a file). The parser takes text for now, so bytes
+        // that are not UTF-8 become U+FFFD. That keeps every line and every
+        // declaration where it is, which is all the checks read.
+        let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let source = String::from_utf8_lossy(&bytes).into_owned();
         let lines = LineTable::new(&source);
         match phera_parser::parse_on_current_stack(&source) {
             Ok(program) => files.push(ParsedFile {
