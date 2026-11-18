@@ -222,6 +222,20 @@ impl Tables {
             Old::Unset(place) => Instruction::UnsetPath {
                 path: path(self, function, place),
             },
+            // A concatenation onto its own left operand, as the steps of a
+            // `.` chain and of an interpolated string are compiled, appends
+            // in place: copying the growing string at every step would make
+            // a template of n pieces take n² time.
+            Old::Binary {
+                destination,
+                operator: ir::Binary::Concat,
+                left,
+                right,
+            } if destination == left && left != right => Instruction::AssignOp {
+                op: phera_bytecode::BinaryOp::Concat,
+                local: destination,
+                src: right,
+            },
             Old::Binary {
                 destination: dst,
                 operator: op,
