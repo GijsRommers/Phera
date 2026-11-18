@@ -48,10 +48,10 @@ impl Vm {
         }
         let value = self.read_place(
             &place,
-            if mode != FetchMode::Quiet {
-                crate::access_mode::Missing::Warn
-            } else {
-                crate::access_mode::Missing::Silent
+            match mode {
+                FetchMode::Read | FetchMode::Destructure => crate::access_mode::Missing::Warn,
+                FetchMode::Quiet => crate::access_mode::Missing::Silent,
+                FetchMode::Isset => crate::access_mode::Missing::Isset,
             },
         )?;
         self.set(destination, value);
