@@ -1,7 +1,8 @@
 # PDO in Phera
 
-PHP's PDO with its PostgreSQL (`pgsql:`) and MySQL (`mysql:`) drivers,
-written against `tokio-postgres` and `mysql_async`:
+PHP's PDO with its PostgreSQL (`pgsql:`), MySQL (`mysql:`) and SQLite
+(`sqlite:`) drivers, written against `tokio-postgres`, `mysql_async` and
+`crates/sqlite`:
 
 ```php
 $pdo = new PDO('pgsql:host=127.0.0.1;dbname=app', $user, $password);
@@ -14,9 +15,15 @@ Every database wait is asynchronous: while one request waits for its query,
 its worker thread runs other requests. The drivers sit behind one interface,
 `src/drivers/mod.rs`, which also says what adding a driver takes.
 
+SQLite differs in two ways, described in `src/drivers/sqlite/mod.rs`: its
+calls block, so each database runs on a thread of its own and a statement
+streams its rows from a live cursor there; and its handles are never pooled.
+`Pdo\Sqlite` and the SQLite attributes are there; what SQLite does not have
+yet (SQL callbacks, blob streams) is listed in `crates/sqlite/README.md`.
+
 ## Connection pool
 
-Connections are pooled across the whole process, all `phera serve --workers
+PostgreSQL and MySQL connections are pooled across the whole process, all `phera serve --workers
 N` workers included (`crates/io-pool` shows how a query travels to the I/O
 threads and back). A pool is shared by `new PDO` calls with the same driver,
 DSN settings and credentials.
@@ -69,7 +76,6 @@ These throw a PDOException that says "... is not supported yet":
   network, UUID, enum and array types.
 - The `Pdo\Pgsql` and `Pdo\Mysql` constants and driver methods; most
   driver-specific attributes.
-- `sqlite:` (on its own branch).
 
 ## Tests
 
@@ -88,7 +94,7 @@ PHERA_BIN="$PWD/target/release/phera" cargo test -p phera-ext-pdo -- --nocapture
 PHP 8.5 with `pdo_pgsql` and `pdo_mysql` is the oracle (see CONTRIBUTING.md
 for how it is found).
 
-- `tests/scripts`: each script runs through PHP and through Phera, which
+- `tests/scripts`: each `pgsql_` and `mysql_` script runs through PHP and through Phera, which
   must succeed with the same stdout and stderr. Each creates a table of its
   own and drops it in `finally`. Without `PHERA_BIN` they are skipped.
 - `tests/native_oracle.rs`: the registered methods called directly, against
@@ -97,6 +103,11 @@ for how it is found).
 - `tests/native*.rs`: binding by reference, rollback when a PDO is dropped,
   forty overlapping waits on one thread, statements that keep their lease,
   a cancelled request.
+- `tests/sqlite_*.rs`: the `sqlite_` scripts, each run in a directory of its
+  own; a database written by PHP and read by Phera and the other way round;
+  200 simultaneous WAL writes through `php -S` and `phera serve`, and a
+  quick request answered while a slow query runs on the same worker. These
+  need no database server.
 - `tests/concurrency.rs`: forty 0.3 s queries through `phera serve
   --workers 1` must finish within two seconds.
 - `src/pool/tests`: the pool against the live servers, as the `phera_pool`
