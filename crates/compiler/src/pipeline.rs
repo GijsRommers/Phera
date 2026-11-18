@@ -93,13 +93,13 @@ fn compile_program(
     let reflection_initializers = RefCell::new(Vec::new());
     let mut compiler = Compiler::new(
         file,
+        source,
         lines,
         "{main}",
         "",
         compile_diagnostics,
         &reflection_initializers,
     );
-    compiler.source = source;
     compiler.function.dynamic_scope = true;
     if let Err(mut error) = compiler.block(&ast.statements, DeclarationTiming::Hoisted) {
         error

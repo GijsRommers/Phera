@@ -58,13 +58,13 @@ fn compile_on_stack(
     let nested_initializers = RefCell::new(Vec::new());
     let mut compiler = Compiler::new(
         file,
+        &fragment,
         &lines,
         &initializer.function,
         &initializer.namespace,
         &diagnostics,
         &nested_initializers,
     );
-    compiler.source = &fragment;
     compiler.class_scope.clone_from(&initializer.scope);
     compiler.imports.clone_from(&initializer.imports);
     compiler.function.strict_types = initializer.strict_types;

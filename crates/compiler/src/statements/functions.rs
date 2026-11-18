@@ -188,13 +188,13 @@ impl<'ast> Compiler<'ast> {
     ) -> Result<Compiler<'ast>, CompileError> {
         let mut builder = Compiler::new(
             self.file,
+            self.source,
             self.lines,
             name,
             &self.namespace,
             self.compile_diagnostics,
             self.reflection_initializers,
         );
-        builder.source = self.source;
         builder.class_scope = if !name.starts_with("{closure:") {
             name.split_once("::")
                 .map(|(class, _)| class.to_owned())
