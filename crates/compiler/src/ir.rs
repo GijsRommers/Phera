@@ -16,16 +16,6 @@ use phera_bytecode::Reg;
 /// Compiler IR with owned names and paths before table interning.
 #[derive(Debug, Clone)]
 pub enum Instruction {
-    GeneratorStart,
-    Yield {
-        destination: Reg,
-        key: Option<Reg>,
-        value: Option<Reg>,
-    },
-    YieldFrom {
-        destination: Reg,
-        source: Reg,
-    },
     /// Quiet receiver read for isset($this).
     ThisOrNull {
         destination: Reg,
@@ -338,5 +328,15 @@ pub enum Instruction {
     /// Raise the unmatched-subject exception; emits Raise(UnhandledMatch).
     MatchError {
         subject: Reg,
+    },
+    GeneratorStart,
+    Yield {
+        destination: Reg,
+        key: Option<Reg>,
+        value: Option<Reg>,
+    },
+    YieldFrom {
+        destination: Reg,
+        source: Reg,
     },
 }

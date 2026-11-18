@@ -37,6 +37,8 @@ pub(crate) struct IteratorState {
     pub(crate) source: Option<AccessPath>,
     /// The array storage position, distinct from a PHP integer key.
     pub(crate) position: Option<usize>,
+    /// A generator cursor may expose the yielded cell to a by-reference foreach.
+    pub(crate) traversal_reference: bool,
     /// Distinguishes an untouched iterator from an exhausted one.
     pub(crate) started: bool,
 }

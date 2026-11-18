@@ -164,10 +164,10 @@ impl Compiler<'_> {
                 ),
                 (_, false) => Some("A function with return type must return a value"),
             };
-            if let Some(message) = message {
-                if self.return_error.is_none() {
-                    self.return_error = Some(self.error(message, line));
-                }
+            if let Some(message) = message
+                && self.return_error.is_none()
+            {
+                self.return_error = Some(self.error(message, line));
             }
         }
         let source = if let Some(expression) = expression {

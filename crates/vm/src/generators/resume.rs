@@ -33,6 +33,49 @@ struct Drive {
     seen: HashSet<*const Object>,
 }
 
+/// Reading the current item of an already-started local generator never executes PHP.
+pub(crate) fn local_observation(
+    object: &Object,
+    operation: &GeneratorOperation,
+) -> Option<NativeResult> {
+    let (step, by_reference) = match *operation {
+        GeneratorOperation::Method(step) => (step, false),
+        GeneratorOperation::Cursor { step, by_reference } => (step, by_reference),
+        _ => return None,
+    };
+    if !matches!(
+        step,
+        IteratorStep::Current | IteratorStep::Key | IteratorStep::Valid
+    ) {
+        return None;
+    }
+    match state(object, |generator| {
+        if needs_priming(generator)
+            || matches!(
+                generator.state,
+                State::Delegating(_, _, Delegate::Generator(_))
+            )
+        {
+            return None;
+        }
+        Some(observe(generator, step, by_reference))
+    }) {
+        Ok(observed) => observed.map(Ok),
+        Err(error) => Some(Err(error)),
+    }
+}
+
+fn observe(generator: &mut Generator, step: IteratorStep, by_reference: bool) -> Value {
+    match step {
+        IteratorStep::Current => current_value(generator, by_reference),
+        IteratorStep::Key => active_item(generator)
+            .map(|item| item.key.clone())
+            .unwrap_or_default(),
+        IteratorStep::Valid => Value::Bool(is_open(generator)),
+        _ => Value::Null,
+    }
+}
+
 impl Vm {
     pub(crate) async fn operate_generator(
         &mut self,
@@ -92,18 +135,7 @@ impl Vm {
                 })?,
                 Some(step) => {
                     let leaf = self.drive_generator(object, Motion::Observe).await?;
-                    match step {
-                        IteratorStep::Current => current(&leaf, by_reference),
-                        IteratorStep::Key => state(&leaf, |generator| {
-                            active_item(generator)
-                                .map(|item| item.key.clone())
-                                .unwrap_or_default()
-                        }),
-                        IteratorStep::Valid => {
-                            state(&leaf, |generator| Value::Bool(is_open(generator)))
-                        }
-                        _ => Err(internal_error!("generator iterator operation")),
-                    }
+                    state(&leaf, |generator| observe(generator, step, by_reference))
                 }
                 None => Err(internal_error!("generator operation")),
             },
@@ -299,18 +331,20 @@ fn active_item(generator: &mut Generator) -> Option<&mut Item> {
 }
 
 fn current(object: &Object, by_reference: bool) -> NativeResult {
-    state(object, |generator| {
-        let Some(item) = active_item(generator) else {
-            return Value::Null;
-        };
-        if !by_reference {
-            return item.value.deref().clone();
-        }
-        if !item.value.is_reference() {
-            item.value = Value::Reference(Rc::new(RefCell::new(std::mem::take(&mut item.value))));
-        }
-        item.value.clone()
-    })
+    state(object, |generator| current_value(generator, by_reference))
+}
+
+fn current_value(generator: &mut Generator, by_reference: bool) -> Value {
+    let Some(item) = active_item(generator) else {
+        return Value::Null;
+    };
+    if !by_reference {
+        return item.value.deref().clone();
+    }
+    if !item.value.is_reference() {
+        item.value = Value::Reference(Rc::new(RefCell::new(std::mem::take(&mut item.value))));
+    }
+    item.value.clone()
 }
 
 pub(super) fn impossible_delegation() -> NativeError {

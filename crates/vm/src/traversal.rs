@@ -26,27 +26,22 @@ impl Traversal for Cursor {
         operation: IteratorStep,
     ) -> LocalFuture<'a, NativeResult> {
         match self {
-            Self::Php(object) => Box::pin(async move {
-                Ok(context
-                    .call_method(
-                        object.clone(),
-                        match operation {
-                            IteratorStep::Rewind => "rewind",
-                            IteratorStep::Advance => "next",
-                            IteratorStep::Valid => "valid",
-                            IteratorStep::Current => "current",
-                            IteratorStep::Key => "key",
-                        },
-                        Vec::new(),
-                    )
-                    .await?
-                    .deref()
-                    .clone())
-            }),
-            Self::Native(iterator) => Box::pin(std::future::ready(
-                native_step(iterator.as_mut(), context, operation)
-                    .map(|value| value.deref().clone()),
-            )),
+            Self::Php(object) => context.call_method(
+                object.clone(),
+                match operation {
+                    IteratorStep::Rewind => "rewind",
+                    IteratorStep::Advance => "next",
+                    IteratorStep::Valid => "valid",
+                    IteratorStep::Current => "current",
+                    IteratorStep::Key => "key",
+                },
+                Vec::new(),
+            ),
+            Self::Native(iterator) => Box::pin(std::future::ready(native_step(
+                iterator.as_mut(),
+                context,
+                operation,
+            ))),
         }
     }
 }

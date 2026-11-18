@@ -133,6 +133,9 @@ impl Context for Vm {
         object: std::rc::Rc<phera_value::Object>,
         operation: phera_extension_api::GeneratorOperation,
     ) -> LocalFuture<'_, NativeResult> {
+        if let Some(result) = crate::generators::local_observation(&object, &operation) {
+            return Box::pin(std::future::ready(result));
+        }
         Box::pin(async move {
             self.call_stack.enter_callback()?;
             self.generator_traces

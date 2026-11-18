@@ -33,6 +33,7 @@ impl Vm {
                 source: None,
                 traversal: valid.then_some(cursor),
                 position: None,
+                traversal_reference: by_reference,
                 started: false,
             },
         );
@@ -66,6 +67,11 @@ impl Vm {
         if let Some((key, index)) = key.zip(index) {
             self.set(key, index.deref().clone());
         }
+        let value = if state.traversal_reference {
+            value
+        } else {
+            value.deref().clone()
+        };
         self.set(destination, value);
         state.started = true;
         self.call_stack

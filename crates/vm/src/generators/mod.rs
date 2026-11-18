@@ -12,6 +12,7 @@ pub(crate) mod cleanup;
 mod delegation;
 mod execution;
 mod resume;
+pub(crate) use resume::local_observation;
 pub(crate) mod trace;
 
 use std::rc::Rc;
@@ -135,9 +136,22 @@ impl Vm {
         BatchExit::GeneratorSuspended
     }
 
+    /// Consumed operands may be scratch registers or named locals after optimization.
+    pub(crate) fn discard_generator_temporary(&mut self, register: Reg) {
+        if self
+            .current()
+            .is_some_and(|frame| register.index() >= frame.function().locals.len())
+            && let Some(slot) = self.current_slot_mut(register)
+        {
+            *slot = None;
+        }
+    }
+
     #[cold]
     pub(crate) fn generator_delegate(&mut self, destination: Reg, source: Reg) -> BatchExit {
-        let source = self.read_local(source);
+        let value = self.read_local(source);
+        self.discard_generator_temporary(source);
+        let source = value;
         self.generator_suspension = Some(Suspension::Delegate {
             destination,
             source,

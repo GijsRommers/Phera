@@ -49,7 +49,10 @@ impl Vm {
                                 Err(handler_error) => handler_error,
                             }
                         };
-                        self.handle_exception(error, stop)?;
+                        let error = self.unwind_generator_releases(error).await;
+                        if let Err(error) = self.handle_exception(error, stop) {
+                            return Err(self.unwind_generator_releases(error).await);
+                        }
                     }
                 }
             }

@@ -169,6 +169,7 @@ impl Vm {
                     {
                         if class.is_readonly
                             || class.origin == crate::classes::class::ClassOrigin::Closure
+                            || crate::generators::generator_object(object)
                         {
                             return Err(NativeError::error(format!(
                                 "Cannot create dynamic property {}::${name}",

@@ -15,7 +15,7 @@ use std::{
 use phera_extension_api::{NativeError, Unwind};
 use phera_value::Value;
 
-use crate::{Vm, finally::Continuation};
+use crate::{Vm, exception_unwind::append_previous, exceptions::Thrown, finally::Continuation};
 
 use super::{Generator, Item, State, activation::Activation};
 
@@ -72,6 +72,30 @@ impl Vm {
         let result = self.run_generator_releases(&releases).await;
         self.draining_generators = false;
         result
+    }
+
+    /// Preserve the active exception unless releasing a frame raises a replacement.
+    pub(crate) async fn unwind_generator_releases(&mut self, error: NativeError) -> NativeError {
+        if !self.generator_releases_pending() {
+            return error;
+        }
+        let previous = self.materialize_error(error);
+        match self.drain_generator_releases().await {
+            Ok(()) => previous,
+            Err(error) => {
+                let replacement = self.materialize_error(error);
+                if let (NativeError::Unwind(current), NativeError::Unwind(old)) =
+                    (&replacement, previous)
+                    && let (Some(current), Ok(old)) = (
+                        current.0.downcast_ref::<Thrown>(),
+                        old.0.downcast::<Thrown>(),
+                    )
+                {
+                    append_previous(&current.object, old.object);
+                }
+                replacement
+            }
+        }
     }
 
     async fn run_generator_releases(&mut self, queue: &Releases) -> Result<(), NativeError> {

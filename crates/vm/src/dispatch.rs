@@ -89,7 +89,12 @@ impl Vm {
                     .await?;
                 }
                 Instruction::IterStart { iter, src, .. } => {
-                    self.start_traversable(iter, self.get(src), false).await?;
+                    let subject = self.get(src);
+                    if matches!(&subject, Value::Object(object) if crate::generators::generator_object(object))
+                    {
+                        self.discard_generator_temporary(src);
+                    }
+                    self.start_traversable(iter, subject, false).await?;
                 }
                 Instruction::IterStartReference { iter, subject, .. } => {
                     let value = self.get(subject);

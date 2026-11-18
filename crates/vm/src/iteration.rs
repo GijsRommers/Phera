@@ -55,6 +55,7 @@ impl Vm {
                 traversal: None,
                 source: if object_iteration { None } else { place },
                 position: None,
+                traversal_reference: false,
                 started: false,
             },
         );
@@ -86,6 +87,7 @@ impl Vm {
                 traversal: None,
                 source: Some(place),
                 position: None,
+                traversal_reference: false,
                 started: false,
             },
         );

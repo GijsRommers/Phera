@@ -30,6 +30,9 @@ impl Vm {
                 value.type_name()
             )));
         };
+        if crate::generators::generator_object(&object) {
+            self.discard_generator_temporary(receiver);
+        }
         let class = self
             .classes
             .for_object(&object)

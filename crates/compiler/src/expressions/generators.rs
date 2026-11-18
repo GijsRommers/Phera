@@ -88,11 +88,14 @@ impl Compiler<'_> {
             ));
         }
         if let Some(ty) = &self.function.return_type
-            && !ty.trim_start_matches('?').split('|').any(accepts_generator)
+            && !accepts_generator(ty)
         {
             return Err(self.error(
-                format!("Generator return type must be a supertype of Generator, {ty} given"),
-                line,
+                format!(
+                    "Generator return type must be a supertype of Generator, {} given",
+                    display_generator_type(ty),
+                ),
+                self.function.definition_line,
             ));
         }
         self.function.is_generator = true;
@@ -100,9 +103,34 @@ impl Compiler<'_> {
     }
 }
 
-fn accepts_generator(ty: &str) -> bool {
-    matches!(
-        ty.to_ascii_lowercase().as_str(),
-        "generator" | "iterator" | "traversable" | "iterable" | "object" | "mixed"
-    )
+fn accepts_generator(declaration: &str) -> bool {
+    // Zend checks the components of a top-level intersection or union for a
+    // generator-compatible name. A union's intersection member is itself a type list.
+    let separator = if declaration.contains('|') { '|' } else { '&' };
+    declaration
+        .trim_start_matches('?')
+        .split(separator)
+        .any(|member| {
+            matches!(
+                member.to_ascii_lowercase().as_str(),
+                "generator" | "iterator" | "traversable" | "iterable" | "object" | "mixed"
+            )
+        })
+}
+
+fn display_generator_type(declaration: &str) -> String {
+    if !declaration.contains('|') {
+        return declaration.to_owned();
+    }
+    declaration
+        .split('|')
+        .map(|ty| {
+            if ty.contains('&') {
+                format!("({ty})")
+            } else {
+                ty.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("|")
 }

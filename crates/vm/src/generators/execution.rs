@@ -13,7 +13,7 @@ use phera_extension_api::NativeError;
 use phera_value::{Object, Value};
 use std::rc::Rc;
 
-use crate::Vm;
+use crate::{Vm, calls::execution_loop::BatchExit};
 
 use super::{Item, State, Suspension, activation::Activation, delegation::Delegate, state};
 
@@ -133,7 +133,16 @@ impl Vm {
                 }
                 Input::Begin | Input::Send(_) | Input::Complete(_) => {}
             }
-            let result = self.interpret(stop).await?;
+            let mut work = 0;
+            let result = match self.run_batch(stop, &mut work) {
+                Ok(BatchExit::GeneratorSuspended)
+                    if self.error_handlers.pending.is_empty()
+                        && !self.generator_releases_pending() =>
+                {
+                    Value::Null
+                }
+                other => self.continue_execution(stop, work, Some(other)).await?,
+            };
             if self.call_stack.depth() == stop {
                 return Ok(Pause::Return(result));
             }
