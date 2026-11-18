@@ -11,10 +11,14 @@ use std::{collections::HashSet, rc::Rc};
 use phera_extension_api::NativeError;
 use phera_value::{Object, Value};
 
-use crate::{Vm, calls::execution_loop::YIELD_AFTER_STEPS};
+use crate::{Vm, calls::execution_loop::YIELD_AFTER_STEPS, inline_stack::InlineStack};
 
 use super::{Generator, Item, State, state};
-use super::{activation::Activation, delegation::Delegate, execution::Input};
+use super::{
+    activation::Activation,
+    delegation::Delegate,
+    execution::{Input, Progress},
+};
 
 pub(super) enum Motion {
     Observe,
@@ -28,9 +32,41 @@ enum Position {
     Failed,
 }
 
+pub(super) type Ancestors = InlineStack<Rc<Object>>;
+
 struct Drive {
-    ancestors: Vec<Rc<Object>>,
-    seen: HashSet<*const Object>,
+    ancestors: Ancestors,
+    seen: Option<HashSet<*const Object>>,
+}
+
+impl Drive {
+    fn contains(&self, object: &Rc<Object>) -> bool {
+        match &self.seen {
+            Some(seen) => seen.contains(&Rc::as_ptr(object)),
+            None => self
+                .ancestors
+                .iter()
+                .any(|parent| Rc::ptr_eq(parent, object)),
+        }
+    }
+
+    fn push(&mut self, parent: Rc<Object>) {
+        let address = Rc::as_ptr(&parent);
+        self.ancestors.push(parent);
+        if let Some(seen) = &mut self.seen {
+            seen.insert(address);
+        } else if self.ancestors.len() > 8 {
+            self.seen = Some(self.ancestors.iter().map(Rc::as_ptr).collect());
+        }
+    }
+
+    fn pop(&mut self) -> Option<Rc<Object>> {
+        let parent = self.ancestors.pop()?;
+        if let Some(seen) = &mut self.seen {
+            seen.remove(&Rc::as_ptr(&parent));
+        }
+        Some(parent)
+    }
 }
 
 impl Vm {
@@ -39,13 +75,19 @@ impl Vm {
         object: Rc<Object>,
         input: Input,
     ) -> Result<Rc<Object>, NativeError> {
-        if !state(&object, |generator| is_open(generator))? {
+        let open = state(&object, |generator| {
+            let open = is_open(generator);
+            if open {
+                generator.first_yield = false;
+            }
+            open
+        })?;
+        if !open {
             if let Input::Throw(error) = input {
                 return Err(error);
             }
             return Ok(object);
         }
-        state(&object, |generator| generator.first_yield = false)?;
         self.drive_generator(object, Motion::Advance(input)).await
     }
 
@@ -55,8 +97,8 @@ impl Vm {
         mut motion: Motion,
     ) -> Result<Rc<Object>, NativeError> {
         let mut drive = Drive {
-            ancestors: Vec::new(),
-            seen: HashSet::new(),
+            ancestors: Ancestors::new(),
+            seen: None,
         };
         loop {
             let position = state(&object, |generator| match &generator.state {
@@ -69,18 +111,17 @@ impl Vm {
             })?;
             let (activation, input) = match position {
                 Position::Delegates(delegate) => {
-                    drive.seen.insert(Rc::as_ptr(&object));
                     if drive.ancestors.len() >= self.frame_limit {
                         let error = NativeError::error(format!(
                             "Maximum call stack depth of {} exceeded",
                             self.frame_limit,
                         ));
                         leave_delegate(&object, Input::Throw(error))?
-                    } else if drive.seen.contains(&Rc::as_ptr(&delegate)) {
+                    } else if drive.contains(&delegate) {
                         let input = Input::Throw(impossible_delegation());
                         leave_delegate(&object, input)?
                     } else {
-                        drive.ancestors.push(object);
+                        drive.push(object);
                         if drive.ancestors.len().is_multiple_of(YIELD_AFTER_STEPS) {
                             tokio::task::yield_now().await;
                         }
@@ -89,10 +130,9 @@ impl Vm {
                     }
                 }
                 Position::Returned(value) => {
-                    let Some(parent) = drive.ancestors.pop() else {
+                    let Some(parent) = drive.pop() else {
                         return Ok(object);
                     };
-                    drive.seen.remove(&Rc::as_ptr(&parent));
                     if matches!(motion, Motion::Observe) {
                         retain_delegate_value(&parent, &object, value)?;
                         return Ok(parent);
@@ -101,10 +141,9 @@ impl Vm {
                     leave_delegate(&object, Input::Complete(value))?
                 }
                 Position::Failed => {
-                    let Some(parent) = drive.ancestors.pop() else {
+                    let Some(parent) = drive.pop() else {
                         return Ok(object);
                     };
-                    drive.seen.remove(&Rc::as_ptr(&parent));
                     object = parent;
                     leave_delegate(
                         &object,
@@ -132,14 +171,13 @@ impl Vm {
             let mut outcome = self
                 .run_generator_frame(&object, activation, input, &mut drive.ancestors)
                 .await;
-            loop {
+            let progress = loop {
                 match outcome {
-                    Ok(()) => break,
+                    Ok(progress) => break progress,
                     Err(error) => {
-                        let Some(parent) = drive.ancestors.pop() else {
+                        let Some(parent) = drive.pop() else {
                             return Err(error);
                         };
-                        drive.seen.remove(&Rc::as_ptr(&parent));
                         object = parent;
                         let (activation, input) = leave_delegate(&object, Input::Throw(error))?;
                         outcome = self
@@ -147,14 +185,13 @@ impl Vm {
                             .await;
                     }
                 }
-            }
-            let finished = !state(&object, |generator| is_open(generator))?;
-            if finished && !drive.ancestors.is_empty() {
-                // A child that just returned continues the yielding expression in its parent.
-                motion = Motion::Advance(Input::Begin);
-            } else {
-                motion = Motion::Observe;
-            }
+            };
+            motion = match progress {
+                Progress::Visible => return Ok(object),
+                Progress::Complete if drive.ancestors.is_empty() => return Ok(object),
+                Progress::Complete => Motion::Advance(Input::Begin),
+                Progress::Delegated => Motion::Observe,
+            };
         }
     }
 }

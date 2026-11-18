@@ -15,7 +15,9 @@ use std::rc::Rc;
 
 use crate::{Vm, calls::execution_loop::BatchExit};
 
-use super::{Item, State, Suspension, activation::Activation, delegation::Delegate, state};
+use super::{
+    Item, State, Suspension, activation::Activation, delegation::Delegate, resume::Ancestors, state,
+};
 
 pub(super) enum Input {
     Begin,
@@ -35,6 +37,12 @@ impl Input {
     }
 }
 
+pub(super) enum Progress {
+    Visible,
+    Delegated,
+    Complete,
+}
+
 enum Pause {
     Value(Reg, Option<Value>, Value),
     Delegating(Reg, Delegate, Option<Item>),
@@ -47,8 +55,8 @@ impl Vm {
         object: &Rc<Object>,
         activation: Activation,
         input: Input,
-        ancestors: &mut Vec<Rc<Object>>,
-    ) -> Result<(), NativeError> {
+        ancestors: &mut Ancestors,
+    ) -> Result<Progress, NativeError> {
         if let Some(site) = self.generator_traces.last_mut() {
             std::mem::swap(&mut site.ancestors, ancestors);
         }
@@ -64,7 +72,7 @@ impl Vm {
         object: &Rc<Object>,
         activation: Activation,
         input: Input,
-    ) -> Result<(), NativeError> {
+    ) -> Result<Progress, NativeError> {
         let stop = self.call_stack.depth();
         // The caller has already claimed the frame. Return it on every suspension.
         let caller_silence = self.diagnostic_reporter.silence();
@@ -75,40 +83,45 @@ impl Vm {
             .silence()
             .saturating_sub(caller_silence);
         self.diagnostic_reporter.restore_silence(caller_silence);
-        state(object, |generator| -> Result<(), NativeError> {
-            match outcome {
-                Ok(Pause::Value(destination, key, value)) => {
-                    let key = match key {
-                        Some(Value::Int(key)) => {
-                            generator.largest_key = generator.largest_key.max(key);
-                            Value::Int(key)
-                        }
-                        Some(key) => key,
-                        None => {
-                            generator.largest_key = generator.largest_key.wrapping_add(1);
-                            Value::Int(generator.largest_key)
-                        }
-                    };
-                    generator.item = Some(Item { key, value });
-                    let mut activation = self.suspend_generator_frame(storage)?;
-                    activation.silence = generator_silence;
-                    generator.state = State::Yielded(activation, destination);
-                }
-                Ok(Pause::Delegating(destination, delegate, item)) => {
-                    if item.is_some() {
-                        generator.item = item;
+        state(object, |generator| match outcome {
+            Ok(Pause::Value(destination, key, value)) => {
+                let key = match key {
+                    Some(Value::Int(key)) => {
+                        generator.largest_key = generator.largest_key.max(key);
+                        Value::Int(key)
                     }
-                    let mut activation = self.suspend_generator_frame(storage)?;
-                    activation.silence = generator_silence;
-                    generator.state = State::Delegating(activation, destination, delegate);
-                }
-                Ok(Pause::Return(value)) => generator.state = State::Returned(value),
-                Err(error) => {
-                    generator.state = State::Failed;
-                    return Err(error);
-                }
+                    Some(key) => key,
+                    None => {
+                        generator.largest_key = generator.largest_key.wrapping_add(1);
+                        Value::Int(generator.largest_key)
+                    }
+                };
+                generator.item = Some(Item { key, value });
+                let mut activation = self.suspend_generator_frame(storage)?;
+                activation.silence = generator_silence;
+                generator.state = State::Yielded(activation, destination);
+                Ok(Progress::Visible)
             }
-            Ok(())
+            Ok(Pause::Delegating(destination, delegate, item)) => {
+                let progress = if item.is_some() {
+                    generator.item = item;
+                    Progress::Visible
+                } else {
+                    Progress::Delegated
+                };
+                let mut activation = self.suspend_generator_frame(storage)?;
+                activation.silence = generator_silence;
+                generator.state = State::Delegating(activation, destination, delegate);
+                Ok(progress)
+            }
+            Ok(Pause::Return(value)) => {
+                generator.state = State::Returned(value);
+                Ok(Progress::Complete)
+            }
+            Err(error) => {
+                generator.state = State::Failed;
+                Err(error)
+            }
         })?
     }
 

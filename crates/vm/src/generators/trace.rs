@@ -8,15 +8,15 @@
 use std::rc::Rc;
 
 use phera_extension_api::{GeneratorOperation, NativeError, traversal::IteratorStep};
-use phera_value::{ArrayKey, Object, PhpArray, Value};
+use phera_value::{ArrayKey, PhpArray, Value};
 
 use crate::{Vm, error_traces::NativeTrace};
 
-use super::{State, state};
+use super::{State, resume::Ancestors, state};
 
 pub(crate) struct Site {
     pub(crate) boundary: usize,
-    pub(super) ancestors: Vec<Rc<Object>>,
+    pub(super) ancestors: Ancestors,
     method: Option<Method>,
 }
 
@@ -54,7 +54,7 @@ impl Site {
         };
         Self {
             boundary,
-            ancestors: Vec::new(),
+            ancestors: Ancestors::new(),
             method,
         }
     }
