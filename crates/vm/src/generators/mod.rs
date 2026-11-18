@@ -22,7 +22,10 @@ use phera_bytecode::{Instruction, Reg};
 use phera_extension_api::NativeError;
 use phera_value::{Object, Value};
 
-use crate::{Vm, calls::execution_loop::BatchExit};
+use crate::{
+    Vm,
+    calls::{execution_loop::BatchExit, prepared_call::CallKind},
+};
 use activation::Activation;
 use delegation::Delegate;
 
@@ -109,6 +112,16 @@ impl Vm {
         let name = Value::from(frame.function().name.clone());
         let destination = frame.frame.destination();
         let reference = frame.function().returns_reference;
+        let constructed = if frame.frame.kind() == CallKind::Constructor {
+            Some(
+                frame
+                    .this()
+                    .cloned()
+                    .ok_or_else(|| internal_error!("generator constructor receiver"))?,
+            )
+        } else {
+            None
+        };
         let object = self.classes.allocate(class);
         let activation = self.suspend_generator_frame(activation::Storage::default())?;
         *object.native.borrow_mut() = Some(Box::new(Generator {
@@ -120,7 +133,8 @@ impl Vm {
             first_yield: false,
             largest_key: -1,
         }));
-        let value = Value::Object(object);
+        // new returns its receiver even when its constructor call returns a generator.
+        let value = Value::Object(constructed.unwrap_or(object));
         if self.call_stack.depth() == stop {
             return Ok(Some(BatchExit::Returned(value)));
         }
