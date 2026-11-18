@@ -16,6 +16,12 @@ impl Compiler<'_> {
             if !parameter.hooks.is_empty() {
                 return Err(self.error("Property hooks not supported yet", line));
             }
+            if parameter.modifiers.is_static {
+                return Err(self.error(
+                    "Cannot use the static modifier on a parameter",
+                    self.lines.line(parameter.span.start),
+                ));
+            }
             if parameter.modifiers.promotes_property()
                 && !declaration
                     .name

@@ -1,6 +1,8 @@
 use phera_lexer::{BACKTICK_OPERATOR_ERROR, LexError, LexErrorKind};
 use phera_source::Span;
 
+pub(crate) const MULTIPLE_ACCESS_MODIFIERS: &str = "Multiple access type modifiers are not allowed";
+
 /// The first thing in the source that did not fit the grammar.
 ///
 /// A lexer error is reported as a `ParseError` with the lexer's span.
@@ -41,6 +43,11 @@ impl ParseError {
 
     pub fn is_backtick_operator(&self) -> bool {
         self.message == BACKTICK_OPERATOR_ERROR
+    }
+
+    /// A grammar production can reject a declaration with PHP's fatal severity.
+    pub fn is_fatal(&self) -> bool {
+        self.is_backtick_operator() || self.message == MULTIPLE_ACCESS_MODIFIERS
     }
 }
 

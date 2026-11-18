@@ -55,7 +55,7 @@ fn compile_program(
     compile_diagnostics: &RefCell<Vec<CompileDiagnostic>>,
 ) -> Result<phera_bytecode::CompiledUnit, CompileError> {
     let ast = parsed.map_err(|error| {
-        if error.is_backtick_operator() {
+        if error.is_fatal() {
             return CompileError {
                 message: error.message,
                 file: file.into(),

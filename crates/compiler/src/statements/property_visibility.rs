@@ -11,14 +11,34 @@ impl Compiler<'_> {
         &self,
         modifiers: &Modifiers,
         location: (&str, &str, Span),
-        typed: bool,
+        ty: Option<&str>,
         readonly: bool,
     ) -> Result<(Option<Visibility>, bool), CompileError> {
         let (class, name, span) = location;
         let line = self.lines.line(span.start);
         let read = modifiers.visibility.unwrap_or(SourceVisibility::Public);
         let write = modifiers.set_visibility;
-        if write.is_some() && !typed {
+        if let Some(ty) = ty
+            && ty.split(['|', '&', '?']).any(|name| name == "callable")
+        {
+            return Err(self.error(
+                format!("Property {class}::${name} cannot have type {ty}"),
+                line,
+            ));
+        }
+        if readonly && modifiers.is_static {
+            return Err(self.error(
+                format!("Static property {class}::${name} cannot be readonly"),
+                line,
+            ));
+        }
+        if readonly && ty.is_none() {
+            return Err(self.error(
+                format!("Readonly property {class}::${name} must have type"),
+                line,
+            ));
+        }
+        if write.is_some() && ty.is_none() {
             return Err(self.error(
                 format!("Property with asymmetric visibility {class}::${name} must have type"),
                 line,

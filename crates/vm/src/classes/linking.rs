@@ -444,12 +444,16 @@ impl Vm {
                     },
                 ))));
             }
-            super::declaration_errors::check_property_visibility(
-                name,
-                property,
-                property_name,
-                inherited,
-            )?;
+            let other_storage = if property.is_static {
+                &defaults
+            } else {
+                &static_properties
+            };
+            if let Some(inherited) = inherited.iter().chain(other_storage).find(|candidate| {
+                candidate.name == *property_name && candidate.visibility != Visibility::Private
+            }) {
+                self.check_property_override(&linked, inherited, &unit)?;
+            }
             let target = if property.is_static {
                 &mut static_properties
             } else {

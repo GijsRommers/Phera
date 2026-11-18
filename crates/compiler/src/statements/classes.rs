@@ -101,52 +101,19 @@ impl Compiler<'_> {
                     if !property.hooks.is_empty() {
                         return Err(self.error("Property hooks not supported yet", line));
                     }
-                    if ty.as_ref().is_some_and(|ty| {
-                        self.declaration_type(ty)
-                            .split(['|', '&', '?'])
-                            .any(|name| name == "callable")
-                    }) {
-                        return Err(self.error(
-                            format!(
-                                "Property {name}::${} cannot have type {}",
-                                property.name,
-                                ty.as_ref()
-                                    .map(|ty| self.declaration_type(ty))
-                                    .unwrap_or_default()
-                            ),
-                            self.lines.line(property.span.start),
-                        ));
-                    }
                     let readonly = modifiers.is_readonly || declaration.modifiers.is_readonly;
-                    if readonly && modifiers.is_static {
-                        return Err(self.error(
-                            format!(
-                                "Static property {name}::${} cannot be readonly",
-                                property.name
-                            ),
-                            self.lines.line(property.span.start),
-                        ));
-                    }
-                    if readonly && ty.is_none() {
-                        return Err(self.error(
-                            format!(
-                                "Readonly property {name}::${} must have type",
-                                property.name
-                            ),
-                            self.lines.line(property.span.start),
-                        ));
-                    }
+                    let ty = ty.as_ref().map(|ty| self.declaration_type(ty));
+                    let (set_visibility, is_final) = self.property_write_visibility(
+                        modifiers,
+                        (&name, &property.name, property.span),
+                        ty.as_deref(),
+                        readonly,
+                    )?;
                     let default = property
                         .default
                         .as_ref()
                         .map(|value| self.compile_initializer(value, line))
                         .transpose()?;
-                    let (set_visibility, is_final) = self.property_write_visibility(
-                        modifiers,
-                        (&name, &property.name, property.span),
-                        ty.is_some(),
-                        readonly,
-                    )?;
                     properties.push(ClassProperty {
                         name: property.name.clone(),
                         set_visibility,
@@ -160,9 +127,7 @@ impl Compiler<'_> {
                         },
                         is_static: modifiers.is_static,
                         is_readonly: modifiers.is_readonly || declaration.modifiers.is_readonly,
-                        ty: ty
-                            .as_ref()
-                            .map(|declared_type| self.declaration_type(declared_type)),
+                        ty,
                         default,
                     });
                 }
@@ -187,7 +152,31 @@ impl Compiler<'_> {
             }
             self.validate_magic_method(&name, method)?;
             for parameter in &method.parameters {
+                let parameter_line = self.lines.line(parameter.span.start);
+                if parameter.modifiers.is_static {
+                    return Err(self.error(
+                        "Cannot use the static modifier on a parameter",
+                        parameter_line,
+                    ));
+                }
                 if parameter.modifiers.promotes_property() {
+                    if !method.name.name.eq_ignore_ascii_case("__construct") {
+                        return Err(self.error(
+                            "Cannot declare promoted property outside a constructor",
+                            parameter_line,
+                        ));
+                    }
+                    if method.body.is_none() {
+                        return Err(self.error(
+                            "Cannot declare promoted property in an abstract constructor",
+                            parameter_line,
+                        ));
+                    }
+                    if parameter.variadic {
+                        return Err(
+                            self.error("Cannot declare variadic promoted property", parameter_line)
+                        );
+                    }
                     let metadata = self.declaration_metadata(
                         &parameter.attributes,
                         parameter.span,
@@ -197,10 +186,11 @@ impl Compiler<'_> {
                     )?;
                     let readonly =
                         parameter.modifiers.is_readonly || declaration.modifiers.is_readonly;
+                    let ty = parameter.ty.as_ref().map(|ty| self.declaration_type(ty));
                     let (set_visibility, is_final) = self.property_write_visibility(
                         &parameter.modifiers,
                         (&name, &parameter.name, parameter.span),
-                        parameter.ty.is_some(),
+                        ty.as_deref(),
                         readonly,
                     )?;
                     properties.push(ClassProperty {
@@ -213,10 +203,7 @@ impl Compiler<'_> {
                         is_static: false,
                         is_readonly: parameter.modifiers.is_readonly
                             || declaration.modifiers.is_readonly,
-                        ty: parameter
-                            .ty
-                            .as_ref()
-                            .map(|declared_type| self.declaration_type(declared_type)),
+                        ty,
                         default: None,
                     });
                 }

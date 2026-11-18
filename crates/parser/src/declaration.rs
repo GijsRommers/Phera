@@ -334,13 +334,16 @@ impl Parser<'_> {
             }
             loop {
                 if let Some((visibility, is_set_only)) = member_modifier(self.kind()) {
-                    self.bump()?;
                     has_modifiers = true;
-                    if is_set_only {
-                        modifiers.set_visibility = Some(visibility);
+                    let slot = if is_set_only {
+                        &mut modifiers.set_visibility
                     } else {
-                        modifiers.visibility = Some(visibility);
+                        &mut modifiers.visibility
+                    };
+                    if slot.replace(visibility).is_some() {
+                        return Err(self.error(crate::error::MULTIPLE_ACCESS_MODIFIERS));
                     }
+                    self.bump()?;
                 } else {
                     match self.kind() {
                         TokenKind::Static => {
@@ -723,23 +726,19 @@ impl Parser<'_> {
 
         let mut modifiers = Modifiers::default();
         loop {
+            if let Some((visibility, is_set_only)) = member_modifier(self.kind()) {
+                let slot = if is_set_only {
+                    &mut modifiers.set_visibility
+                } else {
+                    &mut modifiers.visibility
+                };
+                if slot.replace(visibility).is_some() {
+                    return Err(self.error(crate::error::MULTIPLE_ACCESS_MODIFIERS));
+                }
+                self.bump()?;
+                continue;
+            }
             match self.kind() {
-                TokenKind::Public | TokenKind::Protected | TokenKind::Private => {
-                    modifiers.visibility = Some(match self.kind() {
-                        TokenKind::Public => Visibility::Public,
-                        TokenKind::Protected => Visibility::Protected,
-                        _ => Visibility::Private,
-                    });
-                    self.bump()?;
-                }
-                TokenKind::PublicSet | TokenKind::ProtectedSet | TokenKind::PrivateSet => {
-                    modifiers.set_visibility = Some(match self.kind() {
-                        TokenKind::PublicSet => Visibility::Public,
-                        TokenKind::ProtectedSet => Visibility::Protected,
-                        _ => Visibility::Private,
-                    });
-                    self.bump()?;
-                }
                 TokenKind::Static => {
                     self.bump()?;
                     modifiers.is_static = true;
