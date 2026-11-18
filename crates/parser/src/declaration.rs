@@ -762,6 +762,7 @@ impl Parser<'_> {
             Vec::new()
         };
 
+        let doc_comment = self.declaration_doc_comment(&attributes);
         let mut modifiers = Modifiers::default();
         loop {
             if let Some((visibility, is_set_only)) = member_modifier(self.kind()) {
@@ -825,6 +826,7 @@ impl Parser<'_> {
         };
 
         Ok(Parameter {
+            doc_comment,
             attributes,
             modifiers,
             ty,

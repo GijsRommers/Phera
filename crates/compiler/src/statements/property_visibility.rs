@@ -15,7 +15,7 @@ impl Compiler<'_> {
         readonly: bool,
     ) -> Result<(Option<Visibility>, bool), CompileError> {
         let (class, name, span) = location;
-        let line = self.lines.line(span.start);
+        let line = || self.lines.line(span.start);
         let read = modifiers.visibility.unwrap_or(SourceVisibility::Public);
         let write = modifiers.set_visibility;
         if let Some(ty) = ty
@@ -23,25 +23,25 @@ impl Compiler<'_> {
         {
             return Err(self.error(
                 format!("Property {class}::${name} cannot have type {ty}"),
-                line,
+                line(),
             ));
         }
         if readonly && modifiers.is_static {
             return Err(self.error(
                 format!("Static property {class}::${name} cannot be readonly"),
-                line,
+                line(),
             ));
         }
         if readonly && ty.is_none() {
             return Err(self.error(
                 format!("Readonly property {class}::${name} must have type"),
-                line,
+                line(),
             ));
         }
         if write.is_some() && ty.is_none() {
             return Err(self.error(
                 format!("Property with asymmetric visibility {class}::${name} must have type"),
-                line,
+                line(),
             ));
         }
         if write.is_some_and(|write| level(read) > level(write)) {
@@ -49,11 +49,11 @@ impl Compiler<'_> {
                 format!(
                     "Visibility of property {class}::${name} must not be weaker than set visibility"
                 ),
-                line,
+                line(),
             ));
         }
         if modifiers.is_final && read == SourceVisibility::Private {
-            return Err(self.error("Property cannot be both final and private", line));
+            return Err(self.error("Property cannot be both final and private", line()));
         }
         let restricted = match (read, write) {
             (read, Some(write)) if write == read => None,
@@ -72,7 +72,7 @@ impl Compiler<'_> {
         &self,
         modifiers: &Modifiers,
         member: &str,
-        line: usize,
+        span: Span,
     ) -> Result<(), CompileError> {
         if let Some(write) = modifiers.set_visibility {
             let visibility = match write {
@@ -82,7 +82,7 @@ impl Compiler<'_> {
             };
             return Err(self.error(
                 format!("Cannot use the {visibility}(set) modifier on a {member}"),
-                line,
+                self.lines.line(span.start),
             ));
         }
         Ok(())

@@ -47,24 +47,11 @@ impl<'src> Parser<'src> {
             lexer
         };
         let mut tokens = Vec::new();
-        let mut doc_comments = Vec::new();
-        let mut pending_doc_comment = None;
         let mut lex_error = None;
 
         loop {
             match lexer.next_token() {
                 Ok(token) => {
-                    match token.kind {
-                        TokenKind::DocComment => {
-                            pending_doc_comment = Some(token.span);
-                            continue;
-                        }
-                        TokenKind::Whitespace | TokenKind::Comment => continue,
-                        _ => {}
-                    }
-                    if let Some(comment) = pending_doc_comment.take() {
-                        doc_comments.push((token.span.start, comment));
-                    }
                     let eof = token.kind == TokenKind::Eof;
                     tokens.push(token);
                     if eof {
@@ -85,7 +72,7 @@ impl<'src> Parser<'src> {
         let parser = Self {
             source,
             tokens,
-            doc_comments,
+            doc_comments: lexer.take_doc_comments(),
             pos: 0,
             lex_error,
             prev_end: 0,
@@ -188,6 +175,9 @@ impl<'src> Parser<'src> {
 
     /// Doc comment immediately before this token, if the scanner saw one.
     pub(crate) fn doc_comment(&self) -> Option<Span> {
+        if self.doc_comments.is_empty() {
+            return None;
+        }
         self.doc_comment_before(self.peek_span().start)
     }
 

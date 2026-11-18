@@ -36,7 +36,9 @@ impl Compiler<'_> {
             Some(&name),
             AttributePlacement::Declaration(AttributeTarget::Class),
         )?;
-        self.validate_class_attributes(declaration, display, &mut metadata)?;
+        if !metadata.attributes.is_empty() {
+            self.validate_class_attributes(declaration, display, &mut metadata)?;
+        }
         let mut methods = Vec::new();
         let mut properties = Vec::new();
         let mut constants = Vec::new();
@@ -103,11 +105,7 @@ impl Compiler<'_> {
                     Some(&name),
                     AttributePlacement::Declaration(AttributeTarget::ClassConstant),
                 )?;
-                self.reject_member_set_visibility(
-                    modifiers,
-                    "class constant",
-                    self.lines.line(member.span.start),
-                )?;
+                self.reject_member_set_visibility(modifiers, "class constant", member.span)?;
                 for constant in items {
                     if constant.name.name.eq_ignore_ascii_case("class") {
                         return Err(self.error("A class constant must not be called 'class'; it is reserved for class name fetching", self.lines.line(member.span.start)));
@@ -211,11 +209,7 @@ impl Compiler<'_> {
             let ast::ClassMemberKind::Method(method) = &member.kind else {
                 return Err(self.error("Class properties and constants not supported yet", line));
             };
-            self.reject_member_set_visibility(
-                &method.modifiers,
-                "method",
-                self.lines.line(method.span.start),
-            )?;
+            self.reject_member_set_visibility(&method.modifiers, "method", method.span)?;
             if methods
                 .iter()
                 .any(|entry: &ClassMethod| entry.name.eq_ignore_ascii_case(&method.name.name))
@@ -227,35 +221,36 @@ impl Compiler<'_> {
             }
             self.validate_magic_method(display, method)?;
             for parameter in &method.parameters {
-                let parameter_line = self.lines.line(parameter.span.start);
+                let parameter_line = || self.lines.line(parameter.span.start);
                 if parameter.modifiers.is_static {
                     return Err(self.error(
                         "Cannot use the static modifier on a parameter",
-                        parameter_line,
+                        parameter_line(),
                     ));
                 }
                 if parameter.is_promoted() {
                     if !method.name.name.eq_ignore_ascii_case("__construct") {
                         return Err(self.error(
                             "Cannot declare promoted property outside a constructor",
-                            parameter_line,
+                            parameter_line(),
                         ));
                     }
                     if method.body.is_none() {
                         return Err(self.error(
                             "Cannot declare promoted property in an abstract constructor",
-                            parameter_line,
+                            parameter_line(),
                         ));
                     }
                     if parameter.variadic {
-                        return Err(
-                            self.error("Cannot declare variadic promoted property", parameter_line)
-                        );
+                        return Err(self.error(
+                            "Cannot declare variadic promoted property",
+                            parameter_line(),
+                        ));
                     }
                     let metadata = self.declaration_metadata(
                         &parameter.attributes,
                         parameter.span,
-                        None,
+                        parameter.doc_comment,
                         Some(&name),
                         AttributePlacement::Promoted(AttributeTarget::Property),
                     )?;

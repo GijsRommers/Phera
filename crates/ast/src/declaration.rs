@@ -27,6 +27,7 @@ pub struct FunctionDeclaration {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Parameter {
+    pub doc_comment: Option<Span>,
     pub attributes: Vec<Attribute>,
     /// Non-empty only for constructor property promotion.
     pub modifiers: Modifiers,

@@ -98,9 +98,16 @@ impl<'ast> Compiler<'ast> {
             ),
         )?;
         builder.validate_nodiscard(declaration, line)?;
-        for parameter in declaration.parameters {
-            let metadata = builder.reflected_parameter(parameter)?;
-            builder.function.metadata.parameters.push(metadata);
+        if declaration.parameters.iter().any(|parameter| {
+            parameter.default.is_some()
+                || !parameter.attributes.is_empty()
+                || parameter.is_promoted()
+        }) {
+            builder.function.metadata.parameters = declaration
+                .parameters
+                .iter()
+                .map(|parameter| builder.reflected_parameter(parameter))
+                .collect::<Result<_, _>>()?;
         }
         builder.compile_promoted_properties(declaration.parameters, line)?;
         builder.function.return_type = declaration
