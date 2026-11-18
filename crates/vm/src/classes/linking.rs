@@ -13,34 +13,22 @@ use crate::Vm;
 impl Vm {
     /// Hoist only declarations whose dependencies are available; deferred ones execute normally.
     pub(crate) fn hoist_classes(&mut self, unit: &Arc<CompiledUnit>) -> Result<(), NativeError> {
-        let mut pending = unit.hoisted_classes.clone();
-        loop {
-            let before = pending.len();
-            let mut deferred = Vec::new();
-            for index in pending {
-                let declaration = &unit.classes[index.index()];
-                if declaration
-                    .parent
-                    .iter()
-                    .chain(&declaration.interfaces)
-                    .all(|symbol| {
-                        self.classes
-                            .get(&unit.symbols[symbol.index()].name)
-                            .is_some()
-                    })
-                {
-                    self.link_class(unit.clone(), index)?;
-                    self.prelinked_classes
-                        .insert((Arc::as_ptr(unit) as usize, index.index()));
-                } else {
-                    deferred.push(index);
-                }
+        for &index in &unit.hoisted_classes {
+            let declaration = &unit.classes[index.index()];
+            if declaration.interfaces.is_empty()
+                && declaration.parent.is_none_or(|parent| {
+                    self.classes
+                        .get(&unit.symbols[parent.index()].written)
+                        .is_some()
+                })
+                && self.classes.get(&declaration.name).is_none()
+            {
+                self.link_class(unit.clone(), index)?;
+                self.prelinked_classes
+                    .insert((Arc::as_ptr(unit) as usize, index.index()));
             }
-            if deferred.len() == before || deferred.is_empty() {
-                return Ok(());
-            }
-            pending = deferred;
         }
+        Ok(())
     }
 
     /// Runtime declarations are not idempotent; only the exact prelinked instruction is skipped.
@@ -69,9 +57,9 @@ impl Vm {
     fn link_class_body(
         &mut self,
         unit: Arc<CompiledUnit>,
-        index: ClassId,
+        declaration_index: ClassId,
     ) -> Result<(), NativeError> {
-        let declaration = &unit.classes[index.index()];
+        let declaration = &unit.classes[declaration_index.index()];
         let name = &declaration.name;
         if let Some(existing) = self.classes.get(name) {
             return Err(NativeError::error(format!(
@@ -85,7 +73,7 @@ impl Vm {
                 let parent_name = &unit.symbols[symbol.index()].written;
                 self.classes
                     .get(parent_name)
-                    .ok_or_else(|| NativeError::error(format!("Class \"{parent_name}\" not found")))
+                    .ok_or_else(|| self.class_miss(parent_name, "Class"))
             })
             .transpose()?;
         if let Some(parent) = &parent {
@@ -107,9 +95,10 @@ impl Vm {
             .iter()
             .map(|symbol| {
                 let interface_name = &unit.symbols[symbol.index()].written;
-                let interface = self.classes.get(interface_name).ok_or_else(|| {
-                    NativeError::error(format!("Interface \"{interface_name}\" not found"))
-                })?;
+                let interface = self
+                    .classes
+                    .get(interface_name)
+                    .ok_or_else(|| self.class_miss(interface_name, "Interface"))?;
                 if interface.kind != ClassKind::Interface {
                     return Err(NativeError::error(format!(
                         "{name} cannot implement {interface_name} - it is not an interface"
@@ -296,13 +285,10 @@ impl Vm {
                 .as_ref()
                 .and_then(|reference| super::class::literal_initializer(&self.code, reference))
             {
-                if property.is_static {
-                    if let Some(storage) = &linked.static_storage {
-                        *storage.reference.borrow().borrow_mut() = value;
-                    }
-                } else {
-                    linked.value = value;
+                if let Some(storage) = &linked.static_storage {
+                    *storage.reference.borrow().borrow_mut() = value.clone();
                 }
+                linked.value = value;
                 linked.initializer = None;
             }
             let inherited = if property.is_static {
@@ -339,6 +325,7 @@ impl Vm {
             let function = self.code.index_in(&unit, Some(method.function.index()));
             self.code.set_declaring_class(function, index);
         }
+        let declaration_location = Some((self.code.index_in(&unit, None), declaration.line));
         self.classes.insert(
             name.to_ascii_lowercase(),
             Rc::new_cyclic(|identity| Class {
@@ -364,6 +351,7 @@ impl Vm {
                 defaults,
                 static_properties,
                 constants,
+                declaration: declaration_location,
             }),
         );
         Ok(())

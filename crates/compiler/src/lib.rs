@@ -4,6 +4,7 @@ mod compile_error;
 mod constant_callables;
 mod context;
 mod errors;
+mod eval_diagnostics;
 mod expressions;
 mod helpers;
 mod ir;

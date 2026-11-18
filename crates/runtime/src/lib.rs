@@ -7,6 +7,8 @@
 
 mod cache;
 mod error;
+#[cfg(test)]
+mod extension_introspection_tests;
 mod http;
 
 use std::path::{Path, PathBuf};
@@ -50,6 +52,7 @@ impl Runtime {
         let mut registry = Registry::new();
         registry.load(&phera_ext_core::Core);
         registry.load(&phera_ext_standard::Standard);
+        registry.php_module("SPL");
         registry.load(&phera_ext_ctype::Ctype);
         registry.load(&phera_ext_json::Json);
         registry.load(&phera_ext_pcre::Pcre);

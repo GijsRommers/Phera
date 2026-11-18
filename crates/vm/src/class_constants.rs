@@ -25,7 +25,7 @@ impl Vm {
         let class = self
             .classes
             .get(class)
-            .ok_or_else(|| NativeError::error(format!("Class \"{class}\" not found")))?;
+            .ok_or_else(|| self.class_miss(class, "Class"))?;
         let constant = class.constants.get(name).cloned().ok_or_else(|| {
             NativeError::error(format!("Undefined constant {}::{name}", class.name))
         })?;

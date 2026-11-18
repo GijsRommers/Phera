@@ -50,6 +50,8 @@ impl Vm {
         mut arguments: Vec<Value>,
         origin: crate::calls::callback_binding::ArgumentOrigin,
     ) -> NativeResult {
+        self.autoload_native_parameters(entry.params, &arguments)
+            .await?;
         let previous = std::mem::replace(&mut self.argument_origin, origin);
         let prepared = self.prepare_call_with_trace(entry.name, entry.params, &mut arguments);
         self.argument_origin = previous;
@@ -104,16 +106,10 @@ impl Vm {
         arguments.reserve(call.sent as usize);
         for index in 0..call.sent as usize {
             let value = self.registers.window_mut(slots.slot(index), 1)[0].take();
-            let value = if index == 1
-                && value.is_none()
-                && matches!(
-                    callee.target,
-                    CallTarget::Intrinsic(crate::intrinsics::Intrinsic::IsCallable)
-                ) {
-                Value::Bool(false)
-            } else {
-                value.unwrap_or_default()
-            };
+            let value = value.unwrap_or_else(|| match callee.target {
+                CallTarget::Intrinsic(intrinsic) => intrinsic.named_default(index),
+                _ => Value::Null,
+            });
             arguments.push(value);
         }
         self.registers.truncate(slots.base);
@@ -153,6 +149,8 @@ impl Vm {
                 .await
             }
             MethodBody::Native(entry) => {
+                self.autoload_native_parameters(entry.params, &arguments)
+                    .await?;
                 self.with_argument_origin(origin, |vm| {
                     vm.prepare_native_method_arguments(method, entry.params, &mut arguments)
                 })?;

@@ -26,17 +26,24 @@ pub(super) fn compile_on_stack(
     kind: SourceKind,
 ) -> Result<phera_bytecode::CompiledUnit, CompileError> {
     let lines = LineTable::new(source);
-    let ast = phera_parser::parse_on_current_stack(source).map_err(|error| CompileError {
-        message: errors::parse_message(
-            &error.message,
-            source,
-            source
-                .get(error.span.start..error.span.end)
-                .unwrap_or_default(),
-        ),
-        file: file.into(),
-        line: errors::parse_line(&error.message, source, lines.line(error.span.start)),
-        parse: true,
+    let ast = phera_parser::parse_on_current_stack(source).map_err(|error| {
+        let token = source
+            .get(error.span.start..error.span.end)
+            .unwrap_or_default();
+        let message = errors::parse_message(&error.message, source, token);
+        let line = errors::parse_line(&error.message, source, lines.line(error.span.start));
+        let message = match kind {
+            SourceKind::File => message,
+            SourceKind::Eval => {
+                crate::eval_diagnostics::message(message, source, token, line, &lines)
+            }
+        };
+        CompileError {
+            message,
+            file: file.into(),
+            line,
+            parse: true,
+        }
     })?;
     let mut compiler = Compiler::new(file, &lines, "{main}", "");
     compiler.function.dynamic_scope = true;

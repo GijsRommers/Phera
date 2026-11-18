@@ -45,7 +45,20 @@ impl Vm {
     pub(crate) async fn interpret_frames(&mut self, stop: usize) -> NativeResult {
         let mut work = 0;
         loop {
-            match self.run_batch(stop, &mut work)? {
+            let exit = match self.run_batch(stop, &mut work)? {
+                BatchExit::ClassMiss(instruction, miss) => {
+                    let Some(exit) = self
+                        .resume_class_fetch(instruction, miss, stop, &mut work)
+                        .await?
+                    else {
+                        continue;
+                    };
+                    exit
+                }
+                exit => exit,
+            };
+            match exit {
+                BatchExit::ClassMiss(..) => return Err(internal_error!("nested class suspension")),
                 BatchExit::Returned(value) => return Ok(value),
                 BatchExit::Yield => tokio::task::yield_now().await,
                 BatchExit::Handlers => self.drain_error_handlers().await?,

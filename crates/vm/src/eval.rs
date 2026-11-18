@@ -15,6 +15,10 @@ impl Vm {
             phera_value::to_php_string(&diagnostics.vm.operand(source), &mut diagnostics.buffer)?
                 .to_string_lossy()
         };
+        if source.is_empty() {
+            self.set(destination, phera_value::Value::Bool(false));
+            return Ok(());
+        }
         let location = self.location();
         let file = format!("{}({}) : eval()'d code", location.file, location.line);
         let compiled =
@@ -22,7 +26,7 @@ impl Vm {
                 .await
                 .map_err(|error| NativeError::error(format!("Eval compiler failed: {error}")))?;
         match compiled {
-            Ok(unit) => self.enter_scoped_unit(Arc::new(unit), destination),
+            Ok(unit) => self.enter_scoped_unit(Arc::new(unit), Some(destination)),
             Err(error) if error.parse => {
                 let previous = self.diagnostic_location.replace(SourceLocation {
                     file: error.file,

@@ -8,6 +8,7 @@ use crate::CodeLoader;
 pub(crate) struct IncludeState {
     loader: Option<Arc<dyn CodeLoader>>,
     included: HashSet<String>,
+    path: Option<String>,
 }
 
 impl IncludeState {
@@ -15,6 +16,7 @@ impl IncludeState {
         Self {
             loader: None,
             included: HashSet::new(),
+            path: None,
         }
     }
 
@@ -25,6 +27,14 @@ impl IncludeState {
     /// Clone the runtime handle so an include may await loading without borrowing state.
     pub(crate) fn loader(&self) -> Option<Arc<dyn CodeLoader>> {
         self.loader.clone()
+    }
+
+    pub(crate) fn path(&self) -> &str {
+        self.path.as_deref().unwrap_or(".")
+    }
+
+    pub(crate) fn set_path(&mut self, path: String) -> String {
+        self.path.replace(path).unwrap_or_else(|| ".".into())
     }
 
     pub(crate) fn contains(&self, file: &str) -> bool {

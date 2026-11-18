@@ -21,29 +21,69 @@ impl Vm {
         result
     }
 
-    /// Class variables expose defaults rather than values modified on existing objects.
-    pub(crate) fn class_variables(&mut self, name: &str) -> NativeResult {
-        let class = self
-            .classes
-            .get(name)
-            .ok_or_else(|| NativeError::error(format!("Class \"{name}\" not found")))?;
-        let temporary = self.classes.allocate(class.clone());
+    /// Class variables list declaration defaults, including null for uninitialized typed properties.
+    pub(crate) fn class_variables(&mut self, class: &crate::classes::Class) -> NativeResult {
         let mut result = phera_value::PhpArray::new();
-        for property in class.defaults.iter().chain(&class.static_properties) {
-            if !property.initialized || self.property_key(&temporary, &property.name).is_err() {
-                continue;
-            }
-            let value = if let Some(initializer) = &property.initializer {
-                self.evaluate_initializer(initializer, &property.declaring)?
-            } else {
-                property.static_storage.as_ref().map_or_else(
-                    || property.value.deref().clone(),
-                    |storage| storage.reference.borrow().borrow().deref().clone(),
-                )
-            };
-            result.insert(ArrayKey::str(property.name.as_bytes()), value);
+        let mut ancestry = Vec::new();
+        let mut current = Some(class);
+        while let Some(class) = current {
+            ancestry.push(class.name.as_str());
+            current = class.parent.as_deref();
         }
-        Ok(Value::Array(std::rc::Rc::new(result)))
+        for declarations in [&class.defaults, &class.static_properties] {
+            let mut properties: Vec<_> = declarations.iter().collect();
+            properties.sort_by_key(|property| {
+                ancestry.iter().position(|name| *name == property.declaring)
+            });
+            for property in properties {
+                let scope = self.current().and_then(|frame| frame.scope());
+                let visible = match property.visibility {
+                    Visibility::Public => true,
+                    Visibility::Private => {
+                        scope.is_some_and(|scope| scope.name == property.declaring)
+                    }
+                    Visibility::Protected => scope.is_some_and(|scope| {
+                        scope.is_a(&property.declaring)
+                            || self
+                                .classes
+                                .get(&property.declaring)
+                                .is_some_and(|owner| owner.is_a(&scope.name))
+                    }),
+                };
+                let key = ArrayKey::str(property.name.as_str());
+                if !visible || result.contains_key(&key) {
+                    continue;
+                }
+                let value = if let Some(initializer) = &property.initializer {
+                    self.evaluate_initializer(initializer, &property.declaring)?
+                } else {
+                    property.value.deref().clone()
+                };
+                result.insert(key, value);
+            }
+        }
+        Ok(Value::from(result))
+    }
+
+    /// Inherited private declarations only count for objects in their declaring scope.
+    pub(crate) fn class_property_exists(
+        &self,
+        target: &Value,
+        class: &crate::classes::Class,
+        name: &str,
+    ) -> bool {
+        class
+            .defaults
+            .iter()
+            .chain(&class.static_properties)
+            .any(|property| {
+                property.name == name
+                    && (property.visibility != Visibility::Private
+                        || property.declaring == class.name)
+            })
+            || matches!(target, Value::Object(object) if
+                self.property_key(object, name).is_ok_and(|key| object.has(&key))
+            )
     }
 
     /// Dynamic static targets accept either an object handle or a class-name string.
@@ -78,7 +118,7 @@ impl Vm {
         let class = self
             .classes
             .get(&class_name)
-            .ok_or_else(|| NativeError::error(format!("Class \"{class_name}\" not found")))?;
+            .ok_or_else(|| self.class_miss(&class_name, "Class"))?;
         let property = class
             .static_properties
             .iter()

@@ -36,7 +36,7 @@ impl Vm {
         let class = self
             .classes
             .get(&name)
-            .ok_or_else(|| NativeError::error(format!("Class \"{name}\" not found")))?;
+            .ok_or_else(|| self.class_miss(&name, "Class"))?;
         self.link_class_symbol(symbol, &class);
         let context = self.current().and_then(|frame| frame.method());
         let receiver = context
@@ -45,7 +45,7 @@ impl Vm {
             .filter(|object| {
                 self.classes
                     .for_object(object)
-                    .is_some_and(|class| class.is_a(&name))
+                    .is_some_and(|class| self.class_matches(&class, &name))
             });
         let resolved = self
             .find_method_lowercase(&class, &method.name, Invocation::Method)?

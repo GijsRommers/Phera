@@ -7,7 +7,11 @@ use crate::Vm;
 
 impl Vm {
     /// The output name is written even when resolution fails, as PHP's third argument requires.
-    pub(crate) fn callable_introspection(&mut self, mut arguments: Vec<Value>) -> NativeResult {
+    pub(crate) async fn callable_introspection(
+        &mut self,
+        mut arguments: Vec<Value>,
+        origin: crate::calls::callback_binding::ArgumentOrigin,
+    ) -> NativeResult {
         const PARAMETERS: &[phera_extension_api::Param] = &[
             phera_extension_api::Param::new("value", phera_extension_api::ParamType::Mixed),
             phera_extension_api::Param::new("syntax_only", phera_extension_api::ParamType::Bool)
@@ -16,13 +20,16 @@ impl Vm {
                 .optional()
                 .by_ref(),
         ];
-        phera_extension_api::prepare_call("is_callable", PARAMETERS, &mut arguments, self)?;
+        self.with_argument_origin(origin, |vm| {
+            phera_extension_api::prepare_call("is_callable", PARAMETERS, &mut arguments, vm)
+        })?;
         let value = arguments.first().cloned().unwrap_or_default();
         let syntax_only = arguments.get(1).is_some_and(phera_value::to_bool);
         let shape = callable_shape(&value);
         let valid = if syntax_only && !value.is_object() {
             shape.is_some()
         } else {
+            self.autoload_callable(&value).await?;
             self.resolve_callable(&value).is_ok()
         };
         if let Some(Value::Reference(reference)) = arguments.get(2) {

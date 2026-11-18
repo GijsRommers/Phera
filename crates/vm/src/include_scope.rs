@@ -26,7 +26,7 @@ impl Vm {
     pub(crate) fn enter_scoped_unit(
         &mut self,
         unit: std::sync::Arc<CompiledUnit>,
-        destination: Reg,
+        destination: Option<Reg>,
     ) -> Result<(), NativeError> {
         use crate::calls::{frame::Frame, prepared_call::CallKind};
 
@@ -56,7 +56,7 @@ impl Vm {
         let mut count = unit.main.registers as usize;
         self.registers.grow_to(base + count);
         self.call_stack
-            .push(Frame::of_kind(function, kind, base, Some(destination)));
+            .push(Frame::of_kind(function, kind, base, destination));
         if let Some(context) = context {
             self.call_stack.current_extras_mut().called = Some(context.called.index);
         }
@@ -142,7 +142,7 @@ impl Vm {
         let Some(frame) = self.current() else {
             return Ok(());
         };
-        if frame.function_id().is_some() || frame.frame.destination().is_none() {
+        if frame.function_id().is_some() || self.call_stack.depth() == 1 {
             return Ok(());
         }
         let entries = scope_entries(frame, &self.registers);

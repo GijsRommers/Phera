@@ -30,7 +30,7 @@ impl Vm {
             return Ok(());
         }
         self.include_state.record(unit.file.clone());
-        self.enter_scoped_unit(unit, destination)
+        self.enter_scoped_unit(unit, Some(destination))
     }
 }
 
@@ -60,11 +60,13 @@ impl Vm {
         ));
         if matches!(kind, IncludeKind::Require | IncludeKind::RequireOnce) {
             return Err(NativeError::error(format!(
-                "Failed opening required '{name}' (include_path='.')"
+                "Failed opening required '{name}' (include_path='{}')",
+                self.include_state.path()
             )));
         }
         self.warn(format!(
-            "{construct}(): Failed opening '{name}' for inclusion (include_path='.')"
+            "{construct}(): Failed opening '{name}' for inclusion (include_path='{}')",
+            self.include_state.path()
         ));
         self.set(destination, Value::Bool(false));
         Ok(())
@@ -72,7 +74,7 @@ impl Vm {
 
     /// Resolve relative includes against the caller only after the first load fails.
     /// Parse errors terminate the request before any fallback lookup.
-    async fn load_include(
+    pub(crate) async fn load_include(
         &mut self,
         name: &str,
     ) -> Result<Result<std::sync::Arc<phera_bytecode::CompiledUnit>, String>, NativeError> {
@@ -80,34 +82,36 @@ impl Vm {
             .include_state
             .loader()
             .ok_or_else(|| NativeError::error("Includes need a runtime code loader"))?;
-        let mut result = loader.load(PathBuf::from(name)).await;
-        if let Err(error) = &result
-            && (error.contains("Fatal error:") || error.contains("Parse error:"))
-        {
-            self.out(error.as_bytes());
-            self.status = 255;
-            return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
-                (),
-            ))));
-        }
-        if result.is_err()
-            && !Path::new(name).is_absolute()
-            && !name.starts_with("./")
-            && !name.starts_with("../")
-        {
+        let mut candidates = Vec::new();
+        let path = Path::new(name);
+        if path.is_absolute() || name.starts_with("./") || name.starts_with("../") {
+            candidates.push(path.to_path_buf());
+        } else {
+            candidates.extend(
+                std::env::split_paths(self.include_state.path())
+                    .map(|directory| directory.join(path)),
+            );
             let file = self.location().file;
             if let Some(parent) = Path::new(&file).parent() {
-                result = loader.load(parent.join(name)).await;
+                candidates.push(parent.join(path));
             }
+            candidates.push(PathBuf::from(name));
         }
-        if let Err(error) = &result
-            && (error.contains("Fatal error:") || error.contains("Parse error:"))
-        {
-            self.out(error.as_bytes());
-            self.status = 255;
-            return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
-                (),
-            ))));
+        let mut result = Err(String::new());
+        for candidate in candidates {
+            result = loader.load(candidate).await;
+            if let Err(error) = &result
+                && (error.contains("Fatal error:") || error.contains("Parse error:"))
+            {
+                self.out(error.as_bytes());
+                self.status = 255;
+                return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
+                    (),
+                ))));
+            }
+            if result.is_ok() {
+                break;
+            }
         }
         Ok(result.map_err(|error| {
             if error.contains("Permission denied") {

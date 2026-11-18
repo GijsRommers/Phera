@@ -20,6 +20,7 @@ impl Vm {
         let callee = if callback.is_null() {
             None
         } else {
+            self.autoload_callable(callback).await?;
             Some(self.resolve_callable(callback).map_err(|error| {
                 self.invalid_callback("array_map", 1, "callback", callback, error, true)
             })?)

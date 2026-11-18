@@ -21,13 +21,16 @@ mod access_mode;
 mod array_map;
 mod array_slots;
 mod arrays;
+mod autoload;
 mod callable_classes;
 mod callable_introspection;
 mod callables;
 mod callback_errors;
 mod calls;
+mod class_alias;
 mod class_constants;
 mod class_intrinsics;
+mod class_listings;
 mod class_types;
 mod classes;
 mod closure_binding;
@@ -45,6 +48,7 @@ mod constants;
 mod context;
 mod control_flow;
 mod declaration_diagnostics;
+mod default_autoload;
 mod diagnostic_reporter;
 mod diagnostics;
 mod dispatch;
@@ -65,6 +69,7 @@ mod extract;
 mod fast;
 mod finally;
 mod function_facts;
+mod function_introspection;
 mod function_table;
 mod global_instructions;
 mod global_paths;
@@ -102,6 +107,7 @@ mod property_targets;
 mod reference_holders;
 mod references;
 mod scope_intrinsics;
+mod spl_autoload;
 mod static_variables;
 mod string_offsets;
 mod trigger_errors;
@@ -132,6 +138,7 @@ pub const DEFAULT_FRAME_LIMIT: usize = 250_000;
 /// One request interpreter; PHP calls use heap frames rather than Rust recursion.
 pub struct Vm {
     classes: classes::ClassTable,
+    autoload: autoload::Autoloaders,
     closure_captures: Vec<closures::PendingCapture>,
     /// Pure defaults retain lexical class scope while running outside a method frame.
     initializer_scope: Option<String>,
@@ -175,6 +182,7 @@ impl Vm {
             .collect();
         Self {
             classes: classes::ClassTable::native(&registry),
+            autoload: Default::default(),
             property_references: Default::default(),
             closure_captures: Vec::new(),
             initializer_scope: None,

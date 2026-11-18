@@ -1,3 +1,5 @@
+//! `extension_loaded('Core')` reflects PHP modules registered for this runtime.
+
 use std::collections::HashMap;
 
 use phera_value::Value;
@@ -60,6 +62,9 @@ impl From<&'static str> for ConstantValue {
 pub struct Registry {
     /// Keyed by lowercase name: PHP function names are case-insensitive.
     functions: HashMap<String, FunctionEntry>,
+    function_order: Vec<&'static str>,
+    extensions: Vec<&'static str>,
+    bundles: Vec<&'static str>,
     constants: HashMap<String, ConstantValue>,
     /// In registration order, which puts every parent before its children.
     classes: Vec<ClassEntry>,
@@ -73,6 +78,23 @@ impl Registry {
     /// Runs the extension's registration against this registry.
     pub fn load(&mut self, extension: &dyn crate::Extension) {
         extension.register(self);
+        self.bundles.push(extension.name());
+        if let Some(module) = extension.php_module() {
+            self.php_module(module);
+        }
+    }
+
+    /// Engine-provided PHP modules can register without an extension crate.
+    pub fn php_module(&mut self, name: &'static str) {
+        self.extensions.push(name);
+    }
+
+    pub fn extensions(&self) -> impl Iterator<Item = &'static str> + '_ {
+        self.extensions.iter().copied()
+    }
+
+    pub fn bundles(&self) -> impl Iterator<Item = &'static str> + '_ {
+        self.bundles.iter().copied()
     }
 
     /// Panics on a duplicate name: extensions are linked at compile time, so a
@@ -84,6 +106,7 @@ impl Registry {
             "function {}() is already registered",
             entry.name
         );
+        self.function_order.push(entry.name);
         self.functions.insert(key, entry);
     }
 
@@ -135,7 +158,9 @@ impl Registry {
     }
 
     pub fn functions(&self) -> impl Iterator<Item = &FunctionEntry> {
-        self.functions.values()
+        self.function_order
+            .iter()
+            .filter_map(|name| self.get_function(name))
     }
 
     pub fn constants(&self) -> impl Iterator<Item = (&str, &ConstantValue)> {

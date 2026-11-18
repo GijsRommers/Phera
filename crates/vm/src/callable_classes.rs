@@ -19,10 +19,10 @@ impl Vm {
         usage: CallableUse,
     ) -> Result<(), NativeError> {
         if usage != CallableUse::Callback || !matches!(name, "self" | "parent" | "static") {
-            let class = self
-                .classes
-                .get(name)
-                .ok_or_else(|| NativeError::error(format!("Class \"{name}\" not found")))?;
+            let class = self.classes.get(name).ok_or_else(|| match usage {
+                CallableUse::Callback => NativeError::error(format!("Class \"{name}\" not found")),
+                _ => self.class_miss(name, "Class"),
+            })?;
             return self.prepare_callback_method(class, None, method, usage);
         }
         self.diagnostic(
