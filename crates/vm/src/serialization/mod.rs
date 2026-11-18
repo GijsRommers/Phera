@@ -2,7 +2,7 @@
 
 mod declarations;
 mod enums;
-mod layout;
+pub(crate) mod layout;
 mod properties;
 mod property_index;
 pub(crate) mod settings;

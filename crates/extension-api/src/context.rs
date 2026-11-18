@@ -243,6 +243,14 @@ pub trait Context {
         self.object_properties(object, crate::PropertyPurpose::Serialize)
     }
 
+    /// An immutable class layout that can be emitted without a property callback.
+    fn plain_serialization_fields(
+        &self,
+        _object: &Object,
+    ) -> Option<Rc<[crate::serialization::SerializedProperty]>> {
+        None
+    }
+
     fn has_uninitialized_serialized_property(&self, _object: &Object, _key: &ArrayKey) -> bool {
         false
     }

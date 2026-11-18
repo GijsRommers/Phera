@@ -7,6 +7,8 @@ use phera_extension_api::{ArrayKey, Context, NativeError, Object, PhpArray, Valu
 
 use super::{Contents, Encoder, Identity, SerializationSlots};
 
+mod plain;
+
 impl Encoder {
     pub(super) async fn object(
         &mut self,

@@ -9,11 +9,17 @@ use phera_value::ArrayKey;
 use crate::{Vm, classes::Class};
 
 pub(super) fn plain_layout(class: &Rc<Class>) -> Option<PlainSerializedClass> {
-    let fields = class.serialized_fields.get_or_init(|| linked_fields(class));
     Some(PlainSerializedClass {
         class: class.clone(),
-        fields: fields.as_ref()?.clone(),
+        fields: fields(class)?,
     })
+}
+
+pub(crate) fn fields(class: &Class) -> Option<Rc<[SerializedProperty]>> {
+    class
+        .serialized_fields
+        .get_or_init(|| linked_fields(class))
+        .clone()
 }
 
 fn linked_fields(class: &Class) -> Option<Rc<[SerializedProperty]>> {
@@ -23,6 +29,8 @@ fn linked_fields(class: &Class) -> Option<Rc<[SerializedProperty]>> {
         || class.property_template.is_none()
         || Vm::class_forbids_serialization(class)
         || class.is_a("Serializable")
+        || Vm::serialization_method(class, "__serialize").is_some()
+        || Vm::serialization_method(class, "__sleep").is_some()
         || Vm::serialization_method(class, "__unserialize").is_some()
         || Vm::serialization_method(class, "__wakeup").is_some()
     {

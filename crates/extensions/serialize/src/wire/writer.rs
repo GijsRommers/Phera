@@ -78,6 +78,11 @@ impl Writer {
         self.open(count);
     }
 
+    /// Writes a declared property's pre-encoded key.
+    pub fn property(&mut self, encoded_key: &[u8]) {
+        self.0.extend_from_slice(encoded_key);
+    }
+
     pub fn custom_object(&mut self, class: &[u8], payload: &[u8]) {
         self.quoted(b'C', class);
         self.0.push(b':');

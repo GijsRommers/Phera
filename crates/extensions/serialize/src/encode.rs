@@ -72,7 +72,9 @@ impl Encoder {
     ) -> Result<(), NativeError> {
         let mut value = value.try_deref()?.clone();
         loop {
-            if let Some(object) = self.value(context, value)? {
+            if let Some(object) = self.value(context, value)?
+                && !self.write_plain_object(context, &object)?
+            {
                 self.object(context, object).await?;
                 // A hook can change the request's serialization precision.
                 self.precision = None;
@@ -176,12 +178,7 @@ impl Encoder {
             Value::Null => self.output.null(),
             Value::Bool(boolean) => self.output.boolean(boolean),
             Value::Int(integer) => self.output.integer(integer),
-            Value::Float(float) => {
-                let precision = *self.precision.get_or_insert_with(|| precision(context));
-                if precision >= 0 || !self.output.short_float(float) {
-                    with_float_repr(float, precision, |decimal| self.output.float(decimal));
-                }
-            }
+            Value::Float(float) => self.float(context, float),
             Value::String(string) => self.output.string(string.as_bytes()),
             Value::Array(array) => {
                 self.output.array(array.len());
@@ -192,5 +189,12 @@ impl Encoder {
             Value::Reference(_) => return Err(NativeError::error("Invalid nested PHP reference")),
         }
         Ok(None)
+    }
+
+    fn float(&mut self, context: &mut dyn Context, float: f64) {
+        let precision = *self.precision.get_or_insert_with(|| precision(context));
+        if precision >= 0 || !self.output.short_float(float) {
+            with_float_repr(float, precision, |decimal| self.output.float(decimal));
+        }
     }
 }

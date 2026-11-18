@@ -334,6 +334,17 @@ impl Context for Vm {
         self.ordered_serialization_properties(object)
     }
 
+    fn plain_serialization_fields(
+        &self,
+        object: &phera_value::Object,
+    ) -> Option<std::rc::Rc<[phera_extension_api::serialization::SerializedProperty]>> {
+        let class = object
+            .class
+            .as_any()
+            .downcast_ref::<crate::classes::Class>()?;
+        crate::serialization::layout::fields(class)
+    }
+
     fn has_uninitialized_serialized_property(
         &self,
         object: &phera_value::Object,
