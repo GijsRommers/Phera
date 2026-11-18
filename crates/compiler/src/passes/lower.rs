@@ -342,6 +342,22 @@ pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
                     is_static: property.is_static,
                     is_readonly: property.is_readonly,
                     ty: property.ty.map(|name| tables.ty(&name)),
+                    hooks: property.hooks.map(|hooks| {
+                        let lower_hook = |hook: phera_bytecode::PropertyHook<usize>| {
+                            phera_bytecode::PropertyHook {
+                                function: FunctionId(hook.function as u32),
+                                is_abstract: hook.is_abstract,
+                                is_final: hook.is_final,
+                                attributes: hook.attributes,
+                            }
+                        };
+                        Box::new(phera_bytecode::PropertyHooks {
+                            get: hooks.get.map(lower_hook),
+                            set: hooks.set.map(lower_hook),
+                            is_virtual: hooks.is_virtual,
+                            set_visibility: hooks.set_visibility,
+                        })
+                    }),
                     default: property.default.map(|index| {
                         phera_bytecode::Initializer::Function(FunctionId(index as u32))
                     }),

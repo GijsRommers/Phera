@@ -43,7 +43,13 @@ impl<'ast> Compiler<'ast> {
         {
             return Err(self.error(format!("Cannot redeclare function {name}()"), line));
         }
-        let mut builder = self.function_builder(declaration, &name, captures, line)?;
+        let mut builder = self.function_builder(
+            &declaration.parameters,
+            declaration.by_reference,
+            &name,
+            captures,
+            line,
+        )?;
         builder.compile_parameter_defaults(&declaration.parameters, line)?;
         builder.compile_promoted_properties(&declaration.parameters, line)?;
         builder.function.return_type = declaration
@@ -116,6 +122,11 @@ impl<'ast> Compiler<'ast> {
                 constant.initializer += id + 1;
             }
             for property in &mut class.properties {
+                if let Some(hooks) = &mut property.hooks {
+                    for hook in hooks.get.iter_mut().chain(hooks.set.iter_mut()) {
+                        hook.function += id + 1;
+                    }
+                }
                 if let Some(default) = &mut property.default {
                     *default += id + 1;
                 }
@@ -135,9 +146,10 @@ impl<'ast> Compiler<'ast> {
     }
 
     /// Independent builders keep captured locals ahead of ordinary body temporaries.
-    fn function_builder(
+    pub(super) fn function_builder(
         &self,
-        declaration: &ast::FunctionDeclaration,
+        parameters: &[ast::Parameter],
+        returns_reference: bool,
         name: &str,
         captures: &[String],
         line: usize,
@@ -162,10 +174,10 @@ impl<'ast> Compiler<'ast> {
             self.class_scope.clone()
         };
         builder.function.definition_line = line;
-        builder.function.returns_reference = declaration.by_reference;
+        builder.function.returns_reference = returns_reference;
         builder.imports = self.imports.clone();
         builder.function.strict_types = self.function.strict_types;
-        for parameter in &declaration.parameters {
+        for parameter in parameters {
             builder.local(&parameter.name)?;
             builder.function.parameters.push(Parameter {
                 default_display: parameter

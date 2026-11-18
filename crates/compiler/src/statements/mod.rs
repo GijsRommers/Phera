@@ -46,7 +46,7 @@ impl Compiler<'_> {
                 catches,
                 finally,
             } => self.compile_try(body, catches, finally, line)?,
-            StatementKind::Return(expression) => self.compile_return(expression, line)?,
+            StatementKind::Return(expression) => self.compile_return(expression.as_ref(), line)?,
             StatementKind::Class(declaration) => {
                 self.compile_class(declaration, timing, line)?;
             }
@@ -100,6 +100,7 @@ mod function_parameters;
 pub(crate) mod functions;
 pub(crate) mod loops;
 mod magic_methods;
+pub(crate) mod property_hooks;
 pub(crate) mod switching;
 mod traits;
 

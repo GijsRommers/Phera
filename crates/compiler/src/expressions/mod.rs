@@ -146,7 +146,7 @@ impl Compiler<'_> {
                     Constant::Bytes(if self.function.name == "{main}" {
                         vec![]
                     } else if *match_expression == ast::MagicConstant::Function
-                        && let Some((_, method)) = self.function.name.rsplit_once("::")
+                        && let Some((_, method)) = self.function.name.split_once("::")
                         && !self.function.name.starts_with("{closure:")
                     {
                         method.as_bytes().to_vec()
@@ -171,7 +171,13 @@ impl Compiler<'_> {
                         .as_bytes()
                         .to_vec(),
                 ),
-                _ => Constant::Bytes(vec![]),
+                ast::MagicConstant::Property => Constant::Bytes(
+                    self.hooked_property
+                        .as_deref()
+                        .unwrap_or("")
+                        .as_bytes()
+                        .to_vec(),
+                ),
             },
             line,
         )

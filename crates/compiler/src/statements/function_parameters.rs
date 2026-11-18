@@ -19,10 +19,13 @@ impl Compiler<'_> {
             if !parameter.attributes.is_empty() {
                 return Err(self.error("Attributes not supported yet", line));
             }
-            if !parameter.hooks.is_empty() {
-                return Err(self.error("Property hooks not supported yet", line));
+            if parameter.has_hook_list && !parameter.is_promoted() {
+                return Err(self.error(
+                    "Only hooked properties may be declared in constructor promotion",
+                    line,
+                ));
             }
-            if parameter.modifiers.set_visibility.is_some() {
+            if parameter.modifiers.set_visibility.is_some() && !parameter.has_hook_list {
                 return Err(self.error("Asymmetric visibility not supported yet", line));
             }
         }

@@ -34,6 +34,7 @@ pub struct Parameter {
     pub default: Option<Expression>,
     /// Hooks on a promoted property.
     pub hooks: Vec<PropertyHook>,
+    pub has_hook_list: bool,
     pub span: Span,
 }
 
@@ -128,6 +129,7 @@ pub struct PropertyDeclaration {
     pub name: String,
     pub default: Option<Expression>,
     pub hooks: Vec<PropertyHook>,
+    pub has_hook_list: bool,
     pub span: Span,
 }
 
@@ -171,6 +173,8 @@ pub struct PropertyHook {
     pub by_reference: bool,
     /// `get` or `set`.
     pub name: Identifier,
+    pub invalid_modifier: Option<Identifier>,
+    pub has_parameter_list: bool,
     pub parameters: Vec<Parameter>,
     pub body: HookBody,
     pub span: Span,

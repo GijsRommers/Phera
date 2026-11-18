@@ -1,6 +1,7 @@
 //! Class declarations compile methods as ordinary functions so calls keep heap-frame execution.
 
 use super::class_default_types::DefaultKind;
+use super::property_hooks::HookedDeclaration;
 use phera_ast as ast;
 use phera_bytecode::{ClassKind, Visibility};
 
@@ -128,12 +129,18 @@ impl Compiler<'_> {
                 if !attributes.is_empty() {
                     return Err(self.error("Attributes not supported yet", line));
                 }
-                if modifiers.set_visibility.is_some() {
-                    return Err(self.error("Asymmetric visibility not supported yet", line));
-                }
                 for property in items {
-                    if !property.hooks.is_empty() {
-                        return Err(self.error("Property hooks not supported yet", line));
+                    let property_line = self.lines.line(property.span.start);
+                    if !property.has_hook_list && declaration.kind == ast::ClassKind::Interface {
+                        return Err(self.error(
+                            "Interfaces may only include hooked properties",
+                            property_line,
+                        ));
+                    }
+                    if !property.has_hook_list && modifiers.set_visibility.is_some() {
+                        return Err(
+                            self.error("Asymmetric visibility not supported yet", property_line)
+                        );
                     }
                     if ty.as_ref().is_some_and(|ty| {
                         self.declaration_type(ty)
@@ -194,7 +201,26 @@ impl Compiler<'_> {
                         .as_ref()
                         .map(|value| self.compile_initializer(value, &name, trait_scope, line))
                         .transpose()?;
+                    let hooks = property
+                        .has_hook_list
+                        .then(|| {
+                            self.compile_property_hooks(HookedDeclaration {
+                                class: &name,
+                                trait_scope,
+                                kind: declaration.kind,
+                                property: &property.name,
+                                modifiers,
+                                readonly,
+                                ty: ty.as_ref(),
+                                default: property.default.as_ref(),
+                                hooks: &property.hooks,
+                                has_parent: !declaration.extends.is_empty(),
+                                line: property_line,
+                            })
+                        })
+                        .transpose()?;
                     properties.push(ClassProperty {
+                        hooks,
                         name: property.name.clone(),
                         visibility: match modifiers.visibility {
                             Some(ast::Visibility::Private) => Visibility::Private,
@@ -243,7 +269,27 @@ impl Compiler<'_> {
                             self.lines.line(parameter.span.start),
                         ));
                     }
+                    let hooks = parameter
+                        .has_hook_list
+                        .then(|| {
+                            self.compile_property_hooks(HookedDeclaration {
+                                class: &name,
+                                trait_scope,
+                                kind: declaration.kind,
+                                property: &parameter.name,
+                                modifiers: &parameter.modifiers,
+                                readonly: parameter.modifiers.is_readonly
+                                    || declaration.modifiers.is_readonly,
+                                ty: parameter.ty.as_ref(),
+                                default: None,
+                                hooks: &parameter.hooks,
+                                has_parent: !declaration.extends.is_empty(),
+                                line: self.lines.line(parameter.span.start),
+                            })
+                        })
+                        .transpose()?;
                     properties.push(ClassProperty {
+                        hooks,
                         name: parameter.name.clone(),
                         visibility: member_visibility(&parameter.modifiers),
                         is_static: false,

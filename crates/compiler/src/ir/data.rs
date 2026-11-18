@@ -172,6 +172,7 @@ pub struct ClassProperty {
     pub is_readonly: bool,
     pub ty: Option<String>,
     pub default: Option<usize>,
+    pub hooks: Option<Box<phera_bytecode::PropertyHooks<usize>>>,
 }
 
 /// Constant initializers execute only when the linked class first needs their value.

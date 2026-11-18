@@ -1,0 +1,294 @@
+//! `public string $name { get => $this->name; set => trim($value); }`
+//! compiles two ordinary class-scoped functions without publishing methods.
+
+use phera_ast as ast;
+use phera_bytecode::{PropertyHook, PropertyHooks, Visibility};
+
+use crate::ir::{Constant, Instruction, PathStep, Place, PlaceScope};
+use crate::policies::{DeclarationTiming, NameKind};
+use crate::{CompileError, Compiler};
+
+pub(super) struct HookedDeclaration<'a> {
+    pub class: &'a str,
+    pub trait_scope: Option<&'a str>,
+    pub kind: ast::ClassKind,
+    pub property: &'a str,
+    pub modifiers: &'a ast::Modifiers,
+    pub readonly: bool,
+    pub ty: Option<&'a ast::Type>,
+    pub default: Option<&'a ast::Expression>,
+    pub hooks: &'a [ast::PropertyHook],
+    pub has_parent: bool,
+    pub line: usize,
+}
+
+impl Compiler<'_> {
+    pub(super) fn compile_property_hooks(
+        &mut self,
+        declaration: HookedDeclaration<'_>,
+    ) -> Result<Box<PropertyHooks<usize>>, CompileError> {
+        let property = format!("{}::${}", declaration.class, declaration.property);
+        let interface = declaration.kind == ast::ClassKind::Interface;
+        if declaration.readonly {
+            return Err(self.error("Hooked properties cannot be readonly", declaration.line));
+        }
+        if declaration.hooks.is_empty() {
+            return Err(self.error("Property hook list must not be empty", declaration.line));
+        }
+        if interface {
+            let invalid = if declaration.modifiers.is_final {
+                Some("Property in interface cannot be final")
+            } else if declaration.modifiers.is_abstract {
+                Some(
+                    "Property in interface cannot be explicitly abstract. All interface members are implicitly abstract",
+                )
+            } else if matches!(
+                declaration.modifiers.visibility,
+                Some(ast::Visibility::Private | ast::Visibility::Protected)
+            ) {
+                Some("Property in interface cannot be protected or private")
+            } else {
+                None
+            };
+            if let Some(message) = invalid {
+                return Err(self.error(message, declaration.line));
+            }
+        }
+        let mut result = PropertyHooks {
+            get: None,
+            set: None,
+            is_virtual: true,
+            set_visibility: declaration.modifiers.set_visibility.map(
+                |visibility| match visibility {
+                    ast::Visibility::Public => Visibility::Public,
+                    ast::Visibility::Protected => Visibility::Protected,
+                    ast::Visibility::Private => Visibility::Private,
+                },
+            ),
+        };
+        for hook in declaration.hooks {
+            let line = self.lines.line(hook.span.start);
+            let name = &hook.name.name;
+            if let Some(modifier) = &hook.invalid_modifier {
+                let message = if modifier.name == "final" {
+                    "Multiple final modifiers are not allowed".to_owned()
+                } else {
+                    format!(
+                        "Cannot use the {} modifier on a property hook",
+                        modifier.name
+                    )
+                };
+                return Err(self.error(message, self.lines.line(modifier.span.start)));
+            }
+            if declaration.modifiers.is_static {
+                return Err(self.error("Cannot declare hooks for static property", line));
+            }
+            let private = declaration.modifiers.visibility == Some(ast::Visibility::Private);
+            let abstract_hook = matches!(hook.body, ast::HookBody::None);
+            if let Some(message) = match (hook.is_final, private, abstract_hook) {
+                (true, true, _) => Some("Property hook cannot be both final and private"),
+                (_, _, false) if interface => Some("Abstract property hook cannot have body"),
+                (_, _, true) if !interface && !declaration.modifiers.is_abstract => {
+                    Some("Non-abstract property hook must have a body")
+                }
+                (_, true, true) => Some("Property hook cannot be both abstract and private"),
+                (true, _, true) => Some("Property hook cannot be both abstract and final"),
+                _ => None,
+            } {
+                return Err(self.error(message, line));
+            }
+            let (entry, setter) = if name.eq_ignore_ascii_case("get") {
+                (&mut result.get, false)
+            } else if name.eq_ignore_ascii_case("set") {
+                (&mut result.set, true)
+            } else {
+                return Err(self.error(format!("Unknown hook \"{name}\" for property {property}, expected \"get\" or \"set\""), line));
+            };
+            if entry.is_some() {
+                return Err(self.error(format!("Cannot redeclare property hook \"{name}\""), line));
+            }
+            let implicit = ast::Parameter {
+                attributes: Vec::new(),
+                modifiers: ast::Modifiers::default(),
+                ty: declaration.ty.cloned(),
+                by_reference: false,
+                variadic: false,
+                name: "value".into(),
+                default: None,
+                hooks: Vec::new(),
+                has_hook_list: false,
+                span: hook.span,
+            };
+            let parameters = if setter {
+                if hook.has_parameter_list {
+                    self.validate_set_parameters(hook, &property, declaration.ty.is_some(), line)?;
+                    &hook.parameters
+                } else {
+                    std::slice::from_ref(&implicit)
+                }
+            } else {
+                if hook.has_parameter_list {
+                    return Err(self.error(
+                        format!("get hook of property {property} must not have a parameter list"),
+                        line,
+                    ));
+                }
+                &[]
+            };
+            let mut body = self.function_builder(
+                parameters,
+                hook.by_reference,
+                &format!("{property}::{name}"),
+                &[],
+                line,
+            )?;
+            body.trait_scope = declaration.trait_scope.map(str::to_owned);
+            body.hooked_property = Some(declaration.property.to_owned());
+            body.function.return_type = if setter {
+                Some("void".into())
+            } else {
+                declaration.ty.map(|ty| self.declaration_type(ty))
+            };
+            body.compile_hook_body(&hook.body, setter, self.lines.line(hook.span.end))?;
+            result.is_virtual &= !body.uses_hook_backing;
+            let function = self.append_function_body(&mut body);
+            *entry = Some(PropertyHook {
+                function,
+                is_abstract: abstract_hook,
+                is_final: hook.is_final,
+                attributes: hook
+                    .attributes
+                    .iter()
+                    .map(|attribute| self.resolve(&attribute.name, NameKind::Class).0)
+                    .collect(),
+            });
+        }
+        if !declaration.has_parent {
+            if result.is_virtual && declaration.default.is_some() {
+                return Err(self.error(
+                    format!("Cannot specify default value for virtual hooked property {property}"),
+                    declaration.line,
+                ));
+            }
+            if !result.is_virtual
+                && result.set.is_some()
+                && result
+                    .get
+                    .as_ref()
+                    .is_some_and(|get| self.functions[get.function].returns_reference)
+            {
+                return Err(self.error(format!("Get hook of backed property {property} with set hook may not return by reference"), declaration.line));
+            }
+        }
+        if declaration.modifiers.is_abstract
+            && !result
+                .get
+                .iter()
+                .chain(result.set.iter())
+                .any(|hook| hook.is_abstract)
+        {
+            return Err(self.error(
+                format!("Abstract property {property} must specify at least one abstract hook"),
+                declaration.line,
+            ));
+        }
+        Ok(Box::new(result))
+    }
+
+    fn validate_set_parameters(
+        &self,
+        hook: &ast::PropertyHook,
+        property: &str,
+        typed: bool,
+        line: usize,
+    ) -> Result<(), CompileError> {
+        let name = &hook.name.name;
+        let [parameter] = hook.parameters.as_slice() else {
+            return Err(self.error(
+                format!("{name} hook of property {property} must accept exactly one parameters"),
+                line,
+            ));
+        };
+        let parameter_name = &parameter.name;
+        let invalid = if parameter.by_reference {
+            Some("be pass-by-reference")
+        } else if parameter.variadic {
+            Some("be variadic")
+        } else if parameter.default.is_some() {
+            Some("have a default value")
+        } else {
+            None
+        };
+        if let Some(invalid) = invalid {
+            return Err(self.error(
+                format!("Parameter ${parameter_name} of {name} hook {property} must not {invalid}"),
+                line,
+            ));
+        }
+        if typed != parameter.ty.is_some() {
+            return Err(self.error(format!("Type of parameter ${parameter_name} of hook {property}::set must be compatible with property type"), line));
+        }
+        Ok(())
+    }
+
+    fn compile_hook_body(
+        &mut self,
+        body: &ast::HookBody,
+        setter: bool,
+        end_line: usize,
+    ) -> Result<(), CompileError> {
+        match body {
+            ast::HookBody::Expression(expression) if setter => {
+                let line = self.lines.line(expression.span.start);
+                let name = self.hooked_property.clone().unwrap_or_default();
+                self.uses_hook_backing = true;
+                let base = self.allocate_register()?;
+                let source = self.compile_expression(expression)?;
+                self.emit(
+                    Instruction::Write {
+                        place: Place {
+                            base,
+                            scope: PlaceScope::This,
+                            path: vec![PathStep::Property(name)],
+                        },
+                        source,
+                    },
+                    line,
+                );
+            }
+            ast::HookBody::Expression(expression) => {
+                self.compile_return(Some(expression), self.lines.line(expression.span.start))?;
+            }
+            ast::HookBody::Block(block) => self.block(block, DeclarationTiming::AtExecution)?,
+            ast::HookBody::None => {}
+        }
+        if !setter && self.function.return_type.is_some() {
+            self.emit(Instruction::ReturnMissing, end_line);
+        } else {
+            let register = self.literal(Constant::Null, end_line)?;
+            self.emit(Instruction::Return(register), end_line);
+        }
+        Ok(())
+    }
+
+    /// Only a literal access on `$this` in the hook body declares backing storage.
+    pub(crate) fn note_hook_backing(&mut self, expression: &ast::Expression) {
+        let Some(property) = &self.hooked_property else {
+            return;
+        };
+        let ast::ExpressionKind::Property { target, name, .. } = &expression.kind else {
+            return;
+        };
+        if matches!(&target.kind, ast::ExpressionKind::Variable(ast::Variable::Named(name)) if name == "this")
+            && match name {
+                ast::MemberName::Identifier(name) => &name.name == property,
+                ast::MemberName::Expression(expression) => matches!(
+                    &expression.kind, ast::ExpressionKind::Literal(ast::Literal::String(name))
+                        if name.as_slice() == property.as_bytes()
+                ),
+            }
+        {
+            self.uses_hook_backing = true;
+        }
+    }
+}
