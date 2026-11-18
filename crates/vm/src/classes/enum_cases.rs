@@ -6,10 +6,10 @@ use std::{
 };
 
 use phera_bytecode::EnumBacking;
-use phera_extension_api::{Context, NativeError, NativeResult, Param, ParamType};
-use phera_value::{ArrayKey, Object, PhpArray, Value};
+use phera_extension_api::NativeError;
+use phera_value::{ArrayKey, Object, Value};
 
-use super::{Class, ClassIndex, class::ConstantInitializer, enums::EnumMethod};
+use super::{Class, ClassIndex, class::ConstantInitializer};
 use crate::{
     Vm,
     initializer_tasks::{CaseLookup, Continuation, InitializerTask, Progress},
@@ -208,7 +208,7 @@ fn name_of(object: &Object) -> Result<String, NativeError> {
     }
 }
 
-fn case_lookup(class: &Rc<Class>, name: &str) -> Result<CaseLookup, NativeError> {
+pub(super) fn case_lookup(class: &Rc<Class>, name: &str) -> Result<CaseLookup, NativeError> {
     let Some(constant) = class.constants.get(name) else {
         return Err(internal_error!("enum case constant"));
     };
@@ -224,82 +224,8 @@ fn case_lookup(class: &Rc<Class>, name: &str) -> Result<CaseLookup, NativeError>
 }
 
 impl Vm {
-    pub(crate) fn call_enum_method(
-        &mut self,
-        operation: EnumMethod,
-        name: &str,
-        class: &Rc<Class>,
-        arguments: &mut [Value],
-    ) -> NativeResult {
-        let Some(info) = &class.enum_info else {
-            return Err(internal_error!("enum method scope"));
-        };
-        if matches!(operation, EnumMethod::Cases) {
-            self.prepare_call_with_trace(name, &[], arguments)?;
-            let mut result = PhpArray::new();
-            for case in &info.names {
-                result.push(
-                    self.run_initializer(InitializerTask::Case(case_lookup(class, case)?))?,
-                )?;
-            }
-            return Ok(Value::Array(Rc::new(result)));
-        }
-        let Some(backing) = info.backing else {
-            return Err(internal_error!("enum lookup without backing"));
-        };
-        let strict = Context::strict_types(self);
-        let ty = match backing {
-            EnumBacking::Int => ParamType::Int,
-            EnumBacking::String if strict => ParamType::String,
-            EnumBacking::String => ParamType::IntOrString,
-        };
-        if !strict && let [argument] = &*arguments {
-            let argument = argument.deref();
-            if argument.is_null() {
-                return Err(NativeError::throw(
-                    "Phera\\NotSupportedException",
-                    format!(
-                        "Passing null to {name}() is not supported by Phera: deprecated since PHP 8.1",
-                    ),
-                ));
-            }
-        }
-        self.prepare_call_with_trace(name, &[Param::new("value", ty)], arguments)?;
-        let argument = arguments
-            .first()
-            .ok_or_else(|| internal_error!("enum backing argument"))?;
-        let key = match (backing, argument) {
-            (EnumBacking::Int, Value::Int(number)) => ArrayKey::Int(*number),
-            (EnumBacking::String, Value::Int(number)) => ArrayKey::str(number.to_string()),
-            (EnumBacking::String, Value::String(string)) => ArrayKey::String(string.clone()),
-            _ => return Err(internal_error!("enum backing conversion")),
-        };
-        self.run_initializer(InitializerTask::ValidateEnum(class.clone()))?;
-        if let Some(object) = self
-            .enum_cases
-            .backed
-            .get(&class.index)
-            .and_then(|table| table.get(&key))
-        {
-            return Ok(Value::Object(object.clone()));
-        }
-        if matches!(operation, EnumMethod::TryFrom) {
-            return Ok(Value::Null);
-        }
-        let value = match key {
-            ArrayKey::Int(number) => number.to_string(),
-            ArrayKey::String(string) => {
-                let bytes = string
-                    .as_bytes()
-                    .split(|byte| *byte == 0)
-                    .next()
-                    .unwrap_or_default();
-                format!("\"{}\"", String::from_utf8_lossy(bytes))
-            }
-        };
-        Err(NativeError::value_error(format!(
-            "{value} is not a valid backing value for enum {}",
-            class.name
-        )))
+    pub(super) fn backed_enum_case(&self, class: &Class, key: &ArrayKey) -> Option<Value> {
+        let object = self.enum_cases.backed.get(&class.index)?.get(key)?;
+        Some(Value::Object(object.clone()))
     }
 }
