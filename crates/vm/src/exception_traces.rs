@@ -90,7 +90,10 @@ impl Vm {
                 .rev()
                 .filter(|site| site.boundary == callee_index)
                 .peekable();
-            if warning.is_some() || callbacks.peek().is_some() {
+            // At the end of the request PHP calls destructors from no code
+            // at all: "[internal function]".
+            let from_shutdown = self.request_end.shutting_down && callee_index == 1;
+            if warning.is_some() || callbacks.peek().is_some() || from_shutdown {
                 entry.remove(&ArrayKey::str("file"));
                 entry.remove(&ArrayKey::str("line"));
             }

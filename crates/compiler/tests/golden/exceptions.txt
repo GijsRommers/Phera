@@ -47,8 +47,8 @@ function {main} (17 registers, dynamic scope)
   0031  line 1    Move { dst: r12, src: r0 }
   0032  line 1    InitMethodCall { receiver: r12, method: name#1 }
   0033  line 1    Call { dst: r13 }
-  0034  line 1    Echo { src: r13 }
-  0035  line 1    Clear { reg: r12 }
+  0034  line 1    Clear { reg: r12 }
+  0035  line 1    Echo { src: r13 }
   0036  line 1    Clear { reg: r13 }
   0037  line 1    Jump { target: @39 }
   0038  line 1    Throw { source: r2 }

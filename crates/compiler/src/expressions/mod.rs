@@ -38,9 +38,9 @@ impl Compiler<'_> {
             ExpressionKind::New { .. }
             | ExpressionKind::MethodCall { .. }
             | ExpressionKind::StaticCall { .. } => {
-                let (first, start) = (self.next, self.position());
+                let start = self.temporaries_start();
                 let result = self.compile_object_expression(expression, line)?;
-                self.release_call_operands(first, start, result, line);
+                self.release_call_operands(start, result, line);
                 Ok(result)
             }
             ExpressionKind::ClassConstant { .. }
@@ -105,9 +105,9 @@ impl Compiler<'_> {
             ExpressionKind::Exit(expression) => self.compile_exit(expression, line),
             ExpressionKind::Name(name) => self.compile_constant(name, line),
             ExpressionKind::Call { callee, arguments } => {
-                let (first, start) = (self.next, self.position());
+                let start = self.temporaries_start();
                 let result = self.compile_call(callee, arguments, line)?;
-                self.release_call_operands(first, start, result, line);
+                self.release_call_operands(start, result, line);
                 Ok(result)
             }
             ExpressionKind::Array(items) => self.compile_array(items, line),

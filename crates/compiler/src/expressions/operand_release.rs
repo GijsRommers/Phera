@@ -14,66 +14,122 @@
 //! after the call. The registers are temporaries the compiler allocated
 //! while it compiled the call; nothing reads them afterwards.
 //!
-//! A register that provably holds a scalar (a literal, arithmetic, a
-//! comparison) owns nothing that could have a destructor, so it is left to
-//! the statement-end clear (or to the frame's end): clearing it would only
-//! cost an instruction.
+//! The same holds for the temporaries of a condition (`if`, `while`,
+//! `for`, `switch`) and of a `foreach` subject, which no statement-end clear
+//! covers: they are cleared on each way out of the branch or loop.
+//!
+//! A register that provably holds a scalar when it is cleared (its last
+//! write is a literal, arithmetic, a comparison) owns nothing that could
+//! have a destructor, so it is left alone: clearing it would only cost an
+//! instruction, inside a loop on every round.
+
+use std::ops::Range;
 
 use phera_bytecode::Reg;
 
 use crate::Compiler;
-use crate::ir::{ArgumentSource, Binary, Instruction, Unary};
+use crate::ir::{ArgumentSource, Binary, Instruction, Target, Unary};
+
+/// The temporaries of one expression: the registers allocated and the
+/// instructions emitted while it was compiled.
+pub(crate) struct Temporaries {
+    registers: Range<usize>,
+    instructions: Range<usize>,
+}
 
 impl Compiler<'_> {
-    /// Clears the temporaries allocated from register `first` on, while the
-    /// call whose result is `result` was compiled, starting at instruction
-    /// `start`.
+    /// Where the next expression's temporaries begin.
+    pub(crate) fn temporaries_start(&self) -> (usize, usize) {
+        (self.next, self.position())
+    }
+
+    /// The temporaries of the expression compiled since `start`.
+    pub(crate) fn temporaries_since(&self, (first, start): (usize, usize)) -> Temporaries {
+        Temporaries {
+            registers: first..self.next,
+            instructions: start..self.position(),
+        }
+    }
+
+    /// Clears the temporaries a call was built from, right after the call;
+    /// `result` is the call's own result and stays.
     pub(crate) fn release_call_operands(
         &mut self,
-        first: usize,
-        start: usize,
+        start: (usize, usize),
         result: Reg,
         line: usize,
     ) {
-        for register in self.owning_temporaries(first, start, Some(result)) {
+        let operands = self.temporaries_since(start);
+        for register in self.owning(&operands, Some(result)) {
             self.emit(Instruction::Clear { register }, line);
             self.released.insert(register.0);
         }
     }
 
-    /// Clears the temporaries allocated from register `first` on, from
-    /// instruction `start` on, once the expression that needed them (a
-    /// condition, a loop subject) has been used. A branch calls this on
-    /// each of its ways out.
-    pub(crate) fn release_temporaries(&mut self, first: usize, start: usize, line: usize) {
-        for register in self.owning_temporaries(first, start, None) {
+    /// Clears the temporaries of an expression that has been used (a
+    /// condition, a loop subject). A branch calls this on each way out.
+    pub(crate) fn release_temporaries(&mut self, temporaries: &Temporaries, line: usize) {
+        for register in self.owning(temporaries, None) {
             self.emit(Instruction::Clear { register }, line);
         }
     }
 
-    /// The temporaries from `first` on that may own an object.
-    fn owning_temporaries(&self, first: usize, start: usize, keep: Option<Reg>) -> Vec<Reg> {
-        (first..self.next)
+    /// The temporaries that may own an object.
+    fn owning(&self, temporaries: &Temporaries, keep: Option<Reg>) -> Vec<Reg> {
+        let code = self
+            .function
+            .instructions
+            .get(temporaries.instructions.clone())
+            .unwrap_or_default();
+        let merges = code.iter().filter_map(jump_target).any(|target| {
+            temporaries.instructions.contains(&target) && target > temporaries.instructions.start
+        });
+        temporaries
+            .registers
+            .clone()
             .map(|index| Reg(index as u16))
             .filter(|register| Some(*register) != keep)
             .filter(|register| !self.locals.values().any(|local| local == register))
-            .filter(|register| !self.holds_only_scalars(*register, start))
+            .filter(|register| !holds_a_scalar(code, *register, merges))
             .collect()
     }
+}
 
-    /// Whether every write to `register` since instruction `start` produces
-    /// a scalar, and every other use only reads it.
-    fn holds_only_scalars(&self, register: Reg, start: usize) -> bool {
-        let mut written = false;
-        for instruction in self.function.instructions.iter().skip(start) {
-            match scalar_write(instruction, register) {
-                Some(true) => written = true,
-                Some(false) => return false,
-                None if reads_only(instruction, register) => {}
-                None => return false,
+/// Whether `register` holds a scalar after `code`. In straight-line code
+/// its last write decides; where paths merge, every write must be scalar.
+/// An instruction that mentions the register in a way not known here
+/// counts as writing anything into it.
+fn holds_a_scalar(code: &[Instruction], register: Reg, merges: bool) -> bool {
+    let mut scalar = false;
+    for instruction in code {
+        let written = match scalar_write(instruction, register) {
+            Some(result) => Some(result),
+            None if reads_only(instruction, register) => None,
+            None => Some(false),
+        };
+        if let Some(result) = written {
+            if merges && !result {
+                return false;
             }
+            scalar = result;
         }
-        written
+    }
+    scalar
+}
+
+/// Where a jump inside an expression can land.
+fn jump_target(instruction: &Instruction) -> Option<usize> {
+    match instruction {
+        Instruction::Jump(Target(target))
+        | Instruction::Branch {
+            target: Target(target),
+            ..
+        }
+        | Instruction::BranchNull {
+            target: Target(target),
+            ..
+        } => Some(*target),
+        _ => None,
     }
 }
 

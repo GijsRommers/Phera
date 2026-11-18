@@ -40,15 +40,17 @@ impl Compiler<'_> {
     ) -> Result<(), CompileError> {
         let reference_subject = binding == crate::policies::IterationBinding::Reference
             || crate::expressions::places::contains_reference(value);
-        let (first, subject_start) = (self.next, self.position());
+        let mark = self.temporaries_start();
         let src = if reference_subject && crate::writable(subject) {
             self.literal(Constant::Null, line)?
         } else {
             self.compile_expression(subject)?
         };
+        // The subject, and the registers the loop itself copies values into.
         let id = self.allocate_register()?;
         let key_register = key.as_ref().map(|_| self.allocate_register()).transpose()?;
         let value_register = self.allocate_register()?;
+        let owned = self.temporaries_since(mark);
         let place = if reference_subject {
             Some(if crate::writable(subject) {
                 self.place(subject)?
@@ -129,7 +131,7 @@ impl Compiler<'_> {
         // PHP frees the loop's own copy of the subject and of the last
         // value when the loop ends (FE_FREE), so an object that only they
         // held is destroyed here.
-        self.release_temporaries(first, subject_start, line);
+        self.release_temporaries(&owned, line);
 
         Ok(())
     }

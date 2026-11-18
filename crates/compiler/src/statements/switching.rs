@@ -22,7 +22,7 @@ impl Compiler<'_> {
         cases: &[ast::SwitchCase],
         line: usize,
     ) -> Result<(), CompileError> {
-        let (first, start) = (self.next, self.position());
+        let mark = self.temporaries_start();
         let value = self.compile_expression(subject)?;
         let mut jumps = vec![];
         let mut default = None;
@@ -54,6 +54,7 @@ impl Compiler<'_> {
                 default = Some(i)
             }
         }
+        let comparisons = self.temporaries_since(mark);
         let miss = self.emit(Instruction::Jump(Target(0)), line);
         self.loops.push(Loop {
             breaks: vec![],
@@ -67,12 +68,12 @@ impl Compiler<'_> {
                 self.patch(miss, self.position())
             }
             // The subject and the case values are dead in every body.
-            self.release_temporaries(first, start, line);
+            self.release_temporaries(&comparisons, line);
             self.block(&case.body, DeclarationTiming::AtExecution)?
         }
         if default.is_none() {
             self.patch(miss, self.position());
-            self.release_temporaries(first, start, line);
+            self.release_temporaries(&comparisons, line);
         }
         self.loop_end(self.position());
         Ok(())
