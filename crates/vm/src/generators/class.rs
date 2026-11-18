@@ -151,6 +151,16 @@ impl Cursor {
 }
 
 impl Traversal for Cursor {
+    fn observation(&self, step: IteratorStep) -> Option<NativeResult> {
+        super::local_observation(
+            &self.0,
+            &GeneratorOperation::Cursor {
+                step,
+                by_reference: self.1,
+            },
+        )
+    }
+
     fn step<'a>(
         &'a mut self,
         context: &'a mut dyn Context,

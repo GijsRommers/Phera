@@ -25,7 +25,7 @@ impl Vm {
         };
         let mut cursor = self.make_traversal(object, by_reference).await?;
         cursor.step(self, IteratorStep::Rewind).await?;
-        let valid = to_bool(&cursor.step(self, IteratorStep::Valid).await?);
+        let valid = to_bool(&traversal::observe(cursor.as_mut(), self, IteratorStep::Valid).await?);
         self.call_stack.current_extras_mut().iterators.insert(
             iterator.0,
             IteratorState {
@@ -59,7 +59,7 @@ impl Vm {
             .ok_or_else(|| internal_error!("missing Traversable cursor"))?;
         if state.started {
             cursor.step(self, IteratorStep::Advance).await?;
-            if !to_bool(&cursor.step(self, IteratorStep::Valid).await?) {
+            if !to_bool(&traversal::observe(cursor, self, IteratorStep::Valid).await?) {
                 return self.jump(end);
             }
         }
