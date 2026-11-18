@@ -31,6 +31,7 @@ mod fast_objects;
 pub(crate) mod frame;
 pub(crate) mod frame_extras;
 pub(crate) mod frame_view;
+pub(crate) mod magic_dispatch;
 mod native;
 mod native_ready;
 pub(crate) mod parameter_binding;
@@ -44,3 +45,5 @@ pub(crate) mod sends;
 #[cfg(test)]
 mod tests;
 pub(crate) mod window_context;
+
+mod string_arguments;

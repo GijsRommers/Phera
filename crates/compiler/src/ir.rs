@@ -120,6 +120,7 @@ pub enum Instruction {
     Clone {
         destination: Reg,
         source: Reg,
+        with: Option<Reg>,
     },
     /// Test membership in a resolved class or interface.
     InstanceOf {
@@ -235,6 +236,12 @@ pub enum Instruction {
         place: Place,
         source: Reg,
     },
+    /// Prepare an indirect property destination before reading its local source.
+    WriteFromLocal {
+        place: Place,
+        source: Reg,
+        destination: Reg,
+    },
     /// Alias two writable places; emits MakeReference, BindReference, and Clear.
     Bind {
         place: Place,
@@ -281,6 +288,7 @@ pub enum Instruction {
     Return(Reg),
     /// Return an alias cell from this frame; emits ReturnReference.
     ReturnReference(Reg),
+    ReturnMissing,
     /// Stop the request with a value or status; emits Exit.
     Exit(Reg),
     /// Enter or leave PHP error suppression; emits BeginSilence or EndSilence.

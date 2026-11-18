@@ -27,7 +27,8 @@ impl Vm {
     ) -> Result<Option<BatchExit>, NativeError> {
         use Instruction as I;
         match instruction {
-            I::MakeReference { .. }
+            I::AssignPathFromLocal { .. }
+            | I::MakeReference { .. }
             | I::BindReference { .. }
             | I::SendPath { .. }
             | I::UnsetPath { .. }
@@ -52,6 +53,7 @@ impl Vm {
             }
             I::Return { src } => return self.return_local(src, instruction, stop),
             I::ReturnNull => return self.return_null(stop),
+            I::ReturnMissing => return Err(self.missing_magic_return()),
             I::ReturnChecked { .. } | I::ReturnReference { .. } => {
                 return Ok(Some(BatchExit::Instruction(instruction)));
             }
@@ -78,7 +80,11 @@ impl Vm {
             I::NewDynamic { class } => self.new_dynamic_object(class)?,
             I::SendValue { src } => self.send(SentArgument::Value(src))?,
             I::SendLocal { local } => self.send(SentArgument::Local(local))?,
-            I::SendPath { path } => self.send(SentArgument::Path(self.path(path)?))?,
+            I::SendPath { path } => {
+                if !self.send_path(self.path(path)?)? {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+            }
             I::SendSpread { src } => {
                 if !self.spread(src)? {
                     return Ok(Some(BatchExit::Instruction(instruction)));
@@ -95,8 +101,8 @@ impl Vm {
             I::LoadConst { dst, constant } => self.load_constant(dst, constant)?,
             I::Move { dst, src } => self.move_local(dst, src)?,
             I::Clear { reg } | I::UnsetLocal { local: reg } => self.clear_local(reg)?,
-            I::Assign { local, src } => self.execute_assign(local, src)?,
-            I::AssignOp { op, local, src } => self.execute_assign_op(op, local, src)?,
+            I::Assign { local, src } => return self.execute_assign(local, src),
+            I::AssignOp { op, local, src } => return self.execute_assign_op(op, local, src),
             I::CheckType { local, ty } => self.check_local_type(local, ty)?,
             I::IncDecLocal { mode, dst, local } => self.execute_inc_dec(mode, dst, local)?,
 
@@ -107,37 +113,59 @@ impl Vm {
                 target,
             } => self.binary_int_branch(op, lhs, rhs, target)?,
             I::BinaryInt { op, dst, lhs, rhs } => self.execute_binary_int(op, dst, lhs, rhs)?,
-            I::Binary { dst, op, lhs, rhs } => self.execute_binary(op, dst, lhs, rhs)?,
+            I::Binary { dst, op, lhs, rhs } => return self.execute_binary(op, dst, lhs, rhs),
             I::Unary { dst, op, src } => self.execute_unary(dst, op, src)?,
-            I::Cast { to, dst, src } => self.execute_cast(to, dst, src)?,
+            I::Cast { to, dst, src } => {
+                if to == phera_bytecode::CastKind::String && self.operand(src).is_object() {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+                self.execute_cast(to, dst, src)?;
+            }
 
             I::Fetch { dst, path, mode }
             | I::FetchIndex {
                 dst, path, mode, ..
             } => {
-                if !self.fetch_path(dst, path, mode)? {
-                    return Ok(Some(BatchExit::Instruction(instruction)));
-                }
+                return self.fetch_path(dst, path, mode);
             }
             I::AssignOpPath { op, dst, path, src } => {
-                if !self.assign_op_path(op, dst, path, src)? {
-                    return Ok(Some(BatchExit::Instruction(instruction)));
-                }
+                return self.assign_op_path(op, dst, path, src);
             }
             I::IncDecPath { mode, dst, path } => {
-                if !self.inc_dec_path(mode, dst, path)? {
-                    return Ok(Some(BatchExit::Instruction(instruction)));
-                }
+                return self.inc_dec_path(mode, dst, path);
             }
             I::AppendLocal { local, src } => self.append_local(local, src)?,
             I::AssignPath { path, src } => {
-                if !self.assign_path(path, src)? {
+                return self.assign_path(path, src);
+            }
+            I::AssignPathFromLocal { path, src, dst } => {
+                if let Some(value) = self.read_defined_local(src)
+                    && self.assign_property_site(&self.path(path)?, &value)?
+                {
+                    self.set(dst, value);
+                } else {
                     return Ok(Some(BatchExit::Instruction(instruction)));
                 }
             }
-            I::MakeReference { dst, path } => self.make_reference(dst, path)?,
-            I::BindReference { path, src } => self.bind_reference(path, src)?,
-            I::UnsetPath { path } => self.unset_place(&self.path(path)?)?,
+            I::MakeReference { dst, path } => {
+                if self.path(path)?.has_properties()? {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+                self.make_reference(dst, path)?;
+            }
+            I::BindReference { path, src } => {
+                if self.path(path)?.has_properties()? {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+                self.bind_reference(path, src)?;
+            }
+            I::UnsetPath { path } => {
+                let place = self.path(path)?;
+                if place.has_properties()? {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+                self.unset_place(&place)?;
+            }
 
             I::DeclareClass { class } => self.declare_class(class)?,
             I::DynamicInstanceOf { dst, source, class } => {
@@ -152,10 +180,15 @@ impl Vm {
             I::FetchClassName { dst, class } => self.fetch_class_name(dst, class)?,
             I::FetchThis { dst } => self.fetch_this(dst)?,
             I::ThisOrNull { dst } => self.this_or_null(dst),
-            I::Clone { dst, src } => self.clone_object(dst, src)?,
+            I::Clone { .. } => return Ok(Some(BatchExit::Instruction(instruction))),
             I::InstanceOf { dst, src, class } => self.instance_of(dst, src, class)?,
 
-            I::CheckReturn { source } => self.check_return_register(source)?,
+            I::CheckReturn { source } => {
+                if self.return_string_coercion_needed(&self.raw_local(source)) {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+                self.check_return_register(source)?;
+            }
             I::FinallyCall {
                 state,
                 target,
@@ -165,7 +198,12 @@ impl Vm {
             I::FinallyDiscard { state } => self.discard_finally(state),
             I::Throw { source } => return Err(self.throw_operand(source)?),
 
-            I::Echo { src } => self.echo_value(src)?,
+            I::Echo { src } => {
+                if self.operand(src).is_object() {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+                self.echo_value(src)?;
+            }
             I::Jump { target } => self.execute_jump(target, work)?,
             I::JumpIf { condition, target } => self.jump_if(condition, target, work)?,
             I::JumpIfNot { condition, target } => self.jump_if_not(condition, target, work)?,
@@ -257,14 +295,20 @@ impl Vm {
         work: &mut usize,
     ) -> Result<Option<BatchExit>, NativeError> {
         *work += 1;
-        if self.enter_prepared_call(Some(destination))? {
-            return Ok(None);
-        }
-        if TRACK_GENERATORS && let Some(value) = self.finish_ready_native_window()? {
-            self.set(destination, value);
-            return Ok(None);
-        }
-        Ok(Some(BatchExit::NativeCall(destination)))
+        use crate::calls::call_execution::CallEntry;
+        Ok(match self.enter_prepared_call(Some(destination))? {
+            CallEntry::Php => None,
+            CallEntry::Native if TRACK_GENERATORS => {
+                if let Some(value) = self.finish_ready_native_window()? {
+                    self.set(destination, value);
+                    None
+                } else {
+                    Some(BatchExit::NativeCall(destination))
+                }
+            }
+            CallEntry::Native => Some(BatchExit::NativeCall(destination)),
+            CallEntry::ConvertStrings => Some(BatchExit::BindCall(destination)),
+        })
     }
 
     /// `Return` of a register. An undefined variable warns first, which may
@@ -278,6 +322,9 @@ impl Vm {
         let Some(value) = self.read_defined_local(source) else {
             return Ok(Some(BatchExit::Instruction(instruction)));
         };
+        if value.is_object() && self.return_string_coercion_needed(&value) {
+            return Ok(Some(BatchExit::Instruction(instruction)));
+        }
         Ok(self.return_value(value, stop)?.map(BatchExit::Returned))
     }
 

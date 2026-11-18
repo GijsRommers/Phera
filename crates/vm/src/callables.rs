@@ -83,9 +83,13 @@ impl Vm {
                 .classes
                 .for_object(object)
                 .ok_or_else(|| internal_error!("invokable class"))?;
-            let method = class.methods.get("__invoke").cloned().ok_or_else(|| {
-                NativeError::error(format!("Object of type {} is not callable", class.name))
-            })?;
+            let method = class
+                .magic
+                .as_ref()
+                .and_then(|magic| magic.invoke.clone())
+                .ok_or_else(|| {
+                    NativeError::error(format!("Object of type {} is not callable", class.name))
+                })?;
             let scope = self
                 .classes
                 .get(&method.declaring)
@@ -178,16 +182,6 @@ impl Vm {
         name: &str,
         usage: CallableUse,
     ) -> Result<(), NativeError> {
-        if receiver.is_none()
-            && usage == CallableUse::Callback
-            && let Some(method) = class.methods.get(&name.to_ascii_lowercase())
-            && !method.is_static
-        {
-            return Err(NativeError::error(format!(
-                "Non-static method {}::{}() cannot be called statically",
-                method.declaring, method.name
-            )));
-        }
         let Some((qualifier, method)) = name.split_once("::") else {
             return self.prepare_method(class, receiver, name, Invocation::Method);
         };

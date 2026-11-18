@@ -59,12 +59,16 @@ pub(crate) fn register(registry: &mut Registry) {
     ];
     registry.function(FunctionEntry::sync("preg_match", MATCH, matching::single));
     registry.function(FunctionEntry::sync("preg_match_all", MATCH, matching::all));
-    registry.function(FunctionEntry::sync(
+    registry.function(FunctionEntry::asynchronous(
         "preg_replace",
         REPLACE,
         replace::replace,
     ));
-    registry.function(FunctionEntry::sync("preg_filter", REPLACE, replace::filter));
+    registry.function(FunctionEntry::asynchronous(
+        "preg_filter",
+        REPLACE,
+        replace::filter,
+    ));
     registry.function(FunctionEntry::asynchronous(
         "preg_replace_callback",
         CALLBACK,
@@ -77,7 +81,7 @@ pub(crate) fn register(registry: &mut Registry) {
     ));
     registry.function(FunctionEntry::sync("preg_split", SPLIT, split::split));
     registry.function(FunctionEntry::sync("preg_quote", QUOTE, quote::quote));
-    registry.function(FunctionEntry::sync("preg_grep", GREP, grep::grep));
+    registry.function(FunctionEntry::asynchronous("preg_grep", GREP, grep::grep));
     registry.function(FunctionEntry::sync("preg_last_error", &[], errors::last));
     registry.function(FunctionEntry::sync(
         "preg_last_error_msg",

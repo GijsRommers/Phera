@@ -37,6 +37,34 @@ pub enum NativeClone {
     Forbidden,
 }
 
+impl NativeClone {
+    /// Register this for values such as date/time data that own cloneable state.
+    pub const fn copy<T: Clone + 'static>() -> Self {
+        Self::Copy(copy_state::<T>)
+    }
+}
+
+fn copy_state<T: Clone + 'static>(
+    source: &Object,
+    destination: &Object,
+) -> Result<(), NativeError> {
+    let state = source
+        .native
+        .try_borrow()
+        .map_err(|_| NativeError::error("Native clone source is already borrowed"))?
+        .as_ref()
+        .and_then(|data| data.downcast_ref::<T>())
+        .cloned();
+    if let Some(state) = state {
+        *destination
+            .native
+            .try_borrow_mut()
+            .map_err(|_| NativeError::error("Native clone destination is already borrowed"))? =
+            Some(Box::new(state));
+    }
+    Ok(())
+}
+
 /// A separate cursor is constructed for each traversal of a native object.
 pub trait NativeIterator {
     fn rewind(&mut self, context: &mut dyn Context) -> Result<(), NativeError>;

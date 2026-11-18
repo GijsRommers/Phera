@@ -4,7 +4,7 @@ use phera_bytecode::{ClassBinding, Reg};
 use phera_extension_api::NativeError;
 use phera_value::Value;
 
-use super::Invocation;
+use super::{Invocation, magic_calls::MethodSyntax};
 use crate::Vm;
 
 impl Vm {
@@ -71,7 +71,8 @@ impl Vm {
                     .for_object(object)
                     .is_some_and(|receiver_class| self.class_matches(&receiver_class, name))
             });
-        self.prepare_method(class, receiver, method, Invocation::Method)?;
+        let resolved = self.find_method(&class, method, Invocation::Method);
+        self.prepare_method_lookup(class, receiver, method, MethodSyntax::Static, resolved)?;
         if binding == ClassBinding::Forward
             && let Some(context) = context
         {

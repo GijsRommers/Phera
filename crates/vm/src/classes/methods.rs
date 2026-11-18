@@ -6,7 +6,9 @@ use phera_bytecode::{NameId, Reg, Visibility};
 use phera_extension_api::NativeError;
 use phera_value::{Object, Value};
 
-use super::{Class, Invocation, Method, MethodContext};
+use super::{
+    Class, Invocation, Method, MethodContext, class::ClassOrigin, magic_calls::MethodSyntax,
+};
 use crate::Vm;
 use crate::calls::call_state::{CallTarget, Callee};
 
@@ -37,18 +39,10 @@ impl Vm {
             .classes
             .for_object(&object)
             .ok_or_else(|| internal_error!("receiver class"))?;
-        let resolved = self.find_method(&class, name, Invocation::Method)?;
-        if let Some(resolved) = resolved {
-            if matches!(resolved.method.body, super::MethodBody::Native(_))
-                && class.name == "Generator"
-            {
-                self.discard_generator_temporary(receiver);
-            }
-            self.prepare_resolved_method(class, Some(object), resolved, Invocation::Method)?;
-        } else {
-            self.prepare_method(class, Some(object), name, Invocation::Method)?;
+        if class.origin == ClassOrigin::Native && class.name == "Generator" {
+            self.discard_generator_temporary(receiver);
         }
-        Ok(())
+        self.prepare_method(class, Some(object), name, Invocation::Method)
     }
 
     /// Snapshot a bound target so nested calls during argument sends cannot replace the receiver.
@@ -78,8 +72,16 @@ impl Vm {
             callee.argument_binding = crate::calls::callback_binding::ArgumentBinding::Internal;
             return self.prepare_call(callee);
         }
-        let resolved = self.find_method(&class, name, invocation)?;
-        let Some(super::method_lookup::ResolvedMethod { method, scope }) = resolved else {
+        let resolved = self.find_method(&class, name, invocation);
+        if invocation == Invocation::Method {
+            let syntax = if receiver.is_some() {
+                MethodSyntax::Instance
+            } else {
+                MethodSyntax::Static
+            };
+            return self.prepare_method_lookup(class, receiver, name, syntax, resolved);
+        }
+        let Some(super::method_lookup::ResolvedMethod { method, scope }) = resolved? else {
             if invocation == Invocation::Constructor {
                 let object = receiver.ok_or_else(|| internal_error!("constructor receiver"))?;
                 self.prepare_constructed_object(object);

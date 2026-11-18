@@ -1,9 +1,8 @@
 //! Splitting and joining: `explode(",", "a,b")` is `["a", "b"]`,
 //! `implode("-", ["a", "b"])` is `"a-b"`.
 
-use phera_extension_api::value::to_php_string;
 use phera_extension_api::{
-    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Value, args,
+    Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, Value, args,
 };
 
 use super::{buffer, find, reserve};
@@ -21,7 +20,7 @@ pub(super) const FUNCTIONS: &[FunctionEntry] = &[IMPLODE, JOIN, EXPLODE, STR_REP
 /// implode(", ", ["a", 1, null]); // "a, 1, "
 /// implode(["a", "b"]);           // "ab"
 /// ```
-const IMPLODE: FunctionEntry = FunctionEntry::sync(
+const IMPLODE: FunctionEntry = FunctionEntry::asynchronous(
     "implode",
     &[
         Param::new("separator", ParamType::ArrayOrString),
@@ -30,12 +29,12 @@ const IMPLODE: FunctionEntry = FunctionEntry::sync(
     implode,
 );
 
-fn implode(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    join_values(context, arguments, "implode")
+fn implode(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(join_values(context, arguments, "implode"))
 }
 
 /// `join()`, another name for `implode()`; its errors name `join()`.
-const JOIN: FunctionEntry = FunctionEntry::sync(
+const JOIN: FunctionEntry = FunctionEntry::asynchronous(
     "join",
     &[
         Param::new("separator", ParamType::ArrayOrString),
@@ -44,11 +43,16 @@ const JOIN: FunctionEntry = FunctionEntry::sync(
     join,
 );
 
-fn join(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    join_values(context, arguments, "join")
+fn join(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(join_values(context, arguments, "join"))
 }
 
-fn join_values(context: &mut dyn Context, arguments: &[Value], function: &str) -> NativeResult {
+async fn join_values(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+    function: &str,
+) -> NativeResult {
+    let arguments = &arguments;
     let (separator, array) = match (args::array(arguments, 0), args::array(arguments, 1)) {
         (None, Some(array)) => (args::bytes(arguments, 0), array),
         (Some(array), None) => (&b""[..], array),
@@ -66,7 +70,7 @@ fn join_values(context: &mut dyn Context, arguments: &[Value], function: &str) -
     };
     let mut result = Vec::new();
     for (index, value) in array.values().enumerate() {
-        let string = to_php_string(value, context.diagnostics())?;
+        let string = context.stringify(value).await?;
         let separator = if index > 0 { separator } else { &[] };
         reserve(&mut result, separator.len() + string.len())?;
         result.extend_from_slice(separator);

@@ -77,6 +77,53 @@ impl Vm {
         Ok(())
     }
 
+    /// Reject readonly writes before the value's conversion can run PHP code.
+    pub(crate) fn check_readonly_property_write(
+        &self,
+        object: &phera_value::Object,
+        property: &crate::classes::class::PropertyDefault,
+        indirect: bool,
+        mutation: Mutation,
+    ) -> Result<(), NativeError> {
+        let name = &property.name;
+        let key = &property.key;
+        if indirect || mutation == Mutation::Bind {
+            return Err(NativeError::error(format!(
+                "Cannot indirectly modify readonly property {}::${name}",
+                property.declaring
+            )));
+        }
+        let scope = self.current().and_then(|frame| frame.scope());
+        if crate::property_storage::read(object, key).is_some()
+            && !self.clone_can_update(object, key)
+        {
+            let action = if mutation == Mutation::Unset {
+                "unset"
+            } else {
+                "modify"
+            };
+            return Err(NativeError::error(format!(
+                "Cannot {action} readonly property {}::${name}",
+                property.declaring
+            )));
+        }
+        if scope.is_none_or(|scope| !scope.is_a(&property.declaring)) {
+            let action = if mutation == Mutation::Unset {
+                "unset"
+            } else {
+                "modify"
+            };
+            let from = scope
+                .map(|scope| format!("scope {}", scope.name))
+                .unwrap_or_else(|| "global scope".into());
+            return Err(NativeError::error(format!(
+                "Cannot {action} protected(set) readonly property {}::${name} from {from}",
+                property.declaring
+            )));
+        }
+        Ok(())
+    }
+
     /// Validate each object boundary, including indirect mutations of readonly arrays.
     pub(crate) fn validate_property_mutation(
         &mut self,
@@ -119,40 +166,12 @@ impl Vm {
                                 && crate::property_storage::read(object, key)
                                     .is_some_and(|value| value.deref().is_object()))
                         {
-                            if mutation == Mutation::Bind {
-                                return Err(NativeError::error(format!(
-                                    "Cannot indirectly modify readonly property {}::${name}",
-                                    property.declaring
-                                )));
-                            }
-                            let scope = self.current().and_then(|frame| frame.scope());
-                            if crate::property_storage::read(object, key).is_some()
-                                || steps.peek().is_some()
-                            {
-                                let action = if mutation == Mutation::Unset {
-                                    "unset"
-                                } else {
-                                    "modify"
-                                };
-                                return Err(NativeError::error(format!(
-                                    "Cannot {action} readonly property {}::${name}",
-                                    property.declaring
-                                )));
-                            }
-                            if scope.is_none_or(|scope| !scope.is_a(&property.declaring)) {
-                                let action = if mutation == Mutation::Unset {
-                                    "unset"
-                                } else {
-                                    "modify"
-                                };
-                                let from = scope
-                                    .map(|scope| format!("scope {}", scope.name))
-                                    .unwrap_or_else(|| "global scope".into());
-                                return Err(NativeError::error(format!(
-                                    "Cannot {action} protected(set) readonly property {}::${name} from {from}",
-                                    property.declaring
-                                )));
-                            }
+                            self.check_readonly_property_write(
+                                object,
+                                property,
+                                steps.peek().is_some(),
+                                mutation,
+                            )?;
                         }
                         if steps.peek().is_none()
                             && mutation != Mutation::Unset
@@ -162,6 +181,20 @@ impl Vm {
                                 self.coerce_property(value.clone(), property, declaration_type)?;
                             if !matches!(value, Value::Reference(_)) {
                                 *value = converted;
+                            }
+                        }
+                        if steps.peek().is_none() {
+                            if property.is_readonly && mutation != Mutation::Unset {
+                                self.clone_updated(object, key);
+                            }
+                            if mutation == Mutation::Unset
+                                && property.ty.is_some()
+                                && class
+                                    .magic
+                                    .as_ref()
+                                    .is_some_and(|magic| magic.has_properties())
+                            {
+                                self.mark_typed_property_unset(object, key.clone());
                             }
                         }
                     } else if !crate::property_storage::read(object, key).is_some()

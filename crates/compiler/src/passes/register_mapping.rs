@@ -100,8 +100,13 @@ impl Instruction {
             Instruction::Clone {
                 destination,
                 source,
+                with,
+            } => {
+                *destination = map(*destination);
+                *source = map(*source);
+                *with = with.map(map);
             }
-            | Instruction::InstanceOf {
+            Instruction::InstanceOf {
                 destination,
                 source,
                 ..
@@ -204,6 +209,15 @@ impl Instruction {
                 place(target, &mut map);
                 *src = map(*src)
             }
+            Instruction::WriteFromLocal {
+                place: target,
+                source: src,
+                destination: dst,
+            } => {
+                place(target, &mut map);
+                *src = map(*src);
+                *dst = map(*dst);
+            }
             Instruction::Bind {
                 place: target,
                 source,
@@ -274,7 +288,10 @@ impl Instruction {
                 *value = map(*value)
             }
             Instruction::MatchError { subject } => *subject = map(*subject),
-            Instruction::Jump(_) | Instruction::Suppress(_) | Instruction::Declare(_) => {}
+            Instruction::Jump(_)
+            | Instruction::Suppress(_)
+            | Instruction::Declare(_)
+            | Instruction::ReturnMissing => {}
         }
     }
 }

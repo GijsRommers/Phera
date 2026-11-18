@@ -224,6 +224,14 @@ impl Vm {
                     phera_bytecode::ClosureBinding::Bound
                 },
             ),
+            crate::calls::call_state::CallTarget::Magic(magic) => (
+                Some(magic.context.clone()),
+                if magic.method.is_static {
+                    phera_bytecode::ClosureBinding::Static
+                } else {
+                    phera_bytecode::ClosureBinding::Bound
+                },
+            ),
             _ => (None, phera_bytecode::ClosureBinding::Bound),
         };
         self.allocate_closure(ClosureState {

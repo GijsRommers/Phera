@@ -12,12 +12,49 @@
 //! Weak cell handles reserve allocation identities without retaining values. An empty typed
 //! table makes unrelated reference writes return immediately, regardless of live object count.
 
-use crate::{Vm, classes::class::PropertyDefault};
-use phera_extension_api::NativeResult;
+use crate::{
+    AccessPath, Vm,
+    access_mode::{Binding, Creation, Missing},
+    classes::class::PropertyDefault,
+    inline_stack::InlineStack,
+    path_update::PathKey,
+    types::TypeChecking,
+};
+use phera_extension_api::{NativeError, NativeResult};
 use phera_value::Value;
 use std::{cell::RefCell, rc::Rc};
 
 impl Vm {
+    /// Only an object assigned through a typed reference can need a callback.
+    pub(crate) fn local_reference_needs_string(
+        &self,
+        local: phera_bytecode::Reg,
+        value: &Value,
+    ) -> bool {
+        let Some(frame) = self
+            .current()
+            .filter(|frame| !frame.function().strict_types)
+        else {
+            return false;
+        };
+        let Some(Some(Value::Reference(reference))) =
+            frame.slots(&self.registers).get(local.index())
+        else {
+            return false;
+        };
+        self.property_references
+            .borrow()
+            .constraints
+            .get(&(Rc::as_ptr(reference) as usize))
+            .is_some_and(|properties| {
+                properties.iter().any(|(_, property)| {
+                    property.ty.as_ref().is_some_and(|ty| {
+                        self.needs_string_coercion(value, ty, crate::types::TypeChecking::Coerce)
+                    })
+                })
+            })
+    }
+
     /// Look up only this cell; neither objects nor class declarations are scanned.
     #[inline(never)]
     pub(crate) fn check_reference_assignment(
@@ -52,17 +89,9 @@ impl Vm {
         let Some(declaration) = &property.ty else {
             return Ok(value);
         };
-        let actual = match &value {
-            Value::Object(object) => object.class.name().to_owned(),
-            _ => value.type_name(),
-        };
+        let actual = value.type_name();
         self.coerce_property(value, property, declaration)
-            .map_err(|_| {
-                phera_extension_api::NativeError::type_error(format!(
-                    "Cannot assign {actual} to reference held by property {}::${} of type {}",
-                    property.declaring, property.name, declaration.display
-                ))
-            })
+            .map_err(|_| reference_type_error(&actual, property))
     }
 }
 
@@ -171,25 +200,174 @@ impl Vm {
         if self.property_references.borrow().constraints.is_empty() {
             return Ok(value);
         }
-        let mut target = root.clone();
-        for key in keys.iter() {
-            let next = match (&*target.deref(), key) {
-                (Value::Object(object), crate::path_update::PathKey::Property(key)) => {
-                    crate::property_storage::read(object, key).unwrap_or_default()
-                }
-                (Value::Array(array), crate::path_update::PathKey::Index(Some(key))) => {
-                    array.get(key).cloned().unwrap_or_default()
-                }
-                _ => return Ok(value),
-            };
-            target = next;
-        }
-        if let Value::Reference(reference) = target {
-            self.check_reference_assignment(&reference, value)
-        } else {
-            Ok(value)
+        match path_reference(root, keys) {
+            Some(reference) => self.check_reference_assignment(&reference, value),
+            None => Ok(value),
         }
     }
+
+    /// Only a weak assignment of a Stringable object can run PHP during a reference write.
+    pub(crate) fn may_cast_typed_reference(&self, value: &Value) -> bool {
+        matches!(value, Value::Object(_))
+            && !self.property_references.borrow().constraints.is_empty()
+            && self
+                .current()
+                .is_some_and(|frame| !frame.function().strict_types)
+            && Self::has_string_conversion(value)
+    }
+
+    pub(crate) async fn assign_indexed_stringable(
+        &mut self,
+        place: &AccessPath,
+        value: Value,
+    ) -> Result<Option<Value>, NativeError> {
+        let register = self
+            .base_register(place, Creation::Create, Missing::Silent)?
+            .ok_or_else(|| internal_error!("missing place"))?;
+        let keys = self.keys(place)?;
+        if let Some(reference) = path_reference(&self.raw_local(register), &keys)
+            && let Some(converted) = self.assign_stringable_reference(&reference, &value).await?
+        {
+            return Ok(Some(converted));
+        }
+        self.write_resolved_place(place, register, keys, value, Binding::ByValue)?;
+        Ok(None)
+    }
+
+    pub(crate) async fn assign_stringable_reference(
+        &mut self,
+        reference: &Rc<RefCell<Value>>,
+        value: &Value,
+    ) -> Result<Option<Value>, NativeError> {
+        // Hold the selected cell across PHP code, with no borrow on the path or type index.
+        let constraints: Vec<_> = {
+            let index = self.property_references.borrow();
+            let Some(properties) = index.constraints.get(&(Rc::as_ptr(reference) as usize)) else {
+                return Ok(None);
+            };
+            properties
+                .iter()
+                .filter_map(|(_, property)| {
+                    property
+                        .ty
+                        .as_ref()
+                        .map(|ty| (property.clone(), ty.clone()))
+                })
+                .collect()
+        };
+        let needs_string = |vm: &Vm, ty| vm.needs_string_coercion(value, ty, TypeChecking::Coerce);
+        if !constraints.iter().any(|(_, ty)| needs_string(self, ty)) {
+            return Ok(None);
+        }
+
+        let mut first: Option<(&PropertyDefault, Value)> = None;
+        for (property, ty) in &constraints {
+            let candidate = if needs_string(self, ty) {
+                if let Some((first, Value::Object(_))) = first.as_ref() {
+                    return Err(conflicting_reference_types(value, first, property));
+                }
+                match self.object_to_string(value).await {
+                    Ok(Some(string)) => Value::String(string),
+                    Ok(None) => return Err(reference_type_error(&value.type_name(), property)),
+                    Err(error) => {
+                        return Err(self.wrap_reference_cast_error(error, value, property));
+                    }
+                }
+            } else {
+                self.coerce_reference_property(value.clone(), property)?
+            };
+            if let Some((first, result)) = &first {
+                if phera_value::strict_equals(result, &candidate, self)? != Value::Bool(true) {
+                    return Err(conflicting_reference_types(value, first, property));
+                }
+            } else {
+                first = Some((property, candidate));
+            }
+        }
+        let Some((_, converted)) = first else {
+            return Ok(None);
+        };
+        *reference
+            .try_borrow_mut()
+            .map_err(|_| internal_error!("borrowed typed array alias"))? = converted.clone();
+        Ok(Some(converted))
+    }
+
+    fn wrap_reference_cast_error(
+        &mut self,
+        error: NativeError,
+        value: &Value,
+        property: &PropertyDefault,
+    ) -> NativeError {
+        use crate::exceptions::{Thrown, throwable_root};
+        let previous = self.materialize_error(error);
+        let NativeError::Unwind(state) = &previous else {
+            return previous;
+        };
+        let Some(thrown) = state.0.downcast_ref::<Thrown>() else {
+            return previous;
+        };
+        let error = self.materialize_error(reference_type_error(&value.type_name(), property));
+        if let NativeError::Unwind(state) = &error
+            && let Some(assignment) = state.0.downcast_ref::<Thrown>()
+        {
+            assignment.object.set(
+                phera_value::Object::private_key(throwable_root(&assignment.object), "previous"),
+                Value::Object(thrown.object.clone()),
+            );
+        }
+        error
+    }
+}
+
+fn path_reference(root: &Value, keys: &InlineStack<PathKey>) -> Option<Rc<RefCell<Value>>> {
+    let mut target = root.clone();
+    for key in keys.iter() {
+        let next = match (&*target.deref(), key) {
+            (Value::Object(object), PathKey::Property(key)) => {
+                crate::property_storage::read(object, key)?
+            }
+            (Value::Array(array), PathKey::Index(Some(key))) => array.get(key)?.clone(),
+            _ => return None,
+        };
+        target = next;
+    }
+    match target {
+        Value::Reference(reference) => Some(reference),
+        _ => None,
+    }
+}
+
+fn reference_type_error(actual: &str, property: &PropertyDefault) -> NativeError {
+    NativeError::type_error(format!(
+        "Cannot assign {} to reference held by property {}",
+        actual,
+        reference_property_name(property)
+    ))
+}
+
+fn conflicting_reference_types(
+    value: &Value,
+    first: &PropertyDefault,
+    other: &PropertyDefault,
+) -> NativeError {
+    NativeError::type_error(format!(
+        "Cannot assign {} to reference held by property {} and property {}, as this would result in an inconsistent type conversion",
+        value.type_name(),
+        reference_property_name(first),
+        reference_property_name(other)
+    ))
+}
+
+fn reference_property_name(property: &PropertyDefault) -> String {
+    let declaration = property
+        .ty
+        .as_ref()
+        .map_or("mixed", |ty| ty.display.as_str());
+    format!(
+        "{}::${} of type {}",
+        property.declaring, property.name, declaration
+    )
 }
 
 #[cfg(test)]

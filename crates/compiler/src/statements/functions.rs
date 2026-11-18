@@ -55,11 +55,21 @@ impl<'ast> Compiler<'ast> {
             .map(|declared_type| self.declaration_type(declared_type));
         builder.validate_generator_type()?;
         builder.block(&declaration.body, DeclarationTiming::AtExecution)?;
-        let register = builder.literal(Constant::Null, line)?;
-        let implicit_return = if declaration.by_reference && !declaration.is_generator {
-            Instruction::ReturnReference(register)
+        let implicit_return = if !declaration.is_generator
+            && declaration
+                .name
+                .name
+                .rsplit_once("::")
+                .is_some_and(|(_, method)| method.eq_ignore_ascii_case("__toString"))
+        {
+            Instruction::ReturnMissing
         } else {
-            Instruction::Return(register)
+            let register = builder.literal(Constant::Null, line)?;
+            if declaration.by_reference && !declaration.is_generator {
+                Instruction::ReturnReference(register)
+            } else {
+                Instruction::Return(register)
+            }
         };
         builder.emit(implicit_return, line);
         self.append_function(builder, timing, line);

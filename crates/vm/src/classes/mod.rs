@@ -2,10 +2,13 @@
 
 pub(crate) mod class;
 mod class_table;
+pub(crate) mod cloning;
 mod declaration_errors;
 mod inheritance_checks;
 pub(crate) mod instantiation;
 mod linking;
+mod magic;
+mod magic_calls;
 pub(crate) mod method_lookup;
 pub(crate) mod method_table;
 mod methods;
