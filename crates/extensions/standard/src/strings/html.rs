@@ -11,14 +11,21 @@ use super::buffer;
 use super::url::hex_digit;
 use crate::constants::{ENT_HTML401, ENT_QUOTES, ENT_SUBSTITUTE};
 
+mod decode;
 mod encoding;
 mod entities;
+mod legacy;
 mod options;
 
 use encoding::{Decoded, Encoding};
 use options::{Document, InvalidInput, Options};
 
-pub(super) const FUNCTIONS: &[FunctionEntry] = &[HTMLSPECIALCHARS, HTMLSPECIALCHARS_DECODE];
+pub(super) const FUNCTIONS: &[FunctionEntry] = &[
+    HTMLSPECIALCHARS,
+    HTMLSPECIALCHARS_DECODE,
+    decode::HTML_ENTITY_DECODE,
+    decode::GET_HTML_TRANSLATION_TABLE,
+];
 
 /// The `$flags` both functions default to.
 const DEFAULT_FLAGS: i64 = ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML401;
@@ -60,7 +67,7 @@ fn htmlspecialchars(context: &mut dyn Context, arguments: &[Value]) -> NativeRes
     if string.is_empty() {
         return Ok(Value::from(""));
     }
-    let encoding = Encoding::resolve(context, args::bytes(arguments, 2));
+    let encoding = Encoding::resolve(context, "htmlspecialchars", args::bytes(arguments, 2));
     let double_encode = args::bool(arguments, 3).unwrap_or(true);
     let mut result = buffer(string.len().saturating_mul(9))?;
     let mut cursor = 0;
@@ -172,6 +179,10 @@ fn numeric_entity(name: &[u8]) -> Option<u32> {
         [b'x' | b'X', rest @ ..] => (16, rest),
         _ => (10, digits),
     };
+    parse_numeric_digits(digits, radix)
+}
+
+fn parse_numeric_digits(digits: &[u8], radix: u32) -> Option<u32> {
     if digits.is_empty() {
         return None;
     }
@@ -213,11 +224,5 @@ fn is_valid_entity(name: &[u8], options: Options) -> bool {
                 _ => document.allows(code),
             };
     }
-    let names = match document {
-        Document::Xml1 => return matches!(name, b"amp" | b"lt" | b"gt" | b"quot" | b"apos"),
-        Document::Xhtml if name == b"apos" => return true,
-        Document::Html5 => entities::HTML5,
-        Document::Html401 | Document::Xhtml => entities::HTML4,
-    };
-    names.split(' ').any(|known| known.as_bytes() == name)
+    entities::named(name, document).is_some()
 }

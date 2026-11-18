@@ -10,7 +10,7 @@ pub(super) const FUNCTIONS: &[FunctionEntry] = &[URLENCODE, RAWURLENCODE, URLDEC
 
 /// Which of PHP's two percent encodings.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Encoding {
+pub(crate) enum Encoding {
     /// `application/x-www-form-urlencoded`: a space is `+`.
     Form,
     /// RFC 3986: a space is `%20`, and `~` stays as it is.
@@ -85,8 +85,13 @@ fn rawurldecode(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
 }
 
 fn encode(string: &[u8], encoding: Encoding) -> NativeResult {
-    const HEX: &[u8; 16] = b"0123456789ABCDEF";
     let mut result = buffer(string.len().saturating_mul(3))?;
+    encode_into(&mut result, string, encoding);
+    Ok(Value::from(result))
+}
+
+pub(crate) fn encode_into(result: &mut Vec<u8>, string: &[u8], encoding: Encoding) {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
     for &byte in string {
         if byte.is_ascii_alphanumeric()
             || matches!(byte, b'-' | b'_' | b'.')
@@ -103,7 +108,6 @@ fn encode(string: &[u8], encoding: Encoding) -> NativeResult {
             ]);
         }
     }
-    Ok(Value::from(result))
 }
 
 fn decode(string: &[u8], encoding: Encoding) -> NativeResult {

@@ -367,8 +367,12 @@ fn uploads_fill_post_and_files_as_in_php() {
 /// What a script does not move is gone when the request ends.
 #[test]
 fn unclaimed_uploads_are_deleted_after_the_request() {
-    let script = "<?php echo $_FILES['doc']['tmp_name'], '|', \
-                  (int) file_exists($_FILES['doc']['tmp_name']);";
+    let script = r#"<?php
+        $path = $_FILES['doc']['tmp_name'];
+        ob_start(fn ($output) => $output . '|buffer:' . (int) file_exists($path));
+        register_shutdown_function(fn () => print '|shutdown:' . (int) file_exists($path));
+        echo $path, '|', (int) file_exists($path);
+    "#;
     let served = Served::start("uploads-cleanup", &[("keep.php", script)]);
     let body = form(
         &[("form-data; name=\"doc\"; filename=\"n.txt\"", None, "n")],
@@ -377,7 +381,7 @@ fn unclaimed_uploads_are_deleted_after_the_request() {
     let headers = format!("Content-Type: multipart/form-data; boundary={BOUNDARY}\r\n");
     let (status, answer) = served.request("POST", "/keep.php", &headers, &body);
     let (path, existed) = answer.split_once('|').expect("a path and a flag");
-    assert_eq!((status, existed), (200, "1"));
+    assert_eq!((status, existed), (200, "1|shutdown:1|buffer:1"));
     assert!(
         !std::path::Path::new(path).exists(),
         "{path} is still there"
