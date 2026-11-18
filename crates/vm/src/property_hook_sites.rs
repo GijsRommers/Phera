@@ -102,6 +102,11 @@ impl Vm {
         destination: Option<Reg>,
     ) -> Result<(), NativeError> {
         if self.enter_exact_method(function, &object, value, destination)? {
+            if destination.is_none()
+                && let Some(frame) = self.call_stack.current_mut()
+            {
+                frame.discard_result();
+            }
             return Ok(());
         }
         self.prepare_declared_hook(function, object, value.cloned())?;

@@ -281,7 +281,13 @@ impl CallStack {
         self.extras
             .iter()
             .skip(self.frames.len())
-            .map(|extra| usize::from(extra.called.is_some() || !extra.holds_only_called_class()))
+            .map(|extra| {
+                usize::from(
+                    extra.called.is_some()
+                        || extra.property_hook.is_some()
+                        || !extra.plain_return_can_release(),
+                )
+            })
             .sum()
     }
 

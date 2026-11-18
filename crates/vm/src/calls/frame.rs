@@ -69,6 +69,8 @@ impl FrameFlags {
     /// window keeps below the first register.
     const KIND_SHIFT: u16 = 2;
     const KIND_MASK: u16 = 0b11 << Self::KIND_SHIFT;
+    /// A setter entered for its effects has no result destination or continuation.
+    const DISCARD_RESULT: u16 = 1 << 4;
     /// The top eight bits hold how many arguments the call passed, when it
     /// passed fewer than the function's parameters (at most 64, see
     /// `FunctionShape::Plain`), so that a call with defaults needs no
@@ -187,5 +189,13 @@ impl Frame {
 
     pub(crate) fn mark_extras(&mut self) {
         self.flags.0 |= FrameFlags::EXTRAS;
+    }
+
+    pub(crate) fn discard_result(&mut self) {
+        self.flags.0 |= FrameFlags::DISCARD_RESULT;
+    }
+
+    pub(super) fn discards_result(&self) -> bool {
+        self.flags.0 & FrameFlags::DISCARD_RESULT != 0
     }
 }

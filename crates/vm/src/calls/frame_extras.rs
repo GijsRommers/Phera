@@ -66,14 +66,13 @@ impl FrameExtras {
         }
     }
 
-    /// Whether the entry holds nothing but a called class, so that
-    /// returning has nothing to release.
-    pub(crate) fn holds_only_called_class(&self) -> bool {
+    /// A fast return to a register can release the called class alone.
+    /// Suspended hooks have no return register and never take that path.
+    pub(crate) fn plain_return_can_release(&self) -> bool {
         self.dynamic_count.is_none()
             && self.dynamic.is_empty()
             && self.iterators.is_empty()
             && self.arguments.is_default()
-            && self.property_hook.is_none()
     }
 
     /// Releases what the frame owned, keeping the storage for the next frame
