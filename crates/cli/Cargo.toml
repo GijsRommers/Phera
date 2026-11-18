@@ -10,6 +10,7 @@ name = "phera"
 path = "src/main.rs"
 
 [dependencies]
+phera-dotenv.workspace = true
 phera-analyzer.workspace = true
 phera-runtime.workspace = true
 phera-server.workspace = true
@@ -19,6 +20,7 @@ tokio.workspace = true
 mimalloc.workspace = true
 
 [dev-dependencies]
+phera-extension-api.workspace = true
 phera-phpt.workspace = true
 
 # Selected PHP tests run during cargo test; unsupported features carry XFAIL reasons.

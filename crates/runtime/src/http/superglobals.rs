@@ -16,6 +16,7 @@ pub(crate) fn define_superglobals(
     request: &HttpRequest,
     script: &Path,
     document_root: &Path,
+    environment: PhpArray,
 ) {
     let mut get = PhpArray::new();
     parse_pairs(
@@ -46,7 +47,7 @@ pub(crate) fn define_superglobals(
 
     vm.set_global(
         "_SERVER",
-        Value::from(server(request, script, document_root)),
+        Value::from(server(request, script, document_root, environment)),
     );
     vm.set_global("_GET", Value::from(get));
     vm.set_global("_POST", Value::from(post));
@@ -66,8 +67,12 @@ fn is_form(request: &HttpRequest) -> bool {
     })
 }
 
-fn server(request: &HttpRequest, script: &Path, document_root: &Path) -> PhpArray {
-    let mut server = PhpArray::new();
+fn server(
+    request: &HttpRequest,
+    script: &Path,
+    document_root: &Path,
+    mut server: PhpArray,
+) -> PhpArray {
     let mut set = |name: &str, value: Value| {
         server.insert(ArrayKey::str(name), value);
     };
