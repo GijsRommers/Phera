@@ -91,6 +91,7 @@ pub(super) fn weak_map() -> Cases {
         for value in HOSTILE.iter().chain(&["$x"]) {
             let extra = if method == "offsetSet" { ", 2" } else { "" };
             if method == "offsetGet" && *value == "new stdClass" {
+                push(&mut cases, method, setup, "$o->offsetGet(new stdClass)");
                 // This diagnostic names the same handle returned by spl_object_id().
                 cases.push((
                     "offsetGet_missing_object".to_owned(),
