@@ -256,8 +256,8 @@ silence:
   `function_exists()` and `class_exists()` answer false for these, so code
   that checks first takes its fallback. The list comes from the
   `#[\Deprecated]` attributes in PHP 8.5's own stub files, not from memory.
-- **Syntax** (backticks, `${expr}` interpolation, the `(real)` cast): a
-  compile error, "... is not supported by Phera", with file and line.
+- **Syntax** (the backtick operator): a compile error, "... is not
+  supported by Phera", with file and line.
 - **Legacy package layouts** (PSR-0 autoloading, `target-dir`,
   `include-path`, PEAR-style trees): `phera install` stops and names the
   package and the field. Nothing is installed half.
@@ -266,6 +266,34 @@ silence:
 
 Something merely not built yet is different: it keeps PHP's own error
 ("Call to undefined function ...") until it exists.
+
+**Which deprecated items go, and which stay.** PHP 8.5.12 marks 148
+functions, methods and constants with `#[\Deprecated]` in its stub files.
+Each falls in one of three groups:
+
+1. *Named items nothing uses*: they go, as described above. Examples:
+   `strftime()`, `lcg_value()`, `utf8_decode()`, `mhash()`, `MT_RAND_PHP`,
+   `FILTER_SANITIZE_STRING`, `assert_options()`.
+2. *Named items the scan of 6.1 finds in use*, mostly calls that became
+   no-ops and that current releases of widely used libraries still make:
+   they stay, and behave as in PHP, deprecation message included. On
+   2026-11-18 these were `curl_close()`, `curl_share_close()`,
+   `imagedestroy()`, `xml_parser_free()`, `openssl_pkey_free()`,
+   `libxml_disable_entity_loader()`, `utf8_encode()`, `ldap_connect()` with
+   two arguments, `E_STRICT`, `DOM_PHP_ERR`, `DATE_RFC7231`,
+   `NumberFormatter::TYPE_CURRENCY`, `setAccessible()` on reflection
+   objects, `SplObjectStorage::attach()`, `detach()` and `contains()`, the
+   driver constants on the `PDO` class (`PDO::MYSQL_ATTR_*` and relatives),
+   and two pieces of syntax: `"${name}"` in strings and the long cast names
+   (`(integer)`, `(boolean)`, `(double)`, `(binary)`).
+3. *Deprecated behaviour of something supported*, which depends on the
+   values at run time and so cannot be found by scanning (passing `null` to
+   a built-in parameter that does not accept it, a float that loses
+   precision as an array key, and so on): it stays as in PHP, with PHP's
+   message. Turning these into errors would make maintained code fail on
+   the data it happens to meet.
+
+An item moves from group 2 to group 1 when a later scan no longer finds it.
 
 ## 7. Testing
 
