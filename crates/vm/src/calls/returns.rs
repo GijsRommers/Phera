@@ -189,6 +189,15 @@ impl Vm {
             value = frame.this().cloned().map(Value::Object).unwrap_or_default();
         }
         self.finish_include_scope()?;
+        let property_hook = if self
+            .call_stack
+            .current()
+            .is_some_and(|frame| frame.destination().is_none() && frame.has_extras())
+        {
+            self.call_stack.current_extras_mut().property_hook.take()
+        } else {
+            None
+        };
         let frame = self
             .call_stack
             .pop()
@@ -200,6 +209,12 @@ impl Vm {
         }
         if let Some(destination) = frame.destination() {
             self.set(destination, value);
+        } else if let Some(continuation) = property_hook {
+            self.returned_hook = Some(crate::property_hook_continuation::ReturnedHook {
+                continuation,
+                value,
+            });
+            self.pending_callbacks = true;
         }
         Ok(None)
     }

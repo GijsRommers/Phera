@@ -118,6 +118,7 @@ mod path_update;
 mod place_mutation;
 mod places;
 mod properties;
+mod property_hook_continuation;
 mod property_hook_sites;
 mod property_mutation;
 mod property_sites;
@@ -179,6 +180,7 @@ pub struct Vm {
     argument_origin: calls::callback_binding::ArgumentOrigin,
     native_called_class: Option<std::rc::Rc<classes::Class>>,
     pending_dimension: Option<dimensions::DimensionPath>,
+    returned_hook: Option<property_hook_continuation::ReturnedHook>,
     prelinked_classes: std::collections::HashSet<(usize, usize)>,
     function_table: function_table::FunctionTable,
     /// Every loaded file and function of the request, by number.
@@ -246,6 +248,7 @@ impl Vm {
             argument_origin: calls::callback_binding::ArgumentOrigin::Php,
             native_called_class: None,
             pending_dimension: None,
+            returned_hook: None,
             prelinked_classes: std::collections::HashSet::new(),
             function_table: function_table::FunctionTable::new(),
             code: code_table::CodeTable::default(),

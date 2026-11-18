@@ -108,18 +108,24 @@ impl Vm {
     }
 
     async fn drain_pending_callbacks(&mut self) -> Result<(), NativeError> {
+        let returned_hook = self.returned_hook.take();
         if !self.error_handlers.pending.is_empty() {
             self.drain_error_handlers().await?;
         }
         if self.output_pending() {
             self.drain_output().await?;
         }
+        if let Some(returned) = returned_hook {
+            self.resume_property_hook(returned).await?;
+        }
         self.refresh_pending_callbacks();
         Ok(())
     }
 
     pub(crate) fn refresh_pending_callbacks(&mut self) {
-        self.pending_callbacks = !self.error_handlers.pending.is_empty() || self.output_pending();
+        self.pending_callbacks = !self.error_handlers.pending.is_empty()
+            || self.output_pending()
+            || self.returned_hook.is_some();
     }
 
     /// Backward branches consume the same fairness budget as calls.

@@ -27,6 +27,8 @@ pub(crate) struct FrameExtras {
     /// How the call passed its arguments, when that differs from "one per
     /// parameter".
     pub(crate) arguments: ArgumentFacts,
+    /// A property operation resumes only when this hook returns normally.
+    pub(crate) property_hook: Option<Box<crate::property_hook_continuation::HookContinuation>>,
 }
 
 /// How many arguments a call passed and where the surplus ones are, for
@@ -60,6 +62,7 @@ impl FrameExtras {
             dynamic_count: None,
             iterators: Iterators::new(0),
             arguments: ArgumentFacts::default(),
+            property_hook: None,
         }
     }
 
@@ -70,6 +73,7 @@ impl FrameExtras {
             && self.dynamic.is_empty()
             && self.iterators.is_empty()
             && self.arguments.is_default()
+            && self.property_hook.is_none()
     }
 
     /// Releases what the frame owned, keeping the storage for the next frame
@@ -80,5 +84,6 @@ impl FrameExtras {
         self.dynamic_count = None;
         self.iterators.clear();
         self.arguments = ArgumentFacts::default();
+        self.property_hook = None;
     }
 }

@@ -74,13 +74,17 @@ impl Vm {
             .receiving(index)
             .is_some_and(|parameter| parameters.by_reference(parameter))
             || (index == 0 && view.is_extract());
-        let value = if reference {
-            self.magic_reference(place).await?
+        if reference {
+            let value = self.magic_reference(place).await?;
+            self.store_sent_value(index, value)
         } else {
-            self.read_magic_place(place, phera_bytecode::FetchMode::Read)
-                .await?
-        };
-        self.store_sent_value(index, value)
+            self.read_property_path(
+                place.clone(),
+                phera_bytecode::FetchMode::Read,
+                crate::property_hook_continuation::ReadCompletion::Argument(index),
+            )
+            .await
+        }
     }
 
     /// Put an argument at position `index` of the innermost prepared call,

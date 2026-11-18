@@ -7,18 +7,18 @@ use phera_value::Value;
 
 use crate::access_mode::{Binding, Mutation};
 use crate::magic_mutations::{PropertyMutation, WriteValue};
-use crate::magic_places::UpdateTarget;
+use crate::magic_places::{ReadPlace, UpdateTarget};
 use crate::{AccessPath, Vm};
 
 impl Vm {
-    pub(crate) async fn magic_assign_op_path(
+    pub(crate) async fn finish_magic_assign_op(
         &mut self,
         place: &AccessPath,
+        left: ReadPlace,
         operator: BinaryOp,
         destination: Reg,
         source: Reg,
     ) -> Result<(), NativeError> {
-        let left = self.read_for_path_update(place).await?;
         let value = self
             .binary_with_strings(operator, left.value, self.get(source))
             .await?;
@@ -28,13 +28,13 @@ impl Vm {
         Ok(())
     }
 
-    pub(crate) async fn magic_inc_dec_path(
+    pub(crate) async fn finish_magic_inc_dec(
         &mut self,
         place: &AccessPath,
+        target: ReadPlace,
         mode: IncDec,
         destination: Reg,
     ) -> Result<(), NativeError> {
-        let target = self.read_for_path_update(place).await?;
         let old = target.value;
         let value = {
             let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);

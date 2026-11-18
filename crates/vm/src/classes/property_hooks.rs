@@ -189,6 +189,12 @@ pub(crate) enum HookWrite {
     Setter(FunctionIndex),
 }
 
+pub(crate) enum HookRead {
+    Storage,
+    Value(Value),
+    Getter(FunctionIndex),
+}
+
 impl Vm {
     pub(crate) async fn read_declared_hook(
         &mut self,
@@ -197,6 +203,27 @@ impl Vm {
         hooks: &LinkedPropertyHooks,
         indirect: bool,
     ) -> Result<Option<Value>, NativeError> {
+        let function = match self.declared_hook_read(object, property, hooks, indirect)? {
+            HookRead::Storage => return Ok(None),
+            HookRead::Value(value) => return Ok(Some(value)),
+            HookRead::Getter(function) => function,
+        };
+        let value = self
+            .invoke_declared_hook(function, object.clone(), None)
+            .await?;
+        if indirect && !value.is_reference() && !value.is_object() {
+            return Err(indirect_error(object, &property.name));
+        }
+        Ok(Some(value))
+    }
+
+    pub(crate) fn declared_hook_read(
+        &mut self,
+        object: &Object,
+        property: &PropertyDefault,
+        hooks: &LinkedPropertyHooks,
+        indirect: bool,
+    ) -> Result<HookRead, NativeError> {
         let Some(getter) = &hooks.hooks.get else {
             if hooks.hooks.is_virtual {
                 return Err(property_error(
@@ -215,12 +242,12 @@ impl Vm {
                 if !value.is_object() {
                     return Err(indirect_error(object, &property.name));
                 }
-                return Ok(Some(value));
+                return Ok(HookRead::Value(value));
             }
             if indirect {
                 self.hook_set_access(property, hooks, "indirectly modify")?;
             }
-            return Ok(None);
+            return Ok(HookRead::Storage);
         };
         if self.uses_property_backing(object, property, hooks) {
             if hooks.hooks.is_virtual {
@@ -231,18 +258,12 @@ impl Vm {
                     "",
                 ));
             }
-            return Ok(None);
+            return Ok(HookRead::Storage);
         }
         if indirect {
             self.hook_set_access(property, hooks, "indirectly modify")?;
         }
-        let value = self
-            .invoke_declared_hook(getter.function, object.clone(), None)
-            .await?;
-        if indirect && !value.is_reference() && !value.is_object() {
-            return Err(indirect_error(object, &property.name));
-        }
-        Ok(Some(value))
+        Ok(HookRead::Getter(getter.function))
     }
 
     pub(crate) fn declared_hook_write(

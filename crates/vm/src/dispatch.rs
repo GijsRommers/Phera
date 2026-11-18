@@ -26,6 +26,7 @@ impl Vm {
         stop: usize,
     ) -> Result<DispatchResult, NativeError> {
         use crate::magic_mutations::{PropertyMutation, WriteValue};
+        use crate::property_hook_continuation::ReadCompletion;
 
         if self.pending_dimension.is_some() {
             return self.dispatch_object_operation(instruction).await;
@@ -90,8 +91,8 @@ impl Vm {
             | Instruction::FetchIndex {
                 dst, path, mode, ..
             } => {
-                let value = self.read_magic_place(&self.path(path)?, mode).await?;
-                self.set(dst, value);
+                self.read_property_path(self.path(path)?, mode, ReadCompletion::Fetch(dst))
+                    .await?;
             }
             Instruction::SendPath { path } => self.send_magic_place(&self.path(path)?).await?,
             Instruction::AssignPath { path, src } => {
@@ -135,12 +136,20 @@ impl Vm {
                 }
             }
             Instruction::AssignOpPath { op, dst, path, src } => {
-                self.magic_assign_op_path(&self.path(path)?, op, dst, src)
-                    .await?
+                self.read_property_path(
+                    self.path(path)?,
+                    phera_bytecode::FetchMode::Read,
+                    ReadCompletion::AssignOp(op, dst, src),
+                )
+                .await?
             }
             Instruction::IncDecPath { mode, dst, path } => {
-                self.magic_inc_dec_path(&self.path(path)?, mode, dst)
-                    .await?
+                self.read_property_path(
+                    self.path(path)?,
+                    phera_bytecode::FetchMode::Read,
+                    ReadCompletion::IncDec(mode, dst),
+                )
+                .await?
             }
             Instruction::MakeReference { dst, path } => {
                 let value = self.magic_reference(&self.path(path)?).await?;
