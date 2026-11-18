@@ -26,6 +26,7 @@ pub(crate) enum Error {
     Unsupported = 8,
     Property = 9,
     Utf16 = 10,
+    NonBackedEnum = 11,
 }
 
 impl Error {
@@ -43,6 +44,7 @@ impl Error {
             Self::Unsupported => "Type is not supported",
             Self::Property => "The decoded property name is invalid",
             Self::Utf16 => "Single unpaired UTF-16 surrogate in unicode escape",
+            Self::NonBackedEnum => "Non-backed enums have no default serialization",
         }
     }
 }

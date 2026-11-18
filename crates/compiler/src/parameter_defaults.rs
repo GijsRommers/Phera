@@ -63,54 +63,78 @@ impl Compiler<'_> {
 
 /// Defaults permit constant arithmetic and arrays, but never variables or function calls.
 pub(crate) fn constant_expression(expression: &Expression) -> bool {
-    match &expression.kind {
-        ExpressionKind::Literal(_) | ExpressionKind::Name(_) | ExpressionKind::MagicConstant(_) => {
-            true
-        }
-        ExpressionKind::ClassConstant { .. } => true,
-        ExpressionKind::Call {
-            callee,
-            arguments: phera_ast::Arguments::FirstClassCallable,
-        } => {
-            matches!(
+    let mut pending = vec![expression];
+    while let Some(expression) = pending.pop() {
+        match &expression.kind {
+            ExpressionKind::Literal(_)
+            | ExpressionKind::Name(_)
+            | ExpressionKind::MagicConstant(_) => {}
+            ExpressionKind::ClassConstant { name, .. } => {
+                if let phera_ast::MemberName::Expression(name) = name {
+                    pending.push(name);
+                }
+            }
+            ExpressionKind::Property {
+                target,
+                name,
+                nullsafe: false,
+            } => {
+                pending.push(target);
+                if let phera_ast::MemberName::Expression(name) = name {
+                    pending.push(name);
+                }
+            }
+            ExpressionKind::Call {
+                callee,
+                arguments: phera_ast::Arguments::FirstClassCallable,
+            } if matches!(
                 callee.kind,
                 ExpressionKind::Name(_) | ExpressionKind::Literal(phera_ast::Literal::String(_))
-            )
+            ) => {}
+            ExpressionKind::StaticCall {
+                class,
+                name: phera_ast::MemberName::Identifier(_),
+                arguments: phera_ast::Arguments::FirstClassCallable,
+            } if matches!(class.kind, ExpressionKind::Name(_)) => {}
+            ExpressionKind::Closure(closure) if closure.is_static && closure.uses.is_empty() => {}
+            ExpressionKind::Array(items) => {
+                for item in items {
+                    if item.by_reference {
+                        return false;
+                    }
+                    pending.extend(item.key.iter());
+                    pending.push(&item.value);
+                }
+            }
+            ExpressionKind::Unary { operator, operand }
+                if *operator != phera_ast::UnaryOperator::ErrorSuppress =>
+            {
+                pending.push(operand)
+            }
+            ExpressionKind::Ternary {
+                condition,
+                then,
+                otherwise,
+            } => {
+                pending.push(condition);
+                pending.extend(then.as_deref());
+                pending.push(otherwise);
+            }
+            ExpressionKind::Index {
+                target,
+                index: Some(index),
+            } => {
+                pending.push(target);
+                pending.push(index);
+            }
+            ExpressionKind::Binary { left, right, .. } => {
+                pending.push(left);
+                pending.push(right);
+            }
+            _ => return false,
         }
-        ExpressionKind::StaticCall {
-            class,
-            name: phera_ast::MemberName::Identifier(_),
-            arguments: phera_ast::Arguments::FirstClassCallable,
-        } => {
-            matches!(class.kind, ExpressionKind::Name(_))
-        }
-        ExpressionKind::Closure(closure) => closure.is_static && closure.uses.is_empty(),
-        ExpressionKind::ArrowFunction(_) => false,
-        ExpressionKind::Array(items) => items.iter().all(|item| {
-            !item.by_reference
-                && item.key.as_ref().is_none_or(constant_expression)
-                && constant_expression(&item.value)
-        }),
-        ExpressionKind::Unary { operator, operand } => {
-            *operator != phera_ast::UnaryOperator::ErrorSuppress && constant_expression(operand)
-        }
-        ExpressionKind::Ternary {
-            condition,
-            then,
-            otherwise,
-        } => {
-            constant_expression(condition)
-                && then.as_deref().is_none_or(constant_expression)
-                && constant_expression(otherwise)
-        }
-        ExpressionKind::Index { target, index } => {
-            constant_expression(target) && index.as_deref().is_some_and(constant_expression)
-        }
-        ExpressionKind::Binary { left, right, .. } => {
-            constant_expression(left) && constant_expression(right)
-        }
-        _ => false,
     }
+    true
 }
 
 /// PHP permits named-class construction in parameter defaults but not property defaults.

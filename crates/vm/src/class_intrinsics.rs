@@ -30,7 +30,9 @@ impl Vm {
         };
 
         match function {
-            Operation::DeclaredClasses | Operation::DeclaredInterfaces => {
+            Operation::DeclaredClasses
+            | Operation::DeclaredInterfaces
+            | Operation::DeclaredTraits => {
                 return self.declared_classes(function);
             }
             Operation::GetCalledClass => {
@@ -87,7 +89,8 @@ impl Vm {
             | Operation::TraitExists
             | Operation::EnumExists
             | Operation::ClassParents
-            | Operation::ClassImplements => option(1, true),
+            | Operation::ClassImplements
+            | Operation::ClassUses => option(1, true),
             _ => true,
         };
         let class = match &value {
@@ -107,13 +110,17 @@ impl Vm {
         };
         match function {
             Operation::ClassExists => Ok(Value::Bool(
-                class.is_some_and(|class| class.kind == ClassKind::Class),
+                class.is_some_and(|class| class.kind.is_class()),
             )),
             Operation::InterfaceExists => Ok(Value::Bool(
                 class.is_some_and(|class| class.kind == ClassKind::Interface),
             )),
-            // The class table has only class and interface entries until traits and enums are linked.
-            Operation::TraitExists | Operation::EnumExists => Ok(Value::Bool(false)),
+            Operation::TraitExists => Ok(Value::Bool(
+                class.is_some_and(|class| class.kind == ClassKind::Trait),
+            )),
+            Operation::EnumExists => Ok(Value::Bool(
+                class.is_some_and(|class| class.kind == ClassKind::Enum),
+            )),
             Operation::IsA | Operation::IsSubclassOf => {
                 let target = self.classes.get(&string(&arguments[1]));
                 Ok(Value::Bool(class.zip(target).is_some_and(
@@ -142,7 +149,7 @@ impl Vm {
                 self.class_variables(&class, (function.name(), &arguments))
                     .await
             }
-            Operation::ClassParents | Operation::ClassImplements => {
+            Operation::ClassParents | Operation::ClassImplements | Operation::ClassUses => {
                 check_object_or_class(function, &value)?;
                 let Some(class) = class else {
                     let suffix = if autoload {
@@ -199,18 +206,17 @@ impl Vm {
 
     /// PHP lists the canonical declaration spelling, or the lowercased key for an alias.
     fn declared_classes(&self, function: ClassFunction) -> NativeResult {
-        let wanted = if matches!(function, ClassFunction::DeclaredInterfaces) {
-            ClassKind::Interface
-        } else {
-            ClassKind::Class
-        };
         let mut listed = PhpArray::new();
         for name in &self.classes.order {
             if self
                 .classes
                 .entries
                 .get(&name.to_ascii_lowercase())
-                .is_some_and(|class| class.kind == wanted)
+                .is_some_and(|class| match function {
+                    ClassFunction::DeclaredInterfaces => class.kind == ClassKind::Interface,
+                    ClassFunction::DeclaredTraits => class.kind == ClassKind::Trait,
+                    _ => class.kind.is_class(),
+                })
             {
                 listed.push(Value::from(name.as_str()))?;
             }

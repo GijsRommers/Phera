@@ -12,6 +12,25 @@ impl Compiler<'_> {
     ) -> Result<(), CompileError> {
         let is_interface = declaration.kind == ast::ClassKind::Interface;
         if let Some(identifier) = &declaration.name
+            && identifier.name == "_"
+            && matches!(
+                declaration.kind,
+                ast::ClassKind::Trait | ast::ClassKind::Enum
+            )
+        {
+            let kind = if declaration.kind == ast::ClassKind::Trait {
+                "a trait"
+            } else {
+                "an enum"
+            };
+            return Err(self.error(
+                format!(
+                    "Using \"_\" as {kind} name is not supported by Phera: deprecated since PHP 8.4"
+                ),
+                self.lines.line(identifier.span.start),
+            ));
+        }
+        if let Some(identifier) = &declaration.name
             && matches!(
                 identifier.name.to_ascii_lowercase().as_str(),
                 "self" | "parent" | "static"
@@ -89,7 +108,11 @@ impl Compiler<'_> {
         let line = self.lines.line(method.name.span.start);
         let name = &method.name.name;
         let is_interface = declaration.kind == ast::ClassKind::Interface;
-        let message = if name.eq_ignore_ascii_case("__construct") && method.modifiers.is_static {
+        let message = if declaration.name.is_none() && method.modifiers.is_abstract {
+            Some(format!(
+                "Anonymous class method {name}() must not be abstract"
+            ))
+        } else if name.eq_ignore_ascii_case("__construct") && method.modifiers.is_static {
             Some(format!("Method {class}::{name}() cannot be static"))
         } else if !is_interface && method.body.is_none() && !method.modifiers.is_abstract {
             Some(format!(
@@ -97,12 +120,14 @@ impl Compiler<'_> {
             ))
         } else if method.modifiers.is_abstract
             && method.modifiers.visibility == Some(ast::Visibility::Private)
+            && declaration.kind != ast::ClassKind::Trait
         {
             Some(format!(
                 "Abstract function {class}::{name}() cannot be declared private"
             ))
         } else if method.modifiers.is_abstract
             && !is_interface
+            && declaration.kind != ast::ClassKind::Trait
             && !declaration.modifiers.is_abstract
         {
             Some(format!(

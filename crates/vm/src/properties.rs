@@ -6,6 +6,29 @@ use phera_extension_api::{NativeError, NativePropertyRead, NativeResult};
 use phera_value::{ArrayKey, Value};
 
 impl Vm {
+    /// A property default must match its declared type even in a weak calling file.
+    pub(crate) fn evaluate_property_initializer(
+        &mut self,
+        initializer: &crate::code_table::FunctionIndex,
+        property: &crate::classes::class::PropertyDefault,
+    ) -> NativeResult {
+        let value = self.evaluate_initializer(initializer, &property.declaring)?;
+        let Some(ty) = &property.ty else {
+            return Ok(value);
+        };
+        let actual = value.type_name();
+        crate::types::coerce(value, ty, crate::types::TypeChecking::Strict, self).map_err(|_| {
+            NativeError::type_error(format!(
+                "Cannot assign {actual} to property {}::${} of type {}",
+                phera_value::class_display_name(&property.declaring),
+                property.name,
+                ty.display,
+            ))
+        })
+    }
+}
+
+impl Vm {
     /// Dynamic static targets accept either an object handle or a class-name string.
     pub(crate) fn static_property_names(
         &mut self,
@@ -54,7 +77,13 @@ impl Vm {
         let allowed = match property.visibility {
             Visibility::Public => true,
             Visibility::Private => scope.is_some_and(|scope| scope.name == property.declaring),
-            Visibility::Protected => scope.is_some_and(|scope| scope.is_a(&property.declaring)),
+            Visibility::Protected => scope.is_some_and(|scope| {
+                scope.is_a(&property.declaring)
+                    || self
+                        .classes
+                        .get(&property.declaring)
+                        .is_some_and(|declaring| declaring.is_a(&scope.name))
+            }),
         };
         if !allowed {
             let visibility = if property.visibility == Visibility::Private {
@@ -67,9 +96,18 @@ impl Vm {
                 property.declaring
             )));
         }
+        if class.kind == phera_bytecode::ClassKind::Trait {
+            self.diagnostic(
+                "Deprecated",
+                format!(
+                    "Accessing static trait property {}::${name} is deprecated, it should only be accessed on a class using the trait",
+                    class.name,
+                ),
+            );
+        }
         if !property.static_initialized.get() {
             if let Some(initializer) = &property.initializer {
-                let value = self.evaluate_initializer(initializer, &property.declaring)?;
+                let value = self.evaluate_property_initializer(initializer, property)?;
                 if let Some(storage) = &property.static_storage {
                     *storage.reference.borrow().borrow_mut() = value;
                 }
