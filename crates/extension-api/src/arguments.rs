@@ -328,8 +328,8 @@ fn to_number(value: &Value, site: &Site<'_>, context: &mut dyn Context) -> Optio
     })
 }
 
-/// Scalar conversions are synchronous. The VM invokes user-defined `__toString`
-/// before passing the resulting string here.
+/// Objects with `__toString` are not converted yet: calling the method needs
+/// the VM.
 fn to_string(value: &Value, site: &Site<'_>, context: &mut dyn Context) -> Option<Value> {
     match value {
         Value::Null => {

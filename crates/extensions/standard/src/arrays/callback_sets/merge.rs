@@ -1,12 +1,16 @@
-//! Sorted set traversal: `array_uintersect([2, 2, 1], [2], 'strcmp')` keeps both 2s.
+//! Walking the sorted arrays side by side, as php_array_diff and
+//! php_array_intersect do: `array_uintersect([2, 2, 1], [2], "strcmp")` keeps
+//! both 2s.
 
 use std::cmp::Ordering;
 
 use phera_extension_api::{Context, NativeResult, PhpArray, Value};
 
-use super::callback_sets::{Entry, SetComparison};
+use super::Entry;
+use super::comparison::SetComparison;
+use crate::arrays::callback::BoolResult;
 
-pub(super) async fn run(
+pub(in crate::arrays) async fn run(
     context: &mut dyn Context,
     first: &PhpArray,
     sorted: &[Vec<Entry>],
@@ -61,7 +65,11 @@ async fn difference(
                     break;
                 }
                 if let Some(candidate) = other.get(position) {
-                    if comparison.data(context, entry, candidate, true).await? == Ordering::Equal {
+                    if comparison
+                        .data(context, entry, candidate, BoolResult::AskAgain)
+                        .await?
+                        == Ordering::Equal
+                    {
                         break;
                     }
                     order = Ordering::Less;
@@ -121,7 +129,11 @@ async fn intersect(
                 return Ok(Value::from(result));
             };
             if order == Ordering::Equal && comparison.keys.is_some() && !comparison.key_only {
-                if comparison.data(context, entry, candidate, true).await? != Ordering::Equal {
+                if comparison
+                    .data(context, entry, candidate, BoolResult::AskAgain)
+                    .await?
+                    != Ordering::Equal
+                {
                     order = Ordering::Greater;
                     data_compares_keys = false;
                 } else {

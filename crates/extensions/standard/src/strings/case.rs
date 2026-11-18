@@ -1,91 +1,143 @@
-//! Case operations for PHP values.
+//! Length, case and byte order: `strtoupper("abc")` is `"ABC"`.
+//!
+//! PHP strings are bytes, and since PHP 8.2 these functions change the case
+//! of the ASCII letters only, whatever the locale. A UTF-8 `é` keeps its
+//! case, and `strrev` reverses the two bytes it is made of.
 
-use phera_extension_api::{
-    Context, FunctionEntry, NativeResult, Param, ParamType, Registry, SyncFn, Value, args,
-};
+use phera_extension_api::{Context, FunctionEntry, NativeResult, Param, ParamType, Value, args};
 
-use super::bytes;
-
-const STRING_PARAMS: &[Param] = &[Param::new("string", ParamType::String)];
-const UCWORDS_PARAMS: &[Param] = &[
-    Param::new("string", ParamType::String),
-    Param::new("separators", ParamType::String).optional(),
+pub(super) const FUNCTIONS: &[FunctionEntry] = &[
+    STRLEN, STRTOUPPER, STRTOLOWER, UCFIRST, LCFIRST, UCWORDS, STRREV,
 ];
 
-pub(crate) fn register(registry: &mut Registry) {
-    for (name, function) in [
-        ("strlen", strlen as SyncFn),
-        ("strtoupper", uppercase),
-        ("strtolower", lowercase),
-        ("ucfirst", ucfirst),
-        ("lcfirst", lcfirst),
-        ("strrev", reverse),
-    ] {
-        registry.function(FunctionEntry::sync(name, STRING_PARAMS, function));
-    }
-    registry.function(FunctionEntry::sync(
-        "ucwords",
-        UCWORDS_PARAMS,
-        capitalize_words,
-    ));
-}
+/// `strlen(string $string): int`, the length in bytes.
+///
+/// ```php
+/// strlen("héllo"); // 6: é takes two bytes in UTF-8
+/// ```
+const STRLEN: FunctionEntry =
+    FunctionEntry::sync("strlen", &[Param::new("string", ParamType::String)], strlen);
 
 fn strlen(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(Value::Int(args::bytes(arguments, 0).len() as i64))
 }
 
-fn uppercase(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(bytes(args::bytes(arguments, 0).to_ascii_uppercase()))
+/// `strtoupper(string $string): string`
+///
+/// ```php
+/// strtoupper("abc é"); // "ABC é"
+/// ```
+const STRTOUPPER: FunctionEntry = FunctionEntry::sync(
+    "strtoupper",
+    &[Param::new("string", ParamType::String)],
+    strtoupper,
+);
+
+fn strtoupper(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    Ok(Value::from(args::bytes(arguments, 0).to_ascii_uppercase()))
 }
 
-fn lowercase(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(bytes(args::bytes(arguments, 0).to_ascii_lowercase()))
+/// `strtolower(string $string): string`
+///
+/// ```php
+/// strtolower("ABC É"); // "abc É"
+/// ```
+const STRTOLOWER: FunctionEntry = FunctionEntry::sync(
+    "strtolower",
+    &[Param::new("string", ParamType::String)],
+    strtolower,
+);
+
+fn strtolower(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    Ok(Value::from(args::bytes(arguments, 0).to_ascii_lowercase()))
 }
 
-/// PHP changes only the first byte, without Unicode case expansion.
+/// `ucfirst(string $string): string`, the first byte in upper case.
+///
+/// ```php
+/// ucfirst("hello world"); // "Hello world"
+/// ```
+const UCFIRST: FunctionEntry = FunctionEntry::sync(
+    "ucfirst",
+    &[Param::new("string", ParamType::String)],
+    ucfirst,
+);
+
 fn ucfirst(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let mut string = args::bytes(arguments, 0).to_vec();
-    if let Some(byte) = string.first_mut() {
-        byte.make_ascii_uppercase();
+    if let Some(first) = string.first_mut() {
+        first.make_ascii_uppercase();
     }
-    Ok(bytes(string))
+    Ok(Value::from(string))
 }
 
-/// PHP changes only the first byte, without Unicode case expansion.
+/// `lcfirst(string $string): string`, the first byte in lower case.
+///
+/// ```php
+/// lcfirst("Hello World"); // "hello World"
+/// ```
+const LCFIRST: FunctionEntry = FunctionEntry::sync(
+    "lcfirst",
+    &[Param::new("string", ParamType::String)],
+    lcfirst,
+);
+
 fn lcfirst(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let mut string = args::bytes(arguments, 0).to_vec();
-    if let Some(byte) = string.first_mut() {
-        byte.make_ascii_lowercase();
+    if let Some(first) = string.first_mut() {
+        first.make_ascii_lowercase();
     }
-    Ok(bytes(string))
+    Ok(Value::from(string))
 }
 
-/// PHP reverses bytes, including individual bytes of multibyte characters.
-fn reverse(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let mut string = args::bytes(arguments, 0).to_vec();
-    string.reverse();
-    Ok(bytes(string))
-}
+/// `ucwords(string $string, string $separators = " \t\r\n\f\v"): string`,
+/// the first byte and every byte after a separator in upper case.
+///
+/// ```php
+/// ucwords("hello big-world");      // "Hello Big-world"
+/// ucwords("hello big-world", "-"); // "Hello big-World"
+/// ```
+const UCWORDS: FunctionEntry = FunctionEntry::sync(
+    "ucwords",
+    &[
+        Param::new("string", ParamType::String),
+        Param::new("separators", ParamType::String).optional(),
+    ],
+    ucwords,
+);
 
-/// Only configured separator bytes word_start a new word; Unicode is not interpreted.
-fn capitalize_words(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let separator = if args::given(arguments, 1) {
+fn ucwords(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let separators = if args::given(arguments, 1) {
         args::bytes(arguments, 1)
     } else {
         b" \t\r\n\x0c\x0b"
     };
-    let mut word_start = true;
-    let string = args::bytes(arguments, 0)
+    let mut after_separator = true;
+    let result: Vec<u8> = args::bytes(arguments, 0)
         .iter()
-        .map(|byte| {
-            let result = if word_start {
+        .map(|&byte| {
+            let changed = if after_separator {
                 byte.to_ascii_uppercase()
             } else {
-                *byte
+                byte
             };
-            word_start = separator.contains(byte);
-            result
+            after_separator = separators.contains(&byte);
+            changed
         })
-        .collect::<Vec<_>>();
-    Ok(bytes(string))
+        .collect();
+    Ok(Value::from(result))
+}
+
+/// `strrev(string $string): string`, the bytes in reverse order.
+///
+/// ```php
+/// strrev("abc"); // "cba"
+/// ```
+const STRREV: FunctionEntry =
+    FunctionEntry::sync("strrev", &[Param::new("string", ParamType::String)], strrev);
+
+fn strrev(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let mut string = args::bytes(arguments, 0).to_vec();
+    string.reverse();
+    Ok(Value::from(string))
 }

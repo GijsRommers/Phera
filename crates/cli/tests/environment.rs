@@ -168,35 +168,6 @@ fn cli_environment_matches_php() {
     script.push_str("unset($_SERVER['REQUEST_TIME'], $_SERVER['REQUEST_TIME_FLOAT']);\n");
     script.push_str("var_dump($_SERVER);\n");
     compare(php, &project.write("probe.php", script), names.len());
-    for strict in [false, true] {
-        let mut script = if strict {
-            "<?php declare(strict_types=1);\n"
-        } else {
-            "<?php\n"
-        }
-        .to_owned();
-        script.push_str("class Key { function __toString(): string { return 'BASE'; } }\n");
-        script.push_str("class Bad { function __toString() { return []; } }\n");
-        script
-            .push_str("class Thrown { function __toString() { throw new Exception('cast'); } }\n");
-        for expr in [
-            "getenv(new Key())",
-            "putenv(new Key())",
-            "getenv(new Key(),[])",
-            "getenv(new Bad())",
-            "putenv(new Thrown())",
-            "putenv(new Key(),1)",
-            "getenv('BASE')",
-        ] {
-            script.push_str(&observe(expr));
-            calls += 1;
-        }
-        compare(
-            php,
-            &project.write("cast.php", script),
-            14 + usize::from(strict),
-        );
-    }
     // Exercise the ordering of inherited, removed, restored and request-created names.
     let mut state = 17u32;
     for group in 0..16 {

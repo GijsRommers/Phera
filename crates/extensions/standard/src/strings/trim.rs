@@ -1,125 +1,161 @@
-//! Trim operations for PHP values.
+//! Trimming: `trim("  hi\n")` is `"hi"`, `rtrim("1.500", "0")` is `"1.5"`.
+//!
+//! The list of characters to strip may contain ranges: `trim($s, "a..z")`.
+//! [`character_mask`] reads such a list, for `addcslashes` and
+//! `str_word_count` as well.
 
-use phera_extension_api::{
-    Context, FunctionEntry, NativeResult, Param, ParamType, Registry, SyncFn, Value, args,
-};
+use phera_extension_api::{Context, FunctionEntry, NativeResult, Param, ParamType, Value, args};
 
-use super::bytes;
+pub(super) const FUNCTIONS: &[FunctionEntry] = &[TRIM, LTRIM, RTRIM, CHOP];
 
-#[derive(Clone, Copy)]
-enum Side {
-    Left,
-    Right,
-    Both,
-}
+/// What the trim functions strip by default: space, `\n`, `\r`, `\t`, `\v`
+/// and NUL. Unlike C's `isspace`, PHP's list has no form feed.
+const DEFAULT_CHARACTERS: &[u8] = b" \n\r\t\x0b\0";
 
-const TRIM_PARAMS: &[Param] = &[
-    Param::new("string", ParamType::String),
-    Param::new("characters", ParamType::String).optional(),
-];
-
-pub(crate) fn register(registry: &mut Registry) {
-    for (name, function) in [
-        ("trim", trim as SyncFn),
-        ("ltrim", left),
-        ("rtrim", right),
-        ("chop", chop),
-    ] {
-        registry.function(FunctionEntry::sync(name, TRIM_PARAMS, function));
-    }
-}
-
-/// Malformed ranges warn independently because PHP still uses the remaining mask bytes.
-pub(super) fn mask(context: &mut dyn Context, string: &[u8], name: &str) -> [bool; 256] {
+/// The bytes a character list such as `"a..z\n"` names, as `php_charmask`
+/// in ext/standard/string.c reads it.
+///
+/// `x..y` with `x <= y` is the range of bytes from `x` to `y`. Any other
+/// `..` warns (PHP tries to say what is wrong with it) and then counts as
+/// characters: `"z..a"` names `z`, `.` and `a`.
+pub(super) fn character_mask(
+    context: &mut dyn Context,
+    function: &str,
+    list: &[u8],
+) -> [bool; 256] {
     let mut mask = [false; 256];
     let mut cursor = 0;
-    while let Some(&byte) = string.get(cursor) {
-        if let Some(range) = string.get(cursor..cursor.saturating_add(4))
-            && range.get(1) == Some(&b'.')
-            && range.get(2) == Some(&b'.')
-            && range.get(3).is_some_and(|end| *end >= byte)
+    while cursor < list.len() {
+        let byte = list[cursor];
+        if let &[_, b'.', b'.', last, ..] = &list[cursor..]
+            && last >= byte
         {
-            if let Some(&end) = range.get(3) {
-                for value in byte..=end {
-                    if let Some(entry) = mask.get_mut(usize::from(value)) {
-                        *entry = true;
-                    }
-                }
-            }
+            mask[usize::from(byte)..=usize::from(last)].fill(true);
             cursor += 4;
             continue;
         }
-        if byte == b'.' && string.get(cursor + 1) == Some(&b'.') {
+        if byte == b'.' && list.get(cursor + 1) == Some(&b'.') {
+            // The first dot of a bad range is dropped; the second one is
+            // read as a character on the next step.
             let reason = if cursor == 0 {
                 ", no character to the left of '..'"
-            } else if cursor + 2 >= string.len() {
+            } else if cursor + 2 >= list.len() {
                 ", no character to the right of '..'"
-            } else if string.get(cursor - 1) > string.get(cursor + 2) {
+            } else if list[cursor - 1] > list[cursor + 2] {
                 ", '..'-range needs to be incrementing"
             } else {
                 ""
             };
-            context.warning(format!("{name}(): Invalid '..'-range{reason}"));
+            context.warning(format!("{function}(): Invalid '..'-range{reason}"));
         } else {
-            if let Some(entry) = mask.get_mut(usize::from(byte)) {
-                *entry = true;
-            }
+            mask[usize::from(byte)] = true;
         }
         cursor += 1;
     }
     mask
 }
 
-/// Default whitespace excludes form feed in the installed PHP executable.
-fn trim_sides(
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Side {
+    Left,
+    Right,
+    Both,
+}
+
+/// The string without the listed characters at the start, the end or both.
+fn trim_with(
     context: &mut dyn Context,
     arguments: &[Value],
-    name: &str,
+    function: &str,
     side: Side,
 ) -> NativeResult {
-    let string = args::bytes(arguments, 0);
     let characters = if args::given(arguments, 1) {
         args::bytes(arguments, 1)
     } else {
-        b" \n\r\t\x0b\0"
+        DEFAULT_CHARACTERS
     };
-    let characters_mask = mask(context, characters, name);
-    let mut result = string;
-    if matches!(side, Side::Left | Side::Both) {
-        while result.first().is_some_and(|b| {
-            characters_mask
-                .get(usize::from(*b))
-                .copied()
-                .unwrap_or(false)
-        }) {
-            result = result.get(1..).unwrap_or_default();
-        }
+    let strip = character_mask(context, function, characters);
+    let keep = |byte: &u8| !strip[usize::from(*byte)];
+    let mut trimmed = args::bytes(arguments, 0);
+    if side != Side::Right {
+        let start = trimmed.iter().position(keep).unwrap_or(trimmed.len());
+        trimmed = &trimmed[start..];
     }
-    if matches!(side, Side::Right | Side::Both) {
-        while result.last().is_some_and(|b| {
-            characters_mask
-                .get(usize::from(*b))
-                .copied()
-                .unwrap_or(false)
-        }) {
-            result = result.get(..result.len() - 1).unwrap_or_default();
-        }
+    if side != Side::Left {
+        let end = trimmed.iter().rposition(keep).map_or(0, |last| last + 1);
+        trimmed = &trimmed[..end];
     }
-    Ok(bytes(result.to_vec()))
+    Ok(Value::from(trimmed))
 }
+
+/// `trim(string $string, string $characters = " \n\r\t\v\0"): string`
+///
+/// ```php
+/// trim("  hello\n");       // "hello"
+/// trim("[hello]", "[]");   // "hello"
+/// trim("abcba", "a..b");   // "c"
+/// ```
+const TRIM: FunctionEntry = FunctionEntry::sync(
+    "trim",
+    &[
+        Param::new("string", ParamType::String),
+        Param::new("characters", ParamType::String).optional(),
+    ],
+    trim,
+);
 
 fn trim(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    trim_sides(context, arguments, "trim", Side::Both)
+    trim_with(context, arguments, "trim", Side::Both)
 }
 
-fn left(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    trim_sides(context, arguments, "ltrim", Side::Left)
+/// `ltrim(string $string, string $characters = " \n\r\t\v\0"): string`,
+/// trimming the start only.
+///
+/// ```php
+/// ltrim("0012", "0"); // "12"
+/// ```
+const LTRIM: FunctionEntry = FunctionEntry::sync(
+    "ltrim",
+    &[
+        Param::new("string", ParamType::String),
+        Param::new("characters", ParamType::String).optional(),
+    ],
+    ltrim,
+);
+
+fn ltrim(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    trim_with(context, arguments, "ltrim", Side::Left)
 }
 
-fn right(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    trim_sides(context, arguments, "rtrim", Side::Right)
+/// `rtrim(string $string, string $characters = " \n\r\t\v\0"): string`,
+/// trimming the end only.
+///
+/// ```php
+/// rtrim("line\r\n"); // "line"
+/// ```
+const RTRIM: FunctionEntry = FunctionEntry::sync(
+    "rtrim",
+    &[
+        Param::new("string", ParamType::String),
+        Param::new("characters", ParamType::String).optional(),
+    ],
+    rtrim,
+);
+
+fn rtrim(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    trim_with(context, arguments, "rtrim", Side::Right)
 }
+
+/// `chop()`, another name for `rtrim()`; its warnings name `chop()`.
+const CHOP: FunctionEntry = FunctionEntry::sync(
+    "chop",
+    &[
+        Param::new("string", ParamType::String),
+        Param::new("characters", ParamType::String).optional(),
+    ],
+    chop,
+);
 
 fn chop(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    trim_sides(context, arguments, "chop", Side::Right)
+    trim_with(context, arguments, "chop", Side::Right)
 }

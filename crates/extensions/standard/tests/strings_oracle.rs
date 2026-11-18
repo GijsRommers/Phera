@@ -1,59 +1,22 @@
 //! Byte-oriented string matrices compared with the installed PHP executable.
-use phera_ext_standard::Standard;
-use phera_extension_api::{
-    ArrayKey, Extension, PhpArray, Registry, Value,
-    testing::{TestContext, call, oracle},
-};
+
+mod oracle_table;
+
+use oracle_table::OracleTable;
+use phera_extension_api::{ArrayKey, PhpArray, Value};
 
 #[test]
 fn strings_match_php() {
-    let mut registry = Registry::new();
-    Standard.register(&mut registry);
-    let mut script = String::from("<?php\n");
-    script.push_str(oracle::PHP_PREAMBLE);
-    let mut labels = Vec::new();
-    let mut results = Vec::new();
+    let mut table = OracleTable::new();
     let mut check = |name: &str, mut arguments: Vec<Value>| {
-        let expression = format!(
-            "{name}({})",
-            arguments
-                .iter()
-                .map(oracle::php_literal)
-                .collect::<Vec<_>>()
-                .join(",")
-        );
+        // similar_text reports its percentage through a third, by-reference
+        // argument.
         if name == "similar_text" {
-            let params = arguments
-                .iter()
-                .map(oracle::php_literal)
-                .collect::<Vec<_>>()
-                .join(",");
-            script.push_str(&format!("run('{name}',function(){{$p=null;$r=similar_text({params},$p);return [$r,$p];}});\n"));
+            arguments.push(Value::Null);
+            table.check_by_reference(name, arguments, 2);
         } else {
-            script.push_str(&format!("run('{name}',fn()=>{expression});\n"));
+            table.check(name, arguments);
         }
-        labels.push(expression);
-        let percent = std::rc::Rc::new(std::cell::RefCell::new(Value::Null));
-        if name == "similar_text" {
-            arguments.push(Value::Reference(percent.clone()));
-        }
-        let mut context = TestContext::default();
-        let result = call(&registry, &mut context, name, arguments).map(|result| {
-            if name == "similar_text" {
-                let mut array = PhpArray::new();
-                array.insert(ArrayKey::Int(0), result);
-                array.insert(ArrayKey::Int(1), percent.borrow().clone());
-                Value::from(array)
-            } else {
-                result
-            }
-        });
-        results.push(oracle::encode_case(
-            name,
-            &result,
-            &context.output,
-            &context.diagnostics,
-        ));
     };
     let mut strings: Vec<Value> = [
         "",
@@ -532,24 +495,7 @@ fn strings_match_php() {
             }
         }
     }
-    let Some(php) = oracle::run_php("standard-strings", &script) else {
-        panic!("PHP oracle required")
-    };
-    let php: Vec<String> = php.iter().map(|line| sign_of_comparison(line)).collect();
-    let results: Vec<String> = results
-        .iter()
-        .map(|line| sign_of_comparison(line))
-        .collect();
-    oracle::compare("strings", &labels, &php, &results);
-    let mut counts = std::collections::BTreeMap::new();
-    for line in &results {
-        if let Some((name, _)) = line.split_once('=') {
-            *counts.entry(name).or_insert(0usize) += 1;
-        }
-    }
-    for (name, count) in counts {
-        println!("{name}: {count}");
-    }
+    table.finish("strings", sign_of_comparison);
 }
 
 /// The functions PHP implements with the C library's `memcmp`. PHP returns
