@@ -47,7 +47,12 @@ impl ParseError {
 
     /// A grammar production can reject a declaration with PHP's fatal severity.
     pub fn is_fatal(&self) -> bool {
-        self.is_backtick_operator() || self.message == MULTIPLE_ACCESS_MODIFIERS
+        self.is_backtick_operator() || self.is_compile_error()
+    }
+
+    /// PHP's grammar can accept a declaration before rejecting its modifier combination.
+    pub fn is_compile_error(&self) -> bool {
+        self.message == MULTIPLE_ACCESS_MODIFIERS
     }
 }
 
