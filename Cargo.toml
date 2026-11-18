@@ -40,6 +40,7 @@ phera-ext-redis = { path = "crates/extensions/redis" }
 phera-io-pool = { path = "crates/io-pool" }
 phera-dotenv = { path = "crates/dotenv" }
 indexmap = "2"
+itoa = "1"
 regex = "1"
 phera-analyzer = { path = "crates/analyzer" }
 phera-lexer = { path = "crates/lexer" }
@@ -71,6 +72,7 @@ phera-ext-sqlite3 = { path = "crates/extensions/sqlite3" }
 rusqlite = { version = "=0.43.0", default-features = false, features = ["bundled", "column_metadata", "column_decltype", "backup"] }
 phera-ext-pdo = { path = "crates/extensions/pdo" }
 phera-ext-random = { path = "crates/extensions/random" }
+phera-ext-serialize = { path = "crates/extensions/serialize" }
 phera-ext-standard = { path = "crates/extensions/standard" }
 phera-ext-streams = { path = "crates/extensions/streams" }
 phera-ext-tokenizer = { path = "crates/extensions/tokenizer" }
