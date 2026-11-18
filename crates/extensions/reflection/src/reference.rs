@@ -105,12 +105,11 @@ fn from_array(
         );
         id
     };
-    allocate(
-        context,
-        "ReflectionReference",
-        None,
-        (id, reference.clone()),
-    )
+    let reflected = allocate(context, "ReflectionReference", None, id)?;
+    if let Value::Object(object) = &reflected {
+        crate::keep(object, Value::Reference(reference.clone()));
+    }
+    Ok(reflected)
 }
 
 fn get_id(_: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {

@@ -26,7 +26,7 @@ function oracleValue($value) {
 function oracleCall($key, $factory, $method, $arguments) {
     global $oracleDiagnostics;
     $oracleDiagnostics = [];
-    $output = '';
+    echo 'BEGIN ', $key, "\n";
     try {
         $reflector = $factory();
         $value = $reflector->$method(...$arguments);
@@ -34,5 +34,5 @@ function oracleCall($key, $factory, $method, $arguments) {
     } catch (Throwable $error) {
         $output = ['error', get_class($error), $error->getMessage()];
     }
-    echo 'CASE ', $key, '=', json_encode([$output, $oracleDiagnostics], JSON_INVALID_UTF8_SUBSTITUTE), "\n";
+    echo "\nCASE ", $key, '=', json_encode([$output, $oracleDiagnostics], JSON_INVALID_UTF8_SUBSTITUTE), "\n";
 }

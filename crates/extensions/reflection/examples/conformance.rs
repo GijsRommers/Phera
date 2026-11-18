@@ -114,14 +114,30 @@ fn run(
     fs::write(filename, &stdout)?;
     let filename = path.with_extension(format!("{}.err", runtime.label()));
     fs::write(filename, output.stderr)?;
-    Ok(stdout
-        .lines()
-        .filter_map(|line| {
-            line.strip_prefix("CASE ")
-                .and_then(|line| line.split_once('='))
-        })
-        .map(|(key, result)| (key.to_owned(), result.to_owned()))
-        .collect())
+    let mut output = Vec::new();
+    let mut results = BTreeMap::new();
+    let mut started = false;
+    for line in stdout.lines() {
+        if line.starts_with("BEGIN ") {
+            output.clear();
+            started = true;
+        } else if let Some((key, result)) = line
+            .strip_prefix("CASE ")
+            .and_then(|line| line.split_once('='))
+        {
+            let printed = output.join("\n");
+            let result = if printed.is_empty() {
+                result.to_owned()
+            } else {
+                format!("{result} (stdout {printed:?})")
+            };
+            results.insert(key.to_owned(), result);
+            started = false;
+        } else if started {
+            output.push(line);
+        }
+    }
+    Ok(results)
 }
 
 fn script(surface: &Surface, methods: &[String]) -> String {
