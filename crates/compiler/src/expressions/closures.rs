@@ -30,7 +30,7 @@ impl Compiler<'_> {
         };
         let function = self.functions.len();
         self.compile_captured_function(&declaration, DeclarationTiming::Hoisted, line, &captures)?;
-        self.hoisted.retain(|candidate| *candidate != function);
+        self.unhoist(function);
         for capture in &closure.uses {
             let source = self.local(&capture.name)?;
             let kind = if capture.by_reference {

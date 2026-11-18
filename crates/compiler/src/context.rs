@@ -25,6 +25,9 @@ pub(super) struct Compiler<'ast> {
     pub(super) function: Function,
     pub(super) functions: Vec<Function>,
     pub(super) hoisted: Vec<usize>,
+    /// The lowercased names of the functions in `hoisted`, to find a
+    /// redeclaration without searching every earlier one.
+    pub(super) hoisted_names: std::collections::HashSet<String>,
     pub(super) classes: Vec<crate::ir::ClassDeclaration>,
     pub(super) hoisted_classes: Vec<usize>,
     pub(super) next: usize,
@@ -62,6 +65,7 @@ impl<'ast> Compiler<'ast> {
             },
             functions: vec![],
             hoisted: vec![],
+            hoisted_names: std::collections::HashSet::new(),
             classes: vec![],
             hoisted_classes: vec![],
             next: 0,

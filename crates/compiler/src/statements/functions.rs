@@ -35,11 +35,7 @@ impl<'ast> Compiler<'ast> {
             format!("{}\\{}", self.namespace, declaration.name.name)
         };
         if timing == DeclarationTiming::Hoisted
-            && self
-                .hoisted
-                .iter()
-                .filter_map(|i| self.functions.get(*i))
-                .any(|declaration| declaration.name.eq_ignore_ascii_case(&name))
+            && self.hoisted_names.contains(&name.to_ascii_lowercase())
         {
             return Err(self.error(format!("Cannot redeclare function {name}()"), line));
         }
@@ -103,9 +99,24 @@ impl<'ast> Compiler<'ast> {
         self.declaration_warnings
             .extend(builder.declaration_warnings);
         if timing == DeclarationTiming::Hoisted {
-            self.hoisted.push(id)
+            self.hoisted.push(id);
+            if let Some(function) = self.functions.get(id) {
+                self.hoisted_names
+                    .insert(function.name.to_ascii_lowercase());
+            }
         } else {
             self.emit(Instruction::Declare(id), line);
+        }
+    }
+
+    /// Takes a function compiled as hoisted back out of the hoisted list:
+    /// methods and closures are compiled that way, but declared by their
+    /// class or closure expression instead.
+    pub(crate) fn unhoist(&mut self, index: usize) {
+        self.hoisted.retain(|candidate| *candidate != index);
+        if let Some(function) = self.functions.get(index) {
+            self.hoisted_names
+                .remove(&function.name.to_ascii_lowercase());
         }
     }
 

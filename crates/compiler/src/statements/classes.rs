@@ -289,7 +289,7 @@ impl Compiler<'_> {
         // The synthetic name is already fully qualified.
         let result = self.compile_function(&declaration, DeclarationTiming::Hoisted, line);
         result?;
-        self.hoisted.retain(|candidate| *candidate != index);
+        self.unhoist(index);
         Ok(ClassMethod {
             name: method.name.name.clone(),
             function: index,

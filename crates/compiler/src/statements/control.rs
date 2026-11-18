@@ -66,6 +66,7 @@ impl Compiler<'_> {
             }));
         let mut ends = Vec::new();
         for (condition, body, line) in branches {
+            let mark = self.mark_temporaries();
             let register = self.compile_expression(condition)?;
             let skip = self.emit(
                 Instruction::Branch {
@@ -75,6 +76,7 @@ impl Compiler<'_> {
                 },
                 line,
             );
+            self.release_temporaries(mark);
             self.block(body, DeclarationTiming::AtExecution)?;
             ends.push(self.emit(Instruction::Jump(Target(0)), line));
             self.patch(skip, self.position());

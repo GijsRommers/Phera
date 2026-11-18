@@ -70,7 +70,7 @@ pub(crate) fn fuse_integer_operands(function: &mut Function) {
 /// query walks forward until the register is overwritten, so without a bound
 /// a generated function with thousands of `case` arms takes quadratic time;
 /// giving up only means an operand is not fused.
-const DEAD_AFTER_SCAN: usize = 2048;
+const DEAD_AFTER_SCAN: usize = 512;
 
 /// A deliberately conservative proof: only straight-line overwrites are accepted.
 pub(crate) fn dead_after(function: &Function, index: usize, register: phera_bytecode::Reg) -> bool {
