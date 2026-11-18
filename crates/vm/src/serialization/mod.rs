@@ -2,6 +2,7 @@
 
 mod declarations;
 mod properties;
+mod property_index;
 pub(crate) mod settings;
 
 use std::rc::Rc;

@@ -5,6 +5,7 @@ use std::rc::Rc;
 use phera_extension_api::{Context, NativeError, PropertyPurpose};
 use phera_value::{ArrayKey, Object, PhpArray, PropertyScope, Value, split_property_key};
 
+use super::property_index::DeclaredProperties;
 use crate::Vm;
 
 impl Vm {
@@ -52,7 +53,8 @@ impl Vm {
         let ArrayKey::String(spelling) = &key else {
             return Some(key);
         };
-        if class.defaults.is_empty() || class.defaults.iter().any(|prop| prop.key == key) {
+        let declarations = DeclaredProperties::new(self, &class);
+        if class.defaults.is_empty() || declarations.key(&key).is_some() {
             return Some(key);
         }
         let (name, scope) = split_property_key(spelling.as_bytes());
@@ -72,14 +74,7 @@ impl Vm {
         {
             return Some(key);
         }
-        Some(
-            class
-                .defaults
-                .iter()
-                .rev()
-                .find(|prop| prop.name.as_bytes() == name)
-                .map_or(key, |prop| prop.key.clone()),
-        )
+        Some(declarations.name(name).map_or(key, |prop| prop.key.clone()))
     }
 
     pub(crate) fn check_serialized_dynamic_property(
@@ -91,9 +86,9 @@ impl Vm {
             .classes
             .for_object(object)
             .ok_or_else(|| internal_error!("serialized property class"))?;
-        if class.defaults.iter().any(|prop| prop.key == *key)
-            || class.allows_dynamic_properties
+        if class.allows_dynamic_properties
             || class.name == phera_extension_api::serialization::INCOMPLETE_CLASS
+            || DeclaredProperties::new(self, &class).key(key).is_some()
         {
             return Ok(());
         }
@@ -127,8 +122,10 @@ impl Vm {
             .classes
             .for_object(object)
             .ok_or_else(|| internal_error!("serialized property class"))?;
+        let declarations = DeclaredProperties::new(self, &class);
         for (key, value) in properties.iter() {
-            let value = if let Some(property) = class.defaults.iter().find(|prop| prop.key == key)
+            let property = declarations.key(&key);
+            let value = if let Some(property) = property
                 && let Some(ty) = &property.ty
             {
                 let converted =
@@ -149,11 +146,12 @@ impl Vm {
                 value.clone()
             };
             if let Value::Reference(cell) = &value {
-                crate::reference_holders::ReferenceHolders::track_object(
+                crate::reference_holders::ReferenceHolders::track_serialized_property(
                     &self.property_references,
                     object,
                     &key,
                     cell,
+                    property,
                 )?;
             }
             object.set(key, value);
