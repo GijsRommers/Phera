@@ -127,16 +127,17 @@ fn create(options: &NewOptions, answers: &mut impl BufRead) -> Result<(), String
         })?,
     }
 
-    println!("\nCreated {}.\n\nNext:\n  cd {}", name, directory.display());
+    println!("\nCreated {name}.\n\nNext:\n  cd {}", directory.display());
     if needs_composer_install {
         println!("  composer install        fetches packages and writes the class loader");
     }
-    println!("  phera serve public      then open http://127.0.0.1:8080/");
-    if let (false, Some(framework)) = (template.runs_on_phera(), template.framework()) {
-        println!(
-            "\nPhera does not run {framework} applications yet. Until it does:\n  \
-             php -S 127.0.0.1:8080 -t public"
-        );
+    match template.framework() {
+        Some(framework) if !template.runs_on_phera() => println!(
+            "  php -S 127.0.0.1:8080 -t public\n\n\
+             Phera does not run {framework} applications yet. When it does, the last step is:\n  \
+             phera serve public"
+        ),
+        _ => println!("  phera serve public      then open http://127.0.0.1:8080/"),
     }
     Ok(())
 }
