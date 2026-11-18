@@ -1,5 +1,6 @@
 //! Parse commands and startup options, preserving everything after a script name as PHP argv.
 
+use crate::new::{NewOptions, Template, template_keys};
 use phera_dotenv::FileSelection;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -24,6 +25,11 @@ Usage:
     --health PATH                         answer this path with 200 and ok,
                                           without running PHP
     ENV OPTIONS as below
+  phera new [OPTIONS] [DIRECTORY]         start a project; asks for what
+                                          is not given
+    --template NAME                       plain, symfony, symfony-webapp or
+                                          laravel
+    --no-install                          do not fetch packages
   phera --dump <file.php>                 print the compiled bytecode
   phera check [--level 0|1] [--format text|json|github] [--no-progress]
               [--generate-baseline FILE] <paths...>
@@ -43,6 +49,7 @@ pub(crate) enum Command {
     },
     Serve(ServeOptions),
     Check(phera_analyzer::config::Options),
+    New(crate::new::NewOptions),
     Version,
 }
 
@@ -86,6 +93,10 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
             arguments.next();
             parse_serve(arguments, files).map(Command::Serve)
         }
+        Some("new") => {
+            arguments.next();
+            parse_new(arguments).map(Command::New)
+        }
         Some(_) => {
             // `phera run file.php` and `phera file.php` mean the same.
             arguments.next_if(|argument| argument == "run");
@@ -99,6 +110,32 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
             })
         }
     }
+}
+
+fn parse_new(mut arguments: impl Iterator<Item = String>) -> Result<NewOptions, String> {
+    let mut options = NewOptions {
+        directory: None,
+        template: None,
+        install: true,
+    };
+    while let Some(argument) = arguments.next() {
+        match argument.as_str() {
+            "--no-install" => options.install = false,
+            "--template" => {
+                let key = arguments.next().ok_or("--template needs a name.")?;
+                let template = Template::from_key(&key).ok_or_else(|| {
+                    format!("Unknown template: {key}. Known: {}.", template_keys())
+                })?;
+                options.template = Some(template);
+            }
+            option if option.starts_with('-') => return Err(format!("Unknown option: {option}")),
+            _ if options.directory.is_some() => {
+                return Err("phera new takes one directory.".to_string());
+            }
+            _ => options.directory = Some(PathBuf::from(argument)),
+        }
+    }
+    Ok(options)
 }
 
 fn leading_files(
