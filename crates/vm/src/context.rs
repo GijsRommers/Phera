@@ -145,6 +145,17 @@ impl Context for Vm {
         }
     }
 
+    fn throw_object(&mut self, object: std::rc::Rc<phera_value::Object>) -> NativeError {
+        let throwable = self
+            .classes
+            .for_object(&object)
+            .is_some_and(|class| class.is_throwable);
+        if !throwable {
+            return NativeError::error("Cannot throw objects that do not implement Throwable");
+        }
+        crate::exceptions::Thrown::from_object(object).into_error()
+    }
+
     /// Native decoders construct linked objects without running PHP constructors.
     fn create_object(&mut self, name: &str, properties: phera_value::PhpArray) -> NativeResult {
         let class = self.factory_class(name)?;

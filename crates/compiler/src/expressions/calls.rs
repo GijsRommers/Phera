@@ -3,7 +3,7 @@
 use phera_ast as ast;
 use phera_bytecode::Reg;
 
-use crate::ir::{Argument, Instruction};
+use crate::ir::{Argument, Constant, Instruction};
 use crate::policies::NameKind;
 use crate::{CompileError, Compiler};
 
@@ -30,16 +30,66 @@ impl Compiler<'_> {
         {
             self.function.dynamic_scope = true;
         }
+        let mut quoted_condition = None;
         if let ExpressionKind::Name(name) = &callee.kind
             && callee.span == name.span
         {
+            quoted_condition = self.assertion_text(name, arguments);
             let (name, fallback) = self.resolve(name, NameKind::Function);
             self.emit(Instruction::StartCall { name, fallback }, line);
         } else {
             let callee = self.compile_expression(callee)?;
             self.emit(Instruction::StartDynamicCall { callee }, line);
         }
-        self.compile_arguments(arguments, line)
+        let Some((description, name)) = quoted_condition else {
+            return self.compile_arguments(arguments, line);
+        };
+        // `assert($x > 1)` is called as `assert($x > 1, 'assert($x > 1)')`:
+        // the message of a failed assertion is the condition as written.
+        let temporary_objects = match arguments {
+            ast::Arguments::List(arguments) => self.send_arguments(arguments, line)?,
+            _ => Vec::new(),
+        };
+        let description = self.literal(Constant::Bytes(description), line)?;
+        self.emit(
+            Instruction::Send {
+                argument: Argument {
+                    source: crate::ir::ArgumentSource::Value(description),
+                    name,
+                    spread: false,
+                },
+            },
+            line,
+        );
+        self.finish_call(temporary_objects, line)
+    }
+
+    /// For `assert(condition)` with nothing else, the text `assert(condition)`
+    /// that PHP uses as the failure message, and the name to pass it under:
+    /// after `assert(assertion: $x)` the description must be named too.
+    /// `None` for any other call.
+    fn assertion_text(
+        &self,
+        name: &ast::Name,
+        arguments: &ast::Arguments,
+    ) -> Option<(Vec<u8>, Option<String>)> {
+        let ast::Arguments::List(arguments) = arguments else {
+            return None;
+        };
+        let [condition] = arguments.as_slice() else {
+            return None;
+        };
+        if condition.spread || !name.text.eq_ignore_ascii_case("assert") {
+            return None;
+        }
+        let description_name = match &condition.name {
+            None => None,
+            Some(named) if named.name == "assertion" => Some("description".to_string()),
+            Some(_) => return None,
+        };
+        let written = self.source.get(condition.span.start..condition.span.end)?;
+        let text = [b"assert(", written.trim_ascii(), b")"].concat();
+        Some((text, description_name))
     }
 
     /// All call forms share named arguments, spreads and reference-capable sends.
@@ -53,46 +103,78 @@ impl Compiler<'_> {
             self.emit(Instruction::FinishCallable { destination: dst }, line);
             return Ok(dst);
         };
+        let temporary_objects = self.send_arguments(arguments, line)?;
+        self.finish_call(temporary_objects, line)
+    }
+
+    fn send_arguments(
+        &mut self,
+        arguments: &[ast::Argument],
+        line: usize,
+    ) -> Result<Vec<Reg>, CompileError> {
         let mut temporary_objects = Vec::new();
         for argument in arguments {
-            let place = if !argument.spread && crate::helpers::reference_capable(&argument.value) {
-                Some(self.readable_place(&argument.value)?)
-            } else {
-                None
-            };
-            let source = if let Some(place) = place {
-                crate::ir::ArgumentSource::Place(place)
-            } else if argument.spread && crate::helpers::reference_capable(&argument.value) {
-                let place = self.place(&argument.value)?;
-                let destination = self.allocate_register()?;
-                self.emit(Instruction::Reference { destination, place }, line);
-                crate::ir::ArgumentSource::Value(destination)
-            } else {
-                crate::ir::ArgumentSource::Value(self.compile_expression(&argument.value)?)
-            };
-            if let crate::ir::ArgumentSource::Value(register) = &source
-                && matches!(argument.value.kind, ast::ExpressionKind::New { .. })
-            {
-                temporary_objects.push(*register);
+            if let Some(register) = self.send_argument(argument, line)? {
+                temporary_objects.push(register);
             }
-            self.emit(
-                Instruction::Send {
-                    argument: Argument {
-                        source,
-                        name: argument.name.as_ref().map(|name| name.name.clone()),
-                        spread: argument.spread,
-                    },
-                },
-                line,
-            );
         }
-        let dst = self.allocate_register()?;
-        self.emit(Instruction::FinishCall { destination: dst }, line);
+        Ok(temporary_objects)
+    }
+
+    fn finish_call(
+        &mut self,
+        temporary_objects: Vec<Reg>,
+        line: usize,
+    ) -> Result<Reg, CompileError> {
+        let destination = self.allocate_register()?;
+        self.emit(Instruction::FinishCall { destination }, line);
         // The argument window owns a constructed object for the duration of the call.
         // Drop the compiler's copy before a following call can observe a weak reference.
         for register in temporary_objects {
             self.emit(Instruction::Clear { register }, line);
         }
-        Ok(dst)
+        Ok(destination)
+    }
+
+    /// Evaluates one argument and hands it to the call being set up.
+    fn send_argument(
+        &mut self,
+        argument: &ast::Argument,
+        line: usize,
+    ) -> Result<Option<Reg>, CompileError> {
+        let place = if !argument.spread && crate::helpers::reference_capable(&argument.value) {
+            Some(self.readable_place(&argument.value)?)
+        } else {
+            None
+        };
+        let source = if let Some(place) = place {
+            crate::ir::ArgumentSource::Place(place)
+        } else if argument.spread && crate::helpers::reference_capable(&argument.value) {
+            let place = self.place(&argument.value)?;
+            let destination = self.allocate_register()?;
+            self.emit(Instruction::Reference { destination, place }, line);
+            crate::ir::ArgumentSource::Value(destination)
+        } else {
+            crate::ir::ArgumentSource::Value(self.compile_expression(&argument.value)?)
+        };
+        let temporary = match &source {
+            crate::ir::ArgumentSource::Value(register)
+                if matches!(argument.value.kind, ast::ExpressionKind::New { .. }) =>
+            {
+                Some(*register)
+            }
+            _ => None,
+        };
+        self.emit(
+            Instruction::Send {
+                argument: Argument {
+                    source,
+                    name: argument.name.as_ref().map(|name| name.name.clone()),
+                    spread: argument.spread,
+                },
+            },
+            line,
+        );
+        Ok(temporary)
     }
 }

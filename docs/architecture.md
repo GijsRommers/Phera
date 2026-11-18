@@ -252,8 +252,11 @@ nullsafe, destructuring, alternative control syntax, heredoc and nowdoc,
 autoloading, `eval`, property hooks, asymmetric visibility, the pipe operator.
 
 **Language, left out:** backticks, `(real)`, short and
-ASP tags, `goto`, `declare(ticks)`, `__halt_compiler` data access, and
-`assert()` with side effects (assertions compile to nothing, as in production).
+ASP tags, `goto`, `declare(ticks)` and `__halt_compiler` data access.
+`assert()` is checked, as under `php -n`: a failed assertion throws
+`AssertionError` with the condition as written. A setting that compiles
+assertions out, as PHP's production configuration does, comes with the
+configuration file.
 Fibers come after everything else works.
 
 **Runtime, left out:** opcache and JIT settings, FFI, phar, pcntl, posix, the C
