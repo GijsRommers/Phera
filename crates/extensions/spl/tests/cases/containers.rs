@@ -90,13 +90,23 @@ pub(super) fn weak_map() -> Cases {
     for method in ["offsetGet", "offsetSet", "offsetExists", "offsetUnset"] {
         for value in HOSTILE.iter().chain(&["$x"]) {
             let extra = if method == "offsetSet" { ", 2" } else { "" };
-            let expression = if method == "offsetGet" && *value == "new stdClass" {
-                // The error contains the request-local object ID.
-                format!("$o->{method}({value})")
+            if method == "offsetGet" && *value == "new stdClass" {
+                // This diagnostic names the same handle returned by spl_object_id().
+                cases.push((
+                    "offsetGet_missing_object".to_owned(),
+                    format!("{setup} $missing = new stdClass;"),
+                    "(function () use ($o, $missing) { try { return $o->offsetGet($missing); } \
+                     catch (Error $e) { \
+                         $message = 'Object stdClass#' . spl_object_id($missing) . ' not contained in WeakMap'; \
+                         if ($e->getMessage() !== $message) throw $e; \
+                         return get_class($e) . ': exact diagnostic with the key handle'; \
+                     } })()"
+                        .to_owned(),
+                ));
             } else {
-                format!("[$o->{method}({value}{extra}), count($o)]")
-            };
-            push(&mut cases, method, setup, &expression);
+                let expression = format!("[$o->{method}({value}{extra}), count($o)]");
+                push(&mut cases, method, setup, &expression);
+            }
         }
     }
     methods(

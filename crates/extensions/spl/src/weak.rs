@@ -52,9 +52,27 @@ fn create(context: &mut dyn Context, _: This<'_>, arguments: &[Value]) -> Native
 }
 
 fn get_reference(_: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
-    read_state(receiver(this)?, |target: &Weak<Object>| {
+    target_value(receiver(this)?)
+}
+
+fn target_value(reference: &Object) -> NativeResult {
+    read_state(reference, |target: &Weak<Object>| {
         target.upgrade().map_or(Value::Null, Value::Object)
     })
+}
+
+fn reference_view(
+    _: &mut dyn Context,
+    reference: &Object,
+    purpose: PropertyPurpose,
+) -> Result<PhpArray, NativeError> {
+    if purpose == PropertyPurpose::Debug {
+        Ok([(ArrayKey::str("object"), target_value(reference)?)]
+            .into_iter()
+            .collect())
+    } else {
+        Ok(reference.to_array())
+    }
 }
 
 #[derive(Clone, Default)]
@@ -279,6 +297,7 @@ const MAP_HOOKS: ClassHooks = ClassHooks {
 
 const REFERENCE_HOOKS: ClassHooks = ClassHooks {
     clone: Some(NativeClone::Forbidden),
+    properties: Some(reference_view),
     ..ClassHooks::EMPTY
 };
 
