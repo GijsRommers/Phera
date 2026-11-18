@@ -42,17 +42,8 @@ impl Vm {
             );
             entry.insert(ArrayKey::str("line"), Value::Int(caller.line() as i64));
             if callee.function_id().is_none()
-                && let Some(phera_bytecode::Instruction::Include { kind, .. }) = caller
-                    .function()
-                    .instructions
-                    .get(caller.ip().saturating_sub(1))
+                && let Some(name) = scoped_unit_name(caller)
             {
-                let name = match kind {
-                    phera_bytecode::IncludeKind::Include => "include",
-                    phera_bytecode::IncludeKind::IncludeOnce => "include_once",
-                    phera_bytecode::IncludeKind::Require => "require",
-                    phera_bytecode::IncludeKind::RequireOnce => "require_once",
-                };
                 let arguments = PhpArray::new();
                 entry.insert(ArrayKey::str("function"), Value::from(name));
                 entry.insert(ArrayKey::str("args"), Value::Array(Rc::new(arguments)));
@@ -170,4 +161,25 @@ pub(crate) struct WarningSite {
     pub(crate) boundary: usize,
     pub(crate) native: crate::error_traces::NativeTrace,
     pub(crate) location: crate::diagnostics::SourceLocation,
+}
+
+/// A nested unit is shown as the construct that entered it.
+fn scoped_unit_name(frame: FrameView<'_>) -> Option<&'static str> {
+    use phera_bytecode::{IncludeKind, Instruction};
+    Some(
+        match frame
+            .function()
+            .instructions
+            .get(frame.ip().saturating_sub(1))?
+        {
+            Instruction::Eval { .. } => "eval",
+            Instruction::Include { kind, .. } => match kind {
+                IncludeKind::Include => "include",
+                IncludeKind::IncludeOnce => "include_once",
+                IncludeKind::Require => "require",
+                IncludeKind::RequireOnce => "require_once",
+            },
+            _ => return None,
+        },
+    )
 }

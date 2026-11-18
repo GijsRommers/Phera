@@ -134,7 +134,11 @@ impl Instruction {
             | Instruction::ReturnReference(dst)
             | Instruction::Return(dst)
             | Instruction::Exit(dst) => *dst = map(*dst),
-            Instruction::Include {
+            Instruction::Eval {
+                destination: dst,
+                source: src,
+            }
+            | Instruction::Include {
                 destination: dst,
                 path: src,
                 ..

@@ -6,7 +6,7 @@ use phera_bytecode::{IncludeKind, Reg};
 use phera_extension_api::NativeError;
 use phera_value::{Value, to_php_string};
 
-use crate::{Vm, calls::frame::Frame, include_scope::ScopeBinding};
+use crate::Vm;
 
 impl Vm {
     /// Execute included top-level code with references to the caller scope.
@@ -29,47 +29,8 @@ impl Vm {
             self.set(destination, Value::Bool(true));
             return Ok(());
         }
-        if self.call_stack.depth() >= self.frame_limit {
-            return Err(NativeError::error(format!(
-                "Maximum call stack depth of {} exceeded",
-                self.frame_limit
-            )));
-        }
         self.include_state.record(unit.file.clone());
-        self.publish_declaration_warnings(&unit);
-        self.declare_included_functions(&unit)?;
-        self.push_include_frame(unit, destination)
-    }
-
-    /// Sharing the caller scope happens before the included frame takes its register window.
-    fn push_include_frame(
-        &mut self,
-        unit: std::sync::Arc<phera_bytecode::CompiledUnit>,
-        destination: Reg,
-    ) -> Result<(), NativeError> {
-        let bindings = self.include_bindings(&unit)?;
-        let function = self.code.load(&unit);
-        let base = self.registers.len();
-        let mut count = unit.main.registers as usize;
-        self.registers.grow_to(base + count);
-        self.call_stack
-            .push(Frame::new(function, base, Some(destination)));
-        for ScopeBinding {
-            register,
-            name,
-            value,
-        } in bindings
-        {
-            if let Some(name) = name {
-                self.registers.push_undefined();
-                count += 1;
-                let extras = self.call_stack.current_extras_mut();
-                extras.dynamic_count = Some(count);
-                extras.dynamic.insert(name, register);
-            }
-            self.registers.window_mut(base + register.index(), 1)[0] = Some(value);
-        }
-        Ok(())
+        self.enter_scoped_unit(unit, destination)
     }
 }
 
@@ -158,7 +119,7 @@ impl Vm {
     }
 
     /// Included declarations reject names that already exist in this request.
-    fn declare_included_functions(
+    pub(crate) fn declare_included_functions(
         &mut self,
         unit: &std::sync::Arc<phera_bytecode::CompiledUnit>,
     ) -> Result<(), NativeError> {

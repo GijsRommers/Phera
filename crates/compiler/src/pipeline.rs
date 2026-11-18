@@ -12,10 +12,18 @@ use crate::ir::{CompiledUnit, Constant, Instruction};
 use crate::policies::DeclarationTiming;
 use crate::{CompileError, errors, passes::lower};
 
+/// Included files return 1 by default; evaluated expressions return null.
+#[derive(Clone, Copy)]
+pub(super) enum SourceKind {
+    File,
+    Eval,
+}
+
 /// Parse and lower on the dedicated parser stack, returning immutable bytecode.
 pub(super) fn compile_on_stack(
     source: &str,
     file: &str,
+    kind: SourceKind,
 ) -> Result<phera_bytecode::CompiledUnit, CompileError> {
     let lines = LineTable::new(source);
     let ast = phera_parser::parse_on_current_stack(source).map_err(|error| CompileError {
@@ -33,7 +41,11 @@ pub(super) fn compile_on_stack(
     let mut compiler = Compiler::new(file, &lines, "{main}", "");
     compiler.function.dynamic_scope = true;
     compiler.block(&ast.statements, DeclarationTiming::Hoisted)?;
-    let register = compiler.literal(Constant::Int(1), 1)?;
+    let default = match kind {
+        SourceKind::File => Constant::Int(1),
+        SourceKind::Eval => Constant::Null,
+    };
+    let register = compiler.literal(default, 1)?;
     compiler.emit(Instruction::Return(register), 1);
     let unit = CompiledUnit {
         main: compiler.finish(),

@@ -54,6 +54,7 @@ mod error_handlers;
 mod error_traces;
 mod error_values;
 mod errors;
+mod eval;
 mod exception_rendering;
 #[cfg(test)]
 mod exception_tests;

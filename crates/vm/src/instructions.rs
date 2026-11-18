@@ -39,7 +39,7 @@ impl Vm {
             I::ReturnChecked { .. } | I::ReturnReference { .. } => {
                 return Ok(Some(BatchExit::Instruction(instruction)));
             }
-            I::Exit { .. } | I::Include { .. } => {
+            I::Exit { .. } | I::Include { .. } | I::Eval { .. } => {
                 return Ok(Some(BatchExit::Instruction(instruction)));
             }
             I::InitCall { function } => self.init_call(function)?,

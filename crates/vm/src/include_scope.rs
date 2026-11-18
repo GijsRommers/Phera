@@ -22,6 +22,62 @@ struct ScopeEntry {
 }
 
 impl Vm {
+    /// Included and evaluated code use the caller's variables and class context.
+    pub(crate) fn enter_scoped_unit(
+        &mut self,
+        unit: std::sync::Arc<CompiledUnit>,
+        destination: Reg,
+    ) -> Result<(), NativeError> {
+        use crate::calls::{frame::Frame, prepared_call::CallKind};
+
+        if self.call_stack.depth() >= self.frame_limit {
+            return Err(NativeError::error(format!(
+                "Maximum call stack depth of {} exceeded",
+                self.frame_limit
+            )));
+        }
+        self.publish_declaration_warnings(&unit);
+        self.declare_included_functions(&unit)?;
+        let function = self.code.load(&unit);
+        self.hoist_classes(&unit)?;
+        let bindings = self.include_bindings(&unit)?;
+        let context = self.current().and_then(|frame| frame.method());
+        let kind = if let Some(context) = &context {
+            self.code.set_declaring_class(function, context.scope.index);
+            let receiver = context.receiver.clone().map(Value::Object);
+            self.registers.push_undefined();
+            let index = self.registers.len() - 1;
+            self.registers.window_mut(index, 1)[0] = receiver;
+            CallKind::Method
+        } else {
+            CallKind::Function
+        };
+        let base = self.registers.len();
+        let mut count = unit.main.registers as usize;
+        self.registers.grow_to(base + count);
+        self.call_stack
+            .push(Frame::of_kind(function, kind, base, Some(destination)));
+        if let Some(context) = context {
+            self.call_stack.current_extras_mut().called = Some(context.called.index);
+        }
+        for ScopeBinding {
+            register,
+            name,
+            value,
+        } in bindings
+        {
+            if let Some(name) = name {
+                self.registers.push_undefined();
+                count += 1;
+                let extras = self.call_stack.current_extras_mut();
+                extras.dynamic_count = Some(count);
+                extras.dynamic.insert(name, register);
+            }
+            self.registers.window_mut(base + register.index(), 1)[0] = Some(value);
+        }
+        Ok(())
+    }
+
     /// Included locals and dynamic caller names must refer to the same cells before execution.
     pub(crate) fn include_bindings(
         &mut self,
@@ -102,7 +158,8 @@ impl Vm {
             }
         }
         // Ordinary return still owns recycling and writing the result register.
-        self.call_stack.push(frame.moved_to(self.registers.len()));
+        self.call_stack
+            .push(frame.moved_to(self.registers.len() + frame.kind().prefix()));
         Ok(())
     }
 }

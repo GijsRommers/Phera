@@ -330,6 +330,10 @@ impl Tables {
                 local,
                 name: self.name(&name),
             },
+            Old::Eval {
+                destination: dst,
+                source,
+            } => Instruction::Eval { dst, source },
             Old::Include {
                 destination: dst,
                 path,

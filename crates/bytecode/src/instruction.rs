@@ -456,6 +456,10 @@ pub enum Instruction {
     },
     /// `include`, `require` and their `_once` forms. `dst` receives what the
     /// file returned.
+    Eval {
+        dst: Reg,
+        source: Reg,
+    },
     Include {
         kind: IncludeKind,
         dst: Reg,
