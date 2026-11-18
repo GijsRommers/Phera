@@ -82,6 +82,18 @@ impl Comparison {
         command
     }
 
+    /// A fresh, empty directory for one run of `script` on `runtime`, for
+    /// scripts that write files: SQLite's take it as their working directory
+    /// and first argument, so the two runs do not share a database.
+    pub fn scratch_directory(&self, script: &Path, runtime: Runtime) -> PathBuf {
+        let directory = self
+            .artifacts
+            .join(format!("{}-{}", stem(script), runtime.label()));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).expect("create a scratch directory");
+        directory
+    }
+
     /// Checks two runs of the script `label` against each other and saves
     /// their outputs as `<label>.php.out`, `<label>.phera.err` and so on.
     pub fn check(&self, label: &str, php: &Output, phera: &Output) -> Result<Matched, String> {
