@@ -1,5 +1,17 @@
 //! Building `$_SERVER`, `$_GET`, `$_POST`, `$_COOKIE` and `$_REQUEST` from a
 //! request.
+//!
+//! A header the client sends more than once reaches PHP once, its values
+//! joined with ", " in the order they arrived:
+//!
+//! ```text
+//! X-Tag: one
+//! x-tag: two              $_SERVER['HTTP_X_TAG'] === 'one, two'
+//! ```
+//!
+//! That joined value is what PHP itself looks at afterwards, so two `Cookie`
+//! headers give one cookie string, and two `Content-Type` headers describe a
+//! form only when the form type comes first.
 
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -26,16 +38,19 @@ pub(crate) fn define_superglobals(
         Duplicates::Replace,
     );
 
+    let headers = join_repeated_headers(request);
+
     let mut post = PhpArray::new();
-    // PHP fills `$_POST` for the POST method only. A form body sent with PUT
-    // or GET stays in the raw request body.
-    if request.method.eq_ignore_ascii_case("POST") && is_form(request) {
+    // PHP fills `$_POST` for the method `POST` only, spelled exactly so. A
+    // form body sent with `PUT`, `GET` or `post` stays in the raw request
+    // body.
+    if request.method == "POST" && is_form(header(&headers, "content-type")) {
         parse_pairs(&mut post, &request.body, b'&', Duplicates::Replace);
     }
 
     let mut cookie = PhpArray::new();
-    if let Some(header) = request.header("Cookie") {
-        parse_pairs(&mut cookie, header, b';', Duplicates::KeepFirst);
+    if let Some(cookies) = header(&headers, "cookie") {
+        parse_pairs(&mut cookie, cookies, b';', Duplicates::KeepFirst);
     }
 
     // PHP's default `request_order` is "GP": POST values override GET ones,
@@ -47,7 +62,13 @@ pub(crate) fn define_superglobals(
 
     vm.set_global(
         "_SERVER",
-        Value::from(server(request, script, document_root, environment)),
+        Value::from(server(
+            request,
+            &headers,
+            script,
+            document_root,
+            environment,
+        )),
     );
     vm.set_global("_GET", Value::from(get));
     vm.set_global("_POST", Value::from(post));
@@ -58,17 +79,60 @@ pub(crate) fn define_superglobals(
 
 /// Whether the body is an HTML form in the default encoding. File uploads
 /// (`multipart/form-data`) are not parsed yet.
-fn is_form(request: &HttpRequest) -> bool {
-    request.header("Content-Type").is_some_and(|value| {
-        let media_type = value.split(|&byte| byte == b';').next().unwrap_or_default();
-        media_type
-            .trim_ascii()
-            .eq_ignore_ascii_case(b"application/x-www-form-urlencoded")
+///
+/// PHP reads the media type up to the first `;`, `,` or space and ignores
+/// the rest, so `application/x-www-form-urlencoded, text/plain` is a form
+/// and `text/plain, application/x-www-form-urlencoded` is not.
+fn is_form(content_type: Option<&[u8]>) -> bool {
+    content_type.is_some_and(|value| {
+        let media_type = value
+            .split(|byte| matches!(byte, b';' | b',' | b' '))
+            .next()
+            .unwrap_or_default();
+        media_type.eq_ignore_ascii_case(b"application/x-www-form-urlencoded")
     })
+}
+
+/// One request header as PHP sees it.
+struct JoinedHeader {
+    /// In lower case: header names do not distinguish case.
+    name: String,
+    /// Every value sent under this name, joined with ", ".
+    value: Vec<u8>,
+}
+
+/// Collects the headers by name, in the order each name first appeared.
+fn join_repeated_headers(request: &HttpRequest) -> Vec<JoinedHeader> {
+    let mut joined: Vec<JoinedHeader> = Vec::new();
+    for (name, value) in &request.headers {
+        let earlier = joined
+            .iter_mut()
+            .find(|header| header.name.eq_ignore_ascii_case(name));
+        match earlier {
+            Some(header) => {
+                header.value.extend_from_slice(b", ");
+                header.value.extend_from_slice(value);
+            }
+            None => joined.push(JoinedHeader {
+                name: name.to_ascii_lowercase(),
+                value: value.clone(),
+            }),
+        }
+    }
+    joined
+}
+
+/// The joined value of the header with this lower-case name.
+fn header<'a>(headers: &'a [JoinedHeader], name: &str) -> Option<&'a [u8]> {
+    headers
+        .iter()
+        .find(|header| header.name == name)
+        .map(|header| header.value.as_slice())
 }
 
 fn server(
     request: &HttpRequest,
+    headers: &[JoinedHeader],
     script: &Path,
     document_root: &Path,
     mut server: PhpArray,
@@ -124,15 +188,18 @@ fn server(
     let name = host.split(|&byte| byte == b':').next().unwrap_or_default();
     set("SERVER_NAME", Value::from(name));
 
-    for (header, value) in &request.headers {
-        // CGI's convention: `Accept-Language` becomes `HTTP_ACCEPT_LANGUAGE`,
-        // except for the two headers that describe the body.
-        let upper = header.to_ascii_uppercase().replace('-', "_");
-        let key = match upper.as_str() {
-            "CONTENT_TYPE" | "CONTENT_LENGTH" => upper,
-            _ => format!("HTTP_{upper}"),
-        };
-        set(&key, Value::from(value.as_slice()));
+    for header in headers {
+        // CGI's convention: `Accept-Language` becomes `HTTP_ACCEPT_LANGUAGE`.
+        // The two headers that describe the body are also set without the
+        // prefix, as PHP's own server does.
+        let upper = header.name.to_ascii_uppercase().replace('-', "_");
+        if matches!(upper.as_str(), "CONTENT_TYPE" | "CONTENT_LENGTH") {
+            set(&upper, Value::from(header.value.as_slice()));
+        }
+        set(
+            &format!("HTTP_{upper}"),
+            Value::from(header.value.as_slice()),
+        );
     }
     server
 }
