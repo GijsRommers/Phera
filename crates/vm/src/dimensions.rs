@@ -95,7 +95,8 @@ impl Vm {
         if let Some(native) = native(&object, NativeDimension::Get) {
             (native.get)(self, &object, offset)
         } else {
-            self.call_method(object, "offsetGet", vec![offset]).await
+            self.call_protocol_method(object, "offsetGet", vec![offset])
+                .await
         }
     }
 
@@ -129,7 +130,7 @@ impl Vm {
         } else {
             Ok(to_bool(
                 &self
-                    .call_method(object, "offsetExists", vec![offset])
+                    .call_protocol_method(object, "offsetExists", vec![offset])
                     .await?,
             ))
         }
@@ -144,7 +145,7 @@ impl Vm {
         if let Some(native) = native(&object, NativeDimension::Set) {
             (native.set)(self, &object, offset, value)
         } else {
-            self.call_method(object, "offsetSet", vec![offset, value])
+            self.call_protocol_method(object, "offsetSet", vec![offset, value])
                 .await
                 .map(drop)
         }
@@ -158,7 +159,7 @@ impl Vm {
         if let Some(native) = native(&object, NativeDimension::Unset) {
             (native.unset)(self, &object, offset)
         } else {
-            self.call_method(object, "offsetUnset", vec![offset])
+            self.call_protocol_method(object, "offsetUnset", vec![offset])
                 .await
                 .map(drop)
         }
@@ -226,13 +227,12 @@ impl Vm {
     ) -> NativeResult {
         match step {
             Step::Index(register) => {
-                let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
-                let key = ArrayKey::from_value_diag(
-                    &diagnostics.vm.operand(register),
-                    &mut diagnostics.buffer,
-                )?;
-                drop(diagnostics);
-                self.read_index(value, key, missing)
+                if matches!(value, Value::Array(_) | Value::String(_)) {
+                    let key = self.read_index_key(register, missing)?;
+                    self.read_path_index(value, &key, missing)
+                } else {
+                    self.read_nonarray_offset(value, missing)
+                }
             }
             Step::Append => Err(NativeError::error("Cannot use [] for reading")),
             Step::Property(name) => {

@@ -33,7 +33,8 @@ impl Vm {
         instruction: Instruction,
     ) -> Result<bool, NativeError> {
         let path = match instruction {
-            Instruction::MakeReference { path, .. }
+            Instruction::AssignPathFromLocal { path, .. }
+            | Instruction::MakeReference { path, .. }
             | Instruction::BindReference { path, .. }
             | Instruction::SendPath { path }
             | Instruction::UnsetPath { path } => self.path(path)?,
@@ -75,6 +76,13 @@ impl Vm {
                 return Ok(());
             }
             Instruction::AssignPath { src, .. } => (Write::Assign(self.get(src)), None),
+            Instruction::AssignPathFromLocal { src, dst, .. } => {
+                let value = self.read_root(src, Missing::Warn);
+                self.write_dimension_path(path, Write::Assign(value.clone()))
+                    .await?;
+                self.set(dst, value);
+                return Ok(());
+            }
             Instruction::AppendLocal { src, .. } => (Write::Assign(self.read_local(src)), None),
             Instruction::AssignOpPath { op, dst, src, .. } => {
                 (Write::Compound(op, self.get(src)), Some(dst))

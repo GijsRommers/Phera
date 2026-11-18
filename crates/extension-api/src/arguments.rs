@@ -51,31 +51,62 @@ pub fn prepare_call(
         let Some(param) = params.get(index).or(params.last()) else {
             break;
         };
-        let site = Site {
-            function: name,
-            number: index + 1,
-            param,
-        };
-        if param.by_ref {
-            // The function sees the caller's variable, so the conversion has
-            // to happen inside the reference.
-            if let Value::Reference(cell) = argument {
-                let mut target = cell.try_borrow_mut().map_err(|_| {
-                    NativeError::error(format!(
-                        "{}(): Argument #{} is already being modified",
-                        site.function, site.number
-                    ))
-                })?;
-                convert(&mut target, &site, strict, context)?;
-            }
-            continue;
-        }
-        if argument.is_reference() {
-            let plain = argument.deref().clone();
-            *argument = plain;
-        }
-        convert(argument, &site, strict, context)?;
+        prepare_argument(name, index, param, argument, strict, context)?;
     }
+    Ok(())
+}
+
+/// Prepare one supplied argument when the VM parses a list that may call PHP.
+pub fn prepare_single_argument(
+    name: &str,
+    index: usize,
+    param: &Param,
+    argument: &mut Value,
+    context: &mut dyn Context,
+) -> Result<(), NativeError> {
+    prepare_argument(
+        name,
+        index,
+        param,
+        argument,
+        context.strict_types(),
+        context,
+    )
+}
+
+#[inline]
+fn prepare_argument(
+    name: &str,
+    index: usize,
+    param: &Param,
+    argument: &mut Value,
+    strict: bool,
+    context: &mut dyn Context,
+) -> Result<(), NativeError> {
+    let site = Site {
+        function: name,
+        number: index + 1,
+        param,
+    };
+    if param.by_ref {
+        // The function sees the caller's variable, so the conversion has
+        // to happen inside the reference.
+        if let Value::Reference(cell) = argument {
+            let mut target = cell.try_borrow_mut().map_err(|_| {
+                NativeError::error(format!(
+                    "{}(): Argument #{} is already being modified",
+                    site.function, site.number
+                ))
+            })?;
+            convert(&mut target, &site, strict, context)?;
+        }
+        return Ok(());
+    }
+    if argument.is_reference() {
+        let plain = argument.deref().clone();
+        *argument = plain;
+    }
+    convert(argument, &site, strict, context)?;
     Ok(())
 }
 
@@ -371,8 +402,7 @@ fn to_number(value: &Value, site: &Site<'_>, context: &mut dyn Context) -> Optio
     })
 }
 
-/// Objects with `__toString` are not converted yet: calling the method needs
-/// the VM.
+/// Stringable objects are converted by the VM before entering the native parser.
 fn to_string(value: &Value, site: &Site<'_>, context: &mut dyn Context) -> Option<Value> {
     match value {
         Value::Null => {

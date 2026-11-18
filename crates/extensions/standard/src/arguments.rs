@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use phera_extension_api::{PhpArray, Value, args};
+use phera_extension_api::{Context, NativeError, PhpArray, PhpString, Value, args};
 
 /// A required `array` parameter.
 ///
@@ -24,5 +24,20 @@ pub(crate) fn given_type(value: &Value) -> String {
         Value::Bool(false) => "false".into(),
         Value::Bool(true) => "true".into(),
         _ => value.type_name(),
+    }
+}
+
+/// Array elements can be stringable even when the outer argument is an array.
+pub(crate) async fn stringify(
+    context: &mut dyn Context,
+    value: &Value,
+) -> Result<PhpString, NativeError> {
+    if value.is_object() {
+        context.stringify(value).await
+    } else {
+        Ok(phera_extension_api::value::to_php_string(
+            value,
+            context.diagnostics(),
+        )?)
     }
 }

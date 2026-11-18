@@ -56,7 +56,7 @@ async fn format_write(
         ),
         _ => Cow::Borrowed(arguments.get(2..).unwrap_or_default()),
     };
-    let data = render_format(context, format, &values, function, source)?;
+    let data = render_format(context, format, &values, function, source).await?;
     let requested = data.len() as i64;
     write(context, stream, &data, function).await?;
     Ok(Value::Int(requested))

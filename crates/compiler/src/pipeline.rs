@@ -38,7 +38,9 @@ pub(super) fn compile_on_stack(
             Ok(unit)
         }
         Err(mut error) => {
-            error.scanner_diagnostics = scanner_diagnostics;
+            let mut diagnostics = scanner_diagnostics;
+            diagnostics.append(&mut error.scanner_diagnostics);
+            error.scanner_diagnostics = diagnostics;
             Err(error)
         }
     }
@@ -90,7 +92,18 @@ fn compile_program(
     })?;
     let mut compiler = Compiler::new(file, lines, "{main}", "", compile_diagnostics);
     compiler.function.dynamic_scope = true;
-    compiler.block(&ast.statements, DeclarationTiming::Hoisted)?;
+    if let Err(mut error) = compiler.block(&ast.statements, DeclarationTiming::Hoisted) {
+        error
+            .scanner_diagnostics
+            .extend(compiler.declaration_warnings.into_iter().map(|warning| {
+                phera_source::CompileDiagnostic {
+                    kind: phera_source::CompileDiagnosticKind::Warning,
+                    message: warning.message,
+                    line: warning.line as usize,
+                }
+            }));
+        return Err(error);
+    }
     let default = match kind {
         SourceKind::File => Constant::Int(1),
         SourceKind::Eval => Constant::Null,
@@ -117,6 +130,7 @@ fn validate_global_writes(unit: &CompiledUnit) -> Result<(), CompileError> {
         for (index, instruction) in function.instructions.iter().enumerate() {
             let place = match instruction {
                 Instruction::Write { place, .. }
+                | Instruction::WriteFromLocal { place, .. }
                 | Instruction::Rebind { place, .. }
                 | Instruction::Compound { place, .. }
                 | Instruction::IncPlace { place, .. }

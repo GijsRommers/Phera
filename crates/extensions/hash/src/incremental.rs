@@ -15,8 +15,8 @@ use std::rc::Rc;
 
 use digest::DynDigest;
 use phera_extension_api::{
-    ClassEntry, ClassKind, Context, FunctionEntry, MethodEntry, NativeError, NativeResult, Object,
-    Param, ParamType, PhpArray, Value, Visibility, args,
+    ClassEntry, ClassHooks, ClassKind, Context, FunctionEntry, MethodEntry, NativeClone,
+    NativeError, NativeResult, Object, Param, ParamType, PhpArray, Value, Visibility, args,
 };
 
 use crate::algorithms::Algorithm;
@@ -39,11 +39,27 @@ pub const HASH_HMAC: i64 = 1;
 /// `final class HashContext`, made only by `hash_init()` and `hash_copy()`.
 pub const HASH_CONTEXT: ClassEntry = ClassEntry {
     kind: ClassKind::FinalClass,
+    hooks: Some(&ClassHooks {
+        clone: Some(NativeClone::Copy(clone_hash_context)),
+        ..ClassHooks::EMPTY
+    }),
     methods: &[
         MethodEntry::public("__construct", &[], construct).with_visibility(Visibility::Private)
     ],
     ..ClassEntry::class("HashContext")
 };
+
+fn clone_hash_context(source: &Rc<Object>, destination: &Object) -> Result<(), NativeError> {
+    let state = source
+        .native
+        .borrow()
+        .as_ref()
+        .and_then(|state| state.downcast_ref::<State>())
+        .cloned()
+        .ok_or_else(|| NativeError::value_error("Cannot clone a finalized HashContext"))?;
+    put_state(destination, state);
+    Ok(())
+}
 
 fn construct(_: &mut dyn Context, _: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
     Err(NativeError::error(
