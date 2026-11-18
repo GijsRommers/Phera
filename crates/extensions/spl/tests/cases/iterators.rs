@@ -91,6 +91,29 @@ pub(super) fn wrappers() -> Cases {
 
 pub(super) fn recursive() -> Cases {
     let mut cases = Cases::new();
+    let uninitialized = concat!(
+        "if (!class_exists('SkipsRecursiveConstructor')) { ",
+        "class SkipsRecursiveConstructor extends RecursiveIteratorIterator ",
+        "{ function __construct() {} } } $o = new SkipsRecursiveConstructor;"
+    );
+    methods(
+        &mut cases,
+        uninitialized,
+        &[
+            "$o->getDepth()",
+            "$o->getInnerIterator()",
+            "$o->getSubIterator()",
+            "$o->getMaxDepth()",
+            "$o->setMaxDepth(-2)",
+            "$o->beginIteration()",
+            "$o->rewind()",
+            "$o->current()",
+            "$o->valid()",
+            "$o->next()",
+            "$o->callHasChildren()",
+            "$o->callGetChildren()",
+        ],
+    );
     let setup = "$a=new RecursiveArrayIterator(['x'=>['n'=>1,2],'y'=>3]);";
     for expression in [
         "new RecursiveCallbackFilterIterator($a, fn()=>true)",

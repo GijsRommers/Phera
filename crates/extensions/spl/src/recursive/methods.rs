@@ -145,15 +145,16 @@ pub(super) fn get_max(_: &mut dyn Context, this: This<'_>, _: &[Value]) -> Nativ
 
 pub(super) fn set_max(_: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> NativeResult {
     let max = args::int(arguments, 0).unwrap_or(-1);
-    if max < -1 {
-        return Err(NativeError::value_error(
-            "RecursiveIteratorIterator::setMaxDepth(): Argument #1 ($maxDepth) must be greater than or equal to -1",
-        ));
-    }
     update(receiver(this)?, |state| {
+        if max < -1 {
+            return Err(NativeError::value_error(concat!(
+                "RecursiveIteratorIterator::setMaxDepth(): Argument #1 ($maxDepth) ",
+                "must be greater than or equal to -1"
+            )));
+        }
         state.max_depth = (max >= 0).then_some(max.min(i64::from(i32::MAX)));
-        Value::Null
-    })
+        Ok(Value::Null)
+    })?
 }
 
 pub(super) fn has_children(
@@ -172,6 +173,6 @@ pub(super) fn children(
     Box::pin(async move { walk::children(context, receiver(this.as_ref())?, false).await })
 }
 
-pub(super) fn no_action(_: &mut dyn Context, _: This<'_>, _: &[Value]) -> NativeResult {
-    Ok(Value::Null)
+pub(super) fn no_action(_: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
+    read(receiver(this)?, |_| Value::Null)
 }

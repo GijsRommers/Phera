@@ -74,11 +74,20 @@ struct Settings {
 }
 
 fn read<T>(object: &Object, f: impl FnOnce(&State) -> T) -> Result<T, NativeError> {
-    crate::read_state(object, f)
+    crate::read_state(object, |state: &State| state.settings.map(|_| f(state)))?
+        .ok_or_else(|| initialization_error(object))
 }
 
 fn update<T>(object: &Object, f: impl FnOnce(&mut State) -> T) -> Result<T, NativeError> {
-    crate::update_state(object, f)
+    crate::update_state(object, |state: &mut State| state.settings.map(|_| f(state)))?
+        .ok_or_else(|| initialization_error(object))
+}
+
+fn initialization_error(object: &Object) -> NativeError {
+    NativeError::error(format!(
+        "The {} instance wasn't initialized properly",
+        object.class.name()
+    ))
 }
 
 fn uninitialized() -> NativeError {
