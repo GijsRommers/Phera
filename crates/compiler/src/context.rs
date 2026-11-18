@@ -2,7 +2,11 @@
 //!
 //! AST nodes lower to compiler IR here; final interning belongs to `lower`.
 
-use std::{cell::RefCell, collections::HashMap};
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    rc::Rc,
+};
 
 use phera_ast as ast;
 use phera_bytecode::Reg;
@@ -33,6 +37,7 @@ pub(super) struct Compiler<'ast> {
     pub(super) hoisted_names: std::collections::HashSet<String>,
     pub(super) classes: Vec<crate::ir::ClassDeclaration>,
     pub(super) hoisted_classes: Vec<usize>,
+    pub(super) anonymous_classes: Rc<Cell<u64>>,
     pub(super) next: usize,
     pub(super) peak: usize,
     /// The highest `next` since the current expression statement began; see
@@ -48,6 +53,7 @@ pub(super) struct Compiler<'ast> {
     pub(super) namespace: String,
     /// __CLASS__ is lexical and does not change when a closure is rebound.
     pub(super) class_scope: Option<String>,
+    pub(super) trait_scope: Option<String>,
     pub(super) imports: HashMap<(NameKind, String), String>,
 }
 impl<'ast> Compiler<'ast> {
@@ -75,6 +81,7 @@ impl<'ast> Compiler<'ast> {
             hoisted_names: std::collections::HashSet::new(),
             classes: vec![],
             hoisted_classes: vec![],
+            anonymous_classes: Rc::default(),
             next: 0,
             peak: 0,
             reach: 0,
@@ -84,6 +91,7 @@ impl<'ast> Compiler<'ast> {
             finalies: vec![],
             namespace: namespace.into(),
             class_scope: None,
+            trait_scope: None,
             imports: HashMap::new(),
         }
     }

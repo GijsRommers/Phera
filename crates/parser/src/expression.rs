@@ -1036,20 +1036,31 @@ impl Parser<'_> {
 
         let mut modifiers = Modifiers::default();
         loop {
-            if self.eat(TokenKind::Abstract)? {
-                modifiers.is_abstract = true;
-            } else if self.eat(TokenKind::Final)? {
-                modifiers.is_final = true;
-            } else if self.eat(TokenKind::Readonly)? {
-                modifiers.is_readonly = true;
-            } else {
-                break;
-            }
+            let modifier = match self.kind() {
+                TokenKind::Abstract => "abstract",
+                TokenKind::Final => "final",
+                TokenKind::Readonly => {
+                    if modifiers.is_readonly {
+                        return Err(ParseError::compile(
+                            "Multiple readonly modifiers are not allowed",
+                            self.peek_span(),
+                        ));
+                    }
+                    self.bump()?;
+                    modifiers.is_readonly = true;
+                    continue;
+                }
+                _ => break,
+            };
+            return Err(ParseError::compile(
+                format!("Cannot use the {modifier} modifier on an anonymous class"),
+                self.peek_span(),
+            ));
         }
 
-        if self.at(TokenKind::Class) {
+        if modifiers.is_readonly || self.at(TokenKind::Class) {
             let mut arguments = Arguments::List(vec![]);
-            let class = self.parse_anonymous_class(start, attributes, modifiers, &mut arguments)?;
+            let class = self.parse_anonymous_class(attributes, modifiers, &mut arguments)?;
             return Ok(Expression {
                 kind: ExpressionKind::New {
                     class: NewTarget::Anonymous(Box::new(class)),
@@ -1506,7 +1517,8 @@ enum Rhs {
 
 /// PHP's grammar only allows a `variable` on the left of `=`, but its parser
 /// reduces the rightmost operand to a variable when an assignment operator
-/// follows, so `$a + $b = 1` parses as `$a + ($b = 1)`. This re-associates
+/// follows, so `$a + $b = 1` parses as `$a + ($b = 1)` and `(bool) $a = 1` as
+/// `(bool) ($a = 1)`. This re-associates
 /// `left` accordingly: the assignment attaches to the rightmost assignable
 /// operand along the right spine.
 ///
@@ -1580,12 +1592,14 @@ fn reassociate_assign(
 }
 
 /// The operand an assignment re-associates into: the right side of a binary
-/// operator or of a ternary, the operand of a prefix operator or `clone`.
+/// operator or of a ternary, the operand of a prefix operator, a cast or `clone`.
 fn right_operand(kind: &mut ExpressionKind) -> Option<&mut Box<Expression>> {
     match kind {
         ExpressionKind::Binary { right, .. } => Some(right),
         ExpressionKind::Ternary { otherwise, .. } => Some(otherwise),
-        ExpressionKind::Unary { operand, .. } => Some(operand),
+        ExpressionKind::Unary { operand, .. } | ExpressionKind::Cast { operand, .. } => {
+            Some(operand)
+        }
         ExpressionKind::Clone { object, .. } => Some(object),
         _ => None,
     }

@@ -37,6 +37,18 @@ impl Compiler<'_> {
             }
             _ => {}
         }
+        let mut root = expression;
+        while let ast::ExpressionKind::Index { target, .. }
+        | ast::ExpressionKind::Property { target, .. } = &root.kind
+        {
+            root = target;
+        }
+        if matches!(root.kind, ast::ExpressionKind::ClassConstant { .. }) {
+            return Err(self.error(
+                "Cannot use temporary expression in write context",
+                self.lines.line(expression.span.start),
+            ));
+        }
         self.readable_place(expression)
     }
 

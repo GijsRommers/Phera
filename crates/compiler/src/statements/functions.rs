@@ -74,39 +74,7 @@ impl<'ast> Compiler<'ast> {
         timing: DeclarationTiming,
         line: usize,
     ) {
-        let id = self.functions.len();
-        let class_base = self.classes.len();
-        let mut function = builder.finish();
-        for instruction in function.instructions.iter_mut().chain(
-            builder
-                .functions
-                .iter_mut()
-                .flat_map(|declaration| declaration.instructions.iter_mut()),
-        ) {
-            match instruction {
-                Instruction::Declare(i) | Instruction::Closure { function: i, .. } => *i += id + 1,
-                Instruction::DeclareClass(i) => *i += class_base,
-                _ => {}
-            }
-        }
-        self.functions.push(function);
-        self.functions.extend(builder.functions);
-        for mut class in builder.classes {
-            for method in &mut class.methods {
-                method.function += id + 1;
-            }
-            for constant in &mut class.constants {
-                constant.initializer += id + 1;
-            }
-            for property in &mut class.properties {
-                if let Some(initializer) = &mut property.default {
-                    *initializer += id + 1;
-                }
-            }
-            self.classes.push(class);
-        }
-        self.declaration_warnings
-            .extend(builder.declaration_warnings);
+        let id = self.append_function_body(&mut builder);
         if timing == DeclarationTiming::Hoisted {
             self.hoisted.push(id);
             if let Some(function) = self.functions.get(id) {
@@ -116,6 +84,54 @@ impl<'ast> Compiler<'ast> {
         } else {
             self.emit(Instruction::Declare(id), line);
         }
+    }
+
+    /// Relocate code and metadata compiled in a separate lexical frame.
+    pub(crate) fn append_function_body(&mut self, builder: &mut Compiler<'_>) -> usize {
+        let id = self.functions.len();
+        let class_offset = self.classes.len();
+        let mut function = builder.finish();
+        for instruction in function.instructions.iter_mut().chain(
+            builder
+                .functions
+                .iter_mut()
+                .flat_map(|declaration| declaration.instructions.iter_mut()),
+        ) {
+            match instruction {
+                Instruction::Declare(index)
+                | Instruction::Closure {
+                    function: index, ..
+                } => {
+                    *index += id + 1;
+                }
+                Instruction::DeclareClass(index) => *index += class_offset,
+                _ => {}
+            }
+        }
+        for class in &mut builder.classes {
+            for method in &mut class.methods {
+                method.function += id + 1;
+            }
+            for constant in &mut class.constants {
+                constant.initializer += id + 1;
+            }
+            for property in &mut class.properties {
+                if let Some(default) = &mut property.default {
+                    *default += id + 1;
+                }
+            }
+            for (_, backing) in &mut class.enum_cases {
+                if let Some(initializer) = backing {
+                    *initializer += id + 1;
+                }
+            }
+        }
+        self.functions.push(function);
+        self.functions.append(&mut builder.functions);
+        self.classes.append(&mut builder.classes);
+        self.declaration_warnings
+            .append(&mut builder.declaration_warnings);
+        id
     }
 
     /// Takes a function compiled as hoisted back out of the hoisted list:
@@ -145,6 +161,10 @@ impl<'ast> Compiler<'ast> {
             &self.namespace,
             self.compile_diagnostics,
         );
+        builder.anonymous_classes = self.anonymous_classes.clone();
+        if name.starts_with("{closure:") || name.contains("::") {
+            builder.trait_scope = self.trait_scope.clone();
+        }
         builder.class_scope = if !name.starts_with("{closure:") {
             name.split_once("::")
                 .map(|(class, _)| class.to_owned())

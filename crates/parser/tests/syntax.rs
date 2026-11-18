@@ -37,9 +37,86 @@ fn expr(src: &str) -> Expression {
     }
 }
 
+#[test]
+fn anonymous_class_declaration_starts_at_class_keyword() {
+    let source = "new\nreadonly\nclass {}";
+    let expression = expr(source);
+    let ExpressionKind::New {
+        class: NewTarget::Anonymous(declaration),
+        ..
+    } = &expression.kind
+    else {
+        panic!("expected an anonymous class");
+    };
+    assert_eq!(
+        declaration.span.start - expression.span.start,
+        "new\nreadonly\n".len()
+    );
+}
+
 /// Parses a whole file, tags and all.
 fn file(src: &str) -> Program {
     parse(src).unwrap_or_else(|e| panic!("parse error in {src:?}: {e}"))
+}
+
+#[test]
+fn trait_final_modifier_does_not_become_an_alias() {
+    let statement = stmt("class C { use T { T::f as final; T::f as protected final; } }");
+    let StatementKind::Class(class) = &statement.kind else {
+        panic!("expected a class");
+    };
+    let ClassMemberKind::TraitUse { adaptations, .. } = &class.members[0].kind else {
+        panic!("expected a trait use");
+    };
+    assert!(matches!(
+        adaptations.as_slice(),
+        [
+            TraitAdaptation::Alias {
+                alias: None,
+                visibility: None,
+                is_final: true,
+                ..
+            },
+            TraitAdaptation::Alias {
+                alias: Some(alias),
+                visibility: Some(Visibility::Protected),
+                is_final: false,
+                ..
+            }
+        ] if alias.name == "final"
+    ));
+}
+
+#[test]
+fn traits_cannot_declare_interfaces() {
+    assert!(
+        err("trait T implements I {}")
+            .message
+            .contains("unexpected token \"implements\"")
+    );
+}
+
+#[test]
+fn class_modifiers_are_rejected_on_traits_and_enums() {
+    for declaration in [
+        "final trait T {}",
+        "abstract enum E {}",
+        "readonly trait R {}",
+    ] {
+        assert!(err(declaration).message.contains("expecting \"abstract\""));
+    }
+}
+
+#[test]
+fn anonymous_class_reports_illegal_modifiers_at_the_keyword() {
+    let source = "new\nabstract\nclass {}";
+    let error = err(&format!("{source};"));
+    assert!(error.is_compile_error());
+    assert_eq!(error.span.start, "<?php\nnew\n".len());
+    assert_eq!(
+        error.message,
+        "Cannot use the abstract modifier on an anonymous class"
+    );
 }
 
 /// The parse error for `<?php ...` source.
@@ -693,6 +770,7 @@ fn sexp_member_kind(member: &ClassMember) -> String {
                         method,
                         alias,
                         visibility,
+                        ..
                     } => format!(
                         "(alias {}::{} as={} vis={:?})",
                         trait_name.as_ref().map_or("none".into(), sexp_name),
