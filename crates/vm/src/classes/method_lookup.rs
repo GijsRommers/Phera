@@ -53,18 +53,22 @@ impl Vm {
         };
         self.check_invocation_visibility(&method, invocation)?;
         if class.kind == ClassKind::Trait && method.is_static {
-            self.diagnostic(
-                "Deprecated",
-                format!(
-                    "Calling static trait method {}::{} is deprecated, it should only be called on a class using the trait",
-                    class.name, method.name,
-                ),
-            );
+            self.deprecate_static_trait_method(class, &method.name);
         }
         let scope = declaring_class(class, &method)
             .or_else(|| self.classes.get(&method.declaring))
             .ok_or_else(|| internal_error!("method scope"))?;
         Ok(Some(ResolvedMethod { method, scope }))
+    }
+    /// Direct static access through a trait also warns when PHP uses __callStatic.
+    pub(super) fn deprecate_static_trait_method(&mut self, class: &Class, name: &str) {
+        self.diagnostic(
+            "Deprecated",
+            format!(
+                "Calling static trait method {}::{name} is deprecated, it should only be called on a class using the trait",
+                class.name,
+            ),
+        );
     }
 }
 
