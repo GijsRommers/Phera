@@ -18,7 +18,7 @@ var_dump($b->data);
 --EXPECTF--
 set
 
-Deprecated: Implicit conversion from float 1.7 to int loses precision in /private%s on line 6
+Deprecated: Implicit conversion from float 1.7 to int loses precision in %s on line 6
 array(1) {
   [1]=>
   string(1) "v"

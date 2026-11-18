@@ -14,12 +14,12 @@ var_dump($b->data);
 --EXPECTF--
 get alias
 
-Deprecated: Implicit conversion from float 1.5 to int loses precision in /private%s on line 7
+Deprecated: Implicit conversion from float 1.5 to int loses precision in %s on line 7
 
-Warning: Undefined array key 1 in /private%s on line 7
+Warning: Undefined array key 1 in %s on line 7
 get alias
 
-Deprecated: Implicit conversion from float 2.5 to int loses precision in /private%s on line 8
+Deprecated: Implicit conversion from float 2.5 to int loses precision in %s on line 8
 array(2) {
   [1]=>
   int(2)

@@ -11,7 +11,7 @@ Box::$instances[] = $b;
 Box::$instances[0]->data[1.5] = 1;
 var_dump($b->data);
 --EXPECTF--
-Deprecated: Implicit conversion from float 1.5 to int loses precision in /private%s on line 8
+Deprecated: Implicit conversion from float 1.5 to int loses precision in %s on line 8
 array(1) {
   [1]=>
   int(1)

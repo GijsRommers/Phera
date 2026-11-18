@@ -12,7 +12,7 @@ var_dump($b->data);
 key evaluated
 value evaluated
 
-Deprecated: Implicit conversion from float 2.5 to int loses precision in /private%s on line 6
+Deprecated: Implicit conversion from float 2.5 to int loses precision in %s on line 6
 array(1) {
   [2]=>
   string(1) "v"

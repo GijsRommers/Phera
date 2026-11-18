@@ -8,8 +8,8 @@ unset($b->data[2.5]);
 unset($b->data[3.5][4.5]);
 var_dump($b->data);
 --EXPECTF--
-Deprecated: Implicit conversion from float 2.5 to int loses precision in /private%s on line 4
+Deprecated: Implicit conversion from float 2.5 to int loses precision in %s on line 4
 
-Deprecated: Implicit conversion from float 3.5 to int loses precision in /private%s on line 5
+Deprecated: Implicit conversion from float 3.5 to int loses precision in %s on line 5
 array(0) {
 }
