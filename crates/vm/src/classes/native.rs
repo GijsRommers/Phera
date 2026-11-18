@@ -31,6 +31,7 @@ impl ClassTable {
                 is_final: false,
                 is_readonly: false,
                 allows_dynamic_properties: true,
+                property_access: None,
                 methods: HashMap::new(),
                 method_table: std::cell::OnceCell::new(),
                 constructor: None,
@@ -148,6 +149,9 @@ impl ClassTable {
                     .iter()
                     .any(|interface: &Rc<Class>| interface.is_throwable);
             let index = table.next_index();
+            let property_access = entry
+                .property_access
+                .or_else(|| parent.as_ref().and_then(|parent| parent.property_access));
             table.insert(
                 entry.name.to_ascii_lowercase(),
                 Rc::new_cyclic(|identity| Class {
@@ -174,6 +178,7 @@ impl ClassTable {
                     is_final: entry.kind == NativeKind::FinalClass,
                     is_readonly: false,
                     allows_dynamic_properties: false,
+                    property_access,
                     constructor: methods.get("__construct").cloned(),
                     methods,
                     method_table: std::cell::OnceCell::new(),

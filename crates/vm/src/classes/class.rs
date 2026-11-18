@@ -33,6 +33,7 @@ pub(crate) struct Class {
     pub(crate) is_final: bool,
     pub(crate) is_readonly: bool,
     pub(crate) allows_dynamic_properties: bool,
+    pub(crate) property_access: Option<&'static phera_extension_api::NativePropertyAccess>,
     pub(crate) methods: HashMap<String, Rc<Method>>,
     /// The same methods by name key, built on first use by a fast call.
     pub(crate) method_table: std::cell::OnceCell<super::method_table::MethodTable>,

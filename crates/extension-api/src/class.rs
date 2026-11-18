@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use phera_value::{Object, Value};
 
-use crate::{ConstantValue, Context, LocalFuture, NativeResult, Param};
+use crate::{ConstantValue, Context, LocalFuture, NativeError, NativeResult, Param};
 
 /// A method that finishes without waiting. `this` is `None` when the method
 /// is static.
@@ -144,6 +144,35 @@ impl PropertyEntry {
     }
 }
 
+/// Instance access for native properties whose values live outside ordinary storage.
+pub enum NativePropertyRead {
+    Read,
+    Quiet,
+    Exists,
+}
+
+/// A mutation reaching a native property before ordinary storage is changed.
+pub enum NativePropertyMutation<'a> {
+    Assign(&'a Value),
+    Bind,
+    Reference,
+    Unset,
+    Indirect,
+}
+
+/// Return `None` to use ordinary storage. For existence checks, any `Some` counts.
+pub type ReadNativeProperty =
+    fn(&mut dyn Context, &Object, &str, NativePropertyRead) -> Result<Option<Value>, NativeError>;
+
+/// Return `true` when the mutation has already been handled.
+pub type MutateNativeProperty =
+    fn(&mut dyn Context, &Object, &str, NativePropertyMutation<'_>) -> Result<bool, NativeError>;
+
+pub struct NativePropertyAccess {
+    pub read: ReadNativeProperty,
+    pub mutate: MutateNativeProperty,
+}
+
 /// A class or interface provided by an extension.
 #[derive(Clone, Copy)]
 pub struct ClassEntry {
@@ -157,6 +186,7 @@ pub struct ClassEntry {
     /// For example, PHP may declare `function rows($mode = PDO::FETCH_ASSOC) {}`.
     pub constants: &'static [(&'static str, ConstantValue)],
     pub properties: &'static [PropertyEntry],
+    pub property_access: Option<&'static NativePropertyAccess>,
     pub methods: &'static [MethodEntry],
 }
 
@@ -172,6 +202,7 @@ impl ClassEntry {
             interfaces: &[],
             constants: &[],
             properties: &[],
+            property_access: None,
             methods: &[],
         }
     }
