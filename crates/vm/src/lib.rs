@@ -41,8 +41,6 @@ mod closure_initializers;
 mod closure_methods;
 #[cfg(test)]
 mod closure_tests;
-#[cfg(test)]
-mod destructor_tests;
 mod closure_types;
 mod closures;
 mod code_table;
@@ -55,6 +53,8 @@ mod cycles;
 mod debug_info;
 mod declaration_diagnostics;
 mod default_autoload;
+#[cfg(test)]
+mod destructor_tests;
 mod destructors;
 mod diagnostic_reporter;
 mod diagnostics;

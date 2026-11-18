@@ -47,7 +47,13 @@ async fn a_stopped_request_frees_every_object_without_destructors() {
         tokio::time::timeout(std::time::Duration::from_millis(50), vm.run(Arc::new(unit))).await;
     assert!(stopped.is_err(), "the script never ends by itself");
     let objects: Vec<_> = vm.classes.objects.clone();
-    assert_eq!(objects.iter().filter(|object| object.upgrade().is_some()).count(), 5);
+    assert_eq!(
+        objects
+            .iter()
+            .filter(|object| object.upgrade().is_some())
+            .count(),
+        5
+    );
     assert!(vm.output.is_empty());
     drop(vm);
     assert!(objects.iter().all(|object| object.upgrade().is_none()));

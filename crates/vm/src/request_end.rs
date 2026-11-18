@@ -132,30 +132,42 @@ impl Vm {
         }
     }
 
-    /// Runs the destructor phases and closes the id pool. `end` says how
-    /// the script's code ended.
+    /// Ends the request in PHP's order; `end` says how the script's code
+    /// ended.
     pub(crate) async fn finish_request(&mut self, end: ScriptEnd) {
+        // 1. Shutdown functions belong here; they run after a fatal error
+        //    too.
+        // 2. Destructors.
         if end == ScriptEnd::Destructible {
-            self.call_stack.clear();
-            if let Some(main) = self.request_end.main {
-                let mut frame = Frame::new(main, 0, None);
-                frame.set_ip(self.code.function(main).instructions.len());
-                self.call_stack.push(frame);
-            }
-            self.request_end.shutting_down = true;
-            let outcome = match self.destroy_globals().await {
-                Ok(()) => self.destroy_remaining_objects().await,
-                failure => failure,
-            };
-            if let Err(error) = outcome {
-                let error = self.materialize_error(error);
-                self.unwind(error);
-            }
+            self.run_request_destructors().await;
         }
-        // Everything still alive is freed without its destructor.
+        // 3. Output buffers belong here. Objects their callbacks create
+        //    still get destructors, since the pool is not closed yet.
+        // 4. Everything still alive is freed without its destructor.
         drop(self.classes.ids().close());
         self.call_stack.clear();
         self.registers.truncate(0);
+    }
+
+    /// The destructor phases, with the main script's frame back on the
+    /// call stack so that destructors see the globals.
+    async fn run_request_destructors(&mut self) {
+        self.call_stack.clear();
+        if let Some(main) = self.request_end.main {
+            let mut frame = Frame::new(main, 0, None);
+            frame.set_ip(self.code.function(main).instructions.len());
+            self.call_stack.push(frame);
+        }
+        self.request_end.shutting_down = true;
+        let outcome = match self.destroy_globals().await {
+            Ok(()) => self.destroy_remaining_objects().await,
+            failure => failure,
+        };
+        if let Err(error) = outcome {
+            let error = self.materialize_error(error);
+            self.unwind(error);
+        }
+        self.request_end.shutting_down = false;
     }
 
     /// Phase 2: globals holding the only reference to an object, last to
