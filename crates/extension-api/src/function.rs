@@ -122,6 +122,8 @@ pub struct FunctionEntry {
     pub name: &'static str,
     pub params: &'static [Param],
     pub handler: NativeFn,
+    /// Alternate body for functions that reject extra named variadic arguments.
+    pub extra_named_handler: Option<SyncFn>,
 }
 
 impl FunctionEntry {
@@ -130,6 +132,7 @@ impl FunctionEntry {
             name,
             params,
             handler: NativeFn::Sync(handler),
+            extra_named_handler: None,
         }
     }
 
@@ -142,7 +145,13 @@ impl FunctionEntry {
             name,
             params,
             handler: NativeFn::Async(handler),
+            extra_named_handler: None,
         }
+    }
+
+    pub const fn on_extra_named(mut self, handler: SyncFn) -> Self {
+        self.extra_named_handler = Some(handler);
+        self
     }
 
     /// How many arguments a call must pass at least.
