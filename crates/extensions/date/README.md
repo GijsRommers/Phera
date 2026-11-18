@@ -26,8 +26,8 @@ covers the PHP surface and the remaining engine integration.
 | `DateTime` | PARTIAL | Constructors, factories, mutators, getters, arithmetic and direct magic methods work. Inherited static factories and native object hooks are pending. |
 | `DateTimeImmutable` | PARTIAL | Mutators return new instances. Inherited static factories, ignored-return diagnostics and native object hooks are pending. |
 | `DateTimeZone` | PARTIAL | Constructors, groups, offsets, transition ranges, metadata, abbreviations and direct magic methods work. Native clone, comparison and property projection are pending. |
-| `DateInterval` | PARTIAL | ISO durations, relative strings, format codes, arithmetic fields and direct magic methods work. PHP virtual property coercion, debug projection, clone and comparison need engine hooks. |
-| `DatePeriod` | PARTIAL | Object constructors, ISO factory, getters, readonly writes, direct magic methods and the recurrence calculation work. Iteration, virtual property snapshots, inherited ISO factories and native object hooks are pending. |
+| `DateInterval` | PARTIAL | ISO durations, relative strings, format codes, virtual arithmetic fields and direct magic methods work. Debug projection, clone and comparison need engine hooks. |
+| `DatePeriod` | PARTIAL | Object constructors, ISO factory, getters, readonly properties with fresh snapshots, direct magic methods and the recurrence calculation work. Iteration, inherited ISO factories and native object hooks are pending. |
 | `DateError` | DONE | Extends Error. |
 | `DateObjectError` | DONE | Extends DateError and reports uninitialized objects. |
 | `DateRangeError` | DONE | Extends DateError and reports timestamp and microsecond bounds. |
@@ -243,8 +243,11 @@ a fixed base, and identical checksums (1707946012000000). It measures native fun
 calls, not compiler/VM throughput. Process startup is included; compilation is not.
 Wall-clock time is not used because other workloads share this machine.
 
-The existing CI installs `timezonedb-2026.5`, loads it through the `-n` oracle wrapper,
-and verifies its version. The parser comparison results above are from the local PHP 8.5.12 run. Full local `make ci`
+CI uses PHP 8.5.12 with timezonedb 2026.5. When the system PHP uses a different
+database, CI builds the pinned PECL release with `TIMELIB_SUPPORT_SLIM_FILE`
+and loads it through the `-n` oracle wrapper. This matches the bundled PHP
+database's explicit transition layout, including where it switches to POSIX
+rules. The parser comparison results above are from the local PHP 8.5.12 run. Full local `make ci`
 was not run because its prerequisite script provisions/connects to databases,
 excluded by this task. `make fmt-check lint safe-rust`, the entire date crate's
 oracle suite, runtime date tests, and CLI build passed locally.
@@ -265,7 +268,7 @@ methods with argument coercion and compare their results separately.
 | Internal DatePeriod sequences compared with PHP `foreach` | 2,560 | 0 |
 | Solar information, including polar dates and argument errors | 3,376 | 0 |
 | **Total native cases** | **386,044** | **0** |
-| Release CLI scripts | 187 | 0 |
+| Release CLI scripts | 189 | 0 |
 | Timezone catalog check within the CLI scripts | 2,557 output rows | 0 |
 
 `tools/import_timezones.py` reads PHP 8.5.12's timelib data. The class catalog
@@ -306,22 +309,31 @@ A comma-separated list selects several. The harness reports mismatches as failur
 
 | Waiting fixture | Current runtime behavior | Proposed API |
 | --- | --- | --- |
-| `native-object-compare` | Value operators compare class and stored properties. DateTime and DateTimeImmutable need comparison by timestamp and microseconds across the two classes. | `ClassEntry::compare: Option<fn(&mut dyn Context, &Object, &Object) -> Result<NativeComparison, NativeError>>`, with default, ordered and uncomparable results. |
-| `native-object-clone` | The VM copies declared properties. Native date, zone, interval and period state is missing from the copy. | `ClassEntry::clone_native: Option<fn(&Object, &Object) -> Result<(), NativeError>>`, called with the original and new object before user clone hooks. |
-| `native-property-projection` | Dump, print, export, JSON and casts read stored properties. Date and zone fields are native state, and DateInterval debug/JSON fields depend on the kind of interval. | `ClassEntry::project_properties: Option<fn(&mut dyn Context, &Object, PropertyPurpose) -> Result<PhpArray, NativeError>>`, with the consumer identifying the PHP operation. |
+| [`native-object-compare`](tests/waiting/native-object-compare.php) | Value operators compare classes and stored properties. Two date objects at the same instant can compare unequal. | `ClassEntry::compare: Option<fn(&mut dyn Context, &Object, &Object) -> Result<NativeComparison, NativeError>>`, with default, ordered and uncomparable results. |
+| [`native-object-clone`](tests/waiting/native-object-clone.php) | The VM copies declared properties. Calling a method on a cloned date fails with an uninitialized-object error because its native state was lost. Zones, intervals and periods also lose their native state. | `ClassEntry::clone_native: Option<fn(&Object, &Object) -> Result<(), NativeError>>`, called with the original and new object before user clone hooks. |
+| [`native-property-projection`](tests/waiting/native-property-projection.php) | Dump, print, export, JSON and array casts read stored properties. `json_encode($date)` returns `{}`. Interval metadata and period snapshots need operation-specific projections. | `ClassEntry::project_properties: Option<fn(&mut dyn Context, &Object, PropertyPurpose) -> Result<PhpArray, NativeError>>`, with the consumer identifying the PHP operation. |
 | `native-object-serialization` | Direct `__set_state`, `__serialize` and `__unserialize` calls work. General `serialize` and `unserialize` entry points and their magic-method dispatch are absent. | The serializers should use `Context::call` for magic method dispatch and `Context::create_object` for constructor-free restoration. |
-| `native-object-iterator` | `foreach` reads visible properties. Native Traversable/IteratorAggregate dispatch and `DatePeriod::getIterator` are absent. | `ClassEntry::iterator: Option<fn(&mut dyn Context, Rc<Object>, bool) -> Result<Box<dyn NativeIterator>, NativeError>>` plus `Context::create_iterator` for the Iterator object. The period cursor and PHP comparison live in `src/classes/period_dates.rs`. |
-| `native-virtual-properties` | DatePeriod enforces readonly assignment using stored snapshots. PHP returns a fresh date or interval on each property read. DateInterval consumes numeric assignments when its methods run. PHP coerces them during the write and exposes its special fields through virtual properties. | `PropertyEntry::read: Option<fn(&mut dyn Context, &Object) -> NativeResult>` and `PropertyEntry::write: Option<fn(&mut dyn Context, &Object, Value) -> NativeResult>`, including read, isset, mutation and reference access modes. |
+| [`native-object-iterator`](tests/waiting/native-object-iterator.php) | `foreach` uses ordinary property iteration and yields no dates. Native Traversable/IteratorAggregate dispatch and `DatePeriod::getIterator` are absent. | `ClassEntry::iterator: Option<fn(&mut dyn Context, Rc<Object>, bool) -> Result<Box<dyn NativeIterator>, NativeError>>` plus `Context::create_iterator` for the Iterator object. The period cursor and PHP comparison live in `src/classes/period_dates.rs`. |
 | `native-called-class` | Native static handlers receive no called class. Inherited DateTime and DatePeriod factories return the declaring built-in class. | `Context::called_class(&self) -> Option<&str>`, scoped to the executing native call. |
 | `native-named-defaults` | The VM fills skipped native named arguments with null. This can change a default or emit a null deprecation. | `Param::default: Option<ConstantValue>` and binding that distinguishes omitted arguments from explicit null. |
 
 Additional native metadata gaps include DateTimeInterface's user implementation
 restriction, signature variance for native methods and PHP's `#[NoDiscard]`
 diagnostics on unused immutable mutator results. `NativeError::throw` takes a
-Rust string, so parse diagnostics containing invalid UTF-8 are lossy. Phera also
-uses the generic readonly error when acquiring a reference to a DatePeriod property.
+Rust string, so parse diagnostics containing invalid UTF-8 are lossy.
 
-Two changes outside the date crate support the public surface. The first adds
-`ParamType::Class` and `ClassHandle::is_instance_of`, using the VM's existing
-ancestry lookup. The second maps `PropertyEntry::readonly()` to the VM's existing
-readonly write checks. The call-handling directory has no date-extension edits.
+The release scripts cover direct property reads, writes, `isset` and
+`property_exists` on both classes. PHP exposes DateInterval's arithmetic fields
+and `days` on initialized instances. `from_string` and `date_string` start
+undefined. PHP's `var_dump` materializes the debug fields, which can make those
+names readable after a dump. The ISO view includes the arithmetic fields and
+`from_string = false`. The relative view contains `from_string = true` and the
+original string. DatePeriod declares seven readonly properties. Its object-valued
+reads produce fresh snapshots, and its dump view includes those snapshots and
+recurrence flags. The projection fixture covers the remaining dump behavior.
+
+Three changes outside the date crate support the public surface.
+`ParamType::Class` and `ClassHandle::is_instance_of` reuse the VM's ancestry
+lookup. `PropertyEntry::readonly()` uses its readonly checks.
+`ClassEntry::property_access` dispatches direct instance access for native
+properties. The call-handling directory has no date-extension edits.

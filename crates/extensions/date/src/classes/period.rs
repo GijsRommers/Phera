@@ -5,9 +5,9 @@ use phera_extension_api::{Param, ParamType, args, prepare_call};
 
 use super::zone_kind::ZoneKind;
 use super::{
-    This, assoc,
+    This,
     instant::{IMMUTABLE, INTERFACE, Instant},
-    make, make_with_properties,
+    make,
 };
 use super::{
     interval::{Arithmetic, Interval},
@@ -86,31 +86,29 @@ impl Period {
     }
 
     pub fn make(self, context: &mut dyn Context) -> NativeResult {
-        let properties = self.properties(context)?;
-        make_with_properties(context, CLASS, self, properties)
+        make(context, CLASS, self)
     }
 
-    pub fn store(self, context: &mut dyn Context, object: &Object) -> Result<(), NativeError> {
-        for (key, value) in self.properties(context)?.iter() {
-            object.set(key, value.clone());
-        }
+    pub fn store(self, object: &Object) {
         store(object, self);
-        Ok(())
     }
 
     pub fn properties(&self, context: &mut dyn Context) -> Result<PhpArray, NativeError> {
-        Ok(assoc([
-            ("start", self.make_date(context, self.start.clone())?),
-            ("current", self.make_date(context, self.current.clone())?),
-            ("end", self.make_date(context, self.end.clone())?),
-            ("interval", self.make_interval(context)?),
-            ("recurrences", Value::Int(self.recurrences)),
-            ("include_start_date", Value::Bool(self.include_start)),
-            ("include_end_date", Value::Bool(self.include_end)),
-        ]))
+        let mut data = PhpArray::new();
+        for field in super::period_properties::Field::ALL {
+            data.insert(
+                phera_extension_api::ArrayKey::str(field.name()),
+                field.value(context, self)?,
+            );
+        }
+        Ok(data)
     }
 
-    fn make_date(&self, context: &mut dyn Context, date: Option<Instant>) -> NativeResult {
+    pub(super) fn make_date(
+        &self,
+        context: &mut dyn Context,
+        date: Option<Instant>,
+    ) -> NativeResult {
         if let Some(date) = date {
             make(context, &self.date_class, date)
         } else {
@@ -118,7 +116,7 @@ impl Period {
         }
     }
 
-    fn make_interval(&self, context: &mut dyn Context) -> NativeResult {
+    pub(super) fn make_interval(&self, context: &mut dyn Context) -> NativeResult {
         let Some(mut interval) = self.interval.clone() else {
             return Ok(Value::Null);
         };
@@ -177,7 +175,7 @@ pub fn construct(context: &mut dyn Context, this: This<'_>, arguments: &[Value])
     let interval = Interval::read(interval)?;
     let period =
         Period::new(start_date, interval, end, count, start.class.name()).finish(options, SITE)?;
-    period.store(context, object)?;
+    period.store(object);
     Ok(Value::Null)
 }
 

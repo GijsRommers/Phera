@@ -36,13 +36,13 @@ pub fn serialize(context: &mut dyn Context, this: This<'_>, _: &[Value]) -> Nati
     Ok(data.into())
 }
 
-pub fn unserialize(context: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> NativeResult {
+pub fn unserialize(_: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> NativeResult {
     let object = receiver(this)?;
     let data = args::array(arguments, 0).expect("serialization data");
     let mut period = Period::read(object).unwrap_or_default();
     let restored = restore_into(data, &mut period);
     // Zend restores fields in order and retains the fields it accepted before an error.
-    period.store(context, object)?;
+    period.store(object);
     restored?;
     for (key, value) in data.iter() {
         if let ArrayKey::String(name) = &key

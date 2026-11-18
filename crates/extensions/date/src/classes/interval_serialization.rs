@@ -15,7 +15,7 @@ pub fn serialize(_: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResu
     let interval = Interval::read(object)?;
     let mut properties = interval::serialization(&interval);
     for (key, value) in object.to_array().iter() {
-        if properties.get(&key).is_none() && !internal(&key) {
+        if properties.get(&key).is_none() {
             properties.insert(key, value.clone());
         }
     }

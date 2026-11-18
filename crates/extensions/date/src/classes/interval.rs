@@ -1,4 +1,4 @@
-//! A DateInterval reads its declared properties back, so `$interval->d = 10` affects add.
+//! A DateInterval keeps numeric fields in native state, so `$interval->d = 10` affects add.
 
 use phera_extension_api::{ArrayKey, Context, NativeError, NativeResult, Object, PhpArray, Value};
 use phera_extension_api::{
@@ -7,11 +7,11 @@ use phera_extension_api::{
 };
 
 use super::{This, assoc, datetime_factory, interval_diff, interval_iso};
-use super::{instant::Instant, make_with_properties, receiver, state, store, zone_kind::ZoneKind};
+use super::{instant::Instant, make, receiver, state, store, zone_kind::ZoneKind};
 use crate::parse::{self, state::State, token::Special};
 
 pub const CLASS: &str = "DateInterval";
-const FIELDS: [&str; 6] = ["y", "m", "d", "h", "i", "s"];
+pub(super) const FIELDS: [&str; 6] = ["y", "m", "d", "h", "i", "s"];
 const UNSET: i64 = -9_999_999;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -53,61 +53,14 @@ impl Interval {
     }
 
     pub fn read(object: &Object) -> Result<Self, NativeError> {
-        let mut interval: Self = state(object, CLASS)?;
-        for (field, property) in interval.relative.delta.iter_mut().zip(FIELDS) {
-            *field = integer(
-                &object
-                    .get(&ArrayKey::str(property))
-                    .unwrap_or(Value::Int(*field)),
-            );
-        }
-        if let Some(value) = object.get(&ArrayKey::str("f")) {
-            let original = interval.relative.delta[6] as f64 / 1_000_000.0;
-            if !matches!(&*value.deref(), Value::Float(v) if *v == original) {
-                interval.relative.delta[6] = micros(&value);
-            }
-        }
-        if let Some(value) = object.get(&ArrayKey::str("invert")) {
-            interval.invert = i64::from(integer(&value) as i32);
-        }
-        Ok(interval)
-    }
-
-    pub fn properties(&self) -> PhpArray {
-        let mut properties = PhpArray::new();
-        for (key, value) in FIELDS.into_iter().zip(self.relative.delta) {
-            properties.insert(ArrayKey::str(key), optional_integer(value));
-        }
-        for (key, value) in [
-            (
-                "f",
-                Value::Float(self.relative.delta[6] as f64 / 1_000_000.0),
-            ),
-            ("invert", optional_integer(self.invert)),
-            (
-                "days",
-                self.days.map_or(Value::Bool(false), optional_integer),
-            ),
-            ("from_string", Value::Bool(self.source.is_some())),
-            (
-                "date_string",
-                self.source.clone().map_or(Value::Null, Value::from),
-            ),
-        ] {
-            properties.insert(ArrayKey::str(key), value);
-        }
-        properties
+        state(object, CLASS)
     }
 
     pub fn make(self, context: &mut dyn Context) -> NativeResult {
-        let properties = self.properties();
-        make_with_properties(context, CLASS, self, properties)
+        make(context, CLASS, self)
     }
 
     pub fn store(self, object: &Object) {
-        for (key, value) in self.properties().iter() {
-            object.set(key, value.clone());
-        }
         store(object, self);
     }
 
@@ -252,8 +205,24 @@ pub fn serialization(interval: &Interval) -> PhpArray {
             ("date_string", input.clone().into()),
         ]);
     }
-    let mut properties = interval.properties();
-    properties.remove(&ArrayKey::str("date_string"));
+    let mut properties = PhpArray::new();
+    for (key, value) in FIELDS.into_iter().zip(interval.relative.delta) {
+        properties.insert(ArrayKey::str(key), Value::Int(value));
+    }
+    for (key, value) in [
+        (
+            "f",
+            Value::Float(interval.relative.delta[6] as f64 / 1_000_000.0),
+        ),
+        ("invert", Value::Int(interval.invert)),
+        (
+            "days",
+            interval.days.map_or(Value::Bool(false), optional_integer),
+        ),
+        ("from_string", Value::Bool(false)),
+    ] {
+        properties.insert(ArrayKey::str(key), value);
+    }
     properties
 }
 
@@ -262,7 +231,11 @@ pub fn integer(value: &Value) -> i64 {
 }
 
 pub fn micros(value: &Value) -> i64 {
-    let value = to_float(value, &mut NoDiagnostics).unwrap_or_default() * 1_000_000.0;
+    fraction_micros(to_float(value, &mut NoDiagnostics).unwrap_or_default())
+}
+
+pub(super) fn fraction_micros(value: f64) -> i64 {
+    let value = value * 1_000_000.0;
     if value.is_finite() {
         let period = 18_446_744_073_709_551_616.0;
         let truncated = value.trunc() % period;
@@ -278,7 +251,7 @@ pub fn micros(value: &Value) -> i64 {
     }
 }
 
-fn optional_integer(value: i64) -> Value {
+pub(super) fn optional_integer(value: i64) -> Value {
     if value == UNSET {
         Value::Bool(false)
     } else {

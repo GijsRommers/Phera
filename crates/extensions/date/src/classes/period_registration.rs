@@ -3,7 +3,7 @@
 use phera_extension_api::{ClassEntry, ConstantValue, MethodEntry, Param, ParamType};
 use phera_extension_api::{PropertyEntry, Registry, Visibility};
 
-use super::{period, period_serialization as serialization};
+use super::{period, period_properties, period_serialization as serialization};
 
 pub fn register(registry: &mut Registry) {
     registry.class(ClassEntry {
@@ -15,6 +15,7 @@ pub fn register(registry: &mut Registry) {
             ("INCLUDE_END_DATE", ConstantValue::Int(period::INCLUDE_END)),
         ],
         properties: PROPERTIES,
+        property_access: Some(&period_properties::ACCESS),
         methods: METHODS,
         ..ClassEntry::class(period::CLASS)
     });

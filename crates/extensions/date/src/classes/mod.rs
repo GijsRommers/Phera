@@ -13,11 +13,13 @@ mod interval;
 mod interval_arithmetic;
 mod interval_diff;
 mod interval_iso;
+mod interval_properties;
 mod interval_registration;
 mod interval_serialization;
 mod period;
 #[cfg(test)]
 mod period_dates;
+mod period_properties;
 mod period_registration;
 mod period_serialization;
 mod timezone;
