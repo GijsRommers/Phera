@@ -7,15 +7,16 @@ use std::net::TcpStream;
 use super::super::Served;
 
 /// A response with its headers, which the shared helper does not keep.
-struct Answer {
-    status: u16,
+pub(super) struct Answer {
+    pub(super) status: u16,
     /// Names in lower case.
     headers: Vec<(String, String)>,
-    body: Vec<u8>,
+    pub(super) body: Vec<u8>,
 }
 
 impl Answer {
-    fn header(&self, name: &str) -> &str {
+    /// The value of a header, or "" when it is absent.
+    pub(super) fn header(&self, name: &str) -> &str {
         self.headers
             .iter()
             .find(|(key, _)| key == name)
@@ -24,7 +25,7 @@ impl Answer {
 }
 
 /// Sends one request with the given extra header lines.
-fn fetch(served: &Served, method: &str, path: &str, headers: &[&str]) -> Answer {
+pub(super) fn fetch(served: &Served, method: &str, path: &str, headers: &[&str]) -> Answer {
     let mut stream = TcpStream::connect(&served.address).expect("connect");
     let mut request = format!(
         "{method} {path} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n",

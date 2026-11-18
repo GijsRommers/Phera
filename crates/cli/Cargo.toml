@@ -16,6 +16,8 @@ phera-runtime.workspace = true
 phera-server.workspace = true
 tokio.workspace = true
 httpdate.workspace = true
+flate2.workspace = true
+brotli.workspace = true
 # The system allocator on macOS is slow for the many small allocations an
 # interpreter makes (strings, arrays, objects).
 mimalloc.workspace = true
