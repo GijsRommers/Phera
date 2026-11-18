@@ -101,6 +101,12 @@ pub trait Context {
         Box::pin(std::future::ready(result))
     }
 
+    /// Whether an operation raised a PHP exception. Some PHP functions finish
+    /// a native side effect before propagating the exception to their caller.
+    fn is_exception(&self, error: &NativeError) -> bool {
+        matches!(error, NativeError::Throw { .. })
+    }
+
     /// Loose comparisons may invoke __toString on mixed string/object pairs.
     fn compare<'a>(
         &'a mut self,

@@ -71,6 +71,13 @@ impl Context for Vm {
         Box::pin(self.stringify_value(value))
     }
 
+    fn is_exception(&self, error: &NativeError) -> bool {
+        match error {
+            NativeError::Throw { .. } => true,
+            NativeError::Unwind(payload) => payload.0.is::<crate::exceptions::Thrown>(),
+        }
+    }
+
     fn compare<'a>(
         &'a mut self,
         left: &'a Value,

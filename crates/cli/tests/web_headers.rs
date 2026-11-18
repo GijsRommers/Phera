@@ -156,6 +156,18 @@ fn cookie_options_and_validation_match_php() {
 }
 
 #[test]
+fn cookie_option_string_conversion_matches_php() {
+    let (expected, actual) = compare(
+        include_str!("../../../tests/fixtures/web/cookie-stringable.php"),
+        "cookie-stringable",
+        &["/"],
+        &[],
+    );
+    assert_eq!(expected.lines().count(), 8);
+    assert_eq!(actual, expected);
+}
+
+#[test]
 fn web_sapi_header_alias_and_flush_match_php() {
     let (expected, actual) = compare(
         REQUEST,

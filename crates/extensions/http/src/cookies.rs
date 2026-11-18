@@ -6,9 +6,9 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use phera_extension_api::{
-    ArrayKey, ConstantValue, Context, FunctionEntry, NativeError, NativeResult, Param, ParamType,
-    Registry, Value, args,
-    value::{to_bool, to_int, to_php_string},
+    ArrayKey, ConstantValue, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param,
+    ParamType, Registry, Value, args,
+    value::{to_bool, to_int},
 };
 
 use crate::{ResponseHead, headers_open, valid_header_line};
@@ -41,12 +41,12 @@ impl Cookie {
 }
 
 pub(super) fn register(registry: &mut Registry) {
-    registry.function(FunctionEntry::sync(
+    registry.function(FunctionEntry::asynchronous(
         "setcookie",
         PARAMS,
         |context, arguments| set_cookie(context, arguments, Cookie::Encoded),
     ));
-    registry.function(FunctionEntry::sync(
+    registry.function(FunctionEntry::asynchronous(
         "setrawcookie",
         PARAMS,
         |context, arguments| set_cookie(context, arguments, Cookie::Raw),
@@ -65,10 +65,11 @@ struct Options {
 }
 
 impl Options {
-    fn read(
+    async fn read(
         context: &mut dyn Context,
         arguments: &[Value],
         function: &str,
+        exception: &mut Option<NativeError>,
     ) -> Result<Self, NativeError> {
         let Some(array) = args::array(arguments, 2) else {
             return Ok(Self {
@@ -96,9 +97,9 @@ impl Options {
             let key_bytes = key.as_bytes().to_ascii_lowercase();
             match key_bytes.as_slice() {
                 b"expires" => options.expires = to_int(value, context.diagnostics())?,
-                b"path" => options.path = option_string(context, value)?,
-                b"domain" => options.domain = option_string(context, value)?,
-                b"samesite" => options.samesite = option_string(context, value)?,
+                b"path" => options.path = option_string(context, value, exception).await?,
+                b"domain" => options.domain = option_string(context, value, exception).await?,
+                b"samesite" => options.samesite = option_string(context, value, exception).await?,
                 b"secure" => options.secure = to_bool(value),
                 b"httponly" => options.httponly = to_bool(value),
                 b"partitioned" => options.partitioned = to_bool(value),
@@ -160,14 +161,27 @@ fn illegal(value: &[u8]) -> bool {
         .any(|byte| matches!(byte, b',' | b';' | b' ' | 9..=13))
 }
 
-fn option_string(context: &mut dyn Context, value: &Value) -> Result<Vec<u8>, NativeError> {
+async fn option_string(
+    context: &mut dyn Context,
+    value: &Value,
+    exception: &mut Option<NativeError>,
+) -> Result<Vec<u8>, NativeError> {
+    if exception.is_some() && value.is_object() {
+        return Ok(Vec::new());
+    }
     if value.is_array() {
         context.warning("Array to string conversion".into());
         return Ok(b"Array".to_vec());
     }
-    Ok(to_php_string(value, context.diagnostics())?
-        .as_bytes()
-        .to_vec())
+    match context.stringify(value).await {
+        Ok(string) => Ok(string.as_bytes().to_vec()),
+        Err(error) if context.is_exception(&error) => {
+            // PHP uses an empty option and finishes the header with the exception pending.
+            *exception = Some(error);
+            Ok(Vec::new())
+        }
+        Err(error) => Err(error),
+    }
 }
 
 fn append_option(line: &mut Vec<u8>, label: &[u8], value: &[u8]) {
@@ -177,11 +191,30 @@ fn append_option(line: &mut Vec<u8>, label: &[u8], value: &[u8]) {
     }
 }
 
-fn set_cookie(context: &mut dyn Context, arguments: &[Value], kind: Cookie) -> NativeResult {
+fn set_cookie(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+    kind: Cookie,
+) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        let mut exception = None;
+        let result = write_cookie(context, &arguments, kind, &mut exception).await;
+        result
+            .and_then(|value| exception.map_or(Ok(value), Err))
+            .map_err(|error| context.native_call_error(kind.name(), &arguments, error))
+    })
+}
+
+async fn write_cookie(
+    context: &mut dyn Context,
+    arguments: &[Value],
+    kind: Cookie,
+    exception: &mut Option<NativeError>,
+) -> NativeResult {
     let function = kind.name();
     let name = args::bytes(arguments, 0);
     let value = args::bytes(arguments, 1);
-    let options = Options::read(context, arguments, function)?;
+    let options = Options::read(context, arguments, function, exception).await?;
     if name.is_empty() {
         return Err(NativeError::value_error(format!(
             "{function}(): Argument #1 ($name) must not be empty"

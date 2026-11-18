@@ -82,7 +82,12 @@ pub fn store_named(variables: &mut PhpArray, name: &[u8], value: Value) {
     register_variable(variables, name, || value, Duplicates::Replace);
 }
 
-fn register_variable(variables: &mut PhpArray, name: &[u8], value: Value, duplicates: Duplicates) {
+fn register_variable(
+    variables: &mut PhpArray,
+    name: &[u8],
+    value: impl FnOnce() -> Value,
+    duplicates: Duplicates,
+) {
     let Some((keys, valid)) = parse_name(name) else {
         return;
     };
