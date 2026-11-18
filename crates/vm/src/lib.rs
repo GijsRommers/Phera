@@ -109,6 +109,7 @@ mod object_iteration;
 mod operators;
 mod ops;
 mod output;
+mod output_buffer;
 mod path;
 mod path_dimensions;
 mod path_instructions;
@@ -123,6 +124,7 @@ mod property_strings;
 mod property_targets;
 mod reference_holders;
 mod references;
+mod request_callbacks;
 mod scope_intrinsics;
 mod serialization;
 mod spl_autoload;
@@ -148,6 +150,7 @@ pub trait CodeLoader: Send + Sync {
 /// Receives each PHP output write while Vm also retains its output buffer.
 pub trait OutputSink {
     fn write(&mut self, bytes: &[u8]);
+    fn flush(&mut self) {}
 }
 
 impl OutputSink for Vec<u8> {
@@ -193,12 +196,15 @@ pub struct Vm {
     /// All PHP output emitted during this request.
     pub output: Vec<u8>,
     output_writer: output::Output,
+    request_callbacks: request_callbacks::RequestCallbacks,
     registers: calls::registers::Registers,
     constants: constant_table::ConstantTable,
     /// PHP call depth limit, independent of the native Rust stack.
     pub frame_limit: usize,
     status: i32,
     error_handlers: error_handlers::ErrorHandlers,
+    /// Whether output or a diagnostic needs to invoke a PHP callback.
+    pending_callbacks: bool,
     failed_native: Option<error_traces::NativeTrace>,
     /// What extensions remember during this request (response headers, ...).
     state: RequestState,
@@ -253,11 +259,13 @@ impl Vm {
             registry,
             output: vec![],
             output_writer: output::Output::new(),
+            request_callbacks: Default::default(),
             registers: calls::registers::Registers::new(),
             constants: constant_table::ConstantTable::new(constants),
             frame_limit: DEFAULT_FRAME_LIMIT,
             status: 0,
             error_handlers: error_handlers::ErrorHandlers::default(),
+            pending_callbacks: false,
             failed_native: None,
             state: RequestState::default(),
         }
@@ -300,10 +308,6 @@ impl Vm {
             .insert("argc".into(), Value::Int(arguments.len() as i64));
     }
 
-    fn out(&mut self, bytes: &[u8]) {
-        self.output_writer.write(&mut self.output, bytes);
-    }
-
     /// Run a compiled top-level function on the request heap stack and report its exit status.
     pub async fn run(&mut self, unit: Arc<CompiledUnit>) -> i32 {
         let main = self.code.load(&unit);
@@ -331,14 +335,19 @@ impl Vm {
         self.publish_declaration_warnings(&unit);
         if let Err(error) = self.hoist_classes(&unit) {
             self.unwind(error);
-            return self.status;
-        }
-        if let Err(error) = self.interpret(0).await {
+        } else if let Err(error) = self.interpret(0).await {
             let error = self.materialize_error(error);
-            if self.invoke_exception_handler(&error).await {
-                return self.status;
-            }
-            self.unwind(error)
+            self.report_uncaught(error).await;
+        }
+        if self.output_pending()
+            && let Err(error) = self.drain_output().await
+        {
+            self.unwind(error);
+        }
+        self.run_shutdown_callbacks().await;
+        self.finish_buffers().await;
+        if let Err(error) = self.finish_headers().await {
+            self.unwind(error);
         }
         self.status
     }
