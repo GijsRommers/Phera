@@ -116,6 +116,10 @@ async fn seek_to(
             next(context, object).await?;
             position = position.saturating_add(1);
         }
+        // PHP tests the emulated seek result before fetching, which tests it again.
+        if !to_bool(&step(context, object, IteratorStep::Valid).await?) {
+            return Ok(position);
+        }
     }
     fetch(context, object).await?;
     Ok(position)
