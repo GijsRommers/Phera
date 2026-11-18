@@ -1,4 +1,6 @@
 <?php
+var_dump(bin2hex(basename("/native\xFF/file\xA1.php")));
+var_dump(basename("./filename", "filename"));
 $directory = "native\xFF";
 $path = "file\xA1.php";
 set_include_path($directory);
