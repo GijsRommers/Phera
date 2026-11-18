@@ -7,6 +7,7 @@
 
 use super::PhpArray;
 use super::storage::Storage;
+use crate::destruction::Destruction;
 use crate::value::Value;
 use std::rc::Rc;
 
@@ -33,8 +34,12 @@ impl PhpArray {
                     }
                 }
                 Value::Object(owner) => {
-                    if let Ok(object) = Rc::try_unwrap(owner) {
-                        object.properties.into_inner().take_values(&mut work);
+                    // An object that waits for its destructor is handed to
+                    // the interpreter whole by its own `Drop`.
+                    if let Ok(object) = Rc::try_unwrap(owner)
+                        && object.destruction() != Destruction::Due
+                    {
+                        object.properties.take().take_values(&mut work);
                     }
                 }
                 Value::Reference(owner) => {

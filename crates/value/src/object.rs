@@ -1,10 +1,11 @@
 //! Objects and resources: handle semantics (clones share the instance).
 
 use std::any::Any;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use crate::array::{ArrayKey, PhpArray};
+use crate::destruction::{Destruction, DoomedObjects};
 use crate::value::Value;
 
 /// The VM's per-class data. Implemented by other crates; tests use a dummy.
@@ -42,13 +43,12 @@ pub struct Object {
     pub(crate) properties: RefCell<PhpArray>,
     /// Native state for built-in classes (closures, PDO handles, ...).
     pub native: RefCell<Option<Box<dyn Any>>>,
-    /// Gives the id back to its pool when the object is freed. A separate
-    /// field rather than a `Drop` on `Object` itself, because a type with
-    /// its own `Drop` cannot have its fields moved out, and freeing long
-    /// chains of objects without recursion relies on moving the properties
-    /// out. The underscore says the field is never read: it exists only
-    /// to be dropped.
-    _lease: Option<IdLease>,
+    /// Whether `__destruct` still has to run; see `crate::destruction`.
+    pub(crate) destruction: Cell<Destruction>,
+    /// Gives the id back to its pool when the object is freed. Moved, not
+    /// copied, into the object that waits for its destructor, so the id
+    /// stays taken until that object is really gone.
+    pub(crate) lease: Option<IdLease>,
 }
 
 impl Object {
@@ -59,7 +59,8 @@ impl Object {
             class,
             properties: RefCell::new(PhpArray::new()),
             native: RefCell::new(None),
-            _lease: None,
+            destruction: Cell::new(Destruction::Never),
+            lease: None,
         }
     }
 
@@ -76,7 +77,8 @@ impl Object {
             class,
             properties: RefCell::new(PhpArray::new()),
             native: RefCell::new(None),
-            _lease: Some(lease),
+            destruction: Cell::new(Destruction::Never),
+            lease: Some(lease),
         }
     }
 
@@ -148,6 +150,8 @@ impl Object {
 #[derive(Debug, Default)]
 pub struct ObjectIds {
     state: RefCell<IdState>,
+    /// Objects whose destructor is due; see `crate::destruction`.
+    pub(crate) doomed: DoomedObjects,
 }
 
 #[derive(Debug, Default)]
@@ -163,7 +167,7 @@ impl ObjectIds {
         Rc::new(ObjectIds::default())
     }
 
-    fn take(&self) -> u32 {
+    pub(crate) fn take(&self) -> u32 {
         let mut state = self.state.borrow_mut();
         if let Some(id) = state.free.pop() {
             return id;
@@ -189,9 +193,9 @@ impl ObjectIds {
 }
 
 /// Returns an object's id to the pool when dropped.
-struct IdLease {
-    id: u32,
-    pool: Rc<ObjectIds>,
+pub(crate) struct IdLease {
+    pub(crate) id: u32,
+    pub(crate) pool: Rc<ObjectIds>,
 }
 
 impl Drop for IdLease {
