@@ -90,7 +90,7 @@ fn compile_program(
             scanner_diagnostics: Vec::new(),
         }
     })?;
-    let mut compiler = Compiler::new(file, lines, "{main}", "", compile_diagnostics);
+    let mut compiler = Compiler::new(file, source, lines, "{main}", "", compile_diagnostics);
     if let SourceKind::Eval { anonymous_seed } = kind {
         compiler.anonymous_classes.set(anonymous_seed);
     }

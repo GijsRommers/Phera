@@ -144,6 +144,7 @@ impl<'ast> Compiler<'ast> {
     ) -> Result<Compiler<'ast>, CompileError> {
         let mut builder = Compiler::new(
             self.file,
+            self.source,
             self.lines,
             name,
             &self.namespace,
