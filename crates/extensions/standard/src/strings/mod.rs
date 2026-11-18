@@ -4,7 +4,19 @@
 //! The helpers below are what several modules share: the size limit every
 //! growing string checks, and substring search.
 
-use phera_extension_api::{NativeError, Registry};
+use phera_extension_api::{Context, NativeError, PhpString, Registry, Value};
+
+/// Array elements can be stringable even when the outer argument is an array.
+async fn stringify(context: &mut dyn Context, value: &Value) -> Result<PhpString, NativeError> {
+    if value.is_object() {
+        context.stringify(value).await
+    } else {
+        Ok(phera_extension_api::value::to_php_string(
+            value,
+            context.diagnostics(),
+        )?)
+    }
+}
 
 mod base64;
 mod case;
