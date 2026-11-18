@@ -262,5 +262,16 @@ pub enum TokenKind {
     Comma,
     Colon,
 
+    // Tokens only returned by the lossless tokenizer scanner.
+    Whitespace,
+    Comment,
+    DocComment,
+    BadCharacter,
+    Backquote,
+    DollarCurlyOpen,
+    StringVarname,
+    AmpersandBeforeVariable,
+    OffsetAmpersand,
+
     Eof,
 }

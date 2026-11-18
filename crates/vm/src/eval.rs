@@ -12,8 +12,10 @@ impl Vm {
     pub(crate) async fn eval(&mut self, destination: Reg, source: Reg) -> Result<(), NativeError> {
         let source = {
             let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
+            // The code keeps its bytes: a string literal inside it may hold any.
             phera_value::to_php_string(&diagnostics.vm.operand(source), &mut diagnostics.buffer)?
-                .to_string_lossy()
+                .as_bytes()
+                .to_vec()
         };
         if source.is_empty() {
             self.set(destination, phera_value::Value::Bool(false));

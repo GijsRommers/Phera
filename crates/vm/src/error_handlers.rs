@@ -6,7 +6,7 @@
 //! warnings use built-in reporting while the handler is active.
 
 use crate::{Vm, diagnostics::SourceLocation};
-use phera_extension_api::{Context, NativeError, NativeResult};
+use phera_extension_api::{CompileDiagnosticKind, Context, NativeError, NativeResult};
 use phera_value::Value;
 
 /// Callable plus the error-level mask accepted by set_error_handler.
@@ -23,6 +23,7 @@ pub(crate) struct DiagnosticEvent {
     pub(crate) message: String,
     pub(crate) location: SourceLocation,
     pub(crate) native: Option<crate::error_traces::NativeTrace>,
+    pub(crate) trace_location: Option<SourceLocation>,
 }
 
 /// Resolve at registration so private scope and method callables survive unwinding.
@@ -141,9 +142,10 @@ impl Vm {
         let pending = std::mem::take(&mut self.error_handlers.pending);
         for event in pending {
             let handler = self.error_handlers.error.clone();
-            let handled = if let Some(handler) =
-                handler.filter(|handler| handler.levels & event.level != 0)
-            {
+            let handled = if let Some(handler) = handler.filter(|handler| {
+                event.level != CompileDiagnosticKind::Warning.error_level()
+                    && handler.levels & event.level != 0
+            }) {
                 self.error_handlers.active = true;
                 let warning_site =
                     event
@@ -152,7 +154,10 @@ impl Vm {
                         .map(|native| crate::exception_traces::WarningSite {
                             boundary: self.call_stack.depth(),
                             native: native.clone(),
-                            location: event.location.clone(),
+                            location: event
+                                .trace_location
+                                .clone()
+                                .unwrap_or_else(|| event.location.clone()),
                         });
                 let previous_site =
                     std::mem::replace(&mut self.error_handlers.warning_site, warning_site);
@@ -194,24 +199,28 @@ impl Vm {
             "Deprecated" => 8192,
             _ => 0,
         };
-        if !self.error_handlers.active
-            && self
-                .error_handlers
-                .error
-                .as_ref()
-                .is_some_and(|handler| handler.levels & level != 0)
-        {
+        if self.handles_diagnostic(level) {
             self.error_handlers.pending.push(DiagnosticEvent {
                 level,
                 kind: kind.into(),
                 message: message.into(),
                 location: self.location(),
                 native: self.error_handlers.native_site.clone(),
+                trace_location: None,
             });
             true
         } else {
             false
         }
+    }
+
+    pub(crate) fn handles_diagnostic(&self, level: i64) -> bool {
+        !self.error_handlers.active
+            && self
+                .error_handlers
+                .error
+                .as_ref()
+                .is_some_and(|handler| handler.levels & level != 0)
     }
 
     /// Respect the reporting mask separately from whether a user callback was invoked.

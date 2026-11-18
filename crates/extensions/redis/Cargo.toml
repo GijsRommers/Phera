@@ -1,0 +1,18 @@
+[package]
+name = "phera-ext-redis"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+phera-extension-api.workspace = true
+phera-io-pool.workspace = true
+redis.workspace = true
+rustls-rustcrypto.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["io-util"] }
+
+[lints]
+workspace = true

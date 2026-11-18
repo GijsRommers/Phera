@@ -1,0 +1,6155 @@
+{
+    "version": "6.3.0",
+    "constants": {
+        "REDIS_NOT_FOUND": 0,
+        "REDIS_STRING": 1,
+        "REDIS_SET": 2,
+        "REDIS_LIST": 3,
+        "REDIS_ZSET": 4,
+        "REDIS_HASH": 5,
+        "REDIS_STREAM": 6,
+        "REDIS_VECTORSET": 7,
+        "ATOMIC": 0,
+        "MULTI": 1,
+        "PIPELINE": 2,
+        "OPT_SERIALIZER": 1,
+        "OPT_PREFIX": 2,
+        "OPT_READ_TIMEOUT": 3,
+        "OPT_TCP_KEEPALIVE": 6,
+        "OPT_COMPRESSION": 7,
+        "OPT_REPLY_LITERAL": 8,
+        "OPT_COMPRESSION_LEVEL": 9,
+        "OPT_NULL_MULTIBULK_AS_NULL": 10,
+        "OPT_PACK_IGNORE_NUMBERS": 15,
+        "SERIALIZER_NONE": 0,
+        "SERIALIZER_PHP": 1,
+        "SERIALIZER_JSON": 4,
+        "COMPRESSION_NONE": 0,
+        "OPT_SCAN": 4,
+        "SCAN_RETRY": 1,
+        "SCAN_NORETRY": 0,
+        "SCAN_PREFIX": 2,
+        "SCAN_NOPREFIX": 3,
+        "BEFORE": "before",
+        "AFTER": "after",
+        "LEFT": "left",
+        "RIGHT": "right",
+        "OPT_MAX_RETRIES": 11,
+        "OPT_BACKOFF_ALGORITHM": 12,
+        "BACKOFF_ALGORITHM_DEFAULT": 0,
+        "BACKOFF_ALGORITHM_CONSTANT": 6,
+        "BACKOFF_ALGORITHM_UNIFORM": 5,
+        "BACKOFF_ALGORITHM_EXPONENTIAL": 4,
+        "BACKOFF_ALGORITHM_FULL_JITTER": 2,
+        "BACKOFF_ALGORITHM_EQUAL_JITTER": 3,
+        "BACKOFF_ALGORITHM_DECORRELATED_JITTER": 1,
+        "OPT_BACKOFF_BASE": 13,
+        "OPT_BACKOFF_CAP": 14
+    },
+    "methods": {
+        "__construct": [
+            {
+                "name": "options",
+                "type": "?array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "__destruct": [],
+        "_compress": [
+            {
+                "name": "value",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "_uncompress": [
+            {
+                "name": "value",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "_prefix": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "_serialize": [
+            {
+                "name": "value",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "_unserialize": [
+            {
+                "name": "value",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "_pack": [
+            {
+                "name": "value",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "_unpack": [
+            {
+                "name": "value",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "acl": [
+            {
+                "name": "subcmd",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "args",
+                "type": "string",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "append": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "value",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "auth": [
+            {
+                "name": "credentials",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "bgSave": [],
+        "bgrewriteaof": [],
+        "waitaof": [
+            {
+                "name": "numlocal",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "numreplicas",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "timeout",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "bitcount": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "start",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 0
+            },
+            {
+                "name": "end",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": -1
+            },
+            {
+                "name": "bybit",
+                "type": "bool",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": false
+            }
+        ],
+        "bitop": [
+            {
+                "name": "operation",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "deskey",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "srckey",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "other_keys",
+                "type": "string",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "bitpos": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "bit",
+                "type": "bool",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "start",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 0
+            },
+            {
+                "name": "end",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": -1
+            },
+            {
+                "name": "bybit",
+                "type": "bool",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": false
+            }
+        ],
+        "blPop": [
+            {
+                "name": "key_or_keys",
+                "type": "array|string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "timeout_or_key",
+                "type": "string|int|float",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "extra_args",
+                "type": "mixed",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "brPop": [
+            {
+                "name": "key_or_keys",
+                "type": "array|string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "timeout_or_key",
+                "type": "string|int|float",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "extra_args",
+                "type": "mixed",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "brpoplpush": [
+            {
+                "name": "src",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "dst",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "timeout",
+                "type": "int|float",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "bzPopMax": [
+            {
+                "name": "key",
+                "type": "array|string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "timeout_or_key",
+                "type": "string|int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "extra_args",
+                "type": "mixed",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "bzPopMin": [
+            {
+                "name": "key",
+                "type": "array|string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "timeout_or_key",
+                "type": "string|int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "extra_args",
+                "type": "mixed",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "bzmpop": [
+            {
+                "name": "timeout",
+                "type": "float",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "keys",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "from",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "count",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 1
+            }
+        ],
+        "zmpop": [
+            {
+                "name": "keys",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "from",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "count",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 1
+            }
+        ],
+        "blmpop": [
+            {
+                "name": "timeout",
+                "type": "float",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "keys",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "from",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "count",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 1
+            }
+        ],
+        "lmpop": [
+            {
+                "name": "keys",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "from",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "count",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 1
+            }
+        ],
+        "clearLastError": [],
+        "client": [
+            {
+                "name": "opt",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "args",
+                "type": "mixed",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "close": [],
+        "command": [
+            {
+                "name": "opt",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "args",
+                "type": "mixed",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "config": [
+            {
+                "name": "operation",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "key_or_settings",
+                "type": "array|string|null",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "value",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "connect": [
+            {
+                "name": "host",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "port",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 6379
+            },
+            {
+                "name": "timeout",
+                "type": "float",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 0
+            },
+            {
+                "name": "persistent_id",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "retry_interval",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 0
+            },
+            {
+                "name": "read_timeout",
+                "type": "float",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 0
+            },
+            {
+                "name": "context",
+                "type": "?array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "copy": [
+            {
+                "name": "src",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "dst",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "options",
+                "type": "?array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "dbSize": [],
+        "debug": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "decr": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "by",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 1
+            }
+        ],
+        "decrBy": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "value",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "del": [
+            {
+                "name": "key",
+                "type": "array|string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "other_keys",
+                "type": "string",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "delifeq": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "value",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "delete": [
+            {
+                "name": "key",
+                "type": "array|string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "other_keys",
+                "type": "string",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "discard": [],
+        "dump": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "echo": [
+            {
+                "name": "str",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "eval": [
+            {
+                "name": "script",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "args",
+                "type": "array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": []
+            },
+            {
+                "name": "num_keys",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 0
+            }
+        ],
+        "eval_ro": [
+            {
+                "name": "script_sha",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "args",
+                "type": "array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": []
+            },
+            {
+                "name": "num_keys",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 0
+            }
+        ],
+        "evalsha": [
+            {
+                "name": "sha1",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "args",
+                "type": "array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": []
+            },
+            {
+                "name": "num_keys",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 0
+            }
+        ],
+        "evalsha_ro": [
+            {
+                "name": "sha1",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "args",
+                "type": "array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": []
+            },
+            {
+                "name": "num_keys",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 0
+            }
+        ],
+        "exec": [],
+        "exists": [
+            {
+                "name": "key",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "other_keys",
+                "type": "mixed",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "expire": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "timeout",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "mode",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "expireAt": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "timestamp",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "mode",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "failover": [
+            {
+                "name": "to",
+                "type": "?array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "abort",
+                "type": "bool",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": false
+            },
+            {
+                "name": "timeout",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 0
+            }
+        ],
+        "expiretime": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "pexpiretime": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "fcall": [
+            {
+                "name": "fn",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "keys",
+                "type": "array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": []
+            },
+            {
+                "name": "args",
+                "type": "array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": []
+            }
+        ],
+        "fcall_ro": [
+            {
+                "name": "fn",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "keys",
+                "type": "array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": []
+            },
+            {
+                "name": "args",
+                "type": "array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": []
+            }
+        ],
+        "flushAll": [
+            {
+                "name": "sync",
+                "type": "?bool",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "flushDB": [
+            {
+                "name": "sync",
+                "type": "?bool",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "function": [
+            {
+                "name": "operation",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "args",
+                "type": "mixed",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "geoadd": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "lng",
+                "type": "float",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "lat",
+                "type": "float",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "member",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "other_triples_and_options",
+                "type": "mixed",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "geodist": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "src",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "dst",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "unit",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "geohash": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "member",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "other_members",
+                "type": "string",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "geopos": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "member",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "other_members",
+                "type": "string",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "georadius": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "lng",
+                "type": "float",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "lat",
+                "type": "float",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "radius",
+                "type": "float",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "unit",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "options",
+                "type": "array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": []
+            }
+        ],
+        "georadius_ro": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "lng",
+                "type": "float",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "lat",
+                "type": "float",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "radius",
+                "type": "float",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "unit",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "options",
+                "type": "array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": []
+            }
+        ],
+        "georadiusbymember": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "member",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "radius",
+                "type": "float",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "unit",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "options",
+                "type": "array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": []
+            }
+        ],
+        "georadiusbymember_ro": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "member",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "radius",
+                "type": "float",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "unit",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "options",
+                "type": "array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": []
+            }
+        ],
+        "geosearch": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "position",
+                "type": "array|string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "shape",
+                "type": "array|int|float",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "unit",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "options",
+                "type": "array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": []
+            }
+        ],
+        "geosearchstore": [
+            {
+                "name": "dst",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "src",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "position",
+                "type": "array|string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "shape",
+                "type": "array|int|float",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "unit",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "options",
+                "type": "array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": []
+            }
+        ],
+        "get": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "getWithMeta": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "getAuth": [],
+        "getBit": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "idx",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "getEx": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "options",
+                "type": "array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": []
+            }
+        ],
+        "getDBNum": [],
+        "getDel": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "getHost": [],
+        "getLastError": [],
+        "getMode": [],
+        "getOption": [
+            {
+                "name": "option",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "getPersistentID": [],
+        "getPort": [],
+        "serverName": [],
+        "serverVersion": [],
+        "getRange": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "start",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "end",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "lcs": [
+            {
+                "name": "key1",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "key2",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "options",
+                "type": "?array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "getReadTimeout": [],
+        "getset": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "value",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "getTimeout": [],
+        "getTransferredBytes": [],
+        "clearTransferredBytes": [],
+        "hDel": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "field",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "other_fields",
+                "type": "string",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "hExists": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "field",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "hGet": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "member",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "hGetAll": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "hGetWithMeta": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "member",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "hIncrBy": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "field",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "value",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "hIncrByFloat": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "field",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "value",
+                "type": "float",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "hKeys": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "hLen": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "hMget": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "fields",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "hgetex": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "fields",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "expiry",
+                "type": "array|string|null",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "hsetex": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "fields",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "expiry",
+                "type": "?array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "hgetdel": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "fields",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "hMset": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "fieldvals",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "hRandField": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "options",
+                "type": "?array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "hSet": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "fields_and_vals",
+                "type": "mixed",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "hSetNx": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "field",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "value",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "hStrLen": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "field",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "hVals": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "hexpire": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "ttl",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "fields",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "mode",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "hpexpire": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "ttl",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "fields",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "mode",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "hexpireat": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "time",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "fields",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "mode",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "hpexpireat": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "mstime",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "fields",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "mode",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "httl": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "fields",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "hpttl": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "fields",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "hexpiretime": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "fields",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "hpexpiretime": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "fields",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "hpersist": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "fields",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "hscan": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "iterator",
+                "type": "string|int|null",
+                "optional": false,
+                "ref": true,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "pattern",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "count",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 0
+            }
+        ],
+        "expiremember": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "field",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "ttl",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "unit",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "expirememberat": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "field",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "timestamp",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "incr": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "by",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 1
+            }
+        ],
+        "incrBy": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "value",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "incrByFloat": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "value",
+                "type": "float",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "info": [
+            {
+                "name": "sections",
+                "type": "string",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "isConnected": [],
+        "keys": [
+            {
+                "name": "pattern",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "lInsert": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "pos",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "pivot",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "value",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "lLen": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "lMove": [
+            {
+                "name": "src",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "dst",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "wherefrom",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "whereto",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "blmove": [
+            {
+                "name": "src",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "dst",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "wherefrom",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "whereto",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "timeout",
+                "type": "float",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "lPop": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "count",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 0
+            }
+        ],
+        "lPos": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "value",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "options",
+                "type": "?array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "lPush": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "elements",
+                "type": "mixed",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "rPush": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "elements",
+                "type": "mixed",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "lPushx": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "value",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "rPushx": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "value",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "lSet": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "index",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "value",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "lastSave": [],
+        "lindex": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "index",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "lrange": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "start",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "end",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "lrem": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "value",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "count",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 0
+            }
+        ],
+        "ltrim": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "start",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "end",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "mget": [
+            {
+                "name": "keys",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "migrate": [
+            {
+                "name": "host",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "port",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "key",
+                "type": "array|string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "dstdb",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "timeout",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "copy",
+                "type": "bool",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": false
+            },
+            {
+                "name": "replace",
+                "type": "bool",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": false
+            },
+            {
+                "name": "credentials",
+                "type": "mixed",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "move": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "index",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "mset": [
+            {
+                "name": "key_values",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "msetnx": [
+            {
+                "name": "key_values",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "multi": [
+            {
+                "name": "value",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 1
+            }
+        ],
+        "object": [
+            {
+                "name": "subcommand",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "open": [
+            {
+                "name": "host",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "port",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 6379
+            },
+            {
+                "name": "timeout",
+                "type": "float",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 0
+            },
+            {
+                "name": "persistent_id",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "retry_interval",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 0
+            },
+            {
+                "name": "read_timeout",
+                "type": "float",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 0
+            },
+            {
+                "name": "context",
+                "type": "?array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "pconnect": [
+            {
+                "name": "host",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "port",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 6379
+            },
+            {
+                "name": "timeout",
+                "type": "float",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 0
+            },
+            {
+                "name": "persistent_id",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "retry_interval",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 0
+            },
+            {
+                "name": "read_timeout",
+                "type": "float",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 0
+            },
+            {
+                "name": "context",
+                "type": "?array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "persist": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "pexpire": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "timeout",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "mode",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "pexpireAt": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "timestamp",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "mode",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "pfadd": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "elements",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "pfcount": [
+            {
+                "name": "key_or_keys",
+                "type": "array|string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "pfmerge": [
+            {
+                "name": "dst",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "srckeys",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "ping": [
+            {
+                "name": "message",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "pipeline": [],
+        "popen": [
+            {
+                "name": "host",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "port",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 6379
+            },
+            {
+                "name": "timeout",
+                "type": "float",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 0
+            },
+            {
+                "name": "persistent_id",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "retry_interval",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 0
+            },
+            {
+                "name": "read_timeout",
+                "type": "float",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 0
+            },
+            {
+                "name": "context",
+                "type": "?array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "psetex": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "expire",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "value",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "psubscribe": [
+            {
+                "name": "patterns",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "cb",
+                "type": "callable",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "pttl": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "publish": [
+            {
+                "name": "channel",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "message",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "pubsub": [
+            {
+                "name": "command",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "arg",
+                "type": "mixed",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "punsubscribe": [
+            {
+                "name": "patterns",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "rPop": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "count",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 0
+            }
+        ],
+        "randomKey": [],
+        "rawcommand": [
+            {
+                "name": "command",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "args",
+                "type": "mixed",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "rename": [
+            {
+                "name": "old_name",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "new_name",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "renameNx": [
+            {
+                "name": "key_src",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "key_dst",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "reset": [],
+        "restore": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "ttl",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "value",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "options",
+                "type": "?array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "role": [],
+        "rpoplpush": [
+            {
+                "name": "srckey",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "dstkey",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "sAdd": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "value",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "other_values",
+                "type": "mixed",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "sAddArray": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "values",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "sDiff": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "other_keys",
+                "type": "string",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "sDiffStore": [
+            {
+                "name": "dst",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "other_keys",
+                "type": "string",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "sInter": [
+            {
+                "name": "key",
+                "type": "array|string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "other_keys",
+                "type": "string",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "sintercard": [
+            {
+                "name": "keys",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "limit",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": -1
+            }
+        ],
+        "sInterStore": [
+            {
+                "name": "key",
+                "type": "array|string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "other_keys",
+                "type": "string",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "sMembers": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "sMisMember": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "member",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "other_members",
+                "type": "string",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "sMove": [
+            {
+                "name": "src",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "dst",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "value",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "sPop": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "count",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 0
+            }
+        ],
+        "sRandMember": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "count",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 0
+            }
+        ],
+        "sUnion": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "other_keys",
+                "type": "string",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "sUnionStore": [
+            {
+                "name": "dst",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "other_keys",
+                "type": "string",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "save": [],
+        "scan": [
+            {
+                "name": "iterator",
+                "type": "string|int|null",
+                "optional": false,
+                "ref": true,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "pattern",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "count",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 0
+            },
+            {
+                "name": "type",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "scard": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "script": [
+            {
+                "name": "command",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "args",
+                "type": "mixed",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "select": [
+            {
+                "name": "db",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "set": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "value",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "options",
+                "type": "mixed",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "setBit": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "idx",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "value",
+                "type": "bool",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "setRange": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "index",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "value",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "setOption": [
+            {
+                "name": "option",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "value",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "setex": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "expire",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "value",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "setnx": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "value",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "sismember": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "value",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "slaveof": [
+            {
+                "name": "host",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "port",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 6379
+            }
+        ],
+        "replicaof": [
+            {
+                "name": "host",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "port",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 6379
+            }
+        ],
+        "touch": [
+            {
+                "name": "key_or_array",
+                "type": "array|string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "more_keys",
+                "type": "string",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "slowlog": [
+            {
+                "name": "operation",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "length",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 0
+            }
+        ],
+        "sort": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "options",
+                "type": "?array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "sort_ro": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "options",
+                "type": "?array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "sortAsc": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "pattern",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "get",
+                "type": "mixed",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "offset",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": -1
+            },
+            {
+                "name": "count",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": -1
+            },
+            {
+                "name": "store",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "sortAscAlpha": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "pattern",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "get",
+                "type": "mixed",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "offset",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": -1
+            },
+            {
+                "name": "count",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": -1
+            },
+            {
+                "name": "store",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "sortDesc": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "pattern",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "get",
+                "type": "mixed",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "offset",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": -1
+            },
+            {
+                "name": "count",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": -1
+            },
+            {
+                "name": "store",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "sortDescAlpha": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "pattern",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "get",
+                "type": "mixed",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "offset",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": -1
+            },
+            {
+                "name": "count",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": -1
+            },
+            {
+                "name": "store",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "srem": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "value",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "other_values",
+                "type": "mixed",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "sscan": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "iterator",
+                "type": "string|int|null",
+                "optional": false,
+                "ref": true,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "pattern",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "count",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 0
+            }
+        ],
+        "ssubscribe": [
+            {
+                "name": "channels",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "cb",
+                "type": "callable",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "strlen": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "subscribe": [
+            {
+                "name": "channels",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "cb",
+                "type": "callable",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "sunsubscribe": [
+            {
+                "name": "channels",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "swapdb": [
+            {
+                "name": "src",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "dst",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "time": [],
+        "ttl": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "type": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "unlink": [
+            {
+                "name": "key",
+                "type": "array|string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "other_keys",
+                "type": "string",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "unsubscribe": [
+            {
+                "name": "channels",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "unwatch": [],
+        "watch": [
+            {
+                "name": "key",
+                "type": "array|string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "other_keys",
+                "type": "string",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "wait": [
+            {
+                "name": "numreplicas",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "timeout",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "xack": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "group",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "ids",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "xadd": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "id",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "values",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "maxlen",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 0
+            },
+            {
+                "name": "approx",
+                "type": "bool",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": false
+            },
+            {
+                "name": "nomkstream",
+                "type": "bool",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": false
+            }
+        ],
+        "xautoclaim": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "group",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "consumer",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "min_idle",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "start",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "count",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": -1
+            },
+            {
+                "name": "justid",
+                "type": "bool",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": false
+            }
+        ],
+        "xclaim": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "group",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "consumer",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "min_idle",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "ids",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "options",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "xdel": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "ids",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "xgroup": [
+            {
+                "name": "operation",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "key",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "group",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "id_or_consumer",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "mkstream",
+                "type": "bool",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": false
+            },
+            {
+                "name": "entries_read",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": -2
+            }
+        ],
+        "xinfo": [
+            {
+                "name": "operation",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "arg1",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "arg2",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "count",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": -1
+            }
+        ],
+        "xlen": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "xpending": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "group",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "start",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "end",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "count",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": -1
+            },
+            {
+                "name": "consumer",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "xrange": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "start",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "end",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "count",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": -1
+            }
+        ],
+        "xread": [
+            {
+                "name": "streams",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "count",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": -1
+            },
+            {
+                "name": "block",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": -1
+            }
+        ],
+        "xreadgroup": [
+            {
+                "name": "group",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "consumer",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "streams",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "count",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 1
+            },
+            {
+                "name": "block",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 1
+            }
+        ],
+        "xrevrange": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "end",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "start",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "count",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": -1
+            }
+        ],
+        "vadd": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "values",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "element",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "options",
+                "type": "?array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "vsim": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "member",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "options",
+                "type": "?array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "vcard": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "vdim": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "vinfo": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "vismember": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "member",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "vemb": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "member",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "raw",
+                "type": "bool",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": false
+            }
+        ],
+        "vrandmember": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "count",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 0
+            }
+        ],
+        "vrange": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "min",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "max",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "count",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": -1
+            }
+        ],
+        "vrem": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "member",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "vsetattr": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "member",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "attributes",
+                "type": "array|string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "vgetattr": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "member",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "decode",
+                "type": "bool",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": true
+            }
+        ],
+        "vlinks": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "member",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "withscores",
+                "type": "bool",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": false
+            }
+        ],
+        "xtrim": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "threshold",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "approx",
+                "type": "bool",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": false
+            },
+            {
+                "name": "minid",
+                "type": "bool",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": false
+            },
+            {
+                "name": "limit",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": -1
+            }
+        ],
+        "zAdd": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "score_or_options",
+                "type": "array|float",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "more_scores_and_mems",
+                "type": "mixed",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "zCard": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "zCount": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "start",
+                "type": "string|int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "end",
+                "type": "string|int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "zIncrBy": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "value",
+                "type": "float",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "member",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "zLexCount": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "min",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "max",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "zMscore": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "member",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "other_members",
+                "type": "mixed",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "zPopMax": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "count",
+                "type": "?int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "zPopMin": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "count",
+                "type": "?int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "zRange": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "start",
+                "type": "string|int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "end",
+                "type": "string|int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "options",
+                "type": "array|bool|null",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "zRangeByLex": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "min",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "max",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "offset",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": -1
+            },
+            {
+                "name": "count",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": -1
+            }
+        ],
+        "zRangeByScore": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "start",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "end",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "options",
+                "type": "array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": []
+            }
+        ],
+        "zrangestore": [
+            {
+                "name": "dstkey",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "srckey",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "start",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "end",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "options",
+                "type": "array|bool|null",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "zRandMember": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "options",
+                "type": "?array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "zRank": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "member",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "zRem": [
+            {
+                "name": "key",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "member",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "other_members",
+                "type": "mixed",
+                "optional": true,
+                "ref": false,
+                "variadic": true,
+                "default": null
+            }
+        ],
+        "zRemRangeByLex": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "min",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "max",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "zRemRangeByRank": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "start",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "end",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "zRemRangeByScore": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "start",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "end",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "zRevRange": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "start",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "end",
+                "type": "int",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "scores",
+                "type": "mixed",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "zRevRangeByLex": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "max",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "min",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "offset",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": -1
+            },
+            {
+                "name": "count",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": -1
+            }
+        ],
+        "zRevRangeByScore": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "max",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "min",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "options",
+                "type": "array|bool",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": []
+            }
+        ],
+        "zRevRank": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "member",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "zScore": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "member",
+                "type": "mixed",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "zdiff": [
+            {
+                "name": "keys",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "options",
+                "type": "?array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "zdiffstore": [
+            {
+                "name": "dst",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "keys",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "zinter": [
+            {
+                "name": "keys",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "weights",
+                "type": "?array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "options",
+                "type": "?array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "zintercard": [
+            {
+                "name": "keys",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "limit",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": -1
+            }
+        ],
+        "zinterstore": [
+            {
+                "name": "dst",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "keys",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "weights",
+                "type": "?array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "aggregate",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "zscan": [
+            {
+                "name": "key",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "iterator",
+                "type": "string|int|null",
+                "optional": false,
+                "ref": true,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "pattern",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "count",
+                "type": "int",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": 0
+            }
+        ],
+        "zunion": [
+            {
+                "name": "keys",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "weights",
+                "type": "?array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "options",
+                "type": "?array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ],
+        "zunionstore": [
+            {
+                "name": "dst",
+                "type": "string",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "keys",
+                "type": "array",
+                "optional": false,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "weights",
+                "type": "?array",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            },
+            {
+                "name": "aggregate",
+                "type": "?string",
+                "optional": true,
+                "ref": false,
+                "variadic": false,
+                "default": null
+            }
+        ]
+    }
+}

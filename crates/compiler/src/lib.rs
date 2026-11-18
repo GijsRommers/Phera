@@ -24,19 +24,28 @@ use helpers::{binary, constant, type_name, writable};
 
 /// Compile PHP source on a bounded dedicated stack, keeping tiny callers safe.
 pub fn compile(source: &str, file: &str) -> Result<phera_bytecode::CompiledUnit, CompileError> {
+    compile_bytes(source.as_bytes(), file)
+}
+
+/// Compile a file without transcoding its source bytes.
+pub fn compile_bytes(
+    source: &[u8],
+    file: &str,
+) -> Result<phera_bytecode::CompiledUnit, CompileError> {
     compile_source(source, file, pipeline::SourceKind::File)
 }
 
 /// Compile the code passed to `eval()` without requiring an opening tag.
 pub fn compile_eval(
-    source: &str,
+    source: &[u8],
     file: &str,
 ) -> Result<phera_bytecode::CompiledUnit, CompileError> {
-    compile_source(&format!("<?php {source}"), file, pipeline::SourceKind::Eval)
+    let code = [b"<?php ".as_slice(), source].concat();
+    compile_source(&code, file, pipeline::SourceKind::Eval)
 }
 
 fn compile_source(
-    source: &str,
+    source: &[u8],
     file: &str,
     kind: pipeline::SourceKind,
 ) -> Result<phera_bytecode::CompiledUnit, CompileError> {
@@ -50,6 +59,7 @@ fn compile_source(
                 file: file.into(),
                 line: 1,
                 parse: false,
+                scanner_diagnostics: Vec::new(),
             })?
             .join()
             .unwrap_or_else(|_| {
@@ -58,6 +68,7 @@ fn compile_source(
                     file: file.into(),
                     line: 1,
                     parse: false,
+                    scanner_diagnostics: Vec::new(),
                 })
             })
     })

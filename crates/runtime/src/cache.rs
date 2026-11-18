@@ -34,8 +34,8 @@ impl CodeCache {
 
         // Compile without holding the lock, so other files load meanwhile.
         // Two threads may compile the same file once; the result is the same.
-        let source = std::fs::read_to_string(&canonical).map_err(read_error)?;
-        let unit = Arc::new(phera_compiler::compile(
+        let source = std::fs::read(&canonical).map_err(read_error)?;
+        let unit = Arc::new(phera_compiler::compile_bytes(
             &source,
             &canonical.to_string_lossy(),
         )?);

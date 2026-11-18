@@ -5,8 +5,10 @@
 //! and lets `__halt_compiler` hand the rest of the file back as one raw
 //! `InlineHtml` token, exactly like the lexer produces it.
 
+use std::borrow::Cow;
+
 use phera_ast::{Program, Statement, StatementKind};
-use phera_lexer::{LexError, Lexer, Token, TokenKind};
+use phera_lexer::{LexError, Lexer, ScanMode, ScanReport, Token, TokenKind};
 use phera_source::Span;
 
 use crate::error::ParseError;
@@ -21,7 +23,7 @@ use crate::error::ParseError;
 const MAX_DEPTH: u32 = 1000;
 
 pub(crate) struct Parser<'src> {
-    pub(crate) source: &'src str,
+    pub(crate) source: &'src [u8],
     tokens: Vec<Token>,
     pos: usize,
     /// The lexer error that stopped lexing early, if any. A synthetic `Eof`
@@ -36,8 +38,13 @@ pub(crate) struct Parser<'src> {
 }
 
 impl<'src> Parser<'src> {
-    pub(crate) fn new(source: &'src str) -> Self {
-        let mut lexer = Lexer::new(source);
+    pub(crate) fn new(source: &'src [u8], collect_diagnostics: bool) -> (Self, ScanReport) {
+        let lexer = Lexer::new_bytes(source);
+        let mut lexer = if collect_diagnostics {
+            lexer.with_diagnostics(ScanMode::Parsed)
+        } else {
+            lexer
+        };
         let mut tokens = Vec::new();
         let mut lex_error = None;
 
@@ -61,7 +68,7 @@ impl<'src> Parser<'src> {
             }
         }
 
-        Self {
+        let parser = Self {
             source,
             tokens,
             pos: 0,
@@ -69,7 +76,8 @@ impl<'src> Parser<'src> {
             prev_end: 0,
             depth: 0,
             halted: false,
-        }
+        };
+        (parser, lexer.into_diagnostics())
     }
 
     pub(crate) fn parse_program(mut self) -> Result<Program, ParseError> {
@@ -106,7 +114,7 @@ impl<'src> Parser<'src> {
                 }
                 TokenKind::InlineHtml => {
                     let token = self.bump()?;
-                    let html = self.text_of(&token).to_string();
+                    let html = self.bytes_of(&token).to_vec();
                     statements.push(Statement {
                         kind: StatementKind::InlineHtml(html),
                         span: token.span,
@@ -168,11 +176,32 @@ impl<'src> Parser<'src> {
     }
 
     /// The source text of the current token.
-    pub(crate) fn text(&self) -> &'src str {
+    pub(crate) fn text(&self) -> Cow<'src, str> {
         self.text_of(self.current())
     }
 
-    pub(crate) fn text_of(&self, token: &Token) -> &'src str {
+    pub(crate) fn text_of(&self, token: &Token) -> Cow<'src, str> {
+        let bytes = self.bytes_of(token);
+        match std::str::from_utf8(bytes) {
+            Ok(text) => Cow::Borrowed(text),
+            Err(_) => {
+                // NUL cannot occur in a PHP name. Escape high bytes injectively
+                // until bytecode and symbol tables can hold byte-string names.
+                let mut name = String::new();
+                for &byte in bytes {
+                    if byte.is_ascii() {
+                        name.push(char::from(byte));
+                    } else {
+                        use std::fmt::Write;
+                        write!(name, "\0{byte:02x}").expect("string writes succeed");
+                    }
+                }
+                Cow::Owned(name)
+            }
+        }
+    }
+
+    pub(crate) fn bytes_of(&self, token: &Token) -> &'src [u8] {
         &self.source[token.span.start..token.span.end]
     }
 
@@ -244,7 +273,7 @@ impl<'src> Parser<'src> {
         if token.kind == TokenKind::Eof {
             "end of file".to_string()
         } else {
-            let text = self.text_of(token);
+            let text = String::from_utf8_lossy(self.bytes_of(token));
             let text = if text.chars().count() > 30 {
                 format!("{}...", text.chars().take(30).collect::<String>())
             } else {
