@@ -9,7 +9,7 @@ $r = new ReflectionObject($object);
 var_dump($r->hasProperty('label'), $r->getProperty('label')->isDefault());
 var_dump($r->getProperty('label')->getValue($object));
 --EXPECTF--
-Deprecated: Creation of dynamic property Entity::$label is deprecated in /private%s on line 4
+Deprecated: Creation of dynamic property Entity::$label is deprecated in %s on line 4
 bool(true)
 bool(false)
 string(4) "test"
