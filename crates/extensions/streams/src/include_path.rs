@@ -2,7 +2,7 @@
 
 use phera_extension_api::{Context, FunctionEntry, NativeResult, Registry, Value, args};
 
-use crate::errors::check_path;
+use crate::errors::{check_path, wrapper_warning};
 use crate::handles::FILENAME;
 use crate::request::{bytes, directory, path, search};
 use crate::wrapper::Target;
@@ -26,6 +26,10 @@ fn resolve(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
             .ok()
             .and_then(|p| p.canonicalize().ok()),
         Target::File(file) => search(directory(context), file, &include_path, script.as_deref()),
+        Target::Unavailable(scheme) => {
+            wrapper_warning(context, "stream_resolve_include_path", scheme);
+            None
+        }
         _ => None,
     };
     Ok(found.map_or(Value::Bool(false), |path| {

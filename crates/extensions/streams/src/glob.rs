@@ -11,7 +11,7 @@ use phera_extension_api::{
 
 use crate::errors::{check_path, warn_false};
 use crate::io_policy::IoPolicy;
-use crate::pattern::Options;
+use crate::pattern::{InvalidClass, Options};
 use crate::request::{directory, path};
 
 // PHP uses glibc's glob flags on Linux and the bundled BSD glob elsewhere.
@@ -93,6 +93,7 @@ fn glob(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeRe
                 path: false,
                 period: true,
                 fold: false,
+                invalid_class: InvalidClass::Literal,
             },
             braces,
             errors,

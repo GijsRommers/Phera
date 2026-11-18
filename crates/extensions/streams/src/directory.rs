@@ -14,7 +14,7 @@ use crate::context_options::{OPTIONAL_CONTEXT, validate};
 use crate::errors::{check_path, reason, warn_false};
 use crate::io_policy::IoPolicy;
 use crate::mutations::{DIRECTORY, local, path_call};
-use crate::request::{bytes, directory, files, new_resource};
+use crate::request::{bytes, directory, files, new_resource, path};
 use crate::resource::given;
 
 const HANDLE: Param = Param::new("dir_handle", ParamType::Mixed).optional();
@@ -324,7 +324,12 @@ fn getcwd(context: &mut dyn Context, _: &[Value]) -> NativeResult {
 fn chdir(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let name = args::bytes(arguments, 0);
     check_path("chdir", "#1 ($directory)", name)?;
-    let expected = local(context, "chdir", name).and_then(|name| {
+    let resolved = if name.is_empty() {
+        Err(rustix::io::Errno::NOENT.into())
+    } else {
+        directory(context).resolve(path(name))
+    };
+    let expected = resolved.and_then(|name| {
         use rustix::fs::{Access, access};
         let name = name.canonicalize()?;
         let result = name.metadata()?;

@@ -54,6 +54,11 @@ fn fnmatch(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         path: flags & PATHNAME != 0,
         period: flags & PERIOD != 0,
         fold: flags & CASEFOLD != 0,
+        invalid_class: if cfg!(target_vendor = "apple") {
+            InvalidClass::Reject
+        } else {
+            InvalidClass::Literal
+        },
     };
     Ok(Value::Bool(options.matches(pattern, name)))
 }
@@ -63,6 +68,12 @@ pub struct Options {
     pub path: bool,
     pub period: bool,
     pub fold: bool,
+    pub invalid_class: InvalidClass,
+}
+
+pub enum InvalidClass {
+    Literal,
+    Reject,
 }
 
 enum Token<'a> {
@@ -117,7 +128,10 @@ impl Options {
             [b'\\'] if self.escape => (Token::Never, &[]),
             [b'[', rest @ ..] => match class_end(rest) {
                 Some(index) => (Token::Class(&rest[..index]), &rest[index + 1..]),
-                None => (Token::Literal(b'['), rest),
+                None => match self.invalid_class {
+                    InvalidClass::Literal => (Token::Literal(b'['), rest),
+                    InvalidClass::Reject => (Token::Never, rest),
+                },
             },
             [byte, rest @ ..] => (Token::Literal(*byte), rest),
             [] => (Token::Never, &[]),
