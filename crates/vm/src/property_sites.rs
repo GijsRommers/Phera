@@ -2,9 +2,10 @@
 
 use crate::{
     AccessPath, Vm,
+    property_hook_sites::CachedPropertyHooks,
     property_targets::{PropertyShape, PropertyTarget},
 };
-use phera_bytecode::{NameId, Step, TypeMask};
+use phera_bytecode::{NameId, Reg, Step, TypeMask};
 use phera_extension_api::NativeError;
 use phera_value::{ArrayKey, ClassHandle, Object, Value};
 use std::rc::Rc;
@@ -14,15 +15,27 @@ use std::rc::Rc;
 /// entries retain classes, and the entire map dies with the request, preventing
 /// address reuse and conditional declarations in another request from matching.
 /// Class and lexical scope identities guard the slow visibility resolver's result.
-#[derive(Clone)]
 pub(crate) struct PropertyEntry {
     class: Rc<dyn ClassHandle>,
     scope: Option<Rc<crate::classes::Class>>,
     key: ArrayKey,
     write_rule: WriteRule,
-    pub(crate) slot: Option<usize>,
+    slot: Option<usize>,
     /// An immutable class fact, so a property-site hit avoids a class downcast.
     read_without_static_notice: bool,
+    pub(crate) hooks: Option<Box<CachedPropertyHooks>>,
+}
+
+impl PropertyEntry {
+    fn read(&self, object: &Object) -> Option<Value> {
+        if !self.read_without_static_notice {
+            return None;
+        }
+        crate::property_storage::read_at(object, &self.key, self.slot).map(|value| match value {
+            Value::Reference(_) => value.deref().clone(),
+            value => value,
+        })
+    }
 }
 
 impl Vm {
@@ -47,10 +60,23 @@ impl Vm {
         {
             return Ok(Some(entry.clone()));
         }
+        self.fill_property_entry(object, name)
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn fill_property_entry(
+        &mut self,
+        object: &Object,
+        name: NameId,
+    ) -> Result<Option<Rc<PropertyEntry>>, NativeError> {
         if crate::properties::native_property_access(object).is_some() {
             return Ok(None);
         }
-        let scope = scope.cloned();
+        let frame = self
+            .current()
+            .ok_or_else(|| internal_error!("property site"))?;
+        let scope = frame.scope().cloned();
         let unit = frame.unit().clone();
         let name = unit
             .names
@@ -73,15 +99,15 @@ impl Vm {
                 .find(|(_, property)| property.key == key)
         });
         let slot = property.map(|(slot, _)| slot);
-        let dispatched = property.and_then(|(_, property)| {
-            let hooks = property.hooks.as_ref()?;
-            (hooks.hooks.is_virtual
-                || !this_property_site(frame)
-                || !self.uses_property_backing(object, property, hooks))
-            .then_some(hooks)
-        });
-        let invokes_getter =
-            dispatched.is_some_and(|hooks| hooks.hooks.is_virtual || hooks.hooks.get.is_some());
+        let dispatched =
+            property.and_then(|(_, property)| {
+                let hooks = property.hooks.as_ref()?;
+                let guard_receiver = self.has_property_hook_scope(property, hooks);
+                (hooks.hooks.is_virtual || !guard_receiver || !this_property_site(frame))
+                    .then_some((property, hooks, guard_receiver))
+            });
+        let invokes_getter = dispatched
+            .is_some_and(|(_, hooks, _)| hooks.hooks.is_virtual || hooks.hooks.get.is_some());
         let write_rule = match property {
             Some((_, property)) if !property.is_readonly && dispatched.is_none() => {
                 match &property.ty {
@@ -97,6 +123,20 @@ impl Vm {
             key,
             write_rule,
             slot,
+            hooks: dispatched.map(|(property, hooks, guard_receiver)| {
+                Box::new(CachedPropertyHooks {
+                    getter: hooks.hooks.get.as_ref().and_then(|getter| {
+                        (!self.code.function(getter.function).returns_reference)
+                            .then_some(getter.function)
+                    }),
+                    setter: hooks.hooks.set.as_ref().and_then(|setter| {
+                        self.hook_set_access(property, hooks, "modify")
+                            .is_ok()
+                            .then_some(setter.function)
+                    }),
+                    guard_receiver,
+                })
+            }),
             read_without_static_notice: !invokes_getter
                 && class.is_none_or(|class| {
                     class
@@ -123,17 +163,26 @@ impl Vm {
         let Some(entry) = self.property_entry(&object, name)? else {
             return Ok(None);
         };
-        if !entry.read_without_static_notice {
-            return Ok(None);
+        Ok(entry.read(&object))
+    }
+
+    /// A fetch either writes its own result or supplies the getter's return destination.
+    pub(crate) fn fetch_property_site(
+        &mut self,
+        place: &AccessPath,
+        destination: Reg,
+    ) -> Result<bool, NativeError> {
+        let Some(PropertyTarget { object, name }) = self.read_property_target(place)? else {
+            return Ok(false);
+        };
+        let Some(entry) = self.property_entry(&object, name)? else {
+            return Ok(false);
+        };
+        if let Some(value) = entry.read(&object) {
+            self.set(destination, value);
+            return Ok(true);
         }
-        Ok(
-            crate::property_storage::read_at(&object, &entry.key, entry.slot).map(|value| {
-                match value {
-                    Value::Reference(_) => value.deref().clone(),
-                    value => value,
-                }
-            }),
-        )
+        self.enter_cached_getter(&entry, object, destination)
     }
 
     /// Mirrors inc_dec_path and validated write_place only for an existing,
@@ -207,10 +256,11 @@ impl WriteRule {
 impl Vm {
     /// Mirrors validated write_place for mutable declarations and already matching
     /// values. Existing references retain write-through and type guards in the slow path.
-    pub(crate) fn write_property_site(
+    fn write_property_site(
         &mut self,
         place: &AccessPath,
         value: &Value,
+        assignment: Option<(Reg, Reg)>,
     ) -> Result<bool, NativeError> {
         let Some(PropertyTarget { object, name }) =
             self.property_target(place, PropertyShape::Single)?
@@ -221,6 +271,7 @@ impl Vm {
             return Ok(false);
         };
         // `public float $x` assigned an int stores the float, as PHP does.
+        let original = value;
         let widened = match entry.write_rule {
             WriteRule::Typed(declared) => crate::types::widen_int_to_float(value, declared),
             _ => None,
@@ -229,7 +280,7 @@ impl Vm {
         let accepted = !matches!(value, Value::Reference(_))
             && entry.write_rule.allows(crate::types::own_type(value));
         if !accepted {
-            return Ok(false);
+            return self.enter_cached_setter(&entry, object, value, assignment);
         }
         let existing = crate::property_storage::read_at(&object, &entry.key, entry.slot);
         if matches!(existing, Some(Value::Reference(_)))
@@ -238,6 +289,9 @@ impl Vm {
             return Ok(false);
         }
         crate::property_storage::write_at(&object, entry.key.clone(), entry.slot, value.clone());
+        if let Some((_, result)) = assignment {
+            self.set(result, original.clone());
+        }
         Ok(true)
     }
 
@@ -275,11 +329,19 @@ impl Vm {
         &mut self,
         place: &AccessPath,
         value: &Value,
+        assignment: Option<(Reg, Reg)>,
     ) -> Result<bool, NativeError> {
         if !matches!(place.steps()?.next(), Some(Step::Property(_))) {
             return Ok(false);
         }
-        Ok(self.write_property_site(place, value)? || self.append_property_site(place, value)?)
+        if self.write_property_site(place, value, assignment)? {
+            return Ok(true);
+        }
+        let appended = self.append_property_site(place, value)?;
+        if appended && let Some((_, result)) = assignment {
+            self.set(result, value.clone());
+        }
+        Ok(appended)
     }
 }
 

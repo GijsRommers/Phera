@@ -19,6 +19,7 @@ use crate::calls::sends::SentArgument;
 impl Vm {
     /// Runs one instruction. `Some` hands control back to the async shell:
     /// a native call to run, a finished callback, or an instruction to await.
+    #[inline]
     pub(crate) fn execute(
         &mut self,
         instruction: Instruction,
@@ -133,11 +134,12 @@ impl Vm {
                 return self.assign_path(path, src);
             }
             I::AssignPathFromLocal { path, src, dst } => {
-                if let Some(value) = self.read_defined_local(src)
-                    && self.assign_property_site(&self.path(path)?, &value)?
-                {
-                    self.set(dst, value);
-                } else if !self.start_setter_from_local(path, src, dst)? {
+                let handled = if let Some(value) = self.read_defined_local(src) {
+                    self.assign_property_site(&self.path(path)?, &value, Some((src, dst)))?
+                } else {
+                    false
+                };
+                if !handled {
                     return Ok(Some(BatchExit::Instruction(instruction)));
                 }
             }

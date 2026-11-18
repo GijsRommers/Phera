@@ -68,31 +68,31 @@ impl Vm {
         property: &PropertyDefault,
         hooks: &LinkedPropertyHooks,
     ) -> bool {
+        self.current()
+            .and_then(|frame| frame.this())
+            .is_some_and(|receiver| std::ptr::eq(&**receiver, object))
+            && self.has_property_hook_scope(property, hooks)
+    }
+
+    /// Receiver identity is checked separately, so a literal property site can
+    /// cache this lexical decision across different method activations.
+    pub(crate) fn has_property_hook_scope(
+        &self,
+        property: &PropertyDefault,
+        hooks: &LinkedPropertyHooks,
+    ) -> bool {
         let Some(frame) = self.current() else {
             return false;
         };
-        if frame.function().name.starts_with("{closure:") {
-            return false;
-        }
-        let Some((_, name)) = frame.function().name.split_once("::$") else {
-            return false;
-        };
-        if !name
-            .split_once("::")
-            .is_some_and(|(name, _)| name == property.name)
-            || !frame
-                .this()
-                .is_some_and(|receiver| std::ptr::eq(&**receiver, object))
-        {
-            return false;
-        }
         frame.scope().is_some_and(|scope| {
             scope.defaults.iter().any(|candidate| {
                 candidate.name == property.name
-                    && candidate
-                        .hooks
-                        .as_ref()
-                        .is_some_and(|own| Rc::ptr_eq(&own.prototype, &hooks.prototype))
+                    && candidate.hooks.as_ref().is_some_and(|own| {
+                        Rc::ptr_eq(&own.prototype, &hooks.prototype)
+                            && own
+                                .methods()
+                                .any(|hook| hook.function == frame.frame.function)
+                    })
             })
         })
     }

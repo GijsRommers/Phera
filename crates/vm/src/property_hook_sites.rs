@@ -1,100 +1,81 @@
 //! A cached `$item->name` can enter its getter in the same interpreter loop as
 //! a normal method call. Plain property hits already returned before this path.
 
-use phera_bytecode::{FetchMode, Reg};
+use phera_bytecode::Reg;
 use phera_extension_api::NativeError;
-use phera_value::Value;
+use phera_value::{Object, Value};
+use std::rc::Rc;
 
 use crate::calls::call_execution::CallEntry;
-use crate::classes::property_hooks::HookWrite;
-use crate::property_targets::{PropertyShape, PropertyTarget};
+use crate::code_table::FunctionIndex;
+use crate::property_sites::PropertyEntry;
+use crate::property_targets::PropertyTarget;
 use crate::{AccessPath, Vm};
 
+pub(crate) struct CachedPropertyHooks {
+    pub(crate) getter: Option<FunctionIndex>,
+    pub(crate) setter: Option<FunctionIndex>,
+    pub(crate) guard_receiver: bool,
+}
+
+impl CachedPropertyHooks {
+    fn dispatches(&self, vm: &Vm, object: &phera_value::Object) -> bool {
+        !self.guard_receiver
+            || !vm
+                .current()
+                .and_then(|frame| frame.this())
+                .is_some_and(|receiver| std::ptr::eq(&**receiver, object))
+    }
+}
+
 impl Vm {
+    #[inline(never)]
     pub(crate) fn start_cached_getter(
         &mut self,
         place: &AccessPath,
         destination: Reg,
-        mode: FetchMode,
     ) -> Result<bool, NativeError> {
         let Some(PropertyTarget { object, name }) = self.read_property_target(place)? else {
             return Ok(false);
         };
-        let entry = match self.property_entry(&object, name) {
-            Err(_) if mode != FetchMode::Read => return Ok(false),
-            result => result?,
-        };
-        let Some(slot) = entry.and_then(|entry| entry.slot) else {
+        let Ok(Some(entry)) = self.property_entry(&object, name) else {
             return Ok(false);
         };
-        let Some(class) = self.classes.for_object(&object) else {
-            return Ok(false);
-        };
-        let Some(property) = class.defaults.get(slot) else {
-            return Err(internal_error!("cached hooked property"));
-        };
-        let Some(hooks) = &property.hooks else {
-            return Ok(false);
-        };
-        let Some(getter) = &hooks.hooks.get else {
-            return Ok(false);
-        };
-        let function = getter.function;
-        if self.code.function(function).returns_reference
-            || self.uses_property_backing(&object, property, hooks)
-        {
-            return Ok(false);
-        }
-        self.prepare_declared_hook(function, object, None)?;
-        match self.enter_prepared_call(Some(destination))? {
-            CallEntry::Php => Ok(true),
-            _ => Err(internal_error!("prepared getter")),
-        }
+        self.enter_cached_getter(&entry, object, destination)
     }
 
-    pub(crate) fn start_setter_from_local(
+    #[inline(never)]
+    pub(crate) fn enter_cached_getter(
         &mut self,
-        path: phera_bytecode::PathId,
-        local: Reg,
-        result: Reg,
+        entry: &PropertyEntry,
+        object: Rc<Object>,
+        destination: Reg,
     ) -> Result<bool, NativeError> {
-        // A hook can change an aliased source before PHP copies the assignment's result.
-        let Some(value) = self.read_defined_local(local) else {
+        let Some(function) = entry
+            .hooks
+            .as_deref()
+            .filter(|hooks| hooks.dispatches(self, &object))
+            .and_then(|hooks| hooks.getter)
+        else {
             return Ok(false);
         };
-        if self.raw_local(local).is_reference() {
-            return Ok(false);
-        }
-        self.start_cached_setter(&self.path(path)?, &value, Some(result))
+        self.start_resolved_hook(function, object, None, Some(destination))?;
+        Ok(true)
     }
 
-    pub(crate) fn start_cached_setter(
+    #[inline(never)]
+    pub(crate) fn enter_cached_setter(
         &mut self,
-        place: &AccessPath,
+        entry: &PropertyEntry,
+        object: Rc<Object>,
         value: &Value,
-        assignment_result: Option<Reg>,
+        assignment: Option<(Reg, Reg)>,
     ) -> Result<bool, NativeError> {
-        let Some(PropertyTarget { object, name }) =
-            self.property_target(place, PropertyShape::Single)?
-        else {
-            return Ok(false);
-        };
-        let Some(slot) = self
-            .property_entry(&object, name)?
-            .and_then(|entry| entry.slot)
-        else {
-            return Ok(false);
-        };
-        let Some(class) = self.classes.for_object(&object) else {
-            return Ok(false);
-        };
-        let Some(property) = class.defaults.get(slot) else {
-            return Err(internal_error!("cached hooked property"));
-        };
-        let Some(hooks) = &property.hooks else {
-            return Ok(false);
-        };
-        let HookWrite::Setter(function) = self.declared_hook_write(&object, property, hooks)?
+        let Some(function) = entry
+            .hooks
+            .as_deref()
+            .filter(|hooks| hooks.dispatches(self, &object))
+            .and_then(|hooks| hooks.setter)
         else {
             return Ok(false);
         };
@@ -102,13 +83,31 @@ impl Vm {
         if value.is_object() {
             return Ok(false);
         }
-        if let Some(assignment_result) = assignment_result {
-            self.set(assignment_result, value.clone());
+        if let Some((source, result)) = assignment {
+            // A hook can change an aliased source before PHP copies the result.
+            if self.raw_local(source).is_reference() {
+                return Ok(false);
+            }
+            self.set(result, value.clone());
         }
-        self.prepare_declared_hook(function, object, Some(value.clone()))?;
-        match self.enter_prepared_call(None)? {
-            CallEntry::Php => Ok(true),
-            _ => Err(internal_error!("prepared setter")),
+        self.start_resolved_hook(function, object, Some(value), None)?;
+        Ok(true)
+    }
+
+    fn start_resolved_hook(
+        &mut self,
+        function: FunctionIndex,
+        object: Rc<Object>,
+        value: Option<&Value>,
+        destination: Option<Reg>,
+    ) -> Result<(), NativeError> {
+        if self.enter_exact_method(function, &object, value, destination)? {
+            return Ok(());
+        }
+        self.prepare_declared_hook(function, object, value.cloned())?;
+        match self.enter_prepared_call(destination)? {
+            CallEntry::Php => Ok(()),
+            _ => Err(internal_error!("prepared property hook")),
         }
     }
 }
