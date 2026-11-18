@@ -111,6 +111,43 @@ async fn open_directory(
         .await
 }
 
+/// Reads a directory through the same wrapper and request directory as scandir().
+pub async fn directory_entries(
+    context: &mut dyn Context,
+    name: &[u8],
+) -> Result<io::Result<Vec<Vec<u8>>>, NativeError> {
+    collect_entries(context, name, 2).await
+}
+
+async fn collect_entries(
+    context: &mut dyn Context,
+    name: &[u8],
+    order: i64,
+) -> Result<io::Result<Vec<Vec<u8>>>, NativeError> {
+    let directory = match open_directory(context, name, "scandir").await? {
+        Ok(directory) => directory,
+        Err(error) => return Ok(Err(error)),
+    };
+    let entries = IoPolicy::Blocking
+        .run(move || {
+            let mut entries: Vec<_> = directory
+                .filter_map(Result::ok)
+                .map(|entry| entry.file_name().to_bytes().to_vec())
+                .collect();
+            match order {
+                0 => entries.sort_unstable(),
+                2 => (),
+                _ => {
+                    entries.sort_unstable();
+                    entries.reverse();
+                }
+            }
+            entries
+        })
+        .await?;
+    Ok(Ok(entries))
+}
+
 fn scandir(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
         let name = args::bytes(&arguments, 0);
@@ -121,8 +158,9 @@ fn scandir(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, 
                 "scandir(): Argument #1 ($directory) must not be empty",
             ));
         }
-        let directory = match open_directory(context, name, "scandir").await? {
-            Ok(dir) => dir,
+        let order = args::int(&arguments, 1).unwrap_or(0);
+        let entries = match collect_entries(context, name, order).await? {
+            Ok(entries) => entries,
             Err(error) => {
                 let description = reason(&error);
                 context.warning(format!(
@@ -136,23 +174,6 @@ fn scandir(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, 
                 );
             }
         };
-        let order = args::int(&arguments, 1).unwrap_or(0);
-        let entries = IoPolicy::Blocking
-            .run(move || {
-                let entries =
-                    directory.map(|entry| entry.map(|e| e.file_name().to_bytes().to_vec()));
-                let mut entries: Vec<_> = entries.filter_map(Result::ok).collect();
-                match order {
-                    0 => entries.sort_unstable(),
-                    2 => (),
-                    _ => {
-                        entries.sort_unstable();
-                        entries.reverse();
-                    }
-                }
-                entries
-            })
-            .await?;
         let mut result = PhpArray::new();
         for entry in entries {
             result.push(Value::from(entry))?;

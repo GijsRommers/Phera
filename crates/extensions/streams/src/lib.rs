@@ -23,6 +23,7 @@ mod locking;
 mod metadata;
 mod mode;
 mod mutations;
+pub mod native;
 mod path_text;
 mod pattern;
 mod request;

@@ -1829,6 +1829,7 @@ dependencies = [
  "indexmap",
  "phera-ext-pcre",
  "phera-ext-standard",
+ "phera-ext-streams",
  "phera-extension-api",
 ]
 

@@ -12,6 +12,7 @@ use std::rc::Rc;
 
 mod arrays;
 mod catalog;
+mod files;
 mod fixed_array;
 mod heap;
 mod interfaces;
@@ -46,6 +47,7 @@ impl Extension for Spl {
         wrappers::register(registry);
         multiple_iterator::register(registry);
         recursive::register(registry);
+        files::register(registry);
         catalog::register(registry);
     }
 }

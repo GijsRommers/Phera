@@ -44,7 +44,7 @@ fn scan(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Nat
     })
 }
 
-fn scan_line(data: &[u8], format: Format<'_>, arguments: &[Value]) -> NativeResult {
+pub(crate) fn scan_line(data: &[u8], format: Format<'_>, arguments: &[Value]) -> NativeResult {
     let data = data.split(|&b| b == 0).next().unwrap_or_default();
     let mut rest = data;
     let mut values = PhpArray::new();
