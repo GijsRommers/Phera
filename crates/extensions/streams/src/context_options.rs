@@ -56,14 +56,6 @@ pub fn validate(value: &Value, function: &str, index: usize) -> Result<(), Nativ
     }
 }
 
-pub fn attach(context: &mut dyn Context, stream: &Value, options: &Value) {
-    if let (Value::Resource(stream), Value::Resource(options)) = (stream, options) {
-        files(context)
-            .stream_contexts
-            .insert(stream.id, options.clone());
-    }
-}
-
 fn create(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let mut options = PhpArray::new();
     if let Some(array) = args::array(arguments, 0) {

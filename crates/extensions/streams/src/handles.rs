@@ -7,7 +7,7 @@ use phera_extension_api::{
     ParamType, Registry, Value, args,
 };
 
-use crate::context_options::{OPTIONAL_CONTEXT, attach, validate};
+use crate::context_options::{OPTIONAL_CONTEXT, validate};
 use crate::errors::{check_path, nonnegative, reason};
 use crate::io_policy::{CHUNK, IoPolicy};
 use crate::request::{files, new_resource};
@@ -83,11 +83,7 @@ fn fopen(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
         )
         .await?;
         Ok(match stream {
-            Some(stream) => {
-                let resource = new_resource(context.state(), "stream", stream);
-                attach(context, &resource, args::value(&arguments, 3));
-                resource
-            }
+            Some(stream) => new_resource(context.state(), "stream", stream),
             None => Value::Bool(false),
         })
     })
