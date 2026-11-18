@@ -5,6 +5,7 @@ use phera_extension_api::{Extension, Registry};
 mod arguments;
 mod arrays;
 mod constants;
+pub mod environment;
 mod math;
 mod natural;
 mod offsets;
@@ -26,6 +27,7 @@ impl Extension for Standard {
         for entry in natural::FUNCTIONS.iter().chain(time::FUNCTIONS) {
             registry.function(*entry);
         }
+        environment::register(registry);
     }
 }
 
