@@ -6,8 +6,8 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use phera_extension_api::{
-    ArrayKey, Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Registry, Value,
-    args,
+    ArrayKey, ConstantValue, Context, FunctionEntry, NativeError, NativeResult, Param, ParamType,
+    Registry, Value, args,
     value::{to_bool, to_int, to_php_string},
 };
 
@@ -15,11 +15,11 @@ use crate::{ResponseHead, headers_open, valid_header_line};
 
 const PARAMS: &[Param] = &[
     Param::new("name", ParamType::String),
-    Param::new("value", ParamType::String).optional(),
-    Param::new("expires_or_options", ParamType::ArrayOrInt).optional(),
-    Param::new("path", ParamType::String).optional(),
-    Param::new("domain", ParamType::String).optional(),
-    Param::new("secure", ParamType::Bool).optional(),
+    Param::new("value", ParamType::String).with_default(ConstantValue::String("")),
+    Param::new("expires_or_options", ParamType::ArrayOrInt).with_default(ConstantValue::Int(0)),
+    Param::new("path", ParamType::String).with_default(ConstantValue::String("")),
+    Param::new("domain", ParamType::String).with_default(ConstantValue::String("")),
+    Param::new("secure", ParamType::Bool).with_default(ConstantValue::Bool(false)),
     Param::new("httponly", ParamType::Bool).optional(),
 ];
 

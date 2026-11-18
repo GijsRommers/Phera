@@ -108,15 +108,33 @@ impl Vm {
             .ok_or_else(|| internal_error!("native target"))?;
         let mut arguments = self.call_stack.native_arguments();
         arguments.reserve(call.sent as usize);
+        let mut missing = None;
         for index in 0..call.sent as usize {
             let value = self.registers.window_mut(slots.slot(index), 1)[0].take();
             let value = value.unwrap_or_else(|| match callee.target {
                 CallTarget::Intrinsic(intrinsic) => intrinsic.named_default(index),
+                CallTarget::Native(entry) => match entry.params.get(index) {
+                    Some(parameter) if !parameter.optional => {
+                        missing.get_or_insert((entry.name, index + 1, parameter.name));
+                        Value::Null
+                    }
+                    Some(parameter) => parameter
+                        .default_value
+                        .map_or(Value::Null, |default| default.to_value()),
+                    None => Value::Null,
+                },
                 _ => Value::Null,
             });
             arguments.push(value);
         }
         self.registers.truncate(slots.base);
+        if let Some((function, number, parameter)) = missing {
+            self.failed_native = Some(crate::error_traces::NativeTrace::new(function, &arguments));
+            self.call_stack.recycle_native_arguments(arguments);
+            return Err(NativeError::argument_count_error(format!(
+                "{function}(): Argument #{number} (${parameter}) not passed"
+            )));
+        }
         let origin = callee.argument_binding.origin(self.argument_origin);
         let named = &details.extra_named;
         match &callee.target {

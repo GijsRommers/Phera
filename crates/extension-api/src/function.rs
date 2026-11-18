@@ -1,6 +1,6 @@
 use phera_value::Value;
 
-use crate::{Context, LocalFuture, NativeResult};
+use crate::{ConstantValue, Context, LocalFuture, NativeResult};
 
 /// A native function that finishes without waiting for anything.
 ///
@@ -53,7 +53,7 @@ pub enum ParamType {
     ArrayOrBool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Param {
     /// Without the `$`. Used for named arguments and in error messages.
     pub name: &'static str,
@@ -62,6 +62,8 @@ pub struct Param {
     pub optional: bool,
     pub by_ref: bool,
     pub variadic: bool,
+    /// The value to insert when a later parameter is supplied by name.
+    pub default_value: Option<ConstantValue>,
 }
 
 impl Param {
@@ -73,6 +75,7 @@ impl Param {
             optional: false,
             by_ref: false,
             variadic: false,
+            default_value: None,
         }
     }
 
@@ -85,6 +88,13 @@ impl Param {
     /// when it is left out.
     pub const fn optional(mut self) -> Self {
         self.optional = true;
+        self
+    }
+
+    /// Declares a PHP default. Trailing omissions still arrive as a shorter slice.
+    pub const fn with_default(mut self, value: ConstantValue) -> Self {
+        self.optional = true;
+        self.default_value = Some(value);
         self
     }
 

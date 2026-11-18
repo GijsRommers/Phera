@@ -27,7 +27,7 @@ pub use context::{Context, LocalFuture, RequestCallback};
 pub use error::{NativeError, NativeResult, Unwind};
 pub use function::{AsyncFn, FunctionEntry, NativeFn, Param, ParamType, SyncFn};
 pub use registry::{ConstantValue, Registry};
-pub use state::RequestState;
+pub use state::{QuerySeparator, RequestState};
 
 /// The PHP version exposed by the engine and its built-in modules.
 pub const PHP_VERSION: &str = "8.5.12";

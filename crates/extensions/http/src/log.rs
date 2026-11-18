@@ -4,8 +4,8 @@
 use std::{io::Write, path::PathBuf};
 
 use phera_extension_api::{
-    Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, Registry,
-    Value, args,
+    ConstantValue, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param,
+    ParamType, Registry, Value, args,
 };
 use tokio::io::AsyncWriteExt;
 
@@ -13,7 +13,7 @@ use crate::request::{Sapi, sapi};
 
 const PARAMS: &[Param] = &[
     Param::new("message", ParamType::String),
-    Param::new("message_type", ParamType::Int).optional(),
+    Param::new("message_type", ParamType::Int).with_default(ConstantValue::Int(0)),
     Param::new("destination", ParamType::String)
         .nullable()
         .optional(),

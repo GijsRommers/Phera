@@ -14,8 +14,8 @@ mod log;
 mod request;
 
 use phera_extension_api::{
-    Context, Extension, FunctionEntry, NativeResult, Param, ParamType, PhpArray, Registry,
-    RequestCallback, Value, args,
+    ConstantValue, Context, Extension, FunctionEntry, NativeResult, Param, ParamType, PhpArray,
+    Registry, RequestCallback, Value, args,
 };
 
 pub use head::ResponseHead;
@@ -25,7 +25,7 @@ pub struct Http;
 
 const HEADER_PARAMS: &[Param] = &[
     Param::new("header", ParamType::String),
-    Param::new("replace", ParamType::Bool).optional(),
+    Param::new("replace", ParamType::Bool).with_default(ConstantValue::Bool(true)),
     Param::new("response_code", ParamType::Int).optional(),
 ];
 

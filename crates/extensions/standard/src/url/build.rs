@@ -3,8 +3,8 @@
 use std::{collections::HashSet, rc::Rc};
 
 use phera_extension_api::{
-    ArrayKey, Context, FunctionEntry, NativeResult, Param, ParamType, PhpArray, Value, args,
-    value::to_php_string,
+    ArrayKey, ConstantValue, Context, FunctionEntry, NativeResult, Param, ParamType, PhpArray,
+    QuerySeparator, Value, args, value::to_php_string,
 };
 
 use crate::strings::url::{Encoding, encode_into};
@@ -13,7 +13,7 @@ pub(super) const ENTRY: FunctionEntry = FunctionEntry::sync(
     "http_build_query",
     &[
         Param::new("data", ParamType::ObjectOrArray),
-        Param::new("numeric_prefix", ParamType::String).optional(),
+        Param::new("numeric_prefix", ParamType::String).with_default(ConstantValue::String("")),
         Param::new("arg_separator", ParamType::String)
             .nullable()
             .optional(),
@@ -60,7 +60,13 @@ fn build(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         return Ok(Value::from(""));
     };
     let numeric_prefix = args::bytes(arguments, 1);
-    let separator = args::string(arguments, 2).map_or(b"&".as_slice(), |s| s.as_bytes());
+    let separator = args::string(arguments, 2).cloned().unwrap_or_else(|| {
+        context
+            .state()
+            .get::<QuerySeparator>()
+            .map_or_else(|| "&".into(), |separator| separator.0.clone())
+    });
+    let separator = separator.as_bytes();
     let encoding = if args::int(arguments, 3).unwrap_or(1) as i32 == 2 {
         Encoding::Raw
     } else {
