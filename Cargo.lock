@@ -1255,6 +1255,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "phera-ext-streams"
+version = "0.1.0"
+dependencies = [
+ "phera-extension-api",
+ "tokio",
+]
+
+[[package]]
 name = "phera-extension-api"
 version = "0.1.0"
 dependencies = [
@@ -1302,6 +1310,7 @@ dependencies = [
  "phera-ext-pdo",
  "phera-ext-random",
  "phera-ext-standard",
+ "phera-ext-streams",
  "phera-extension-api",
  "phera-value",
  "phera-vm",

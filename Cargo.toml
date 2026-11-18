@@ -53,6 +53,7 @@ phera-ext-pcre = { path = "crates/extensions/pcre" }
 phera-ext-pdo = { path = "crates/extensions/pdo" }
 phera-ext-random = { path = "crates/extensions/random" }
 phera-ext-standard = { path = "crates/extensions/standard" }
+phera-ext-streams = { path = "crates/extensions/streams" }
 digest = "0.10"
 md2 = "0.10"
 md4 = "0.10"
