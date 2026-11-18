@@ -36,32 +36,32 @@ impl Context for Vm {
         diagnostic: &CompileDiagnostic,
         site: CompileDiagnosticSite<'_>,
     ) {
+        let caller = self.location();
         let location = match site {
-            CompileDiagnosticSite::Caller => self.location(),
+            CompileDiagnosticSite::Caller => caller.clone(),
             CompileDiagnosticSite::Source(file) => crate::diagnostics::SourceLocation {
                 file: file.to_owned(),
                 line: diagnostic.line,
             },
         };
-        match diagnostic.kind {
-            CompileDiagnosticKind::Warning => {
-                // E_COMPILE_WARNING never invokes the PHP error handler.
-                if self.error_handlers.reporting & diagnostic.kind.error_level() != 0
-                    && let Some(bytes) = self.diagnostic_reporter.report(
-                        diagnostic.kind.label(),
-                        diagnostic.message.clone(),
-                        &location.file,
-                        location.line,
-                    )
-                {
-                    self.out(&bytes);
-                }
-            }
-            CompileDiagnosticKind::Deprecated => {
-                let previous = self.diagnostic_location.replace(location);
-                self.diagnostic("Deprecated", diagnostic.message.clone());
-                self.diagnostic_location = previous;
-            }
+        let level = diagnostic.kind.error_level();
+        let calls_handler =
+            diagnostic.kind == CompileDiagnosticKind::Deprecated && self.handles_diagnostic(level);
+        let event = crate::error_handlers::DiagnosticEvent {
+            level,
+            kind: diagnostic.kind.label().into(),
+            message: diagnostic.message.clone(),
+            location,
+            native: self.error_handlers.native_site.clone(),
+            trace_location: Some(caller),
+        };
+        // Compile warnings bypass the PHP handler. If an earlier deprecation
+        // queued a callback, publish later warnings only if that callback returns.
+        if calls_handler || (!self.error_handlers.active && !self.error_handlers.pending.is_empty())
+        {
+            self.error_handlers.pending.push(event);
+        } else {
+            self.report_event(&event);
         }
     }
 

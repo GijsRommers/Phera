@@ -29,11 +29,15 @@ its own warning. PHP’s fixture `warning_during_heredoc_scan_ahead.phpt` checks
 both behaviors in the oracle. The runnable PHPTs in
 `tests/fixtures/scanner-diagnostics` also exercise the CLI and both native APIs.
 
-Native deprecation callbacks are dispatched at the VM’s native-call boundary.
-Matching Zend’s immediate callback ordering and internal backtrace requires a
-callback boundary within scanning. PHP’s `gh19507_throw.phpt` still exposes
-the trace difference. The scanner trusts positive source reads instead of using
-Zend’s memory tracker or optional multibyte source filters.
+Native deprecation handlers receive the scanned location. If a handler throws,
+a later queued scanner warning is discarded. The native caller remains in
+the exception trace, as exercised by `throwing-cast-handler.phpt` and php-src’s
+`gh19507_throw.phpt`.
+
+The file loader preserves literal bytes and inline HTML through compilation.
+Static identifier references also work for non-UTF-8 names. Byte-exact
+dynamic references, name introspection and diagnostics containing arbitrary
+identifier bytes require byte strings in the VM’s name and exception tables.
 
 ## Engine-dependent behavior
 
