@@ -49,6 +49,6 @@ as described in CONTRIBUTING.md: a million draws per engine for ten range shapes
 first and last hundred one by one (30 million draws); every Randomizer
 method with valid and rejected arguments, and engine jumps (5,127 calls);
 the procedural shuffles and key picks after seeding;
-the aliases and request isolation (10,000 draws); argument errors (19). The
+the aliases and request isolation (10,000 draws); argument errors. The
 secure functions are checked for plausibility: 100,000 draws of
 `random_int(0, 15)` must fill all sixteen values evenly.

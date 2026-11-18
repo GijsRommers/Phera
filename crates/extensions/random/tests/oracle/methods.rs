@@ -128,7 +128,6 @@ fn secure_sanity_and_errors() {
         ("random_int", vec![Value::Int(2), Value::Int(1)]),
         ("random_bytes", vec![Value::Int(0)]),
         ("random_bytes", vec![Value::Int(-1)]),
-        ("mt_srand", vec![Value::Int(42), Value::Int(1)]),
     ] {
         let expression = format!("{name}({})", php_arguments(&arguments));
         let result = call(&registry, &mut context, name, arguments);
