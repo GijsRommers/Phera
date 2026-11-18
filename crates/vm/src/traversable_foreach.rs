@@ -32,6 +32,7 @@ impl Vm {
                 snapshot: None,
                 source: None,
                 traversal: valid.then_some(cursor),
+                property_hooks: None,
                 position: None,
                 started: false,
             },
@@ -46,6 +47,12 @@ impl Vm {
         destination: Reg,
         end: Target,
     ) -> Result<(), NativeError> {
+        if self
+            .next_hooked_property(iterator, key, destination, end)
+            .await?
+        {
+            return Ok(());
+        }
         let mut state = self
             .call_stack
             .current_extras_mut()

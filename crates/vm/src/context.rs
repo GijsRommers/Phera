@@ -83,7 +83,13 @@ impl Context for Vm {
         object: &phera_value::Object,
         purpose: phera_extension_api::PropertyPurpose,
     ) -> bool {
-        purpose == phera_extension_api::PropertyPurpose::Debug && self.has_debug_info(object)
+        match purpose {
+            phera_extension_api::PropertyPurpose::Debug => self.has_debug_info(object),
+            phera_extension_api::PropertyPurpose::Json => {
+                self.hooked_property_class(object).is_some()
+            }
+            _ => false,
+        }
     }
 
     fn property_view(
@@ -93,8 +99,26 @@ impl Context for Vm {
         function: &'static str,
         arguments: &[Value],
     ) -> LocalFuture<'_, Result<phera_extension_api::PropertyView, NativeError>> {
-        if self.property_view_runs_code(&object, purpose) {
+        if purpose == phera_extension_api::PropertyPurpose::Debug && self.has_debug_info(&object) {
             return self.debug_properties(object, function, arguments);
+        }
+        if purpose == phera_extension_api::PropertyPurpose::Json
+            && let Some(class) = self.hooked_property_class(&object)
+        {
+            return Box::pin(async move {
+                let properties = self
+                    .enumerate_hooked_properties(object, class, purpose)
+                    .await?;
+                Ok(phera_extension_api::PropertyView::Snapshot(
+                    std::rc::Rc::new(properties),
+                ))
+            });
+        }
+        if function == "var_dump"
+            && let Some(class) = self.hooked_property_class(&object)
+        {
+            let view = self.dump_hooked_slots(&object, &class);
+            return Box::pin(std::future::ready(Ok(view)));
         }
         let view = self.object_properties(&object, purpose).map(|properties| {
             phera_extension_api::PropertyView::Snapshot(std::rc::Rc::new(properties))

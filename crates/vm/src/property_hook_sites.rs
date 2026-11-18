@@ -20,7 +20,7 @@ impl Vm {
             return Ok(false);
         };
         let Some(slot) = self
-            .property_entry(&object, name)?
+            .property_entry(&object, name, place)?
             .and_then(|entry| entry.hook_slot)
         else {
             return Ok(false);
@@ -61,7 +61,7 @@ impl Vm {
             return Ok(false);
         };
         let Some(slot) = self
-            .property_entry(&object, name)?
+            .property_entry(&object, name, place)?
             .and_then(|entry| entry.hook_slot)
         else {
             return Ok(false);

@@ -80,6 +80,7 @@ mod global_instructions;
 mod global_paths;
 mod globals;
 mod handler_installation;
+mod hooked_property_iteration;
 mod include_scope;
 mod include_state;
 mod includes;

@@ -41,7 +41,11 @@ pub struct Parameter {
 impl Parameter {
     /// A readonly constructor parameter promotes even without explicit visibility.
     pub fn is_promoted(&self) -> bool {
-        self.modifiers.visibility.is_some() || self.modifiers.is_readonly
+        self.modifiers.visibility.is_some()
+            || self.modifiers.set_visibility.is_some()
+            || self.modifiers.is_readonly
+            || self.modifiers.is_final
+            || self.has_hook_list
     }
 }
 

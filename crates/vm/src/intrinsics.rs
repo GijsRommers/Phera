@@ -6,6 +6,7 @@ pub(crate) enum Intrinsic {
     /// Callback mapping needs the request callable resolver.
     ArrayMap,
     Clone,
+    ParentProperty(crate::classes::parent_property_hooks::ParentHook),
     /// Request-level PHP handlers use VM callable resolution.
     Handler(crate::error_handlers::HandlerFunction),
     /// Path basename is needed to inspect portable Throwable locations.

@@ -17,6 +17,11 @@ pub type LocalFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
 pub enum PropertyView {
     Snapshot(Rc<PhpArray>),
     DebugInfo(Rc<PhpArray>),
+    /// var_dump displays typed slots even when the object does not store a value.
+    DebugSlots {
+        slots: Rc<PhpArray>,
+        uninitialized: std::collections::HashMap<phera_value::ArrayKey, String>,
+    },
     Recursive,
 }
 

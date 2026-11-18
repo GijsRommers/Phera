@@ -144,7 +144,15 @@ impl Vm {
                         candidate.name == name && candidate.declaring == *class
                     };
                     if let Some(existing) = target.iter().find(|candidate| same_name(candidate)) {
-                        if existing.hooks.is_some() || property.hooks.is_some() {
+                        if existing
+                            .hooks
+                            .as_ref()
+                            .is_some_and(|hooks| hooks.has_hooks())
+                            || property
+                                .hooks
+                                .as_ref()
+                                .is_some_and(|hooks| hooks.has_hooks())
+                        {
                             let origin = property_origins.get(name).copied().unwrap_or(class);
                             let provider = &provider.name;
                             let class = display(class);
@@ -203,7 +211,7 @@ impl Vm {
                     linked.declaring = class.clone();
                     if let Some(hooks) = &mut linked.hooks {
                         let hooks = Rc::make_mut(hooks);
-                        hooks.prototype = Rc::new(());
+                        hooks.prototype = Rc::from(class.as_str());
                         for (kind, hook) in
                             [("get", &mut hooks.hooks.get), ("set", &mut hooks.hooks.set)]
                         {

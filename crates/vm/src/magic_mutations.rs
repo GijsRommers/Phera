@@ -208,15 +208,25 @@ impl Vm {
                             }
                             return Ok(OverloadedMutation::Handled);
                         }
-                    } else if last && matches!(operation, PropertyMutation::Unset) {
+                    } else if last
+                        && matches!(operation, PropertyMutation::Unset)
+                        && hooks.has_hooks()
+                    {
                         return Err(property_error(
                             object,
                             &display,
                             "Cannot unset hooked property ",
                             "",
                         ));
+                    } else if last && matches!(operation, PropertyMutation::Unset) {
+                        self.hook_set_access(property, hooks, "unset")?;
                     } else if let Some(value) = self
-                        .read_declared_hook(object, property, hooks, true)
+                        .read_declared_hook(
+                            object,
+                            property,
+                            hooks,
+                            !last || hooks.hooks.get.is_none(),
+                        )
                         .await?
                     {
                         if last {

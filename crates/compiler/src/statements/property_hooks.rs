@@ -18,14 +18,41 @@ pub(super) struct HookedDeclaration<'a> {
     pub ty: Option<&'a ast::Type>,
     pub default: Option<&'a ast::Expression>,
     pub hooks: &'a [ast::PropertyHook],
+    pub has_hook_list: bool,
     pub has_parent: bool,
     pub line: usize,
 }
 
 impl Compiler<'_> {
-    pub(super) fn compile_property_hooks(
+    pub(super) fn compile_property_metadata(
         &mut self,
         declaration: HookedDeclaration<'_>,
+    ) -> Result<Option<Box<PropertyHooks<usize>>>, CompileError> {
+        let set_visibility = property_access(self, &declaration)?;
+        if !declaration.has_hook_list {
+            if declaration.kind == ast::ClassKind::Interface {
+                return Err(self.error(
+                    "Interfaces may only include hooked properties",
+                    declaration.line,
+                ));
+            }
+            return Ok(set_visibility.map(|visibility| {
+                Box::new(PropertyHooks {
+                    get: None,
+                    set: None,
+                    is_virtual: false,
+                    set_visibility: Some(visibility),
+                })
+            }));
+        }
+        self.compile_property_hooks(declaration, set_visibility)
+            .map(Some)
+    }
+
+    fn compile_property_hooks(
+        &mut self,
+        declaration: HookedDeclaration<'_>,
+        set_visibility: Option<Visibility>,
     ) -> Result<Box<PropertyHooks<usize>>, CompileError> {
         let property = format!("{}::${}", declaration.class, declaration.property);
         let interface = declaration.kind == ast::ClassKind::Interface;
@@ -58,13 +85,7 @@ impl Compiler<'_> {
             get: None,
             set: None,
             is_virtual: true,
-            set_visibility: declaration.modifiers.set_visibility.map(
-                |visibility| match visibility {
-                    ast::Visibility::Public => Visibility::Public,
-                    ast::Visibility::Protected => Visibility::Protected,
-                    ast::Visibility::Private => Visibility::Private,
-                },
-            ),
+            set_visibility,
         };
         for hook in declaration.hooks {
             let line = self.lines.line(hook.span.start);
@@ -291,4 +312,48 @@ impl Compiler<'_> {
             self.uses_hook_backing = true;
         }
     }
+}
+
+/// A set visibility also applies to backed properties without explicit hooks.
+pub(super) fn property_access(
+    compiler: &Compiler<'_>,
+    declaration: &HookedDeclaration<'_>,
+) -> Result<Option<Visibility>, CompileError> {
+    let modifiers = declaration.modifiers;
+    let class = declaration.class;
+    let name = declaration.property;
+    let line = declaration.line;
+    if modifiers.is_final && modifiers.visibility == Some(ast::Visibility::Private) {
+        return Err(compiler.error("Property cannot be both final and private", line));
+    }
+    if modifiers.is_final && modifiers.is_abstract {
+        return Err(compiler.error(
+            "Cannot use the final modifier on an abstract property",
+            line,
+        ));
+    }
+    let Some(set) = modifiers.set_visibility else {
+        return Ok(None);
+    };
+    if declaration.ty.is_none() {
+        return Err(compiler.error(
+            format!("Property with asymmetric visibility {class}::${name} must have type"),
+            line,
+        ));
+    }
+    let translate = |visibility| match visibility {
+        ast::Visibility::Public => Visibility::Public,
+        ast::Visibility::Protected => Visibility::Protected,
+        ast::Visibility::Private => Visibility::Private,
+    };
+    let get = modifiers.visibility.unwrap_or(ast::Visibility::Public);
+    if (translate(get) as u8) > (translate(set) as u8) {
+        return Err(compiler.error(
+            format!(
+                "Visibility of property {class}::${name} must not be weaker than set visibility"
+            ),
+            line,
+        ));
+    }
+    Ok((get != set).then(|| translate(set)))
 }

@@ -41,6 +41,12 @@ impl Vm {
             )
         })?;
         self.link_class_symbol(symbol, &class);
+        if binding == ClassBinding::Forward
+            && let Some((property, operation)) =
+                super::parent_property_hooks::ParentHook::parse(&method.written)
+        {
+            return self.prepare_parent_property_hook(&class, property, operation);
+        }
         let context = self.current().and_then(|frame| frame.method());
         let receiver = context
             .as_ref()

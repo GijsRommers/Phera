@@ -32,6 +32,7 @@ impl Vm {
         &mut self,
         object: &Object,
         name: NameId,
+        place: &AccessPath,
     ) -> Result<Option<Rc<PropertyEntry>>, NativeError> {
         let frame = self
             .current()
@@ -74,7 +75,17 @@ impl Vm {
                 .find(|(_, property)| property.key == key)
         });
         let slot = property.map(|(slot, _)| slot);
-        let hook_slot = property.and_then(|(slot, property)| property.hooks.as_ref().map(|_| slot));
+        let mut hook_slot = None;
+        let mut invokes_getter = false;
+        if let Some((slot, property)) = property
+            && let Some(hooks) = &property.hooks
+            && (hooks.hooks.is_virtual
+                || !matches!(place.base()?, phera_bytecode::PathBase::This { .. })
+                || !self.uses_property_backing(object, property, hooks))
+        {
+            invokes_getter = hooks.hooks.is_virtual || hooks.hooks.get.is_some();
+            hook_slot = Some(slot);
+        }
         let write_rule = match property {
             Some((_, property)) if !property.is_readonly && hook_slot.is_none() => {
                 match &property.ty {
@@ -91,7 +102,7 @@ impl Vm {
             write_rule,
             slot,
             hook_slot,
-            read_without_static_notice: hook_slot.is_none()
+            read_without_static_notice: !invokes_getter
                 && class.is_none_or(|class| {
                     class
                         .static_properties
@@ -114,7 +125,7 @@ impl Vm {
         let Some(PropertyTarget { object, name }) = self.read_property_target(place)? else {
             return Ok(None);
         };
-        let Some(entry) = self.property_entry(&object, name)? else {
+        let Some(entry) = self.property_entry(&object, name, place)? else {
             return Ok(None);
         };
         if !entry.read_without_static_notice {
@@ -140,7 +151,7 @@ impl Vm {
         else {
             return Ok(None);
         };
-        let Some(entry) = self.property_entry(&object, name)? else {
+        let Some(entry) = self.property_entry(&object, name, place)? else {
             return Ok(None);
         };
         if !entry.write_rule.allows(TypeMask::INT) {
@@ -207,7 +218,7 @@ impl Vm {
         else {
             return Ok(false);
         };
-        let Some(entry) = self.property_entry(&object, name)? else {
+        let Some(entry) = self.property_entry(&object, name, place)? else {
             return Ok(false);
         };
         // `public float $x` assigned an int stores the float, as PHP does.
@@ -243,7 +254,7 @@ impl Vm {
         else {
             return Ok(false);
         };
-        let Some(entry) = self.property_entry(&object, name)? else {
+        let Some(entry) = self.property_entry(&object, name, place)? else {
             return Ok(false);
         };
         if !entry.write_rule.allows(TypeMask::ARRAY) {

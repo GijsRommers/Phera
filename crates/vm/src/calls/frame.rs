@@ -33,6 +33,8 @@ pub(crate) struct IteratorState {
     pub(crate) snapshot: Option<Rc<PhpArray>>,
     /// Objects keep an independent cursor for each active traversal.
     pub(crate) traversal: Option<Box<dyn phera_extension_api::traversal::Traversal>>,
+    pub(crate) property_hooks:
+        Option<Box<crate::hooked_property_iteration::HookedPropertyIterator>>,
     /// By-reference foreach resolves this place again as the array changes.
     pub(crate) source: Option<AccessPath>,
     /// The array storage position, distinct from a PHP integer key.

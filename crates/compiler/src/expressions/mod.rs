@@ -192,6 +192,7 @@ pub(crate) mod matching;
 pub(crate) mod nullsafe;
 pub(crate) mod objects;
 pub(crate) mod operators;
+mod parent_hooks;
 pub(crate) mod paths;
 pub(crate) mod places;
 pub(crate) mod spine;

@@ -17,12 +17,13 @@ use super::{Class, class::PropertyDefault};
 #[derive(Clone)]
 pub(crate) struct LinkedPropertyHooks {
     pub(crate) hooks: PropertyHooks<FunctionIndex>,
-    pub(crate) prototype: Rc<()>,
+    pub(crate) prototype: Rc<str>,
 }
 
 impl LinkedPropertyHooks {
     pub(super) fn link(
         hooks: &PropertyHooks<FunctionId>,
+        declaring: &str,
         vm: &Vm,
         unit: &std::sync::Arc<CompiledUnit>,
     ) -> Self {
@@ -39,8 +40,12 @@ impl LinkedPropertyHooks {
                 is_virtual: hooks.is_virtual,
                 set_visibility: hooks.set_visibility,
             },
-            prototype: Rc::new(()),
+            prototype: Rc::from(declaring),
         }
+    }
+
+    pub(crate) fn has_hooks(&self) -> bool {
+        self.hooks.get.is_some() || self.hooks.set.is_some()
     }
 
     pub(super) fn methods(&self) -> impl Iterator<Item = &PropertyHook<FunctionIndex>> {
@@ -66,6 +71,9 @@ impl Vm {
         let Some(frame) = self.current() else {
             return false;
         };
+        if frame.function().name.starts_with("{closure:") {
+            return false;
+        }
         let Some((_, name)) = frame.function().name.split_once("::$") else {
             return false;
         };
@@ -136,10 +144,10 @@ impl Vm {
             Visibility::Public => true,
             Visibility::Private => scope.is_some_and(|scope| scope.name == property.declaring),
             Visibility::Protected => scope.is_some_and(|scope| {
-                scope.is_a(&property.declaring)
+                scope.is_a(&hooks.prototype)
                     || self
                         .classes
-                        .get(&property.declaring)
+                        .get(&hooks.prototype)
                         .is_some_and(|declaring| declaring.is_a(&scope.name))
             }),
         };
@@ -198,7 +206,7 @@ impl Vm {
                     " is write-only",
                 ));
             }
-            if indirect {
+            if indirect && hooks.has_hooks() {
                 let value = self.read_declared_property(
                     object,
                     &property.name,
@@ -208,6 +216,9 @@ impl Vm {
                     return Err(indirect_error(object, &property.name));
                 }
                 return Ok(Some(value));
+            }
+            if indirect {
+                self.hook_set_access(property, hooks, "indirectly modify")?;
             }
             return Ok(None);
         };

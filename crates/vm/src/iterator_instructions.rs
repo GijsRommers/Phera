@@ -15,11 +15,20 @@ impl Vm {
     ) -> Result<bool, NativeError> {
         let place = self.path(path)?;
         let value = self.read_place(&place, crate::access_mode::Missing::Warn)?;
-        if let phera_value::Value::Object(ref object) = value
-            && object.class.is_traversable()
-        {
-            self.set(subject, value);
-            return Ok(false);
+        if let phera_value::Value::Object(ref object) = value {
+            if object.class.is_traversable() {
+                self.set(subject, value);
+                return Ok(false);
+            }
+            if let Some(class) = self.hooked_property_class(object) {
+                self.start_hooked_property_iteration(
+                    iterator,
+                    object.clone(),
+                    class,
+                    crate::access_mode::Binding::ByReference,
+                );
+                return Ok(true);
+            }
         }
         drop(value);
         let reference = self.reference(&place)?;

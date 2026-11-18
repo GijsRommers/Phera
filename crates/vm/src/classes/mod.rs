@@ -18,6 +18,7 @@ pub(crate) mod method_table;
 mod methods;
 mod native;
 pub(crate) mod operations;
+pub(crate) mod parent_property_hooks;
 mod property_hook_inheritance;
 pub(crate) mod property_hooks;
 mod protocol_methods;

@@ -86,7 +86,7 @@ impl Vm {
                         is_virtual: false,
                         set_visibility: None,
                     },
-                    prototype: Rc::new(()),
+                    prototype: Rc::from(inherited.declaring.as_str()),
                 });
         linked.hooks.is_virtual = virtual_property;
         if let Some(parent) = &inherited.hooks {
@@ -128,7 +128,7 @@ impl Vm {
                 }
             }
         }
-        if linked.hooks.get.is_some() || linked.hooks.set.is_some() {
+        if linked.has_hooks() || linked.hooks.set_visibility.is_some() {
             property.hooks = Some(Rc::new(linked));
         }
         if !virtual_property && property.ty.is_none() {

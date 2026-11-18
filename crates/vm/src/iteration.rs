@@ -21,6 +21,15 @@ impl Vm {
             return Ok(false);
         }
         let object_snapshot = if let Value::Object(object) = &element {
+            if let Some(class) = self.hooked_property_class(object) {
+                self.start_hooked_property_iteration(
+                    iterator,
+                    object.clone(),
+                    class,
+                    crate::access_mode::Binding::ByValue,
+                );
+                return Ok(true);
+            }
             Some(std::rc::Rc::new(self.visible_properties(
                 object,
                 phera_extension_api::PropertyPurpose::Foreach,
@@ -53,6 +62,7 @@ impl Vm {
                     None
                 },
                 traversal: None,
+                property_hooks: None,
                 source: if object_iteration { None } else { place },
                 position: None,
                 started: false,
@@ -84,6 +94,7 @@ impl Vm {
             frame::IteratorState {
                 snapshot: None,
                 traversal: None,
+                property_hooks: None,
                 source: Some(place),
                 position: None,
                 started: false,
@@ -115,7 +126,8 @@ impl Vm {
             .iterators
             .remove(&iterator.0)
             .ok_or_else(|| internal_error!("missing iterator"))?;
-        if state.snapshot.is_none() && state.traversal.is_some() {
+        if state.snapshot.is_none() && (state.traversal.is_some() || state.property_hooks.is_some())
+        {
             self.keep_iterator(iterator, state);
             return Ok(false);
         }

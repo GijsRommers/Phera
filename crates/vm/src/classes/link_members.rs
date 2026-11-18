@@ -124,7 +124,7 @@ impl Vm {
             };
             let hooks = property.hooks.as_ref().map(|hooks| {
                 Rc::new(super::property_hooks::LinkedPropertyHooks::link(
-                    hooks, self, unit,
+                    hooks, name, self, unit,
                 ))
             });
             let initialized = property.default.is_some()

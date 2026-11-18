@@ -67,6 +67,13 @@ pub(crate) trait Style {
     /// Anything that is not an array or object.
     fn scalar(&mut self, out: &mut Vec<u8>, value: &Value, place: Place);
 
+    fn uninitialized(&mut self, out: &mut Vec<u8>, ty: &str, depth: usize) {
+        spaces(out, depth * 2);
+        out.extend_from_slice(b"uninitialized(");
+        out.extend_from_slice(ty.as_bytes());
+        out.extend_from_slice(b")\n");
+    }
+
     /// A case can be printed as one value or as a container of its readonly properties.
     fn enum_case(
         &mut self,
@@ -107,6 +114,7 @@ struct Frame {
     /// no borrow of the object is held while printing.
     entries: Rc<PhpArray>,
     source: EntrySource,
+    uninitialized: Option<std::collections::HashMap<ArrayKey, String>>,
     next: Option<usize>,
 }
 
@@ -151,6 +159,15 @@ pub(crate) async fn walk(
             Some((position, (key, item))) => {
                 frame.next = frame.entries.next_position(position);
                 style.key(out, &key, &frame.container, depth);
+                if let Some(ty) = frame
+                    .uninitialized
+                    .as_ref()
+                    .and_then(|slots| slots.get(&key))
+                {
+                    style.uninitialized(out, ty, depth);
+                    style.after_entry(out);
+                    continue;
+                }
                 let duplicate = frame.duplicate_owner(&key, item);
                 match enter(style, out, item, depth, duplicate, &mut active, context).await? {
                     Some(child) => frames.push(child),
@@ -209,8 +226,8 @@ async fn enter(
         style.recursion(out, &container, place, context);
         return Ok(None);
     }
-    let (entries, source) = match &container {
-        Container::Array(array) => (array.clone(), EntrySource::Live),
+    let (entries, source, uninitialized) = match &container {
+        Container::Array(array) => (array.clone(), EntrySource::Live, None),
         Container::Object(object) => {
             let purpose = style.property_purpose();
             if context.property_view_runs_code(object, purpose) {
@@ -222,8 +239,14 @@ async fn enter(
                 .property_view(object.clone(), purpose, function, arguments)
                 .await?
             {
-                PropertyView::Snapshot(properties) => (properties, EntrySource::PropertySnapshot),
-                PropertyView::DebugInfo(properties) => (properties, EntrySource::Live),
+                PropertyView::Snapshot(properties) => {
+                    (properties, EntrySource::PropertySnapshot, None)
+                }
+                PropertyView::DebugInfo(properties) => (properties, EntrySource::Live, None),
+                PropertyView::DebugSlots {
+                    slots,
+                    uninitialized,
+                } => (slots, EntrySource::PropertySnapshot, Some(uninitialized)),
                 PropertyView::Recursive => {
                     style.recursion(out, &container, place, context);
                     active.remove(&container.identity());
@@ -232,12 +255,14 @@ async fn enter(
             }
         }
     };
-    style.open(out, &container, entries.len(), place);
+    let initialized = entries.len() - uninitialized.as_ref().map_or(0, |slots| slots.len());
+    style.open(out, &container, initialized, place);
     Ok(Some(Frame {
         container,
         next: entries.first_position(),
         entries,
         source,
+        uninitialized,
     }))
 }
 

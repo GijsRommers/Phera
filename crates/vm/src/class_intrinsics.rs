@@ -62,6 +62,18 @@ impl Vm {
                 let Value::Object(object) = value else {
                     return Err(internal_error!("class function object"));
                 };
+                if matches!(function, Operation::GetObjectVars)
+                    && let Some(class) = self.hooked_property_class(&object)
+                {
+                    let properties = self
+                        .enumerate_hooked_properties(
+                            object,
+                            class,
+                            phera_extension_api::PropertyPurpose::ObjectVars,
+                        )
+                        .await?;
+                    return Ok(Value::from(properties));
+                }
                 return Ok(match function {
                     Operation::GetClass => Value::from(object.class.name()),
                     Operation::GetObjectVars => Value::from(self.visible_properties(

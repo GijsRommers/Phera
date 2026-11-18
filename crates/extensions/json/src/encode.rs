@@ -269,7 +269,22 @@ impl Encoder {
             self.failure(Error::Recursion);
             return Ok(());
         }
-        let properties = context.object_properties(&object, PropertyPurpose::Json)?;
+        let properties = if context.property_view_runs_code(&object, PropertyPurpose::Json) {
+            match context
+                .property_view(object.clone(), PropertyPurpose::Json, "json_encode", &[])
+                .await?
+            {
+                phera_extension_api::PropertyView::Snapshot(properties)
+                | phera_extension_api::PropertyView::DebugInfo(properties) => properties,
+                phera_extension_api::PropertyView::DebugSlots { slots, .. } => slots,
+                phera_extension_api::PropertyView::Recursive => {
+                    self.failure(Error::Recursion);
+                    return Ok(());
+                }
+            }
+        } else {
+            Rc::new(context.object_properties(&object, PropertyPurpose::Json)?)
+        };
         let entries = properties
             .iter()
             .filter(|(key, _)| match key {
