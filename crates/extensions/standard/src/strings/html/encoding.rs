@@ -4,7 +4,7 @@
 
 use phera_extension_api::Context;
 
-use super::options::Document;
+use super::{legacy::Legacy, options::Document};
 
 /// The next character of a string, or the invalid bytes PHP skips at once.
 pub(super) enum Decoded {
@@ -15,7 +15,7 @@ pub(super) enum Decoded {
 pub(super) enum Encoding {
     Utf8,
     Latin1,
-    SingleByte,
+    SingleByte(Legacy),
     Big5,
     Big5Hkscs,
     Gb2312,
@@ -26,7 +26,7 @@ pub(super) enum Encoding {
 impl Encoding {
     /// The encoding `$encoding` names, ignoring case and anything after a
     /// NUL. An unknown name warns and means UTF-8, as an empty one does.
-    pub(super) fn resolve(context: &mut dyn Context, name: &[u8]) -> Self {
+    pub(super) fn resolve(context: &mut dyn Context, function: &str, name: &[u8]) -> Self {
         let end = name
             .iter()
             .position(|&byte| byte == 0)
@@ -35,13 +35,13 @@ impl Encoding {
         match name.to_ascii_lowercase().as_slice() {
             b"" | b"utf-8" => Self::Utf8,
             b"iso-8859-1" | b"iso8859-1" => Self::Latin1,
-            b"iso-8859-15" | b"iso8859-15" => Self::SingleByte,
-            b"cp1252" | b"windows-1252" | b"1252" => Self::SingleByte,
-            b"cp1251" | b"windows-1251" | b"win-1251" => Self::SingleByte,
-            b"koi8-r" | b"koi8-ru" | b"koi8r" => Self::SingleByte,
-            b"iso8859-5" | b"iso-8859-5" => Self::SingleByte,
-            b"cp866" | b"866" | b"ibm866" => Self::SingleByte,
-            b"macroman" => Self::SingleByte,
+            b"iso-8859-15" | b"iso8859-15" => Self::SingleByte(Legacy::Latin9),
+            b"cp1252" | b"windows-1252" | b"1252" => Self::SingleByte(Legacy::Windows1252),
+            b"cp1251" | b"windows-1251" | b"win-1251" => Self::SingleByte(Legacy::Windows1251),
+            b"koi8-r" | b"koi8-ru" | b"koi8r" => Self::SingleByte(Legacy::Koi8r),
+            b"iso8859-5" | b"iso-8859-5" => Self::SingleByte(Legacy::Iso88595),
+            b"cp866" | b"866" | b"ibm866" => Self::SingleByte(Legacy::Cp866),
+            b"macroman" => Self::SingleByte(Legacy::MacRoman),
             b"big5" | b"950" => Self::Big5,
             b"big5-hkscs" => Self::Big5Hkscs,
             b"gb2312" | b"936" => Self::Gb2312,
@@ -49,12 +49,30 @@ impl Encoding {
             b"eucjp" | b"euc-jp" | b"eucjp-win" => Self::Eucjp,
             _ => {
                 context.warning(format!(
-                    "htmlspecialchars(): Charset \"{}\" is not supported, assuming UTF-8",
+                    "{function}(): Charset \"{}\" is not supported, assuming UTF-8",
                     String::from_utf8_lossy(name)
                 ));
                 Self::Utf8
             }
         }
+    }
+
+    /// Map one Unicode character to bytes for a decoded entity.
+    pub(super) fn encode_entity(&self, point: u32, output: &mut Vec<u8>) -> Option<()> {
+        let byte = match self {
+            Self::Utf8 => {
+                let mut bytes = [0; 4];
+                output.extend_from_slice(char::from_u32(point)?.encode_utf8(&mut bytes).as_bytes());
+                return Some(());
+            }
+            Self::Latin1 => u8::try_from(point).ok()?,
+            Self::SingleByte(encoding) => encoding.encode(point)?,
+            Self::Sjis | Self::Eucjp if point == 0x5c => return None,
+            _ if (0x20..=0x7d).contains(&point) => point as u8,
+            _ => return None,
+        };
+        output.push(byte);
+        Some(())
     }
 
     /// U+FFFD, the replacement character: in UTF-8 itself, in any other
@@ -73,7 +91,7 @@ impl Encoding {
     pub(super) fn disallowed(&self, code: u32, document: Document) -> bool {
         if matches!(
             self,
-            Self::SingleByte
+            Self::SingleByte(_)
                 | Self::Big5
                 | Self::Big5Hkscs
                 | Self::Gb2312
@@ -96,7 +114,7 @@ impl Encoding {
         let trail = |byte: u8| (0xa1..=0xfe).contains(&byte);
         match self {
             Self::Utf8 => utf8(input),
-            Self::Latin1 | Self::SingleByte => Decoded::Valid {
+            Self::Latin1 | Self::SingleByte(_) => Decoded::Valid {
                 code: u32::from(first),
                 length: 1,
             },
