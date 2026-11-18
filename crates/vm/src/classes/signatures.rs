@@ -106,7 +106,7 @@ impl Contract {
         format!(
             "{}{}::{}({parameters}){}",
             if self.returns_reference { "& " } else { "" },
-            method.declaring,
+            super::trait_methods::display(&method.declaring),
             method.name,
             self.returns
                 .as_ref()
