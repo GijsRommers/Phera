@@ -12,7 +12,7 @@ pub fn parameter(value: &BoundValue) -> MysqlValue {
         BoundValue::Null => MysqlValue::NULL,
         BoundValue::Int(value) => MysqlValue::Int(*value),
         BoundValue::Bool(value) => MysqlValue::Int(i64::from(*value)),
-        BoundValue::String(value) => MysqlValue::Bytes(value.clone()),
+        BoundValue::String(value) | BoundValue::Blob(value) => MysqlValue::Bytes(value.clone()),
     }
 }
 

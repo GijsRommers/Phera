@@ -65,6 +65,9 @@ impl Vm {
                 constant.declaring
             )));
         }
+        if let Some(message) = constant.deprecated {
+            self.diagnostic("Deprecated", message.into());
+        }
         self.evaluate_class_constant(&constant, name)
     }
 

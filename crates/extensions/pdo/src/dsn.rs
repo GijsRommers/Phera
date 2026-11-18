@@ -11,6 +11,7 @@ use crate::errors::DbError;
 pub enum DriverName {
     Postgres,
     Mysql,
+    Sqlite,
 }
 
 impl DriverName {
@@ -18,6 +19,7 @@ impl DriverName {
         match self {
             Self::Postgres => "pgsql",
             Self::Mysql => "mysql",
+            Self::Sqlite => "sqlite",
         }
     }
 }
@@ -45,10 +47,16 @@ impl Dsn {
         let driver = match name {
             "pgsql" => DriverName::Postgres,
             "mysql" => DriverName::Mysql,
-            "sqlite" => return Err(crate::errors::unsupported("SQLite")),
+            "sqlite" => DriverName::Sqlite,
             _ => return Err(crate::errors::exception("could not find driver", None, 0)),
         };
         let mut fields = BTreeMap::new();
+        // `sqlite:/path/to/file`, `sqlite::memory:`: everything after the prefix
+        // is the file name, semicolons included.
+        if driver == DriverName::Sqlite {
+            fields.insert("filename".into(), rest.into());
+            return Ok(Self { driver, fields });
+        }
         for field in rest.split(';').filter(|field| !field.trim().is_empty()) {
             if let Some((key, value)) = field.split_once('=') {
                 fields.insert(key.trim().to_owned(), value.trim().to_owned());
@@ -74,6 +82,8 @@ impl Dsn {
         match self.driver {
             DriverName::Postgres => 5432,
             DriverName::Mysql => 3306,
+            // A file has no port; nothing asks for it.
+            DriverName::Sqlite => 0,
         }
     }
 
@@ -87,6 +97,7 @@ impl Dsn {
             DriverName::Postgres => libpq_port(text),
             // mysqlnd takes `atoi()` as an unsigned int, 0 meaning the
             // default, and the socket keeps its low 16 bits: 98605 is 33069.
+            DriverName::Sqlite => Ok(0),
             DriverName::Mysql => Ok(match atoi(text) as u32 {
                 0 => self.default_port(),
                 port => port as u16,
@@ -148,7 +159,7 @@ mod tests {
     fn rejects_tls_and_unknown_drivers() {
         assert!(Dsn::parse("pgsql:sslmode=require").is_err());
         assert!(Dsn::parse("mysql:ssl_ca=ca.pem").is_err());
-        assert!(Dsn::parse("sqlite:foo").is_err());
+        assert_eq!(Dsn::parse("sqlite:foo").unwrap().get("filename", ""), "foo");
         assert!(Dsn::parse("pgsql:sslmode=disable").is_ok());
     }
 

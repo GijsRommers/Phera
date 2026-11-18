@@ -3,16 +3,18 @@
 use std::rc::Rc;
 
 use phera_extension_api::value::{to_bool, to_int};
-use phera_extension_api::{Context, NativeError, NativeResult, Object, Value, args};
+use phera_extension_api::{Context, LocalFuture, NativeError, NativeResult, Object, Value, args};
 
 use crate::connection::session;
 use crate::constants::{
-    ATTR_CASE, ATTR_DEFAULT_FETCH_MODE, ATTR_DRIVER_NAME, ATTR_EMULATE_PREPARES, ATTR_ERRMODE,
-    ATTR_PERSISTENT, ATTR_SERVER_VERSION, ATTR_STRINGIFY_FETCHES, CASE_LOWER, CASE_NATURAL,
-    CASE_UPPER, ERRMODE_EXCEPTION, ERRMODE_SILENT, ERRMODE_WARNING,
+    ATTR_CASE, ATTR_CLIENT_VERSION, ATTR_DEFAULT_FETCH_MODE, ATTR_DRIVER_NAME,
+    ATTR_EMULATE_PREPARES, ATTR_ERRMODE, ATTR_PERSISTENT, ATTR_SERVER_VERSION,
+    ATTR_STRINGIFY_FETCHES, ATTR_TIMEOUT, CASE_LOWER, CASE_NATURAL, CASE_UPPER, ERRMODE_EXCEPTION,
+    ERRMODE_SILENT, ERRMODE_WARNING, SQLITE_ATTR_EXTENDED_RESULT_CODES, SQLITE_ATTR_OPEN_FLAGS,
+    SQLITE_ATTR_TRANSACTION_MODE, SQLITE_OPEN_CREATE, SQLITE_OPEN_READWRITE,
 };
 use crate::dsn::DriverName;
-use crate::errors::{ErrorMode, unsupported};
+use crate::errors::{DbError, ErrorMode, unsupported};
 use crate::fetch::FetchMode;
 
 /// pdo_mysql's TLS options, `Pdo\Mysql::ATTR_SSL_KEY` (1006) to
@@ -29,25 +31,66 @@ pub enum ColumnCase {
     Lower,
 }
 
+/// The attributes pdo_sqlite accepts in `setAttribute()`; the constructor
+/// also takes `ATTR_OPEN_FLAGS`. Any other is refused with false.
+const SQLITE_SETTABLE: [i64; 8] = [
+    ATTR_TIMEOUT,
+    ATTR_ERRMODE,
+    ATTR_CASE,
+    ATTR_PERSISTENT,
+    ATTR_STRINGIFY_FETCHES,
+    ATTR_DEFAULT_FETCH_MODE,
+    SQLITE_ATTR_EXTENDED_RESULT_CODES,
+    SQLITE_ATTR_TRANSACTION_MODE,
+];
+
+/// The attributes pdo_sqlite answers in `getAttribute()`.
+const SQLITE_READABLE: [i64; 9] = [
+    ATTR_ERRMODE,
+    ATTR_SERVER_VERSION,
+    ATTR_CLIENT_VERSION,
+    ATTR_CASE,
+    ATTR_PERSISTENT,
+    ATTR_DRIVER_NAME,
+    ATTR_STRINGIFY_FETCHES,
+    ATTR_DEFAULT_FETCH_MODE,
+    SQLITE_ATTR_TRANSACTION_MODE,
+];
+
+/// The seconds SQLite waits for a lock before it reports "database is locked".
+const SQLITE_DEFAULT_TIMEOUT: i64 = 60;
+
 #[derive(Clone)]
 pub struct Attributes {
+    driver: DriverName,
     pub errors: ErrorMode,
     pub fetch: FetchMode,
     pub emulate: bool,
     pub stringify: bool,
     pub case: ColumnCase,
     pub persistent: bool,
+    /// SQLite only: the lock timeout in seconds, the open flags, whether
+    /// errors report SQLite's extended result codes, and the BEGIN mode.
+    pub timeout: i64,
+    pub sqlite_flags: i64,
+    pub extended: bool,
+    pub transaction_mode: i64,
 }
 
 impl Attributes {
     pub fn new(driver: DriverName) -> Self {
         Self {
+            driver,
             errors: ErrorMode::Exception,
             fetch: FetchMode::Both,
             emulate: driver == DriverName::Mysql,
             stringify: false,
             case: ColumnCase::Natural,
             persistent: false,
+            timeout: SQLITE_DEFAULT_TIMEOUT,
+            sqlite_flags: SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
+            extended: false,
+            transaction_mode: 0,
         }
     }
 
@@ -57,7 +100,16 @@ impl Attributes {
         attribute: i64,
         value: &Value,
     ) -> Result<(), NativeError> {
+        let sqlite = self.driver == DriverName::Sqlite;
         match attribute {
+            ATTR_TIMEOUT if sqlite => self.timeout = to_int(value, context.diagnostics())?,
+            SQLITE_ATTR_OPEN_FLAGS if sqlite => {
+                self.sqlite_flags = to_int(value, context.diagnostics())?
+            }
+            SQLITE_ATTR_EXTENDED_RESULT_CODES if sqlite => self.extended = to_bool(value),
+            SQLITE_ATTR_TRANSACTION_MODE if sqlite => {
+                self.transaction_mode = to_int(value, context.diagnostics())?
+            }
             ATTR_ERRMODE => {
                 self.errors = match to_int(value, context.diagnostics())? {
                     ERRMODE_SILENT => ErrorMode::Silent,
@@ -94,30 +146,88 @@ impl Attributes {
     }
 }
 
-pub fn set(
+/// Whether the constructor's options may set `attribute`: for SQLite only
+/// the ones pdo_sqlite knows.
+pub fn constructor_accepts(driver: DriverName, attribute: i64) -> bool {
+    driver != DriverName::Sqlite
+        || attribute == SQLITE_ATTR_OPEN_FLAGS
+        || SQLITE_SETTABLE.contains(&attribute)
+}
+
+/// `setAttribute()`. Asynchronous because SQLite's lock timeout is set on
+/// the database's own thread.
+pub fn set<'a>(
+    context: &'a mut dyn Context,
+    this: Option<Rc<Object>>,
+    arguments: Vec<Value>,
+) -> LocalFuture<'a, NativeResult> {
+    Box::pin(async move {
+        let connection = session(this.as_ref())?;
+        let attribute = args::int(&arguments, 0).unwrap_or_default();
+        let value = args::value(&arguments, 1);
+        if connection.name == DriverName::Sqlite {
+            if !SQLITE_SETTABLE.contains(&attribute) {
+                return Ok(Value::Bool(false));
+            }
+            if attribute == SQLITE_ATTR_TRANSACTION_MODE
+                && !(0..=SQLITE_TRANSACTION_MODES).contains(&to_int(value, context.diagnostics())?)
+            {
+                return Ok(Value::Bool(false));
+            }
+            if attribute == ATTR_TIMEOUT {
+                let seconds = to_int(value, context.diagnostics())?;
+                let milliseconds = seconds.max(0).saturating_mul(1000) as u64;
+                let result = connection
+                    .driver
+                    .lock()
+                    .await
+                    .sqlite_timeout(milliseconds)
+                    .await;
+                if let Err(error) = result {
+                    return connection.fail(context, error, "PDO::setAttribute");
+                }
+            }
+        }
+        connection
+            .attributes
+            .borrow_mut()
+            .set(context, attribute, value)?;
+        Ok(Value::Bool(true))
+    })
+}
+
+/// The highest `Pdo\Sqlite::TRANSACTION_MODE_*`.
+const SQLITE_TRANSACTION_MODES: i64 = 2;
+
+pub fn get(
     context: &mut dyn Context,
     this: Option<&Rc<Object>>,
     arguments: &[Value],
 ) -> NativeResult {
     let connection = session(this)?;
-    connection.attributes.borrow_mut().set(
-        context,
-        args::int(arguments, 0).unwrap_or_default(),
-        args::value(arguments, 1),
-    )?;
-    Ok(Value::Bool(true))
-}
-
-pub fn get(_: &mut dyn Context, this: Option<&Rc<Object>>, arguments: &[Value]) -> NativeResult {
-    let connection = session(this)?;
+    let attribute = args::int(arguments, 0).unwrap_or_default();
+    if connection.name == DriverName::Sqlite && !SQLITE_READABLE.contains(&attribute) {
+        let error = DbError {
+            state: "IM001".into(),
+            code: None,
+            detail: "driver does not support that attribute".into(),
+        };
+        return connection.fail(context, error, "PDO::getAttribute");
+    }
     let attributes = connection.attributes.borrow();
-    let value = match args::int(arguments, 0).unwrap_or(0) {
+    let value = match attribute {
         ATTR_ERRMODE => Value::Int(match attributes.errors {
             ErrorMode::Silent => ERRMODE_SILENT,
             ErrorMode::Warning => ERRMODE_WARNING,
             ErrorMode::Exception => ERRMODE_EXCEPTION,
         }),
         ATTR_SERVER_VERSION => Value::from(connection.version.clone()),
+        // SQLite's client is its engine; the server drivers' client versions
+        // are not known.
+        ATTR_CLIENT_VERSION if connection.name == DriverName::Sqlite => {
+            Value::from(connection.version.clone())
+        }
+        SQLITE_ATTR_TRANSACTION_MODE => Value::Int(attributes.transaction_mode),
         ATTR_CASE => Value::Int(match attributes.case {
             ColumnCase::Natural => CASE_NATURAL,
             ColumnCase::Upper => CASE_UPPER,

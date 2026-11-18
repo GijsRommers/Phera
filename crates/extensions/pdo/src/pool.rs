@@ -75,7 +75,8 @@ impl Key {
             .entry("dbname".into())
             .or_insert_with(|| match dsn.driver {
                 DriverName::Postgres => username.to_owned(),
-                DriverName::Mysql => String::new(),
+                // SQLite never reaches the pool.
+                DriverName::Mysql | DriverName::Sqlite => String::new(),
             });
         Self {
             driver: dsn.driver,
@@ -129,6 +130,11 @@ async fn acquire_from(
     let connect = {
         let (dsn, username, password) = (dsn.clone(), username.to_owned(), password.to_owned());
         async move { Driver::connect(&dsn, &username, &password).await }
+    };
+    // A SQLite handle is never pooled: see `drivers::sqlite`.
+    let policy = match dsn.driver {
+        DriverName::Sqlite => Policy::Unpooled,
+        _ => policy,
     };
     let lease = match policy {
         Policy::Pooled => {

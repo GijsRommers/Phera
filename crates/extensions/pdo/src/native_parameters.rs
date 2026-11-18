@@ -48,7 +48,7 @@ pub fn ordered<'a>(
                 continue;
             }
             return Err(DbError::parameter(match driver {
-                DriverName::Mysql => "",
+                DriverName::Mysql | DriverName::Sqlite => "",
                 DriverName::Postgres => "number of bound variables does not match number of tokens",
             }));
         };

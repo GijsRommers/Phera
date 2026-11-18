@@ -247,6 +247,7 @@ impl Vm {
             constants.insert(
                 constant_name,
                 Rc::new(super::LinkedConstant {
+                    deprecated: None,
                     declaring: name.clone(),
                     visibility: constant.visibility,
                     is_final: constant.is_final,
