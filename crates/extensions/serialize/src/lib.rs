@@ -5,9 +5,7 @@ mod encode;
 mod incomplete;
 pub mod wire;
 
-use phera_extension_api::{
-    ClassEntry, Extension, FunctionEntry, MethodEntry, Param, ParamType, Registry,
-};
+use phera_extension_api::{ClassEntry, Extension, MethodEntry, Param, ParamType, Registry};
 
 pub struct Serialize;
 
@@ -34,30 +32,20 @@ impl Extension for Serialize {
     }
 
     fn register(&self, registry: &mut Registry) {
-        registry.function(FunctionEntry::asynchronous(
+        registry.function_with_callback_frame(
             "serialize",
             SERIALIZE_PARAMS,
             |context, arguments| {
-                Box::pin(async move {
-                    encode::serialize(context, &arguments)
-                        .await
-                        .map_err(|error| context.native_call_error("serialize", &arguments, error))
-                })
+                Box::pin(async move { encode::serialize(context, &arguments).await })
             },
-        ));
-        registry.function(FunctionEntry::asynchronous(
+        );
+        registry.function_with_callback_frame(
             "unserialize",
             UNSERIALIZE_PARAMS,
             |context, arguments| {
-                Box::pin(async move {
-                    decode::unserialize(context, &arguments)
-                        .await
-                        .map_err(|error| {
-                            context.native_call_error("unserialize", &arguments, error)
-                        })
-                })
+                Box::pin(async move { decode::unserialize(context, &arguments).await })
             },
-        ));
+        );
         registry.class(SERIALIZABLE);
         registry.class(incomplete::CLASS);
     }
