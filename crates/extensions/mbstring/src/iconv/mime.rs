@@ -9,12 +9,17 @@
 //! The words are converted by the platform's iconv, the B and Q schemes are
 //! [`crate::mime::Scheme`].
 
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 use phera_extension_api::{
     ArrayKey, Context, FunctionEntry, NativeResult, Param, ParamType, PhpArray, Registry, Value,
     args,
 };
 
-use super::convert::{Failure, convert, report, try_convert};
+use super::convert::{Failure, code_points, convert, report, try_convert};
 use super::settings::{encoding_argument, internal_encoding};
 use crate::mime::Scheme;
 
@@ -68,6 +73,7 @@ const ICONV_MIME_ENCODE: &[Param] = &[
 /// The options are `scheme`, `input-charset`, `output-charset`,
 /// `line-length` and `line-break-chars`.
 fn iconv_mime_encode(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
+    let function = "iconv_mime_encode";
     let options = args::array(a, 2);
     let option = |key: &str| options.and_then(|options| options.get(&ArrayKey::str(key)));
     let input = option("input-charset").map_or_else(|| internal_encoding(ctx), crate::string_of);
@@ -79,36 +85,190 @@ fn iconv_mime_encode(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
         _ => 76,
     };
     let newline = option("line-break-chars").map_or_else(|| "\r\n".into(), crate::string_of);
-    let Some(converted) = convert(ctx, args::bytes(a, 1), &input, &output, "iconv_mime_encode")
-    else {
+    // PHP checks the lengths before it converts anything.
+    let name = args::bytes(a, 0);
+    if name.len() + 2 >= line_length || output.len() + 12 >= line_length {
+        ctx.warning(format!("{function}(): Buffer length exceeded"));
+        return Ok(Value::Bool(false));
+    }
+    let value = args::bytes(a, 1);
+    let Some(converted) = convert(ctx, value, &input, &output, function) else {
         return Ok(Value::Bool(false));
     };
-    let mut field = args::bytes(a, 0).to_vec();
-    field.extend_from_slice(b": ");
-    // `=?`, `?B?` and `?=` around the charset, after the field name.
-    let overhead = output.len() + 7 + field.len();
-    if overhead >= line_length {
-        ctx.warning("iconv_mime_encode(): Buffer length exceeded".into());
-        return Ok(Value::Bool(false));
-    }
-    let budget = line_length - overhead;
-    let mut pending = Vec::new();
-    for byte in converted {
-        let mut candidate = pending.clone();
-        candidate.push(byte);
-        let too_long = scheme.encode(&candidate).len() > budget
-            || matches!(scheme, Scheme::Base64)
-                && candidate.len() > (budget / 4 * 3).saturating_sub(4);
-        if !pending.is_empty() && too_long {
-            field.extend_from_slice(scheme.word(&pending, &output).as_bytes());
-            field.extend_from_slice(newline.as_bytes());
-            field.push(b' ');
-            pending.clear();
+    let characters = output_characters(ctx, value, &input, &output, &converted);
+    let pieces: Vec<&[u8]> = match &characters {
+        Some(characters) => characters.iter().map(Vec::as_slice).collect(),
+        None => converted.chunks(1).collect(),
+    };
+    let header = Header {
+        name,
+        charset: &output,
+        scheme,
+        line_length,
+        newline: newline.as_bytes(),
+    };
+    match header.encode(&pieces) {
+        Ok(field) => Ok(Value::from(field)),
+        Err(EncodeError::TooBig) => {
+            ctx.warning(format!("{function}(): Buffer length exceeded"));
+            Ok(Value::Bool(false))
         }
-        pending.push(byte);
+        Err(EncodeError::NoRoom) => {
+            // PHP's "unknown error" with `errno` E2BIG, 7 on Linux and macOS.
+            ctx.notice(format!("{function}(): Unknown error (7)"));
+            Ok(Value::Bool(false))
+        }
     }
-    field.extend_from_slice(scheme.word(&pending, &output).as_bytes());
-    Ok(Value::from(field))
+}
+
+/// The value as the bytes of each of its characters in the output charset,
+/// which PHP never splits between two encoded words. Each distinct
+/// character is converted once. A stateful charset (ISO-2022-JP, UTF-16
+/// with its byte order mark) converts differently character by character;
+/// for those this is `None`, and the bytes are split anywhere.
+fn output_characters(
+    ctx: &mut dyn Context,
+    value: &[u8],
+    input: &str,
+    output: &str,
+    converted: &[u8],
+) -> Option<Vec<Vec<u8>>> {
+    let points = code_points(ctx, value, input, "iconv_mime_encode")?;
+    let mut known: HashMap<u32, Vec<u8>> = HashMap::new();
+    let mut characters = Vec::with_capacity(points.len());
+    for point in points {
+        let bytes = match known.entry(point) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => {
+                entry.insert(iconv_native::convert(point.to_le_bytes(), "UCS-4LE", output).ok()?)
+            }
+        };
+        characters.push(bytes.clone());
+    }
+    let whole: Vec<u8> = characters.concat();
+    (whole == converted).then_some(characters)
+}
+
+enum EncodeError {
+    /// PHP's "Buffer length exceeded".
+    TooBig,
+    /// No character fits a Q word.
+    NoRoom,
+}
+
+/// PHP's `_php_iconv_mime_encode`: encoded words filled up to the line
+/// length, each line after the first starting with the newline and a space.
+struct Header<'a> {
+    name: &'a [u8],
+    charset: &'a str,
+    scheme: Scheme,
+    line_length: usize,
+    newline: &'a [u8],
+}
+
+impl Header<'_> {
+    fn encode(&self, pieces: &[&[u8]]) -> Result<Vec<u8>, EncodeError> {
+        let mut field = self.name.to_vec();
+        field.extend_from_slice(b": ");
+        // What is left of the current line.
+        let mut room = self.line_length - self.name.len() - 2;
+        // `=??X??=` around the charset, and the shortest encoded text.
+        let shortest = 7
+            + self.charset.len()
+            + if matches!(self.scheme, Scheme::Base64) {
+                4
+            } else {
+                3
+            };
+        let mut next = 0;
+        loop {
+            if room < shortest + self.newline.len() + 1 {
+                field.extend_from_slice(self.newline);
+                field.push(b' ');
+                room = self.line_length - 1;
+            }
+            field.extend_from_slice(format!("=?{}?", self.charset).as_bytes());
+            room = room.saturating_sub(3 + self.charset.len());
+            let (taken, text) = match self.scheme {
+                Scheme::Base64 => {
+                    field.extend_from_slice(b"B?");
+                    room = room.saturating_sub(2);
+                    // Three bytes make four characters; PHP keeps four bytes
+                    // free for the shift sequence of a stateful charset.
+                    let size = room.saturating_sub(2) / 4 * 3;
+                    if size <= 4 {
+                        return Err(EncodeError::TooBig);
+                    }
+                    let (taken, bytes) = take(pieces, next, size - 4);
+                    if taken == 0 && next < pieces.len() {
+                        return Err(EncodeError::TooBig);
+                    }
+                    (taken, STANDARD.encode(bytes))
+                }
+                Scheme::Quoted => {
+                    field.extend_from_slice(b"Q?");
+                    room = room.saturating_sub(2);
+                    let limit = room.saturating_sub(2);
+                    let mut size = limit;
+                    // Fit the bytes, then shrink until their quoted form fits.
+                    loop {
+                        let (taken, bytes) = take(pieces, next, size);
+                        if taken == 0 && next < pieces.len() {
+                            return Err(EncodeError::NoRoom);
+                        }
+                        let required: usize = bytes.iter().map(|&byte| quoted_length(byte)).sum();
+                        if required <= limit || size == 0 {
+                            break (taken, quoted(&bytes));
+                        }
+                        size = size.saturating_sub((required - limit).div_ceil(3));
+                    }
+                }
+            };
+            next += taken;
+            room = room.saturating_sub(text.len() + 2);
+            field.extend_from_slice(text.as_bytes());
+            field.extend_from_slice(b"?=");
+            if next >= pieces.len() {
+                return Ok(field);
+            }
+        }
+    }
+}
+
+/// As many pieces from `start` as fit in `budget` bytes.
+fn take(pieces: &[&[u8]], start: usize, budget: usize) -> (usize, Vec<u8>) {
+    let mut bytes = Vec::new();
+    let mut taken = 0;
+    for piece in &pieces[start..] {
+        if bytes.len() + piece.len() > budget {
+            break;
+        }
+        bytes.extend_from_slice(piece);
+        taken += 1;
+    }
+    (taken, bytes)
+}
+
+/// iconv's Q encoding writes printable ASCII as it is, except `=`, `?` and
+/// `_`, and everything else, the space included, as `=XX`.
+fn quoted_length(byte: u8) -> usize {
+    if matches!(byte, 0x21..=0x7E) && !matches!(byte, b'=' | b'?' | b'_') {
+        1
+    } else {
+        3
+    }
+}
+
+fn quoted(bytes: &[u8]) -> String {
+    let mut text = String::with_capacity(bytes.len() * 3);
+    for &byte in bytes {
+        if quoted_length(byte) == 1 {
+            text.push(char::from(byte));
+        } else {
+            text.push_str(&format!("={byte:02X}"));
+        }
+    }
+    text
 }
 
 const ICONV_MIME_DECODE: &[Param] = &[

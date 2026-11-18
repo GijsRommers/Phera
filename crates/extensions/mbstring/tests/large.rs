@@ -121,6 +121,7 @@ fn megabyte_iconv() {
     incomplete.push(0xC3);
     let mut illegal = "é".repeat(40_000).into_bytes();
     illegal.push(0xFF);
+    let words = "=?UTF-8?B?w6k=?= =?UTF-8?Q?caf=C3=A9?= ".repeat(25_000);
     let mut matrix = support::Matrix::new();
     let utf8 = || Value::from("UTF-8");
     let mut ignoring = Vec::new();
@@ -169,6 +170,23 @@ fn megabyte_iconv() {
         }
         matrix.case("iconv_strlen", vec![Value::from(subject.clone())]);
     }
+    matrix.case(
+        "iconv_mime_encode",
+        vec![Value::from("Subject"), Value::from(latin.clone())],
+    );
+    matrix.case("iconv_mime_decode", vec![Value::from(words.clone())]);
+    matrix.case(
+        "iconv_mime_decode",
+        vec![
+            Value::from(words.clone()),
+            Value::Int(2),
+            Value::from("ISO-8859-1//IGNORE"),
+        ],
+    );
+    matrix.case(
+        "iconv_mime_decode_headers",
+        vec![Value::from(format!("Subject: {words}\r\nX: y\r\n"))],
+    );
     for arguments in ignoring {
         let Some(Value::String(subject)) = arguments.get(2) else {
             unreachable!("the subject is a string");

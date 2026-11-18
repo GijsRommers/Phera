@@ -167,6 +167,37 @@ fn option_matrix() {
             vec![Value::from("Subject"), Value::from(input)],
         );
     }
+    // iconv folds encoded words between characters, never inside one.
+    for value in [
+        "",
+        "a",
+        &"Café crème brûlée, s'il vous plaît! ".repeat(4),
+        &"日本語のテキスト".repeat(6),
+    ] {
+        // Stateful charsets are left out; the README says why.
+        for charset in ["UTF-8", "ISO-8859-1", "UTF-16BE", "UTF-32LE"] {
+            for scheme in ["B", "Q"] {
+                for length in [20, 36, 76] {
+                    let mut options = PhpArray::new();
+                    for (key, option) in [
+                        ("scheme", Value::from(scheme)),
+                        ("output-charset", Value::from(charset)),
+                        ("line-length", Value::Int(length)),
+                    ] {
+                        options.insert(phera_extension_api::ArrayKey::str(key), option);
+                    }
+                    m.case(
+                        "iconv_mime_encode",
+                        vec![
+                            Value::from("Subject"),
+                            Value::from(value),
+                            Value::from(options),
+                        ],
+                    );
+                }
+            }
+        }
+    }
     // mb_decode_mimeheader reads plain text as ASCII: a byte from 0x80 is `?`.
     m.case(
         "mb_decode_mimeheader",
