@@ -661,6 +661,8 @@ pub enum FinallyEntry {
     Break,
     /// A loop continuation waits at the continuation.
     Continue,
+    /// A jump to a PHP label waits at the continuation.
+    Goto,
 }
 
 /// Explicit uses warn for undefined values; arrows capture them silently.

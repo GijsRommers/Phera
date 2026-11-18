@@ -92,7 +92,10 @@ fn compile_program(
     })?;
     let mut compiler = Compiler::new(file, source, lines, "{main}", "", compile_diagnostics);
     compiler.function.dynamic_scope = true;
-    if let Err(mut error) = compiler.block(&ast.statements, DeclarationTiming::Hoisted) {
+    if let Err(mut error) = compiler
+        .block(&ast.statements, DeclarationTiming::Hoisted)
+        .and_then(|()| compiler.finish_gotos())
+    {
         error
             .scanner_diagnostics
             .extend(compiler.declaration_warnings.into_iter().map(|warning| {
@@ -111,7 +114,7 @@ fn compile_program(
     let register = compiler.literal(default, 1)?;
     compiler.emit(Instruction::Return(register), 1);
     let unit = CompiledUnit {
-        main: compiler.finish(),
+        main: compiler.finish()?,
         declaration_warnings: compiler.declaration_warnings,
         functions: compiler.functions,
         hoisted: compiler.hoisted,

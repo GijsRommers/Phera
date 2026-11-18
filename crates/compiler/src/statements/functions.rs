@@ -67,8 +67,7 @@ impl<'ast> Compiler<'ast> {
             }
         };
         builder.emit(implicit_return, line);
-        self.append_function(builder, timing, line);
-        Ok(())
+        self.append_function(builder, timing, line)
     }
 
     /// Nested declarations use indices relative to their builder until attached to the unit.
@@ -77,10 +76,10 @@ impl<'ast> Compiler<'ast> {
         mut builder: Compiler<'_>,
         timing: DeclarationTiming,
         line: usize,
-    ) {
+    ) -> Result<(), CompileError> {
         let id = self.functions.len();
         let class_base = self.classes.len();
-        let mut function = builder.finish();
+        let mut function = builder.finish()?;
         for instruction in function.instructions.iter_mut().chain(
             builder
                 .functions
@@ -116,6 +115,7 @@ impl<'ast> Compiler<'ast> {
         } else {
             self.emit(Instruction::Declare(id), line);
         }
+        Ok(())
     }
 
     /// Independent builders keep captured locals ahead of ordinary body temporaries.

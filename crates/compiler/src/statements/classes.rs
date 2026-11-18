@@ -242,7 +242,7 @@ impl Compiler<'_> {
         let result = builder.compile_expression(expression)?;
         builder.emit(Instruction::Return(result), line);
         let index = self.functions.len();
-        let mut function = builder.finish();
+        let mut function = builder.finish()?;
         for instruction in function.instructions.iter_mut().chain(
             builder
                 .functions
