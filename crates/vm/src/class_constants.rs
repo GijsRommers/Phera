@@ -50,6 +50,9 @@ impl Vm {
                 constant.declaring
             )));
         }
+        if let Some(message) = constant.deprecated {
+            self.diagnostic("Deprecated", message.into());
+        }
         let (initializer, state) = match &constant.initializer {
             crate::classes::class::ConstantInitializer::Value(value) => return Ok(value.clone()),
             crate::classes::class::ConstantInitializer::Compiled { function, state } => {

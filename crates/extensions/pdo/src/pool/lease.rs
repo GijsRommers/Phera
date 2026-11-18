@@ -120,6 +120,9 @@ impl Lease {
     pub async fn metadata(&mut self, column: &Column) -> Result<PhpArray, DbError> {
         let postgres = match &column.metadata {
             Metadata::Mysql(mysql) => return Ok(crate::metadata::mysql(mysql)),
+            Metadata::Sqlite(sqlite, kind) => {
+                return Ok(crate::drivers::sqlite::statement::metadata(sqlite, *kind));
+            }
             Metadata::Postgres(postgres) => postgres,
         };
         let owned = column.clone();
@@ -132,6 +135,19 @@ impl Lease {
             length,
             table,
         ))
+    }
+
+    /// `ATTR_TIMEOUT` on a SQLite connection.
+    pub async fn sqlite_timeout(&mut self, milliseconds: u64) -> Result<(), DbError> {
+        self.run(move |driver| {
+            Box::pin(async move {
+                match driver {
+                    Driver::Sqlite(sqlite) => sqlite.set_timeout(milliseconds).await,
+                    _ => Err(connection_error("ATTR_TIMEOUT is set on SQLite only")),
+                }
+            })
+        })
+        .await
     }
 
     pub fn observed_transaction_state(&self) -> Option<bool> {

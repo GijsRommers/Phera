@@ -85,7 +85,7 @@ jobs:
         with:
           php-version: '8.5'
           extensions: >-
-            json, pcre, ctype, pdo, pdo_pgsql, mysqlnd, pdo_mysql, mbstring, tokenizer,
+            json, pcre, ctype, pdo, pdo_pgsql, mysqlnd, pdo_mysql, pdo_sqlite, sqlite3, mbstring, tokenizer,
             timezonedb-2026.5, redis-phpredis/phpredis@6.3.0
           coverage: none
         env:
@@ -99,7 +99,7 @@ jobs:
         run: |
           echo "PHERA_PHP_REAL=$(command -v php)" >> "$GITHUB_ENV"
           echo "PHERA_PHP=$GITHUB_WORKSPACE/.github/scripts/php-oracle.sh" >> "$GITHUB_ENV"
-          echo "PHERA_PHP_SHARED_EXTENSIONS=$(php -n -r 'foreach (["json", "pcre", "ctype", "pdo", "pdo_pgsql", "mysqlnd", "pdo_mysql", "mbstring", "tokenizer", "timezonedb", "redis"] as $e) { if (!extension_loaded($e)) echo "$e "; }')" >> "$GITHUB_ENV"
+          echo "PHERA_PHP_SHARED_EXTENSIONS=$(php -n -r 'foreach (["json", "pcre", "ctype", "pdo", "pdo_pgsql", "mysqlnd", "pdo_mysql", "pdo_sqlite", "sqlite3", "mbstring", "tokenizer", "timezonedb", "redis"] as $e) { if (!extension_loaded($e)) echo "$e "; }')" >> "$GITHUB_ENV"
       # Fail on missing prerequisites instead of silently skipping the PDO suites.
       - name: Verify PHP version, extensions and database connections
         run: make ci-prerequisites
@@ -109,10 +109,9 @@ jobs:
   pdo-end-to-end:
     name: PDO end to end
     # The name is a required check in the branch protection, so it stays as it
-    # is although the job now runs the Redis comparisons too.
-    # Runs the 110 PHP comparison scripts through the release binary against
-    # both databases. All of them match real PHP since native class constants
-    # and exception codes landed, so this job is part of the gate.
+    # is although the job now runs the SQLite and Redis comparisons too.
+    # Runs the comparison scripts of PDO, SQLite3 and Redis through the release
+    # binary; every one of them must match real PHP.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -155,7 +154,7 @@ jobs:
         with:
           php-version: '8.5'
           extensions: >-
-            json, pcre, ctype, pdo, pdo_pgsql, mysqlnd, pdo_mysql, mbstring, tokenizer,
+            json, pcre, ctype, pdo, pdo_pgsql, mysqlnd, pdo_mysql, pdo_sqlite, sqlite3, mbstring, tokenizer,
             timezonedb-2026.5, redis-phpredis/phpredis@6.3.0
           coverage: none
         env:
@@ -169,7 +168,7 @@ jobs:
         run: |
           echo "PHERA_PHP_REAL=$(command -v php)" >> "$GITHUB_ENV"
           echo "PHERA_PHP=$GITHUB_WORKSPACE/.github/scripts/php-oracle.sh" >> "$GITHUB_ENV"
-          echo "PHERA_PHP_SHARED_EXTENSIONS=$(php -n -r 'foreach (["json", "pcre", "ctype", "pdo", "pdo_pgsql", "mysqlnd", "pdo_mysql", "mbstring", "tokenizer", "timezonedb", "redis"] as $e) { if (!extension_loaded($e)) echo "$e "; }')" >> "$GITHUB_ENV"
+          echo "PHERA_PHP_SHARED_EXTENSIONS=$(php -n -r 'foreach (["json", "pcre", "ctype", "pdo", "pdo_pgsql", "mysqlnd", "pdo_mysql", "pdo_sqlite", "sqlite3", "mbstring", "tokenizer", "timezonedb", "redis"] as $e) { if (!extension_loaded($e)) echo "$e "; }')" >> "$GITHUB_ENV"
       # Fail on missing prerequisites instead of silently skipping the PDO suites.
       - name: Verify PHP version, extensions and database connections
         run: make ci-prerequisites
@@ -179,8 +178,8 @@ jobs:
         run: cargo test -p phera-ext-date --test class_scripts
         env:
           PHERA_BIN: ${{ github.workspace }}/target/release/phera
-      - name: Run PDO and Redis tests through the release binary
-        run: cargo test -p phera-ext-pdo -p phera-ext-redis --no-fail-fast
+      - name: Run PDO, SQLite3 and Redis tests through the release binary
+        run: cargo test -p phera-ext-pdo -p phera-ext-sqlite3 -p phera-ext-redis --no-fail-fast
         env:
           PHERA_BIN: ${{ github.workspace }}/target/release/phera
 

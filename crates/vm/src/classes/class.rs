@@ -139,6 +139,7 @@ pub(crate) enum Invocation {
 
 /// Lazy constants retain declaring scope and detect recursive initializers before borrowing values.
 pub(crate) struct LinkedConstant {
+    pub(crate) deprecated: Option<&'static str>,
     pub(crate) declaring: String,
     pub(crate) visibility: Visibility,
     pub(crate) is_final: bool,

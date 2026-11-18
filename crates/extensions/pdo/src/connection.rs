@@ -26,7 +26,15 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn fail(&self, context: &mut dyn Context, error: DbError, method: &str) -> NativeResult {
+    pub fn fail(
+        &self,
+        context: &mut dyn Context,
+        mut error: DbError,
+        method: &str,
+    ) -> NativeResult {
+        if self.name == DriverName::Sqlite {
+            crate::drivers::sqlite::normalize(&mut error, self.attributes.borrow().extended);
+        }
         *self.last_error.borrow_mut() = Some(error.clone());
         *self.error.borrow_mut() = ErrorState::Failed(error.clone());
         let mode = self.attributes.borrow().errors;
@@ -62,7 +70,7 @@ pub fn construct<'a>(
         let dsn_text = args::string(&arguments, 0)
             .map(|s| s.to_string_lossy())
             .unwrap_or_default();
-        let dsn = Dsn::parse(&dsn_text)?;
+        let mut dsn = Dsn::parse(&dsn_text)?;
         let username = args::string(&arguments, 1)
             .map(|s| s.to_string_lossy())
             .unwrap_or_else(|| dsn.get("user", "").to_owned());
@@ -75,10 +83,18 @@ pub fn construct<'a>(
             for (key, value) in options.iter() {
                 if let ArrayKey::Int(attribute) = key
                     && attribute != pool::PHERA_ATTR_POOL
+                    && crate::attributes::constructor_accepts(dsn.driver, attribute)
                 {
                     attributes.set(context, attribute, value)?;
                 }
             }
+        }
+        if dsn.driver == DriverName::Sqlite {
+            // The driver opens the file with the options' flags and timeout.
+            dsn.fields
+                .insert("flags".into(), attributes.sqlite_flags.to_string());
+            dsn.fields
+                .insert("timeout".into(), attributes.timeout.to_string());
         }
         let driver = match pool::acquire(&dsn, &username, &password, policy).await {
             Ok(driver) => driver,
@@ -110,6 +126,7 @@ pub fn available(_: &mut dyn Context, _: Option<&Rc<Object>>, _: &[Value]) -> Na
     let mut drivers = PhpArray::new();
     drivers.push(Value::from("mysql"))?;
     drivers.push(Value::from("pgsql"))?;
+    drivers.push(Value::from("sqlite"))?;
     Ok(Value::from(drivers))
 }
 
@@ -160,6 +177,10 @@ pub fn quote<'a>(
 ) -> LocalFuture<'a, NativeResult> {
     Box::pin(async move {
         let session = session(this.as_ref())?;
+        if session.name == DriverName::Sqlite {
+            let bytes = args::string(&arguments, 0).map_or(&b""[..], |s| s.as_bytes());
+            return Ok(Value::from(crate::drivers::sqlite::quote(bytes)));
+        }
         let kind = args::int(&arguments, 1).unwrap_or(PARAM_STR);
         if !matches!(kind, PARAM_NULL | PARAM_INT | PARAM_STR | PARAM_BOOL) {
             return Err(unsupported("LOB quoting"));
@@ -219,6 +240,7 @@ pub fn connect<'a>(
         let class = match Dsn::parse_named(&dsn, "PDO::connect")?.driver {
             DriverName::Postgres => "Pdo\\Pgsql",
             DriverName::Mysql => "Pdo\\Mysql",
+            DriverName::Sqlite => "Pdo\\Sqlite",
         };
         let object = context.create_object(class, PhpArray::new())?;
         let Value::Object(instance) = &object else {

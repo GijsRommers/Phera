@@ -22,8 +22,10 @@ pub const FETCH_UNIQUE: i64 = 64;
 pub const FETCH_CLASSTYPE: i64 = 128;
 pub const FETCH_PROPS_LATE: i64 = 256;
 pub const FETCH_SERIALIZE: i64 = 512;
+pub const ATTR_TIMEOUT: i64 = 2;
 pub const ATTR_ERRMODE: i64 = 3;
 pub const ATTR_SERVER_VERSION: i64 = 4;
+pub const ATTR_CLIENT_VERSION: i64 = 5;
 pub const ATTR_CASE: i64 = 8;
 pub const ATTR_PERSISTENT: i64 = 12;
 pub const ATTR_DRIVER_NAME: i64 = 16;
@@ -46,7 +48,43 @@ pub const FETCH_CLASS_FLAGS: i64 = FETCH_CLASSTYPE | FETCH_PROPS_LATE | FETCH_SE
 /// The flags `fetchAll()` groups rows by.
 pub const FETCH_GROUPING: i64 = FETCH_GROUP | FETCH_UNIQUE;
 
+/// `Pdo\Sqlite::ATTR_*`: the attributes only SQLite has, and its open flags.
+pub const SQLITE_ATTR_OPEN_FLAGS: i64 = 1000;
+pub const SQLITE_ATTR_READONLY_STATEMENT: i64 = 1001;
+pub const SQLITE_ATTR_EXTENDED_RESULT_CODES: i64 = 1002;
+pub const SQLITE_ATTR_BUSY_STATEMENT: i64 = 1003;
+pub const SQLITE_ATTR_EXPLAIN_STATEMENT: i64 = 1004;
+pub const SQLITE_ATTR_TRANSACTION_MODE: i64 = 1005;
+pub const SQLITE_OPEN_READONLY: i64 = 1;
+pub const SQLITE_OPEN_READWRITE: i64 = 2;
+pub const SQLITE_OPEN_CREATE: i64 = 4;
+pub const SQLITE_TRANSACTION_MODE_IMMEDIATE: i64 = 1;
+pub const SQLITE_TRANSACTION_MODE_EXCLUSIVE: i64 = 2;
+
 pub const CONSTANTS: &[(&str, ConstantValue)] = &[
+    // Deprecated in PHP 8.5 in favour of `Pdo\Sqlite`'s; see SQLITE_DEPRECATED.
+    ("SQLITE_DETERMINISTIC", ConstantValue::Int(2048)),
+    (
+        "SQLITE_ATTR_OPEN_FLAGS",
+        ConstantValue::Int(SQLITE_ATTR_OPEN_FLAGS),
+    ),
+    (
+        "SQLITE_ATTR_READONLY_STATEMENT",
+        ConstantValue::Int(SQLITE_ATTR_READONLY_STATEMENT),
+    ),
+    (
+        "SQLITE_ATTR_EXTENDED_RESULT_CODES",
+        ConstantValue::Int(SQLITE_ATTR_EXTENDED_RESULT_CODES),
+    ),
+    (
+        "SQLITE_OPEN_READONLY",
+        ConstantValue::Int(SQLITE_OPEN_READONLY),
+    ),
+    (
+        "SQLITE_OPEN_READWRITE",
+        ConstantValue::Int(SQLITE_OPEN_READWRITE),
+    ),
+    ("SQLITE_OPEN_CREATE", ConstantValue::Int(SQLITE_OPEN_CREATE)),
     (
         "PHERA_ATTR_POOL",
         ConstantValue::Int(crate::pool::PHERA_ATTR_POOL),
@@ -87,13 +125,16 @@ pub const CONSTANTS: &[(&str, ConstantValue)] = &[
     ("FETCH_NAMED", ConstantValue::Int(11)),
     ("ATTR_AUTOCOMMIT", ConstantValue::Int(0)),
     ("ATTR_PREFETCH", ConstantValue::Int(1)),
-    ("ATTR_TIMEOUT", ConstantValue::Int(2)),
+    ("ATTR_TIMEOUT", ConstantValue::Int(ATTR_TIMEOUT)),
     ("ATTR_ERRMODE", ConstantValue::Int(ATTR_ERRMODE)),
     (
         "ATTR_SERVER_VERSION",
         ConstantValue::Int(ATTR_SERVER_VERSION),
     ),
-    ("ATTR_CLIENT_VERSION", ConstantValue::Int(5)),
+    (
+        "ATTR_CLIENT_VERSION",
+        ConstantValue::Int(ATTR_CLIENT_VERSION),
+    ),
     ("ATTR_SERVER_INFO", ConstantValue::Int(6)),
     ("ATTR_CONNECTION_STATUS", ConstantValue::Int(7)),
     ("ATTR_CASE", ConstantValue::Int(ATTR_CASE)),
@@ -137,4 +178,83 @@ pub const CONSTANTS: &[(&str, ConstantValue)] = &[
     ("FETCH_ORI_REL", ConstantValue::Int(5)),
     ("CURSOR_FWDONLY", ConstantValue::Int(0)),
     ("CURSOR_SCROLL", ConstantValue::Int(1)),
+];
+
+/// `Pdo\Sqlite`'s class constants.
+pub const SQLITE: &[(&str, ConstantValue)] = &[
+    ("DETERMINISTIC", ConstantValue::Int(2048)),
+    ("OPEN_READONLY", ConstantValue::Int(SQLITE_OPEN_READONLY)),
+    ("OPEN_READWRITE", ConstantValue::Int(SQLITE_OPEN_READWRITE)),
+    ("OPEN_CREATE", ConstantValue::Int(SQLITE_OPEN_CREATE)),
+    (
+        "ATTR_OPEN_FLAGS",
+        ConstantValue::Int(SQLITE_ATTR_OPEN_FLAGS),
+    ),
+    (
+        "ATTR_READONLY_STATEMENT",
+        ConstantValue::Int(SQLITE_ATTR_READONLY_STATEMENT),
+    ),
+    (
+        "ATTR_EXTENDED_RESULT_CODES",
+        ConstantValue::Int(SQLITE_ATTR_EXTENDED_RESULT_CODES),
+    ),
+    (
+        "ATTR_BUSY_STATEMENT",
+        ConstantValue::Int(SQLITE_ATTR_BUSY_STATEMENT),
+    ),
+    (
+        "ATTR_EXPLAIN_STATEMENT",
+        ConstantValue::Int(SQLITE_ATTR_EXPLAIN_STATEMENT),
+    ),
+    (
+        "ATTR_TRANSACTION_MODE",
+        ConstantValue::Int(SQLITE_ATTR_TRANSACTION_MODE),
+    ),
+    ("TRANSACTION_MODE_DEFERRED", ConstantValue::Int(0)),
+    (
+        "TRANSACTION_MODE_IMMEDIATE",
+        ConstantValue::Int(SQLITE_TRANSACTION_MODE_IMMEDIATE),
+    ),
+    (
+        "TRANSACTION_MODE_EXCLUSIVE",
+        ConstantValue::Int(SQLITE_TRANSACTION_MODE_EXCLUSIVE),
+    ),
+    ("EXPLAIN_MODE_PREPARED", ConstantValue::Int(0)),
+    ("EXPLAIN_MODE_EXPLAIN", ConstantValue::Int(1)),
+    ("EXPLAIN_MODE_EXPLAIN_QUERY_PLAN", ConstantValue::Int(2)),
+    ("OK", ConstantValue::Int(0)),
+    ("DENY", ConstantValue::Int(1)),
+    ("IGNORE", ConstantValue::Int(2)),
+];
+
+/// `PDO::SQLITE_*` warns on use, as in PHP 8.5.
+pub const SQLITE_DEPRECATED: &[(&str, &str)] = &[
+    (
+        "SQLITE_DETERMINISTIC",
+        "Constant PDO::SQLITE_DETERMINISTIC is deprecated since 8.5, use Pdo\\Sqlite::DETERMINISTIC instead",
+    ),
+    (
+        "SQLITE_ATTR_OPEN_FLAGS",
+        "Constant PDO::SQLITE_ATTR_OPEN_FLAGS is deprecated since 8.5, use Pdo\\Sqlite::ATTR_OPEN_FLAGS instead",
+    ),
+    (
+        "SQLITE_ATTR_READONLY_STATEMENT",
+        "Constant PDO::SQLITE_ATTR_READONLY_STATEMENT is deprecated since 8.5, use Pdo\\Sqlite::ATTR_READONLY_STATEMENT instead",
+    ),
+    (
+        "SQLITE_ATTR_EXTENDED_RESULT_CODES",
+        "Constant PDO::SQLITE_ATTR_EXTENDED_RESULT_CODES is deprecated since 8.5, use Pdo\\Sqlite::ATTR_EXTENDED_RESULT_CODES instead",
+    ),
+    (
+        "SQLITE_OPEN_READONLY",
+        "Constant PDO::SQLITE_OPEN_READONLY is deprecated since 8.5, use Pdo\\Sqlite::OPEN_READONLY instead",
+    ),
+    (
+        "SQLITE_OPEN_READWRITE",
+        "Constant PDO::SQLITE_OPEN_READWRITE is deprecated since 8.5, use Pdo\\Sqlite::OPEN_READWRITE instead",
+    ),
+    (
+        "SQLITE_OPEN_CREATE",
+        "Constant PDO::SQLITE_OPEN_CREATE is deprecated since 8.5, use Pdo\\Sqlite::OPEN_CREATE instead",
+    ),
 ];

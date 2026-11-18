@@ -51,7 +51,7 @@ impl Vm {
         let Some(method) = private.or_else(|| class.methods.get(lower)).cloned() else {
             return Ok(None);
         };
-        self.check_method_visibility(&method)?;
+        self.check_invocation_visibility(&method, invocation)?;
         let scope = declaring_class(class, &method)
             .or_else(|| self.classes.get(&method.declaring))
             .ok_or_else(|| internal_error!("method scope"))?;
