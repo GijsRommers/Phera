@@ -9,6 +9,7 @@ license.workspace = true
 indexmap.workspace = true
 phera-extension-api.workspace = true
 phera-ext-standard.workspace = true
+phera-ext-pcre.workspace = true
 
 [lints]
 workspace = true

@@ -193,10 +193,3 @@ fn unserialize(_: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> Nati
     }
     Ok(Value::Null)
 }
-
-fn obsolete_wakeup(_: &mut dyn Context, _: This<'_>, _: &[Value]) -> NativeResult {
-    Err(NativeError::throw(
-        "Phera\\NotSupportedException",
-        "SplFixedArray::__wakeup() is not supported by Phera: deprecated since PHP 8.4",
-    ))
-}

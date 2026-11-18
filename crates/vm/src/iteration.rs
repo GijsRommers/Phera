@@ -53,6 +53,7 @@ impl Vm {
                     None
                 },
                 traversal: None,
+                traversal_by_reference: false,
                 source: if object_iteration { None } else { place },
                 position: None,
                 started: false,
@@ -84,6 +85,7 @@ impl Vm {
             frame::IteratorState {
                 snapshot: None,
                 traversal: None,
+                traversal_by_reference: false,
                 source: Some(place),
                 position: None,
                 started: false,

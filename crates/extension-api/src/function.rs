@@ -49,6 +49,8 @@ pub enum ParamType {
     ArrayOrBool,
     /// `array|object`
     ArrayOrObject,
+    /// `RecursiveIterator|IteratorAggregate`
+    RecursiveOrAggregate,
 }
 
 impl ParamType {

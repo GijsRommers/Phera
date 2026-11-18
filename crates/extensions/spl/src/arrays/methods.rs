@@ -8,7 +8,8 @@
 use std::rc::Rc;
 
 use phera_extension_api::{
-    ArrayKey, Context, LocalFuture, NativeError, NativeResult, Object, PhpString, Value, args,
+    Context, LocalFuture, MethodPreparation, NativeError, NativeResult, Object, Param, PhpString,
+    Value, args,
 };
 
 use super::{
@@ -45,7 +46,7 @@ pub(super) fn construct_object(
     })
 }
 
-fn storage(
+pub(super) fn storage(
     context: &mut dyn Context,
     receiver: &Object,
     value: &Value,
@@ -104,7 +105,7 @@ fn replace_storage(
         state.storage = storage;
         state.position = Position::Initial;
         if let Some(flags) = flags {
-            state.flags = flags;
+            state.flags = Flags::new(state.flags.raw() | flags.raw());
         }
         Ok(Value::Null)
     })
@@ -239,113 +240,18 @@ pub(super) fn debug(_: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeR
     Ok(Value::from(properties::debug(receiver(this)?)?))
 }
 
-pub(super) fn serialize(_: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
-    let object = receiver(this)?;
-    let (flags, storage, iterator) = state::read(object, |state| {
-        let flags = state.flags.raw()
-            | if matches!(state.storage, Storage::OwnProperties) {
-                0x010000
-            } else {
-                0
-            };
-        (
-            flags,
-            properties::as_value(&state.storage),
-            state.iterator_class.clone(),
-        )
-    })?;
-    Ok(Value::from(
-        [
-            Value::Int(flags),
-            storage.unwrap_or(Value::Null),
-            Value::from(object.to_array()),
-            iterator.map_or(Value::Null, Value::from),
-        ]
-        .into_iter()
-        .enumerate()
-        .map(|(index, value)| (ArrayKey::Int(index as i64), value))
-        .collect::<phera_extension_api::PhpArray>(),
-    ))
-}
-
-pub(super) fn unserialize(
+pub(super) fn prepare_iterator_class(
     context: &mut dyn Context,
-    this: Option<Rc<Object>>,
-    arguments: Vec<Value>,
-) -> LocalFuture<'_, NativeResult> {
-    Box::pin(async move {
-        let object = receiver(this.as_ref())?;
-        let field =
-            |index| args::array(&arguments, 0).and_then(|data| data.get(&ArrayKey::Int(index)));
-        let (Some(Value::Int(flags)), Some(contents), Some(Value::Array(members))) =
-            (field(0), field(1), field(2))
-        else {
-            return Err(invalid_serialization());
-        };
-        let iterator = match field(3) {
-            Some(Value::String(name)) => Some(name.to_string_lossy()),
-            None | Some(Value::Null) => None,
-            _ => return Err(invalid_serialization()),
-        };
-        let storage = if flags & 0x010000 != 0 {
-            Storage::OwnProperties
-        } else {
-            storage(context, object, contents, "__unserialize")?
-        };
-        let restored_flags = match &storage {
-            Storage::Alias(alias) => state::read(alias, |s| s.flags)?,
-            _ => Flags::new(*flags),
-        };
-        state::update(object, |state| {
-            state.storage = storage;
-            state.flags = restored_flags;
-            state.position = Position::Initial;
-            Ok(())
-        })?;
-        object
-            .update(|target| {
-                for (key, value) in members.iter() {
-                    target.insert(key, value.clone());
-                }
-            })
-            .ok_or_else(crate::busy)?;
-        if let Some(name) = iterator {
-            let class = context.lookup_class(&name).await?.ok_or_else(|| {
-                NativeError::throw(
-                    "UnexpectedValueException",
-                    format!(
-                        "Cannot deserialize ArrayObject with iterator class '{name}'; \
-                     no such class exists"
-                    ),
-                )
-            })?;
-            if !class.is_instance_of("Iterator") {
-                return Err(NativeError::throw(
-                    "UnexpectedValueException",
-                    format!(
-                        "Cannot deserialize ArrayObject with iterator class '{name}'; \
-                     this class does not implement the Iterator interface"
-                    ),
-                ));
-            }
-            state::update(object, |state| {
-                state.iterator_class = Some(class.name().to_owned());
-                Ok(())
-            })?;
-        }
-        Ok(Value::Null)
-    })
-}
-
-fn invalid_serialization() -> NativeError {
-    NativeError::throw(
-        "UnexpectedValueException",
-        "Incomplete or ill-typed serialization data",
-    )
-}
-
-pub(super) fn legacy_serialization(_: &mut dyn Context, _: This<'_>, _: &[Value]) -> NativeResult {
-    Err(NativeError::error(
-        "SPL legacy serialization is not implemented",
-    ))
+    _: &[Param],
+    args: &mut [Value],
+) -> Result<MethodPreparation, NativeError> {
+    if let Some(Value::Array(_)) = args.first()
+        && let Some(value) = args.first_mut()
+    {
+        *value = Value::String(phera_extension_api::value::to_php_string(
+            value,
+            context.diagnostics(),
+        )?);
+    }
+    Ok(MethodPreparation::Default)
 }

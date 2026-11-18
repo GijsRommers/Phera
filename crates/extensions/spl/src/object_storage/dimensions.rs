@@ -14,6 +14,8 @@ use super::{CLASS, Key, attach, detach, hash, read};
 use crate::receiver;
 
 pub(super) const HANDLERS: NativeDimensions = NativeDimensions {
+    reference: None,
+    bind: None,
     fallback_if_overridden: &["gethash"],
     get: |_, storage, value| lookup(storage, &Key::Handle(object(value, "offsetGet")?.id)),
     exists: |_, storage, value| contains(storage, &Key::Handle(object(value, "offsetExists")?.id)),
@@ -76,7 +78,7 @@ fn invoke<'a>(
     Box::pin(async move {
         if let Some(replacement) = replacement {
             context.diagnostics().deprecated(format!(
-                "Method {CLASS}::{method}() is deprecated since 8.5,                 use method {CLASS}::{replacement}() instead"
+                "Method {CLASS}::{method}() is deprecated since 8.5, use method {CLASS}::{replacement}() instead"
             ));
         }
         let storage = receiver(this.as_ref())?;

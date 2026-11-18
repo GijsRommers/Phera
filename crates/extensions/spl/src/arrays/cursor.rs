@@ -9,7 +9,7 @@
 use std::rc::Rc;
 
 use phera_extension_api::{
-    Context, NativeError, NativeIterator, NativeResult, Object, PhpArray, Value, args,
+    Context, LocalFuture, NativeError, NativeIterator, NativeResult, Object, PhpArray, Value, args,
 };
 
 use super::state::{self, Position, Target};
@@ -38,7 +38,6 @@ fn index(array: &PhpArray, position: Position, properties: bool) -> Option<usize
             .entry_at(index)
             .map(|_| index)
             .or_else(|| array.next_position(index)),
-        Position::End => None,
     };
     visible_at(array, index, properties)
 }
@@ -47,7 +46,16 @@ fn inspect<T>(
     object: &Object,
     f: impl FnOnce(&PhpArray, Option<usize>) -> T,
 ) -> Result<T, NativeError> {
-    let position = state::read(object, |state| state.position)?;
+    let (f, position) = match state::read(object, |state| {
+        let position = state.position;
+        match &state.storage {
+            state::Storage::Array(array) => Ok(f(array, index(array, position, false))),
+            _ => Err((f, position)),
+        }
+    })? {
+        Ok(value) => return Ok(value),
+        Err(remote) => remote,
+    };
     let target = Target::of(object)?;
     target.read(|array| f(array, index(array, position, target.is_properties())))
 }
@@ -63,16 +71,11 @@ fn advance(object: &Object) -> Result<(), NativeError> {
     let position = state::read(object, |state| state.position)?;
     let target = Target::of(object)?;
     let next = target.read(|array| {
-        let start = match position {
-            Position::Initial => array
-                .first_position()
-                .and_then(|slot| array.next_position(slot)),
-            Position::Slot(slot) => array.next_position(slot),
-            Position::End => None,
-        };
-        visible_at(array, start, target.is_properties())
+        let properties = target.is_properties();
+        let next = index(array, position, properties).and_then(|slot| array.next_position(slot));
+        visible_at(array, next, properties).unwrap_or_else(|| array.end_position())
     })?;
-    move_cursor(object, next.map_or(Position::End, Position::Slot))
+    move_cursor(object, Position::Slot(next))
 }
 
 fn current_value(object: &Object) -> NativeResult {
@@ -118,30 +121,16 @@ pub(super) fn seek(_: &mut dyn Context, this: This<'_>, args: &[Value]) -> Nativ
     let offset = args::int(args, 0).unwrap_or_default();
     if let Ok(offset) = usize::try_from(offset) {
         let target = Target::of(object)?;
-        let found = target.read(|array| {
-            if target.is_properties() {
-                return array
-                    .keys()
-                    .filter(state::public)
-                    .nth(offset)
-                    .and_then(|key| {
-                        let mut position = array.first_position();
-                        while let Some(slot) = position {
-                            if array.entry_at(slot).is_some_and(|(other, _)| other == key) {
-                                return position;
-                            }
-                            position = array.next_position(slot);
-                        }
-                        None
-                    });
-            }
-            let mut position = array.first_position();
+        let (found, end) = target.read(|array| {
+            let properties = target.is_properties();
+            let mut position = visible_at(array, array.first_position(), properties);
             for _ in 0..offset {
-                position = array.next_position(position?);
+                let Some(slot) = position else { break };
+                position = visible_at(array, array.next_position(slot), properties);
             }
-            position
+            (position, array.end_position())
         })?;
-        move_cursor(object, found.map_or(Position::End, Position::Slot))?;
+        move_cursor(object, Position::Slot(found.unwrap_or(end)))?;
         if found.is_some() {
             return Ok(Value::Null);
         }
@@ -156,30 +145,66 @@ pub(super) fn create(
     _: &mut dyn Context,
     object: Rc<Object>,
 ) -> Result<Box<dyn NativeIterator>, NativeError> {
-    Ok(Box::new(Cursor(object)))
+    Ok(Box::new(Cursor {
+        object,
+        mode: CursorMode::Value,
+    }))
 }
 
-struct Cursor(Rc<Object>);
+pub(super) fn create_by_reference(
+    _: &mut dyn Context,
+    object: Rc<Object>,
+) -> Result<Box<dyn NativeIterator>, NativeError> {
+    Ok(Box::new(Cursor {
+        object,
+        mode: CursorMode::Reference,
+    }))
+}
+
+enum CursorMode {
+    Value,
+    Reference,
+}
+
+struct Cursor {
+    object: Rc<Object>,
+    mode: CursorMode,
+}
+
+fn current_reference(object: &Object) -> NativeResult {
+    let Some(position) = inspect(object, |_, index| index)? else {
+        return Ok(Value::Null);
+    };
+    Target::of(object)?.update(|array| {
+        array
+            .entry_at_mut(position)
+            .map(|(_, slot)| super::dimensions::element_reference(slot))
+            .ok_or_else(|| NativeError::error("SPL array entry vanished"))
+    })
+}
 
 impl NativeIterator for Cursor {
     fn rewind(&mut self, _: &mut dyn Context) -> Result<(), NativeError> {
-        move_cursor(&self.0, Position::Initial)
+        move_cursor(&self.object, Position::Initial)
     }
 
     fn advance(&mut self, _: &mut dyn Context) -> Result<(), NativeError> {
-        advance(&self.0)
+        advance(&self.object)
     }
 
     fn valid(&mut self, _: &mut dyn Context) -> Result<bool, NativeError> {
-        inspect(&self.0, |_, index| index.is_some())
+        inspect(&self.object, |_, index| index.is_some())
     }
 
     fn current(&mut self, _: &mut dyn Context) -> NativeResult {
-        current_value(&self.0)
+        match self.mode {
+            CursorMode::Value => current_value(&self.object),
+            CursorMode::Reference => current_reference(&self.object),
+        }
     }
 
     fn key(&mut self, _: &mut dyn Context) -> NativeResult {
-        current_key(&self.0)
+        current_key(&self.object)
     }
 }
 
@@ -192,28 +217,58 @@ pub(super) fn has_children(_: &mut dyn Context, this: This<'_>, _: &[Value]) -> 
     ))
 }
 
-pub(super) fn children(context: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
-    let object = receiver(this)?;
-    let value = current_value(object)?;
-    let flags = state::read(object, |state| state.flags)?;
-    let storage = match value {
-        Value::Array(array) => state::Storage::Array(array),
-        Value::Object(value) if !flags.child_arrays_only() => {
-            if value.class.is_instance_of(super::RECURSIVE) {
-                return Ok(Value::Object(value));
-            }
-            state::Storage::Properties(value)
+pub(super) fn children(
+    context: &mut dyn Context,
+    this: Option<Rc<Object>>,
+    _: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        let object = receiver(this.as_ref())?;
+        let (value, valid) = inspect(object, |array, index| {
+            (
+                index.map_or(Value::Null, |index| state::value_at(array, index)),
+                index.is_some(),
+            )
+        })?;
+        if !valid {
+            return Ok(Value::Null);
         }
-        _ => return Ok(Value::Null),
-    };
-    let child = crate::make(
-        context,
-        object.class.name(),
-        state::State {
-            flags,
-            storage,
-            ..state::State::default()
-        },
-    )?;
-    Ok(Value::Object(child))
+        let flags = state::read(object, |state| state.flags)?;
+        if let Value::Object(child) = &value {
+            if flags.child_arrays_only() {
+                return Ok(Value::Null);
+            }
+            if child.class.is_instance_of(object.class.name()) {
+                return Ok(value);
+            }
+        }
+        if let Value::Array(array) = &value
+            && object.class.name() == super::RECURSIVE
+        {
+            let child = crate::make(
+                context,
+                super::RECURSIVE,
+                state::State {
+                    flags,
+                    storage: state::Storage::Array(array.clone()),
+                    ..state::State::default()
+                },
+            )?;
+            return Ok(Value::Object(child));
+        }
+        let output = context.create_object(object.class.name(), PhpArray::new())?;
+        let Value::Object(child) = &output else {
+            return Err(NativeError::error(
+                "Cannot create RecursiveArrayIterator child",
+            ));
+        };
+        context
+            .call_method(
+                child.clone(),
+                "__construct",
+                vec![value, Value::Int(flags.raw())],
+            )
+            .await?;
+        Ok(output)
+    })
 }

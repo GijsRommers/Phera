@@ -67,9 +67,9 @@ pub(crate) fn register(registry: &mut Registry) {
                 Method::public("prev", &[], cursor::prev).tentative_return("void"),
                 Method::public("next", &[], cursor::next).tentative_return("void"),
                 Method::public("valid", &[], cursor::valid).tentative_return("bool"),
-                Method::public("unserialize", &[STRING_DATA], crate::legacy_serialization)
+                Method::public("unserialize", &[STRING_DATA], methods::legacy_unserialize)
                     .tentative_return("void"),
-                Method::public("serialize", &[], crate::legacy_serialization)
+                Method::public("serialize", &[], methods::legacy_serialize)
                     .tentative_return("string"),
                 Method::public("__serialize", &[], methods::serialize).tentative_return("array"),
                 Method::public("__unserialize", &[DATA], methods::unserialize)

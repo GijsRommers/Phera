@@ -57,6 +57,11 @@ pub(super) fn inherit_hooks(
         properties: own.properties.or(base.properties),
         property_access: own.property_access.or(base.property_access),
         iterator: own.iterator.or(base.iterator),
+        iterator_by_reference: if own.iterator.is_some() {
+            own.iterator_by_reference
+        } else {
+            base.iterator_by_reference
+        },
         iterator_fallback_if_overridden: if own.iterator.is_some() {
             own.iterator_fallback_if_overridden
         } else {
@@ -94,6 +99,7 @@ pub(super) fn user_hooks(
     }) {
         Some(Rc::new(phera_extension_api::ClassHooks {
             iterator: None,
+            iterator_by_reference: None,
             ..**hooks
         }))
     } else {

@@ -9,14 +9,16 @@ use phera_extension_api::{
     Registry,
 };
 
-use super::{ITERATOR, OBJECT, RECURSIVE, cursor, dimensions, methods, properties, sorting};
+use super::{
+    ITERATOR, OBJECT, RECURSIVE, cursor, dimensions, methods, properties, serialization, sorting,
+};
 
 const ARRAY: Param = Param::new("array", ParamType::ArrayOrObject);
 const FLAGS: Param = Param::new("flags", ParamType::Int);
 const KEY: Param = Param::new("key", ParamType::Mixed);
 const VALUE: Param = Param::new("value", ParamType::Mixed);
 const ITERATOR_CLASS: Param = Param::new("iteratorClass", ParamType::String);
-const CALLBACK: Param = Param::new("callback", ParamType::Callable);
+const CALLBACK: Param = Param::new("callback", ParamType::Mixed);
 const OFFSET: Param = Param::new("offset", ParamType::Int);
 const CONSTANTS: &[(&str, ConstantValue)] = &[
     ("STD_PROP_LIST", ConstantValue::Int(1)),
@@ -34,6 +36,7 @@ const ARRAY_HOOKS: ClassHooks = ClassHooks {
 
 const ITERATOR_HOOKS: ClassHooks = ClassHooks {
     iterator: Some(cursor::create),
+    iterator_by_reference: Some(cursor::create_by_reference),
     ..ARRAY_HOOKS
 };
 
@@ -64,18 +67,19 @@ const COMMON: [Method; 20] = const {
         Method::public_async("uksort", &[CALLBACK], sorting::uksort).tentative_return("true"),
         Method::public("natsort", &[], sorting::natsort).tentative_return("true"),
         Method::public("natcasesort", &[], sorting::natcasesort).tentative_return("true"),
-        Method::public("serialize", &[], methods::legacy_serialization).tentative_return("string"),
+        Method::public("serialize", &[], serialization::legacy_serialize)
+            .tentative_return("string"),
         Method::public(
             "unserialize",
             const { &[Param::new("data", ParamType::String)] },
-            methods::legacy_serialization,
+            serialization::legacy_unserialize,
         )
         .tentative_return("void"),
-        Method::public("__serialize", &[], methods::serialize).tentative_return("array"),
+        Method::public("__serialize", &[], serialization::serialize).tentative_return("array"),
         Method::public_async(
             "__unserialize",
             const { &[Param::new("data", ParamType::Array)] },
-            methods::unserialize,
+            serialization::unserialize,
         )
         .tentative_return("void"),
         Method::public("__debugInfo", &[], methods::debug).tentative_return("array"),
@@ -163,6 +167,7 @@ pub(crate) fn register(registry: &mut Registry) {
                     &[ITERATOR_CLASS],
                     methods::set_iterator_class,
                 )
+                .with_preparation(methods::prepare_iterator_class)
                 .tentative_return("void"),
                 Method::public("getIteratorClass", &[], methods::get_iterator_class)
                     .tentative_return("string"),
@@ -177,7 +182,7 @@ pub(crate) fn register(registry: &mut Registry) {
         methods: const {
             &[
                 Method::public("hasChildren", &[], cursor::has_children).tentative_return("bool"),
-                Method::public("getChildren", &[], cursor::children)
+                Method::public_async("getChildren", &[], cursor::children)
                     .tentative_return("?RecursiveArrayIterator"),
             ]
         },

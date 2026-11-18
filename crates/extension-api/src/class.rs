@@ -178,6 +178,7 @@ pub enum PropertyType {
     Array,
     Object,
     Mixed,
+    NullableString,
     NullableClass(&'static str),
 }
 

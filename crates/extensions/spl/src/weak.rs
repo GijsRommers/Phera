@@ -115,7 +115,13 @@ fn set(_: &mut dyn Context, map: &Object, offset: Value, value: Value) -> Result
 fn unset(_: &mut dyn Context, map: &Object, offset: Value) -> Result<(), NativeError> {
     let key = key(offset, false)?;
     update_state(map, |state: &mut Map| {
-        state.0.shift_remove(&key.id);
+        if state
+            .0
+            .get(&key.id)
+            .is_some_and(|(weak, _)| weak.as_ptr() == Rc::as_ptr(&key))
+        {
+            state.0.shift_remove(&key.id);
+        }
     })
 }
 
@@ -258,6 +264,8 @@ const MAP_HOOKS: ClassHooks = ClassHooks {
     properties: Some(view),
     iterator: Some(cursor),
     dimensions: Some(NativeDimensions {
+        reference: None,
+        bind: None,
         fallback_if_overridden: &[],
         get,
         exists,

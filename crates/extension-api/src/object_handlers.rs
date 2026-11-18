@@ -49,6 +49,18 @@ pub trait NativeIterator {
 pub type IteratorFactory =
     fn(&mut dyn Context, Rc<Object>) -> Result<Box<dyn NativeIterator>, NativeError>;
 
+/// Whether an indirect write may initialize a missing element.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum DimensionReferenceMode {
+    Write,
+    ReadWrite,
+    Unset,
+}
+
+pub type DimensionReference =
+    fn(&mut dyn Context, &Object, Value, DimensionReferenceMode) -> NativeResult;
+pub type BindDimension = fn(&mut dyn Context, &Object, Value, Value) -> Result<(), NativeError>;
+
 /// ArrayAccess's four methods can be serviced directly by native state.
 #[derive(Clone, Copy)]
 pub struct NativeDimensions {
@@ -58,6 +70,10 @@ pub struct NativeDimensions {
     pub exists: fn(&mut dyn Context, &Object, Value) -> Result<bool, NativeError>,
     pub set: fn(&mut dyn Context, &Object, Value, Value) -> Result<(), NativeError>,
     pub unset: fn(&mut dyn Context, &Object, Value) -> Result<(), NativeError>,
+    /// Returns a backing reference cell for an indirect write or reference binding.
+    pub reference: Option<DimensionReference>,
+    /// Makes an existing reference cell the backing storage for one element.
+    pub bind: Option<BindDimension>,
 }
 
 pub type NativeCompare = fn(
@@ -78,6 +94,8 @@ pub struct ClassHooks {
     /// Direct read, mutation or presence check for one virtual property.
     pub property_access: Option<&'static crate::NativePropertyAccess>,
     pub iterator: Option<IteratorFactory>,
+    /// Cursor creation for foreach by reference. Its current values must be reference cells.
+    pub iterator_by_reference: Option<IteratorFactory>,
     /// Additional methods a native cursor relies on, beyond the iterator protocol.
     pub iterator_fallback_if_overridden: &'static [&'static str],
     pub dimensions: Option<NativeDimensions>,
@@ -91,6 +109,7 @@ impl ClassHooks {
         properties: None,
         property_access: None,
         iterator: None,
+        iterator_by_reference: None,
         iterator_fallback_if_overridden: &[],
         dimensions: None,
         count: None,

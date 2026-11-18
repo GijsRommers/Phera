@@ -28,7 +28,17 @@ pub(super) fn view(
         PropertyPurpose::ArrayCast | PropertyPurpose::Export | PropertyPurpose::Json
             if !state::read(object, |state| state.flags.standard_properties())? =>
         {
-            Ok(Target::of(object)?.copy()?.as_ref().clone())
+            let target = Target::of(object)?;
+            let storage = target.copy()?;
+            if purpose == PropertyPurpose::ArrayCast && target.is_properties() {
+                return storage
+                    .iter()
+                    .map(|(key, value)| {
+                        Ok((ArrayKey::from_value(&Value::from(key))?, value.clone()))
+                    })
+                    .collect();
+            }
+            Ok(storage.as_ref().clone())
         }
         PropertyPurpose::Comparison => Ok([
             (ArrayKey::Int(0), Value::Array(Target::of(object)?.copy()?)),

@@ -11,7 +11,11 @@ use phera_extension_api::{
 use std::rc::Rc;
 
 use super::{CLASS, List, Mode, dimensions::arg, range, read, update};
-use crate::{This, receiver};
+use crate::{
+    This,
+    legacy::{Reader, Writer},
+    receiver,
+};
 
 pub(super) fn push(_: &mut dyn Context, this: This<'_>, args: &[Value]) -> NativeResult {
     update(receiver(this)?, |list| {
@@ -186,5 +190,51 @@ pub(super) fn unserialize(_: &mut dyn Context, this: This<'_>, args: &[Value]) -
             }
         })
         .ok_or_else(crate::busy)?;
+    Ok(Value::Null)
+}
+
+pub(super) fn legacy_serialize(_: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
+    let object = receiver(this)?;
+    let mut writer = Writer::default();
+    read(object, |list| {
+        writer.value(Value::Int(list.mode(object).raw()))?;
+        for entry in &list.entries {
+            writer.bytes(b":");
+            writer.value(entry.value.clone())?;
+        }
+        Ok::<_, NativeError>(())
+    })??;
+    Ok(writer.finish())
+}
+
+pub(super) fn legacy_unserialize(
+    context: &mut dyn Context,
+    this: This<'_>,
+    args: &[Value],
+) -> NativeResult {
+    let object = receiver(this)?;
+    let input =
+        args::string(args, 0).ok_or_else(|| NativeError::error("Missing serialized list data"))?;
+    let mut reader = Reader::new(input.as_bytes());
+    if reader.is_empty() {
+        return Ok(Value::Null);
+    }
+    update(object, |list| list.entries.clear())?;
+    let Value::Int(flags) = reader.value(context)? else {
+        return Err(reader.error());
+    };
+    update(object, |list| {
+        list.mode = Some(Mode::parse(i64::from(flags as i32)))
+    })?;
+    while reader.take(b":") {
+        let value = reader.value(context)?;
+        update(object, |list| {
+            let entry = list.entry(value);
+            list.entries.push_back(entry);
+        })?;
+    }
+    if !reader.is_empty() {
+        return Err(reader.error());
+    }
     Ok(Value::Null)
 }

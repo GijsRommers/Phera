@@ -65,7 +65,6 @@ impl Runtime {
             ..phera_extension_api::ClassEntry::class("Phera\\NotSupportedException")
         });
         registry.load(&phera_ext_standard::Standard);
-        registry.php_module("SPL");
         registry.load(&phera_ext_tokenizer::Tokenizer);
         registry.load(&phera_ext_ctype::Ctype);
         registry.load(&phera_ext_date::Date);

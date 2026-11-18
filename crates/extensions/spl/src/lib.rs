@@ -6,23 +6,33 @@
 //! ```
 
 use phera_extension_api::{
-    ArrayKey, Context, Extension, NativeError, NativeResult, Object, PhpArray, Registry, Value,
+    ArrayKey, Context, Extension, NativeError, Object, PhpArray, Registry, Value,
 };
 use std::rc::Rc;
 
 mod arrays;
+mod catalog;
 mod fixed_array;
 mod heap;
 mod interfaces;
+mod legacy;
 mod linked_list;
+mod multiple_iterator;
+mod native_state;
 mod object_storage;
+mod recursive;
 mod weak;
+mod wrappers;
 
 pub struct Spl;
 
 impl Extension for Spl {
     fn name(&self) -> &'static str {
         "spl"
+    }
+
+    fn php_module(&self) -> Option<&'static str> {
+        Some("SPL")
     }
 
     fn register(&self, registry: &mut Registry) {
@@ -33,6 +43,10 @@ impl Extension for Spl {
         linked_list::register(registry);
         fixed_array::register(registry);
         heap::register(registry);
+        wrappers::register(registry);
+        multiple_iterator::register(registry);
+        recursive::register(registry);
+        catalog::register(registry);
     }
 }
 
@@ -42,35 +56,7 @@ fn receiver(this: This<'_>) -> Result<&Rc<Object>, NativeError> {
     this.ok_or_else(|| NativeError::error("Missing SPL method receiver"))
 }
 
-fn store<T: 'static>(object: &Object, value: T) -> Result<(), NativeError> {
-    *object.native.try_borrow_mut().map_err(|_| busy())? = Some(Box::new(value));
-    Ok(())
-}
-
-fn read_state<T: Default + 'static, R>(
-    object: &Object,
-    read: impl FnOnce(&T) -> R,
-) -> Result<R, NativeError> {
-    let data = object.native.try_borrow().map_err(|_| busy())?;
-    Ok(
-        match data.as_ref().and_then(|state| state.downcast_ref::<T>()) {
-            Some(state) => read(state),
-            None => read(&T::default()),
-        },
-    )
-}
-
-fn update_state<T: Default + 'static, R>(
-    object: &Object,
-    change: impl FnOnce(&mut T) -> R,
-) -> Result<R, NativeError> {
-    let mut data = object.native.try_borrow_mut().map_err(|_| busy())?;
-    let state = data
-        .get_or_insert_with(|| Box::<T>::default())
-        .downcast_mut::<T>()
-        .ok_or_else(|| NativeError::error("Invalid SPL object state"))?;
-    Ok(change(state))
-}
+use native_state::{read_state, store, update_state};
 
 fn busy() -> NativeError {
     NativeError::error("Cannot access SPL storage while it is being modified")
@@ -98,10 +84,4 @@ fn list(values: impl IntoIterator<Item = Value>) -> Value {
             .map(|(index, value)| (ArrayKey::Int(index as i64), value))
             .collect::<PhpArray>(),
     )
-}
-
-fn legacy_serialization(_: &mut dyn Context, _: This<'_>, _: &[Value]) -> NativeResult {
-    Err(NativeError::error(
-        "SPL legacy serialization is not implemented",
-    ))
 }

@@ -8,7 +8,7 @@
 use std::{cell::RefCell, rc::Rc};
 
 use phera_bytecode::{BinaryOp, IncDec, Instruction};
-use phera_extension_api::{NativeError, NativeResult};
+use phera_extension_api::{DimensionReferenceMode, NativeError, NativeResult};
 use phera_value::Value;
 
 use crate::{
@@ -130,7 +130,21 @@ impl Vm {
             if path.suffix.is_empty() {
                 return self.write_dimension(path, write).await;
             }
-            let returned = self.dimension_get(path.object.clone(), path.offset).await?;
+            let mode = match write {
+                Write::Unset => DimensionReferenceMode::Unset,
+                Write::Compound(..) | Write::Increment(_) => DimensionReferenceMode::ReadWrite,
+                _ => DimensionReferenceMode::Write,
+            };
+            let returned = match self.dimension_reference(&path.object, path.offset.clone(), mode) {
+                Some(result) => {
+                    let result = result?;
+                    if mode == DimensionReferenceMode::Unset && result.is_null() {
+                        return Ok(Value::Null);
+                    }
+                    result
+                }
+                None => self.dimension_get(path.object.clone(), path.offset).await?,
+            };
             if !returned.is_reference() && !returned.is_object() {
                 self.indirect_dimension_notice(&path.object);
             }
@@ -161,15 +175,32 @@ impl Vm {
                 self.dimension_set(object, offset, result.clone()).await?;
                 Ok(result)
             }
+            Write::Bind(value) => match self.bind_dimension(&object, offset.clone(), value) {
+                Some(result) => result.map(|()| Value::Null),
+                None => {
+                    let value = self.dimension_get(object.clone(), offset).await?;
+                    if !value.is_reference() && !value.is_object() {
+                        self.indirect_dimension_notice(&object);
+                    }
+                    Err(NativeError::error(
+                        "Cannot assign by reference to an array dimension of an object",
+                    ))
+                }
+            },
             write => {
-                let value = self.dimension_get(object.clone(), offset).await?;
+                let mode = if matches!(write, Write::Increment(_)) {
+                    DimensionReferenceMode::ReadWrite
+                } else {
+                    DimensionReferenceMode::Write
+                };
+                let value = match self.dimension_reference(&object, offset.clone(), mode) {
+                    Some(result) => result?,
+                    None => self.dimension_get(object.clone(), offset).await?,
+                };
                 if !value.is_reference() && !value.is_object() {
                     self.indirect_dimension_notice(&object);
                 }
                 match write {
-                    Write::Bind(_) => Err(NativeError::error(
-                        "Cannot assign by reference to an array dimension of an object",
-                    )),
                     Write::Reference => Ok(make_cell(value)),
                     Write::Increment(mode) => {
                         let (updated, result) = self.increment_dimension(&value, mode)?;

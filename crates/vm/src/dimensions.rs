@@ -8,7 +8,9 @@
 use std::rc::Rc;
 
 use phera_bytecode::{FetchMode, Step};
-use phera_extension_api::{Context, NativeDimensions, NativeError, NativeResult};
+use phera_extension_api::{
+    Context, DimensionReferenceMode, NativeDimensions, NativeError, NativeResult,
+};
 use phera_value::{ArrayKey, Object, Value, to_bool};
 
 use crate::{
@@ -92,6 +94,26 @@ impl Vm {
         } else {
             self.call_method(object, "offsetGet", vec![offset]).await
         }
+    }
+
+    pub(crate) fn dimension_reference(
+        &mut self,
+        object: &Object,
+        offset: Value,
+        mode: DimensionReferenceMode,
+    ) -> Option<NativeResult> {
+        let reference = native(object, "offsetget")?.reference?;
+        Some(reference(self, object, offset, mode))
+    }
+
+    pub(crate) fn bind_dimension(
+        &mut self,
+        object: &Object,
+        offset: Value,
+        value: Value,
+    ) -> Option<Result<(), NativeError>> {
+        let bind = native(object, "offsetset")?.bind?;
+        Some(bind(self, object, offset, value))
     }
 
     async fn dimension_exists(
@@ -237,9 +259,12 @@ impl Vm {
     }
 }
 
-fn native(object: &Object, method: &str) -> Option<NativeDimensions> {
+fn native<'a>(object: &'a Object, method: &str) -> Option<&'a NativeDimensions> {
     let class = object.class.as_any().downcast_ref::<Class>()?;
-    let handler = class.hooks.as_ref()?.dimensions?;
+    let handler = class.hooks.as_ref()?.dimensions.as_ref()?;
+    if class.origin == crate::classes::class::ClassOrigin::Native {
+        return Some(handler);
+    }
     let overridden = |method| {
         class
             .methods

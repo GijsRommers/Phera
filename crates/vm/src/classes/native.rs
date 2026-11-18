@@ -253,6 +253,7 @@ fn property_type(ty: phera_extension_api::PropertyType) -> Type {
         PropertyType::Int => (TypeMask::INT, "int"),
         PropertyType::Float => (TypeMask::FLOAT, "float"),
         PropertyType::String => (TypeMask::STRING, "string"),
+        PropertyType::NullableString => (TypeMask::STRING.union(TypeMask::NULL), "?string"),
         PropertyType::Array => (TypeMask::ARRAY, "array"),
         PropertyType::Object => (TypeMask::OBJECT, "object"),
         PropertyType::Mixed => (TypeMask::MIXED, "mixed"),

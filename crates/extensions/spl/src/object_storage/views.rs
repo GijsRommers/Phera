@@ -13,7 +13,11 @@ use phera_extension_api::{
 };
 
 use super::{CLASS, Key, attach, hash, read};
-use crate::{This, receiver};
+use crate::{
+    This,
+    legacy::{Reader, Writer},
+    receiver,
+};
 
 pub(super) fn compare(
     left: &Object,
@@ -135,8 +139,69 @@ fn invalid(message: &str) -> NativeError {
     NativeError::throw("UnexpectedValueException", message)
 }
 
-pub(super) fn legacy(_: &mut dyn Context, _: This<'_>, _: &[Value]) -> NativeResult {
-    Err(NativeError::error(
-        "SPL legacy serialization is not implemented",
-    ))
+pub(super) fn legacy_serialize(_: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
+    let object = receiver(this)?;
+    let mut writer = Writer::default();
+    writer.bytes(b"x:");
+    read(object, |data| {
+        writer.value(Value::Int(data.entries.len() as i64))?;
+        for entry in data.entries.values() {
+            writer.value(entry.object.clone())?;
+            writer.bytes(b",");
+            writer.value(entry.info.clone())?;
+            writer.bytes(b";");
+        }
+        Ok::<_, NativeError>(())
+    })??;
+    writer.bytes(b"m:");
+    writer.value(Value::from(object.to_array()))?;
+    Ok(writer.finish())
+}
+
+pub(super) fn legacy_unserialize(
+    context: &mut dyn Context,
+    this: Option<Rc<Object>>,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        let object = receiver(this.as_ref())?;
+        let input = args::string(&arguments, 0)
+            .ok_or_else(|| NativeError::error("Missing serialized storage data"))?;
+        let mut reader = Reader::new(input.as_bytes());
+        if reader.is_empty() {
+            return Ok(Value::Null);
+        }
+        reader.expect(b"x:")?;
+        let Value::Int(count) = reader.value(context)? else {
+            return Err(reader.error());
+        };
+        if count < 0 {
+            return Err(reader.error());
+        }
+        for _ in 0..count {
+            let Value::Object(item) = reader.value(context)? else {
+                return Err(reader.error());
+            };
+            let info = if reader.take(b",") {
+                reader.value(context)?
+            } else {
+                Value::Null
+            };
+            reader.expect(b";")?;
+            let key = hash(context, object, &item).await?;
+            attach(object, key, item, info)?;
+        }
+        reader.expect(b"m:")?;
+        let Value::Array(members) = reader.value(context)? else {
+            return Err(reader.error());
+        };
+        object
+            .update(|props| {
+                for (key, value) in members.iter() {
+                    props.insert(key, value.clone());
+                }
+            })
+            .ok_or_else(crate::busy)?;
+        Ok(Value::Null)
+    })
 }

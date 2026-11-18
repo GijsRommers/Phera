@@ -1809,6 +1809,7 @@ name = "phera-ext-spl"
 version = "0.1.0"
 dependencies = [
  "indexmap",
+ "phera-ext-pcre",
  "phera-ext-standard",
  "phera-extension-api",
 ]

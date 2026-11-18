@@ -45,7 +45,6 @@ pub(crate) fn register(registry: &mut Registry) {
                     const { &[SIZE.with_default(ConstantValue::Int(0))] },
                     super::construct,
                 ),
-                Method::public("__wakeup", &[], super::obsolete_wakeup).tentative_return("void"),
                 Method::public("__serialize", &[], super::serialize).returning("array"),
                 Method::public("__unserialize", &[DATA], super::unserialize).returning("void"),
                 Method::public("count", &[], super::count).tentative_return("int"),

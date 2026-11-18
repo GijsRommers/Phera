@@ -159,6 +159,7 @@ impl Context for Vm {
             .class
             .as_any()
             .downcast_ref::<crate::classes::Class>()
+            .filter(|class| class.origin == crate::classes::class::ClassOrigin::User)
             .and_then(|class| class.methods.get(&name.to_ascii_lowercase()))
             .is_some_and(|method| matches!(method.body, crate::classes::MethodBody::User(_)))
     }

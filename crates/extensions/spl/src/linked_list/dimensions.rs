@@ -13,6 +13,8 @@ use super::{read, update};
 use crate::{This, receiver};
 
 pub(super) const OPERATIONS: NativeDimensions = NativeDimensions {
+    reference: None,
+    bind: None,
     fallback_if_overridden: &[],
     get,
     exists,
@@ -25,9 +27,15 @@ fn offset(context: &mut dyn Context, value: Value, method: &str) -> Result<i64, 
         return Ok(index);
     }
     let mut values = [value];
+    let parameter = Param::new("index", ParamType::Int);
+    let parameter = if method == "offsetSet" {
+        parameter.nullable()
+    } else {
+        parameter
+    };
     prepare_call(
         &format!("{}::{method}", super::CLASS),
-        &[Param::new("index", ParamType::Int)],
+        &[parameter],
         &mut values,
         context,
     )?;

@@ -64,7 +64,6 @@ pub(super) enum Position {
     #[default]
     Initial,
     Slot(usize),
-    End,
 }
 
 pub(super) fn base(object: &Object) -> &'static str {
@@ -76,28 +75,14 @@ pub(super) fn base(object: &Object) -> &'static str {
 }
 
 pub(super) fn read<T>(object: &Object, read: impl FnOnce(&State) -> T) -> Result<T, NativeError> {
-    let data = object.native.try_borrow().map_err(|_| crate::busy())?;
-    Ok(
-        match data
-            .as_ref()
-            .and_then(|state| state.downcast_ref::<State>())
-        {
-            Some(state) => read(state),
-            None => read(&State::default()),
-        },
-    )
+    crate::read_state(object, read)
 }
 
 pub(super) fn update<T>(
     object: &Object,
     change: impl FnOnce(&mut State) -> Result<T, NativeError>,
 ) -> Result<T, NativeError> {
-    let mut data = object.native.try_borrow_mut().map_err(|_| crate::busy())?;
-    let state = data
-        .get_or_insert_with(|| Box::<State>::default())
-        .downcast_mut::<State>()
-        .ok_or_else(|| NativeError::error("Invalid SPL array state"))?;
-    change(state)
+    crate::update_state(object, change)?
 }
 
 pub(super) fn check_mutable(object: &Object) -> Result<(), NativeError> {
@@ -110,6 +95,13 @@ pub(super) fn check_mutable(object: &Object) -> Result<(), NativeError> {
     }
 }
 
+fn redirect(object: &Object) -> Result<Option<Storage>, NativeError> {
+    read(object, |state| match &state.storage {
+        Storage::Array(_) => None,
+        storage => Some(storage.clone()),
+    })
+}
+
 pub(super) enum Target<'a> {
     Local(&'a Object),
     Shared(Rc<Object>),
@@ -119,41 +111,40 @@ pub(super) enum Target<'a> {
 
 impl<'a> Target<'a> {
     pub fn of(object: &'a Object) -> Result<Self, NativeError> {
-        let mut entry = read(object, |state| match &state.storage {
-            Storage::Array(_) => None,
-            storage => Some(storage.clone()),
-        })?;
-        if entry.is_none() {
+        let Some(entry) = redirect(object)? else {
             return Ok(Self::Local(object));
+        };
+        let first = match entry {
+            Storage::Properties(properties) => return Ok(Self::Properties(properties)),
+            Storage::OwnProperties => return Ok(Self::OwnProperties(object)),
+            Storage::Array(_) => return Ok(Self::Local(object)),
+            Storage::Alias(other) => other,
+        };
+        let Some(mut entry) = redirect(&first)? else {
+            return Ok(Self::Shared(first));
+        };
+        if matches!(entry, Storage::OwnProperties) {
+            return Ok(Self::Properties(first));
         }
-        let mut shared = None;
-        let mut visited = HashSet::new();
-        visited.insert(object.id);
-        while let Some(storage) = entry {
-            match storage {
-                Storage::Array(_) => break,
+        let mut visited = HashSet::from([object.id, first.id]);
+        let mut owner = first;
+        loop {
+            owner = match entry {
+                Storage::Alias(other) if visited.insert(other.id) => other,
+                Storage::Alias(_) => {
+                    return Err(NativeError::error(
+                        "Iterators or objects referencing each other",
+                    ));
+                }
                 Storage::Properties(properties) => return Ok(Self::Properties(properties)),
-                Storage::OwnProperties => {
-                    return Ok(match shared {
-                        Some(shared) => Self::Properties(shared),
-                        None => Self::OwnProperties(object),
-                    });
-                }
-                Storage::Alias(other) => {
-                    if !visited.insert(other.id) {
-                        return Err(NativeError::error(
-                            "Iterators or objects referencing each other",
-                        ));
-                    }
-                    entry = read(&other, |state| match &state.storage {
-                        Storage::Array(_) => None,
-                        storage => Some(storage.clone()),
-                    })?;
-                    shared = Some(other);
-                }
-            }
+                Storage::OwnProperties => return Ok(Self::Properties(owner)),
+                Storage::Array(_) => return Ok(Self::Shared(owner)),
+            };
+            let Some(redirected) = redirect(&owner)? else {
+                return Ok(Self::Shared(owner));
+            };
+            entry = redirected;
         }
-        Ok(shared.map_or(Self::Local(object), Self::Shared))
     }
 
     fn owner(&self) -> &Object {

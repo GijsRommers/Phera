@@ -69,9 +69,10 @@ pub(crate) fn register(registry: &mut Registry) {
                     iteration::seek,
                 )
                 .returning("void"),
-                Method::public("unserialize", &[STRING_DATA], views::legacy)
+                Method::public_async("unserialize", &[STRING_DATA], views::legacy_unserialize)
                     .tentative_return("void"),
-                Method::public("serialize", &[], views::legacy).tentative_return("string"),
+                Method::public("serialize", &[], views::legacy_serialize)
+                    .tentative_return("string"),
                 Method::public_async("offsetExists", &[OFFSET], dimensions::offset_exists)
                     .tentative_return("bool"),
                 Method::public_async("offsetGet", &[OFFSET], dimensions::offset_get)

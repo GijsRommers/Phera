@@ -52,18 +52,19 @@ fn callback<'a>(
     Box::pin(async move {
         let object = receiver(object.as_ref())?;
         let callable = super::dimensions::arg(&args, 0);
+        context.validate_callback(name, 2, "callback", &callable)?;
         let array = Rc::new(RefCell::new(Value::Array(Target::of(object)?.copy()?)));
         state::check_mutable(object)?;
-        state::update(object, |state| {
-            state.sorting = true;
-            Ok(())
-        })?;
         let handler = phera_ext_standard::associative_sort(name)
             .and_then(|entry| match entry.handler {
                 NativeFn::Async(handler) => Some(handler),
                 _ => None,
             })
             .ok_or_else(|| NativeError::error("Missing SPL callback sort function"))?;
+        state::update(object, |state| {
+            state.sorting = true;
+            Ok(())
+        })?;
         let result = handler(context, vec![Value::Reference(array.clone()), callable]).await;
         state::update(object, |state| {
             state.sorting = false;
