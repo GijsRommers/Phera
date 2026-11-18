@@ -22,6 +22,8 @@ pub(crate) struct ClassTable {
     pub(crate) entries: HashMap<String, Rc<Class>>,
     /// Every class, by number.
     numbered: Vec<Rc<Class>>,
+    pub(crate) has_dimensions: bool,
+    pub(crate) has_property_views: bool,
     pub(crate) objects: Vec<Weak<Object>>,
     ids: Rc<ObjectIds>,
 }
@@ -36,6 +38,20 @@ impl ClassTable {
     /// lowercased name.
     pub(crate) fn insert(&mut self, lowercase_name: String, class: Rc<Class>) {
         debug_assert_eq!(class.index, self.next_index());
+        self.has_dimensions |= (!matches!(
+            class.kind,
+            phera_bytecode::ClassKind::Interface | phera_bytecode::ClassKind::Trait
+        ) && class
+            .operations
+            .has(super::operations::ClassOperations::ARRAY_ACCESS))
+            || class
+                .hooks
+                .as_ref()
+                .is_some_and(|hooks| hooks.dimensions.is_some());
+        self.has_property_views |= class
+            .hooks
+            .as_ref()
+            .is_some_and(|hooks| hooks.properties.is_some());
         self.numbered.push(class.clone());
         self.entries.insert(lowercase_name, class);
     }

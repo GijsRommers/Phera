@@ -16,7 +16,7 @@ pub(crate) fn register(registry: &mut Registry) {
 fn var_dump(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     for value in arguments {
         let mut out = Vec::new();
-        walk(&mut VarDump, &mut out, value, context);
+        walk(&mut VarDump, &mut out, value, context)?;
         context.write(&out);
     }
     Ok(Value::Null)

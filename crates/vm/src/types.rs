@@ -103,7 +103,7 @@ pub(crate) fn coerce(
         return Ok(value);
     }
     if mask.intersects(TypeMask::VOID) && value.is_null()
-        || mask.intersects(TypeMask::ITERABLE) && value.is_array()
+        || mask.intersects(TypeMask::ITERABLE) && value.is_iterable()
     {
         return Ok(value);
     }
@@ -123,7 +123,8 @@ pub(crate) fn coerce(
     {
         return Ok(converted);
     }
-    let declared = diagnostic_type(&declaration_type.display);
+    let display = php_type_display(declaration_type);
+    let declared = diagnostic_type(&display);
     Err(NativeError::type_error(format!(
         "must be of type {}, {} given",
         declared,
@@ -188,4 +189,24 @@ fn coerce_scalar(
         }
     }
     Ok(None)
+}
+
+/// PHP expands its iterable alias when reporting a type mismatch.
+fn php_type_display(declaration: &Type) -> std::borrow::Cow<'_, str> {
+    if declaration.mask.intersects(TypeMask::ITERABLE) {
+        declaration
+            .display
+            .split('|')
+            .flat_map(|name| match name {
+                "iterable" => ["Traversable", "array", ""],
+                "?iterable" => ["Traversable", "array", "null"],
+                name => [name, "", ""],
+            })
+            .filter(|name| !name.is_empty())
+            .collect::<Vec<_>>()
+            .join("|")
+            .into()
+    } else {
+        declaration.display.as_str().into()
+    }
 }

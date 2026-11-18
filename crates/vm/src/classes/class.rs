@@ -10,6 +10,10 @@ use phera_value::{ArrayKey, ClassHandle, Object, Value};
 /// A linked class is immutable; its parent keeps inherited metadata alive.
 pub(crate) struct Class {
     /// The class's number in the request's class table.
+    pub(crate) hooks: Option<std::rc::Rc<phera_extension_api::ClassHooks>>,
+    /// Direct property opcodes can check their own hook in one load.
+    pub(crate) property_access: Option<&'static phera_extension_api::NativePropertyAccess>,
+    pub(crate) operations: super::operations::ClassOperations,
     pub(crate) index: super::ClassIndex,
     /// Only user class scopes may be assigned freely by Closure::bind.
     pub(crate) origin: ClassOrigin,
@@ -32,10 +36,10 @@ pub(crate) struct Class {
     pub(crate) is_abstract: bool,
     /// Immutable Throwable membership avoids ancestry allocation on every ordinary new.
     pub(crate) is_throwable: bool,
+    pub(crate) has_native_layout: bool,
     pub(crate) is_final: bool,
     pub(crate) is_readonly: bool,
     pub(crate) allows_dynamic_properties: bool,
-    pub(crate) property_access: Option<&'static phera_extension_api::NativePropertyAccess>,
     pub(crate) methods: HashMap<String, Rc<Method>>,
     /// The same methods by name key, built on first use by a fast call.
     pub(crate) method_table: std::cell::OnceCell<super::method_table::MethodTable>,
@@ -109,6 +113,16 @@ pub(crate) struct MethodContext {
 }
 
 impl ClassHandle for Class {
+    fn is_traversable(&self) -> bool {
+        self.operations
+            .has(super::operations::ClassOperations::TRAVERSABLE)
+    }
+
+    fn is_countable(&self) -> bool {
+        self.operations
+            .has(super::operations::ClassOperations::COUNTABLE)
+    }
+
     fn is_instance_of(&self, name: &str) -> bool {
         self.is_a(name)
     }

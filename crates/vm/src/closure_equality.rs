@@ -3,21 +3,8 @@
 
 use std::rc::Rc;
 
-use phera_value::{Diagnostics, OpError, Value};
-
-/// Preserve callable equality at any depth while the value layer compares containers.
-pub(crate) fn equal(
-    left: &Value,
-    right: &Value,
-    diagnostics: &mut dyn Diagnostics,
-) -> Result<Value, OpError> {
-    phera_value::loose_equals_with_objects(left, right, diagnostics, |left, right| {
-        (left.class.name() == "Closure").then(|| same_callable(left, right))
-    })
-}
-
 /// PHP compares fake closure metadata without comparing captures or mutable static variables.
-fn same_callable(left: &phera_value::Object, right: &phera_value::Object) -> bool {
+pub(crate) fn same_callable(left: &phera_value::Object, right: &phera_value::Object) -> bool {
     let left = left.native.borrow();
     let right = right.native.borrow();
     let left = left

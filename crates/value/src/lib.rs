@@ -23,10 +23,10 @@ pub use object::{
     ClassHandle, Object, ObjectIds, PropertyScope, Resource, class_display_name, split_property_key,
 };
 pub use ops::{
-    add, bitwise_and, bitwise_not, bitwise_or, bitwise_xor, compare, compare_after_error,
-    compare_op, concat, decrement, div, increment, less, less_equal, loose_equals,
-    loose_equals_with_objects, modulo, mul, negate, pow, shift_left, shift_right, strict_equals,
-    sub, unary_plus,
+    ObjectComparator, ObjectComparison, add, bitwise_and, bitwise_not, bitwise_or, bitwise_xor,
+    compare, compare_after_error, compare_op, compare_with_objects, concat, decrement, div,
+    increment, less, less_equal, loose_equals, loose_equals_with_objects, modulo, mul, negate, pow,
+    shift_left, shift_right, strict_equals, sub, unary_plus,
 };
 pub use string::PhpString;
 pub use value::{Value, ValueRef};

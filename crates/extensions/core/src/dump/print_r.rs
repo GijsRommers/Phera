@@ -15,7 +15,7 @@ pub(crate) fn register(registry: &mut Registry) {
 
 fn print_r(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let mut out = Vec::new();
-    walk(&mut PrintR, &mut out, args::value(arguments, 0), context);
+    walk(&mut PrintR, &mut out, args::value(arguments, 0), context)?;
     if args::bool(arguments, 1).unwrap_or(false) {
         Ok(Value::from(out))
     } else {

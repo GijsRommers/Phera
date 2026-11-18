@@ -27,6 +27,16 @@ impl Vm {
     ) -> Result<Option<BatchExit>, NativeError> {
         use Instruction as I;
         match instruction {
+            I::MakeReference { .. }
+            | I::BindReference { .. }
+            | I::SendPath { .. }
+            | I::UnsetPath { .. }
+            | I::AppendLocal { .. }
+                if self.classes.has_dimensions
+                    && self.prepare_dimension_instruction(instruction)? =>
+            {
+                return Ok(Some(BatchExit::Instruction(instruction)));
+            }
             I::Call { dst } => return self.call(dst, work),
             I::CallDirect {
                 function,
@@ -63,7 +73,11 @@ impl Vm {
             I::SendValue { src } => self.send(SentArgument::Value(src))?,
             I::SendLocal { local } => self.send(SentArgument::Local(local))?,
             I::SendPath { path } => self.send(SentArgument::Path(self.path(path)?))?,
-            I::SendSpread { src } => self.spread(src)?,
+            I::SendSpread { src } => {
+                if !self.spread(src)? {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+            }
             I::NameArgument { name } => self.name_argument(name)?,
             I::MakeCallable { dst } => self.make_callable(dst)?,
             I::ReceiveDefault { param, passed } => self.receive_default(param, passed)?,
@@ -94,11 +108,27 @@ impl Vm {
             I::Fetch { dst, path, mode }
             | I::FetchIndex {
                 dst, path, mode, ..
-            } => self.fetch_path(dst, path, mode)?,
-            I::AssignOpPath { op, dst, path, src } => self.assign_op_path(op, dst, path, src)?,
-            I::IncDecPath { mode, dst, path } => self.inc_dec_path(mode, dst, path)?,
+            } => {
+                if !self.fetch_path(dst, path, mode)? {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+            }
+            I::AssignOpPath { op, dst, path, src } => {
+                if !self.assign_op_path(op, dst, path, src)? {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+            }
+            I::IncDecPath { mode, dst, path } => {
+                if !self.inc_dec_path(mode, dst, path)? {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+            }
             I::AppendLocal { local, src } => self.append_local(local, src)?,
-            I::AssignPath { path, src } => self.assign_path(path, src)?,
+            I::AssignPath { path, src } => {
+                if !self.assign_path(path, src)? {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+            }
             I::MakeReference { dst, path } => self.make_reference(dst, path)?,
             I::BindReference { path, src } => self.bind_reference(path, src)?,
             I::UnsetPath { path } => self.unset_place(&self.path(path)?)?,
@@ -153,6 +183,10 @@ impl Vm {
                 self.array_write(array, Some(key), src, ArrayWrite::Element)?
             }
             I::ArraySpread { array, src } => {
+                if matches!(&*self.operand(src), Value::Object(object) if object.class.is_traversable())
+                {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
                 self.array_write(array, None, src, ArrayWrite::Spread)?
             }
 
@@ -172,20 +206,36 @@ impl Vm {
                 src,
             } => self.init_static(local, variable, src)?,
 
-            I::IterStart { iter, src, .. } => self.iter_start(iter, src, None)?,
+            I::IterStart { iter, src, .. } => {
+                if !self.iter_start(iter, src, None)? {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+            }
             I::IterStartReference {
                 subject,
                 iter,
                 path,
                 ..
-            } => self.start_reference_iterator(iter, path, subject)?,
+            } => {
+                if !self.start_reference_iterator(iter, path, subject)? {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+            }
             I::IterNextKeyed {
                 iter,
                 key,
                 value,
                 end,
-            } => self.iter_next(iter, Some(key), value, end)?,
-            I::IterNext { iter, value, end } => self.iter_next(iter, None, value, end)?,
+            } => {
+                if !self.iter_next(iter, Some(key), value, end)? {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+            }
+            I::IterNext { iter, value, end } => {
+                if !self.iter_next(iter, None, value, end)? {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+            }
             I::IterEnd { iter } => self.end_iterator(iter)?,
             I::IssetLocal { .. } | I::IssetPath { .. } => {
                 return Err(internal_error!("unimplemented instruction"));

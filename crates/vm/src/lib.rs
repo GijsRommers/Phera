@@ -52,6 +52,8 @@ mod declaration_diagnostics;
 mod default_autoload;
 mod diagnostic_reporter;
 mod diagnostics;
+mod dimension_instructions;
+mod dimensions;
 mod dispatch;
 mod dynamic_variables;
 mod error_handler_signatures;
@@ -84,6 +86,7 @@ mod initializers;
 mod inline_stack;
 mod instructions;
 mod integer_arithmetic;
+mod internal_iterator;
 mod interpreter;
 mod intrinsic_calls;
 mod intrinsics;
@@ -92,6 +95,7 @@ mod iterator_instructions;
 mod iterators;
 mod locals;
 mod native_diagnostics;
+mod object_comparison;
 mod object_iteration;
 mod operators;
 mod ops;
@@ -112,6 +116,9 @@ mod scope_intrinsics;
 mod spl_autoload;
 mod static_variables;
 mod string_offsets;
+mod traversable_foreach;
+mod traversable_unpack;
+mod traversal;
 mod trigger_errors;
 mod typed_references;
 mod types;
@@ -146,6 +153,8 @@ pub struct Vm {
     initializer_scope: Option<String>,
     initializer_class: Option<initializers::InitializerClass>,
     argument_origin: calls::callback_binding::ArgumentOrigin,
+    native_called_class: Option<std::rc::Rc<classes::Class>>,
+    pending_dimension: Option<dimensions::DimensionPath>,
     prelinked_classes: std::collections::HashSet<(usize, usize)>,
     function_table: function_table::FunctionTable,
     /// Every loaded file and function of the request, by number.
@@ -195,6 +204,8 @@ impl Vm {
             initializer_scope: None,
             initializer_class: None,
             argument_origin: calls::callback_binding::ArgumentOrigin::Php,
+            native_called_class: None,
+            pending_dimension: None,
             prelinked_classes: std::collections::HashSet::new(),
             function_table: function_table::FunctionTable::new(),
             code: code_table::CodeTable::default(),

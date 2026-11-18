@@ -30,6 +30,7 @@ pub struct Period {
     pub include_start: bool,
     pub include_end: bool,
     pub date_class: String,
+    pub iteration_class: &'static str,
 }
 
 impl Period {
@@ -67,6 +68,7 @@ impl Period {
         end: Option<Instant>,
         count: i64,
         class: &str,
+        iteration_class: &'static str,
     ) -> Self {
         Self {
             start: Some(start),
@@ -78,6 +80,7 @@ impl Period {
             include_start: true,
             include_end: false,
             date_class: class.into(),
+            iteration_class,
         }
     }
 
@@ -173,8 +176,15 @@ pub fn construct(context: &mut dyn Context, this: This<'_>, arguments: &[Value])
         .map(|date| Instant::read(date).map_err(|_| uninitialized_date()))
         .transpose()?;
     let interval = Interval::read(interval)?;
-    let period =
-        Period::new(start_date, interval, end, count, start.class.name()).finish(options, SITE)?;
+    let period = Period::new(
+        start_date,
+        interval,
+        end,
+        count,
+        start.class.name(),
+        Instant::base_class(start),
+    )
+    .finish(options, SITE)?;
     period.store(object);
     Ok(Value::Null)
 }
@@ -219,8 +229,10 @@ pub fn from_iso(context: &mut dyn Context, _: This<'_>, arguments: &[Value]) -> 
         iso.end.map(fixed),
         count,
         IMMUTABLE,
+        IMMUTABLE,
     );
-    period.finish(options, SITE)?.make(context)
+    let class = context.called_class().unwrap_or(CLASS).to_owned();
+    make(context, &class, period.finish(options, SITE)?)
 }
 
 fn malformed(message: String) -> NativeError {

@@ -15,7 +15,7 @@ pub(crate) fn register(registry: &mut Registry) {
 
 fn var_export(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let mut out = Vec::new();
-    walk(&mut VarExport, &mut out, args::value(arguments, 0), context);
+    walk(&mut VarExport, &mut out, args::value(arguments, 0), context)?;
     if args::bool(arguments, 1).unwrap_or(false) {
         Ok(Value::from(out))
     } else {
@@ -54,6 +54,10 @@ fn float_source(float: f64) -> String {
 }
 
 impl Style for VarExport {
+    fn property_purpose(&self) -> phera_extension_api::PropertyPurpose {
+        phera_extension_api::PropertyPurpose::Export
+    }
+
     fn enum_case(
         &mut self,
         out: &mut Vec<u8>,

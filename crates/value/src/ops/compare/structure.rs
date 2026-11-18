@@ -13,36 +13,54 @@ use crate::error::{Diagnostics, OpError};
 use crate::object::Object;
 use crate::value::Value;
 
-use super::{ObjectEquality, cmp3, compare_leaf, identical_leaf};
+use super::{ObjectComparator, ObjectComparison, cmp3, compare_leaf, identical_leaf};
 
-#[derive(Clone, Copy)]
-pub(super) enum Comparison {
+pub(super) enum Comparison<'a, 'callback> {
     Strict,
     Loose,
     PendingError,
-    NativeEquality(ObjectEquality),
+    Native(&'a mut ObjectComparator<'callback>),
 }
 
-impl Comparison {
-    /// An object pair can compare as a leaf, even inside an array.
-    pub(super) fn object_equality(self, left: &Rc<Object>, right: &Rc<Object>) -> Option<i8> {
+pub(super) enum Pair {
+    Compared(i8),
+    Tables(Table, Table),
+}
+
+impl Comparison<'_, '_> {
+    /// Native handlers can also compare objects that have different class names.
+    pub(super) fn objects(
+        &mut self,
+        left: &Rc<Object>,
+        right: &Rc<Object>,
+        diagnostics: &mut dyn Diagnostics,
+    ) -> Result<Pair, OpError> {
         if Rc::ptr_eq(left, right) {
-            return Some(0);
+            return Ok(Pair::Compared(0));
         }
-        if left.class.name() != right.class.name()
-            || matches!(self, Self::Strict)
-            || left.class.is_enum()
-        {
-            return Some(1);
+        if matches!(self, Self::Strict) || left.class.is_enum() || right.class.is_enum() {
+            return Ok(Pair::Compared(1));
         }
-        match self {
-            Self::NativeEquality(compare) => compare(left, right).map(|equal| i8::from(!equal)),
-            _ => None,
+        if let Self::Native(compare) = self {
+            match compare(left, right, diagnostics)? {
+                ObjectComparison::Compared(result) => return Ok(Pair::Compared(result)),
+                ObjectComparison::Projected(a, b) => {
+                    return Ok(Pair::Tables(
+                        Table::Object(left.clone(), a),
+                        Table::Object(right.clone(), b),
+                    ));
+                }
+                ObjectComparison::Default => {}
+            }
         }
+        if left.class.name() != right.class.name() {
+            return Ok(Pair::Compared(1));
+        }
+        Ok(Pair::Tables(Table::object(left)?, Table::object(right)?))
     }
 
     pub(super) fn leaf(
-        self,
+        &self,
         left: &Value,
         right: &Value,
         diagnostics: &mut dyn Diagnostics,
@@ -90,7 +108,7 @@ impl Table {
     /// PHP checks the native stack before comparing each table. Charge the
     /// frame sizes observed in the default PHP 8.5 arm64 build against a
     /// fixed budget, so long acyclic chains get a separate catchable error.
-    fn stack_cost(&self, comparison: Comparison) -> usize {
+    fn stack_cost(&self, comparison: &Comparison<'_, '_>) -> usize {
         match self {
             Self::Array(_) if matches!(comparison, Comparison::Strict) => 128,
             Self::Array(_) => 256,
@@ -115,7 +133,7 @@ struct Frame {
 }
 
 impl Frame {
-    fn new(left: Table, right: Table, comparison: Comparison) -> Self {
+    fn new(left: Table, right: Table, comparison: &Comparison<'_, '_>) -> Self {
         let left_position = left.entries().first_position();
         let right_position = match comparison {
             Comparison::Strict => right.entries().first_position(),
@@ -137,7 +155,7 @@ impl Frame {
 pub(super) fn compare_tables(
     left: Table,
     right: Table,
-    comparison: Comparison,
+    comparison: &mut Comparison<'_, '_>,
     diagnostics: &mut dyn Diagnostics,
 ) -> Result<i8, OpError> {
     let stack_budget = match comparison {
@@ -193,11 +211,12 @@ pub(super) fn compare_tables(
                     break;
                 }
                 (Value::Object(a), Value::Object(b)) => {
-                    if let Some(result) = comparison.object_equality(a, b) {
-                        result
-                    } else {
-                        child = Some((Table::object(a)?, Table::object(b)?));
-                        break;
+                    match comparison.objects(a, b, diagnostics)? {
+                        Pair::Compared(result) => result,
+                        Pair::Tables(left, right) => {
+                            child = Some((left, right));
+                            break;
+                        }
                     }
                 }
                 _ => comparison.leaf(&left_value, &right_value, diagnostics)?,

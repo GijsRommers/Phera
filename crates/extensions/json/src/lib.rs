@@ -7,16 +7,19 @@
 //! json_last_error_msg();                  // "No error"
 //! ```
 //!
-//! Backed enum cases encode as their backing value.
+//! Calls JsonSerializable before falling back to a backed enum case’s value.
 
 mod decode;
 mod encode;
 mod error;
 mod flags;
+mod recursion;
 mod string;
 
 use error::Error;
-use phera_extension_api::{Extension, FunctionEntry, Param, ParamType, Registry};
+use phera_extension_api::{
+    ClassEntry, Extension, FunctionEntry, MethodEntry, Param, ParamType, Registry,
+};
 
 pub struct Json;
 
@@ -26,16 +29,16 @@ impl Extension for Json {
     }
 
     fn register(&self, registry: &mut Registry) {
+        registry.class(ClassEntry {
+            methods: const { &[MethodEntry::required("jsonSerialize", &[]).tentative_return("mixed")] },
+            ..ClassEntry::interface("JsonSerializable")
+        });
         const ENCODE: &[Param] = &[
             Param::new("value", ParamType::Mixed),
             Param::new("flags", ParamType::Int).optional(),
             Param::new("depth", ParamType::Int).optional(),
         ];
-        registry.function(FunctionEntry::sync(
-            "json_encode",
-            ENCODE,
-            encode::json_encode,
-        ));
+        registry.function_with_callback_frame("json_encode", ENCODE, encode::json_encode);
 
         const DECODE: &[Param] = &[
             Param::new("json", ParamType::String),

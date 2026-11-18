@@ -180,7 +180,7 @@ impl Vm {
         )
     }
 
-    /// Clone bypasses constructors and copies only the property table, not nested objects.
+    /// Clone copies PHP properties and lets the native class copy its own state.
     pub(crate) fn clone_object(
         &mut self,
         destination: Reg,
@@ -209,8 +209,23 @@ impl Vm {
             self.set(destination, Value::Object(cloned));
             return Ok(());
         }
+        use phera_extension_api::NativeClone;
+        let policy = class.hooks.as_ref().and_then(|hooks| hooks.clone);
+        if matches!(policy, Some(NativeClone::Forbidden))
+            || policy.is_none()
+                && class.has_native_layout
+                && crate::reference_holders::has_extension_state(&original)?
+        {
+            return Err(NativeError::error(format!(
+                "Trying to clone an uncloneable object of class {}",
+                class.name
+            )));
+        }
         let cloned = self.classes.allocate(class);
         cloned.update(|properties| *properties = original.to_array());
+        if let Some(NativeClone::Copy(copy)) = policy {
+            copy(&original, &cloned)?;
+        }
         self.track_object_property_references(&cloned)?;
         self.set(destination, Value::Object(cloned));
         Ok(())

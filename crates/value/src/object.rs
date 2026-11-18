@@ -14,6 +14,14 @@ pub trait ClassHandle: Any {
         self.name().eq_ignore_ascii_case(name)
     }
 
+    fn is_traversable(&self) -> bool {
+        self.is_instance_of("Traversable")
+    }
+
+    fn is_countable(&self) -> bool {
+        self.is_instance_of("Countable")
+    }
+
     fn as_any(&self) -> &dyn Any;
     fn is_enum(&self) -> bool {
         false
