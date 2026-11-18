@@ -33,6 +33,7 @@ use crate::{CompileError, Compiler};
 pub(crate) struct TemporaryMark {
     next: usize,
     locals: usize,
+    reach: usize,
 }
 
 impl Compiler<'_> {
@@ -41,6 +42,7 @@ impl Compiler<'_> {
         TemporaryMark {
             next: self.next,
             locals: self.function.locals.len(),
+            reach: self.reach,
         }
     }
 
@@ -54,6 +56,25 @@ impl Compiler<'_> {
             .map(|register| register.index() + 1)
             .max();
         self.next = newest_local.map_or(mark.next, |end| end.max(mark.next));
+    }
+
+    /// Like [`Compiler::release_temporaries`], for a step of an operator
+    /// chain: its temporaries are left out of the clearing at the end of the
+    /// statement. An operand of `+` or `.` is used up by the operator, and
+    /// clearing it would cost an instruction per step, in loops too.
+    pub(crate) fn release_operand_temporaries(&mut self, mark: TemporaryMark) {
+        self.release_temporaries(mark);
+        self.reach = mark.reach.max(self.next);
+    }
+
+    /// Allocates the next temporaries above every register used so far.
+    ///
+    /// For code that runs after a loop body in each pass, as the step of a
+    /// `for` or the condition of `do ... while`: the body clears its own
+    /// temporaries as it ends, so a register it handed back and this code
+    /// filled would be cleared again, with a value in it, on every pass.
+    pub(crate) fn fresh_temporaries(&mut self) {
+        self.next = self.next.max(self.peak);
     }
 
     /// Runs `body`, an expression statement, then clears every temporary it

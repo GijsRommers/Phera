@@ -104,7 +104,7 @@ impl Compiler<'_> {
                         );
                     }
                 }
-                self.release_temporaries(mark);
+                self.release_operand_temporaries(mark);
             }
             return Ok(lhs);
         }
