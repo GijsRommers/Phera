@@ -20,7 +20,7 @@ pub(crate) enum PropertyMutation {
 }
 
 enum OverloadedMutation {
-    Ordinary(Reg, InlineStack<PathKey>),
+    Ordinary(Reg, Box<InlineStack<PathKey>>),
     Unresolved,
     Handled,
     Converted(Value),
@@ -45,7 +45,7 @@ impl Vm {
                         &mut value,
                         binding.into(),
                     )? {
-                        self.write_resolved_place(place, register, keys, value, binding)?;
+                        self.write_resolved_place(place, register, *keys, value, binding)?;
                     }
                     Ok(None)
                 }
@@ -285,7 +285,7 @@ impl Vm {
         }
         Ok(match detached {
             Some(value) => OverloadedMutation::Detached(value, Box::new(resolved)),
-            None => OverloadedMutation::Ordinary(register, resolved),
+            None => OverloadedMutation::Ordinary(register, Box::new(resolved)),
         })
     }
 
