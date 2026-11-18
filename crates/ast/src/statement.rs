@@ -18,7 +18,7 @@ pub enum StatementKind {
     /// `echo $a, $b;` and `<?= $a ?>`
     Echo(Vec<Expression>),
     /// Text outside `<?php ... ?>`, printed as is.
-    InlineHtml(String),
+    InlineHtml(Vec<u8>),
     Block(Block),
 
     /// `elseif` and `else if` are nested: the `otherwise` block then holds a

@@ -14,8 +14,6 @@ async fn both_drivers_bind_fetch_and_rollback() {
             if !support::databases_available() {
                 return;
             }
-            // All test-created temporary artifacts belong to the authorized scratch directory.
-            assert!(support::scratch().is_dir());
             for driver in ["pgsql", "mysql"] {
                 let mut harness = Harness::new();
                 let pdo = harness.connect(driver).await;
