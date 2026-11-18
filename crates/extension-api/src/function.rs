@@ -39,6 +39,14 @@ pub enum ParamType {
     IntOrString,
     /// `array|string`
     ArrayOrString,
+    /// `string|int|float`, used by phpredis blocking pop timeouts.
+    StringOrNumber,
+    /// `array|int|float`, used by geographic search shapes.
+    ArrayOrNumber,
+    /// `array|float`, used by sorted-set scores or options.
+    ArrayOrFloat,
+    /// `array|bool`, used by sorted-set range options.
+    ArrayOrBool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

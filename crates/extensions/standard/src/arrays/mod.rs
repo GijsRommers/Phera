@@ -91,8 +91,8 @@ pub(super) fn append_entry(
 ///
 /// The VM passes a by-reference parameter as a reference and has checked
 /// that it holds an array. Should a caller ever break that, or should the
-/// variable be in use (an array that contains itself), the script gets an
-/// `Error`; a worker thread must not die for it.
+/// variable already be borrowed, the script gets an `Error`. Clone entries
+/// that may refer back to the array and resolve them after this call returns.
 pub(super) fn change_array_argument<T>(
     arguments: &[Value],
     change: impl FnOnce(&mut PhpArray) -> Result<T, NativeError>,

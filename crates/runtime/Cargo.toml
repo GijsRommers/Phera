@@ -6,6 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+phera-ext-redis.workspace = true
 phera-dotenv.workspace = true
 phera-bytecode.workspace = true
 phera-compiler.workspace = true
@@ -21,6 +22,7 @@ phera-ext-pcre.workspace = true
 phera-ext-pdo.workspace = true
 phera-ext-random.workspace = true
 phera-ext-standard.workspace = true
+phera-ext-tokenizer.workspace = true
 phera-value.workspace = true
 phera-vm.workspace = true
 tokio.workspace = true

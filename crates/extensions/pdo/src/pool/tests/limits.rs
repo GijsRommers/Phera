@@ -9,7 +9,7 @@ use super::{TestPool, direct, id, options, rows};
 pub async fn fifo_timeout_cancellation(name: &'static str) {
     LocalSet::new()
         .run_until(async move {
-            let pool = TestPool::new(name, options(1)).await;
+            let pool = TestPool::new(name, options(1));
             let first = pool.connect().await;
             let error = pool.try_connect().await.err().unwrap();
             assert!(error.detail.contains("pool exhausted (limit 1)"));
@@ -34,13 +34,13 @@ pub async fn fifo_timeout_cancellation(name: &'static str) {
                 waiter.await.unwrap();
             }
             let mut connection = pool.connect().await;
-            let original = id(&mut connection).await;
+            let original = id(&mut connection, name).await;
             drop(connection);
             // Drop a request while a query is in flight. Its operation retains the
             // lease until the driver protocol completes, then rollback/reset runs.
             let request = async {
                 let mut connection = pool.connect().await;
-                connection.direct("BEGIN").await.unwrap();
+                connection.run_unprepared("BEGIN").await.unwrap();
                 let query = if name == "pgsql" {
                     "SELECT pg_sleep(0.08)"
                 } else {
@@ -54,8 +54,8 @@ pub async fn fifo_timeout_cancellation(name: &'static str) {
                     .is_err()
             );
             let mut next = pool.connect().await;
-            assert_eq!(id(&mut next).await, original);
-            next.direct("CREATE TEMPORARY TABLE after_cancel(id INT)")
+            assert_eq!(id(&mut next, name).await, original);
+            next.run_unprepared("CREATE TEMPORARY TABLE after_cancel(id INT)")
                 .await
                 .unwrap();
             eprintln!(
@@ -66,38 +66,46 @@ pub async fn fifo_timeout_cancellation(name: &'static str) {
 }
 
 pub async fn expiry_and_killed(name: &'static str) {
-    let pool = TestPool::new(name, options(1)).await;
+    let pool = TestPool::new(name, options(1));
     let mut first = pool.connect().await;
-    let original = id(&mut first).await;
+    let original = id(&mut first, name).await;
     drop(first);
     tokio::time::sleep(Duration::from_millis(350)).await;
     let mut next = pool.connect().await;
-    assert_ne!(id(&mut next).await, original, "idle expiry");
+    assert_ne!(id(&mut next, name).await, original, "idle expiry");
     drop(next);
     drop(pool);
 
     let mut settings = options(1);
     settings.idle = Duration::from_secs(20);
     settings.lifetime = Duration::from_millis(200);
-    let pool = TestPool::new(name, settings).await;
+    let pool = TestPool::new(name, settings);
     let mut first = pool.connect().await;
-    let original = id(&mut first).await;
+    let original = id(&mut first, name).await;
     tokio::time::sleep(Duration::from_millis(250)).await;
     drop(first);
     let mut next = pool.connect().await;
-    assert_ne!(id(&mut next).await, original, "borrowed lifetime expiry");
-    let idle_original = id(&mut next).await;
+    assert_ne!(
+        id(&mut next, name).await,
+        original,
+        "borrowed lifetime expiry"
+    );
+    let idle_original = id(&mut next, name).await;
     drop(next);
     tokio::time::sleep(Duration::from_millis(450)).await;
     let mut next = pool.connect().await;
-    assert_ne!(id(&mut next).await, idle_original, "idle lifetime expiry");
+    assert_ne!(
+        id(&mut next, name).await,
+        idle_original,
+        "idle lifetime expiry"
+    );
     drop(next);
     drop(pool);
 
     settings.lifetime = Duration::from_secs(30);
-    let pool = TestPool::new(name, settings).await;
+    let pool = TestPool::new(name, settings);
     let mut first = pool.connect().await;
-    let original = id(&mut first).await;
+    let original = id(&mut first, name).await;
     drop(first);
     // Wait beyond the cheap-health-check threshold, without idle expiry.
     tokio::time::sleep(Duration::from_millis(3100)).await;
@@ -109,15 +117,18 @@ pub async fn expiry_and_killed(name: &'static str) {
         )
         .await;
     } else {
-        killer.direct(&format!("KILL {original}")).await.unwrap();
+        killer
+            .run_unprepared(&format!("KILL {original}"))
+            .await
+            .unwrap();
     }
     let mut replacement = pool.connect().await;
     assert_ne!(
-        id(&mut replacement).await,
+        id(&mut replacement, name).await,
         original,
         "killed idle socket replaced"
     );
-    let borrowed_id = id(&mut replacement).await;
+    let borrowed_id = id(&mut replacement, name).await;
     if name == "pgsql" {
         rows(
             &mut killer,
@@ -125,12 +136,15 @@ pub async fn expiry_and_killed(name: &'static str) {
         )
         .await;
     } else {
-        killer.direct(&format!("KILL {borrowed_id}")).await.unwrap();
+        killer
+            .run_unprepared(&format!("KILL {borrowed_id}"))
+            .await
+            .unwrap();
     }
     drop(replacement);
     let mut after_reset_failure = pool.connect().await;
     assert_ne!(
-        id(&mut after_reset_failure).await,
+        id(&mut after_reset_failure, name).await,
         borrowed_id,
         "failed reset discarded socket"
     );

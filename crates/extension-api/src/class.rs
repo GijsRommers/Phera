@@ -10,6 +10,17 @@ use phera_value::{Object, Value};
 
 use crate::{ConstantValue, Context, LocalFuture, NativeError, NativeResult, Param};
 
+/// An extension can preserve legacy parsing behavior while keeping its reflected signature.
+/// Most methods use Default; Prepared means the hook already checked and coerced arguments.
+pub enum MethodPreparation {
+    Default,
+    Prepared,
+    Return(Value),
+}
+
+pub type PrepareMethod =
+    fn(&mut dyn Context, &[Param], &mut [Value]) -> Result<MethodPreparation, crate::NativeError>;
+
 /// A method that finishes without waiting. `this` is `None` when the method
 /// is static.
 pub type SyncMethod = fn(&mut dyn Context, Option<&Rc<Object>>, &[Value]) -> NativeResult;
@@ -52,6 +63,7 @@ pub struct MethodEntry {
     pub name: &'static str,
     pub params: &'static [Param],
     pub handler: NativeMethod,
+    pub preparation: Option<PrepareMethod>,
     pub visibility: Visibility,
     pub is_static: bool,
     /// Subclasses may not override it.
@@ -65,6 +77,7 @@ impl MethodEntry {
             name,
             params,
             handler: NativeMethod::Sync(handler),
+            preparation: None,
             visibility: Visibility::Public,
             is_static: false,
             is_final: false,
@@ -83,6 +96,7 @@ impl MethodEntry {
             name,
             params,
             handler: NativeMethod::Async(handler),
+            preparation: None,
             visibility: Visibility::Public,
             is_static: false,
             is_final: false,
@@ -95,10 +109,16 @@ impl MethodEntry {
             name,
             params,
             handler: NativeMethod::Abstract,
+            preparation: None,
             visibility: Visibility::Public,
             is_static: false,
             is_final: false,
         }
+    }
+
+    pub const fn with_preparation(mut self, preparation: PrepareMethod) -> Self {
+        self.preparation = Some(preparation);
+        self
     }
 
     pub const fn final_(mut self) -> Self {

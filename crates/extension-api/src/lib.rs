@@ -13,13 +13,15 @@ mod registry;
 mod state;
 pub mod testing;
 
+pub use phera_source::{CompileDiagnostic, CompileDiagnosticKind, CompileDiagnosticSite};
 pub use phera_value as value;
 pub use phera_value::{ArrayKey, Diagnostics, Object, PhpArray, PhpString, Value};
 
 pub use arguments::{args, prepare_arguments, prepare_call};
 pub use class::{
-    AsyncMethod, ClassEntry, ClassKind, MethodEntry, NativeMethod, NativePropertyAccess,
-    NativePropertyMutation, NativePropertyRead, PropertyEntry, SyncMethod, Visibility,
+    AsyncMethod, ClassEntry, ClassKind, MethodEntry, MethodPreparation, NativeMethod,
+    NativePropertyAccess, NativePropertyMutation, NativePropertyRead, PrepareMethod, PropertyEntry,
+    SyncMethod, Visibility,
 };
 pub use context::{Context, LocalFuture};
 pub use error::{NativeError, NativeResult, Unwind};
