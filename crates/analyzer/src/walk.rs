@@ -64,7 +64,7 @@ fn aggregate_children(expression: &Expression) -> Vec<&Expression> {
         }
         ExpressionKind::InterpolatedString(parts) => {
             for part in parts {
-                if let StringPart::Expression(e) = part {
+                if let StringPart::Expression(e) | StringPart::DollarCurly(e, _) = part {
                     result.push(e);
                 }
             }

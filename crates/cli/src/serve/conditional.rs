@@ -31,6 +31,13 @@ impl Validators {
         }
     }
 
+    /// The validators of the same file packed another way (`-gzip`).
+    pub(crate) fn of_variant(mut self, variant: &str) -> Validators {
+        let closing_quote = self.etag.len() - 1;
+        self.etag.insert_str(closing_quote, variant);
+        self
+    }
+
     /// The value of the `Last-Modified` header.
     pub(crate) fn last_modified(&self) -> String {
         httpdate::fmt_http_date(self.modified)
@@ -87,6 +94,10 @@ mod tests {
         assert_eq!(
             Validators::of(UNIX_EPOCH, 0, "-br").etag,
             "\"0-0-br\"".to_string()
+        );
+        assert_eq!(
+            validators().of_variant("-gzip").etag,
+            "\"18e914cdc59b6500-2b7-gzip\""
         );
     }
 

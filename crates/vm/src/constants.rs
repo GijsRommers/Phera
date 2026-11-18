@@ -1,7 +1,10 @@
 //! PHP constants instruction handlers, separate from dispatch.
 
-use phera_bytecode::{ConstId, NameId, Reg, SymbolId};
+use std::sync::Arc;
+
+use phera_bytecode::{CompiledUnit, ConstId, NameId, Reg, SymbolId};
 use phera_extension_api::NativeError;
+use phera_value::Value;
 
 use crate::Vm;
 
@@ -32,9 +35,28 @@ impl Vm {
             .ok_or_else(|| internal_error!("constant frame"))?
             .unit()
             .clone();
-        let value = self.constants.fetch(unit, constant)?;
+        let value = self.fetch_global_constant(unit, constant)?;
         self.set(destination, value);
         Ok(())
+    }
+
+    pub(crate) fn fetch_global_constant(
+        &mut self,
+        unit: Arc<CompiledUnit>,
+        symbol: SymbolId,
+    ) -> Result<Value, NativeError> {
+        let constant = self.constants.fetch(unit, symbol)?;
+        Ok(self.report_global_constant(constant))
+    }
+
+    pub(crate) fn report_global_constant(
+        &mut self,
+        constant: crate::constant_table::GlobalConstant,
+    ) -> Value {
+        if let Some(message) = constant.deprecated {
+            self.diagnostic("Deprecated", message.into());
+        }
+        constant.value
     }
 
     /// Implements PHP DeclareConstant semantics outside the dispatch loop.

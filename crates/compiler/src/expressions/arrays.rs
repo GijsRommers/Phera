@@ -2,6 +2,7 @@
 
 use phera_ast as ast;
 use phera_bytecode::Reg;
+use phera_source::{CompileDiagnostic, CompileDiagnosticKind};
 
 use crate::ir::{Binary, Constant, Instruction};
 use crate::{CompileError, Compiler};
@@ -61,14 +62,38 @@ impl Compiler<'_> {
         // One register accumulates the string; each part's temporaries are
         // handed back once it has been appended.
         let dst = self.literal(Constant::Bytes(vec![]), line)?;
+        // Zend starts with the list's first part and reports the notice
+        // before compiling the current part updates its source line.
+        let mut diagnostic_line = parts
+            .first()
+            .map_or(line, |part| self.interpolation_line(part));
         for part in parts {
             let mark = self.mark_temporaries();
             let rhs = match part {
-                ast::StringPart::Literal(value) => {
+                ast::StringPart::Literal(value, _) => {
                     self.literal(Constant::Bytes(value.clone()), line)?
                 }
                 ast::StringPart::Expression(expression) => self.compile_expression(expression)?,
+                ast::StringPart::DollarCurly(expression, form) => {
+                    let message = match form {
+                        ast::DollarCurlyForm::Name => {
+                            "Using ${var} in strings is deprecated, use {$var} instead"
+                        }
+                        ast::DollarCurlyForm::Expression => {
+                            "Using ${expr} (variable variables) in strings is deprecated, use {${expr}} instead"
+                        }
+                    };
+                    self.compile_diagnostics
+                        .borrow_mut()
+                        .push(CompileDiagnostic {
+                            kind: CompileDiagnosticKind::Deprecated,
+                            message: message.into(),
+                            line: diagnostic_line,
+                        });
+                    self.compile_expression(expression)?
+                }
             };
+            diagnostic_line = self.interpolation_line(part);
             self.emit(
                 Instruction::Binary {
                     destination: dst,
@@ -81,5 +106,14 @@ impl Compiler<'_> {
             self.release_temporaries(mark);
         }
         Ok(dst)
+    }
+
+    fn interpolation_line(&self, part: &ast::StringPart) -> usize {
+        let span = match part {
+            ast::StringPart::Literal(_, span) => *span,
+            ast::StringPart::Expression(expression)
+            | ast::StringPart::DollarCurly(expression, _) => expression.span,
+        };
+        self.lines.line(span.start)
     }
 }
