@@ -7,9 +7,11 @@ use std::path::PathBuf;
 pub(crate) const USAGE: &str = "\
 Usage:
   phera [run] [ENV OPTIONS] <file.php> [arguments...]   run a script
-  phera serve [ENV OPTIONS] [--listen ADDRESS] [--workers N] [PATH]
-                                          serve PATH (a directory, or one
-                                          script that answers every request)
+  phera serve [ENV OPTIONS] [--listen ADDRESS] [--workers N] [--compress]
+              [PATH]                      serve PATH (a directory, or one
+                                          script that answers every request);
+                                          --compress sends gzip or brotli to
+                                          clients that accept it
   phera --dump <file.php>                 print the compiled bytecode
   phera check [--level 0|1] [--format text|json|github] [--no-progress]
               [--generate-baseline FILE] <paths...>
@@ -37,6 +39,9 @@ pub(crate) struct ServeOptions {
     pub listen: SocketAddr,
     /// `None` means one worker per CPU core.
     pub workers: Option<usize>,
+    /// `--compress`: gzip or brotli for clients that accept it. Off unless
+    /// given, since the proxy in front usually compresses.
+    pub compress: bool,
     pub path: PathBuf,
 }
 
@@ -117,6 +122,7 @@ fn parse_serve(
         files,
         listen: SocketAddr::from(([127, 0, 0, 1], 8080)),
         workers: None,
+        compress: false,
         path: PathBuf::from("."),
     };
     while let Some(argument) = arguments.next() {
@@ -139,6 +145,7 @@ fn parse_serve(
                     .ok_or_else(|| format!("Not a number of workers: {value}"))?;
                 options.workers = Some(workers);
             }
+            "--compress" => options.compress = true,
             option if option.starts_with("--") => {
                 return Err(format!("Unknown option: {option}"));
             }

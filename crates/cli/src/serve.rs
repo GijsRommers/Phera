@@ -5,6 +5,7 @@
 //! knows how to run a script for a request.
 
 mod byte_range;
+mod compress;
 mod conditional;
 mod content_type;
 mod precompressed;
@@ -64,6 +65,7 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
     let factory = SiteHandlerFactory {
         runtime: Runtime::with_environment(loaded.environment),
         site: site.clone(),
+        compress: options.compress,
     };
     let server = match Server::bind(config, factory) {
         Ok(server) => server,
@@ -92,6 +94,7 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
 struct SiteHandlerFactory {
     runtime: Runtime,
     site: Arc<Site>,
+    compress: bool,
 }
 
 impl HandlerFactory for SiteHandlerFactory {
@@ -99,6 +102,7 @@ impl HandlerFactory for SiteHandlerFactory {
         Rc::new(SiteHandler {
             runtime: self.runtime.clone(),
             site: self.site.clone(),
+            compress: self.compress,
         })
     }
 }
@@ -106,6 +110,8 @@ impl HandlerFactory for SiteHandlerFactory {
 struct SiteHandler {
     runtime: Runtime,
     site: Arc<Site>,
+    /// `--compress`: compress responses for clients that accept it.
+    compress: bool,
 }
 
 impl Handler for SiteHandler {
@@ -118,7 +124,11 @@ impl SiteHandler {
     async fn respond(&self, request: Request) -> Response {
         let site = self.site.clone();
         let path = request.path.clone();
-        let conditions = Conditions::of(&request);
+        let conditions = Conditions::of(&request, self.compress);
+        let accept_encoding = request
+            .header("accept-encoding")
+            .filter(|_| self.compress)
+            .map(|value| String::from_utf8_lossy(value).into_owned());
         // Looking at the file system blocks, so it runs off the worker
         // thread, which must stay free for other requests.
         let found = tokio::task::spawn_blocking(move || match site.resolve(&path) {
@@ -133,7 +143,12 @@ impl SiteHandler {
                     .runtime
                     .handle_request(&script, self.site.document_root(), to_runtime(request))
                     .await;
-                from_runtime(response)
+                let response = from_runtime(response);
+                if self.compress {
+                    compress::php_response(response, accept_encoding.as_deref()).await
+                } else {
+                    response
+                }
             }
             Ok(Found::Answer(response)) => response,
             Err(_) => Response::text(500, "Internal Server Error\n"),
