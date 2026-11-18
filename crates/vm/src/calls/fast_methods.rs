@@ -51,18 +51,40 @@ impl Machine<'_> {
             return Step::Slow;
         };
         let method = found.method;
-        let MethodBody::User(function) = method.body else {
-            return Step::Slow;
-        };
-        if method.is_abstract
-            || method.is_static
-            || !self.may_call(&found)
-            || self.caller_has_other_private(key, method)
-        {
+        if method.is_abstract || method.is_static {
             return Step::Slow;
         }
-        let receiver = Some(object.clone());
-        self.prepare_php_method(function, receiver, None, position.ip)
+        match method.body {
+            MethodBody::User(function) => {
+                if !self.may_call(&found) || self.caller_has_other_private(key, method) {
+                    return Step::Slow;
+                }
+                let receiver = Some(object.clone());
+                self.prepare_php_method(function, receiver, None, position.ip)
+            }
+            MethodBody::Native(entry)
+                if entry.direct.is_some()
+                    && method.visibility == Visibility::Public
+                    && !self.caller_has_other_private(key, method) =>
+            {
+                let Some(class) = class.identity.upgrade() else {
+                    return Step::Slow;
+                };
+                let receiver = object.clone();
+                let Some(scope) = found.scope.upgrade() else {
+                    return Step::Slow;
+                };
+                let method = method.clone();
+                let context = crate::classes::MethodContext {
+                    receiver: Some(receiver),
+                    scope,
+                    called: class,
+                    invocation: crate::classes::Invocation::Method,
+                };
+                self.prepare_direct_method(position, context, method, entry)
+            }
+            _ => Step::Slow,
+        }
     }
 
     /// `InitStaticCall` of `self::`, `parent::`, `static::` or a named class,

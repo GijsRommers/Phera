@@ -18,11 +18,45 @@ use crate::{
 };
 
 pub(super) fn push(_: &mut dyn Context, this: This<'_>, args: &[Value]) -> NativeResult {
-    update(receiver(this)?, |list| {
-        let entry = list.entry(arg(args, 0));
+    push_value(receiver(this)?, arg(args, 0))
+}
+
+fn push_value(object: &Object, value: Value) -> NativeResult {
+    update(object, |list| {
+        let entry = list.entry(value);
         list.entries.push_back(entry);
         Value::Null
     })
+}
+
+pub(super) fn push_direct(object: &Object, args: &[Option<Value>]) -> Option<Value> {
+    let value = args.first()?.as_ref()?.deref().clone();
+    push_value(object, value).ok()
+}
+
+pub(super) fn pop_direct(object: &Object, _: &[Option<Value>]) -> Option<Value> {
+    take(object, End::Back).ok().flatten()
+}
+
+pub(super) fn shift_direct(object: &Object, _: &[Option<Value>]) -> Option<Value> {
+    take(object, End::Front).ok().flatten()
+}
+
+#[derive(Clone, Copy)]
+enum End {
+    Front,
+    Back,
+}
+
+fn take(object: &Object, end: End) -> Result<Option<Value>, NativeError> {
+    let value = crate::native_state::update_present_state(object, |list: &mut List| {
+        match end {
+            End::Front => list.entries.pop_front(),
+            End::Back => list.entries.pop_back(),
+        }
+        .map(|entry| entry.value)
+    })?;
+    Ok(value.flatten())
 }
 
 pub(super) fn unshift(_: &mut dyn Context, this: This<'_>, args: &[Value]) -> NativeResult {
@@ -34,15 +68,11 @@ pub(super) fn unshift(_: &mut dyn Context, this: This<'_>, args: &[Value]) -> Na
 }
 
 pub(super) fn pop(_: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
-    update(receiver(this)?, |list| list.entries.pop_back())?
-        .map(|entry| entry.value)
-        .ok_or_else(|| empty("pop from"))
+    take(receiver(this)?, End::Back)?.ok_or_else(|| empty("pop from"))
 }
 
 pub(super) fn shift(_: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
-    update(receiver(this)?, |list| list.entries.pop_front())?
-        .map(|entry| entry.value)
-        .ok_or_else(|| empty("shift from"))
+    take(receiver(this)?, End::Front)?.ok_or_else(|| empty("shift from"))
 }
 
 pub(super) fn top(_: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {

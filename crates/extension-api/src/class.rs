@@ -33,6 +33,10 @@ pub type PrepareMethod =
 /// is static.
 pub type SyncMethod = fn(&mut dyn Context, Option<&Rc<Object>>, &[Value]) -> NativeResult;
 
+/// An optional no-context handler for a public method with plain positional arguments.
+/// A declined call leaves state untouched and is handled by the usual method.
+pub type DirectMethod = fn(&Object, &[Option<Value>]) -> Option<Value>;
+
 /// A method that may wait, for I/O or for a PHP callback. See
 /// [`crate::AsyncFn`] for why it must never block instead.
 pub type AsyncMethod = for<'a> fn(
@@ -80,6 +84,7 @@ pub struct MethodEntry {
     pub handler: NativeMethod,
     /// Optional argument handling before the ordinary native signature check.
     pub preparation: Option<PrepareMethod>,
+    pub direct: Option<DirectMethod>,
     pub visibility: Visibility,
     pub is_static: bool,
     /// Subclasses may not override it.
@@ -96,6 +101,7 @@ impl MethodEntry {
             params,
             handler: NativeMethod::Sync(handler),
             preparation: None,
+            direct: None,
             visibility: Visibility::Public,
             is_static: false,
             is_final: false,
@@ -116,6 +122,7 @@ impl MethodEntry {
             params,
             handler: NativeMethod::Async(handler),
             preparation: None,
+            direct: None,
             visibility: Visibility::Public,
             is_static: false,
             is_final: false,
@@ -130,6 +137,7 @@ impl MethodEntry {
             params,
             handler: NativeMethod::Abstract,
             preparation: None,
+            direct: None,
             visibility: Visibility::Public,
             is_static: false,
             is_final: false,
@@ -144,6 +152,11 @@ impl MethodEntry {
 
     pub const fn with_preparation(mut self, preparation: PrepareMethod) -> Self {
         self.preparation = Some(preparation);
+        self
+    }
+
+    pub const fn with_direct(mut self, handler: DirectMethod) -> Self {
+        self.direct = Some(handler);
         self
     }
 

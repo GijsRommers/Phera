@@ -41,9 +41,15 @@ pub(crate) fn register(registry: &mut Registry) {
         methods: const {
             &[
                 Method::public("add", &[INDEX_INT, VALUE], methods::add).tentative_return("void"),
-                Method::public("pop", &[], methods::pop).tentative_return("mixed"),
-                Method::public("shift", &[], methods::shift).tentative_return("mixed"),
-                Method::public("push", &[VALUE], methods::push).tentative_return("void"),
+                Method::public("pop", &[], methods::pop)
+                    .with_direct(methods::pop_direct)
+                    .tentative_return("mixed"),
+                Method::public("shift", &[], methods::shift)
+                    .with_direct(methods::shift_direct)
+                    .tentative_return("mixed"),
+                Method::public("push", &[VALUE], methods::push)
+                    .with_direct(methods::push_direct)
+                    .tentative_return("void"),
                 Method::public("unshift", &[VALUE], methods::unshift).tentative_return("void"),
                 Method::public("top", &[], methods::top).tentative_return("mixed"),
                 Method::public("bottom", &[], methods::bottom).tentative_return("mixed"),
@@ -82,8 +88,12 @@ pub(crate) fn register(registry: &mut Registry) {
         parent: Some(CLASS),
         methods: const {
             &[
-                Method::public("enqueue", &[VALUE], methods::push).tentative_return("void"),
-                Method::public("dequeue", &[], methods::shift).tentative_return("mixed"),
+                Method::public("enqueue", &[VALUE], methods::push)
+                    .with_direct(methods::push_direct)
+                    .tentative_return("void"),
+                Method::public("dequeue", &[], methods::shift)
+                    .with_direct(methods::shift_direct)
+                    .tentative_return("mixed"),
             ]
         },
         ..ClassEntry::class("SplQueue")

@@ -28,6 +28,7 @@ mod fast_arguments;
 mod fast_calls;
 mod fast_dimensions;
 mod fast_methods;
+mod fast_native_methods;
 mod fast_objects;
 pub(crate) mod frame;
 pub(crate) mod frame_extras;

@@ -219,7 +219,9 @@ impl Machine<'_> {
         let function = match call.callee {
             PreparedCallee::Php(function) => function,
             PreparedCallee::Constructed => return self.finish_construction(position, destination),
-            PreparedCallee::General => return Step::Slow,
+            PreparedCallee::General => {
+                return self.finish_direct_method(position, destination, call);
+            }
         };
         let facts = self.code.facts(function);
         let sent = call.sent as usize;

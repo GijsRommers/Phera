@@ -87,3 +87,18 @@ pub(crate) fn update_state<T: Default + 'static, R>(
         .ok_or_else(|| NativeError::error("Invalid SPL object state"))?;
     Ok(change(state))
 }
+
+pub(crate) fn update_present_state<T: 'static, R>(
+    object: &Object,
+    change: impl FnOnce(&mut T) -> R,
+) -> Result<Option<R>, NativeError> {
+    let mut data = object.native.try_borrow_mut().map_err(|_| busy())?;
+    let Some(stored) = data.as_deref_mut() else {
+        return Ok(None);
+    };
+    let state = stored
+        .downcast_mut::<Stored<T>>()
+        .and_then(|state| state.0.as_mut())
+        .ok_or_else(|| NativeError::error("Invalid SPL object state"))?;
+    Ok(Some(change(state)))
+}
