@@ -117,6 +117,15 @@ impl Vm {
             I::AssignPath { path, src } => {
                 return self.assign_path(path, src);
             }
+            I::AssignPathFromLocal { path, src, dst } => {
+                if let Some(value) = self.read_defined_local(src)
+                    && self.assign_property_site(&self.path(path)?, &value)?
+                {
+                    self.set(dst, value);
+                } else {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+            }
             I::MakeReference { dst, path } => {
                 if self.path(path)?.has_properties()? {
                     return Ok(Some(BatchExit::Instruction(instruction)));

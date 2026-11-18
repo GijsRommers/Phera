@@ -33,13 +33,38 @@ impl Compiler<'_> {
         Ok(dst)
     }
 
-    /// Evaluate the source before writing, retaining references in destructuring.
+    /// Evaluate property receivers and keys before the source. A simple local
+    /// source is read only when the destination is ready to be written.
     pub(crate) fn compile_assignment(
         &mut self,
         target: &ast::Expression,
         value: &ast::Expression,
         line: usize,
     ) -> Result<Reg, CompileError> {
+        if contains_property(target) {
+            let place = self.place(target)?;
+            if matches!(
+                value.kind,
+                ast::ExpressionKind::Variable(ast::Variable::Named(_))
+            ) {
+                let source = self.readable_place(value)?;
+                if source.scope == crate::ir::PlaceScope::Local && source.path.is_empty() {
+                    let destination = self.allocate_register()?;
+                    self.emit(
+                        Instruction::WriteFromLocal {
+                            place,
+                            source: source.base,
+                            destination,
+                        },
+                        line,
+                    );
+                    return Ok(destination);
+                }
+            }
+            let source = self.compile_expression(value)?;
+            self.emit(Instruction::Write { place, source }, line);
+            return Ok(source);
+        }
         let references = super::places::contains_reference(target);
         let src = if references && writable(value) {
             let place = self.place(value)?;
@@ -201,4 +226,11 @@ impl Compiler<'_> {
         self.patch(end, self.position());
         Ok(lhs)
     }
+}
+
+fn contains_property(mut target: &ast::Expression) -> bool {
+    while let ast::ExpressionKind::Index { target: inner, .. } = &target.kind {
+        target = inner;
+    }
+    matches!(target.kind, ast::ExpressionKind::Property { .. })
 }

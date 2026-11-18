@@ -236,6 +236,12 @@ pub enum Instruction {
         place: Place,
         source: Reg,
     },
+    /// Prepare an indirect property destination before reading its local source.
+    WriteFromLocal {
+        place: Place,
+        source: Reg,
+        destination: Reg,
+    },
     /// Alias two writable places; emits MakeReference, BindReference, and Clear.
     Bind {
         place: Place,

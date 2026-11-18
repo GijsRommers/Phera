@@ -70,7 +70,8 @@ pub(crate) fn effect(
         Instruction::AssignPath { path, src } | Instruction::BindReference { path, src } => {
             path_effect(function, path, None, Some(src), register)
         }
-        Instruction::AssignOpPath { dst, path, src, .. } => {
+        Instruction::AssignOpPath { dst, path, src, .. }
+        | Instruction::AssignPathFromLocal { dst, path, src } => {
             path_effect(function, path, Some(dst), Some(src), register)
         }
         Instruction::IncDecPath { dst, path, .. } => {

@@ -210,6 +210,15 @@ impl Tables {
                 mode,
             } => self.read_place(function, dst, place, mode),
             Old::Write { place, source: src } => self.write_place(function, place, src),
+            Old::WriteFromLocal {
+                place,
+                source: src,
+                destination: dst,
+            } => Instruction::AssignPathFromLocal {
+                path: path(self, function, place),
+                src,
+                dst,
+            },
             Old::Reference {
                 destination: dst,
                 place,

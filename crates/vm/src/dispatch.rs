@@ -25,6 +25,8 @@ impl Vm {
         instruction: Instruction,
         stop: usize,
     ) -> Result<DispatchResult, NativeError> {
+        use crate::magic_mutations::{PropertyMutation, WriteValue};
+
         match instruction {
             Instruction::ReturnChecked { source } => {
                 return self
@@ -86,8 +88,18 @@ impl Vm {
                 let value = self.get(src).deref().clone();
                 self.mutate_magic_place(
                     &self.path(path)?,
-                    crate::magic_mutations::PropertyMutation::Write(
-                        value,
+                    PropertyMutation::Write(
+                        WriteValue::evaluated(value),
+                        crate::access_mode::Binding::ByValue,
+                    ),
+                )
+                .await?;
+            }
+            Instruction::AssignPathFromLocal { path, src, dst } => {
+                self.mutate_magic_place(
+                    &self.path(path)?,
+                    PropertyMutation::Write(
+                        WriteValue::local(src, dst),
                         crate::access_mode::Binding::ByValue,
                     ),
                 )
@@ -109,19 +121,16 @@ impl Vm {
                 let value = self.raw_local(src);
                 self.mutate_magic_place(
                     &self.path(path)?,
-                    crate::magic_mutations::PropertyMutation::Write(
-                        value,
+                    PropertyMutation::Write(
+                        WriteValue::evaluated(value),
                         crate::access_mode::Binding::ByReference,
                     ),
                 )
                 .await?;
             }
             Instruction::UnsetPath { path } => {
-                self.mutate_magic_place(
-                    &self.path(path)?,
-                    crate::magic_mutations::PropertyMutation::Unset,
-                )
-                .await?
+                self.mutate_magic_place(&self.path(path)?, PropertyMutation::Unset)
+                    .await?
             }
             Instruction::Clone { dst, src, with } => self.clone_instruction(dst, src, with).await?,
             Instruction::Exit { src: source } => {

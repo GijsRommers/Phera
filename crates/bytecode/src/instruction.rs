@@ -164,6 +164,12 @@ pub enum Instruction {
         path: PathId,
         src: Reg,
     },
+    /// `<path> = $local`; `dst` is the value read after intermediate properties.
+    AssignPathFromLocal {
+        path: PathId,
+        src: Reg,
+        dst: Reg,
+    },
     /// `<path> op= src`; `dst` receives the new value.
     AssignOpPath {
         op: BinaryOp,

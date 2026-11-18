@@ -116,6 +116,7 @@ fn validate_global_writes(unit: &CompiledUnit) -> Result<(), CompileError> {
         for (index, instruction) in function.instructions.iter().enumerate() {
             let place = match instruction {
                 Instruction::Write { place, .. }
+                | Instruction::WriteFromLocal { place, .. }
                 | Instruction::Rebind { place, .. }
                 | Instruction::Compound { place, .. }
                 | Instruction::IncPlace { place, .. }

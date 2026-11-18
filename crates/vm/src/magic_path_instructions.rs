@@ -5,7 +5,7 @@ use phera_bytecode::{BinaryOp, FetchMode, IncDec, Reg};
 use phera_extension_api::NativeError;
 
 use crate::access_mode::Binding;
-use crate::magic_mutations::PropertyMutation;
+use crate::magic_mutations::{PropertyMutation, WriteValue};
 use crate::{AccessPath, Vm};
 
 impl Vm {
@@ -22,7 +22,7 @@ impl Vm {
             .await?;
         self.mutate_magic_place(
             place,
-            PropertyMutation::Write(value.clone(), Binding::ByValue),
+            PropertyMutation::Write(WriteValue::evaluated(value.clone()), Binding::ByValue),
         )
         .await?;
         self.set(destination, value);
@@ -49,7 +49,7 @@ impl Vm {
         };
         self.mutate_magic_place(
             place,
-            PropertyMutation::Write(value.clone(), Binding::ByValue),
+            PropertyMutation::Write(WriteValue::evaluated(value.clone()), Binding::ByValue),
         )
         .await?;
         self.set(

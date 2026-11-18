@@ -1,20 +1,60 @@
 //! `$object->items['key'] = 1` writes through a getter's reference or object.
 //! A getter returning an array by value gives a detached temporary.
 
-use std::{cell::RefCell, rc::Rc};
-
-use phera_extension_api::{NativeError, NativeResult};
+use phera_bytecode::Reg;
+use phera_extension_api::NativeError;
 use phera_value::Value;
 
 use crate::access_mode::{Binding, Creation, Missing, Mutation};
 use crate::inline_stack::InlineStack;
-use crate::magic_properties::{PropertyHook, PropertyRead};
+use crate::magic_properties::PropertyHook;
 use crate::path_update::PathKey;
 use crate::{AccessPath, Vm};
 
 pub(crate) enum PropertyMutation {
-    Write(Value, Binding),
+    Write(WriteValue, Binding),
     Unset,
+}
+
+pub(crate) struct WriteValue {
+    value: Value,
+    local: Option<AssignmentLocal>,
+}
+
+#[derive(Clone, Copy)]
+struct AssignmentLocal {
+    source: Reg,
+    destination: Reg,
+}
+
+impl WriteValue {
+    pub(crate) fn evaluated(value: Value) -> Self {
+        Self { value, local: None }
+    }
+
+    pub(crate) fn local(source: Reg, destination: Reg) -> Self {
+        Self {
+            value: Value::Null,
+            local: Some(AssignmentLocal {
+                source,
+                destination,
+            }),
+        }
+    }
+
+    /// Read a local only when the write reaches the final destination.
+    fn read(&mut self, vm: &mut Vm) -> &Value {
+        if let Some(local) = self.local.take() {
+            self.value = vm.read_local(local.source);
+            vm.set(local.destination, self.value.clone());
+        }
+        &self.value
+    }
+
+    fn into_value(mut self, vm: &mut Vm) -> Value {
+        self.read(vm);
+        self.value
+    }
 }
 
 enum OverloadedMutation {
@@ -27,17 +67,28 @@ impl Vm {
     pub(crate) async fn mutate_magic_place(
         &mut self,
         place: &AccessPath,
-        operation: PropertyMutation,
+        mut operation: PropertyMutation,
     ) -> Result<(), NativeError> {
-        match self.plan_magic_mutation(place, &operation).await? {
+        let plan = self.plan_magic_mutation(place, &mut operation).await?;
+        match plan {
             OverloadedMutation::Ordinary => match operation {
-                PropertyMutation::Write(value, binding) => self.write_place(place, value, binding),
+                PropertyMutation::Write(value, binding) => {
+                    let value = value.into_value(self);
+                    self.write_place(place, value, binding)
+                }
                 PropertyMutation::Unset => self.unset_place(place),
             },
-            OverloadedMutation::Handled => Ok(()),
+            OverloadedMutation::Handled => {
+                if let PropertyMutation::Write(mut value, _) = operation {
+                    value.read(self);
+                }
+                Ok(())
+            }
             OverloadedMutation::Detached(mut root, keys) => {
                 let (mut value, mutation) = match operation {
-                    PropertyMutation::Write(value, binding) => (value, binding.into()),
+                    PropertyMutation::Write(value, binding) => {
+                        (value.into_value(self), binding.into())
+                    }
                     PropertyMutation::Unset => (Value::Null, Mutation::Unset),
                 };
                 if mutation == Mutation::Assign
@@ -85,8 +136,12 @@ impl Vm {
     async fn plan_magic_mutation(
         &mut self,
         place: &AccessPath,
-        operation: &PropertyMutation,
+        operation: &mut PropertyMutation,
     ) -> Result<OverloadedMutation, NativeError> {
+        let assignment_local = match operation {
+            PropertyMutation::Write(value, _) => value.local,
+            PropertyMutation::Unset => None,
+        };
         let Some(register) = self.base_register(place, Creation::Existing, Missing::Silent)? else {
             return Ok(OverloadedMutation::Ordinary);
         };
@@ -110,10 +165,10 @@ impl Vm {
                 let last = steps.peek().is_none();
                 if let Some(access) = class.property_access {
                     use phera_extension_api::NativePropertyMutation as NativeMutation;
-                    let change = match (last, operation) {
+                    let change = match (last, &mut *operation) {
                         (false, _) => NativeMutation::Indirect,
                         (true, PropertyMutation::Write(value, Binding::ByValue)) => {
-                            NativeMutation::Assign(value)
+                            NativeMutation::Assign(value.read(self))
                         }
                         (true, PropertyMutation::Write(_, Binding::ByReference)) => {
                             NativeMutation::Bind
@@ -134,9 +189,9 @@ impl Vm {
                         .as_ref()
                         .is_some_and(|key| self.typed_property_uninitialized(&class, object, key))
                 {
-                    let (hook, argument) = match (last, operation) {
+                    let (hook, argument) = match (last, &mut *operation) {
                         (true, PropertyMutation::Write(value, Binding::ByValue)) => {
-                            (PropertyHook::Set, Some(value.clone()))
+                            (PropertyHook::Set, Some(value.read(self).clone()))
                         }
                         (true, PropertyMutation::Unset) => (PropertyHook::Unset, None),
                         _ => (PropertyHook::Get, None),
@@ -153,6 +208,13 @@ impl Vm {
                             )
                             .await?;
                         if hook != PropertyHook::Get {
+                            if let Some(local) = assignment_local {
+                                // __set receives a copy, but the assignment result
+                                // still comes from the caller's local after the call.
+                                let value =
+                                    self.read_defined_local(local.source).unwrap_or_default();
+                                self.set(local.destination, value);
+                            }
                             return Ok(OverloadedMutation::Handled);
                         }
                         self.warn_indirect_magic_property(object, &display, &value);
@@ -173,7 +235,10 @@ impl Vm {
                 };
                 if last
                     && let PropertyMutation::Write(value, Binding::ByValue) = operation
-                    && self.property_needs_string(object, &key, value)
+                    && {
+                        let value = value.read(self);
+                        self.property_needs_string(object, &key, value)
+                    }
                 {
                     detached = Some(current.clone());
                     resolved = InlineStack::new();
@@ -196,59 +261,7 @@ impl Vm {
         })
     }
 
-    /// The alias returned by &__get points to the getter's own storage.
-    pub(crate) async fn magic_reference(&mut self, place: &AccessPath) -> NativeResult {
-        let Some(register) = self.base_register(place, Creation::Existing, Missing::Silent)? else {
-            return self.reference(place);
-        };
-        let keys = self.keys(place)?;
-        let mut cursor = self.read_root(register, Missing::Silent);
-        let mut steps = keys.iter().peekable();
-        while let Some(key) = steps.next() {
-            cursor = match key {
-                PathKey::Property(key) => {
-                    let Value::Object(object) = cursor.deref().clone() else {
-                        break;
-                    };
-                    let display = crate::path_update::property_name(key);
-                    let (stored, slot) = self.property_slot(&object, &display);
-                    if let Some(value) = stored {
-                        value.deref().clone()
-                    } else if let Some(class) = self.classes.for_object(&object)
-                        && !slot.as_ref().is_some_and(|key| {
-                            self.typed_property_uninitialized(&class, &object, key)
-                        })
-                        && self
-                            .property_hook(&class, &object, key, PropertyHook::Get)
-                            .is_some()
-                    {
-                        let value = self
-                            .read_overloaded_property(
-                                Value::Object(object.clone()),
-                                key.clone(),
-                                PropertyRead::Read,
-                            )
-                            .await?;
-                        self.warn_indirect_magic_property(&object, &display, &value);
-                        if steps.peek().is_none() {
-                            return Ok(match value {
-                                Value::Reference(_) => value,
-                                _ => Value::Reference(Rc::new(RefCell::new(value))),
-                            });
-                        }
-                        return self.reference_from_magic(value, steps.cloned());
-                    } else {
-                        Value::Null
-                    }
-                }
-                PathKey::Index(Some(key)) => self.read_path_index(cursor, key, Missing::Silent)?,
-                PathKey::Index(None) => Value::Null,
-            };
-        }
-        self.reference(place)
-    }
-
-    fn warn_indirect_magic_property(
+    pub(crate) fn warn_indirect_magic_property(
         &mut self,
         object: &phera_value::Object,
         name: &str,
@@ -263,62 +276,5 @@ impl Vm {
                 ),
             );
         }
-    }
-
-    fn reference_from_magic(
-        &mut self,
-        mut root: Value,
-        tail: impl Iterator<Item = PathKey>,
-    ) -> NativeResult {
-        let mut keys = InlineStack::new();
-        let mut value = root.deref().clone();
-        for key in tail {
-            value = match key {
-                PathKey::Property(key) => {
-                    let (resolved, target) = match &value {
-                        Value::Object(object) => {
-                            let resolved = self
-                                .property_key(object, &crate::path_update::property_name(&key))?;
-                            let target = crate::property_storage::read(object, &resolved)
-                                .unwrap_or_default();
-                            (resolved, target)
-                        }
-                        _ => (key, Value::Null),
-                    };
-                    keys.push(PathKey::Property(resolved));
-                    target
-                }
-                PathKey::Index(key) => {
-                    let value = match (&*value.deref(), &key) {
-                        (Value::Array(array), Some(key)) => {
-                            array.get(key).cloned().unwrap_or_default()
-                        }
-                        _ => Value::Null,
-                    };
-                    keys.push(PathKey::Index(key));
-                    value
-                }
-            };
-        }
-        if value.is_reference() {
-            return Ok(value);
-        }
-        let mut reference = Value::Reference(Rc::new(RefCell::new(value)));
-        self.validate_property_mutation(
-            root.deref().clone(),
-            &keys,
-            &mut reference,
-            Mutation::Bind,
-        )?;
-        let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
-        crate::path_update::update(
-            &mut root,
-            &keys,
-            reference.clone(),
-            Mutation::Bind,
-            &mut diagnostics.buffer,
-            &diagnostics.vm.property_references,
-        )?;
-        Ok(reference)
     }
 }

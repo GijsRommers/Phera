@@ -192,6 +192,15 @@ impl Instruction {
                 place(target, &mut map);
                 *src = map(*src)
             }
+            Instruction::WriteFromLocal {
+                place: target,
+                source: src,
+                destination: dst,
+            } => {
+                place(target, &mut map);
+                *src = map(*src);
+                *dst = map(*dst);
+            }
             Instruction::Bind {
                 place: target,
                 source,
