@@ -25,7 +25,8 @@ pub fn execute_named<'a>(
     Box::pin(async move {
         let state = state(this.as_ref())?;
         if matches!(state.borrow().prepared, Prepared::Sqlite(_)) {
-            return crate::sqlite_statement::execute(context, &state, &arguments, method).await;
+            return crate::drivers::sqlite::statement::execute(context, &state, &arguments, method)
+                .await;
         }
         if let Some(params) = arguments.first().filter(|value| !value.is_null()) {
             state.borrow_mut().bindings = parameters::execute_bindings(params)?;
@@ -69,15 +70,13 @@ pub fn execute_named<'a>(
             Err(error) => return fail(&state, context, error, method),
         };
         let mut driver = connection.driver.lock().await;
-        let prepared = if let Prepared::PostgresDeferred(number) = prepared {
-            match driver.prepare(&sql).await {
-                Ok(Prepared::Postgres(statement, _)) => {
-                    let prepared = Prepared::Postgres(statement, number);
+        let prepared = if let Prepared::PostgresDeferred { number } = prepared {
+            match driver.prepare(&sql, number).await {
+                Ok(prepared) => {
                     state.borrow_mut().prepared = prepared.clone();
                     prepared
                 }
                 Err(error) => return fail(&state, context, error, method),
-                Ok(_) => unreachable!("PostgreSQL session prepares a PostgreSQL statement"),
             }
         } else {
             prepared

@@ -31,6 +31,7 @@ impl ClassTable {
                 is_readonly: false,
                 allows_dynamic_properties: true,
                 methods: HashMap::new(),
+                method_table: std::cell::OnceCell::new(),
                 constructor: None,
                 property_template: Some(phera_value::PhpArray::new()),
                 defaults: Vec::new(),
@@ -99,6 +100,7 @@ impl ClassTable {
                     Visibility::Public => ArrayKey::str(property.name),
                 };
                 defaults.push(PropertyDefault {
+                    static_storage: None,
                     key,
                     value: property.default.to_value(),
                     name: property.name.into(),
@@ -177,6 +179,7 @@ impl ClassTable {
                     allows_dynamic_properties: false,
                     constructor: methods.get("__construct").cloned(),
                     methods,
+                    method_table: std::cell::OnceCell::new(),
                     property_template: super::class::property_template(&defaults),
                     defaults,
                     static_properties: Vec::new(),

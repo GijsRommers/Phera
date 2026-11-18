@@ -9,6 +9,7 @@ use phera_extension_api::{
 use tokio::sync::Mutex;
 
 use crate::attributes::Attributes;
+use crate::constants::{PARAM_BOOL, PARAM_INT, PARAM_NULL, PARAM_STR};
 use crate::dsn::{DriverName, Dsn};
 use crate::errors::{DbError, ErrorState, unsupported};
 use crate::pool::{self, Lease, Policy};
@@ -76,20 +77,20 @@ pub fn construct<'a>(
         let password = args::string(&arguments, 2)
             .map(|s| s.to_string_lossy())
             .unwrap_or_else(|| dsn.get("password", "").to_owned());
-        let policy = Policy::parse(context, args::array(&arguments, 3).map(Rc::as_ref))?;
+        let policy = Policy::from_options(args::array(&arguments, 3).map(Rc::as_ref));
         let mut attributes = Attributes::new(dsn.driver);
         if let Some(options) = args::array(&arguments, 3) {
             for (key, value) in options.iter() {
                 if let ArrayKey::Int(attribute) = key
-                    && !pool::is_pool_attribute(attribute)
-                    && (dsn.driver != DriverName::Sqlite
-                        || matches!(attribute, 2 | 3 | 8 | 12 | 17 | 19 | 1000 | 1002 | 1005))
+                    && attribute != pool::PHERA_ATTR_POOL
+                    && crate::attributes::constructor_accepts(dsn.driver, attribute)
                 {
                     attributes.set(context, attribute, value)?;
                 }
             }
         }
         if dsn.driver == DriverName::Sqlite {
+            // The driver opens the file with the options' flags and timeout.
             dsn.fields
                 .insert("flags".into(), attributes.sqlite_flags.to_string());
             dsn.fields
@@ -178,17 +179,10 @@ pub fn quote<'a>(
         let session = session(this.as_ref())?;
         if session.name == DriverName::Sqlite {
             let bytes = args::string(&arguments, 0).map_or(&b""[..], |s| s.as_bytes());
-            let mut quoted = vec![b'\''];
-            for byte in bytes.iter().take_while(|b| **b != 0) {
-                quoted.push(*byte);
-                if *byte == b'\'' {
-                    quoted.push(*byte);
-                }
-            }
-            quoted.push(b'\'');
-            return Ok(Value::from(quoted));
+            return Ok(Value::from(crate::drivers::sqlite::quote(bytes)));
         }
-        if !matches!(args::int(&arguments, 1).unwrap_or(2), 0 | 1 | 2 | 5) {
+        let kind = args::int(&arguments, 1).unwrap_or(PARAM_STR);
+        if !matches!(kind, PARAM_NULL | PARAM_INT | PARAM_STR | PARAM_BOOL) {
             return Err(unsupported("LOB quoting"));
         }
         let bytes = args::string(&arguments, 0).map_or(&b""[..], |s| s.as_bytes());

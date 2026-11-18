@@ -1,6 +1,16 @@
-//! JSON error messages and request-local last-error state.
+//! The JSON errors, `json_last_error()` and `json_last_error_msg()`.
+//!
+//! ```php
+//! json_decode('[');
+//! json_last_error();                 // JSON_ERROR_SYNTAX, 4
+//! json_decode('[', flags: JSON_THROW_ON_ERROR);
+//! // JsonException "Syntax error", code 4; json_last_error() stays 4
+//! ```
+
 use phera_extension_api::{Context, NativeError, NativeResult, Value};
-/// PHP's stable error codes, also stored in request state.
+
+/// The values of PHP's `JSON_ERROR_*` constants. The error of the last call
+/// is kept in the request state.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 #[repr(i64)]
 pub(crate) enum Error {
@@ -17,8 +27,9 @@ pub(crate) enum Error {
     Property = 9,
     Utf16 = 10,
 }
+
 impl Error {
-    /// Messages shared by json_last_error_msg and JsonException.
+    /// The text of `json_last_error_msg()` and of a `JsonException`.
     pub fn message(self) -> &'static str {
         match self {
             Self::None => "No error",
@@ -35,7 +46,10 @@ impl Error {
         }
     }
 }
-/// Throwing calls preserve the previous last-error state, even on success.
+
+/// Ends a call: records `error` as the last error, or, when `throw` is
+/// set, throws it instead. A throwing call leaves the last error as it was,
+/// even when it succeeds.
 pub(crate) fn finish(
     context: &mut dyn Context,
     error: Error,
@@ -57,11 +71,13 @@ pub(crate) fn finish(
     }
     Ok(value)
 }
-/// Report the request error without resetting it.
+
+/// `json_last_error()`. Reading the error does not clear it.
 pub(crate) fn last(context: &mut dyn Context, _: &[Value]) -> NativeResult {
     Ok(Value::Int(*context.state().get_or_default::<Error>() as i64))
 }
-/// Reading the descriptive message also preserves request state.
+
+/// `json_last_error_msg()`.
 pub(crate) fn message(context: &mut dyn Context, _: &[Value]) -> NativeResult {
     Ok(Value::from(
         context.state().get_or_default::<Error>().message(),

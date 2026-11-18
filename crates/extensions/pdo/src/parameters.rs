@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use phera_extension_api::value::{to_bool, to_int, to_php_string};
 use phera_extension_api::{ArrayKey, Context, NativeError, Value};
 
+use crate::constants::{PARAM_BOOL, PARAM_INT, PARAM_LOB, PARAM_NULL, PARAM_STR};
 use crate::errors::{DbError, unsupported};
 use crate::placeholders::{Parameter, Sql};
 
@@ -13,6 +14,7 @@ pub enum ParameterType {
     Null,
     Int,
     String,
+    /// `PARAM_LOB`: bytes, which SQLite stores as a BLOB, not as text.
     Blob,
     Bool,
 }
@@ -20,11 +22,11 @@ pub enum ParameterType {
 impl ParameterType {
     pub fn parse(value: i64) -> Result<Self, NativeError> {
         match value {
-            0 => Ok(Self::Null),
-            1 => Ok(Self::Int),
-            2 => Ok(Self::String),
-            3 => Ok(Self::Blob),
-            5 => Ok(Self::Bool),
+            PARAM_NULL => Ok(Self::Null),
+            PARAM_INT => Ok(Self::Int),
+            PARAM_STR => Ok(Self::String),
+            PARAM_LOB => Ok(Self::Blob),
+            PARAM_BOOL => Ok(Self::Bool),
             _ => Err(unsupported("This PDO parameter type")),
         }
     }

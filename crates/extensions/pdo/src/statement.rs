@@ -9,6 +9,7 @@ use phera_extension_api::{
 };
 
 use crate::connection::{Session, session};
+use crate::constants::PARAM_STR;
 use crate::drivers::{Prepared, Rows};
 use crate::errors::{DbError, ErrorState, unsupported};
 use crate::fetch::FetchMode;
@@ -29,6 +30,8 @@ pub struct Statement {
     pub column: usize,
     pub fetch_flags: i64,
     pub error: ErrorState,
+    /// SQLite: whether the statement ran since it was prepared or its
+    /// cursor closed, which `getColumnMeta()` needs.
     pub sqlite_executed: bool,
 }
 
@@ -107,11 +110,12 @@ async fn create(
             flags: 0,
         }
     };
-    let sql = match if connection.name == crate::dsn::DriverName::Sqlite {
-        Ok(Sql::sqlite(source.clone()))
-    } else {
-        Sql::parse(source.clone())
-    } {
+    // SQLite numbers its own `?`, `?2`, `:name` and `@name` placeholders.
+    let parsed = match connection.name {
+        crate::dsn::DriverName::Sqlite => Ok(Sql::sqlite(source.clone())),
+        _ => Sql::parse(source.clone()),
+    };
+    let sql = match parsed {
         Ok(sql) => sql,
         Err(error) => return connection.fail(context, error, method),
     };
@@ -120,9 +124,9 @@ async fn create(
     } else if connection.name == crate::dsn::DriverName::Postgres {
         let number = connection.statement_sequence.get() + 1;
         connection.statement_sequence.set(number);
-        Prepared::PostgresDeferred(number)
+        Prepared::PostgresDeferred { number }
     } else {
-        let result = connection.driver.lock().await.prepare(&sql).await;
+        let result = connection.driver.lock().await.prepare(&sql, 0).await;
         match result {
             Ok(prepared) => prepared,
             Err(error) => return connection.fail(context, error, method),
@@ -193,7 +197,7 @@ fn bind(
         let statement = state.borrow();
         if matches!(
             statement.prepared,
-            Prepared::PostgresDeferred(_) | Prepared::Postgres(_, _)
+            Prepared::PostgresDeferred { .. } | Prepared::Postgres { .. }
         ) {
             let valid = crate::native_parameters::valid_key(&statement.sql, &key)
                 || (statement.sql.parameters.is_empty() && key.parse::<usize>().is_ok());
@@ -213,14 +217,15 @@ fn bind(
     if let Some(error) = invalid {
         return fail(&state, context, error, method);
     }
-    let kind = ParameterType::parse(args::int(arguments, 2).unwrap_or(2))?;
+    let kind = ParameterType::parse(args::int(arguments, 2).unwrap_or(PARAM_STR))?;
     let mut binding = Binding {
         value: args::value(arguments, 1).clone(),
         kind,
     };
-    // Conversion errors are immediate for bindValue; references are read at execute time.
+    // Conversion errors are immediate for bindValue; references are read at
+    // execute time. pdo_sqlite converts the bound variable itself at once.
     if state.borrow().connection.name == crate::dsn::DriverName::Sqlite {
-        crate::sqlite_bindings::normalize(context, &mut binding)?;
+        crate::drivers::sqlite::bindings::normalize(context, &mut binding)?;
     } else if !binding.value.is_reference() {
         binding.read(context)?;
     }

@@ -35,7 +35,7 @@ impl Vm {
             .and_then(|name| self.classes.get(name))
             .or_else(|| {
                 self.current()
-                    .and_then(|frame| frame.method.as_ref())
+                    .and_then(|frame| frame.method())
                     .map(|context| context.scope.clone())
             });
         let allowed = match constant.visibility {

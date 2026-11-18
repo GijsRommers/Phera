@@ -1,12 +1,24 @@
-//! Port of php-src ext/standard/math.c: _php_math_round and php_round_helper.
-//! PHP 8.4+ compares rounding boundaries in the original scale.
+//! `round(2.5)` is 3.0, `round(1.955, 2)` is 1.96: ported from php-src
+//! ext/standard/math.c, `_php_math_round` and `php_round_helper`.
+//!
+//! Since PHP 8.4 the value is compared with the rounding boundary in its
+//! original scale, so 0.285 rounds to 0.29 although its double is a little
+//! below 0.285 times 100.
 
 use phera_extension_api::{
-    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Registry, Value, args,
+    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Value, args,
 };
 
+use crate::constants::{
+    PHP_ROUND_HALF_DOWN, PHP_ROUND_HALF_EVEN, PHP_ROUND_HALF_ODD, PHP_ROUND_HALF_UP,
+};
+
+pub(super) const FUNCTIONS: &[FunctionEntry] = &[ROUND];
+
+/// The cases of PHP 8.4's `RoundingMode` enum. The first four also have a
+/// `PHP_ROUND_*` constant; an enum case arrives as its integer 5 to 8.
 #[derive(Clone, Copy)]
-enum RoundingMode {
+pub(crate) enum RoundingMode {
     HalfUp,
     HalfDown,
     HalfEven,
@@ -19,56 +31,53 @@ enum RoundingMode {
 
 impl RoundingMode {
     fn from_integer(mode: i64) -> Option<Self> {
-        match mode {
-            1 => Some(Self::HalfUp),
-            2 => Some(Self::HalfDown),
-            3 => Some(Self::HalfEven),
-            4 => Some(Self::HalfOdd),
-            5 => Some(Self::Ceiling),
-            6 => Some(Self::Floor),
-            7 => Some(Self::TowardZero),
-            8 => Some(Self::AwayFromZero),
-            _ => None,
-        }
+        Some(match mode {
+            PHP_ROUND_HALF_UP => Self::HalfUp,
+            PHP_ROUND_HALF_DOWN => Self::HalfDown,
+            PHP_ROUND_HALF_EVEN => Self::HalfEven,
+            PHP_ROUND_HALF_ODD => Self::HalfOdd,
+            5 => Self::Ceiling,
+            6 => Self::Floor,
+            7 => Self::TowardZero,
+            8 => Self::AwayFromZero,
+            _ => return None,
+        })
     }
 }
 
-const ROUND_PARAMS: &[Param] = &[
-    Param::new("num", ParamType::Number),
-    Param::new("precision", ParamType::Int).optional(),
-    Param::new("mode", ParamType::Int).optional(),
-];
+/// `round(int|float $num, int $precision = 0, int|RoundingMode $mode =
+/// PHP_ROUND_HALF_UP): float`, rounded to `$precision` decimal places
+/// (tens, hundreds… when negative).
+///
+/// ```php
+/// round(2.5);                         // 3.0
+/// round(2.5, 0, PHP_ROUND_HALF_EVEN); // 2.0
+/// round(1234.5678, -2);               // 1200.0
+/// ```
+const ROUND: FunctionEntry = FunctionEntry::sync(
+    "round",
+    &[
+        Param::new("num", ParamType::Number),
+        Param::new("precision", ParamType::Int).optional(),
+        Param::new("mode", ParamType::Int).optional(),
+    ],
+    round,
+);
 
-pub(crate) fn register(registry: &mut Registry) {
-    registry.function(FunctionEntry::sync("round", ROUND_PARAMS, round));
-}
-
-fn round(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let mode = args::int(arguments, 2).unwrap_or(1);
-    if RoundingMode::from_integer(mode).is_none() {
+fn round(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let mode = args::int(arguments, 2).unwrap_or(PHP_ROUND_HALF_UP);
+    let Some(mode) = RoundingMode::from_integer(mode) else {
         return Err(NativeError::value_error(
             "round(): Argument #3 ($mode) must be a valid rounding mode (RoundingMode::*)",
         ));
-    }
-    Ok(Value::Float(decimal_round(
-        args::float(arguments, 0).unwrap_or_default(),
-        args::int(arguments, 1).unwrap_or_default(),
-        mode,
-    )))
+    };
+    let number = args::float(arguments, 0).unwrap_or_default();
+    let places = args::int(arguments, 1).unwrap_or_default();
+    Ok(Value::Float(round_to_places(number, places, mode)))
 }
 
-/// Testing the half boundary after rescaling avoids PHP's former pre-rounding
-/// heuristic and preserves values such as 0.285 at decimal boundaries.
-pub(crate) fn decimal_round(value: f64, places: i64, mode: i64) -> f64 {
-    round_decimal(
-        value,
-        places,
-        RoundingMode::from_integer(mode).unwrap_or(RoundingMode::HalfDown),
-    )
-}
-
-/// Shared callers retain the numeric mode interface; the algorithm uses named modes.
-fn round_decimal(value: f64, places: i64, mode: RoundingMode) -> f64 {
+/// `value` rounded to `places` decimal places, as `_php_math_round` does.
+pub(crate) fn round_to_places(value: f64, places: i64, mode: RoundingMode) -> f64 {
     if !value.is_finite() || value == 0.0 || (places == 0 && value == value.trunc()) {
         return value;
     }

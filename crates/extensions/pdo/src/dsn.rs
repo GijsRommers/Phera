@@ -4,6 +4,9 @@ use std::collections::BTreeMap;
 
 use phera_extension_api::NativeError;
 
+use crate::drivers::connection_error;
+use crate::errors::DbError;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DriverName {
     Postgres,
@@ -21,7 +24,8 @@ impl DriverName {
     }
 }
 
-#[derive(Clone, Debug)]
+/// No `Debug`: the fields may hold a `password=`.
+#[derive(Clone)]
 pub struct Dsn {
     pub driver: DriverName,
     pub fields: BTreeMap<String, String>,
@@ -47,6 +51,8 @@ impl Dsn {
             _ => return Err(crate::errors::exception("could not find driver", None, 0)),
         };
         let mut fields = BTreeMap::new();
+        // `sqlite:/path/to/file`, `sqlite::memory:`: everything after the prefix
+        // is the file name, semicolons included.
         if driver == DriverName::Sqlite {
             fields.insert("filename".into(), rest.into());
             return Ok(Self { driver, fields });
@@ -72,16 +78,69 @@ impl Dsn {
         self.fields.get(key).map_or(default, String::as_str)
     }
 
-    pub fn port(&self) -> Result<u16, NativeError> {
-        let default = match self.driver {
-            DriverName::Postgres => "5432",
-            DriverName::Mysql => "3306",
-            DriverName::Sqlite => "0",
-        };
-        self.get("port", default)
-            .parse()
-            .map_err(|_| crate::errors::exception("Invalid port in data source name", None, 0))
+    pub fn default_port(&self) -> u16 {
+        match self.driver {
+            DriverName::Postgres => 5432,
+            DriverName::Mysql => 3306,
+            // A file has no port; nothing asks for it.
+            DriverName::Sqlite => 0,
+        }
     }
+
+    /// The port, read the way the driver's C library reads it, so that a
+    /// DSN connects, or fails, as it does in PHP.
+    pub fn port(&self) -> Result<u16, DbError> {
+        let Some(text) = self.fields.get("port") else {
+            return Ok(self.default_port());
+        };
+        match self.driver {
+            DriverName::Postgres => libpq_port(text),
+            // mysqlnd takes `atoi()` as an unsigned int, 0 meaning the
+            // default, and the socket keeps its low 16 bits: 98605 is 33069.
+            DriverName::Sqlite => Ok(0),
+            DriverName::Mysql => Ok(match atoi(text) as u32 {
+                0 => self.default_port(),
+                port => port as u16,
+            }),
+        }
+    }
+}
+
+/// libpq: an `int`, perhaps with white space around it, from 1 to 65535.
+fn libpq_port(text: &str) -> Result<u16, DbError> {
+    let number: i32 = text.trim_matches(c_space).parse().map_err(|_| {
+        connection_error(format!(
+            "invalid integer value \"{text}\" for connection option \"port\""
+        ))
+    })?;
+    u16::try_from(number)
+        .ok()
+        .filter(|port| *port != 0)
+        .ok_or_else(|| connection_error(format!("invalid port number: \"{text}\"")))
+}
+
+/// C's `atoi()`: white space, a sign, then digits up to the first other
+/// character; 0 when there are none.
+fn atoi(text: &str) -> i64 {
+    let text = text.trim_start_matches(c_space);
+    let (negative, unsigned) = match text.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, text.strip_prefix('+').unwrap_or(text)),
+    };
+    let number = unsigned
+        .bytes()
+        .take_while(u8::is_ascii_digit)
+        .fold(0_i64, |number, digit| {
+            number
+                .saturating_mul(10)
+                .saturating_add(i64::from(digit - b'0'))
+        });
+    if negative { -number } else { number }
+}
+
+/// C's `isspace()`.
+fn c_space(character: char) -> bool {
+    matches!(character, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r')
 }
 
 #[cfg(test)]
@@ -102,5 +161,27 @@ mod tests {
         assert!(Dsn::parse("mysql:ssl_ca=ca.pem").is_err());
         assert_eq!(Dsn::parse("sqlite:foo").unwrap().get("filename", ""), "foo");
         assert!(Dsn::parse("pgsql:sslmode=disable").is_ok());
+    }
+
+    #[test]
+    fn reads_ports_as_the_c_libraries_do() {
+        let port = |dsn: &str| {
+            Dsn::parse(dsn)
+                .unwrap()
+                .port()
+                .map_err(|error| error.detail)
+        };
+        assert_eq!(port("pgsql:port=+54329"), Ok(54329));
+        assert_eq!(
+            port("pgsql:port=1e3"),
+            Err("invalid integer value \"1e3\" for connection option \"port\"".into())
+        );
+        assert_eq!(
+            port("pgsql:port=65536"),
+            Err("invalid port number: \"65536\"".into())
+        );
+        assert_eq!(port("mysql:port=33069abc"), Ok(33069));
+        assert_eq!(port("mysql:port=98605"), Ok(33069));
+        assert_eq!(port("mysql:port=x"), Ok(3306));
     }
 }

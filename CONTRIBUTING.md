@@ -9,7 +9,7 @@ let-chains. A C compiler is needed for the bundled static PCRE2 build.
 
 Install PHP 8.5 with json, pcre, ctype, pdo_pgsql, pdo_mysql, pdo_sqlite, sqlite3, mbstring and tokenizer, then start
 PostgreSQL 17 and MySQL 8.4 using the commands in the
-[PDO tests README](crates/extensions/pdo/tests/README.md). Wait for both to accept
+[PDO README](crates/extensions/pdo/README.md#tests). Wait for both to accept
 connections. Use only the dedicated ports 54329 and 33069; leave port 5432 alone.
 
 ```sh

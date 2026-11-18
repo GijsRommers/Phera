@@ -1,10 +1,13 @@
-//! PHP array registration and shared key-retention and list-construction helpers.
+//! Array functions, and the helpers several of them share: building a list,
+//! copying entries with or without their integer keys, and changing the
+//! array behind a by-reference parameter.
 
-use phera_extension_api::{ArrayKey, Registry, Value};
+use std::rc::Rc;
+
+use phera_extension_api::{ArrayKey, NativeError, PhpArray, Registry, Value, args};
 
 mod build;
 mod callback;
-mod callback_set_merge;
 mod callback_sets;
 mod callback_sort;
 mod combine;
@@ -20,47 +23,47 @@ mod range_values;
 mod sets;
 mod slice;
 mod sort;
-pub(crate) mod sort_order;
-mod sort_order_async;
 mod stack;
 mod tables;
 mod walk;
+pub(crate) mod zend_sort;
 
 pub(crate) fn register(registry: &mut Registry) {
-    callback_sort::register(registry);
-    callback_sets::register(registry);
-    walk::register(registry);
-    filter::register(registry);
-    find::register(registry);
-    sort::register(registry);
-    sets::register(registry);
-    tables::register(registry);
-    stack::register(registry);
-    build::register(registry);
-    range::register(registry);
-    combine::register(registry);
-    pointer::register(registry);
-    keys::register(registry);
-    slice::register(registry);
-}
-
-/// Expose a key without applying PHP numeric-string key coercion again.
-fn key_value(key: &ArrayKey) -> Value {
-    match key {
-        ArrayKey::Int(integer) => Value::Int(*integer),
-        ArrayKey::String(string) => Value::String(string.clone()),
+    let modules = [
+        build::FUNCTIONS,
+        callback_sets::FUNCTIONS,
+        callback_sort::FUNCTIONS,
+        combine::FUNCTIONS,
+        filter::FUNCTIONS,
+        find::FUNCTIONS,
+        keys::FUNCTIONS,
+        pointer::FUNCTIONS,
+        range::FUNCTIONS,
+        sets::FUNCTIONS,
+        slice::FUNCTIONS,
+        sort::FUNCTIONS,
+        stack::FUNCTIONS,
+        tables::FUNCTIONS,
+        walk::FUNCTIONS,
+    ];
+    for entry in modules.into_iter().flatten() {
+        registry.function(*entry);
     }
 }
 
-#[derive(Clone, Copy)]
-pub(super) enum Keys {
+/// What happens to integer keys when entries are copied into a new array;
+/// string keys are always kept.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum IntegerKeys {
+    /// Numbered again from 0, as `array_slice` does by default.
     Renumber,
     Preserve,
 }
 
-impl Keys {
-    fn from_preserve(preserve_keys: bool) -> Self {
-        if preserve_keys {
+impl IntegerKeys {
+    /// From a `$preserve_keys` argument.
+    fn preserve_if(preserve: bool) -> Self {
+        if preserve {
             Self::Preserve
         } else {
             Self::Renumber
@@ -68,13 +71,59 @@ impl Keys {
     }
 }
 
-/// List construction assigns fresh consecutive integer keys in iteration order.
-fn list_array(
-    values: impl IntoIterator<Item = Value>,
-) -> Result<phera_extension_api::PhpArray, phera_extension_api::NativeError> {
-    let mut array = phera_extension_api::PhpArray::new();
-    for value in values {
-        array.push(value)?;
+/// Appends one entry to `result`, keeping or renumbering its key.
+pub(super) fn append_entry(
+    result: &mut PhpArray,
+    key: ArrayKey,
+    value: &Value,
+    keys: IntegerKeys,
+) -> Result<(), NativeError> {
+    if keys == IntegerKeys::Preserve || matches!(key, ArrayKey::String(_)) {
+        result.insert(key, value.clone());
+    } else {
+        result.push(value.clone())?;
     }
-    Ok(array)
+    Ok(())
+}
+
+/// Runs `change` on the array behind the by-reference parameter 0, as
+/// `sort($array)` and `array_push($array, …)` need.
+///
+/// The VM passes a by-reference parameter as a reference and has checked
+/// that it holds an array. Should a caller ever break that, or should the
+/// variable be in use (an array that contains itself), the script gets an
+/// `Error`; a worker thread must not die for it.
+pub(super) fn change_array_argument<T>(
+    arguments: &[Value],
+    change: impl FnOnce(&mut PhpArray) -> Result<T, NativeError>,
+) -> Result<T, NativeError> {
+    let variable = args::reference(arguments, 0).ok_or_else(not_a_variable)?;
+    let mut value = variable.try_borrow_mut().map_err(|_| variable_in_use())?;
+    match &mut *value {
+        Value::Array(array) => change(Rc::make_mut(array)),
+        _ => Err(not_a_variable()),
+    }
+}
+
+/// The by-reference array parameter did not arrive as a variable holding an
+/// array, which the VM rules out before a native function runs.
+pub(super) fn not_a_variable() -> NativeError {
+    NativeError::error("Internal error: a by-reference array argument is not an array variable")
+}
+
+/// The variable is being read or written further up the same call.
+pub(super) fn variable_in_use() -> NativeError {
+    NativeError::error("Internal error: the array variable is already in use")
+}
+
+/// A PHP list, `[0 => $a, 1 => $b, …]`, of these values.
+pub(crate) fn list(values: impl IntoIterator<Item = Value>) -> PhpArray {
+    let mut array = PhpArray::new();
+    for value in values {
+        // Only an array whose next key would pass PHP_INT_MAX refuses a push.
+        array
+            .push(value)
+            .expect("a new array has a free key for every value");
+    }
+    array
 }

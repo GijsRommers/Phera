@@ -1,4 +1,4 @@
-//! Conversion and padding rules for PHP formatted output.
+//! Converting one value for its specifier, and padding it to the width.
 
 use phera_extension_api::value::{float_repr, to_float, to_int, to_php_string};
 use phera_extension_api::{Context, NativeError, Value};

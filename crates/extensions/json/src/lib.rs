@@ -1,6 +1,14 @@
-//! PHP JSON encoding, parsing and request-local errors.
-//! JsonSerializable dispatch awaits VM method-call integration.
-//! Non-associative decoding awaits a VM-owned stdClass factory.
+//! PHP's JSON extension: `json_encode`, `json_decode`, `json_validate` and
+//! the last-error functions.
+//!
+//! ```php
+//! json_encode(['a' => 1.0, 'b' => 'é']);  // {"a":1,"b":"\u00e9"}
+//! json_decode('{"a":1}', true);           // ['a' => 1]
+//! json_last_error_msg();                  // "No error"
+//! ```
+//!
+//! Not done yet: `JsonSerializable`, which needs method calls from native
+//! code, and enums, which Phera does not have.
 
 mod decode;
 mod encode;
@@ -8,9 +16,9 @@ mod error;
 mod flags;
 mod string;
 
+use error::Error;
 use phera_extension_api::{Extension, FunctionEntry, Param, ParamType, Registry};
 
-/// Registers PHP JSON functions and their stable option/error constants.
 pub struct Json;
 
 impl Extension for Json {
@@ -38,6 +46,7 @@ impl Extension for Json {
             Param::new("depth", ParamType::Int).optional(),
             Param::new("flags", ParamType::Int).optional(),
         ];
+
         const VALIDATE: &[Param] = &[
             Param::new("json", ParamType::String),
             Param::new("depth", ParamType::Int).optional(),
@@ -70,10 +79,10 @@ const CONSTANTS: &[(&str, i64)] = &[
     ("JSON_HEX_AMP", flags::HEX_AMP),
     ("JSON_HEX_APOS", flags::HEX_APOS),
     ("JSON_HEX_QUOT", flags::HEX_QUOT),
-    ("JSON_FORCE_OBJECT", 16),
-    ("JSON_NUMERIC_CHECK", 32),
+    ("JSON_FORCE_OBJECT", flags::FORCE_OBJECT),
+    ("JSON_NUMERIC_CHECK", flags::NUMERIC_CHECK),
     ("JSON_UNESCAPED_SLASHES", flags::UNESCAPED_SLASHES),
-    ("JSON_PRETTY_PRINT", 128),
+    ("JSON_PRETTY_PRINT", flags::PRETTY_PRINT),
     ("JSON_UNESCAPED_UNICODE", flags::UNESCAPED_UNICODE),
     (
         "JSON_PARTIAL_OUTPUT_ON_ERROR",
@@ -84,24 +93,26 @@ const CONSTANTS: &[(&str, i64)] = &[
         "JSON_UNESCAPED_LINE_TERMINATORS",
         flags::UNESCAPED_LINE_TERMINATORS,
     ),
-    ("JSON_OBJECT_AS_ARRAY", 1),
-    ("JSON_BIGINT_AS_STRING", 2),
+    ("JSON_OBJECT_AS_ARRAY", flags::OBJECT_AS_ARRAY),
+    ("JSON_BIGINT_AS_STRING", flags::BIGINT_AS_STRING),
     ("JSON_INVALID_UTF8_IGNORE", flags::INVALID_UTF8_IGNORE),
     (
         "JSON_INVALID_UTF8_SUBSTITUTE",
         flags::INVALID_UTF8_SUBSTITUTE,
     ),
     ("JSON_THROW_ON_ERROR", flags::THROW_ON_ERROR),
-    ("JSON_ERROR_NONE", 0),
-    ("JSON_ERROR_DEPTH", 1),
-    ("JSON_ERROR_STATE_MISMATCH", 2),
-    ("JSON_ERROR_CTRL_CHAR", 3),
-    ("JSON_ERROR_SYNTAX", 4),
-    ("JSON_ERROR_UTF8", 5),
-    ("JSON_ERROR_RECURSION", 6),
-    ("JSON_ERROR_INF_OR_NAN", 7),
-    ("JSON_ERROR_UNSUPPORTED_TYPE", 8),
-    ("JSON_ERROR_INVALID_PROPERTY_NAME", 9),
-    ("JSON_ERROR_UTF16", 10),
+    ("JSON_ERROR_NONE", Error::None as i64),
+    ("JSON_ERROR_DEPTH", Error::Depth as i64),
+    ("JSON_ERROR_STATE_MISMATCH", Error::State as i64),
+    ("JSON_ERROR_CTRL_CHAR", Error::Control as i64),
+    ("JSON_ERROR_SYNTAX", Error::Syntax as i64),
+    ("JSON_ERROR_UTF8", Error::Utf8 as i64),
+    ("JSON_ERROR_RECURSION", Error::Recursion as i64),
+    ("JSON_ERROR_INF_OR_NAN", Error::Infinite as i64),
+    ("JSON_ERROR_UNSUPPORTED_TYPE", Error::Unsupported as i64),
+    ("JSON_ERROR_INVALID_PROPERTY_NAME", Error::Property as i64),
+    ("JSON_ERROR_UTF16", Error::Utf16 as i64),
+    // Encoding an enum case that has no backing value. Phera has no enums
+    // yet, so no Error variant produces this one.
     ("JSON_ERROR_NON_BACKED_ENUM", 11),
 ];

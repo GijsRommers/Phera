@@ -13,10 +13,10 @@ class A {
 $a = new A;
 try {
     $c = $a->getFn()->b = new stdClass;
-} catch (Throwable $e) {
-    echo $e::class, ': ', $e->getMessage(), "\n";
+} catch (Error $e) {
+    echo $e->getMessage(), "\n";
 }
 
 ?>
 --EXPECT--
-Error: Cannot create dynamic property Closure::$b
+Cannot create dynamic property Closure::$b

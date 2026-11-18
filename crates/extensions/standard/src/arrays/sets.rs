@@ -1,238 +1,304 @@
-//! Set operations compare string representations, while key variants retain key identity.
+//! Sets of entries: `array_diff`, `array_intersect` and their `_key` and
+//! `_assoc` forms, and `array_unique`. They keep the keys of the first
+//! array and compare values as strings: `1`, `"1"` and `true` are equal.
 
 use std::cmp::Ordering;
+use std::collections::HashSet;
 
+use phera_extension_api::value::to_php_string;
 use phera_extension_api::{
-    Context, FunctionEntry, NativeResult, Param, ParamType, PhpArray, Registry, Value, args,
+    ArrayKey, Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, PhpArray, Value,
+    args,
 };
 
-use super::ordering::SortOrder;
+use super::ordering::SortFlags;
+use super::zend_sort;
+use crate::arguments::required_array;
+use crate::constants::SORT_STRING;
 
-#[derive(Clone, Copy)]
-enum SetOperation {
-    Difference,
-    Intersection,
+pub(super) const FUNCTIONS: &[FunctionEntry] = &[
+    ARRAY_DIFF,
+    ARRAY_DIFF_KEY,
+    ARRAY_DIFF_ASSOC,
+    ARRAY_INTERSECT,
+    ARRAY_INTERSECT_KEY,
+    ARRAY_INTERSECT_ASSOC,
+    ARRAY_UNIQUE,
+];
+
+/// `array_diff(array $array, array ...$arrays): array`, the entries whose
+/// value is in none of the other arrays.
+///
+/// ```php
+/// array_diff(["a" => 1, "b" => 2, "c" => 3], [2], ["3"]); // ["a" => 1]
+/// ```
+const ARRAY_DIFF: FunctionEntry = FunctionEntry::sync(
+    "array_diff",
+    &[
+        Param::new("array", ParamType::Array),
+        Param::new("arrays", ParamType::Array).variadic(),
+    ],
+    array_diff,
+);
+
+/// Like php_array_diff, this converts each value to a string once and looks
+/// it up, instead of comparing pairs; that decides which conversions (and
+/// their warnings) happen.
+fn array_diff(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let array = required_array(arguments, 0);
+    if array.is_empty() {
+        return Ok(arguments[0].clone());
+    }
+    // One value: PHP compares it with the others' values one by one, and
+    // stops at the first that is equal.
+    if let (1, Some(only)) = (array.len(), array.values().next()) {
+        let only = to_php_string(only, context.diagnostics())?;
+        for other in other_arrays(arguments) {
+            for value in other.values() {
+                if only == to_php_string(value, context.diagnostics())? {
+                    return Ok(Value::from(PhpArray::new()));
+                }
+            }
+        }
+        return Ok(arguments[0].clone());
+    }
+    if arguments.len() == 1 {
+        return Ok(arguments[0].clone());
+    }
+    let mut excluded = HashSet::new();
+    for other in other_arrays(arguments) {
+        for value in other.values() {
+            excluded.insert(to_php_string(value, context.diagnostics())?);
+        }
+    }
+    if excluded.is_empty() {
+        return Ok(arguments[0].clone());
+    }
+    let mut result = PhpArray::new();
+    for (key, value) in array.iter() {
+        if !excluded.contains(&to_php_string(value, context.diagnostics())?) {
+            result.insert(key, value.clone());
+        }
+    }
+    Ok(Value::from(result))
 }
 
+/// The arrays after the first, which every set function compares with.
+fn other_arrays(arguments: &[Value]) -> impl Iterator<Item = &PhpArray> {
+    (1..arguments.len()).map(|index| &**required_array(arguments, index))
+}
+
+/// `array_diff_key(array $array, array ...$arrays): array`, the entries
+/// whose key is in none of the other arrays.
+///
+/// ```php
+/// array_diff_key(["a" => 1, "b" => 2], ["a" => 9]); // ["b" => 2]
+/// ```
+const ARRAY_DIFF_KEY: FunctionEntry = FunctionEntry::sync(
+    "array_diff_key",
+    &[
+        Param::new("array", ParamType::Array),
+        Param::new("arrays", ParamType::Array).variadic(),
+    ],
+    array_diff_key,
+);
+
+fn array_diff_key(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    keep_entries(context, arguments, Keep::InNone, Match::Key)
+}
+
+/// `array_diff_assoc(array $array, array ...$arrays): array`, the entries
+/// that no other array has with the same key and value.
+///
+/// ```php
+/// array_diff_assoc(["a" => 1, "b" => 2], ["a" => "1", "b" => 3]); // ["b" => 2]
+/// ```
+const ARRAY_DIFF_ASSOC: FunctionEntry = FunctionEntry::sync(
+    "array_diff_assoc",
+    &[
+        Param::new("array", ParamType::Array),
+        Param::new("arrays", ParamType::Array).variadic(),
+    ],
+    array_diff_assoc,
+);
+
+fn array_diff_assoc(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    keep_entries(context, arguments, Keep::InNone, Match::KeyAndValue)
+}
+
+/// `array_intersect(array $array, array ...$arrays): array`, the entries
+/// whose value is in every other array.
+///
+/// ```php
+/// array_intersect(["a" => 1, "b" => 2], [2, 3]); // ["b" => 2]
+/// ```
+const ARRAY_INTERSECT: FunctionEntry = FunctionEntry::sync(
+    "array_intersect",
+    &[
+        Param::new("array", ParamType::Array),
+        Param::new("arrays", ParamType::Array).variadic(),
+    ],
+    array_intersect,
+);
+
+fn array_intersect(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    keep_entries(context, arguments, Keep::InAll, Match::Value)
+}
+
+/// `array_intersect_key(array $array, array ...$arrays): array`, the
+/// entries whose key is in every other array.
+const ARRAY_INTERSECT_KEY: FunctionEntry = FunctionEntry::sync(
+    "array_intersect_key",
+    &[
+        Param::new("array", ParamType::Array),
+        Param::new("arrays", ParamType::Array).variadic(),
+    ],
+    array_intersect_key,
+);
+
+fn array_intersect_key(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    keep_entries(context, arguments, Keep::InAll, Match::Key)
+}
+
+/// `array_intersect_assoc(array $array, array ...$arrays): array`, the
+/// entries that every other array has with the same key and value.
+const ARRAY_INTERSECT_ASSOC: FunctionEntry = FunctionEntry::sync(
+    "array_intersect_assoc",
+    &[
+        Param::new("array", ParamType::Array),
+        Param::new("arrays", ParamType::Array).variadic(),
+    ],
+    array_intersect_assoc,
+);
+
+fn array_intersect_assoc(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    keep_entries(context, arguments, Keep::InAll, Match::KeyAndValue)
+}
+
+/// Which entries of the first array a set function keeps.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Keep {
+    /// Those found in none of the other arrays (`array_diff…`).
+    InNone,
+    /// Those found in all of them (`array_intersect…`).
+    InAll,
+}
+
+/// What makes an entry of another array match.
 #[derive(Clone, Copy)]
-enum MatchBy {
+enum Match {
     Key,
     Value,
     KeyAndValue,
 }
 
-const ARRAY_SET_PARAMS: &[Param] = &[
-    Param::new("array", ParamType::Array),
-    Param::new("arrays", ParamType::Array).variadic(),
-];
-
-const ARRAY_UNIQUE_PARAMS: &[Param] = &[
-    Param::new("array", ParamType::Array),
-    Param::new("flags", ParamType::Int).optional(),
-];
-
-pub(crate) fn register(registry: &mut Registry) {
-    for (name, body) in [
-        ("array_diff", array_diff as phera_extension_api::SyncFn),
-        ("array_diff_key", array_diff_key),
-        ("array_diff_assoc", array_diff_assoc),
-        ("array_intersect", array_intersect),
-        ("array_intersect_key", array_intersect_key),
-        ("array_intersect_assoc", array_intersect_assoc),
-    ] {
-        registry.function(FunctionEntry::sync(name, ARRAY_SET_PARAMS, body));
-    }
-    registry.function(FunctionEntry::sync(
-        "array_unique",
-        ARRAY_UNIQUE_PARAMS,
-        array_unique,
-    ));
-}
-
-/// PHP builds a string lookup table, converting each value exactly once.
-fn array_diff(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    if args::array(arguments, 0).is_some_and(|array| array.is_empty()) {
-        return Ok(args::value(arguments, 0).clone());
-    }
-    if let Some(array) = args::array(arguments, 0)
-        && array.len() == 1
-    {
-        if let Some(value) = array.values().next() {
-            let search = phera_extension_api::value::to_php_string(value, context.diagnostics())?;
-            for other in arguments.iter().skip(1) {
-                if let Value::Array(other) = other {
-                    for value in other.values() {
-                        if search
-                            == phera_extension_api::value::to_php_string(
-                                value,
-                                context.diagnostics(),
-                            )?
-                        {
-                            return Ok(Value::from(PhpArray::new()));
-                        }
-                    }
-                }
-            }
-        }
-        return Ok(args::value(arguments, 0).clone());
-    }
-    if arguments.len() == 1 {
-        return Ok(args::value(arguments, 0).clone());
-    }
-    let mut excluded = std::collections::HashSet::new();
-    for other in arguments.iter().skip(1) {
-        if let Value::Array(array) = other {
-            for value in array.values() {
-                excluded.insert(phera_extension_api::value::to_php_string(
-                    value,
-                    context.diagnostics(),
-                )?);
-            }
-        }
-    }
-    if excluded.is_empty() {
-        return Ok(args::value(arguments, 0).clone());
-    }
-    let mut result = PhpArray::new();
-    if let Some(array) = args::array(arguments, 0) {
-        for (key, value) in array.iter() {
-            let string = phera_extension_api::value::to_php_string(value, context.diagnostics())?;
-            if !excluded.contains(&string) {
-                result.insert(key, value.clone());
-            }
-        }
-    }
-    Ok(Value::from(result))
-}
-
-fn array_diff_key(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    set(context, arguments, SetOperation::Difference, MatchBy::Key)
-}
-
-fn array_diff_assoc(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    set(
-        context,
-        arguments,
-        SetOperation::Difference,
-        MatchBy::KeyAndValue,
-    )
-}
-
-fn array_intersect(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    set(
-        context,
-        arguments,
-        SetOperation::Intersection,
-        MatchBy::Value,
-    )
-}
-
-fn array_intersect_key(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    set(context, arguments, SetOperation::Intersection, MatchBy::Key)
-}
-
-fn array_intersect_assoc(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    set(
-        context,
-        arguments,
-        SetOperation::Intersection,
-        MatchBy::KeyAndValue,
-    )
-}
-
-/// Difference rejects a match in any input; intersection needs one in every input.
-fn set(
+fn keep_entries(
     context: &mut dyn Context,
     arguments: &[Value],
-    operation: SetOperation,
-    match_by: MatchBy,
+    keep: Keep,
+    by: Match,
 ) -> NativeResult {
     let mut result = PhpArray::new();
-    if let Some(array) = args::array(arguments, 0) {
-        for (key, value) in array.iter() {
-            let mut keep = true;
-            for other in arguments.iter().skip(1) {
-                let Value::Array(other) = other else {
-                    continue;
-                };
-                let mut found = false;
-                for (other_key, other_value) in other.iter() {
-                    if !matches!(match_by, MatchBy::Value) && key != other_key {
-                        continue;
-                    }
-                    if matches!(match_by, MatchBy::Key)
-                        || super::ordering::compare_values(
-                            context,
-                            value,
-                            other_value,
-                            SortOrder::String { ignore_case: false },
-                        )? == Ordering::Equal
-                    {
-                        found = true;
-                        break;
-                    }
-                }
-                if found != matches!(operation, SetOperation::Intersection) {
-                    keep = false;
-                    break;
-                }
-            }
-            if keep {
-                result.insert(key, value.clone());
+    'entries: for (key, value) in required_array(arguments, 0).iter() {
+        for other in other_arrays(arguments) {
+            let found = contains(context, other, &key, value, by)?;
+            if found != (keep == Keep::InAll) {
+                continue 'entries;
             }
         }
+        result.insert(key, value.clone());
     }
     Ok(Value::from(result))
 }
 
-/// Keep the first occurrence and its key; string comparison is the default.
-fn array_unique(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let flags = args::int(arguments, 1).unwrap_or(2);
-    let Some(array) = args::array(arguments, 0) else {
-        return Ok(Value::from(PhpArray::new()));
+/// Whether `other` has an entry that matches `key` and `value`.
+fn contains(
+    context: &mut dyn Context,
+    other: &PhpArray,
+    key: &ArrayKey,
+    value: &Value,
+    by: Match,
+) -> Result<bool, NativeError> {
+    let equal_strings = |context: &mut dyn Context, other_value: &Value| {
+        Ok::<_, NativeError>(
+            SortFlags::STRING.compare(context, value, other_value)? == Ordering::Equal,
+        )
     };
-    if array.len() <= 1 {
-        return Ok(Value::Array(array.clone()));
+    match by {
+        Match::Key => Ok(other.contains_key(key)),
+        Match::KeyAndValue => match other.get(key) {
+            Some(other_value) => equal_strings(context, other_value),
+            None => Ok(false),
+        },
+        Match::Value => {
+            for other_value in other.values() {
+                if equal_strings(context, other_value)? {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        }
     }
-    if flags == 2 {
-        let mut seen = std::collections::HashSet::new();
+}
+
+/// `array_unique(array $array, int $flags = SORT_STRING): array`, the
+/// first entry of each value, with its key.
+///
+/// With `SORT_STRING`, values are compared as strings through a lookup;
+/// with any other flag, PHP sorts and compares neighbours, which is why
+/// that path goes through zend_sort too.
+///
+/// ```php
+/// array_unique(["a" => 1, "b" => "1", "c" => 2]); // ["a" => 1, "c" => 2]
+/// array_unique([4, "4", "3", 4, 3], SORT_REGULAR); // [0 => 4, 2 => "3"]
+/// ```
+const ARRAY_UNIQUE: FunctionEntry = FunctionEntry::sync(
+    "array_unique",
+    &[
+        Param::new("array", ParamType::Array),
+        Param::new("flags", ParamType::Int).optional(),
+    ],
+    array_unique,
+);
+
+fn array_unique(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let flags = args::int(arguments, 1).unwrap_or(SORT_STRING);
+    let array = required_array(arguments, 0);
+    if array.len() <= 1 {
+        return Ok(arguments[0].clone());
+    }
+    if flags == SORT_STRING {
+        let mut seen = HashSet::new();
         let mut result = PhpArray::new();
         for (key, value) in array.iter() {
-            if seen.insert(phera_extension_api::value::to_php_string(
-                value,
-                context.diagnostics(),
-            )?) {
+            if seen.insert(to_php_string(value, context.diagnostics())?) {
                 result.insert(key, value.clone());
             }
         }
         return Ok(Value::from(result));
     }
-    let order = SortOrder::from_flags(flags);
+    let flags = SortFlags::from_flags(flags);
     let entries: Vec<_> = array.iter().collect();
-    let indices = super::sort_order::order(entries.len(), |left, right| {
-        let (Some((_, left)), Some((_, right))) = (entries.get(left), entries.get(right)) else {
-            return Ok(Ordering::Equal);
-        };
-        super::ordering::compare_values(context, left, right, order)
+    let order = zend_sort::order(entries.len(), |left, right| {
+        flags.compare(context, entries[left].1, entries[right].1)
     })?;
+    // Walk the sorted entries; of a run of equal values, the one that came
+    // first in the array stays.
     let mut result = (**array).clone();
-    let mut previous: Option<usize> = None;
-    for index in indices {
-        if let Some(last) = previous
-            && let (Some((last_key, last_value)), Some((key, value))) =
-                (entries.get(last), entries.get(index))
-            && super::ordering::compare_values(context, last_value, value, order)?
-                == Ordering::Equal
+    let mut kept: Option<usize> = None;
+    for index in order {
+        if let Some(last) = kept
+            && flags.compare(context, entries[last].1, entries[index].1)? == Ordering::Equal
         {
             if last > index {
-                result.remove(last_key);
-                previous = Some(index);
+                result.remove(&entries[last].0);
+                kept = Some(index);
             } else {
-                result.remove(key);
+                result.remove(&entries[index].0);
             }
             continue;
         }
-        previous = Some(index);
+        kept = Some(index);
     }
     Ok(Value::from(result))
 }

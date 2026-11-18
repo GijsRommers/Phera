@@ -150,9 +150,20 @@ impl Vm {
                 .await
             }
             MethodBody::Native(entry) => {
-                self.with_argument_origin(origin, |vm| {
-                    vm.prepare_native_method_arguments(method, entry.params, &mut arguments)
-                })?;
+                let preparation =
+                    self.with_argument_origin(origin, |vm| match entry.preparation {
+                        Some(prepare) => prepare(vm, entry.params, &mut arguments),
+                        None => Ok(phera_extension_api::MethodPreparation::Default),
+                    })?;
+                if matches!(preparation, phera_extension_api::MethodPreparation::Default) {
+                    self.with_argument_origin(origin, |vm| {
+                        vm.prepare_native_method_arguments(method, entry.params, &mut arguments)
+                    })?;
+                }
+                if let phera_extension_api::MethodPreparation::Return(value) = preparation {
+                    self.call_stack.recycle_native_arguments(arguments);
+                    return Ok(value);
+                }
                 match entry.handler {
                     phera_extension_api::NativeMethod::Sync(handler) => {
                         let result = handler(self, context.receiver.as_ref(), &arguments);

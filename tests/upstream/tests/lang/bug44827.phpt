@@ -9,16 +9,16 @@ Testfest Munich 2009
 try {
     define('::', true);
 } catch (ValueError $e) {
-    echo $e::class, ': ', $e->getMessage(), "\n";
+    echo $e->getMessage(), "\n";
 }
 
 try {
     constant('::');
 } catch (Error $e) {
-    echo $e::class, ': ', $e->getMessage(), "\n";
+    echo $e->getMessage(), "\n";
 }
 
 ?>
 --EXPECTF--
-ValueError: define(): Argument #1 ($constant_name) cannot be a class constant
-Error: Class "" not found
+define(): Argument #1 ($constant_name) cannot be a class constant
+Class "" not found

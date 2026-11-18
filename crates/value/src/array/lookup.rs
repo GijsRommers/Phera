@@ -1,52 +1,46 @@
-//! Resolve keys without duplicating them in a lookup table.
+//! Reading by key: `$a[5]`, `$a['name']`, `isset($a['name'])`.
 
 use super::storage::Storage;
 use super::{ArrayKey, PhpArray};
 use crate::value::Value;
-use std::hash::BuildHasher;
+
+/// The list position a key names: only a non-negative integer can name one.
+#[inline]
+pub(super) fn list_position(key: &ArrayKey) -> Option<usize> {
+    match key {
+        ArrayKey::Int(index) => usize::try_from(*index).ok(),
+        ArrayKey::String(_) => None,
+    }
+}
 
 impl PhpArray {
-    /// Lists compute the position; maps compare against their single stored key.
+    /// Position of the live slot with this key.
     #[inline]
     pub(super) fn find_pos(&self, key: &ArrayKey) -> Option<usize> {
         match &self.storage {
-            Storage::List(values) => match key {
-                ArrayKey::Int(index) => usize::try_from(*index)
-                    .ok()
-                    .filter(|&position| values.get(position).is_some_and(Option::is_some)),
-                ArrayKey::String(_) => None,
-            },
-            Storage::Map(map) => match &map.index {
-                None => map
-                    .entries
-                    .iter()
-                    .position(|entry| entry.value.is_some() && &entry.key == key),
-                Some(index) => index
-                    .positions
-                    .find(index.hasher.hash_one(key), |position| {
-                        &map.entries[*position as usize].key == key
-                    })
-                    .map(|position| *position as usize),
-            },
+            Storage::List(values) => list_position(key)
+                .filter(|&position| values.get(position).is_some_and(Option::is_some)),
+            Storage::Map(map) => map.find(key),
         }
     }
 
-    /// A direct list read needs just one bounds check and never materializes a key.
     #[inline]
     pub fn get(&self, key: &ArrayKey) -> Option<&Value> {
-        match (&self.storage, key) {
-            (Storage::List(values), ArrayKey::Int(index)) => {
-                values.get(usize::try_from(*index).ok()?)?.as_ref()
-            }
-            (Storage::List(_), ArrayKey::String(_)) => None,
-            (Storage::Map(_), _) => self.storage.value(self.find_pos(key)?),
+        match &self.storage {
+            Storage::List(values) => values.get(list_position(key)?)?.as_ref(),
+            Storage::Map(map) => map.entries[map.find(key)?].value.as_ref(),
         }
     }
 
     #[inline]
     pub fn get_mut(&mut self, key: &ArrayKey) -> Option<&mut Value> {
-        let position = self.find_pos(key)?;
-        self.storage.slot_mut(position)?.as_mut()
+        match &mut self.storage {
+            Storage::List(values) => values.get_mut(list_position(key)?)?.as_mut(),
+            Storage::Map(map) => {
+                let position = map.find(key)?;
+                map.entries[position].value.as_mut()
+            }
+        }
     }
 
     pub fn contains_key(&self, key: &ArrayKey) -> bool {

@@ -2,7 +2,7 @@ CARGO ?= cargo
 
 .DEFAULT_GOAL := help
 
-.PHONY: help build release check test fmt fmt-check lint ci ci-prerequisites ci-build safe-rust run clean phpt phpt-lexer
+.PHONY: help build release check test fmt fmt-check lint ci ci-prerequisites ci-build safe-rust run clean phpt phpt-sweep phpt-lexer
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -50,6 +50,11 @@ clean:
 
 phpt:
 	$(CARGO) test -p phera-cli --test phpt -- $(FILTER)
+
+# Set PHP_SRC to a php-src checkout: adds every test of it that passes on real
+# PHP and on Phera to tests/upstream/ (see tests/phpt/sweep.sh).
+phpt-sweep:
+	tests/phpt/sweep.sh $(PHP_SRC)
 
 # Set PHP_SRC to a php-src checkout to compare against all of its tests.
 phpt-lexer:

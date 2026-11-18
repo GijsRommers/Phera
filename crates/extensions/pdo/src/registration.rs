@@ -200,7 +200,7 @@ const STATEMENT_METHODS: &[MethodEntry] = &[
             Param::new("cursorOrientation", ParamType::Int).optional(),
             Param::new("cursorOffset", ParamType::Int).optional(),
         ],
-        crate::sqlite_fetch::fetch,
+        crate::drivers::sqlite::fetch::fetch,
     ),
     MethodEntry::public_async(
         "fetchAll",
@@ -208,12 +208,12 @@ const STATEMENT_METHODS: &[MethodEntry] = &[
             Param::new("mode", ParamType::Int).optional(),
             Param::new("args", ParamType::Mixed).variadic(),
         ],
-        crate::sqlite_fetch::all,
+        crate::drivers::sqlite::fetch::all,
     ),
     MethodEntry::public_async(
         "fetchColumn",
         &[Param::new("column", ParamType::Int).optional()],
-        crate::sqlite_fetch::column,
+        crate::drivers::sqlite::fetch::column,
     ),
     MethodEntry::public(
         "setFetchMode",
@@ -223,7 +223,7 @@ const STATEMENT_METHODS: &[MethodEntry] = &[
         ],
         fetch::set_mode,
     ),
-    MethodEntry::public_async("closeCursor", &[], crate::sqlite_fetch::close),
+    MethodEntry::public_async("closeCursor", &[], crate::drivers::sqlite::fetch::close),
     MethodEntry::public("columnCount", &[], statement::column_count),
     MethodEntry::public("rowCount", &[], statement::row_count),
     MethodEntry::public("errorCode", &[], statement::error_code),
@@ -234,7 +234,7 @@ const STATEMENT_METHODS: &[MethodEntry] = &[
             Param::new("class", ParamType::String).nullable().optional(),
             Param::new("constructorArgs", ParamType::Array).optional(),
         ],
-        crate::sqlite_fetch::object,
+        crate::drivers::sqlite::fetch::object,
     ),
     MethodEntry::public(
         "bindColumn",
@@ -264,7 +264,7 @@ const STATEMENT_METHODS: &[MethodEntry] = &[
     MethodEntry::public(
         "getAttribute",
         &[Param::new("name", ParamType::Int)],
-        crate::sqlite_methods::statement_attribute,
+        crate::drivers::sqlite::methods::statement_attribute,
     ),
     MethodEntry::public(
         "setAttribute",
@@ -276,5 +276,5 @@ const STATEMENT_METHODS: &[MethodEntry] = &[
 const SQLITE_METHODS: &[MethodEntry] = &[MethodEntry::public(
     "loadExtension",
     &[Param::new("name", ParamType::String)],
-    crate::sqlite_methods::load,
+    crate::drivers::sqlite::methods::load,
 )];
