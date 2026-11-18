@@ -14,6 +14,7 @@ impl Vm {
         &self,
         property: &PropertyDefault,
         unit: &CompiledUnit,
+        line: usize,
     ) -> Result<(), NativeError> {
         let Some(hook) = property
             .hooks
@@ -42,19 +43,30 @@ impl Vm {
         ) {
             return Ok(());
         }
-        Err(hook_declaration_error(
-            self,
-            hook.function,
-            format!(
-                "Type of parameter ${} of hook {scope}::${}::set must be compatible with property type",
-                self.code
-                    .unit(hook.function)
-                    .names
-                    .get(parameter.name.index())
-                    .map_or("value", String::as_str),
+        let argument = self
+            .code
+            .unit(hook.function)
+            .names
+            .get(parameter.name.index())
+            .map_or("value", String::as_str);
+        let failure = crate::error_traces::DeclarationFailure {
+            message: format!(
+                "Type of parameter ${argument} of hook {scope}::${}::set must be compatible with property type",
                 property.name
             ),
-        ))
+            file: unit.file.clone(),
+            line,
+        };
+        if let Some(name) = self.unresolved_contract_type(
+            property_type(property),
+            Some(&parameter_type.display),
+            unit,
+        ) {
+            return Err(crate::autoload::ClassMiss::signature(name, failure));
+        }
+        Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
+            failure,
+        ))))
     }
 
     pub(super) fn inherit_property_hooks(

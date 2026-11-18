@@ -1,7 +1,7 @@
 //! A cached `$item->name` can enter its getter in the same interpreter loop as
 //! a normal method call. Plain property hits already returned before this path.
 
-use phera_bytecode::Reg;
+use phera_bytecode::{FetchMode, Reg};
 use phera_extension_api::NativeError;
 use phera_value::Value;
 
@@ -15,14 +15,16 @@ impl Vm {
         &mut self,
         place: &AccessPath,
         destination: Reg,
+        mode: FetchMode,
     ) -> Result<bool, NativeError> {
         let Some(PropertyTarget { object, name }) = self.read_property_target(place)? else {
             return Ok(false);
         };
-        let Some(slot) = self
-            .property_entry(&object, name)?
-            .and_then(|entry| entry.slot)
-        else {
+        let entry = match self.property_entry(&object, name) {
+            Err(_) if mode != FetchMode::Read => return Ok(false),
+            result => result?,
+        };
+        let Some(slot) = entry.and_then(|entry| entry.slot) else {
             return Ok(false);
         };
         let Some(class) = self.classes.for_object(&object) else {

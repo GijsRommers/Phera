@@ -166,6 +166,7 @@ pub struct ClassMethod {
 /// Property metadata keeps source names until bytecode interning.
 #[derive(Debug, Clone)]
 pub struct ClassProperty {
+    pub line: u32,
     pub name: String,
     pub visibility: phera_bytecode::Visibility,
     pub is_static: bool,

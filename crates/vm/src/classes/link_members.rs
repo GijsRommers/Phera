@@ -153,7 +153,7 @@ impl Vm {
                 static_initialized: Rc::new(std::cell::Cell::new(false)),
                 value_initialized: Rc::new(std::cell::Cell::new(initialized)),
             };
-            self.verify_set_hook_type(&linked, unit)?;
+            self.verify_set_hook_type(&linked, unit, property.line as usize)?;
             if let Some(value) = linked
                 .initializer
                 .as_ref()

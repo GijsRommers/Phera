@@ -42,7 +42,7 @@ impl Vm {
             && (mode == FetchMode::Read
                 || !matches!(place.base()?, phera_bytecode::PathBase::This { .. })
                 || self.current().is_some_and(|frame| frame.this().is_some()))
-            && self.start_cached_getter(&place, destination)?
+            && self.start_cached_getter(&place, destination, mode)?
         {
             return Ok(None);
         }

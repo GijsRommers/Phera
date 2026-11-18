@@ -117,6 +117,7 @@ pub struct ClassConstant {
 /// An absent default on a typed property means uninitialized, rather than null.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PropertyDeclaration {
+    pub line: u32,
     pub name: NameId,
     pub visibility: Visibility,
     pub is_static: bool,

@@ -337,6 +337,7 @@ pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
                 .properties
                 .into_iter()
                 .map(|property| phera_bytecode::PropertyDeclaration {
+                    line: property.line,
                     name: tables.name(&property.name),
                     visibility: property.visibility,
                     is_static: property.is_static,

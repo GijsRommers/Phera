@@ -205,6 +205,7 @@ impl Compiler<'_> {
                         line: property_line,
                     })?;
                     properties.push(ClassProperty {
+                        line: property_line as u32,
                         hooks,
                         name: property.name.clone(),
                         visibility: match modifiers.visibility {
@@ -277,6 +278,7 @@ impl Compiler<'_> {
                         line: self.lines.line(parameter.span.start),
                     })?;
                     properties.push(ClassProperty {
+                        line: self.lines.line(parameter.span.start) as u32,
                         hooks,
                         name: parameter.name.clone(),
                         visibility: member_visibility(&parameter.modifiers),

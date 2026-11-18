@@ -29,6 +29,12 @@ impl Compiler<'_> {
     ) -> Result<Option<Box<PropertyHooks<usize>>>, CompileError> {
         let set_visibility = property_access(self, &declaration)?;
         if !declaration.has_hook_list {
+            if declaration.modifiers.is_static && set_visibility.is_some() {
+                return Err(self.error(
+                    "Asymmetric visibility on static properties not supported yet",
+                    declaration.line,
+                ));
+            }
             if declaration.kind == ast::ClassKind::Interface {
                 return Err(self.error(
                     "Interfaces may only include hooked properties",

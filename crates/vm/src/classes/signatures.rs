@@ -283,7 +283,7 @@ impl Vm {
     }
 
     /// Linking a method signature can require class identities even though passing arguments does not.
-    fn unresolved_contract_type<'a>(
+    pub(super) fn unresolved_contract_type<'a>(
         &self,
         source: Option<&'a str>,
         target: Option<&'a str>,
