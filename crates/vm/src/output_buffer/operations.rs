@@ -11,7 +11,7 @@ use super::{CLEANABLE, FLUSHABLE, OutputFunction, REMOVABLE, Running};
 
 #[derive(Clone, Copy)]
 pub(crate) enum Operation {
-    Chunk,
+    Chunk(Option<&'static str>),
     Clean,
     Flush,
     EndClean,
@@ -24,7 +24,7 @@ pub(crate) enum Operation {
 impl Operation {
     fn mode(self) -> i64 {
         match self {
-            Self::Chunk => 0,
+            Self::Chunk(_) => 0,
             Self::Clean => 2,
             Self::Flush => 4,
             Self::EndClean | Self::GetClean => 8 | 2,
@@ -38,6 +38,19 @@ impl Operation {
             Self::Flush => FLUSHABLE,
             _ => REMOVABLE,
         }
+    }
+
+    pub(super) fn caller(self) -> Option<&'static str> {
+        Some(match self {
+            Self::Clean => OutputFunction::Clean.name(),
+            Self::Flush => OutputFunction::FlushBuffer.name(),
+            Self::EndClean => OutputFunction::EndClean.name(),
+            Self::EndFlush => OutputFunction::EndFlush.name(),
+            Self::GetClean => OutputFunction::GetClean.name(),
+            Self::GetFlush => OutputFunction::GetFlush.name(),
+            Self::Chunk(caller) => return caller,
+            Self::Shutdown => return None,
+        })
     }
 
     fn removes(self) -> bool {
@@ -125,13 +138,20 @@ impl Vm {
             return Ok(captured.unwrap_or(Value::Bool(false)));
         }
         self.apply_buffer(index, operation).await?;
-        self.drain_output().await?;
+        self.drain_output_from(Some(function.name())).await?;
         Ok(captured.unwrap_or(Value::Bool(true)))
     }
 
     pub(crate) async fn drain_output(&mut self) -> Result<(), NativeError> {
+        self.drain_output_from(None).await
+    }
+
+    pub(crate) async fn drain_output_from(
+        &mut self,
+        caller: Option<&'static str>,
+    ) -> Result<(), NativeError> {
         while let Some(index) = self.output_writer.buffers.pending.take() {
-            self.apply_buffer(index, Operation::Chunk).await?;
+            self.apply_buffer(index, Operation::Chunk(caller)).await?;
         }
         if self.headers_pending() {
             self.finish_headers().await?;
@@ -140,6 +160,7 @@ impl Vm {
     }
 
     pub(crate) async fn finish_buffers(&mut self) {
+        self.output_writer.buffers.finalizing = true;
         while let Some(index) = self.output_writer.buffers.len().checked_sub(1) {
             if let Err(error) = self.apply_buffer(index, Operation::Shutdown).await {
                 self.output_writer.buffers.stack.clear();
@@ -159,6 +180,7 @@ impl Vm {
                 break;
             }
         }
+        self.output_writer.buffers.finalizing = false;
     }
 
     async fn apply_buffer(
@@ -178,28 +200,41 @@ impl Vm {
             buffer.callback.clone()
         };
         let mode = operation.mode() | i64::from(!buffer.started);
+        let mut deprecation = Ok(());
         let result = if let Some(callback) = callback {
             let arguments = [Value::from(buffer.bytes.as_slice()), Value::Int(mode)];
-            self.output_writer.buffers.running = Some(Running {
-                index,
-                produced_output: false,
-            });
+            let previous = self
+                .output_writer
+                .buffers
+                .running
+                .replace(Running { index });
             let result = self.invoke_resolved_callable(callback, arguments).await;
             let buffers = &mut self.output_writer.buffers;
-            let running = buffers.running.take();
-            if std::mem::take(&mut buffers.lock_broken) {
+            if buffers.lock_broken {
+                if previous.is_none() {
+                    buffers.lock_broken = false;
+                }
+                buffers.running = previous;
                 buffers.stack.clear();
                 buffers.pending = None;
                 return result.map(|_| ());
             }
-            if running.is_some_and(|running| running.produced_output) && result.is_ok() {
-                Err(NativeError::throw(
-                    "Phera\\NotSupportedException",
-                    "Producing output from user output handlers is deprecated since PHP 8.5",
-                ))
-            } else {
-                result
+            let buffer = buffers
+                .stack
+                .get_mut(index)
+                .ok_or_else(|| internal_error!("output buffer index after callback"))?;
+            if result.is_ok() && std::mem::take(&mut buffer.produced_output) {
+                deprecation = self.report_handler_output(index, operation).await;
             }
+            let buffers = &mut self.output_writer.buffers;
+            buffers.running = previous;
+            if buffers.lock_broken {
+                if buffers.running.is_none() {
+                    buffers.lock_broken = false;
+                }
+                return deprecation;
+            }
+            result
         } else {
             Ok(Value::Bool(false))
         };
@@ -233,7 +268,7 @@ impl Vm {
                 if !operation.discards() {
                     self.out_below(index, &bytes.unwrap_or(original));
                 }
-                Ok(())
+                deprecation
             }
             Err(error) => {
                 if !operation.discards() && !matches!(operation, Operation::Shutdown) {

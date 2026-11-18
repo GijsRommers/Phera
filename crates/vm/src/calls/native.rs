@@ -180,6 +180,9 @@ impl Vm {
                 let previous = self.native_called_class.take();
                 let result = self.native_entry_origin(*entry, arguments, origin).await;
                 self.native_called_class = previous;
+                if result.is_ok() && self.output_writer.buffers.pending.is_some() {
+                    Box::pin(self.drain_output_from(Some(entry.name))).await?;
+                }
                 result
             }
             CallTarget::Intrinsic(intrinsic) => {

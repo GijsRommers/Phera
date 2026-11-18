@@ -2,11 +2,13 @@
 //!
 //! PHP runs shutdown functions, then request-end destructors, then finalizes
 //! buffers from the innermost out. The last buffer commits the response head
-//! when it delivers bytes. Phera's VM does not yet execute destructors.
+//! when it delivers bytes. Phera runs shutdown functions immediately before
+//! finalizing the buffers. Destructor dispatch at shutdown is pending.
 //!
 //! A callback can call back into the VM, including reading the active buffer.
 //! The stack owns all buffer data and no reference into it crosses that call.
 
+mod deprecation;
 mod functions;
 mod operations;
 
@@ -24,6 +26,7 @@ pub(crate) const STDFLAGS: i64 = CLEANABLE | FLUSHABLE | REMOVABLE;
 const STARTED: i64 = 0x1000;
 const DISABLED: i64 = 0x2000;
 const PROCESSED: i64 = 0x4000;
+const PRODUCED_OUTPUT: i64 = 0x8000;
 const CHUNK_ALIGNMENT: usize = 4096;
 const DEFAULT_SIZE: usize = 16384;
 const DEFAULT_NAME: &str = "default output handler";
@@ -51,11 +54,11 @@ pub(crate) struct Buffers {
     running: Option<Running>,
     pub(crate) pending: Option<usize>,
     lock_broken: bool,
+    finalizing: bool,
 }
 
 struct Running {
     index: usize,
-    produced_output: bool,
 }
 
 struct Buffer {
@@ -68,6 +71,7 @@ struct Buffer {
     started: bool,
     disabled: bool,
     processed: bool,
+    produced_output: bool,
 }
 
 impl Buffer {
@@ -82,6 +86,7 @@ impl Buffer {
             started: false,
             disabled: false,
             processed: false,
+            produced_output: false,
         }
     }
 
@@ -103,6 +108,7 @@ impl Buffer {
             (self.started, STARTED),
             (self.disabled, DISABLED),
             (self.processed, PROCESSED),
+            (self.produced_output, PRODUCED_OUTPUT),
         ] {
             if enabled {
                 flags |= flag;
@@ -131,11 +137,12 @@ impl Buffers {
 
     /// Returns false when the bytes have reached the bottom of the stack.
     pub(crate) fn write(&mut self, depth: usize, bytes: &[u8]) -> bool {
-        if let Some(running) = self.running.as_mut() {
-            if let Some(buffer) = self.stack.get_mut(running.index) {
-                running.produced_output = true;
-                buffer.append(bytes);
-            }
+        if let Some(running) = &self.running
+            && let Some(buffer) = self.stack.get_mut(running.index)
+            && !buffer.disabled
+        {
+            buffer.produced_output = true;
+            buffer.append(bytes);
             return true;
         }
         let Some((index, buffer)) = self
@@ -148,6 +155,11 @@ impl Buffers {
         else {
             return false;
         };
+        // A deprecation emitted while a handler is disabled still counts as
+        // handler output for PHP's next enabled buffer.
+        if self.running.is_some() {
+            buffer.produced_output = true;
+        }
         buffer.append(bytes);
         if buffer.chunk > 0 && buffer.bytes.len() >= buffer.chunk {
             self.pending = Some(index);

@@ -135,6 +135,11 @@ the shared code cache. This is correct for every application with no changes.
 Under `phera run`, `php_sapi_name()` and `PHP_SAPI` both report `cli`.
 Under `phera serve`, they report `phera`, while PHP's development server reports `cli-server`.
 
+`getallheaders()` and `apache_request_headers()` currently use the lower-case
+names in Hyper's header map. Preserving client spelling would require
+`crates/server` to capture the original names at HTTP/1 parsing and pass them
+alongside the normalized headers to the runtime.
+
 Phase 2 is snapshot and fork. A worker boots the application once (autoloader,
 container, routes), freezes that heap as a snapshot, and gives each request a
 fork of it. Arrays and strings are already copy-on-write, so a fork copies only
