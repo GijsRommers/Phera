@@ -63,9 +63,9 @@ and closes the connection.
 
 Built in, each checked call by call against real PHP: core, standard, ctype,
 [curl](crates/extensions/curl/README.md) (HTTP and HTTPS, including HTTP/2,
-connection reuse, and the easy and multi interfaces), date, dom (`DOMDocument`, `DOMNode`, `DOMElement`, `DOMXPath`), filter,
-hash, json, mbstring, openssl, pcre, PDO
-(SQLite, MySQL, PostgreSQL, with TLS), random, redis, reflection, serialize,
+connection reuse, and the easy and multi interfaces), date, dom (`DOMDocument`,
+`DOMNode`, `DOMElement`, `DOMXPath`), filter, hash, json, mbstring, openssl, pcre,
+PDO (SQLite, MySQL, PostgreSQL, with TLS), random, redis, reflection, serialize,
 session, SPL, sqlite3, streams, tokenizer, Unix process functions, and POSIX queries.
 
 Modern DOM supports CSS selectors, live class tokens, and `innerHTML`.
@@ -107,7 +107,7 @@ silently different answer:
 - The other items listed in [`crates/source/data/deprecations.tsv`](crates/source/data/deprecations.tsv)
 
 Why things are the way they are is written down in
-[`docs/decisions.md`](docs/decisions.md).
+[`docs/decisions/`](docs/decisions/README.md).
 
 ## 🏗️ Architecture
 
@@ -133,7 +133,7 @@ PHP source ─▶ lexer ─▶ parser ─▶ AST ─▶ compiler ─▶ bytecode
 
 The extensions live under `crates/extensions/`, behind `phera-extension-api`.
 See [`docs/architecture.md`](docs/architecture.md) for the design and
-[`docs/decisions.md`](docs/decisions.md) for the decisions behind it.
+[`docs/decisions/`](docs/decisions/README.md) for the decisions behind it.
 
 ## 🛠️ Building
 
