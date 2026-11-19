@@ -17,6 +17,12 @@ function twice() { $n += 1; $n += 1; return $n; } var_dump(twice());
 function arr() { $list[] = 1; $list['k'] .= 'x'; $m['a']['b'] += 1; return [$list, $m]; } var_dump(arr());
 function refd() { $r = &$q; $q += 1; return $r; } var_dump(refd());
 function inloop() { for ($i = 0; $i < 3; $i++) { $sum += $i; } return $sum; } var_dump(inloop());
+// an error handler runs before the result is stored, and may touch the variable
+set_error_handler(function ($level, $message) { echo "handler: $message\n"; unset($GLOBALS['gone']); $GLOBALS['other'] = 'set by handler'; return true; });
+$gone -= 1; var_dump($gone, $other);
+$other2 .= 'x'; var_dump($other2);
+function inside() { $n += 5; return $n; } var_dump(inside());
+restore_error_handler();
 --EXPECTF--
 
 Warning: Undefined variable $a in %s on line 2
@@ -138,3 +144,10 @@ int(1)
 
 Warning: Undefined variable $sum in %s on line 16
 int(3)
+handler: Undefined variable $gone
+int(-1)
+string(14) "set by handler"
+handler: Undefined variable $other2
+string(1) "x"
+handler: Undefined variable $n
+int(5)

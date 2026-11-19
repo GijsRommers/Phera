@@ -323,17 +323,24 @@ impl Vm {
         local: Reg,
         source: Reg,
     ) -> Result<Option<BatchExit>, NativeError> {
-        // A variable that was never assigned warns and counts as null, on
-        // either side: `$total += $missing` and `$missing += 1`. PHP reads
-        // the right side first, so its warning comes first.
-        for register in [source, local] {
-            if self
-                .current()
-                .and_then(|frame| frame.slots(&self.registers).get(register.index()))
+        let unassigned = |vm: &Self, register: Reg| {
+            vm.current()
+                .and_then(|frame| frame.slots(&vm.registers).get(register.index()))
                 .is_some_and(Option::is_none)
-            {
-                self.read_local(register);
-            }
+        };
+        // `$missing += 1` reads a variable that was never assigned. The
+        // slow path warns for it and lets an error handler run before the
+        // result is stored, as PHP does.
+        if unassigned(self, local) {
+            return Ok(Some(BatchExit::Instruction(Instruction::AssignOp {
+                op: operator,
+                local,
+                src: source,
+            })));
+        }
+        // A compiler-elided local snapshot must retain its undefined-variable notice.
+        if unassigned(self, source) {
+            self.read_local(source);
         }
         let reference = self
             .current()
