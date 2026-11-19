@@ -78,3 +78,17 @@ The RustCrypto secretstream API keeps explicit rekey and state
 serialization private. Wrapping it as a PHP string would also change cloning
 and serialization. The available `block-padding` ISO 7816-4 decoder exits early
 on padding bytes, so it cannot provide Sodium's constant-time unpadding.
+
+## 2026-11-19 — Omit secret arguments from Sodium exception traces
+
+SodiumException and the Sodium parsing errors that PHP redacts now record an
+empty argument list in each visible trace frame. Register this behavior as
+native metadata. The VM can apply it before capturing frame arguments, and
+other exceptions retain the existing trace behavior. Redacting individual
+sensitive parameters would still expose a secret passed through a PHP caller.
+
+## 2026-11-19 — List Sodium functions in PHP's extension order
+
+Record Sodium's function order in the extension introspection catalog. The
+runtime filters this catalog against the actual registered functions. This
+preserves PHP's ordering without exposing functions whose backends are pending.

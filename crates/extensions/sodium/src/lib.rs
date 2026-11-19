@@ -31,6 +31,7 @@ impl Extension for Sodium {
             parent: Some("Exception"),
             ..ClassEntry::class("SodiumException")
         });
+        registry.redact_exception_arguments("SodiumException");
         register(registry, encoding::FUNCTIONS);
         register(registry, ristretto_scalar::FUNCTIONS);
         register(registry, ristretto::FUNCTIONS);
@@ -64,6 +65,9 @@ fn register(registry: &mut Registry, functions: &[(FunctionEntry, &'static str)]
     for &(entry, return_type) in functions {
         registry.function(entry);
         registry.describe_function(entry.name, return_type, None);
+        if !entry.params.is_empty() && entry.name != "sodium_crypto_pwhash_str_needs_rehash" {
+            registry.redact_argument_error_trace(entry.name);
+        }
     }
 }
 
