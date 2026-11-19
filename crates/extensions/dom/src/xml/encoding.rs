@@ -11,6 +11,22 @@ use quick_xml::events::Event;
 
 use crate::document::ParseError;
 
+pub(crate) fn supported_encoding(name: &str) -> bool {
+    matches!(
+        name.to_ascii_uppercase().as_str(),
+        "UTF-8"
+            | "UTF8"
+            | "UTF-16"
+            | "UTF-16LE"
+            | "UTF-16BE"
+            | "US-ASCII"
+            | "ASCII"
+            | "ISO-8859-1"
+            | "ISO8859-1"
+            | "LATIN1"
+    )
+}
+
 pub(super) fn decode(input: &[u8]) -> Result<Cow<'_, str>, ParseError> {
     let utf16 = match input {
         [0xff, 0xfe, rest @ ..] => Some((rest, true)),

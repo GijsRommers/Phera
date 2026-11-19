@@ -12,7 +12,7 @@ pub(super) use reconciliation::reconcile;
 use std::rc::Rc;
 
 use phera_extension_api::{
-    ArrayKey, ClassEntry, ClassHooks, Context, NativeError, NativePropertyAccess,
+    ArrayKey, ClassEntry, ClassHooks, Context, NativeClone, NativeError, NativePropertyAccess,
     NativePropertyMutation, NativePropertyRead, NativeResult, Object, PhpArray, PropertyPurpose,
     Registry, Value,
 };
@@ -41,6 +41,11 @@ struct Declaration {
     node: Location,
     parent: NodeId,
     _pin: Rc<()>,
+}
+
+pub(super) fn location(object: &Object) -> Option<Location> {
+    let declaration: Declaration = native(object)?;
+    Some(declaration.node)
 }
 
 pub(super) fn wrap(context: &mut dyn Context, node: Location) -> NativeResult {
@@ -179,11 +184,14 @@ fn mutate(
 
 pub(super) fn register(registry: &mut Registry) {
     registry.class(ClassEntry {
-        hooks: Some(&ClassHooks {
-            properties: Some(debug),
-            property_access: Some(&NativePropertyAccess { read, mutate }),
-            ..ClassHooks::EMPTY
-        }),
+        hooks: const {
+            Some(&ClassHooks {
+                clone: Some(NativeClone::copy::<Declaration>()),
+                properties: Some(debug),
+                property_access: Some(&NativePropertyAccess { read, mutate }),
+                ..ClassHooks::EMPTY
+            })
+        },
         ..ClassEntry::class("DOMNameSpaceNode")
     });
 }

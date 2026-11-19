@@ -51,6 +51,9 @@ fn read(
         context.deprecated(format!("Property DOMEntity::${name} is deprecated"));
         return Ok(Some(Value::Null));
     }
+    if kind == Kind::Document && name == "config" {
+        context.deprecated("Property DOMDocument::$config is deprecated".into());
+    }
     value(context, &location, name).map(Some)
 }
 

@@ -21,6 +21,9 @@ pub(super) struct Detached {
 
 impl DomState {
     pub(super) fn remove(&mut self, root: NodeId) {
+        if self.document.arena[root].parent().is_none() {
+            return;
+        }
         self.document.arena.detach(root);
         if self.document.arena[root].first_child().is_some()
             || !self.document.arena[root].attributes().is_empty()

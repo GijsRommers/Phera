@@ -182,6 +182,14 @@ fn load_from_file<'a>(
 ) -> LocalFuture<'a, NativeResult> {
     Box::pin(async move {
         let (name, path) = filename(context, &arguments, function)?;
+        let limit = if cfg!(target_os = "linux") {
+            4096
+        } else {
+            1024
+        };
+        if name.len() >= limit || path.as_os_str().len() >= limit {
+            return Ok(Value::Bool(false));
+        }
         let flags = args::int(&arguments, 1).unwrap_or_default();
         match tokio::fs::read(&path).await {
             Ok(bytes) => {
@@ -200,9 +208,12 @@ fn load_from_file<'a>(
                 )
             }
             Err(_) => {
-                context.warning(format!(
-                    "{function}(): I/O warning : failed to load external entity \"{name}\""
-                ));
+                let display = if format.html() {
+                    name
+                } else {
+                    path.to_string_lossy().into_owned()
+                };
+                libxml::file_failure(context, function, &display);
                 Ok(Value::Bool(false))
             }
         }
@@ -283,6 +294,10 @@ fn save_to_file<'a>(
 ) -> LocalFuture<'a, NativeResult> {
     Box::pin(async move {
         let (name, path) = filename(context, &arguments, function)?;
+        if format.html() {
+            let target = this_node(this.as_ref())?;
+            super::html_file::ensure_content_type(&mut target.shared.borrow_mut().document.arena);
+        }
         let bytes = serialized(
             this.as_ref(),
             None,

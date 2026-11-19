@@ -39,6 +39,24 @@ pub fn parse(bytes: &[u8], options: Options) -> Document {
     let mut arena = parse_document(sink::Sink::default(), ParseOpts::default()).one(input.as_ref());
     let lower = input.to_ascii_lowercase();
     adjust_tree(&mut arena, &lower, options);
+    if let Some((offset, _)) = lower.match_indices("<!doctype").next() {
+        let raw = input
+            .get(offset + "<!doctype".len()..)
+            .unwrap_or_default()
+            .trim_start();
+        let name = raw
+            .split([' ', '\t', '\r', '\n', '>'])
+            .next()
+            .unwrap_or_default();
+        let doctype = arena
+            .children(Arena::DOCUMENT)
+            .find(|&id| arena[id].kind == Kind::Doctype);
+        if let Some(doctype) = doctype
+            && name.eq_ignore_ascii_case(&arena[doctype].name.local)
+        {
+            arena[doctype].name.local = name.to_owned();
+        }
+    }
     Document {
         arena,
         settings: Settings {

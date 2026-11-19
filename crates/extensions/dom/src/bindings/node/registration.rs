@@ -39,7 +39,7 @@ pub(in crate::bindings) fn register(registry: &mut Registry) {
     const FEATURE: &[P] = const { &[P::new("feature", T::String), P::new("version", T::String)] };
     registry.class(ClassEntry {
         hooks: Some(&ClassHooks {
-            clone: Some(NativeClone::Copy(clone_object)),
+            clone: Some(NativeClone::CopyWithHandle(clone_object)),
             property_access: Some(&properties::ACCESS),
             properties: Some(properties::view::view),
             ..ClassHooks::EMPTY
@@ -97,7 +97,7 @@ pub(in crate::bindings) fn register(registry: &mut Registry) {
                     ),
                     M::public(
                         "contains",
-                        const { &[P::new("other", NODE).nullable()] },
+                        const { &[P::new("other", T::Mixed)] },
                         compare::contains,
                     )
                     .returning("bool"),

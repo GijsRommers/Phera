@@ -13,6 +13,7 @@ use crate::xml::names::{XML, XMLNS};
 pub(in crate::bindings) enum AttributeBinding {
     Direct,
     Node,
+    Attach,
 }
 
 pub(in crate::bindings) fn bind(
@@ -44,8 +45,9 @@ pub(in crate::bindings) fn bind(
     let requested = name.prefix.as_deref().unwrap_or("");
     let default_conflict = matches!(binding, AttributeBinding::Direct)
         && scope.get("").is_some_and(|bound| bound == uri);
-    let require_prefix = requested.is_empty() && matches!(binding, AttributeBinding::Node);
-    let base = if default_conflict || require_prefix || scope.contains_key(requested) {
+    let require_prefix = requested.is_empty() && !matches!(binding, AttributeBinding::Direct);
+    let conflict = scope.contains_key(requested) && !matches!(binding, AttributeBinding::Attach);
+    let base = if default_conflict || require_prefix || conflict {
         "default"
     } else {
         requested

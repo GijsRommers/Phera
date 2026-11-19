@@ -75,11 +75,35 @@ fn insert(
     };
     let result = {
         let mut state = parent.shared.borrow_mut();
+        if replace && let Some(reference) = reference {
+            let arena = &mut state.document.arena;
+            let existing = arena[reference].kind == Kind::Attribute;
+            let incoming = arena[child.id].kind == Kind::Attribute;
+            if existing && incoming {
+                arena
+                    .set_attribute(parent.id, child.id, Some(reference))
+                    .map_err(link_error)?;
+                drop(state);
+                return parent.at(reference).wrap(context);
+            } else if existing || incoming {
+                drop(state);
+                return fail_at(
+                    context,
+                    &parent,
+                    method,
+                    dom_error(3, "Hierarchy Request Error"),
+                );
+            }
+        }
         insert_nodes(&mut state.document.arena, parent.id, child.id, reference)
     };
     let first = match result {
         Ok(Some(id)) => id,
         Ok(None) => {
+            if replace && let Some(reference) = reference {
+                parent.shared.borrow_mut().remove(reference);
+                return parent.at(reference).wrap(context);
+            }
             context.warning(format!("{method}(): Document Fragment is empty"));
             return Ok(Value::Bool(false));
         }
@@ -116,7 +140,7 @@ pub(super) fn insert_nodes(
     } else if arena[child].kind == Kind::Attribute && arena[parent].kind == Kind::Element {
         use super::attributes::namespaces::{AttributeBinding, bind};
         let mut name = arena[child].name.clone();
-        bind(arena, parent, &mut name, AttributeBinding::Node);
+        bind(arena, parent, &mut name, AttributeBinding::Attach);
         let existing = arena[parent].attributes().iter().copied().find(|&id| {
             arena[id].name.local == name.local && arena[id].name.namespace == name.namespace
         });
@@ -225,10 +249,44 @@ pub(super) fn adopt_detached(parent: &Location, child: Location) -> Result<Locat
     if parent.same_document(&child) {
         return Ok(child);
     }
-    let mut source = child.shared.borrow_mut();
-    if source.owned {
+    if child.shared.borrow().owned {
         return Err(dom_error(4, "Wrong Document Error"));
     }
+    Ok(transfer(parent, child))
+}
+
+pub(super) fn adopt(
+    context: &mut dyn Context,
+    this: This<'_>,
+    arguments: &[Value],
+) -> NativeResult {
+    let target = this_node(this)?;
+    let node = argument_node(arguments, 0)?;
+    let kind = node.shared.borrow().document.arena[node.id].kind;
+    if matches!(
+        kind,
+        Kind::Document | Kind::Doctype | Kind::Entity | Kind::Notation
+    ) {
+        return fail_at(
+            context,
+            &target,
+            "DOMDocument::adoptNode",
+            dom_error(9, "Not Supported Error"),
+        );
+    }
+    if kind == Kind::Fragment && !node.shared.borrow().owned {
+        return Ok(Value::Bool(false));
+    }
+    if node.same_document(&target) {
+        node.shared.borrow_mut().remove(node.id);
+        node.wrap(context)
+    } else {
+        transfer(&target, node).wrap(context)
+    }
+}
+
+fn transfer(parent: &Location, child: Location) -> Location {
+    let mut source = child.shared.borrow_mut();
     let (id, mapping) = parent.shared.borrow_mut().document.arena.import_mapping(
         &source.document.arena,
         child.id,
@@ -244,7 +302,7 @@ pub(super) fn adopt_detached(parent: &Location, child: Location) -> Result<Locat
         }
     }
     source.document.arena.detach(child.id);
-    Ok(parent.at(id))
+    parent.at(id)
 }
 
 pub(super) fn argument_node(arguments: &[Value], index: usize) -> Result<Location, NativeError> {

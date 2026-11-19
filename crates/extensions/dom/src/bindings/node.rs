@@ -78,10 +78,13 @@ fn clone_node(context: &mut dyn Context, this: This<'_>, arguments: &[Value]) ->
     .wrap(context)
 }
 
-fn clone_object(source: &std::rc::Rc<Object>, destination: &Object) -> Result<(), NativeError> {
+fn clone_object(
+    source: &std::rc::Rc<Object>,
+    destination: &std::rc::Rc<Object>,
+) -> Result<(), NativeError> {
     let node = super::location(source)?;
     let clone = mutation::duplicate(&node, true);
-    *destination.native.borrow_mut() = Some(Box::new(clone));
+    clone.bind(destination);
     Ok(())
 }
 

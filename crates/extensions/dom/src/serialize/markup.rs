@@ -59,6 +59,59 @@ pub(super) fn html_void(name: &str) -> bool {
     )
 }
 
+pub(super) fn html_block(name: &str) -> bool {
+    matches!(
+        name,
+        "address"
+            | "base"
+            | "blockquote"
+            | "body"
+            | "caption"
+            | "center"
+            | "col"
+            | "colgroup"
+            | "dd"
+            | "dir"
+            | "div"
+            | "dl"
+            | "dt"
+            | "fieldset"
+            | "form"
+            | "frame"
+            | "frameset"
+            | "h1"
+            | "h2"
+            | "h3"
+            | "h4"
+            | "h5"
+            | "h6"
+            | "head"
+            | "hr"
+            | "html"
+            | "isindex"
+            | "li"
+            | "link"
+            | "menu"
+            | "meta"
+            | "noframes"
+            | "noscript"
+            | "ol"
+            | "p"
+            | "pre"
+            | "script"
+            | "style"
+            | "table"
+            | "tbody"
+            | "td"
+            | "tfoot"
+            | "th"
+            | "thead"
+            | "title"
+            | "tr"
+            | "ul"
+    )
+}
+
 pub(super) fn html_boolean(name: &str) -> bool {
     matches!(
         name,

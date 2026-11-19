@@ -12,6 +12,7 @@ mod elements;
 mod encoding;
 mod entities;
 pub(crate) mod names;
+pub(crate) use encoding::supported_encoding;
 
 use std::borrow::Cow;
 use std::collections::HashMap;

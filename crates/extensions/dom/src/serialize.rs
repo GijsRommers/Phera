@@ -10,7 +10,7 @@ mod escape;
 mod markup;
 
 pub use canonical::{CanonicalOptions, canonical};
-use markup::{html_boolean, html_void, push_name, write_doctype};
+use markup::{html_block, html_boolean, html_void, push_name, write_doctype};
 
 use std::fmt::Write;
 
@@ -56,7 +56,7 @@ pub fn save(document: &Document, root: NodeId, options: Options) -> Vec<u8> {
     let serializer = Serializer {
         arena: &document.arena,
         mode: if options.html { Mode::Html } else { Mode::Xml },
-        pretty: document.settings.format && !options.html,
+        pretty: document.settings.format,
         expand_empty: options.expand_empty,
         whole,
         ascii_text: whole && (encoding.is_empty() || encoding.eq_ignore_ascii_case("US-ASCII")),
@@ -171,7 +171,12 @@ impl Serializer<'_> {
                     return;
                 }
                 output.push('>');
-                let block = pretty
+                if html && pretty {
+                    self.formatted_html_children(id, depth, pending, output);
+                    return;
+                }
+                let block = !html
+                    && pretty
                     && node.first_child().is_some()
                     && self.arena.children(id).all(|child| {
                         !matches!(
@@ -232,6 +237,49 @@ impl Serializer<'_> {
                 let _ = write!(output, "&{};", node.name.local);
             }
             Kind::Attribute => self.attribute(node, output),
+        }
+    }
+
+    fn formatted_html_children(
+        &self,
+        id: NodeId,
+        depth: usize,
+        pending: &mut Vec<Action>,
+        output: &mut String,
+    ) {
+        let node = &self.arena[id];
+        let block = html_block(&node.name.local)
+            && node.name.local != "p"
+            && node.first_child() != node.last_child();
+        let text = |id: NodeId| matches!(self.arena[id].kind, Kind::Text | Kind::EntityReference);
+        pending.push(Action::Close {
+            id,
+            depth,
+            indent: false,
+        });
+        if block && node.last_child().is_some_and(|id| !text(id)) {
+            pending.push(Action::Newline);
+        }
+        let mut child = node.last_child();
+        while let Some(id) = child {
+            let entry = &self.arena[id];
+            child = entry.previous_sibling();
+            if block
+                && entry.kind == Kind::Element
+                && html_block(&entry.name.local)
+                && entry.next_sibling().is_some_and(|id| !text(id))
+            {
+                pending.push(Action::Newline);
+            }
+            pending.push(Action::Visit {
+                id,
+                depth,
+                pretty: true,
+                indent: false,
+            });
+        }
+        if block && node.first_child().is_some_and(|id| !text(id)) {
+            output.push('\n');
         }
     }
 

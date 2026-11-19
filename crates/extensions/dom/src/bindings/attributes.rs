@@ -190,7 +190,7 @@ fn names(_: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
     for &attribute in arena[node.id].attributes() {
         let attr = &arena[attribute];
         if attr.name.namespace.as_deref() != Some(XMLNS) {
-            let _ = values.push(Value::from(attr.name.qualified()));
+            let _ = values.push(Value::from(attr.name.local.as_str()));
         }
     }
     Ok(Value::from(values))
@@ -242,7 +242,7 @@ fn set_attribute_node(
                 arena,
                 element.id,
                 &mut name,
-                namespaces::AttributeBinding::Node,
+                namespaces::AttributeBinding::Attach,
             );
             arena[attr.id].name = name;
             arena

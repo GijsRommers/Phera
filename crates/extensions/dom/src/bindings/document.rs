@@ -6,6 +6,7 @@
 //! echo $document->saveXML();
 //! ```
 
+mod html_file;
 pub(super) mod io;
 
 use phera_extension_api::{
@@ -102,6 +103,12 @@ pub(super) fn register(registry: &mut Registry) {
                         const { &[P::new("node", NODE), DEEP] },
                         mutation::import,
                     ),
+                    M::public(
+                        "adoptNode",
+                        const { &[P::new("node", NODE)] },
+                        mutation::adopt,
+                    )
+                    .returning("DOMNode|false"),
                     M::public(
                         "getElementById",
                         const { &[P::new("elementId", T::String)] },

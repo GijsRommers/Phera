@@ -6,6 +6,7 @@
 //! ```
 
 use phera_extension_api::{Context, NativeError, NativeResult, Value};
+use std::collections::HashSet;
 
 use crate::tree::{Kind, Name, Node};
 
@@ -154,7 +155,18 @@ fn change_nodes(
                 if child.shared.borrow().document.arena[child.id].kind == Kind::Attribute {
                     return Err(dom_error(3, "Hierarchy Request Error"));
                 }
-                adopt_detached(node, child)?.id
+                match adopt_detached(node, child) {
+                    Ok(child) => child.id,
+                    Err(error) => {
+                        if arguments.len() > 1 {
+                            let mut state = node.shared.borrow_mut();
+                            for id in nodes {
+                                state.remove(id);
+                            }
+                        }
+                        return Err(error);
+                    }
+                }
             }
             Value::String(value) => node.shared.borrow_mut().document.arena.allocate(Node::new(
                 Kind::Text,
@@ -174,17 +186,24 @@ fn change_nodes(
 
     let mut state = node.shared.borrow_mut();
     let arena = &mut state.document.arena;
+    let moving: HashSet<_> = nodes.iter().copied().collect();
+    let before = std::iter::successors(before, |&id| arena[id].next_sibling())
+        .find(|id| !moving.contains(id));
     for &id in &nodes {
-        if arena[id].kind == Kind::Fragment {
-            for child in arena.children(id) {
-                arena
-                    .check_insert(parent, child, before)
-                    .map_err(super::link_error)?;
-            }
-        } else if arena[id].kind != Kind::Attribute {
+        let valid = if arena[id].kind == Kind::Fragment && id != parent {
             arena
-                .check_insert(parent, id, before)
-                .map_err(super::link_error)?;
+                .children(id)
+                .try_for_each(|child| arena.check_insert(parent, child, before))
+        } else {
+            arena.check_insert(parent, id, before)
+        };
+        if let Err(error) = valid {
+            if arguments.len() > 1 {
+                for id in nodes {
+                    state.remove(id);
+                }
+            }
+            return Err(super::link_error(error));
         }
     }
     if matches!(position, Position::ReplaceChildren) {
@@ -195,8 +214,8 @@ fn change_nodes(
     for &id in &nodes {
         insert_nodes(arena, parent, id, before)?;
     }
-    if matches!(position, Position::Replace) && !nodes.contains(&node.id) {
-        arena.detach(node.id);
+    if matches!(position, Position::Replace) && !moving.contains(&node.id) {
+        state.remove(node.id);
     }
     Ok(true)
 }
@@ -209,6 +228,18 @@ pub(in crate::bindings) fn insert_adjacent_element(
     let node = this_node(this)?;
     let child = argument_node(args, 1)?;
     let position = adjacent_position(args)?;
+    if matches!(position, Position::Before | Position::After)
+        && node.shared.borrow().document.arena[node.id]
+            .parent()
+            .is_none()
+    {
+        return Ok(Value::Null);
+    }
+    let child = if node.same_document(&child) {
+        child
+    } else {
+        super::transfer(&node, child)
+    };
     let method = "DOMElement::insertAdjacentElement";
     match change_nodes(&node, &args[1..], position, method) {
         Ok(true) => {
