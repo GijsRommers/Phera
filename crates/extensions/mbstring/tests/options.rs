@@ -242,17 +242,20 @@ fn settings_matrix() {
             "mb_http_output",
             "mb_regex_encoding",
         ] {
-            m.case(f, vec![Value::from(e)]);
+            let minimum = (e.is_empty() && f == "mb_http_output").then_some(80_513);
+            m.case_with_minimum(f, vec![Value::from(e)], minimum);
         }
         for f in [
             "mb_internal_encoding",
             "mb_http_output",
             "mb_regex_encoding",
         ] {
-            m.case(f, vec![]);
+            let minimum = (e.is_empty() && f == "mb_http_output").then_some(80_513);
+            m.case_with_minimum(f, vec![], minimum);
         }
         for f in ["mb_get_info", "iconv_get_encoding"] {
-            m.case(f, vec![]);
+            let minimum = (e.is_empty() && f == "mb_get_info").then_some(80_513);
+            m.case_with_minimum(f, vec![], minimum);
         }
     }
     m.case("mb_internal_encoding", vec![Value::from("UTF-8")]);

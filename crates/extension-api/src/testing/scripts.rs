@@ -16,11 +16,10 @@
 //! to end job sets it. Both outputs of every run are kept in a directory of
 //! the system's temporary directory, named in the failure message.
 
-use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use super::oracle::{find_php, php_version_id};
+use super::oracle::{find_php, oracle_status, supports_php_since};
 
 /// Which side of a comparison a command runs on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -163,14 +162,7 @@ impl Comparison {
         for script in scripts {
             if let Some(minimum) = minimum_php(script) {
                 versioned += 1;
-                let version = php_version_id().expect("PHP oracle available");
-                if version < minimum {
-                    oracle_status(format_args!(
-                        "SKIP {}: PHP behaviour since {}; oracle is {}",
-                        stem(script),
-                        display_version(minimum),
-                        display_version(version),
-                    ));
+                if !supports_php_since(&stem(script), minimum) {
                     skipped += 1;
                     continue;
                 }
@@ -203,11 +195,6 @@ impl Comparison {
     }
 }
 
-fn oracle_status(message: std::fmt::Arguments<'_>) {
-    // Direct writes keep version skips visible under cargo test's output capture.
-    writeln!(io::stderr().lock(), "{message}").expect("write oracle version status");
-}
-
 fn minimum_php(script: &Path) -> Option<u32> {
     let source = std::fs::read(script).expect("read oracle script");
     String::from_utf8_lossy(&source).lines().find_map(|line| {
@@ -219,10 +206,6 @@ fn minimum_php(script: &Path) -> Option<u32> {
                     .expect("numeric PHP version requirement")
             })
     })
-}
-
-fn display_version(id: u32) -> String {
-    format!("{}.{}.{}", id / 10_000, id / 100 % 100, id % 100)
 }
 
 /// The `.php` files in `directory` whose names start with `prefix`, sorted.

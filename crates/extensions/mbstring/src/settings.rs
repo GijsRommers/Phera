@@ -78,15 +78,14 @@ fn mb_internal_encoding(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
 }
 
 /// `mb_http_output(?string $encoding = null): string|bool`: what
-/// `mb_output_handler` converts to; `"pass"` (or an empty string) leaves
-/// output alone.
+/// `mb_output_handler` converts to; `"pass"` leaves output alone.
 fn mb_http_output(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     let Some(name) = args::string(a, 0) else {
         let current = ctx.state().get_or_default::<Settings>().output;
         return Ok(Value::from(current.map_or("pass", Encoding::name)));
     };
     let name = name.to_string_lossy();
-    let output = if name.is_empty() || name.eq_ignore_ascii_case("pass") {
+    let output = if name == "pass" {
         None
     } else {
         Some(encoding::resolve(&name, "mb_http_output", 1, "encoding")?)
