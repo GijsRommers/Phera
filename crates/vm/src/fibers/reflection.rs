@@ -34,7 +34,7 @@ pub(super) const CLASS: ClassEntry = ClassEntry {
                 cx,
                 object.as_ref(),
                 FiberInspection::File,
-                "ReflectionFiber::getExecutingFile",
+                "ReflectionFiber->getExecutingFile",
                 None,
             )
         })
@@ -44,7 +44,7 @@ pub(super) const CLASS: ClassEntry = ClassEntry {
                 cx,
                 object.as_ref(),
                 FiberInspection::Line,
-                "ReflectionFiber::getExecutingLine",
+                "ReflectionFiber->getExecutingLine",
                 None,
             )
         })
@@ -125,7 +125,7 @@ fn trace(
         context,
         Some(&reflection),
         inspection,
-        "ReflectionFiber::getTrace",
+        "ReflectionFiber->getTrace",
         argument,
     )
 }
