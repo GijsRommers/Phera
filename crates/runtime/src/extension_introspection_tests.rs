@@ -32,7 +32,7 @@ foreach ([{entries}] as $name) {{
         return;
     };
     let unit = phera_compiler::compile(&source, "extension-probe.php").unwrap();
-    let mut vm = runtime.new_vm(phera_ext_http::Sapi::Cli);
+    let mut vm = runtime.new_cli_vm();
     assert_eq!(vm.run(Arc::new(unit)).await, 0);
     let output = String::from_utf8(vm.output).unwrap();
     assert_eq!(output.lines().collect::<Vec<_>>(), expected);

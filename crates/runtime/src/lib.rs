@@ -137,7 +137,7 @@ impl Runtime {
         sink: Option<Box<dyn OutputSink>>,
     ) -> Result<RunResult, RuntimeError> {
         let unit = self.compile_file(path.as_ref()).await?;
-        let mut vm = self.new_vm(&NativeTables::new(self.registry.clone()), Sapi::Cli);
+        let mut vm = self.new_cli_vm();
         vm.set_args(arguments);
         let server =
             environment::cli_server(php_array(self.environment.iter()), path.as_ref(), arguments);
@@ -272,6 +272,10 @@ impl Runtime {
     pub fn dump_file_blocking(&self, path: impl AsRef<Path>) -> Result<String, RuntimeError> {
         let unit = single_threaded_executor()?.block_on(self.compile_file(path))?;
         Ok(unit.to_string())
+    }
+
+    fn new_cli_vm(&self) -> Vm {
+        self.new_vm(&NativeTables::new(self.registry.clone()), Sapi::Cli)
     }
 
     fn new_vm(&self, native: &NativeTables, sapi: Sapi) -> Vm {
