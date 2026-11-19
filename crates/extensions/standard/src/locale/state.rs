@@ -213,16 +213,14 @@ fn locale_name(name: &[u8]) -> Option<PhpString> {
 }
 
 /// CSV character scanning uses the request's LC_CTYPE encoding.
-pub(crate) fn ctype_is_utf8(context: &mut dyn Context) -> bool {
+pub(crate) fn ctype_name(context: &mut dyn Context) -> PhpString {
     let category = Category::Ctype;
-    let name = context
+    context
         .state()
         .get::<Option<RequestLocale>>()
         .and_then(Option::as_ref)
         .map(|state| state.get(category).clone())
-        .unwrap_or_else(|| environment_locale(context, Some(category), Environment::Startup));
-    let name = name.to_string_lossy().to_ascii_lowercase();
-    name.contains("utf-8") || name.contains("utf8")
+        .unwrap_or_else(|| environment_locale(context, Some(category), Environment::Startup))
 }
 
 pub(super) fn c_string(bytes: &[u8]) -> &[u8] {

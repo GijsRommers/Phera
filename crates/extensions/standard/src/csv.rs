@@ -11,6 +11,10 @@ use phera_extension_api::{
     Registry, Value, args,
 };
 
+mod encoding;
+
+use encoding::Encoding;
+
 pub const SEPARATOR: Param =
     Param::new("separator", ParamType::String).with_default(ConstantValue::String(","));
 pub const ENCLOSURE: Param =
@@ -38,7 +42,7 @@ pub struct Dialect {
     separator: u8,
     enclosure: u8,
     escape: Option<u8>,
-    utf8: bool,
+    encoding: Encoding,
 }
 
 impl Dialect {
@@ -75,7 +79,7 @@ impl Dialect {
             separator,
             enclosure,
             escape,
-            utf8: crate::locale::ctype_is_utf8(context),
+            encoding: Encoding::for_locale(crate::locale::ctype_name(context).as_bytes()),
         })
     }
 
@@ -115,7 +119,7 @@ impl Dialect {
         mut line: Vec<u8>,
         mut next_line: impl FnMut() -> io::Result<Vec<u8>>,
     ) -> io::Result<Vec<Option<Vec<u8>>>> {
-        let mut end = line_end(&line);
+        let mut end = self.encoding.line_end(&line);
         if end == 0 {
             return Ok(vec![None]);
         }
@@ -129,7 +133,7 @@ impl Dialect {
             }
             let quoted = leading < end
                 && line[leading] == self.enclosure
-                && self.character_width(&line[leading..end]) == 1;
+                && self.encoding.character_width(&line[leading..end]) == 1;
             if quoted {
                 offset = leading + 1;
                 loop {
@@ -137,19 +141,19 @@ impl Dialect {
                         field.extend_from_slice(&line[end..]);
                         line = next_line()?;
                         offset = 0;
-                        end = line_end(&line);
+                        end = self.encoding.line_end(&line);
                         if line.is_empty() {
                             break;
                         }
                         continue;
                     }
-                    let width = self.character_width(&line[offset..end]);
+                    let width = self.encoding.character_width(&line[offset..end]);
                     let byte = line[offset];
                     offset += width;
                     if width == 1 && byte == self.enclosure {
                         if offset < end
                             && line[offset] == self.enclosure
-                            && self.character_width(&line[offset..end]) == 1
+                            && self.encoding.character_width(&line[offset..end]) == 1
                         {
                             offset += 1;
                         } else {
@@ -157,7 +161,7 @@ impl Dialect {
                         }
                     } else if width == 1 && Some(byte) == self.escape && offset < end {
                         field.push(byte);
-                        let after = offset + self.character_width(&line[offset..end]);
+                        let after = offset + self.encoding.character_width(&line[offset..end]);
                         field.extend_from_slice(&line[offset..after]);
                         offset = after;
                         continue;
@@ -167,7 +171,7 @@ impl Dialect {
             }
             let start = offset;
             while offset < end {
-                let width = self.character_width(&line[offset..end]);
+                let width = self.encoding.character_width(&line[offset..end]);
                 if width == 1 && line[offset] == self.separator {
                     break;
                 }
@@ -177,34 +181,13 @@ impl Dialect {
             field.extend_from_slice(if quoted {
                 rest
             } else {
-                &rest[..line_end(rest)]
+                &rest[..self.encoding.line_end(rest)]
             });
             fields.push(Some(field));
             if offset == end {
                 return Ok(fields);
             }
             offset += 1;
-        }
-    }
-
-    /// PHP tests delimiter bytes only at character boundaries in a UTF-8 locale.
-    fn character_width(&self, input: &[u8]) -> usize {
-        if !self.utf8 {
-            return 1;
-        }
-        let width = match input.first() {
-            Some(0xC2..=0xDF) => 2,
-            Some(0xE0..=0xEF) => 3,
-            Some(0xF0..=0xF4) => 4,
-            _ => return 1,
-        };
-        if input
-            .get(..width)
-            .is_some_and(|bytes| std::str::from_utf8(bytes).is_ok())
-        {
-            width
-        } else {
-            1
         }
     }
 }
@@ -241,11 +224,6 @@ fn byte(
             index + 1
         ))),
     }
-}
-
-fn line_end(line: &[u8]) -> usize {
-    let trimmed = line.strip_suffix(b"\n").unwrap_or(line);
-    trimmed.strip_suffix(b"\r").unwrap_or(trimmed).len()
 }
 
 fn space(byte: u8) -> bool {

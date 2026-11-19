@@ -17,7 +17,7 @@ use phera_extension_api::{
 
 mod state;
 
-pub(crate) use state::ctype_is_utf8;
+pub(crate) use state::ctype_name;
 use state::{ALL_ID, Category, c_string, select};
 
 pub(crate) fn register(registry: &mut Registry) {
