@@ -16,6 +16,8 @@
 
 use std::path::{Path, PathBuf};
 
+use tempfile::TempPath;
+
 use phera_extension_api::{
     Context, FunctionEntry, NativeResult, Param, ParamType, Registry, Value, WorkingDirectory, args,
 };
@@ -24,25 +26,28 @@ use phera_extension_api::{
 /// moved yet.
 #[derive(Default)]
 pub struct UploadedFiles {
-    waiting: Vec<PathBuf>,
+    waiting: Vec<TempPath>,
 }
 
 impl UploadedFiles {
-    pub fn new(waiting: Vec<PathBuf>) -> UploadedFiles {
+    pub fn new(waiting: Vec<TempPath>) -> UploadedFiles {
         UploadedFiles { waiting }
     }
 
     fn holds(&self, path: &Path) -> bool {
-        self.waiting.iter().any(|waiting| waiting == path)
+        self.waiting.iter().any(|waiting| &**waiting == path)
     }
 
     fn forget(&mut self, path: &Path) {
-        self.waiting.retain(|waiting| waiting != path);
-    }
-
-    /// The files nobody moved. The runtime deletes them after the request.
-    pub fn into_unclaimed(self) -> Vec<PathBuf> {
-        self.waiting
+        self.waiting.retain_mut(|waiting| {
+            if &**waiting == path {
+                // The move succeeded. Drop must leave the original path alone.
+                waiting.disable_cleanup(true);
+                false
+            } else {
+                true
+            }
+        });
     }
 }
 

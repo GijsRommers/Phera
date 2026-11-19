@@ -19,11 +19,11 @@
 //! ([`Form::into_variables`]), because PHP values never change threads.
 
 use std::io::Write;
-use std::path::PathBuf;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
+use tempfile::TempPath;
 
 use phera_value::{PhpArray, Value};
 
@@ -61,7 +61,7 @@ struct Upload {
     field: Vec<u8>,
     filename: Vec<u8>,
     content_type: Vec<u8>,
-    temporary: Option<PathBuf>,
+    temporary: Option<TempPath>,
     error: UploadError,
     size: u64,
 }
@@ -175,7 +175,7 @@ fn store(
 
 /// Writes `content` to a new file `php??????` in the temporary directory,
 /// readable by this user only.
-fn write_temporary(content: &[u8], cancelled: &AtomicBool) -> std::io::Result<PathBuf> {
+fn write_temporary(content: &[u8], cancelled: &AtomicBool) -> std::io::Result<TempPath> {
     let mut file = tempfile::Builder::new()
         .prefix("php")
         .rand_bytes(6)
@@ -187,10 +187,8 @@ fn write_temporary(content: &[u8], cancelled: &AtomicBool) -> std::io::Result<Pa
         file.write_all(chunk)?;
     }
     file.flush()?;
-    // From here on the file stays until `move_uploaded_file()` takes it or
-    // the request ends.
-    let (_, path) = file.keep().map_err(|kept| kept.error)?;
-    Ok(path)
+    // Keep ownership with the form while it is handed to the request.
+    Ok(file.into_temp_path())
 }
 
 /// The name without the directories a client may have sent with it, with
@@ -205,7 +203,7 @@ fn base_name(filename: &[u8]) -> &[u8] {
 
 impl Form {
     /// Builds `$_POST` and `$_FILES`, and lists the temporary files.
-    pub(crate) fn into_variables(self) -> (PhpArray, PhpArray, Vec<PathBuf>) {
+    pub(crate) fn into_variables(self) -> (PhpArray, PhpArray, Vec<TempPath>) {
         let mut post = PhpArray::new();
         let mut files = PhpArray::new();
         let mut temporary = Vec::new();

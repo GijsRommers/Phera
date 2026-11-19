@@ -241,21 +241,6 @@ impl Runtime {
         let exit_status = vm.run(unit).await;
         let head = vm.state_mut().take::<ResponseHead>().unwrap_or_default();
 
-        // What the script did not move is deleted, as PHP does.
-        let unclaimed = vm
-            .state_mut()
-            .take::<UploadedFiles>()
-            .map(UploadedFiles::into_unclaimed)
-            .unwrap_or_default();
-        if !unclaimed.is_empty() {
-            let _ = tokio::task::spawn_blocking(move || {
-                for file in unclaimed {
-                    let _ = std::fs::remove_file(file);
-                }
-            })
-            .await;
-        }
-
         let mut response = HttpResponse {
             status: head.status,
             headers: head.headers,

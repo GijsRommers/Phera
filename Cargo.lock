@@ -1787,6 +1787,7 @@ dependencies = [
  "chrono",
  "phera-ext-streams",
  "phera-extension-api",
+ "tempfile",
  "tokio",
 ]
 
