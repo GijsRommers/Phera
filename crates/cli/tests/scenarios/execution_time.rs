@@ -28,7 +28,7 @@ while (true) {}
             ),
         ],
         ".",
-        &["--request-timeout", "45"],
+        &["--request-timeout", "45", "--dev", "-d", "html_errors=0"],
     );
 
     thread::scope(|scope| {

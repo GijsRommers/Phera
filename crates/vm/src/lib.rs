@@ -57,6 +57,7 @@ mod control_flow;
 mod debug_info;
 mod declaration_diagnostics;
 mod default_autoload;
+mod diagnostic_output;
 mod diagnostic_reporter;
 mod diagnostics;
 mod dimension_instructions;

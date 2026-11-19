@@ -3,7 +3,7 @@
 use phera_extension_api::{NativeError, Unwind};
 use phera_value::{ArrayKey, PhpArray, PhpString, Value};
 
-use crate::{Vm, diagnostics::SourceLocation};
+use crate::{Vm, diagnostic_output::DiagnosticPhase, diagnostics::SourceLocation};
 
 pub(crate) struct LastError {
     pub(crate) level: i64,
@@ -40,6 +40,20 @@ impl LastError {
 }
 
 impl Vm {
+    /// Reports a warning produced while PHP reads the request before running its script.
+    pub fn request_startup_warning(&mut self, message: &str) {
+        self.emit_diagnostic(
+            DiagnosticPhase::RequestStartup,
+            2,
+            "Warning",
+            message.into(),
+            SourceLocation {
+                file: "Unknown".into(),
+                line: 0,
+            },
+        );
+    }
+
     pub(crate) fn report_fatal(
         &mut self,
         level: i64,
@@ -141,38 +155,7 @@ impl Vm {
         message: PhpString,
         location: SourceLocation,
     ) {
-        if self.error_handlers.reporting & level != 0 {
-            let trace = self.error_handlers.fatal_trace.as_ref().map(|trace| {
-                crate::exception_rendering::render_trace(
-                    trace,
-                    self.error_handlers.trace_string_limit,
-                )
-            });
-            if self.error_handlers.log_errors && self.diagnostic_reporter.is_visible() {
-                use std::io::Write;
-
-                let mut log = std::io::stderr().lock();
-                let _ = write!(log, "PHP {kind}:  ");
-                let _ = log.write_all(message.as_bytes());
-                let _ = write!(log, " in {} on line {}", location.file, location.line);
-                if let Some(trace) = &trace {
-                    let _ = write!(log, "\nStack trace:\n{trace}");
-                }
-                let _ = writeln!(log);
-            }
-            if self.error_handlers.display_errors
-                && let Some(bytes) = self.diagnostic_reporter.report(
-                    kind,
-                    message.as_bytes(),
-                    &location.file,
-                    location.line,
-                    trace.as_deref(),
-                )
-            {
-                self.out(&bytes);
-            }
-        }
-        self.record_last_error(level, message, location);
+        self.emit_diagnostic(DiagnosticPhase::Running, level, kind, message, location);
     }
 
     pub(crate) fn record_last_error(

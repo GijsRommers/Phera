@@ -97,6 +97,9 @@ impl Compiler<'_> {
     ) -> Result<(), CompileError> {
         for value in variables {
             if let ast::Variable::Named(name) = value {
+                if name == "this" {
+                    return Err(self.error("Cannot use $this as global variable", line));
+                }
                 let local = self.local(name)?;
                 self.emit(
                     Instruction::Global {

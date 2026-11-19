@@ -31,10 +31,13 @@ fn read(
     let location = match location(object) {
         Ok(location) => location,
         Err(_)
-            if matches!(
-                mode,
-                NativePropertyRead::Isset | NativePropertyRead::Quiet | NativePropertyRead::Exists
-            ) =>
+            if !known(uninitialized_kind(object), name)
+                || matches!(
+                    mode,
+                    NativePropertyRead::Isset
+                        | NativePropertyRead::Quiet
+                        | NativePropertyRead::Exists
+                ) =>
         {
             return Ok(None);
         }
@@ -47,7 +50,31 @@ fn read(
     if matches!(mode, NativePropertyRead::Exists) {
         return Ok(Some(Value::Null));
     }
+    if kind == Kind::Entity && matches!(name, "actualEncoding" | "encoding" | "version") {
+        context.deprecated(format!("Property DOMEntity::${name} is deprecated"));
+        return Ok(Some(Value::Null));
+    }
+    if kind == Kind::Document && name == "config" {
+        context.deprecated("Property DOMDocument::$config is deprecated".into());
+    }
     value(context, &location, name).map(Some)
+}
+
+fn uninitialized_kind(object: &Object) -> Kind {
+    [
+        ("DOMDocument", Kind::Document),
+        ("DOMElement", Kind::Element),
+        ("DOMAttr", Kind::Attribute),
+        ("DOMCharacterData", Kind::Text),
+        ("DOMProcessingInstruction", Kind::ProcessingInstruction),
+        ("DOMDocumentType", Kind::Doctype),
+        ("DOMDocumentFragment", Kind::Fragment),
+        ("DOMEntity", Kind::Entity),
+        ("DOMNotation", Kind::Notation),
+    ]
+    .into_iter()
+    .find_map(|(class, kind)| object.class.is_instance_of(class).then_some(kind))
+    .unwrap_or(Kind::EntityReference)
 }
 
 pub(super) fn known(kind: Kind, name: &str) -> bool {
@@ -74,7 +101,11 @@ pub(super) fn known(kind: Kind, name: &str) -> bool {
         | "resolveExternals"
         | "preserveWhiteSpace"
         | "recover"
-        | "substituteEntities" => kind == Kind::Document,
+        | "substituteEntities" => {
+            kind == Kind::Document
+                || (kind == Kind::Entity
+                    && matches!(name, "actualEncoding" | "encoding" | "version"))
+        }
         "firstElementChild" | "lastElementChild" | "childElementCount" => {
             matches!(kind, Kind::Document | Kind::Element | Kind::Fragment)
         }
@@ -95,9 +126,9 @@ pub(super) fn known(kind: Kind, name: &str) -> bool {
         "length" => matches!(kind, Kind::Text | Kind::Cdata | Kind::Comment),
         "wholeText" => matches!(kind, Kind::Text | Kind::Cdata),
         "target" => kind == Kind::ProcessingInstruction,
-        "publicId" | "systemId" | "internalSubset" | "entities" | "notations" => {
-            kind == Kind::Doctype
-        }
+        "publicId" | "systemId" => matches!(kind, Kind::Doctype | Kind::Entity | Kind::Notation),
+        "notationName" => kind == Kind::Entity,
+        "internalSubset" | "entities" | "notations" => kind == Kind::Doctype,
         _ => false,
     }
 }
@@ -111,7 +142,8 @@ fn value(context: &mut dyn Context, location: &Location, property: &str) -> Nati
             return collection::attributes(context, location.clone());
         }
         "implementation" => return context.create_object("DOMImplementation", PhpArray::new()),
-        "entities" | "notations" => return collection::attributes(context, location.clone()),
+        "entities" => return collection::declarations(context, location.clone(), Kind::Entity),
+        "notations" => return collection::declarations(context, location.clone(), Kind::Notation),
         _ => {}
     }
     let state = location.shared.borrow();
@@ -135,9 +167,12 @@ fn value(context: &mut dyn Context, location: &Location, property: &str) -> Nati
         "nodeType" => Value::Int(match node.kind {
             Kind::Element => 1,
             Kind::Attribute => 2,
+            Kind::Namespace => 18,
             Kind::Text => 3,
             Kind::Cdata => 4,
             Kind::EntityReference => 5,
+            Kind::Entity => 17,
+            Kind::Notation => 12,
             Kind::ProcessingInstruction => 7,
             Kind::Comment => 8,
             Kind::Document if settings.html => 13,
@@ -145,7 +180,17 @@ fn value(context: &mut dyn Context, location: &Location, property: &str) -> Nati
             Kind::Doctype => 10,
             Kind::Fragment => 11,
         }),
-        "nodeValue" if matches!(node.kind, Kind::Document | Kind::Doctype | Kind::Fragment) => {
+        "nodeValue"
+            if matches!(
+                node.kind,
+                Kind::Document
+                    | Kind::Doctype
+                    | Kind::Fragment
+                    | Kind::Entity
+                    | Kind::EntityReference
+                    | Kind::Notation
+            ) =>
+        {
             Value::Null
         }
         "nodeValue" | "textContent" => Value::from(text(arena, id)),
@@ -176,6 +221,19 @@ fn value(context: &mut dyn Context, location: &Location, property: &str) -> Nati
         "recover" => Value::Bool(settings.recover),
         "substituteEntities" => Value::Bool(settings.substitute_entities),
         "childElementCount" => Value::Int(elements(arena, id).count() as i64),
+        "publicId" | "systemId" | "notationName" if node.dtd_entry.is_some() => {
+            let entry = node.dtd_entry.as_deref();
+            let field = entry.and_then(|entry| match property {
+                "publicId" => entry.public_id.as_deref(),
+                "systemId" => entry.system_id.as_deref(),
+                _ => entry.notation.as_deref(),
+            });
+            match field {
+                Some(value) => Value::from(value),
+                None if node.kind == Kind::Notation => Value::from(""),
+                None => Value::Null,
+            }
+        }
         "publicId" => Value::from(
             node.doctype
                 .as_ref()
@@ -201,11 +259,16 @@ fn related(location: &Location, property: &str) -> Option<Option<NodeId>> {
     let id = location.id;
     let node = &arena[id];
     Some(match property {
+        "parentNode" if node.kind == Kind::Notation => None,
         "parentNode" => node.parent(),
         "ownerElement" | "parentElement" => {
             node.parent().filter(|&id| arena[id].kind == Kind::Element)
         }
-        "ownerDocument" => (node.kind != Kind::Document && state.owned).then_some(Arena::DOCUMENT),
+        "ownerDocument" => (!matches!(node.kind, Kind::Document | Kind::Notation) && state.owned)
+            .then_some(Arena::DOCUMENT),
+        "firstChild" | "lastChild" if node.kind == Kind::EntityReference => {
+            arena.reference_declaration(id)
+        }
         "firstChild" => node.first_child(),
         "lastChild" => node.last_child(),
         "firstElementChild" | "documentElement" => elements(arena, id).next(),

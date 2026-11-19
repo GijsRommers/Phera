@@ -4,6 +4,7 @@
 mod scenarios {
     mod code_cache;
     mod compression;
+    mod diagnostics;
     mod environment;
     mod execution_time;
     mod limits;
@@ -13,6 +14,7 @@ mod scenarios {
     mod request_headers;
     mod request_parse_body;
     mod session;
+    mod spl_policy;
     mod static_files;
     mod uploads;
 }

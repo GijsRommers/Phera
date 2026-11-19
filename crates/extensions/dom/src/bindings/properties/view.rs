@@ -89,7 +89,9 @@ pub(in crate::bindings) fn view(
     if purpose != PropertyPurpose::Debug {
         return Ok(table);
     }
-    let location = location(object)?;
+    let Ok(location) = location(object) else {
+        return Ok(table);
+    };
     let (kind, owned) = {
         let state = location.shared.borrow();
         (state.document.arena[location.id].kind, state.owned)
@@ -98,6 +100,7 @@ pub(in crate::bindings) fn view(
         Kind::Document => (DOCUMENT, &[]),
         Kind::Element => (ELEMENT, &[]),
         Kind::Attribute => (ATTRIBUTE, &[]),
+        Kind::Namespace => (&[], &[]),
         Kind::Text | Kind::Cdata => (&["wholeText"], DATA),
         Kind::Comment => (DATA, &[]),
         Kind::Fragment => (
@@ -117,6 +120,18 @@ pub(in crate::bindings) fn view(
         ),
         Kind::ProcessingInstruction => (&["target", "data"], &[]),
         Kind::EntityReference => (&[], &[]),
+        Kind::Entity => (
+            &[
+                "publicId",
+                "systemId",
+                "notationName",
+                "actualEncoding",
+                "encoding",
+                "version",
+            ],
+            &[],
+        ),
+        Kind::Notation => (&["publicId", "systemId"], &[]),
     };
     for &name in primary.iter().chain(inherited).chain(NODE) {
         if name == "ownerDocument" && !owned {

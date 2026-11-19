@@ -79,7 +79,7 @@ impl Vm {
 
     /// Fatal traces describe heap frames; unwinding never relies on a Rust panic.
     pub(crate) fn unwind(&mut self, error: NativeError) {
-        self.diagnostic_reporter.end_all_silence();
+        self.restore_silence(0);
         let error = self.materialize_error(error);
         match error {
             NativeError::Throw { class, message, .. } => {

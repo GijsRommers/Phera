@@ -27,8 +27,9 @@ pub(super) fn write_doctype(node: &Node, output: &mut String) {
             }
             let _ = write!(output, " \"{}\"", doctype.system_id);
         }
-        if let Some(subset) = &doctype.internal_subset {
-            let _ = write!(output, " [\n{subset}]");
+        if !doctype.notations.is_empty() || doctype.internal_subset.is_some() {
+            let subset = doctype.internal_subset.as_deref().unwrap_or_default();
+            let _ = write!(output, " [\n{}{subset}]", doctype.notations);
         }
     }
     output.push('>');
@@ -55,6 +56,79 @@ pub(super) fn html_void(name: &str) -> bool {
             | "source"
             | "track"
             | "wbr"
+    )
+}
+
+pub(super) fn html5_void(name: &str) -> bool {
+    matches!(
+        name,
+        "area"
+            | "base"
+            | "br"
+            | "col"
+            | "embed"
+            | "hr"
+            | "img"
+            | "input"
+            | "link"
+            | "meta"
+            | "param"
+            | "source"
+            | "track"
+            | "wbr"
+    )
+}
+
+pub(super) fn html_block(name: &str) -> bool {
+    matches!(
+        name,
+        "address"
+            | "base"
+            | "blockquote"
+            | "body"
+            | "caption"
+            | "center"
+            | "col"
+            | "colgroup"
+            | "dd"
+            | "dir"
+            | "div"
+            | "dl"
+            | "dt"
+            | "fieldset"
+            | "form"
+            | "frame"
+            | "frameset"
+            | "h1"
+            | "h2"
+            | "h3"
+            | "h4"
+            | "h5"
+            | "h6"
+            | "head"
+            | "hr"
+            | "html"
+            | "isindex"
+            | "li"
+            | "link"
+            | "menu"
+            | "meta"
+            | "noframes"
+            | "noscript"
+            | "ol"
+            | "p"
+            | "pre"
+            | "script"
+            | "style"
+            | "table"
+            | "tbody"
+            | "td"
+            | "tfoot"
+            | "th"
+            | "thead"
+            | "title"
+            | "tr"
+            | "ul"
     )
 }
 

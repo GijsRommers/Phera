@@ -81,10 +81,14 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
     if let Some(request_timeout) = options.request_timeout {
         config.request_timeout = request_timeout;
     }
+    if let Some(request_read_timeout) = options.request_read_timeout {
+        config.request_read_timeout = request_read_timeout;
+    }
     let workers = config.workers;
 
     let runtime = Runtime::with_environment(loaded.environment)
         .with_startup_ini(options.ini)
+        .with_web_development(options.dev)
         .without_web_processes(options.no_process);
     let preload = if options.preload || settings.preload {
         match runtime.preload_composer(&project) {

@@ -130,6 +130,9 @@ fn whitespace(_: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult 
 
 fn append_xml(context: &mut dyn Context, this: This<'_>, args: &[Value]) -> NativeResult {
     let target = this_node(this)?;
+    if !target.shared.borrow().owned {
+        return Err(dom_error(7, "No Modification Allowed Error"));
+    }
     let data = phera_extension_api::args::bytes(args, 0);
     if data.is_empty() {
         return Ok(Value::Bool(true));

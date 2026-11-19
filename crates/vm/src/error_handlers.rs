@@ -48,8 +48,6 @@ pub(crate) struct ErrorHandlers {
     pub(crate) last_error: Option<crate::last_error::LastError>,
     pub(crate) fatal_trace: Option<Value>,
     pub(crate) fatal_error_backtraces: bool,
-    pub(crate) display_errors: bool,
-    pub(crate) log_errors: bool,
     pub(crate) trace_ignore_args: bool,
     /// PHP formats saved trace strings using the current request limit, not creation-time text.
     pub(crate) trace_string_limit: usize,
@@ -70,8 +68,6 @@ impl Default for ErrorHandlers {
             last_error: None,
             fatal_trace: None,
             fatal_error_backtraces: true,
-            display_errors: true,
-            log_errors: false,
             trace_ignore_args: false,
             trace_string_limit: 15,
         }

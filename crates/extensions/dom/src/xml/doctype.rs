@@ -1,46 +1,55 @@
-//! Preserve a DOCTYPE and collect internal general-entity declarations.
+//! Preserve the internal subset while keeping external identifiers inert.
 //!
 //! ```php
 //! echo $document->doctype->internalSubset;
 //! ```
 
-use super::{Parser, entities::quoted};
+use super::{Parser, declarations, dtd};
 use crate::document::ParseError;
-use crate::tree::{Doctype, Kind, NodeId};
+use crate::tree::{Doctype, DtdEntry, Kind, Node, NodeId};
 
 impl Parser<'_> {
     pub(super) fn add_doctype(&mut self, text: &str, line: usize) -> Result<(), ParseError> {
-        let (name, rest) = text
-            .trim()
-            .split_once([' ', '\r', '\t', '\n', '['])
-            .unwrap_or((text, ""));
-        let tail = text.trim().get(name.len()..).unwrap_or(rest).trim();
-        let (external, subset) = match tail.split_once('[') {
-            Some((external, subset)) => (external.trim(), subset.trim_end().strip_suffix(']')),
-            None => (tail, None),
-        };
-
-        let mut doctype = Doctype::default();
-        if let Some(data) = external.strip_prefix("PUBLIC").map(str::trim_start)
-            && let Some((public, rest)) = quoted(data)
-        {
-            doctype.public_id = public.into();
-            if let Some((system, _)) = quoted(rest.trim_start()) {
-                doctype.system_id = system.into();
-            }
-        } else if let Some(data) = external.strip_prefix("SYSTEM").map(str::trim_start)
-            && let Some((system, _)) = quoted(data)
-        {
-            doctype.system_id = system.into();
+        let text = text.trim();
+        let end = text
+            .find([' ', '\r', '\t', '\n', '['])
+            .unwrap_or(text.len());
+        let (name, rest) = text.split_at(end);
+        let mut tail = rest.trim();
+        let mut external = DtdEntry::default();
+        if let Some(rest) = declarations::external(tail, &mut external) {
+            tail = rest.trim();
         }
-        doctype.internal_subset = subset.map(|subset| self.read_subset(subset));
-        let id: NodeId = self.add(Kind::Doctype, name, "", line)?;
-        self.document.arena[id].doctype = Some(doctype);
+
+        let mut doctype = Doctype {
+            public_id: external.public_id.unwrap_or_default(),
+            system_id: external.system_id.unwrap_or_default(),
+            ..Doctype::default()
+        };
+        let id = self.add(Kind::Doctype, name, "", line)?;
+        if let Some(subset) = tail
+            .strip_prefix('[')
+            .and_then(|value| value.strip_suffix(']'))
+        {
+            let declarations = self.read_subset(id, subset, &mut doctype.notations);
+            if !declarations.is_empty() {
+                doctype.internal_subset = Some(declarations);
+            }
+        }
+        for (element, attribute, value) in self.attribute_rules.defaults() {
+            let value = self.entities.attribute(value, true)?.text;
+            doctype
+                .attribute_defaults
+                .entry(element.into())
+                .or_default()
+                .push((attribute.into(), value));
+        }
+        self.document.arena[id].doctype = Some(Box::new(doctype));
         self.doctype = true;
         Ok(())
     }
 
-    fn read_subset(&mut self, mut subset: &str) -> String {
+    fn read_subset(&mut self, id: NodeId, mut subset: &str, notations: &mut String) -> String {
         let mut serialized = String::new();
         while let Some(start) = subset.find('<') {
             subset = &subset[start..];
@@ -51,16 +60,57 @@ impl Parser<'_> {
             };
             let Some(end) = end else { break };
             let (declaration, rest) = subset.split_at(end);
-            if let Some(data) = declaration.strip_prefix("<!ENTITY") {
-                self.entities.declare(data.trim_end_matches('>'));
-            } else if let Some(data) = declaration.strip_prefix("<!ATTLIST") {
-                self.attribute_rules.declare(data.trim_end_matches('>'));
-            }
-            serialized.push_str(declaration);
-            serialized.push('\n');
+            self.read_declaration(id, declaration, notations, &mut serialized);
             subset = rest;
         }
         serialized
+    }
+
+    fn read_declaration(
+        &mut self,
+        id: NodeId,
+        declaration: &str,
+        notations: &mut String,
+        serialized: &mut String,
+    ) {
+        let data = declaration.strip_suffix('>').unwrap_or(declaration);
+        if let Some(data) = data.strip_prefix("<!ENTITY") {
+            self.entities.declare(data);
+            if let Some((markup, node)) = declarations::entity(data) {
+                serialized.push_str(&markup);
+                if let Some(node) = node {
+                    self.add_entry(id, node);
+                }
+                return;
+            }
+        } else if let Some(data) = data.strip_prefix("<!ATTLIST") {
+            self.attribute_rules.declare(data, serialized);
+            return;
+        } else if let Some(data) = data.strip_prefix("<!ELEMENT")
+            && dtd::write_element(data, serialized)
+        {
+            return;
+        } else if let Some(data) = data.strip_prefix("<!NOTATION")
+            && let Some((markup, node)) = declarations::notation(data)
+        {
+            notations.push_str(&markup);
+            self.add_entry(id, node);
+            return;
+        }
+        serialized.push_str(declaration);
+        serialized.push('\n');
+    }
+
+    fn add_entry(&mut self, owner: NodeId, node: Node) {
+        let arena = &mut self.document.arena;
+        if arena
+            .children(owner)
+            .any(|id| arena[id].kind == node.kind && arena[id].name == node.name)
+        {
+            return;
+        }
+        let id = arena.allocate(node);
+        let _ = arena.insert(owner, id, None);
     }
 }
 

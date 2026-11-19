@@ -3,11 +3,12 @@
 use std::rc::Rc;
 
 use phera_extension_api::serialization::{
-    EnumCaseLookup, INCOMPLETE_CLASS, INCOMPLETE_CLASS_NAME, SerializationClass,
+    ActiveLegacyUnserialize, ActiveUnserializePolicy, EnumCaseLookup, INCOMPLETE_CLASS,
+    INCOMPLETE_CLASS_NAME, SerializationClass, resolve_unserialize_class,
 };
 use phera_extension_api::{ArrayKey, Context, NativeError, Object, Value};
 
-use super::{BuildResult, Container, Decoder, Failure, graph::Place};
+use super::{BuildResult, Container, Decoder, Delayed, Failure, graph::Place};
 use crate::wire::ObjectFormat;
 
 impl<'a> Decoder<'a> {
@@ -43,13 +44,7 @@ impl<'a> Decoder<'a> {
                 let object = allocate(context, name)?;
                 self.graph.value(place, Value::Object(object.clone()));
                 if custom {
-                    context
-                        .call_serialization_method(
-                            object,
-                            "unserialize",
-                            vec![Value::from(payload)],
-                        )
-                        .await?;
+                    self.decode_custom_payload(context, object, payload).await?;
                 } else if info.is_none() {
                     object.set(ArrayKey::str(INCOMPLETE_CLASS_NAME), Value::from(class));
                 }
@@ -63,9 +58,8 @@ impl<'a> Decoder<'a> {
                     context.warning(format!("Erroneous data format for unserializing '{name}'"));
                     return Err(Failure::Parse);
                 }
-                let limit = self.options.max_depth;
                 if !self.tracks_references
-                    && (limit == 0 || self.frames.len() < limit)
+                    && !self.options.depth_exceeded(self.frames.len())
                     && let Some(layout) = info.as_ref().and_then(|info| info.plain.as_ref())
                     && let Some(object) =
                         super::plain_object::read(context, &mut self.reader, layout, count)
@@ -89,6 +83,30 @@ impl<'a> Decoder<'a> {
         Ok(())
     }
 
+    async fn decode_custom_payload(
+        &mut self,
+        context: &mut dyn Context,
+        object: Rc<Object>,
+        payload: &[u8],
+    ) -> Result<(), NativeError> {
+        let mut policy = self.options.clone();
+        policy.depth += self.frames.len();
+        let previous_policy = ActiveUnserializePolicy::replace(context, Some(policy));
+        let slots = (!context.is_user_method(&object, "unserialize"))
+            .then(|| self.graph.legacy_object_slots(payload));
+        let previous_slots = ActiveLegacyUnserialize::replace(context, slots);
+        let result = context
+            .call_serialization_method(object, "unserialize", vec![Value::from(payload)])
+            .await;
+        if let Some(mut slots) = ActiveLegacyUnserialize::replace(context, previous_slots) {
+            self.delayed
+                .extend(slots.hooks.drain(..).map(Delayed::Legacy));
+            self.graph.import_legacy_object_slots(slots);
+        }
+        ActiveUnserializePolicy::replace(context, previous_policy);
+        result.map(|_| ())
+    }
+
     async fn class_info(
         &mut self,
         context: &mut dyn Context,
@@ -99,16 +117,7 @@ impl<'a> Decoder<'a> {
         {
             return Ok(Some(class.clone()));
         }
-        if !self.options.allows(spelling) {
-            return Ok(None);
-        }
-        let Ok(name) = std::str::from_utf8(spelling) else {
-            return Ok(None);
-        };
-        let resolved = match context.serialization_class(name).await? {
-            Some(class) => Some(class),
-            None => context.unserialize_class_callback(name).await?,
-        };
+        let resolved = resolve_unserialize_class(context, spelling, &self.options).await?;
         let resolved = resolved.map(Rc::new);
         if let Some(class) = &resolved {
             self.last_class = Some((spelling, class.clone()));

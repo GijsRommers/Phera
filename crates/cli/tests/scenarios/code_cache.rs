@@ -22,6 +22,31 @@ try {
 "#;
 
 #[test]
+fn development_mode_rechecks_entry_and_includes_on_the_next_request() {
+    let served = Served::start_in(
+        "development-cache",
+        1,
+        &[
+            ("index.php", "<?php require __DIR__ . '/part.php';"),
+            ("part.php", "<?php echo 'original';"),
+        ],
+        ".",
+        &[
+            "--dev",
+            "-d",
+            "opcache.validate_timestamps=0",
+            "-d",
+            "opcache.revalidate_freq=60",
+        ],
+    );
+    assert_eq!(served.get("/route"), (200, "original".into()));
+    std::fs::write(served.root.join("part.php"), "<?php echo 'edited';").unwrap();
+    assert_eq!(served.get("/route"), (200, "edited".into()));
+    std::fs::write(served.root.join("index.php"), "<?php echo 'new entry';").unwrap();
+    assert_eq!(served.get("/route"), (200, "new entry".into()));
+}
+
+#[test]
 fn edited_added_and_deleted_includes_are_rechecked() {
     let served = Served::start_in(
         "revalidate-includes",
