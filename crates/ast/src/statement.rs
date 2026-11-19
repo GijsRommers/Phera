@@ -74,7 +74,9 @@ pub enum StatementKind {
         directives: Vec<DeclareDirective>,
         body: Option<Block>,
     },
+    /// A file- or function-local jump to a case-sensitive label.
     Goto(Identifier),
+    /// A standalone statement, even immediately before a closing brace.
     Label(Identifier),
 
     /// For the `namespace Foo;` form, `statements` holds everything up to the

@@ -38,6 +38,14 @@ impl HandlerFunction {
                 name: "restore_error_handler",
                 parameters: &[],
             },
+            Self::GetException => HandlerSignature {
+                name: "get_exception_handler",
+                parameters: &[],
+            },
+            Self::GetError => HandlerSignature {
+                name: "get_error_handler",
+                parameters: &[],
+            },
             Self::TriggerError => HandlerSignature {
                 name: "trigger_error",
                 parameters: TRIGGER,
