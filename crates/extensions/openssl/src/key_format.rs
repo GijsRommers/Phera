@@ -19,6 +19,10 @@ const X25519_ALGORITHM: AlgorithmIdentifierRef<'static> = AlgorithmIdentifierRef
     oid: X25519,
     parameters: None,
 };
+const ED25519_ALGORITHM: AlgorithmIdentifierRef<'static> = AlgorithmIdentifierRef {
+    oid: ObjectIdentifier::new_unwrap("1.3.101.112"),
+    parameters: None,
+};
 
 pub(crate) fn private(bytes: &[u8], password: &[u8]) -> Option<Private> {
     let bytes = bytes.trim_ascii_start();
@@ -188,13 +192,19 @@ fn private_der(key: &Private) -> Option<SecretDocument> {
         Private::P256(key) => key.to_pkcs8_der().ok(),
         Private::P384(key) => key.to_pkcs8_der().ok(),
         Private::P521(key) => key.to_pkcs8_der().ok(),
-        Private::Ed25519(key) => key.to_pkcs8_der().ok(),
-        Private::X25519(key) => {
-            let nested = OctetStringRef::new(key.as_bytes()).ok()?.to_der().ok()?;
-            let info = PrivateKeyInfoRef::new(X25519_ALGORITHM, OctetStringRef::new(&nested).ok()?);
-            SecretDocument::encode_msg(&info).ok()
-        }
+        Private::Ed25519(key) => curve25519_private_der(ED25519_ALGORITHM, key.as_bytes()),
+        Private::X25519(key) => curve25519_private_der(X25519_ALGORITHM, key.as_bytes()),
     }
+}
+
+fn curve25519_private_der(
+    algorithm: AlgorithmIdentifierRef<'static>,
+    bytes: &[u8; 32],
+) -> Option<SecretDocument> {
+    // OpenSSL 3.0 reads PKCS#8 PrivateKeyInfo without the optional public key.
+    let nested = OctetStringRef::new(bytes).ok()?.to_der().ok()?;
+    let info = PrivateKeyInfoRef::new(algorithm, OctetStringRef::new(&nested).ok()?);
+    SecretDocument::encode_msg(&info).ok()
 }
 
 #[derive(Clone, Copy)]
