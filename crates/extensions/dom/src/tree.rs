@@ -132,7 +132,7 @@ impl Node {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Arena {
     nodes: Vec<Node>,
 }

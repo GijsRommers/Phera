@@ -14,6 +14,7 @@ mod libxml;
 mod mutation;
 mod node;
 mod properties;
+mod xpath;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -44,6 +45,7 @@ impl Extension for Dom {
         document::register(registry);
         factory::register(registry);
         collection::register(registry);
+        xpath::register(registry);
     }
 }
 

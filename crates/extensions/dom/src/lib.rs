@@ -17,3 +17,4 @@ pub mod html;
 pub mod serialize;
 pub mod tree;
 pub mod xml;
+pub mod xpath;

@@ -23,6 +23,7 @@ use super::{Location, This, location, native, receiver};
 enum Selection {
     Children,
     Attributes,
+    Snapshot(Rc<[NodeId]>),
     Tags {
         namespace: Option<Option<String>>,
         name: String,
@@ -39,6 +40,7 @@ impl Collection {
     fn ids(&self, arena: &Arena) -> Vec<NodeId> {
         let id = self.root.id;
         match &self.selection {
+            Selection::Snapshot(nodes) => nodes.to_vec(),
             Selection::Children => arena.children(id).collect(),
             Selection::Attributes => arena[id]
                 .attributes()
@@ -67,6 +69,19 @@ impl Collection {
     fn snapshot(&self) -> Vec<NodeId> {
         self.ids(&self.root.shared.borrow().document.arena)
     }
+}
+
+pub(super) fn snapshot(
+    context: &mut dyn Context,
+    root: Location,
+    nodes: Vec<NodeId>,
+) -> NativeResult {
+    wrap(
+        context,
+        root,
+        Selection::Snapshot(nodes.into()),
+        "DOMNodeList",
+    )
 }
 
 pub(super) fn children(context: &mut dyn Context, root: Location) -> NativeResult {
@@ -160,7 +175,7 @@ fn named(context: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> Nati
         collection
             .ids(arena)
             .into_iter()
-            .find(|&id| arena[id].name.qualified() == name)
+            .find(|&id| arena[id].name.local == name)
     };
     collection.root.wrap_optional(context, id)
 }
@@ -220,7 +235,7 @@ impl NativeIterator for Cursor {
             && let Some(&id) = self.ids.get(self.index)
         {
             let state = self.collection.root.shared.borrow();
-            return Ok(state.document.arena[id].name.qualified().into());
+            return Ok(state.document.arena[id].name.local.clone().into());
         }
         Ok(Value::Int(self.index as i64))
     }
@@ -279,7 +294,7 @@ fn dimension_get(context: &mut dyn Context, object: &Object, index: Value) -> Na
                 collection
                     .ids(arena)
                     .into_iter()
-                    .find(|&id| arena[id].name.qualified() == name)
+                    .find(|&id| arena[id].name.local == name)
             };
             collection.root.wrap_optional(context, id)
         }
