@@ -205,11 +205,14 @@ impl Analyzer<'_> {
         let NewTarget::Class(expression) = target else {
             if let NewTarget::Anonymous(class) = target {
                 let name = crate::collect::anonymous_name(&self.file.path, class.span.start);
-                let signature = self.index.method(&name, "__construct").cloned();
+                let signature = self
+                    .index
+                    .method(&name, "__construct")
+                    .map(|signature| signature.clone().typed(self.index));
                 let evaluation = self.arguments(
                     arguments,
                     signature.as_ref(),
-                    "anonymous class",
+                    "new anonymous class",
                     scope,
                     class.span,
                     CallKind::Direct,
@@ -227,10 +230,14 @@ impl Analyzer<'_> {
             return ValueType::Never;
         }
         let class = class.name();
-        let signature = class
-            .as_ref()
-            .and_then(|c| self.index.method(c, "__construct"))
-            .cloned();
+        let signature = class.as_ref().and_then(|class| {
+            let (owner, signature) = self.index.method_owner(class, "__construct")?;
+            Some(signature.clone().typed(self.index).for_receiver(
+                self.index,
+                owner,
+                &ValueType::Class(class.clone()),
+            ))
+        });
         let late_static = matches!(&expression.kind, ExpressionKind::Name(n)
             if n.text.eq_ignore_ascii_case("static"));
         if !late_static

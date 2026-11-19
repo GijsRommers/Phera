@@ -41,6 +41,7 @@ impl Options {
         }
         let mut arguments = arguments.peekable();
         let mut paths = Vec::new();
+        let mut use_phpstan_baseline = false;
         while let Some(argument) = arguments.next() {
             match argument.as_str() {
                 "--" => {
@@ -59,6 +60,7 @@ impl Options {
                     }
                 }
                 "--no-progress" => options.no_progress = true,
+                "--baseline" => use_phpstan_baseline = true,
                 "--generate-baseline" => {
                     options.generate_baseline =
                         Some(arguments.next().ok_or("--generate-baseline needs a file")?)
@@ -74,6 +76,9 @@ impl Options {
         }
         if options.paths.is_empty() {
             return Err("check needs paths or [check].paths in phera.toml".into());
+        }
+        if use_phpstan_baseline && options.baseline.is_none() {
+            options.baseline = Some(default_baseline(&options.paths));
         }
         Ok(options)
     }
@@ -169,6 +174,22 @@ impl Options {
     }
 }
 
+fn default_baseline(paths: &[String]) -> String {
+    const FILE: &str = "phpstan-baseline.neon";
+    if std::path::Path::new(FILE).is_file() {
+        return FILE.into();
+    }
+    paths
+        .iter()
+        .filter_map(|path| std::path::Path::new(path).canonicalize().ok())
+        .find_map(|path| {
+            path.ancestors()
+                .map(|directory| directory.join(FILE))
+                .find(|file| file.is_file())
+        })
+        .map_or_else(|| FILE.into(), |file| file.to_string_lossy().into_owned())
+}
+
 fn level(value: &str) -> Result<u8, String> {
     match value {
         "0" => Ok(0),
@@ -176,8 +197,8 @@ fn level(value: &str) -> Result<u8, String> {
         "2" => Ok(2),
         "3" => Ok(3),
         "4" => Ok(4),
-        "max" => Ok(4),
-        _ => Err("Supported check levels are 0 through 4, or max".into()),
+        "5" | "max" => Ok(5),
+        _ => Err("Supported check levels are 0 through 5, or max".into()),
     }
 }
 

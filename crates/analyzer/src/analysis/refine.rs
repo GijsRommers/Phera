@@ -133,6 +133,14 @@ impl Analyzer<'_> {
                 self.refine_type(&argument.value, against, scope, truth, span);
             } else if function == "in_array" {
                 self.refine_in_array(arguments, scope, truth, span);
+            } else if self.level >= 5 && truth && function == "is_numeric" {
+                let numeric =
+                    ValueType::Int
+                        .join(&ValueType::Float)
+                        .join(&ValueType::StringRefinement(
+                            crate::types::StringKind::Numeric,
+                        ));
+                self.refine_type(&argument.value, numeric, scope, true, span);
             }
         }
         if function == "is_null" && !truth {

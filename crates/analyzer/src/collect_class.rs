@@ -170,6 +170,7 @@ fn add_method(
     );
     signature.apply_phpdoc(doc, names);
     signature.modifiers = method.modifiers;
+    signature.returns_reference = method.by_reference;
     signature.global_effects = method
         .body
         .as_ref()

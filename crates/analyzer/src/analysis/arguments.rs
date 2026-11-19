@@ -70,6 +70,10 @@ impl Analyzer<'_> {
         if !arguments.iter().any(|a| a.spread) {
             self.check_arity(arguments.len(), &supplied, signature, label, span);
         }
+        if self.level >= 5 {
+            let target = super::argument_contracts::select_target(signature, label, kind);
+            self.check_argument_contracts(arguments, &facts.types, signature, &target, scope);
+        }
         facts
     }
 

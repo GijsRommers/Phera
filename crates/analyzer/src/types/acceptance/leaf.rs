@@ -14,6 +14,13 @@ pub(super) fn atomic(
     let accepted = match (expected, given) {
         (Object, Class(_) | Generic(_) | This) => true,
         (Object, Callable(signature)) => signature.closure_object,
+        (Object, UnknownCallable) => return Uncertain,
+        (Array | String | Iterable | Collection(_) | Class(_) | Generic(_), UnknownCallable)
+            if policy != TypePolicy::Documentation =>
+        {
+            // A callable may be a function name, a pair, or an object.
+            return Uncertain;
+        }
         (Object, Shape(shape)) => shape.kind == ShapeKind::Object,
         (Shape(shape), ty) if shape.kind == ShapeKind::Object && ty.class_name().is_some() => {
             let class = ty.class_name().unwrap_or_default();
@@ -59,6 +66,15 @@ pub(super) fn atomic(
         }
         (StringRefinement(StringKind::NonEmpty), StringRefinement(StringKind::Truthy)) => true,
         (UnknownCallable, Callable(_)) => true,
+        (UnknownCallable, Object) => return Uncertain,
+        (Callable(expected), ty) if !expected.closure_object && ty.class_name().is_some() => {
+            let name = ty.class_name().unwrap_or_default();
+            return if index.method(name, "__invoke").is_some() || !index.complete(name) {
+                Uncertain
+            } else {
+                Rejects
+            };
+        }
         (Class(name), Callable(signature)) if name.eq_ignore_ascii_case("Closure") => {
             signature.closure_object
         }
@@ -76,12 +92,34 @@ pub(super) fn atomic(
             true
         }
         (UnknownCallable, Class(name)) => {
-            name.eq_ignore_ascii_case("Closure") || index.method(name, "__invoke").is_some()
+            if name.eq_ignore_ascii_case("Closure") || index.method(name, "__invoke").is_some() {
+                true
+            } else if index
+                .class(name)
+                .is_none_or(|class| !class.modifiers.is_final)
+                || !index.complete(name)
+            {
+                return Uncertain;
+            } else {
+                false
+            }
         }
         (UnknownCallable, Generic(generic)) => index.method(&generic.base, "__invoke").is_some(),
         (UnknownCallable, String | StringLiteral(_) | Array | Collection(_) | Shape(_)) => {
             return Uncertain;
         }
+        (Array | Object, Iterable) | (Collection(_), Iterable)
+            if policy != TypePolicy::Documentation =>
+        {
+            return Uncertain;
+        }
+        (Array | Object, Collection(collection))
+            if collection.kind == CollectionKind::Iterable
+                && policy != TypePolicy::Documentation =>
+        {
+            return Uncertain;
+        }
+        (Shape(shape), Object) if shape.kind == ShapeKind::Object => return Uncertain,
         (Array, Collection(collection)) => collection.kind != CollectionKind::Iterable,
         (Iterable, Array | Collection(_)) => true,
         (Array | Iterable, Shape(shape)) => shape.kind != ShapeKind::Object,
@@ -93,8 +131,17 @@ pub(super) fn atomic(
         (Collection(collection), ty)
             if collection.kind == CollectionKind::Iterable && ty.class_name().is_some() =>
         {
-            return match nominal("Traversable", ty.class_name().unwrap_or_default(), index) {
+            let class = ty.class_name().unwrap_or_default();
+            return match nominal("Traversable", class, index) {
                 Accepts => Uncertain,
+                Rejects
+                    if policy != TypePolicy::Documentation
+                        && index
+                            .class(class)
+                            .is_some_and(|class| class.kind == phera_ast::ClassKind::Interface) =>
+                {
+                    Uncertain
+                }
                 relation => relation,
             };
         }
@@ -127,10 +174,20 @@ pub(super) fn atomic(
         {
             true
         }
-        (String, Class(class))
-            if matches!(policy, TypePolicy::Coercive | TypePolicy::WeakValue) =>
-        {
-            index.method(class, "__toString").is_some()
+        (String, given) if matches!(policy, TypePolicy::Coercive | TypePolicy::WeakValue) => {
+            if let Some(class) = given.class_name() {
+                return if index.method(class, "__toString").is_some() {
+                    Accepts
+                } else if index.class(class).is_none() || !index.complete(class) {
+                    Uncertain
+                } else {
+                    Rejects
+                };
+            }
+            matches!(
+                given,
+                Int | IntLiteral(_) | IntRange(..) | Float | Bool | BoolLiteral(_)
+            ) && policy == TypePolicy::Coercive
         }
         (Class(_) | Generic(_), Object)
         | (ClassString(_) | StringRefinement(_) | StringLiteral(_), String)

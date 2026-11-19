@@ -106,7 +106,11 @@ impl Parser<'_, '_> {
             }
             signature.parameters.push(ParameterInfo {
                 name,
-                ty,
+                ty: if default_is_null {
+                    ty.join(&ValueType::Null)
+                } else {
+                    ty
+                },
                 optional,
                 default_is_null,
                 variadic: untyped_variadic || trailing_variadic,

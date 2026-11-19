@@ -155,7 +155,30 @@ impl Display for ValueType {
                     }
                     continue;
                 }
-                Self::Callable(_) => "Closure",
+                Self::Callable(signature) => {
+                    f.write_str(if signature.closure_object {
+                        "Closure("
+                    } else {
+                        "callable("
+                    })?;
+                    parts.extend([Part::Type(&signature.returns), Part::Text("): ")]);
+                    for (position, parameter) in signature.parameters.iter().enumerate().rev() {
+                        if parameter.optional {
+                            parts.push(Part::Text("="));
+                        }
+                        parts.push(Part::Type(&parameter.ty));
+                        if parameter.variadic {
+                            parts.push(Part::Text("..."));
+                        }
+                        if parameter.by_reference {
+                            parts.push(Part::Text("&"));
+                        }
+                        if position != 0 {
+                            parts.push(Part::Text(", "));
+                        }
+                    }
+                    continue;
+                }
                 Self::Projection(projection) => {
                     let (name, operand) = match projection.as_ref() {
                         Projection::Keys(operand) => ("key-of<", operand),

@@ -52,7 +52,23 @@ impl Analyzer<'_> {
                     }));
                 }
                 if let Some(class) = self.context.class.as_deref() {
-                    ty = self.relative_type(ty, class);
+                    if self.level >= 5 {
+                        let receiver = ValueType::Class(class.into());
+                        ty = ty.substitute(
+                            &Default::default(),
+                            Some(crate::types::RelativeTypes {
+                                receiver: &receiver,
+                                owner: class,
+                                parent: self
+                                    .index
+                                    .class(class)
+                                    .and_then(|class| class.parents.first())
+                                    .map(String::as_str),
+                            }),
+                        );
+                    } else {
+                        ty = self.relative_type(ty, class);
+                    }
                 }
                 scope.define(name, ty);
             }

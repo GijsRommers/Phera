@@ -4,6 +4,17 @@
 use crate::{index::Index, types::ValueType};
 
 pub fn refine(index: &mut Index) {
+    // These take either an array or Traversable, as in php-src's `iterable`
+    // declarations. Older generated tables stored only the array alternative.
+    for name in ["iterator_to_array", "iterator_count"] {
+        if let Some(parameter) = index
+            .functions
+            .get_mut(name)
+            .and_then(|signature| signature.parameters.first_mut())
+        {
+            parameter.ty = ValueType::Iterable;
+        }
+    }
     for class in ["datetime", "datetimeimmutable"] {
         let Some(class) = index.classes.get_mut(class) else {
             continue;

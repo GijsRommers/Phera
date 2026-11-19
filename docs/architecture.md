@@ -1116,6 +1116,8 @@ What PHPStan and Psalm do: find errors without running the code.
 - **Output**: a readable report, JSON, and annotations for CI; a baseline
   file to adopt it on an existing code base; `@phpstan-ignore` and
   `@psalm-suppress` comments are honoured so existing code needs no edits.
+  `phera check --baseline src` reads `phpstan-baseline.neon`. It uses
+  the generated baseline's paths, identifiers, messages and counts.
   Native union names use PHP's display order through the bytecode crate,
   so `int|string` is displayed as `string|int` in both runtime and checker
   diagnostics.

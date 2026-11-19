@@ -200,6 +200,7 @@ fn function_signature(
         location,
     );
     signature.accepts_extra = uses_argument_introspection(&function.body);
+    signature.returns_reference = function.by_reference;
     signature.global_effects = crate::global_effects::of(&function.body);
     signature
 }

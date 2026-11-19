@@ -14,6 +14,7 @@ use crate::{
 use phera_ast::*;
 use phera_source::Span;
 
+mod argument_contracts;
 mod arguments;
 mod arrays;
 mod assignments;
