@@ -35,6 +35,10 @@ impl Extension for Serialize {
     }
 
     fn register(&self, registry: &mut Registry) {
+        // How a fork of a snapshot gets this extension's request state.
+        registry
+            .fork_state::<crate::decode::graph::RequestCycles>(phera_extension_api::fresh_state);
+        registry.fork_state::<crate::encode::SerializationSlots>(phera_extension_api::fresh_state);
         registry.function_with_callback_frame(
             "serialize",
             SERIALIZE_PARAMS,

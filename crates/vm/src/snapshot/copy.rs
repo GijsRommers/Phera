@@ -13,7 +13,7 @@
 
 use std::rc::Rc;
 
-use phera_value::Fork;
+use phera_value::{Fork, Value};
 
 use super::ForkCopy;
 use super::natives::VmNatives;
@@ -43,7 +43,8 @@ impl Vm {
     /// A copy of this VM that shares nothing a script can change with it.
     pub(crate) fn fork_vm(&self) -> Result<Vm, SnapshotRefusal> {
         self.check_forkable()?;
-        let mut fork = Fork::new(self.classes.ids(), &VmNatives);
+        let natives = VmNatives::default();
+        let mut fork = Fork::new(self.classes.ids(), &natives);
         let globals = self.globals.fork_copy(&mut fork);
         let registers = self.registers.fork_copy(&mut fork);
         let call_stack = self.call_stack.fork_copy(&mut fork);
@@ -57,12 +58,38 @@ impl Vm {
         let output_writer = self.output_writer.fork_copy(&mut fork);
         let code = self.code.fork_copy(&mut fork);
         let unset_typed_properties = self.unset_typed_properties.fork_copy(&mut fork);
+        // Extensions' state may look objects up by identity: every object
+        // reachable from the VM is copied first.
+        fork.drain();
         let state = self
             .state
             .fork(self.registry.state_forks(), &mut fork)
             .map_err(|name| {
                 SnapshotRefusal::state(name, "this extension's request state cannot be copied")
             })?;
+        fork.drain();
+        let property_references = Rc::new(std::cell::RefCell::new(Default::default()));
+        for (original, keys) in natives.rebind.take() {
+            let Some(copy) = fork.copy_at(original) else {
+                continue;
+            };
+            for key in keys {
+                if let Some(Value::Reference(cell)) = copy.get(&key) {
+                    crate::reference_holders::ReferenceHolders::track_object(
+                        &property_references,
+                        &copy,
+                        &key,
+                        &cell,
+                    )
+                    .map_err(|_| {
+                        SnapshotRefusal::state(
+                            "reference",
+                            "a bound property could not be bound again",
+                        )
+                    })?;
+                }
+            }
+        }
         let ids = fork.ids().clone();
         let copies = fork.finish().map_err(|refusal| SnapshotRefusal {
             class: refusal.class,
@@ -118,7 +145,7 @@ impl Vm {
             failed_native: None,
             state,
             reflection_cache: None,
-            property_references: Default::default(),
+            property_references,
             autoload,
             request_end: self.request_end.clone(),
             cycles: self.cycles.clone(),

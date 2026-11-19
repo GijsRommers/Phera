@@ -201,7 +201,7 @@ impl Drop for Graph {
 }
 
 #[derive(Default)]
-struct RequestCycles(Vec<Weak<RefCell<Value>>>);
+pub(crate) struct RequestCycles(Vec<Weak<RefCell<Value>>>);
 
 impl Drop for RequestCycles {
     fn drop(&mut self) {

@@ -250,6 +250,7 @@ const REFERENCE_HOOKS: ClassHooks = ClassHooks {
 };
 
 pub(crate) fn register(registry: &mut Registry) {
+    registry.fork_state::<References>(fork_references);
     registry.class(ClassEntry {
         kind: ClassKind::FinalClass,
         hooks: Some(&REFERENCE_HOOKS),
@@ -280,4 +281,23 @@ pub(crate) fn register(registry: &mut Registry) {
         },
         ..ClassEntry::class("WeakMap")
     });
+}
+
+/// In a fork, `WeakReference::create($object)` still returns the reference
+/// the boot made for that object: the copy of the reference, under the
+/// copy of the object.
+fn fork_references(
+    state: &dyn std::any::Any,
+    fork: &mut phera_extension_api::value::Fork<'_>,
+) -> Option<Box<dyn std::any::Any>> {
+    let references = state.downcast_ref::<References>()?;
+    let mut copies = HashMap::new();
+    for ((id, identity), reference) in &references.0 {
+        let (Some(reference), Some(identity)) = (reference.upgrade(), fork.identity(*identity))
+        else {
+            continue;
+        };
+        copies.insert((*id, identity), Rc::downgrade(&fork.object(&reference)));
+    }
+    Some(Box::new(References(copies)))
 }

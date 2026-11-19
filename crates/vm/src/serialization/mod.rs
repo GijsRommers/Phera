@@ -4,7 +4,7 @@ mod declarations;
 mod enums;
 pub(crate) mod layout;
 mod properties;
-mod property_index;
+pub(crate) mod property_index;
 
 use std::rc::Rc;
 

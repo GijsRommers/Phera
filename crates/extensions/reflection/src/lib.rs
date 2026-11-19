@@ -35,6 +35,8 @@ impl Extension for Reflection {
     }
 
     fn register(&self, registry: &mut Registry) {
+        // How a fork of a snapshot gets this extension's request state.
+        registry.fork_state::<crate::reference::ReferenceIds>(phera_extension_api::fresh_state);
         builtins::register(registry);
         registry.class(ClassEntry {
             parent: Some("Exception"),

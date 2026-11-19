@@ -36,7 +36,7 @@ const MT_RAND_MAX: i64 = 0x7fff_ffff;
 
 /// What the procedural functions remember during a request.
 #[derive(Default)]
-struct RequestRandom {
+pub(crate) struct RequestRandom {
     /// Mt19937, made on first use.
     engine: Option<Engine>,
     /// The microsecond of the last `uniqid()`, which must not repeat.

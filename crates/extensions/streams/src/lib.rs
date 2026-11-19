@@ -63,6 +63,11 @@ impl Extension for Streams {
     }
 
     fn register(&self, registry: &mut Registry) {
+        // How a fork of a snapshot gets this extension's request state.
+        registry.fork_state::<request::Files>(request::fork_files);
+        registry.fork_state::<phera_extension_api::WorkingDirectory>(
+            phera_extension_api::copy_state::<phera_extension_api::WorkingDirectory>,
+        );
         context_options::register(registry);
         copy::register(registry);
         csv::register(registry);

@@ -165,6 +165,18 @@ impl<'n> Fork<'n> {
     /// Fills every copy made so far, and every copy that filling makes.
     /// Returns the copies of all objects, or the first refusal.
     pub fn finish(mut self) -> Result<Vec<Rc<Object>>, Refusal> {
+        self.drain();
+        if let Some(refusal) = self.refusal.take() {
+            self.discard();
+            return Err(refusal);
+        }
+        Ok(self.into_copies())
+    }
+
+    /// Fills every copy made so far, and every copy that filling makes, so
+    /// that [`Fork::identity`] knows every object reachable from the values
+    /// mapped so far.
+    pub fn drain(&mut self) {
         loop {
             if let Some((original, copy)) = self.unfilled_objects.pop() {
                 self.fill_object(&original, &copy);
@@ -179,11 +191,6 @@ impl<'n> Fork<'n> {
                 break;
             }
         }
-        if let Some(refusal) = self.refusal.take() {
-            self.discard();
-            return Err(refusal);
-        }
-        Ok(self.into_copies())
     }
 
     /// The native state of `object` copied through its class's hook.

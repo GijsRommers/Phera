@@ -80,3 +80,24 @@ pub fn warning(context: &mut dyn Context, function: &str, message: &str) {
     };
     context.warning(format!("{origin}: {message}"));
 }
+
+/// A fork keeps the session settings and a save handler object set during
+/// the boot; a session started before `Phera\snapshot()` would be shared
+/// by every request, so it is refused.
+pub(crate) fn fork_state(
+    state: &dyn std::any::Any,
+    fork: &mut phera_extension_api::value::Fork<'_>,
+) -> Option<Box<dyn std::any::Any>> {
+    let state = state.downcast_ref::<SessionState>()?;
+    if state.active || state.files.is_some() || state.user_open {
+        fork.refuse_state(
+            "session",
+            "a session started before the call belongs to one request",
+        );
+    }
+    Some(Box::new(SessionState {
+        numbers: state.numbers.clone(),
+        user: state.user.as_ref().map(|user| fork.object(user)),
+        ..SessionState::default()
+    }))
+}

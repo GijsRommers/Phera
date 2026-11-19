@@ -51,6 +51,11 @@ impl Fork<'_> {
         copy
     }
 
+    /// The copy of the object at `address` in the original, if it was copied.
+    pub fn copy_at(&self, address: usize) -> Option<Rc<Object>> {
+        self.objects.get(&address).cloned()
+    }
+
     /// A weak handle on the copy of the handle's object, or a dead handle
     /// when the object is gone.
     pub fn weak(&mut self, handle: &WeakObject) -> WeakObject {

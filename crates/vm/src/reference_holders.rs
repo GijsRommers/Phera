@@ -107,10 +107,17 @@ impl StaticProperty {
     }
 }
 
-/// Whether an object's native state is the bookkeeping of its properties
-/// that are bound to references.
-pub(crate) fn is_reference_bookkeeping(state: &dyn std::any::Any) -> bool {
-    state.is::<ObjectReferences>()
+/// The properties bound to references, when an object's native state is
+/// that bookkeeping; a fork binds the same properties again in its own
+/// table (see `crate::snapshot`).
+pub(crate) fn bound_properties(state: &dyn std::any::Any) -> Option<Vec<ArrayKey>> {
+    let references = state.downcast_ref::<ObjectReferences>()?;
+    Some(references.slots.keys().cloned().collect())
+}
+
+/// Empty bookkeeping, for a fork's copy before it is bound again.
+pub(crate) fn empty_bookkeeping() -> Box<dyn std::any::Any> {
+    Box::new(ObjectReferences::default())
 }
 
 /// The property-reference bookkeeping also occupies the opaque object slot.

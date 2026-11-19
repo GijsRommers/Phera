@@ -21,8 +21,12 @@ use crate::calls::call_state::Callee;
 use crate::classes::Class;
 use crate::closures::ClosureState;
 
-/// The VM's [`NativeFork`].
-pub(super) struct VmNatives;
+/// The VM's [`NativeFork`]. It remembers the objects whose properties are
+/// bound to references: the fork binds them again in its own table.
+#[derive(Default)]
+pub(super) struct VmNatives {
+    pub(super) rebind: std::cell::RefCell<Vec<(usize, Vec<phera_value::ArrayKey>)>>,
+}
 
 impl NativeFork for VmNatives {
     fn fork_native(
@@ -38,8 +42,10 @@ impl NativeFork for VmNatives {
         if let Some(callee) = state.downcast_ref::<Callee>() {
             return Ok(Box::new(callee.fork_copy(fork)));
         }
-        if crate::reference_holders::is_reference_bookkeeping(state) {
-            return Err("a property of it is bound to a PHP reference".into());
+        if let Some(keys) = crate::reference_holders::bound_properties(state) {
+            let address = std::ptr::from_ref(object) as usize;
+            self.rebind.borrow_mut().push((address, keys));
+            return Ok(crate::reference_holders::empty_bookkeeping());
         }
         let hook = object
             .class

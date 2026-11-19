@@ -1,6 +1,6 @@
 //! `unserialize('a:1:{i:0;N;}')` builds an array without using the Rust call stack.
 
-mod graph;
+pub(crate) mod graph;
 mod objects;
 mod options;
 mod plain;

@@ -38,6 +38,15 @@ pub enum BootOutcome {
 }
 
 impl Vm {
+    /// Registers how a fork gets the VM's own request state: all of it is
+    /// caches, which a fork fills again.
+    pub fn register_state_forks(registry: &mut phera_extension_api::Registry) {
+        use phera_extension_api::fresh_state;
+        registry.fork_state::<crate::reflection::AttributeCallSite>(fresh_state);
+        registry.fork_state::<crate::reflection::initializers::InitializerCode>(fresh_state);
+        registry.fork_state::<crate::serialization::property_index::PropertyCache>(fresh_state);
+    }
+
     /// Sets what `Phera\snapshot()` does: nothing on the command line, keep
     /// the state in a boot run.
     pub fn set_snapshot_mode(&mut self, mode: SnapshotMode) {

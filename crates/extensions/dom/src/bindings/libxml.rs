@@ -19,7 +19,7 @@ use phera_extension_api::{
 use crate::document::ParseError;
 
 #[derive(Default)]
-struct Errors {
+pub(crate) struct Errors {
     internal: bool,
     last: Option<ParseError>,
     all: Vec<ParseError>,

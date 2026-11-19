@@ -4,7 +4,7 @@
 mod abbreviations;
 mod catalog;
 mod datetime;
-mod datetime_factory;
+pub(crate) mod datetime_factory;
 mod datetime_functions;
 mod datetime_registration;
 pub(super) use datetime_registration::RFC7231_FORMAT;

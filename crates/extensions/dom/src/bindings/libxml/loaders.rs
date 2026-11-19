@@ -18,6 +18,7 @@ struct Config {
 }
 
 pub(super) fn register(registry: &mut Registry) {
+    registry.fork_state::<Config>(fork_config);
     registry.function(FunctionEntry::sync(
         "libxml_set_external_entity_loader",
         const { &[Param::new("resolver_function", ParamType::Callable).nullable()] },
@@ -89,4 +90,20 @@ fn stream_context(context: &mut dyn Context, arguments: &[Value]) -> NativeResul
             value.type_name(),
         ))),
     }
+}
+
+/// The entity loader a boot set stays set in each fork, on the fork's copy.
+fn fork_config(
+    state: &dyn std::any::Any,
+    fork: &mut phera_extension_api::value::Fork<'_>,
+) -> Option<Box<dyn std::any::Any>> {
+    let config = state.downcast_ref::<Config>()?;
+    Some(Box::new(Config {
+        resolver: config.resolver.as_ref().map(|value| fork.value(value)),
+        stream_context: config
+            .stream_context
+            .as_ref()
+            .map(|value| fork.value(value)),
+        disabled: config.disabled,
+    }))
 }

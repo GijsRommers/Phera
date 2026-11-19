@@ -7,7 +7,7 @@ use phera_extension_api::{
     PhpArray, Registry, Value, args,
 };
 
-mod memory;
+pub(crate) mod memory;
 mod script;
 mod shell;
 
