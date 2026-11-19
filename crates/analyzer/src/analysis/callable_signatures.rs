@@ -28,7 +28,7 @@ impl Analyzer<'_> {
         span: Span,
     ) -> ValueType {
         if matches!(arguments, Arguments::FirstClassCallable) {
-            return ValueType::Callable(std::sync::Arc::new(signature.clone()));
+            return signature.clone().as_closure();
         }
         if self.arguments(
             arguments,
@@ -44,5 +44,12 @@ impl Analyzer<'_> {
         self.unbound_invocation(signature);
         self.apply_global_effects(Some(signature), scope);
         signature.returns.clone()
+    }
+}
+
+impl Signature {
+    pub fn as_closure(mut self) -> ValueType {
+        self.closure_object = true;
+        ValueType::Callable(std::sync::Arc::new(self))
     }
 }

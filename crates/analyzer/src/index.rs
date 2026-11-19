@@ -32,6 +32,8 @@ pub struct Signature {
     pub modifiers: Modifiers,
     pub abstract_body: bool,
     pub accepts_extra: bool,
+    pub pure: bool,
+    pub closure_object: bool,
     pub unbound_this: Vec<Location>,
     pub global_effects: crate::global_effects::GlobalEffects,
     pub captured_writes: Vec<crate::scope::Place>,
@@ -68,6 +70,8 @@ impl Signature {
             modifiers: Modifiers::default(),
             abstract_body: false,
             accepts_extra: false,
+            pure: false,
+            closure_object: true,
             unbound_this: Vec::new(),
             global_effects: crate::global_effects::GlobalEffects::None,
             captured_writes: Vec::new(),
@@ -75,6 +79,9 @@ impl Signature {
     }
     pub fn apply_phpdoc(&mut self, doc: Option<&str>, names: &Names) {
         if let Some(doc) = doc {
+            self.pure = doc
+                .split_ascii_whitespace()
+                .any(|tag| matches!(tag, "@pure" | "@phpstan-pure" | "@psalm-pure"));
             if crate::phpdoc::never_returns(doc) {
                 self.returns = ValueType::Never;
             }

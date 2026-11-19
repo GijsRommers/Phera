@@ -39,7 +39,10 @@ impl Analyzer<'_> {
                 "parameter.phpDocType",
                 &format!("@param for ${name}"),
             ) {
-                let mut ty = annotated.ty.clone();
+                let mut ty = crate::signature_types::declaration_refinement(
+                    &parameter.ty,
+                    annotated.ty.clone(),
+                );
                 if parameter.variadic {
                     ty = ValueType::Collection(std::sync::Arc::new(crate::types::Collection {
                         kind: crate::types::CollectionKind::Array,
@@ -62,7 +65,9 @@ impl Analyzer<'_> {
                 "return.phpDocType",
                 "@return",
             )
-            .then_some(annotated.ty)
+            .then(|| {
+                crate::signature_types::declaration_refinement(&signature.returns, annotated.ty)
+            })
         })
     }
 

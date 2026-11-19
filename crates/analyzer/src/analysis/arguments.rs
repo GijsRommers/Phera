@@ -41,6 +41,11 @@ impl Analyzer<'_> {
             return facts;
         };
         let collect = self.level >= 5
+            || self.level >= 4
+                && label
+                    .strip_suffix("()")
+                    .and_then(super::refine_types::predicate_type)
+                    .is_some()
             || self.level >= 2
                 && (super::builtin_facts::takes_facts(label)
                     || signature

@@ -85,9 +85,13 @@ impl Analyzer<'_> {
         self.block(body, &mut joined);
         self.discard_exits(&marks);
         let diagnostics = self.diagnostics.len();
+        let trait_diagnostics = self.trait_diagnostics.as_ref().map_or(0, Vec::len);
         // Diagnostic checking uses the join; transfer uses each exit's own bindings.
         paths.retain_mut(|path| self.block(body, &mut path.scope) == Flow::Next);
         self.diagnostics.truncate(diagnostics);
+        if let Some(buffer) = &mut self.trait_diagnostics {
+            buffer.truncate(trait_diagnostics);
+        }
     }
 
     pub fn restore_paths(&mut self, paths: Vec<ExitPath>, scope: &mut Scope) -> Flow {

@@ -37,14 +37,29 @@ impl Analyzer<'_> {
                     }
                     _ => false,
                 };
-                self.property(
+                if *nullsafe {
+                    self.check_nullsafe(
+                        "property access",
+                        target,
+                        name,
+                        &ty,
+                        scope,
+                        expression.span,
+                    );
+                }
+                let result = self.property(
                     &ty,
                     name,
                     scope,
                     expression.span,
                     quiet || guarded,
                     Access::object(target),
-                )
+                );
+                if self.level >= 4 && *nullsafe && !ty.excludes_null() {
+                    result.join(&ValueType::Null)
+                } else {
+                    result
+                }
             }
             ExpressionKind::StaticProperty { class, name } => {
                 self.static_property(class, name, scope, expression.span, quiet)

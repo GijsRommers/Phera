@@ -101,6 +101,8 @@ fn signature(f: &[&str]) -> Signature {
         })
         .collect();
     Signature {
+        pure: false,
+        closure_object: true,
         parameters,
         returns: decode_type(f[3]),
         documentation: None,

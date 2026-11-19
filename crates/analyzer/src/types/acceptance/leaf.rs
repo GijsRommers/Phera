@@ -12,7 +12,8 @@ pub(super) fn atomic(
     use Compatibility::*;
     use ValueType::*;
     let accepted = match (expected, given) {
-        (Object, Class(_) | Generic(_) | Callable(_) | This) => true,
+        (Object, Class(_) | Generic(_) | This) => true,
+        (Object, Callable(signature)) => signature.closure_object,
         (Object, Shape(shape)) => shape.kind == ShapeKind::Object,
         (Shape(shape), ty) if shape.kind == ShapeKind::Object && ty.class_name().is_some() => {
             let class = ty.class_name().unwrap_or_default();
@@ -58,7 +59,9 @@ pub(super) fn atomic(
         }
         (StringRefinement(StringKind::NonEmpty), StringRefinement(StringKind::Truthy)) => true,
         (UnknownCallable, Callable(_)) => true,
-        (Class(name), Callable(_)) if name.eq_ignore_ascii_case("Closure") => true,
+        (Class(name), Callable(signature)) if name.eq_ignore_ascii_case("Closure") => {
+            signature.closure_object
+        }
         (Class(name), UnknownCallable) | (Callable(_), Class(name))
             if name.eq_ignore_ascii_case("Closure") && policy != TypePolicy::Documentation =>
         {

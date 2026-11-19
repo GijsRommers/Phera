@@ -20,19 +20,38 @@ impl Analyzer<'_> {
         }
         self.depth += 1;
         let mut flow = Flow::Next;
+        let mut reported_unreachable = false;
         for (position, statement) in statements.iter().enumerate() {
             if flow != Flow::Next {
                 if !contains_label(statement) {
+                    if !reported_unreachable {
+                        self.discarded_statements(statement);
+                        reported_unreachable = true;
+                    }
                     continue;
                 }
                 scope.unknown_writes();
+                reported_unreachable = false;
             }
             let binding = self.pending_binding.clone();
+            let last_condition = self.last_condition;
             if let Some(next) = statements.get(position + 1) {
                 self.prepare_local_rebinding(statement, next, scope);
+                if self.level >= 4
+                    && position + 2 == statements.len()
+                    && is_throw(next)
+                    && let StatementKind::If {
+                        condition,
+                        otherwise: None,
+                        ..
+                    } = &statement.kind
+                {
+                    self.last_condition = Some(condition.span);
+                }
             }
             flow = self.statement(statement, scope);
             self.pending_binding = binding;
+            self.last_condition = last_condition;
         }
         self.depth -= 1;
         flow
@@ -85,7 +104,7 @@ impl Analyzer<'_> {
                 body: Some(body), ..
             } => return self.block(body, scope),
             StatementKind::Expression(expression) => {
-                if self.expression(expression, scope, false) == ValueType::Never {
+                if self.expression_statement(expression, scope) == ValueType::Never {
                     return Flow::Terminal;
                 }
             }
@@ -96,7 +115,15 @@ impl Analyzer<'_> {
                 condition,
                 then,
                 otherwise,
-            } => return self.if_statement(condition, then, otherwise.as_deref(), scope),
+            } => {
+                return self.if_statement(
+                    condition,
+                    then,
+                    otherwise.as_deref(),
+                    scope,
+                    statement.span,
+                );
+            }
             StatementKind::Switch { subject, cases } => {
                 return self.switch(subject, cases, scope);
             }
@@ -189,8 +216,23 @@ impl Analyzer<'_> {
         then: &[Statement],
         otherwise: Option<&[Statement]>,
         scope: &mut Scope,
+        span: Span,
     ) -> Flow {
+        let previous = self.last_condition;
+        let elsewhere = self.level >= 4 && self.is_elseif(span);
+        if elsewhere
+            && otherwise.is_none_or(|body| matches!(body, [statement] if is_throw(statement)))
+        {
+            self.last_condition = Some(condition.span);
+        }
         let branches = self.condition(condition, scope.clone(), false);
+        let (kind, label) = if elsewhere {
+            ("elseif", "Elseif condition")
+        } else {
+            ("if", "If condition")
+        };
+        self.constant_condition(kind, label, condition, &branches);
+        self.last_condition = previous;
         let (a, left) = self.statement_branch(then, branches.yes, scope);
         let (b, right) = self.statement_branch(otherwise.unwrap_or_default(), branches.no, scope);
         if let Some(after) = condition::Condition::merge(left, right) {
@@ -204,6 +246,13 @@ impl Analyzer<'_> {
         } else {
             Flow::Continue
         }
+    }
+
+    fn is_elseif(&self, span: Span) -> bool {
+        self.file
+            .source
+            .get(span.start..span.start.saturating_add(6))
+            .is_some_and(|keyword| keyword.eq_ignore_ascii_case("elseif"))
     }
     fn statement_branch(
         &mut self,
@@ -223,6 +272,16 @@ impl Analyzer<'_> {
         let flow = self.block(body, &mut scope);
         (flow, (flow == Flow::Next).then_some(scope))
     }
+}
+
+fn is_throw(statement: &Statement) -> bool {
+    matches!(
+        statement.kind,
+        StatementKind::Expression(Expression {
+            kind: ExpressionKind::Throw(_),
+            ..
+        })
+    )
 }
 
 /// A label can re-enter a block after an otherwise terminal statement.

@@ -274,7 +274,9 @@ impl Analyzer<'_> {
                 }
                 _ => false,
             };
-            if known {
+            // Availability checks deliberately leave both branches reachable
+            // in type analysis. The stub table describes several platforms.
+            if known && self.level < 4 {
                 return Some(!inverted);
             }
         }
@@ -300,7 +302,7 @@ impl Analyzer<'_> {
         None
     }
 
-    fn builtin_predicate(&self, name: &Name) -> Option<String> {
+    pub fn builtin_predicate(&self, name: &Name) -> Option<String> {
         let candidates = self.context.names.resolve(name, UseKind::Function);
         let actual = candidates
             .iter()

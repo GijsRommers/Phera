@@ -20,6 +20,10 @@ impl TraitUsers {
 }
 
 impl Index {
+    pub(crate) fn trait_has_users(&self, name: &str) -> bool {
+        self.trait_users.0.contains_key(&name.to_ascii_lowercase())
+    }
+
     pub fn trait_consumers(&self, name: &str) -> Vec<String> {
         let mut pending = vec![name];
         let mut seen = BTreeSet::new();

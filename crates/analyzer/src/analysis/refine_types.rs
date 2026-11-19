@@ -38,7 +38,7 @@ impl Analyzer<'_> {
                 arm.clone()
             } else if matches == Compatibility::Uncertain
                 || arm.accepts(&against, self.index, TypePolicy::Documentation)
-                    == Compatibility::Accepts
+                    != Compatibility::Rejects
             {
                 against.clone()
             } else if let (Some(_), Some(_)) = (arm.class_name(), against.class_name()) {

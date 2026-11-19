@@ -75,9 +75,20 @@ fn check_project(options: &Options) -> Result<Report, String> {
         .collect();
     dependencies.resolve_classes(&mut index, classes);
     traits::link(&mut index);
+    let report_unused_traits = options.level >= 4
+        && options
+            .paths
+            .iter()
+            .any(|path| std::path::Path::new(path).is_dir());
     for file in &files {
-        let mut found =
-            analysis::Analyzer::new(&mut index, &mut dependencies, file, options.level).run();
+        let mut found = analysis::Analyzer::new(
+            &mut index,
+            &mut dependencies,
+            file,
+            options.level,
+            report_unused_traits,
+        )
+        .run();
         suppress::filter(file, &mut found);
         diagnostics.extend(found);
     }

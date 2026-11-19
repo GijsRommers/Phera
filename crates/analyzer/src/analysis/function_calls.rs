@@ -17,6 +17,7 @@ impl Analyzer<'_> {
         callee: &Expression,
         arguments: &Arguments,
         scope: &mut Scope,
+        span: Span,
     ) -> ValueType {
         let resolved = if let ExpressionKind::Name(name) = &callee.kind
             && callee.span == name.span
@@ -68,10 +69,23 @@ impl Analyzer<'_> {
             self.intrinsic(name, arguments, scope);
         }
         if matches!(arguments, Arguments::FirstClassCallable) {
-            resolved.signature.map_or(ValueType::Mixed, |s| {
-                ValueType::Callable(std::sync::Arc::new(s))
-            })
+            resolved
+                .signature
+                .map_or(ValueType::Mixed, crate::index::Signature::as_closure)
         } else {
+            self.discarded_function_result(
+                span,
+                &resolved.label,
+                resolved.intrinsic.as_deref(),
+                resolved.signature.as_ref(),
+            );
+            if self.level >= 4
+                && let Some(name) = &resolved.intrinsic
+                && let Some(ty) =
+                    self.constant_type_test(name, arguments, &facts.types, scope, span)
+            {
+                return ty;
+            }
             if self.level >= 2
                 && let Some(name) = &resolved.intrinsic
                 && let Some(ty) = self.builtin_result(name, arguments, &facts.types, scope)

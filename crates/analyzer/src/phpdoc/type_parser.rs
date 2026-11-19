@@ -137,7 +137,10 @@ impl Parser<'_, '_> {
             "callable" | "closure" | "\\closure" | "pure-callable" | "pure-closure"
         ) && self.eat('(')
         {
-            return self.callable(depth);
+            return self.callable(
+                depth,
+                matches!(lower.as_str(), "closure" | "\\closure" | "pure-closure"),
+            );
         }
         let arguments = if self.eat('<') {
             self.type_list(depth, '>')?
