@@ -22,6 +22,7 @@ PHP source ─▶ lexer ─▶ parser ─▶ AST ─▶ compiler ─▶ bytecode
 | `phera-vm` | Executes bytecode: frames, classes, exceptions, generators | bytecode, value |
 | `phera-extension-api` | What native functions and classes see | value |
 | `phera-extensions/*` | Native functions grouped like PHP extensions | extension-api |
+| `phera-io-pool` | Shared PDO and Redis connection pools and TLS policy | tokio, rustls |
 | `phera-runtime` | Code cache, includes, autoload, superglobals, request lifecycle | compiler, vm, extensions |
 | `phera-server` | HTTP on Tokio, one worker thread per core | |
 | `phera-cli` | `phera run file.php`, `phera serve` | runtime, server |
@@ -46,6 +47,16 @@ to its input without a limit:
 
 Dependencies point one way. The VM never sees the AST, and the server never sees
 the VM: it talks to a `Handler` trait that the runtime implements.
+
+PDO and Redis share the client TLS policy in `phera-io-pool::tls`, where
+their pooled connections already share an I/O runtime abstraction. Rustls
+uses ring's default cipher suites with TLS 1.2 and 1.3. Ring builds its C and
+assembly with the platform toolchain. Phera's crates use the safe Rust API.
+PDO uses platform trust roots with WebPKI fallback and supports driver-specific
+trust and client certificate options. Redis uses the bundled WebPKI roots and
+verifies the server name. PostgreSQL and Redis receive the policy explicitly.
+`mysql_async` builds its own rustls configuration, so the runtime registers
+ring once at startup and PDO supplies the selected roots through its options.
 
 ## 2. Concurrency: M:N on Tokio, thread per core
 
