@@ -20,25 +20,21 @@ impl Vm {
     ) -> Result<Option<Reg>, NativeError> {
         let main = self
             .frame_at(0)
-            .ok_or_else(|| internal_error!("global without main"))?;
-        let index = main
-            .function()
-            .locals
-            .iter()
-            .position(|candidate| main.unit().names.get(candidate.index()) == Some(&name));
-        let main_register = index
-            .map(|index| Reg(index as u16))
-            .or_else(|| main.extras.dynamic.get(&name).copied());
+            .filter(|frame| frame.function_id().is_none());
+        let main_register = main.as_ref().and_then(|frame| {
+            frame
+                .function()
+                .locals
+                .iter()
+                .position(|candidate| frame.unit().names.get(candidate.index()) == Some(&name))
+                .map(|index| Reg(index as u16))
+                .or_else(|| frame.extras.dynamic.get(&name).copied())
+        });
         let existing = main_register
-            .and_then(|register| main.slots(&self.registers).get(register.index()))
+            .and_then(|register| main?.slots(&self.registers).get(register.index()))
             .and_then(Option::as_ref)
-            .cloned()
-            .or_else(|| {
-                self.globals
-                    .iter()
-                    .find(|(candidate, _)| *candidate == &name)
-                    .map(|(_, value)| value.clone())
-            });
+            .or_else(|| self.globals.get(&name))
+            .cloned();
         if existing.is_none() && creation == Creation::Existing {
             if missing == Missing::Warn {
                 self.warn(format!("Undefined global variable ${name}"));
@@ -67,7 +63,10 @@ impl Vm {
         for (name, value) in self.globals.iter() {
             values.insert(ArrayKey::str(name.as_str()), self.copy_global_value(value));
         }
-        if let Some(main) = self.frames().next() {
+        if let Some(main) = self
+            .frame_at(0)
+            .filter(|frame| frame.function_id().is_none())
+        {
             for (index, name) in main.function().locals.iter().enumerate() {
                 if let Some(name) = main.unit().names.get(name.index())
                     && let Some(Some(value)) = main.slots(&self.registers).get(index)
@@ -95,7 +94,10 @@ impl Vm {
             .iter()
             .filter(|(_, value)| same_cell(value))
             .count();
-        if let Some(main) = self.frames().next() {
+        if let Some(main) = self
+            .frame_at(0)
+            .filter(|frame| frame.function_id().is_none())
+        {
             let named_cell = main
                 .slots(&self.registers)
                 .iter()
@@ -138,14 +140,17 @@ impl Vm {
     /// Rebinding a whole global replaces its symbol cell, including the main-scope slot.
     pub(crate) fn publish_global(&mut self, name: String, value: Value) {
         self.globals.insert(name.clone(), value.clone());
-        let register = self.frame_at(0).and_then(|main| {
-            main.function()
-                .locals
-                .iter()
-                .position(|candidate| main.unit().names.get(candidate.index()) == Some(&name))
-                .map(|index| Reg(index as u16))
-                .or_else(|| main.extras.dynamic.get(&name).copied())
-        });
+        let register = self
+            .frame_at(0)
+            .filter(|frame| frame.function_id().is_none())
+            .and_then(|main| {
+                main.function()
+                    .locals
+                    .iter()
+                    .position(|candidate| main.unit().names.get(candidate.index()) == Some(&name))
+                    .map(|index| Reg(index as u16))
+                    .or_else(|| main.extras.dynamic.get(&name).copied())
+            });
         if let Some(slot) = register.and_then(|register| self.main_slot_mut(register)) {
             *slot = Some(value);
         }
@@ -154,7 +159,10 @@ impl Vm {
     /// Removing a symbol never writes null through other references to its former value.
     pub(crate) fn remove_global(&mut self, name: &str) {
         self.globals.remove(name);
-        if let Some(main) = self.frame_at(0) {
+        if let Some(main) = self
+            .frame_at(0)
+            .filter(|frame| frame.function_id().is_none())
+        {
             let index = main.function().locals.iter().position(|candidate| {
                 main.unit()
                     .names

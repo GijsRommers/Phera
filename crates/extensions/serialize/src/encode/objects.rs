@@ -13,10 +13,10 @@ impl Encoder {
     pub(super) async fn object(
         &mut self,
         context: &mut dyn Context,
-        object: Rc<Object>,
-    ) -> Result<(), NativeError> {
+        object: &Rc<Object>,
+    ) -> Result<Option<Option<Rc<PhpArray>>>, NativeError> {
         let name = object.class.name();
-        if context.serialization_forbidden(&object) {
+        if context.serialization_forbidden(object) {
             return Err(NativeError::throw(
                 "Exception",
                 format!(
@@ -30,9 +30,9 @@ impl Encoder {
                 return Err(NativeError::error("Enum case has no name"));
             };
             self.output.enum_case(name.as_bytes(), case.as_bytes());
-            return Ok(());
+            return Ok(None);
         }
-        if context.has_serialization_method(&object, "__serialize") {
+        if context.has_serialization_method(object, "__serialize") {
             let value = context
                 .call_serialization_method(object.clone(), "__serialize", Vec::new())
                 .await?;
@@ -59,7 +59,7 @@ impl Encoder {
                     .output
                     .custom_object(name.as_bytes(), payload.as_bytes()),
                 Value::Null => {
-                    let identity = Identity::Object(Rc::as_ptr(&object) as usize);
+                    let identity = Identity::Object(Rc::as_ptr(object) as usize);
                     if let Some((slot, _)) = self.slots.identities.get_mut(&identity) {
                         *slot = 0;
                     }
@@ -72,27 +72,49 @@ impl Encoder {
                     ));
                 }
             }
-        } else if context.has_serialization_method(&object, "__sleep") {
-            let Some(entries) = sleep_properties(context, &object).await? else {
+        } else if context.has_serialization_method(object, "__sleep") {
+            let names = context
+                .call_serialization_method(object.clone(), "__sleep", Vec::new())
+                .await?;
+            let Value::Array(names) = names else {
+                context.warning(format!(
+                    "serialize(): {}::__sleep() should return an array only containing the names of instance-variables to serialize",
+                    object.class.name()
+                ));
                 self.output.null();
-                return Ok(());
+                return Ok(None);
             };
-            self.output.object(name.as_bytes(), entries.len());
-            self.entries(Rc::new(entries), Contents::Object);
+            return Ok(Some(Some(names)));
         } else {
-            let mut entries = context.serialization_properties(&object)?;
-            let original = if name == INCOMPLETE_CLASS {
-                entries.remove(&ArrayKey::str(INCOMPLETE_CLASS_NAME))
-            } else {
-                None
-            };
-            let name = match &original {
-                Some(Value::String(name)) => name.as_bytes(),
-                _ => name.as_bytes(),
-            };
-            self.output.object(name, entries.len());
-            self.entries(Rc::new(entries), Contents::Object);
+            return Ok(Some(None));
         }
+        Ok(None)
+    }
+
+    pub(super) async fn write_object_properties(
+        &mut self,
+        context: &mut dyn Context,
+        object: &Rc<Object>,
+        properties: Rc<PhpArray>,
+        names: Option<Rc<PhpArray>>,
+    ) -> Result<(), NativeError> {
+        let name = object.class.name();
+        let mut entries = if let Some(names) = names {
+            Rc::new(sleep_properties(context, object, &properties, &names).await?)
+        } else {
+            properties
+        };
+        let original = if name == INCOMPLETE_CLASS {
+            Rc::make_mut(&mut entries).remove(&ArrayKey::str(INCOMPLETE_CLASS_NAME))
+        } else {
+            None
+        };
+        let name = match &original {
+            Some(Value::String(name)) => name.as_bytes(),
+            _ => name.as_bytes(),
+        };
+        self.output.object(name, entries.len());
+        self.entries(entries, Contents::Object);
         Ok(())
     }
 }
@@ -100,10 +122,9 @@ impl Encoder {
 async fn sleep_properties(
     context: &mut dyn Context,
     object: &Rc<Object>,
-) -> Result<Option<PhpArray>, NativeError> {
-    let result = context
-        .call_serialization_method(object.clone(), "__sleep", Vec::new())
-        .await?;
+    properties: &PhpArray,
+    names: &PhpArray,
+) -> Result<PhpArray, NativeError> {
     let invalid_return = || {
         format!(
             "serialize(): {}::__sleep() should return an array only containing \
@@ -111,11 +132,6 @@ async fn sleep_properties(
             object.class.name()
         )
     };
-    let Value::Array(names) = result else {
-        context.warning(invalid_return());
-        return Ok(None);
-    };
-    let properties = context.serialization_properties(object)?;
     let mut selected = PhpArray::with_capacity(names.len());
     for name in names.values() {
         let name = name.try_deref()?.clone();
@@ -145,7 +161,7 @@ async fn sleep_properties(
             ));
         }
     }
-    Ok(Some(selected))
+    Ok(selected)
 }
 
 fn mangle(scope: &[u8], name: &[u8]) -> ArrayKey {

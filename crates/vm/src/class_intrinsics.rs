@@ -60,9 +60,12 @@ impl Vm {
             | Operation::GetMangledObjectVars
             | Operation::ObjectId
             | Operation::ObjectHash => {
-                let Value::Object(object) = value else {
+                let Value::Object(mut object) = value else {
                     return Err(internal_error!("class function object"));
                 };
+                if matches!(function, Operation::GetObjectVars) && object.lazy().is_some() {
+                    object = self.initialize_lazy_via_callback(object).await?;
+                }
                 if matches!(function, Operation::GetObjectVars)
                     && let Some(class) = self.hooked_property_class(&object)
                 {
@@ -194,6 +197,20 @@ impl Vm {
             Operation::MethodExists | Operation::PropertyExists => {
                 check_object_or_class(function, &value)?;
                 let name = string(&arguments[1]);
+                if matches!(function, Operation::PropertyExists)
+                    && let Value::Object(original) = &value
+                    && original.lazy().is_some()
+                {
+                    let object = crate::lazy_objects::resolved_lazy_instance(original.clone());
+                    let (exists, pending) = self.lazy_property_exists_status(&object, &name)?;
+                    if !pending {
+                        return Ok(Value::Bool(exists));
+                    }
+                    let object = self.initialize_lazy_via_callback(object).await?;
+                    return self
+                        .lazy_property_exists_status(&object, &name)
+                        .map(|(exists, _)| Value::Bool(exists));
+                }
                 // A native class answers for properties that live in its
                 // own state (DateInterval's `y`, `m`, `d` and so on).
                 if matches!(function, Operation::PropertyExists)

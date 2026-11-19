@@ -182,7 +182,13 @@ impl From<&LocalTimeType> for Offset {
 }
 
 pub fn current(context: &mut dyn Context) -> Zone {
-    context.state().get_or_default::<Zone>().clone()
+    if let Some(explicit) = context.state().get::<Zone>() {
+        return explicit.clone();
+    }
+    context
+        .ini_get(b"date.timezone")
+        .and_then(|value| Zone::named(value.as_bytes()))
+        .unwrap_or_default()
 }
 
 pub fn get(context: &mut dyn Context, _: &[Value]) -> NativeResult {
@@ -221,4 +227,22 @@ fn last_sunday(year: i64, month: i64) -> i128 {
     let day = crate::calendar::month_days(year, month);
     let last = Civil { day, ..last };
     last.timestamp() - i128::from(last.weekday()) * 86400
+}
+
+/// Validate the configured timezone without overwriting an explicit date setter.
+pub fn update_ini(
+    context: &mut dyn Context,
+    _: &str,
+    value: Option<&[u8]>,
+    function: &str,
+) -> bool {
+    let bytes = value.unwrap_or_default();
+    if Zone::named(bytes).is_some() {
+        return true;
+    }
+    let name = String::from_utf8_lossy(bytes.split(|byte| *byte == 0).next().unwrap_or_default());
+    context.warning(format!(
+        "{function}(): Invalid date.timezone value '{name}', using 'UTC' instead"
+    ));
+    false
 }

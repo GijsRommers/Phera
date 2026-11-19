@@ -8,9 +8,14 @@ pub fn statement_expressions(statement: &Statement) -> Vec<&Expression> {
         StatementKind::Expression(e) => vec![e],
         StatementKind::Echo(items) | StatementKind::Unset(items) => items.iter().collect(),
         StatementKind::Return(e) => e.iter().collect(),
-        StatementKind::If { condition, .. }
-        | StatementKind::While { condition, .. }
-        | StatementKind::DoWhile { condition, .. } => vec![condition],
+        StatementKind::If {
+            condition, elseifs, ..
+        } => std::iter::once(condition)
+            .chain(elseifs.iter().map(|elseif| &elseif.condition))
+            .collect(),
+        StatementKind::While { condition, .. } | StatementKind::DoWhile { condition, .. } => {
+            vec![condition]
+        }
         StatementKind::For {
             init,
             condition,

@@ -17,6 +17,7 @@ impl Compiler<'_> {
         let dst = self.allocate_register()?;
         self.emit(Instruction::Array(dst), line);
         for item in items {
+            let mark = self.mark_temporaries();
             let key = item
                 .key
                 .as_ref()
@@ -45,6 +46,7 @@ impl Compiler<'_> {
                 },
                 line,
             );
+            self.release_temporaries(mark);
         }
         Ok(dst)
     }
@@ -57,13 +59,16 @@ impl Compiler<'_> {
         parts: &[ast::StringPart],
         line: usize,
     ) -> Result<Reg, CompileError> {
-        let mut dst = self.literal(Constant::Bytes(vec![]), line)?;
+        // One register accumulates the string; each part's temporaries are
+        // handed back once it has been appended.
+        let dst = self.literal(Constant::Bytes(vec![]), line)?;
         // Zend starts with the list's first part and reports the notice
         // before compiling the current part updates its source line.
         let mut diagnostic_line = parts
             .first()
             .map_or(line, |part| self.interpolation_line(part));
         for part in parts {
+            let mark = self.mark_temporaries();
             let rhs = match part {
                 ast::StringPart::Literal(value, _) => {
                     self.literal(Constant::Bytes(value.clone()), line)?
@@ -89,17 +94,16 @@ impl Compiler<'_> {
                 }
             };
             diagnostic_line = self.interpolation_line(part);
-            let next = self.allocate_register()?;
             self.emit(
                 Instruction::Binary {
-                    destination: next,
+                    destination: dst,
                     operator: Binary::Concat,
                     left: dst,
                     right: rhs,
                 },
                 line,
             );
-            dst = next;
+            self.release_temporaries(mark);
         }
         Ok(dst)
     }
