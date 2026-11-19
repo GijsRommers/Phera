@@ -31,7 +31,7 @@ Usage:
                                           laravel
     --no-install                          do not fetch packages
   phera --dump <file.php>                 print the compiled bytecode
-  phera check [--level 0|1] [--format text|json|github] [--no-progress]
+  phera check [--level 0|1|2] [--format text|json|github] [--no-progress]
               [--generate-baseline FILE] <paths...>
   phera --version
 

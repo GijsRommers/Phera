@@ -41,7 +41,13 @@ impl Analyzer<'_> {
     fn statement(&mut self, statement: &Statement, scope: &mut Scope) -> Flow {
         let previous = self.context.known.clone();
         self.context.known.extend(scope.known.iter().cloned());
+        let annotations = self.statement_var_annotations(statement, scope);
         let flow = self.statement_kind(statement, scope);
+        for (name, ty) in annotations {
+            if scope.get(&name).definition == Definition::Definite {
+                scope.define(&name, ty);
+            }
+        }
         self.context.known = previous;
         flow
     }
@@ -155,7 +161,7 @@ impl Analyzer<'_> {
             if self.context.returns == ValueType::Void {
                 self.report(Finding::VoidReturn, span);
             }
-        } else if self.level == 1
+        } else if self.level >= 1
             && self.context.declared_return
             && !self.context.generator
             && self.context.returns != ValueType::Void

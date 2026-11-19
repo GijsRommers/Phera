@@ -120,7 +120,7 @@ impl Analyzer<'_> {
         self.exception_scopes = exceptions;
         self.controls = controls;
         self.return_scopes = returns;
-        ValueType::Callable(Box::new(signature))
+        ValueType::Callable(std::sync::Arc::new(signature))
     }
 
     pub fn arrow(&mut self, arrow: &ArrowFunction, outer: &mut Scope, span: Span) -> ValueType {
@@ -160,6 +160,6 @@ impl Analyzer<'_> {
         self.exception_scopes = exceptions;
         self.controls = controls;
         self.return_scopes = returns;
-        ValueType::Callable(Box::new(signature))
+        ValueType::Callable(std::sync::Arc::new(signature))
     }
 }

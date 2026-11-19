@@ -68,9 +68,9 @@ impl Analyzer<'_> {
             self.intrinsic(&name, arguments, scope);
         }
         if matches!(arguments, Arguments::FirstClassCallable) {
-            resolved
-                .signature
-                .map_or(ValueType::Mixed, |s| ValueType::Callable(Box::new(s)))
+            resolved.signature.map_or(ValueType::Mixed, |s| {
+                ValueType::Callable(std::sync::Arc::new(s))
+            })
         } else {
             resolved.signature.map_or(ValueType::Mixed, |s| s.returns)
         }
@@ -82,7 +82,7 @@ impl Analyzer<'_> {
             self.index
                 .functions
                 .get(&name.to_ascii_lowercase())
-                .map(|signature| (name, signature.clone()))
+                .map(|signature| (name, signature.clone().typed(self.index)))
         });
         if found.is_none() {
             let excluded = candidates

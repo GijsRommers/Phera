@@ -36,6 +36,7 @@ pub fn decode(data: &str) -> Index {
                         property.into(),
                         PropertyInfo {
                             ty: decode_type(f[2]),
+                            documented_type: None,
                             modifiers: modifiers(f[3]),
                             location: location(f[4]),
                         },
@@ -100,6 +101,7 @@ fn signature(f: &[&str]) -> Signature {
     Signature {
         parameters,
         returns: decode_type(f[3]),
+        documentation: None,
         modifiers: modifiers(f[4]),
         abstract_body: f[5] == "true",
         accepts_extra: f[6] == "true",

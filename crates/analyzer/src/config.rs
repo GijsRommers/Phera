@@ -48,7 +48,7 @@ impl Options {
                     break;
                 }
                 "--level" => {
-                    options.level = level(&arguments.next().ok_or("--level needs 0 or 1")?)?
+                    options.level = level(&arguments.next().ok_or("--level needs 0, 1 or 2")?)?
                 }
                 "--format" => {
                     options.format = match arguments.next().as_deref() {
@@ -173,7 +173,8 @@ fn level(value: &str) -> Result<u8, String> {
     match value {
         "0" => Ok(0),
         "1" => Ok(1),
-        _ => Err("Supported check levels are 0 and 1".into()),
+        "2" => Ok(2),
+        _ => Err("Supported check levels are 0 through 2".into()),
     }
 }
 

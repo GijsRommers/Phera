@@ -45,7 +45,7 @@ impl Analyzer<'_> {
                         name.name.to_ascii_lowercase(),
                     )) =>
                     {
-                        Access::Inferred
+                        Access::Guarded
                     }
                     _ => Access::object(target),
                 };

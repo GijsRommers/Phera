@@ -42,11 +42,13 @@ mod match_expression;
 mod member_expressions;
 mod members;
 mod not_supported;
+mod receiver_types;
 mod refine;
 mod reporting;
 mod short_circuit;
 mod statements;
 mod switch;
+mod type_docs;
 mod write;
 
 pub const MAX_DEPTH: usize = 256;
@@ -61,6 +63,7 @@ pub struct Context {
     pub unbound_this: Option<Vec<crate::index::Location>>,
     pub returns: ValueType,
     pub declared_return: bool,
+    pub documented_return: Option<ValueType>,
     pub generator: bool,
     pub by_reference: bool,
     pub function: String,
@@ -80,6 +83,7 @@ pub struct Analyzer<'a> {
     pub exception_scopes: Vec<Vec<Scope>>,
     pub return_scopes: Vec<Vec<Scope>>,
     pub controls: Vec<control::ControlFrame>,
+    pub statement_docs: std::collections::BTreeMap<usize, Span>,
     pub pending_binding: Option<(usize, closure_binding::ClosureBinding)>,
 }
 
@@ -102,6 +106,11 @@ impl<'a> Analyzer<'a> {
             return_scopes: Vec::new(),
             controls: Vec::new(),
             pending_binding: None,
+            statement_docs: if level >= 2 {
+                type_docs::statement_comments(&file.source)
+            } else {
+                Default::default()
+            },
             context: Context {
                 names: Names::for_block(String::new(), &file.program.statements),
                 known: std::collections::BTreeSet::new(),
@@ -111,6 +120,7 @@ impl<'a> Analyzer<'a> {
                 unbound_this: None,
                 returns: ValueType::Mixed,
                 declared_return: false,
+                documented_return: None,
                 generator: false,
                 by_reference: false,
                 function: "top level".into(),
@@ -238,6 +248,7 @@ impl<'a> Analyzer<'a> {
 pub enum Access {
     Checked,
     Inferred,
+    Guarded,
     Static,
     Forwarded,
     LateStatic { has_object: bool },
@@ -257,8 +268,12 @@ impl Access {
     pub fn dynamic_receiver(self) -> bool {
         matches!(self, Self::Checked | Self::LateStatic { .. })
     }
-    pub fn reports_missing(self) -> bool {
-        !matches!(self, Self::Inferred)
+    pub fn reports_missing(self, level: u8) -> bool {
+        match self {
+            Self::Inferred => level >= 2,
+            Self::Guarded => false,
+            _ => true,
+        }
     }
 }
 

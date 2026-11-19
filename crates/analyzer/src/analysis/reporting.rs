@@ -5,6 +5,15 @@ use super::*;
 use crate::{index::Location, rules};
 
 impl Analyzer<'_> {
+    pub fn diagnose(&mut self, identifier: &str, span: Span, message: String) {
+        self.diagnostics.push(Diagnostic {
+            file: self.file.path.clone(),
+            line: self.file.lines.line(span.start),
+            identifier: identifier.into(),
+            message,
+        });
+    }
+
     pub fn report(&mut self, finding: Finding, span: Span) {
         let location = Location {
             file: self.file.path.clone(),

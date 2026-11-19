@@ -19,7 +19,11 @@ impl Analyzer<'_> {
         {
             return self.invoke_closure(signature, arguments, scope, span);
         }
-        let (ValueType::Class(class), MemberName::Identifier(method)) = (ty, name) else {
+        let receiver = match name {
+            MemberName::Identifier(method) => self.method_receiver(ty, &method.name, span, access),
+            _ => None,
+        };
+        let (Some(class), MemberName::Identifier(method)) = (receiver.as_deref(), name) else {
             if let MemberName::Expression(e) = name
                 && self.expression(e, scope, false) == ValueType::Never
             {
@@ -37,8 +41,10 @@ impl Analyzer<'_> {
         let signature = self
             .index
             .method(class, &method.name)
+            .or_else(|| self.index.doc_method(class, &method.name))
             .cloned()
-            .map(|mut signature| {
+            .map(|signature| {
+                let mut signature = signature.typed(self.index);
                 for parameter in &mut signature.parameters {
                     if let Some(receiver) = parameter.closure_receiver.take() {
                         parameter.closure_receiver =
@@ -95,7 +101,9 @@ impl Analyzer<'_> {
             return ValueType::Never;
         }
         if matches!(arguments, Arguments::FirstClassCallable) {
-            signature.map_or(ValueType::Mixed, |s| ValueType::Callable(Box::new(s)))
+            signature.map_or(ValueType::Mixed, |s| {
+                ValueType::Callable(std::sync::Arc::new(s))
+            })
         } else {
             signature.map_or(ValueType::Mixed, |s| self.relative_type(s.returns, class))
         }
@@ -113,8 +121,14 @@ impl Analyzer<'_> {
             if access.static_call() && !signature.modifiers.is_static {
                 self.report(Finding::StaticCall(class.into(), method.into()), span);
             }
-        } else if self.index.complete(class)
-            && access.reports_missing()
+        } else if self.can_report_missing_method(class, method, access) {
+            self.report(Finding::UnknownMethod(class.into(), method.into()), span);
+        }
+    }
+
+    pub fn can_report_missing_method(&self, class: &str, method: &str, access: Access) -> bool {
+        access.reports_missing(self.level)
+            && self.index.complete(class)
             && !self
                 .index
                 .documented_method(class, method, access.static_call())
@@ -133,9 +147,6 @@ impl Analyzer<'_> {
                     },
                 )
                 .is_none()
-        {
-            self.report(Finding::UnknownMethod(class.into(), method.into()), span);
-        }
     }
 
     pub fn new_object(

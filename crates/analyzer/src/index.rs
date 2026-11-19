@@ -4,6 +4,7 @@
 use crate::{names::Names, types::ValueType};
 use phera_ast::{ClassKind, Modifiers, Parameter, Type, Visibility};
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Location {
@@ -25,6 +26,7 @@ pub struct ParameterInfo {
 pub struct Signature {
     pub parameters: Vec<ParameterInfo>,
     pub returns: ValueType,
+    pub documentation: Option<Arc<crate::phpdoc::Documentation>>,
     pub location: Location,
     pub modifiers: Modifiers,
     pub abstract_body: bool,
@@ -53,6 +55,7 @@ impl Signature {
                 })
                 .collect(),
             returns: ValueType::declared(returns, names),
+            documentation: None,
             location,
             modifiers: Modifiers::default(),
             abstract_body: false,
@@ -77,6 +80,7 @@ impl Signature {
 #[derive(Clone, Debug)]
 pub struct PropertyInfo {
     pub ty: ValueType,
+    pub documented_type: Option<ValueType>,
     pub modifiers: Modifiers,
     pub location: Location,
 }
@@ -132,6 +136,7 @@ pub struct ClassInfo {
 #[derive(Clone, Debug, Default)]
 pub struct Index {
     pub builtin_functions: BTreeSet<String>,
+    pub read_type_docs: bool,
     pub builtin_classes: BTreeSet<String>,
     pub trait_users: crate::trait_users::TraitUsers,
     pub classes: BTreeMap<String, ClassInfo>,
@@ -226,6 +231,23 @@ impl Index {
                     || (!origin && ancestor.methods.contains_key(&method))
             }
         })
+    }
+
+    pub fn doc_method(&self, class: &str, method: &str) -> Option<&Signature> {
+        let key = method.to_ascii_lowercase();
+        self.ancestry(class).into_iter().find_map(|class| {
+            class
+                .documented
+                .method_types
+                .get(&key)
+                .map(std::sync::Arc::as_ref)
+        })
+    }
+
+    pub fn doc_property_type(&self, class: &str, property: &str) -> Option<&ValueType> {
+        self.ancestry(class)
+            .into_iter()
+            .find_map(|class| class.documented.property_types.get(property))
     }
 
     pub fn documented_property(&self, class: &str, property: &str) -> bool {

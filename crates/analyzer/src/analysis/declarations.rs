@@ -55,6 +55,7 @@ impl Analyzer<'_> {
         self.context.unbound_this = None;
         self.context.function = self.context.names.declaration(&function.name.name);
         self.context.declared_return = function.return_type.is_some();
+        self.context.documented_return = None;
         self.context.generator =
             self.context.declared_return && generators::body_yields(&function.body);
         self.context.by_reference = function.by_reference;
@@ -63,6 +64,18 @@ impl Analyzer<'_> {
         let mut scope = Scope::default();
         self.check_attributes(&function.attributes, &mut scope);
         self.parameter_scope(&function.parameters, &mut scope);
+        if self.level >= 2 && function.doc_comment.is_some() {
+            let signature = self.declaration_signature(
+                &function.parameters,
+                function.return_type.as_ref(),
+                span,
+            );
+            if let Some(returns) =
+                self.function_documentation(function.doc_comment, &signature, span, &mut scope)
+            {
+                self.context.documented_return = Some(returns);
+            }
+        }
         self.check_type(function.return_type.as_ref());
         let flow = self.block(&function.body, &mut scope);
         self.check_return_path(flow, &function.body, span);
@@ -85,6 +98,9 @@ impl Analyzer<'_> {
             |n| self.context.names.declaration(&n.name),
         ));
         self.check_attributes(&class.attributes, &mut Scope::default());
+        if self.level >= 2 && class.doc_comment.is_some() {
+            self.read_documentation(class.doc_comment);
+        }
         for name in class.extends.iter().chain(&class.implements) {
             self.class_name(name, true);
         }
@@ -104,11 +120,11 @@ impl Analyzer<'_> {
             match &member.kind {
                 ClassMemberKind::Method(method) => {
                     if class.kind != ClassKind::Trait {
-                        self.method_declaration(method, member.span);
+                        self.method_declaration(method, member.span, member.doc_comment);
                     } else {
                         for consumer in &consumer_contexts {
                             self.context.class = Some(consumer.clone());
-                            self.method_declaration(method, member.span);
+                            self.method_declaration(method, member.span, member.doc_comment);
                         }
                         self.context.class.clone_from(&declaring_class);
                     }
@@ -121,6 +137,19 @@ impl Analyzer<'_> {
                 } => {
                     self.check_attributes(attributes, &mut Scope::default());
                     self.check_type(ty.as_ref());
+                    if self.level >= 2 && member.doc_comment.is_some() {
+                        let docs = self.read_documentation(member.doc_comment);
+                        let native = ValueType::declared(ty.as_ref(), &self.context.names);
+                        for annotation in docs.variables.values() {
+                            self.check_doc_annotation(
+                                annotation,
+                                &native,
+                                member.span,
+                                "property.phpDocType",
+                                "@var",
+                            );
+                        }
+                    }
                     for item in items {
                         if let Some(default) = &item.default {
                             self.expression(default, &mut Scope::default(), false);
@@ -160,7 +189,7 @@ impl Analyzer<'_> {
         self.return_scopes = returns;
     }
 
-    fn method_declaration(&mut self, method: &Method, span: Span) {
+    fn method_declaration(&mut self, method: &Method, span: Span, doc: Option<Span>) {
         self.context.scope_kind = ScopeKind::Function;
         self.context.incomplete = false;
         self.context.object = !method.modifiers.is_static;
@@ -172,6 +201,7 @@ impl Analyzer<'_> {
         };
         self.context.function = method.name.name.clone();
         self.context.declared_return = method.return_type.is_some();
+        self.context.documented_return = None;
         self.context.generator = self.context.declared_return
             && method
                 .body
@@ -183,11 +213,35 @@ impl Analyzer<'_> {
         let mut scope = Scope::default();
         self.check_attributes(&method.attributes, &mut scope);
         self.parameter_scope(&method.parameters, &mut scope);
+        if self.level >= 2 && doc.is_some() {
+            let signature =
+                self.declaration_signature(&method.parameters, method.return_type.as_ref(), span);
+            if let Some(returns) = self.function_documentation(doc, &signature, span, &mut scope) {
+                self.context.documented_return = Some(returns);
+            }
+        }
         self.check_type(method.return_type.as_ref());
         if let Some(body) = &method.body {
             let flow = self.block(body, &mut scope);
             self.check_return_path(flow, body, span);
         }
+    }
+
+    pub fn declaration_signature(
+        &self,
+        parameters: &[Parameter],
+        returns: Option<&Type>,
+        span: Span,
+    ) -> crate::index::Signature {
+        crate::index::Signature::new(
+            parameters,
+            returns,
+            &self.context.names,
+            crate::index::Location {
+                file: self.file.path.clone(),
+                line: self.file.lines.line(span.start),
+            },
+        )
     }
 
     fn required_methods(&mut self, name: &str, span: Span) {

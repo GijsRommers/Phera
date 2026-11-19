@@ -13,6 +13,7 @@ pub fn add_members(info: &mut ClassInfo, class: &ClassDeclaration, names: &Names
         "name".into(),
         PropertyInfo {
             ty: ValueType::String,
+            documented_type: None,
             modifiers: Modifiers::default(),
             location: info.location.clone(),
         },
@@ -28,6 +29,7 @@ pub fn add_members(info: &mut ClassInfo, class: &ClassDeclaration, names: &Names
             "value".into(),
             PropertyInfo {
                 ty: ty.clone(),
+                documented_type: None,
                 modifiers: Modifiers::default(),
                 location: info.location.clone(),
             },

@@ -1,0 +1,167 @@
+//! A `Readable&Seekable` receiver can use both contracts.
+//! Levels through 5 accept a member available on at least one union arm.
+
+use super::*;
+
+#[derive(Default)]
+pub struct Receivers<'a> {
+    pub classes: Vec<&'a str>,
+    pub known_scalar: bool,
+    pub uncertain: bool,
+}
+
+impl<'a> Receivers<'a> {
+    pub fn of(ty: &'a ValueType) -> Self {
+        let mut receivers = Self::default();
+        let mut pending = vec![ty];
+        while let Some(ty) = pending.pop() {
+            match ty {
+                ValueType::Class(name) => receivers.classes.push(name),
+                ValueType::Generic(generic) => receivers.classes.push(&generic.base),
+                ValueType::Callable(_) => receivers.classes.push("Closure"),
+                ValueType::Union(types) | ValueType::Intersection(types) => {
+                    pending.extend(types.iter())
+                }
+                ValueType::Template(template) => pending.push(&template.bound),
+                ValueType::Conditional(conditional) => {
+                    pending.extend([&conditional.yes, &conditional.no])
+                }
+                ValueType::Bool
+                | ValueType::BoolLiteral(_)
+                | ValueType::Int
+                | ValueType::IntLiteral(_)
+                | ValueType::IntRange(..)
+                | ValueType::Float
+                | ValueType::String
+                | ValueType::StringLiteral(_)
+                | ValueType::StringRefinement(_)
+                | ValueType::ClassString(_)
+                | ValueType::Array
+                | ValueType::Resource => receivers.known_scalar = true,
+                ValueType::Collection(collection)
+                    if collection.kind != crate::types::CollectionKind::Iterable =>
+                {
+                    receivers.known_scalar = true;
+                }
+                ValueType::Shape(shape) if shape.kind != crate::types::ShapeKind::Object => {
+                    receivers.known_scalar = true;
+                }
+                // Nullable receivers are checked at level 8. Keep the type
+                // alternatives that can contribute a method at lower levels.
+                ValueType::Null => {}
+                _ => receivers.uncertain = true,
+            }
+        }
+        receivers
+    }
+}
+
+impl Analyzer<'_> {
+    pub fn method_receiver(
+        &mut self,
+        ty: &ValueType,
+        method: &str,
+        span: Span,
+        access: Access,
+    ) -> Option<String> {
+        if let ValueType::Class(name) = ty {
+            return Some(name.clone());
+        }
+        if self.level < 2 {
+            return None;
+        }
+        let receivers = Receivers::of(ty);
+        if receivers.classes.is_empty()
+            && !receivers.uncertain
+            && (receivers.known_scalar || *ty == ValueType::Null)
+        {
+            self.diagnose(
+                "method.nonObject",
+                span,
+                format!("Cannot call method {method}() on {ty}."),
+            );
+            return None;
+        }
+        let mut reports_missing = !receivers.classes.is_empty() && !receivers.uncertain;
+        let mut selected = None;
+        for class in receivers.classes {
+            self.dependencies.resolve(self.index, class);
+            if self
+                .index
+                .method(class, method)
+                .or_else(|| self.index.doc_method(class, method))
+                .is_some()
+                && selected.replace(class).is_some()
+            {
+                // Do not apply a single signature to several possible receivers.
+                return None;
+            }
+            reports_missing &= self.can_report_missing_method(class, method, access);
+        }
+        if let Some(class) = selected {
+            return Some(class.into());
+        }
+        if reports_missing {
+            self.report(Finding::UnknownMethod(ty.to_string(), method.into()), span);
+        }
+        None
+    }
+
+    pub fn property_receiver(
+        &mut self,
+        ty: &ValueType,
+        name: &str,
+        span: Span,
+        quiet: bool,
+    ) -> ValueType {
+        if let ValueType::Shape(shape) = ty
+            && shape.kind == crate::types::ShapeKind::Object
+        {
+            if let Some(field) = shape.fields.iter().find(|field|
+                matches!(&field.key, crate::types::ShapeKey::String(key) if key.as_ref() == name))
+            {
+                return field.value.clone();
+            }
+            if !quiet && shape.remainder.is_none() {
+                self.report(Finding::UnknownProperty(ty.to_string(), name.into()), span);
+            }
+            return ValueType::Mixed;
+        }
+        let receivers = Receivers::of(ty);
+        if receivers.classes.is_empty()
+            && !receivers.uncertain
+            && (receivers.known_scalar || *ty == ValueType::Null)
+            && !quiet
+        {
+            self.diagnose(
+                "property.nonObject",
+                span,
+                format!("Cannot access property ${name} on {ty}."),
+            );
+            return ValueType::Mixed;
+        }
+        let mut missing = !receivers.classes.is_empty() && !receivers.uncertain;
+        let mut ty_result = ValueType::Never;
+        for class in receivers.classes {
+            self.dependencies.resolve(self.index, class);
+            if let Some(property) = self.index.property(class, name) {
+                ty_result =
+                    ty_result.join(&self.relative_type(property.effective_type(self.index), class));
+                missing = false;
+            } else if let Some(ty) = self.index.doc_property_type(class, name) {
+                ty_result = ty_result.join(&self.relative_type(ty.clone(), class));
+                missing = false;
+            } else {
+                missing &= self.can_report_missing_property(class, name, PropertyAccess::Instance);
+            }
+        }
+        if missing && !quiet {
+            self.report(Finding::UnknownProperty(ty.to_string(), name.into()), span);
+        }
+        if ty_result == ValueType::Never || receivers.uncertain {
+            ValueType::Mixed
+        } else {
+            ty_result
+        }
+    }
+}
