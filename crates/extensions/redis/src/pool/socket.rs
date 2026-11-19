@@ -51,7 +51,7 @@ impl Endpoint {
             return match timeout {
                 Some(duration) => tokio::time::timeout(duration, open)
                     .await
-                    .map_err(|_| std::io::ErrorKind::TimedOut)?,
+                    .map_err(|_| std::io::Error::from(std::io::ErrorKind::TimedOut))?,
                 None => open.await,
             };
         }

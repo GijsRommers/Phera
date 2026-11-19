@@ -1,0 +1,6 @@
+[advisories]
+ignore = [
+    # Unmaintained. Used for PostgreSQL date decoding and HTTP/session cookie
+    # dates. Keep the current behavior until these paths move to a maintained API.
+    "RUSTSEC-2026-0543",
+]

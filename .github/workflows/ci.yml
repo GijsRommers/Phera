@@ -234,3 +234,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Scan tokens as a second guard beyond workspace unsafe_code = "forbid".
       - run: python3 .github/scripts/check-unsafe.py
+
+  advisories:
+    name: Advisories
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: '1.99.1'
+      - run: cargo install cargo-audit --version 0.23.0 --locked
+      - run: cargo audit --deny warnings --no-yanked
