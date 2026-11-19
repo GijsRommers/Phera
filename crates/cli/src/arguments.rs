@@ -32,6 +32,7 @@ Usage:
     --no-install                          do not fetch packages
   phera --dump <file.php>                 print the compiled bytecode
   phera check [--level 0|1|2|3] [--format text|json|github] [--no-progress]
+  phera lint [paths...] [--fix] [--only GROUP]         lint PHP source
               [--generate-baseline FILE] <paths...>
   phera --version
 
@@ -49,6 +50,7 @@ pub(crate) enum Command {
     },
     Serve(ServeOptions),
     Check(phera_analyzer::config::Options),
+    Lint(phera_analyzer::lint::Command),
     New(crate::new::NewOptions),
     Version,
 }
@@ -88,6 +90,10 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
         Some("check") => {
             arguments.next();
             phera_analyzer::config::Options::parse(arguments).map(Command::Check)
+        }
+        Some("lint") => {
+            arguments.next();
+            phera_analyzer::lint::Options::parse(arguments).map(Command::Lint)
         }
         Some("serve") => {
             arguments.next();

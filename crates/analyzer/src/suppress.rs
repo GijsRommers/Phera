@@ -183,3 +183,63 @@ fn begins_at(
                 .is_some_and(|prefix| prefix.trim_start().starts_with("#["))
         })
 }
+
+/// A line comment can suppress a finding on its own line or the line after it.
+pub(crate) struct LintDirective<'a> {
+    pub name: &'a str,
+    pub line: usize,
+    pub file: bool,
+    pub used: bool,
+}
+
+pub(crate) fn lint_directives<'a>(
+    source: &'a [u8],
+    tokens: &[phera_lexer::Token],
+    lines: &phera_source::LineTable,
+) -> Vec<LintDirective<'a>> {
+    tokens
+        .iter()
+        .filter_map(|token| {
+            if token.kind != TokenKind::Comment {
+                return None;
+            }
+            let comment = source
+                .get(token.span.start..token.span.end)?
+                .strip_prefix(b"//")?;
+            let comment = std::str::from_utf8(comment).ok()?.trim_start();
+            let mut words = comment.split_whitespace();
+            let file = match words.next()? {
+                "phera-ignore-file" => true,
+                "phera-ignore" => false,
+                _ => return None,
+            };
+            Some(LintDirective {
+                name: words.next()?,
+                line: lines.line(token.span.start),
+                file,
+                used: false,
+            })
+        })
+        .collect()
+}
+
+pub(crate) fn is_lint_suppressed(
+    diagnostic: &Diagnostic,
+    directives: &mut [LintDirective<'_>],
+) -> bool {
+    let matched = directives
+        .iter_mut()
+        .filter(|directive| {
+            directive.name == diagnostic.identifier
+                && (directive.file
+                    || directive.line == diagnostic.line
+                    || directive.line + 1 == diagnostic.line)
+        })
+        .min_by_key(|directive| (directive.file, directive.line != diagnostic.line));
+    if let Some(directive) = matched {
+        directive.used = true;
+        true
+    } else {
+        false
+    }
+}

@@ -15,6 +15,7 @@ pub mod diagnostic;
 mod enums;
 pub mod global_effects;
 pub mod index;
+pub mod lint;
 pub mod names;
 mod phpdoc;
 pub mod project;

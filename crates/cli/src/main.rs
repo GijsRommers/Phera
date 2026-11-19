@@ -3,6 +3,7 @@
 
 mod arguments;
 mod check;
+mod lint;
 mod new;
 mod run;
 mod serve;
@@ -29,6 +30,7 @@ fn main() -> ExitCode {
         Ok(Command::Dump { script }) => run::dump(&script),
         Ok(Command::Serve(options)) => serve::serve(options),
         Ok(Command::Check(options)) => check::check(options),
+        Ok(Command::Lint(command)) => lint::command(command),
         Ok(Command::New(options)) => new::project(&options),
         Ok(Command::Version) => {
             println!("Phera {}", env!("CARGO_PKG_VERSION"));

@@ -1,0 +1,1 @@
+2	foreach-reference-not-unset	Unset $item after foreach to release the last element reference.
