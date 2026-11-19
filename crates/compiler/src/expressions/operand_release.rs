@@ -21,15 +21,22 @@
 //! A register that provably holds a scalar when it is cleared (its last
 //! write is a literal, arithmetic, a comparison) owns nothing that could
 //! have a destructor, so it is left alone: clearing it would only cost an
-//! instruction, inside a loop on every round.
+//! instruction, inside a loop on every round. The same goes for a copy of a
+//! variable that the expression does not assign (`$i < $n` reads `$n` into
+//! a register): the variable still holds the value, so releasing the copy
+//! frees nothing. (A function the expression calls could still change the
+//! variable through a PHP reference; the copy then lives until its register
+//! is reused or the statement-end clear, a rare and short delay.)
 
-use std::collections::HashMap;
+mod owned_values;
+
 use std::ops::Range;
 
 use phera_bytecode::Reg;
 
 use crate::Compiler;
-use crate::ir::{ArgumentSource, Binary, Instruction, PlaceScope, Target, Unary};
+use crate::ir::Instruction;
+use owned_values::Expression;
 
 /// The temporaries of one expression: the registers allocated and the
 /// instructions emitted while it was compiled (as `start..end` pairs, so
@@ -94,182 +101,55 @@ impl Compiler<'_> {
         line: usize,
     ) {
         let operands = self.temporaries_since(start);
-        for register in self.owning(&operands, Some(result)) {
+        // A sibling operand may have handed a register back without
+        // clearing it, so one this call never writes may own something.
+        for register in self.owning(&operands, Some(result), false) {
             self.emit(Instruction::Clear { register }, line);
             self.released.insert(register.0);
         }
     }
 
-    /// Clears the temporaries of an expression that has been used (a
-    /// condition, a loop subject). A branch calls this on each way out.
+    /// Clears the temporaries of an expression that has been used (a loop
+    /// subject, a `switch` comparison). A branch calls this on each way out.
     pub(crate) fn clear_owning_temporaries(&mut self, temporaries: &Temporaries, line: usize) {
-        for register in self.owning(temporaries, None) {
+        for register in self.owning(temporaries, None, false) {
             self.emit(Instruction::Clear { register }, line);
         }
     }
 
-    /// The temporaries that may own an object.
-    fn owning(&self, temporaries: &Temporaries, keep: Option<Reg>) -> Vec<Reg> {
+    /// Clears the temporaries of an `if`, `while`, `do` or `for` condition,
+    /// on each way out of the branch.
+    ///
+    /// A condition starts a statement, or a new round of a loop, when every
+    /// free register is empty or holds what owns nothing: the previous
+    /// statement's end cleared them, and the previous round cleared what it
+    /// owned. So a register a short-circuited path never writes owns
+    /// nothing either.
+    pub(crate) fn clear_condition_temporaries(&mut self, temporaries: &Temporaries, line: usize) {
+        for register in self.owning(temporaries, None, true) {
+            self.emit(Instruction::Clear { register }, line);
+        }
+    }
+
+    /// `clean_start`: the registers own nothing when the expression begins.
+    fn owning(&self, temporaries: &Temporaries, keep: Option<Reg>, clean_start: bool) -> Vec<Reg> {
         let code = self
             .function
             .instructions
             .get(temporaries.instructions())
             .unwrap_or_default();
+        let locals: Vec<Reg> = self.locals.values().copied().collect();
+        let expression = Expression {
+            code,
+            locals: &locals,
+            clean_start,
+        };
         temporaries
             .registers()
             .map(|index| Reg(index as u16))
             .filter(|register| Some(*register) != keep)
-            .filter(|register| !self.locals.values().any(|local| local == register))
-            .filter(|register| !holds_a_scalar(code, temporaries.instructions.0, *register))
+            .filter(|register| !locals.contains(register))
+            .filter(|register| !expression.holds_a_scalar(temporaries.instructions.0, *register))
             .collect()
-    }
-}
-
-/// Whether `register` holds a scalar after `code`, the instructions from
-/// position `start` on, whichever way control goes through them. A forward
-/// pass: the state after each write, carried along jumps (an expression
-/// only jumps forward, past its short-circuited parts) and merged where
-/// they land. An instruction that mentions the register in a way not known
-/// here counts as writing anything into it, and so does a path that never
-/// writes it.
-fn holds_a_scalar(code: &[Instruction], start: usize, register: Reg) -> bool {
-    let end = start + code.len();
-    let mut landing: HashMap<usize, bool> = HashMap::new();
-    // `None` after an unconditional jump, until something lands.
-    let mut state = Some(false);
-    let mut leaving = true;
-    for (offset, instruction) in code.iter().enumerate() {
-        let here = start + offset;
-        if let Some(&landed) = landing.get(&here) {
-            state = Some(state.map_or(landed, |current| current && landed));
-        }
-        let Some(mut scalar) = state else {
-            continue;
-        };
-        match scalar_write(instruction, register) {
-            Some(result) => scalar = result,
-            None if reads_only(instruction, register) => {}
-            None => scalar = false,
-        }
-        if let Some(target) = jump_target(instruction) {
-            if here < target && target < end {
-                let merged = landing
-                    .get(&target)
-                    .map_or(scalar, |other| *other && scalar);
-                landing.insert(target, merged);
-            } else {
-                leaving &= scalar;
-            }
-            if matches!(instruction, Instruction::Jump(_)) {
-                state = None;
-                continue;
-            }
-        }
-        state = Some(scalar);
-    }
-    leaving && state.unwrap_or(true)
-}
-
-/// Where a jump inside an expression can land.
-fn jump_target(instruction: &Instruction) -> Option<usize> {
-    match instruction {
-        Instruction::Jump(Target(target))
-        | Instruction::Branch {
-            target: Target(target),
-            ..
-        }
-        | Instruction::BranchNull {
-            target: Target(target),
-            ..
-        } => Some(*target),
-        _ => None,
-    }
-}
-
-/// `Some(true)` when the instruction writes a scalar into `register`,
-/// `Some(false)` when it writes something else there, `None` when it is not
-/// one of the instructions that compute scalars.
-fn scalar_write(instruction: &Instruction, register: Reg) -> Option<bool> {
-    match instruction {
-        // Every constant (`crate::ir::Constant`) is a scalar or `[]`.
-        Instruction::Load { destination, .. } if *destination == register => Some(true),
-        Instruction::Binary {
-            destination,
-            operator,
-            ..
-        } if *destination == register => Some(*operator != Binary::Add),
-        Instruction::Unary {
-            destination,
-            operator,
-            ..
-        } if *destination == register => Some(!matches!(operator, Unary::Array | Unary::Object)),
-        // `$i++` gives a number or a string (objects and arrays throw);
-        // `instanceof` gives a boolean.
-        Instruction::IncPlace { destination, .. }
-        | Instruction::InstanceOf { destination, .. }
-        | Instruction::DynamicInstanceOf { destination, .. }
-            if *destination == register =>
-        {
-            Some(true)
-        }
-        // `$this`, and the scratch register a `$this->property` path keeps
-        // it in: the frame holds `$this`, so releasing a copy frees nothing.
-        Instruction::This { destination } if *destination == register => Some(true),
-        _ if this_scratch(instruction) == Some(register) => Some(true),
-        _ => None,
-    }
-}
-
-/// The register that holds `$this` for the instruction's `$this->...` path.
-fn this_scratch(instruction: &Instruction) -> Option<Reg> {
-    let place = match instruction {
-        Instruction::Read { place, .. }
-        | Instruction::Write { place, .. }
-        | Instruction::WriteFromLocal { place, .. }
-        | Instruction::IncPlace { place, .. }
-        | Instruction::Compound { place, .. }
-        | Instruction::Reference { place, .. }
-        | Instruction::Rebind { place, .. }
-        | Instruction::Unset(place) => place,
-        Instruction::Send { argument } => match &argument.source {
-            ArgumentSource::Place(place) => place,
-            ArgumentSource::Value(_) => return None,
-        },
-        _ => return None,
-    };
-    (place.scope == PlaceScope::This).then_some(place.base)
-}
-
-/// Whether the instruction leaves `register` alone or only reads it.
-fn reads_only(instruction: &Instruction, register: Reg) -> bool {
-    let mut mentioned = false;
-    let mut probe = instruction.clone();
-    probe.map_registers(|candidate| {
-        mentioned |= candidate == register;
-        candidate
-    });
-    if !mentioned {
-        return true;
-    }
-    match instruction {
-        Instruction::Send { argument } => {
-            matches!(argument.source, ArgumentSource::Value(value) if value == register)
-        }
-        Instruction::Binary {
-            destination,
-            left,
-            right,
-            ..
-        } => *destination != register && (*left == register || *right == register),
-        Instruction::Unary {
-            destination,
-            source,
-            ..
-        } => *destination != register && *source == register,
-        Instruction::Branch { value, .. } | Instruction::BranchNull { value, .. } => {
-            *value == register
-        }
-        Instruction::Echo(value) => *value == register,
-        _ => false,
     }
 }

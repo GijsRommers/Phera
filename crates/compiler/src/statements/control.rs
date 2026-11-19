@@ -105,12 +105,12 @@ impl Compiler<'_> {
                 line,
             );
             // The condition's values are freed on both ways out, as in PHP.
-            self.clear_owning_temporaries(&temporaries, line);
+            self.clear_condition_temporaries(&temporaries, line);
             self.release_temporaries(mark);
             self.block(body, DeclarationTiming::AtExecution)?;
             ends.push(self.emit(Instruction::Jump(Target(0)), line));
             self.patch(skip, self.position());
-            self.clear_owning_temporaries(&temporaries, line);
+            self.clear_condition_temporaries(&temporaries, line);
         }
         if let Some(body) = otherwise {
             self.block(body, DeclarationTiming::AtExecution)?
@@ -142,7 +142,7 @@ impl Compiler<'_> {
             },
             line,
         );
-        self.clear_owning_temporaries(&condition, line);
+        self.clear_condition_temporaries(&condition, line);
         self.loops.push(Loop {
             start: self.position(),
             cleanup: None,
@@ -152,7 +152,7 @@ impl Compiler<'_> {
         self.block(body, DeclarationTiming::AtExecution)?;
         self.emit(Instruction::Jump(Target(start)), line);
         self.patch(end, self.position());
-        self.clear_owning_temporaries(&condition, line);
+        self.clear_condition_temporaries(&condition, line);
         self.loop_end(start);
 
         Ok(())

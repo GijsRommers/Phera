@@ -36,7 +36,7 @@ impl Compiler<'_> {
             },
             line,
         );
-        self.clear_owning_temporaries(&condition, line);
+        self.clear_condition_temporaries(&condition, line);
         self.loop_end(continue_at);
 
         Ok(())
@@ -74,7 +74,7 @@ impl Compiler<'_> {
                 line,
             )
         });
-        self.clear_owning_temporaries(&conditions, line);
+        self.clear_condition_temporaries(&conditions, line);
         self.loops.push(Loop {
             start: self.position(),
             cleanup: None,
@@ -93,7 +93,7 @@ impl Compiler<'_> {
         self.emit(Instruction::Jump(Target(start)), line);
         if let Some(jump) = end {
             self.patch(jump, self.position());
-            self.clear_owning_temporaries(&conditions, line);
+            self.clear_condition_temporaries(&conditions, line);
         }
         self.loop_end(continue_at);
 
