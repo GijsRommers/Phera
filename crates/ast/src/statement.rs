@@ -21,11 +21,24 @@ pub enum StatementKind {
     InlineHtml(Vec<u8>),
     Block(Block),
 
-    /// `elseif` and `else if` are nested: the `otherwise` block then holds a
-    /// single `If` statement. The `if: ... endif;` form parses to the same node.
+    /// A whole `if` ladder:
+    ///
+    /// ```php
+    /// if ($a) { A(); } elseif ($b) { B(); } elseif ($c) { C(); } else { D(); }
+    /// ```
+    ///
+    /// `then` is `A();`, `elseifs` holds the `$b` and `$c` branches in source
+    /// order, `otherwise` is `D();`. Generated code has ladders of a hundred
+    /// thousand `elseif`s; as a list they are one node, not that many nested
+    /// ones that every pass would recurse through.
+    ///
+    /// `else if` (two words) is PHP's `else` followed by an ordinary `if`
+    /// statement, and stays nested, as in PHP's grammar: `otherwise` holds
+    /// that one `If`. The `if: ... endif;` form parses to the same node.
     If {
         condition: Expression,
         then: Block,
+        elseifs: Vec<ElseIf>,
         otherwise: Option<Block>,
     },
     While {
@@ -117,6 +130,14 @@ pub struct StaticVariable {
     /// Without the `$`.
     pub name: String,
     pub default: Option<Expression>,
+    pub span: Span,
+}
+
+/// One `elseif ($condition) { ... }` branch of [`StatementKind::If`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct ElseIf {
+    pub condition: Expression,
+    pub body: Block,
     pub span: Span,
 }
 

@@ -63,6 +63,10 @@ impl Compiler<'_> {
         while let ast::ExpressionKind::Index { target, .. }
         | ast::ExpressionKind::Property { target, .. } = &node.kind
         {
+            // The rest of a long chain is compiled already (see `chains`).
+            if self.is_compiled_operand(node) {
+                break;
+            }
             self.note_hook_backing(node);
             postfix.push(node);
             node = target;

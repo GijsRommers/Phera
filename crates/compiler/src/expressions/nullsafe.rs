@@ -56,7 +56,36 @@ impl Compiler<'_> {
         let destination = self.literal(Constant::Null, line)?;
         let mut current = self.compile_expression(root)?;
         let mut exits = Vec::new();
+        // A long chain carries its value in one register and hands each
+        // step's temporaries back (see `chains`); a short one needs no moves.
+        let carrier = if chain.len() >= crate::expressions::chains::LONG_CHAIN {
+            let carrier = self.allocate_register()?;
+            self.emit(
+                Instruction::Move {
+                    destination: carrier,
+                    source: current,
+                },
+                line,
+            );
+            current = carrier;
+            Some((carrier, self.mark_temporaries()))
+        } else {
+            None
+        };
         for access in chain.into_iter().rev() {
+            if let Some((carrier, mark)) = carrier
+                && current != carrier
+            {
+                self.emit(
+                    Instruction::Move {
+                        destination: carrier,
+                        source: current,
+                    },
+                    line,
+                );
+                current = carrier;
+                self.release_temporaries(mark);
+            }
             if matches!(
                 access.kind,
                 ast::ExpressionKind::Property { nullsafe: true, .. }

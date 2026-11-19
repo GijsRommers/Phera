@@ -14,6 +14,7 @@ mod pipeline;
 mod policies;
 mod reflection_initializer;
 mod statements;
+mod temporaries;
 
 #[cfg(test)]
 mod tests;

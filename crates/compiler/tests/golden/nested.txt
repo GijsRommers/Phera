@@ -1,7 +1,7 @@
 file golden.php
   const#0 = Array([])
 
-function {main} (7 registers, dynamic scope)
+function {main} (6 registers, dynamic scope)
   r0 = $grid
   path#0 = Register(r0) [Index(r3), Index(r4)]
   0000  line 1    LoadConst { dst: r1, constant: const#0 }
@@ -14,5 +14,5 @@ function {main} (7 registers, dynamic scope)
   0007  line 1    Clear { reg: r2 }
   0008  line 1    Clear { reg: r3 }
   0009  line 1    Clear { reg: r4 }
-  0010  line 1    LoadInt { dst: r5, value: 1 }
-  0011  line 1    Return { src: r5 }
+  0010  line 1    LoadInt { dst: r2, value: 1 }
+  0011  line 1    Return { src: r2 }
