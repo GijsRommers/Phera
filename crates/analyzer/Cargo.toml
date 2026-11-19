@@ -10,5 +10,8 @@ phera-lexer.workspace = true
 phera-ast.workspace = true
 phera-parser.workspace = true
 
+[dev-dependencies]
+phera-extension-api.workspace = true
+
 [lints]
 workspace = true

@@ -308,8 +308,10 @@ fn hex_encode(text: &str) -> String {
 }
 
 fn main() -> ExitCode {
-    let Some(php) = phera_extension_api::testing::oracle::find_php() else {
-        println!("skipping oracle: PHP not found (set PHERA_PHP=/path/to/php)");
+    use phera_extension_api::testing::oracle::{find_php, test_level};
+    let level = test_level();
+    let Some(php) = find_php() else {
+        println!("skipping oracle: PHP not found (set PHERA_PHP or PHERA_PHP86)");
         return ExitCode::SUCCESS;
     };
 
@@ -318,7 +320,7 @@ fn main() -> ExitCode {
 
     for _ in 0..COUNT {
         let (original, _) = gen_expr(&mut rng, 0, true);
-        let parsed = phera_parser::parse(&format!("<?php {original};"));
+        let parsed = phera_parser::parse_at(&format!("<?php {original};"), level);
         match parsed {
             Ok(program) => {
                 let statement = &program.statements[0];

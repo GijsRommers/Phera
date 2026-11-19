@@ -42,9 +42,16 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
   test:
-    name: Test (Linux, PHP 8.5, PostgreSQL 17, MySQL 8.4)
+    name: Test (Linux, PHP ${{ matrix.php }}, PostgreSQL 17, MySQL 8.4)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    continue-on-error: ${{ matrix.php == '8.6' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.5', '8.6']
+    env:
+      PHERA_TEST_PHP: ${{ matrix.php }}
     services:
       redis:
         image: redis:8.4.0
@@ -83,10 +90,10 @@ jobs:
           shared-key: linux
       - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
         with:
-          php-version: '8.5'
+          php-version: ${{ matrix.php }}
           extensions: >-
             json, pcre, ctype, pdo, pdo_pgsql, mysqlnd, pdo_mysql, pdo_sqlite, sqlite3, mbstring, iconv, tokenizer,
-            timezonedb-2026.5, redis-phpredis/phpredis@6.3.0
+            ${{ matrix.php == '8.5' && 'timezonedb-2026.5' || 'timezonedb-2026.6' }}, redis-phpredis/phpredis@6.3.0
           coverage: none
         env:
           REDIS_PATH: .
@@ -94,11 +101,16 @@ jobs:
             --enable-redis --disable-redis-igbinary --disable-redis-msgpack
             --disable-redis-lzf --disable-redis-zstd --disable-redis-lz4
       - name: Build the slim date oracle when PHP uses system tzdata
+        if: matrix.php == '8.5'
         run: bash .github/scripts/build-date-oracle.sh
       - name: Export PHP oracle
         run: |
           echo "PHERA_PHP_REAL=$(command -v php)" >> "$GITHUB_ENV"
-          echo "PHERA_PHP=$GITHUB_WORKSPACE/.github/scripts/php-oracle.sh" >> "$GITHUB_ENV"
+          if [[ "$PHERA_TEST_PHP" == 8.6 ]]; then
+            echo "PHERA_PHP86=$GITHUB_WORKSPACE/.github/scripts/php-oracle.sh" >> "$GITHUB_ENV"
+          else
+            echo "PHERA_PHP=$GITHUB_WORKSPACE/.github/scripts/php-oracle.sh" >> "$GITHUB_ENV"
+          fi
           echo "PHERA_PHP_SHARED_EXTENSIONS=$(php -n -r 'foreach (["json", "pcre", "ctype", "pdo", "pdo_pgsql", "mysqlnd", "pdo_mysql", "pdo_sqlite", "sqlite3", "mbstring", "iconv", "tokenizer", "timezonedb", "redis"] as $e) { if (!extension_loaded($e)) echo "$e "; }')" >> "$GITHUB_ENV"
       # Fail on missing prerequisites instead of silently skipping the PDO suites.
       - name: Verify PHP version, extensions and database connections

@@ -2,7 +2,7 @@ CARGO ?= cargo
 
 .DEFAULT_GOAL := help
 
-.PHONY: help build release check test fmt fmt-check lint ci ci-prerequisites ci-build safe-rust run clean phpt phpt-sweep phpt-lexer
+.PHONY: help build release check test fmt fmt-check lint ci ci-prerequisites ci-build test-php86 safe-rust run clean phpt phpt-sweep phpt-lexer
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -31,13 +31,26 @@ lint:
 
 # Keep prerequisite verification ahead of tests even with make -j.
 .NOTPARALLEL: ci
-ci: fmt-check lint safe-rust ci-prerequisites test
+ci: fmt-check lint safe-rust ci-prerequisites test test-php86
 
 safe-rust:
 	python3 .github/scripts/check-unsafe.py
 
 ci-prerequisites:
-	"$${PHERA_PHP:-php}" -n .github/scripts/check-prerequisites.php
+	@case "$${PHERA_TEST_PHP:-8.5}" in \
+	  8.5) "$${PHERA_PHP85:-$${PHERA_PHP:-php}}" -n .github/scripts/check-prerequisites.php 8.5 ;; \
+	  8.6) "$${PHERA_PHP86:?Set PHERA_PHP86 to the PHP 8.6 oracle}" \
+	    -n .github/scripts/check-prerequisites.php 8.6 ;; \
+	  *) echo 'PHERA_TEST_PHP must be 8.5 or 8.6' >&2; exit 2 ;; \
+	esac
+
+test-php86:
+	@if [ -n "$${PHERA_PHP86:-}" ]; then \
+	  PHERA_TEST_PHP=8.6 $(MAKE) ci-prerequisites && \
+	  PHERA_TEST_PHP=8.6 $(CARGO) test --workspace --no-fail-fast; \
+	else \
+	  echo 'Skipping PHP 8.6 tests. Set PHERA_PHP86 to the PHP 8.6 oracle to enable them.'; \
+	fi
 
 ci-build:
 	$(CARGO) build --release -p phera-cli

@@ -67,7 +67,7 @@ impl Matrix {
         };
         let file = phera_file(name);
         std::fs::write(&file, script).expect("write Phera oracle script");
-        let result = Runtime::new()
+        let result = Runtime::for_level(phera_extension_api::testing::oracle::test_level())
             .run_file_blocking(&file, &[], None)
             .expect("run Phera");
         let output = String::from_utf8(result.output).expect("ASCII test output");

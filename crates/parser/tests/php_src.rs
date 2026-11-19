@@ -32,8 +32,10 @@ enum PhpVerdict {
 }
 
 fn main() -> ExitCode {
-    let Some(php) = phera_extension_api::testing::oracle::find_php() else {
-        println!("skipping oracle: PHP not found (set PHERA_PHP=/path/to/php)");
+    use phera_extension_api::testing::oracle::{find_php, test_level};
+    let level = test_level();
+    let Some(php) = find_php() else {
+        println!("skipping oracle: PHP not found (set PHERA_PHP or PHERA_PHP86)");
         return ExitCode::SUCCESS;
     };
 
@@ -42,7 +44,7 @@ fn main() -> ExitCode {
         .map(PathBuf::from);
     let tests = match &scan_dir {
         Some(dir) => phera_phpt::find_phpt_files(dir),
-        None => match phera_phpt::selected_tests() {
+        None => match phera_phpt::selected_tests_for(level) {
             Ok(tests) => tests,
             Err(error) => {
                 eprintln!("error: {error}");
@@ -107,7 +109,7 @@ fn main() -> ExitCode {
 
     let parsed: Vec<_> = sources
         .iter()
-        .map(|source| match phera_parser::parse(&source.code) {
+        .map(|source| match phera_parser::parse_at(&source.code, level) {
             // The PHP oracle compares grammar acceptance. TOKEN_PARSE checks the
             // exception class and text independently in the tokenizer corpus.
             Err(error) if error.is_compile_error() => Ok(()),

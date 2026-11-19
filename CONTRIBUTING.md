@@ -20,6 +20,11 @@ make ci
 All test suites resolve PHP through the same helper: `PHERA_PHP`, then
 `/opt/homebrew/bin/php`, then `php` on `PATH`. For `make ci` the preflight command
 uses `PHERA_PHP` or `php` on `PATH`; set `PHERA_PHP` explicitly for exact parity.
+ 
+Set `PHERA_PHP86=/absolute/path/to/php86` to add the PHP 8.6 run to
+`make ci`. To run only that fixture suite, use `PHERA_TEST_PHP=8.6 make phpt`.
+Use both variables for Rust oracle tests targeting 8.6. Fixtures under
+`tests/fixtures/php85/` and `tests/fixtures/php86/` run only at their own level.
 `make ci` checks formatting, Clippy, the no-unsafe guard, and prerequisites, then
 runs `cargo test --workspace --no-fail-fast` without setting `PHERA_BIN`. Native PDO
 tests against both databases remain in this gate. CI uses a PHP wrapper that loads

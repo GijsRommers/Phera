@@ -1631,6 +1631,7 @@ name = "phera-analyzer"
 version = "0.1.0"
 dependencies = [
  "phera-ast",
+ "phera-extension-api",
  "phera-lexer",
  "phera-parser",
  "phera-source",
@@ -1936,6 +1937,7 @@ version = "0.1.0"
 dependencies = [
  "phera-extension-api",
  "phera-lexer",
+ "phera-source",
 ]
 
 [[package]]

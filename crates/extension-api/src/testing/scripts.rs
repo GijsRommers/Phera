@@ -19,7 +19,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use super::oracle::find_php;
+use super::oracle::{find_php, test_level};
 
 /// Which side of a comparison a command runs on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,7 +62,7 @@ impl Comparison {
 
     /// Compares scripts using a known executable, for tests that build their own CLI.
     pub fn for_binary(name: &str, phera: &Path) -> Self {
-        let php = find_php().expect("PHP 8.5 is required as the oracle");
+        let php = find_php().expect("The selected PHP oracle is required");
         let artifacts = std::env::temp_dir().join("phera-oracle").join(name);
         std::fs::create_dir_all(&artifacts).expect("create the artifact directory");
         Self {
@@ -81,7 +81,11 @@ impl Comparison {
                 command.args(["-n", "-d", "display_errors=1", "-d", "log_errors=0"]);
                 command
             }
-            Runtime::Phera => Command::new(&self.phera),
+            Runtime::Phera => {
+                let mut command = Command::new(&self.phera);
+                command.args(["--php", test_level().name()]);
+                command
+            }
         };
         command.arg(script);
         command

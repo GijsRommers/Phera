@@ -89,7 +89,7 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
         Some("--version") => Ok(Command::Version),
         Some("--dump") => {
             arguments.next();
-            if arguments.next_if_eq(&"--php".into()).is_some() {
+            if arguments.next_if(|argument| argument == "--php").is_some() {
                 php = Some(php_option(&mut arguments)?);
             }
             let script = arguments.next().ok_or("--dump needs a file.")?;

@@ -11,7 +11,7 @@ use std::process::Command;
 
 use phera_value::{ArrayKey, CollectDiagnostics, DiagnosticKind, Value, float_repr};
 
-use crate::{NativeError, NativeResult};
+use crate::{LanguageLevel, NativeError, NativeResult};
 
 /// PHP code that defines `enc($value)`, collects warnings, notices and
 /// deprecations, and offers `run($tag, $closure)` to print one case line:
@@ -209,12 +209,35 @@ pub fn php_literal(value: &Value) -> String {
     }
 }
 
-/// Resolves the shared oracle binary: `PHERA_PHP`, Homebrew, then `PATH`.
+/// PHP language level under test, shared by the runtime and its oracle.
+pub fn test_level() -> LanguageLevel {
+    match std::env::var("PHERA_TEST_PHP") {
+        Ok(version) => version.parse().unwrap_or_else(|error| panic!("{error}")),
+        Err(std::env::VarError::NotPresent) => LanguageLevel::default(),
+        Err(error) => panic!("PHERA_TEST_PHP: {error}"),
+    }
+}
+
 pub fn find_php() -> Option<PathBuf> {
-    if let Some(path) = std::env::var_os("PHERA_PHP").map(PathBuf::from)
-        && path.exists()
+    find_php_for(test_level())
+}
+
+/// PHP 8.6 requires an explicit oracle. PHP 8.5 also accepts the original
+/// PHERA_PHP override, the Homebrew installation, or a PHP binary on PATH.
+pub fn find_php_for(level: LanguageLevel) -> Option<PathBuf> {
+    let variables: &[&str] = match level {
+        LanguageLevel::Php85 => &["PHERA_PHP85", "PHERA_PHP"],
+        LanguageLevel::Php86 => &["PHERA_PHP86"],
+    };
+    if let Some(path) = variables
+        .iter()
+        .find_map(std::env::var_os)
+        .map(PathBuf::from)
     {
-        return Some(path);
+        return path.is_file().then_some(path);
+    }
+    if level == LanguageLevel::Php86 {
+        return None;
     }
     let homebrew = PathBuf::from("/opt/homebrew/bin/php");
     if homebrew.exists() {

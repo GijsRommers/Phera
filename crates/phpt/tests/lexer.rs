@@ -20,8 +20,10 @@ use phera_lexer::{Lexer, TokenKind, keyword};
 use phera_phpt::{Phpt, display_path, filters_from_args, matches_filters};
 
 fn main() -> ExitCode {
-    let Some(php) = phera_extension_api::testing::oracle::find_php() else {
-        println!("skipping oracle: PHP not found (set PHERA_PHP=/path/to/php)");
+    use phera_extension_api::testing::oracle::{find_php, test_level};
+    let level = test_level();
+    let Some(php) = find_php() else {
+        println!("skipping oracle: PHP not found (set PHERA_PHP or PHERA_PHP86)");
         return ExitCode::SUCCESS;
     };
 
@@ -30,7 +32,7 @@ fn main() -> ExitCode {
         .map(PathBuf::from);
     let tests = match &scan_dir {
         Some(dir) => phera_phpt::find_phpt_files(dir),
-        None => match phera_phpt::selected_tests() {
+        None => match phera_phpt::selected_tests_for(level) {
             Ok(tests) => tests,
             Err(error) => {
                 eprintln!("error: {error}");

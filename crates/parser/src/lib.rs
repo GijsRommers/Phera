@@ -29,18 +29,27 @@ pub const PARSER_STACK_BYTES: usize = 256 * 1024 * 1024;
 /// overflow cannot be caught: it would take the whole process down. On its own
 /// stack the parser's nesting limit is guaranteed to trigger first.
 pub fn parse(source: &str) -> Result<phera_ast::Program, ParseError> {
-    parse_bytes(source.as_bytes())
+    parse_at(source, LanguageLevel::default())
+}
+
+/// Parses a PHP file on a dedicated stack at the selected language level.
+pub fn parse_at(source: &str, level: LanguageLevel) -> Result<phera_ast::Program, ParseError> {
+    parse_bytes_at(source.as_bytes(), level)
 }
 
 /// Parse bytes on the same dedicated stack used for UTF-8 input.
 pub fn parse_bytes(source: &[u8]) -> Result<phera_ast::Program, ParseError> {
+    parse_bytes_at(source, LanguageLevel::default())
+}
+
+fn parse_bytes_at(source: &[u8], level: LanguageLevel) -> Result<phera_ast::Program, ParseError> {
     let whole_file = phera_source::Span::new(0, source.len());
 
     std::thread::scope(|scope| {
         std::thread::Builder::new()
             .name("phera-parser".into())
             .stack_size(PARSER_STACK_BYTES)
-            .spawn_scoped(scope, || parse_bytes_on_current_stack(source))
+            .spawn_scoped(scope, || parse_bytes_at_on_current_stack(source, level))
             .map_err(|error| {
                 ParseError::new(
                     format!("cannot start the parser thread: {error}"),

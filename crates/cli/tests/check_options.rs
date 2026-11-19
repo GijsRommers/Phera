@@ -121,3 +121,62 @@ fn overlapping_psalm_issue_aliases_suppress_their_rules() {
     );
     assert!(project.run(&["aliases.php"]).status.success());
 }
+
+#[test]
+fn language_level_controls_builtin_signatures() {
+    let project = Project::new();
+    project.write("src.php", "<?php clamp(3, 0, 5);");
+    let old = project.run(&["--php", "8.5", "src.php"]);
+    assert_eq!(old.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&old.stdout).contains("function.notFound"));
+
+    project.write(
+        "phera.toml",
+        "[runtime]\nphp = '8.6'\n[check]\npaths = ['src.php']\n",
+    );
+    assert!(project.run(&[]).status.success());
+    assert_eq!(project.run(&["--php", "8.5"]).status.code(), Some(1));
+}
+
+#[test]
+fn language_level_is_selected_once_for_a_script_and_its_includes() {
+    let project = Project::new();
+    project.write("src/main.php", "<?php require __DIR__ . '/helper.php';");
+    project.write(
+        "src/helper.php",
+        "<?php echo PHP_MINOR_VERSION, ':' . $argv[1];",
+    );
+    let run = |flags: &[&str]| {
+        project
+            .command()
+            .arg("run")
+            .args(flags)
+            .args(["src/main.php", "--php"])
+            .output()
+            .unwrap()
+    };
+    let assert_level = |flags: &[&str], expected: &str| {
+        let output = run(flags);
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(output.stdout, expected.as_bytes());
+    };
+    assert_level(&[], "5:--php");
+    project.write("composer.json", r#"{"require":{"php":"^8.6"}}"#);
+    assert_level(&[], "6:--php");
+    project.write("phera.toml", "[runtime]\nphp = '8.5'\n");
+    assert_level(&[], "5:--php");
+    assert_level(&["--php", "8.6"], "6:--php");
+
+    let error = run(&["--php", "8.7"]);
+    assert_eq!(error.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&error.stderr).contains("Known versions are 8.5 and 8.6"));
+    assert!(
+        project
+            .command()
+            .args(["--dump", "--php", "8.6", "src/main.php"])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+}
