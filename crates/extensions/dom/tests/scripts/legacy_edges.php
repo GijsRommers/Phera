@@ -2,8 +2,10 @@
 
 $document = new DOMDocument();
 $document->loadXML('<r a="1" b="2"><x/><y/></r>');
-foreach ([$document->documentElement->childNodes, $document->documentElement->attributes] as $list) {
-    foreach ([-1, 0, 1, 2, 2147483648, 'a', '0', '01', ' 1 ', '1e0', '', null, [], [1], 0.5, true] as $index) {
+$root = $document->documentElement;
+$indices = [-1, 0, 1, 2, 2147483648, 'a', '0', '01', ' 1 ', '1e0', '', null, [], [1], 0.5, true];
+foreach ([$root->childNodes, $root->attributes] as $list) {
+    foreach ($indices as $index) {
         $reference =& $index;
         $present = isset($list[$reference]);
         try {

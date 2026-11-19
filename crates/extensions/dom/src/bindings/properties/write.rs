@@ -85,9 +85,12 @@ pub(super) fn mutate(
         }
         "data" | "value" | "textContent" | "nodeValue" => {
             let dereferenced = value.deref();
-            if matches!(&*dereferenced, Value::Array(_) | Value::Resource(_))
-                || matches!(&*dereferenced, Value::Object(object) if !object.class.is_instance_of("Stringable"))
-            {
+            let invalid = match &*dereferenced {
+                Value::Array(_) | Value::Resource(_) => true,
+                Value::Object(object) => !object.class.is_instance_of("Stringable"),
+                _ => false,
+            };
+            if invalid {
                 let declaring = match name {
                     "data" if kind == Kind::ProcessingInstruction => "DOMProcessingInstruction",
                     "data" => "DOMCharacterData",

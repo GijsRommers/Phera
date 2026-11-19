@@ -12,9 +12,16 @@ $xpath->registerNamespace('php', 'http://php.net/xpath');
 $other = new DOMDocument();
 $other->loadXML('<other><entry id="foreign">value</entry></other>');
 $entry = $other->documentElement->firstChild;
-$xpath->registerPhpFunctions(['other' => fn () => $other->documentElement, 'entry' => fn () => $entry]);
+$xpath->registerPhpFunctions([
+    'other' => fn () => $other->documentElement,
+    'entry' => fn () => $entry,
+]);
 $result = $xpath->query('php:function("other")/entry');
-echo json_encode([$result->length, $result[0] === $entry, $result[0]->ownerDocument === $other]), "\n";
+echo json_encode([
+    $result->length,
+    $result[0] === $entry,
+    $result[0]->ownerDocument === $other,
+]), "\n";
 echo json_encode($xpath->evaluate('string(php:function("entry")/@id)')), "\n";
 echo json_encode($xpath->evaluate('name(php:function("entry")/parent::*)')), "\n";
 
