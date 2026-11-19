@@ -1,5 +1,6 @@
-//! Named PHPDoc declarations: `/** @method string render() */` supplies a method.
-//! Only tags needed for symbol lookup and flow are read at levels 0 and 1.
+//! `/** @param list<User> $users */` refines the native declaration of `$users`.
+//! Parse tags and their type expressions separately. Keep tag locations for diagnostics,
+//! and resolve class names with the same imports as the annotated PHP code.
 
 use crate::names::Names;
 use phera_ast::{Name, NameKind, UseKind};

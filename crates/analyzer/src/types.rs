@@ -1,5 +1,6 @@
-//! The initial type lattice: `$x = new DateTime;` records a class, not `mixed`.
-//! Unknown facts join to mixed; unions retain only information true on all paths.
+//! Values such as `3` refine `int`, and `Readable&Seekable` carries both member sets.
+//! Keep common facts inline and share compound types between signatures and flow scopes.
+//! Type compatibility distinguishes a proven rejection from insufficient information.
 
 use crate::names::Names;
 use phera_ast::{Type, TypeKind, UseKind};

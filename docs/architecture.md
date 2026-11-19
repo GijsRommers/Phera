@@ -901,10 +901,40 @@ What PHPStan and Psalm do: find errors without running the code.
   into one index for the project; then analyse each function body: track the
   type of every variable through the control flow, infer the type of every
   expression, and let rules report what cannot be right.
-- **Types.** A small lattice: the scalar types, literal values, `null`,
-  unions, class names with their ancestry, `list<T>` and `array<K, V>`,
-  array shapes, `callable` signatures, `mixed`, `never`. Declared native
-  types are facts; everything else is inferred.
+- **Type model.** Keep scalar facts inline and share immutable compound types
+  across scopes and declarations. A literal such as `3` is narrower than
+  `int`, and `never` is the empty set of values. A join records the values
+  possible on either branch. An intersection such as `Readable&Seekable`
+  retains members from both bounds. Class ancestry comes from the lazy
+  declaration index. Arrays keep key and value types, lists keep sequential
+  integer keys, and shapes also record named and optional keys. Callable
+  types carry their parameter and return signatures. Iterables retain key
+  and value types even when supplied by a class.
+- **Declaration types.** Keep a declaration's native type and its PHPDoc
+  refinement separately. For example, `@param list<User> $users` refines
+  `array $users`, and an incompatible doc type is a diagnostic on the tag.
+  Parse the PHPDoc grammar independently of PHP syntax, with bounded
+  nesting, namespace imports, tag precedence, and source locations. Use
+  declared template bounds and infer simple template arguments at calls.
+  Resolve `self` against the declaring class, `static` against the receiver,
+  and `$this` against the receiver identity. A class-string carries its
+  class bound. Preserve literal ranges and other refinements when the
+  checker knows what they mean. Erase an unsupported pseudo-type to the
+  nearest type that can be justified by its syntax.
+- **Flow and compatibility.** Expression evaluation supplies a type and
+  sends facts to the true and false scopes. A join keeps facts supported
+  by both paths and can retain an implication tied to an unchanged
+  variable, such as `$ok === true` implying that `$value` was assigned.
+  Narrowing records the condition's location so diagnostics can identify
+  where a fact came from. Native acceptance considers the operation and
+  the relevant `strict_types` setting. PHPDoc acceptance compares the
+  refined types. Keep unknown acceptance distinct from a proven mismatch
+  so that these levels can analyse untyped code.
+- **Analysis concurrency.** Composer resolution and declaration linking
+  precede each analysis pass. Workers analyse independent files against a
+  shared index and return unresolved class requests alongside their
+  results. A subsequent pass resolves new requests and revisits affected
+  files. Diagnostic ordering is independent of worker completion order.
 - **Composer projects.** Check paths such as `src` or `app routes` from a
   directory with `composer.json` and `vendor/composer`, or pass paths
   inside that project from elsewhere. Phera parses Composer's generated
@@ -923,13 +953,13 @@ What PHPStan and Psalm do: find errors without running the code.
   parsed by Phera's parser at build time into a compact table. So the checker
   knows every built-in function and class of PHP, not only those the runtime
   implements so far.
-- **Levels**, as in PHPStan, so a project can adopt it gradually. Level 0:
-  unknown classes, functions, methods on `$this`, constants; wrong argument
-  counts; variables that are certainly undefined. Then: possibly undefined
-  variables; methods and properties on any expression whose type is known;
-  return and property types; dead code and comparisons that are always true
-  or false; argument types; and from there PHPDoc types (`@param`,
-  `@return`, `@var`, generics, shapes).
+- **Levels.** Checks accumulate. Levels 0 and 1 cover basic symbol checks,
+  count checks, and variable definition. Level 2 reads and validates
+  PHPDoc and checks members of known receiver types. Level 3 checks
+  returned values and typed property writes. Level 4 checks provably
+  constant predicates and unreachable code. Level 5 checks argument types
+  against resolved signatures. A call to `strlen(...)` has the same
+  parameter type as a direct call to `strlen`.
 - **Output**: a readable report, JSON, and annotations for CI; a baseline
   file to adopt it on an existing code base; `@phpstan-ignore` and
   `@psalm-suppress` comments are honoured so existing code needs no edits.
@@ -937,8 +967,8 @@ What PHPStan and Psalm do: find errors without running the code.
   with one deliberate error or none, is run through PHPStan at the matching
   level and through `phera check`; both must flag the same lines. Then real
   open-source projects, comparing the reports.
-- **Not in the first versions**: a plugin interface, and full parity with
-  PHPStan's generics inference.
+- **Extension points.** PHPStan plugins and inference beyond declared
+  templates with simple call-site substitutions require separate work.
 
 ### 11.2 `phera test`: a test runner
 
