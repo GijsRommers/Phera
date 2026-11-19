@@ -2,13 +2,15 @@
 //! The last step of isset/empty uses a different hook protocol from ??.
 
 use phera_bytecode::{FetchMode, PathBase, Reg, Step};
-use phera_extension_api::{NativeError, NativeResult};
+use phera_extension_api::NativeError;
 use phera_value::{ArrayKey, Object, Value};
 use std::rc::Rc;
 
 use crate::access_mode::{Creation, Missing, Mutation};
+use crate::classes::property_hooks::HookRead;
+use crate::code_table::FunctionIndex;
 use crate::inline_stack::InlineStack;
-use crate::magic_properties::{PropertyRead, PropertyReadSource};
+use crate::magic_properties::{PropertyRead, PropertyReadSource, PropertyReadStep};
 use crate::path_update::PathKey;
 use crate::{AccessPath, Vm};
 
@@ -30,6 +32,7 @@ pub(crate) enum UpdateTarget {
         object: Rc<Object>,
         key: ArrayKey,
     },
+    Dimension(Rc<Object>, Value),
 }
 
 struct IndirectPath {
@@ -37,10 +40,24 @@ struct IndirectPath {
     keys: InlineStack<PathKey>,
 }
 
-#[derive(PartialEq, Eq)]
-enum ReadPurpose {
-    Value,
-    Update,
+pub(crate) enum PathReadStep {
+    Complete(ReadPlace),
+    Getter {
+        function: FunctionIndex,
+        object: Rc<Object>,
+        indirect: Option<String>,
+    },
+}
+
+pub(crate) struct PathRead {
+    pub(crate) place: AccessPath,
+    mode: FetchMode,
+    register: Option<Reg>,
+    next: usize,
+    value: Value,
+    indirect: Option<Box<IndirectPath>>,
+    resolved: Option<Box<InlineStack<PathKey>>>,
+    target: Option<UpdateTarget>,
 }
 
 impl AccessPath {
@@ -52,63 +69,72 @@ impl AccessPath {
 }
 
 impl Vm {
-    pub(crate) async fn read_magic_place(
+    pub(crate) fn start_read_path(
         &mut self,
-        place: &AccessPath,
+        place: AccessPath,
         mode: FetchMode,
-    ) -> NativeResult {
-        Ok(self
-            .read_magic_path(place, mode, ReadPurpose::Value)
-            .await?
-            .value)
-    }
-
-    pub(crate) async fn read_for_path_update(
-        &mut self,
-        place: &AccessPath,
-    ) -> Result<ReadPlace, NativeError> {
-        self.read_magic_path(place, FetchMode::Read, ReadPurpose::Update)
-            .await
-    }
-
-    async fn read_magic_path(
-        &mut self,
-        place: &AccessPath,
-        mode: FetchMode,
-        purpose: ReadPurpose,
-    ) -> Result<ReadPlace, NativeError> {
-        let mut indirect: Option<IndirectPath> = None;
-        let mut resolved = (purpose == ReadPurpose::Update).then(InlineStack::new);
-        let mut target = None;
-        let quiet = matches!(mode, FetchMode::Quiet | FetchMode::Isset | FetchMode::Empty);
-        let missing = match mode {
-            FetchMode::Isset | FetchMode::Empty => Missing::Isset,
-            FetchMode::Quiet => Missing::Silent,
-            _ => Missing::Warn,
-        };
-        let Some(register) = self.base_register(place, Creation::Existing, missing)? else {
-            return Ok(ReadPlace {
-                value: Value::Null,
-                target,
-            });
-        };
-        if matches!(place.base()?, PathBase::StaticProperty { .. }) {
-            self.check_static_read(place, missing)?;
+        update: bool,
+    ) -> Result<PathRead, NativeError> {
+        let missing = fetch_missing(mode);
+        let register = self.base_register(&place, Creation::Existing, missing)?;
+        if register.is_some() && matches!(place.base()?, PathBase::StaticProperty { .. }) {
+            self.check_static_read(&place, missing)?;
         }
-        let mut value = self.read_root(register, missing);
-        let mut steps = place.steps()?.peekable();
+        let value = register.map_or(Value::Null, |register| self.read_root(register, missing));
+        Ok(PathRead {
+            place,
+            mode,
+            register,
+            next: 0,
+            value,
+            indirect: None,
+            resolved: update.then(|| Box::new(InlineStack::new())),
+            target: None,
+        })
+    }
+
+    pub(crate) async fn advance_path_read(
+        &mut self,
+        path: &mut PathRead,
+    ) -> Result<PathReadStep, NativeError> {
+        let Some(register) = path.register else {
+            return Ok(PathReadStep::Complete(ReadPlace {
+                value: Value::Null,
+                target: None,
+            }));
+        };
+        let mode = path.mode;
+        let quiet = matches!(mode, FetchMode::Quiet | FetchMode::Isset | FetchMode::Empty);
+        let missing = fetch_missing(mode);
+        let update = path.resolved.is_some();
+        let mut value = std::mem::take(&mut path.value);
+        let mut steps = path.place.steps()?.skip(path.next).peekable();
         while let Some(step) = steps.next() {
+            path.next += 1;
+            if let Step::Index(index) = step
+                && let Value::Object(object) = &value
+                && crate::dimensions::has_dimension(object)
+            {
+                let offset = self.get(index);
+                let object = object.clone();
+                let last = steps.peek().is_none();
+                if update && last {
+                    path.target = Some(UpdateTarget::Dimension(object.clone(), offset.clone()));
+                }
+                value = self.read_dimension_mode(object, offset, mode, last).await?;
+                continue;
+            }
             if quiet
                 && !value.is_object()
                 && matches!(step, Step::Property(_) | Step::DynamicProperty(_))
             {
-                return Ok(ReadPlace {
+                return Ok(PathReadStep::Complete(ReadPlace {
                     value: Value::Null,
-                    target,
-                });
+                    target: path.target.take(),
+                }));
             }
             let key = if let Step::Index(index) = step {
-                if purpose == ReadPurpose::Update {
+                if update {
                     PathKey::Index(Some(self.write_index_key(&value, index)?))
                 } else if matches!(value, Value::Array(_) | Value::String(_)) {
                     PathKey::Index(Some(self.read_index_key(index, missing)?))
@@ -121,7 +147,7 @@ impl Vm {
                 self.magic_path_key(step).await?
             };
             let last = steps.peek().is_none();
-            if purpose == ReadPurpose::Update {
+            if update {
                 let stored = match (&key, &value) {
                     (PathKey::Property(key), Value::Object(object)) => {
                         let name = crate::path_update::property_name(key);
@@ -132,10 +158,10 @@ impl Vm {
                     }
                     _ => key.clone(),
                 };
-                match &mut indirect {
+                match &mut path.indirect {
                     Some(path) => path.keys.push(stored),
                     None => {
-                        if let Some(keys) = &mut resolved {
+                        if let Some(keys) = &mut path.resolved {
                             keys.push(stored);
                         }
                     }
@@ -144,31 +170,57 @@ impl Vm {
             value = match key {
                 PathKey::Property(key) => {
                     let read = match (mode, steps.peek()) {
-                        _ if purpose == ReadPurpose::Update => PropertyRead::Update,
+                        _ if update => PropertyRead::Update,
                         (FetchMode::Isset, None) => PropertyRead::Isset,
                         (FetchMode::Empty, None) => PropertyRead::Empty,
                         _ if quiet => PropertyRead::Coalesce,
                         _ => PropertyRead::Read,
                     };
                     let owner = match &value {
-                        Value::Object(object) if purpose == ReadPurpose::Update && !last => {
-                            Some(object.clone())
-                        }
+                        Value::Object(object) if update && !last => Some(object.clone()),
                         _ => None,
                     };
-                    if purpose == ReadPurpose::Update
+                    if update
                         && last
                         && let Value::Object(object) = &value
                     {
-                        target = Some(UpdateTarget::Property {
+                        path.target = Some(UpdateTarget::Property {
                             object: object.clone(),
                             key: key.clone(),
                         });
-                        indirect = None;
+                        path.indirect = None;
                     }
                     let name = owner
                         .as_ref()
                         .map(|_| crate::path_update::property_name(&key));
+                    if let Some(object) = &owner
+                        && let Some(class) = self.classes.for_object(object)
+                        && let Some(slot) = self
+                            .property_slot(object, &crate::path_update::property_name(&key))
+                            .1
+                        && let Some(property) =
+                            crate::classes::property_hooks::for_key(&class, &slot)
+                        && let Some(hooks) = &property.hooks
+                    {
+                        match self.declared_hook_read(object, property, hooks, true)? {
+                            HookRead::Getter(function) => {
+                                return Ok(PathReadStep::Getter {
+                                    function,
+                                    object: object.clone(),
+                                    indirect: Some(property.name.clone()),
+                                });
+                            }
+                            HookRead::Value(hooked) => {
+                                value = hooked.deref().clone();
+                                path.indirect = Some(Box::new(IndirectPath {
+                                    root: hooked,
+                                    keys: InlineStack::new(),
+                                }));
+                                continue;
+                            }
+                            HookRead::Storage => {}
+                        }
+                    }
                     if let Some(object) = &owner
                         && matches!(steps.peek(), Some(Step::Index(_) | Step::Append))
                         && let Some(class) = self.classes.for_object(object)
@@ -192,28 +244,30 @@ impl Vm {
                             .clone();
                         continue;
                     }
-                    let result = self.resolve_property_read(value, key, read).await?;
+                    let result = match self.plan_property_read(value, key, read).await? {
+                        PropertyReadStep::Value(result) => result,
+                        PropertyReadStep::Hook(function, object) => {
+                            return Ok(PathReadStep::Getter {
+                                function,
+                                object,
+                                indirect: None,
+                            });
+                        }
+                    };
                     if result.source == PropertyReadSource::Getter
                         && let (Some(owner), Some(name)) = (owner, name)
                     {
                         self.warn_indirect_magic_property(&owner, &name, &result.value);
-                        indirect = Some(IndirectPath {
+                        path.indirect = Some(Box::new(IndirectPath {
                             root: result.value.clone(),
                             keys: InlineStack::new(),
-                        });
+                        }));
                     }
-                    match result.value {
-                        Value::Reference(reference) => {
-                            let value = reference.borrow().clone();
-                            self.release_property_reference(reference);
-                            value
-                        }
-                        value => value,
-                    }
+                    self.read_path_value(result.value)
                 }
                 PathKey::Index(key) => {
                     let key = key.ok_or_else(|| NativeError::error("Cannot use [] for reading"))?;
-                    if purpose == ReadPurpose::Update {
+                    if update {
                         self.read_writable_index(value, &key)?
                     } else {
                         self.read_path_index(value, &key, missing)?
@@ -221,19 +275,51 @@ impl Vm {
                 }
             };
         }
-        let target = target.or_else(|| {
-            resolved.map(|keys| match indirect {
+        let target = path.target.take().or_else(|| {
+            path.resolved.take().map(|keys| match path.indirect.take() {
                 Some(path) => UpdateTarget::Indirect {
                     root: path.root,
                     keys: Box::new(path.keys),
                 },
-                None => UpdateTarget::Resolved {
-                    register,
-                    keys: Box::new(keys),
-                },
+                None => UpdateTarget::Resolved { register, keys },
             })
         });
-        Ok(ReadPlace { value, target })
+        Ok(PathReadStep::Complete(ReadPlace { value, target }))
+    }
+
+    pub(crate) fn resume_path_read(
+        &mut self,
+        path: &mut PathRead,
+        value: Value,
+        indirect: Option<(Rc<Object>, String)>,
+    ) -> Result<(), NativeError> {
+        path.value = if let Some((object, name)) = indirect {
+            if !value.is_reference() && !value.is_object() {
+                return Err(crate::classes::property_hooks::indirect_error(
+                    &object, &name,
+                ));
+            }
+            let read = value.deref().clone();
+            path.indirect = Some(Box::new(IndirectPath {
+                root: value,
+                keys: InlineStack::new(),
+            }));
+            read
+        } else {
+            self.read_path_value(value)
+        };
+        Ok(())
+    }
+
+    fn read_path_value(&mut self, value: Value) -> Value {
+        match value {
+            Value::Reference(reference) => {
+                let value = reference.borrow().clone();
+                self.release_property_reference(reference);
+                value
+            }
+            value => value,
+        }
     }
 
     /// Resolve dynamic property names as strings. A dimension key keeps
@@ -261,5 +347,13 @@ impl Vm {
             }
         };
         Ok(key)
+    }
+}
+
+fn fetch_missing(mode: FetchMode) -> Missing {
+    match mode {
+        FetchMode::Isset | FetchMode::Empty => Missing::Isset,
+        FetchMode::Quiet => Missing::Silent,
+        _ => Missing::Warn,
     }
 }

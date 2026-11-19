@@ -27,10 +27,16 @@ impl Vm {
             Visibility::Public => true,
             Visibility::Private => scope.is_some_and(|scope| scope.name == property.declaring),
             Visibility::Protected => scope.is_some_and(|scope| {
-                scope.is_a(&property.declaring)
+                let prototype = property
+                    .hooks
+                    .as_ref()
+                    .map_or(property.declaring.as_str(), |hooks| {
+                        hooks.prototype.as_ref()
+                    });
+                scope.is_a(prototype)
                     || self
                         .classes
-                        .get(&property.declaring)
+                        .get(prototype)
                         .is_some_and(|owner| owner.is_a(&scope.name))
             }),
         };

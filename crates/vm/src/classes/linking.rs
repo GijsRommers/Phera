@@ -349,8 +349,13 @@ impl Vm {
         let hooks = super::operations::user_hooks(&methods, parent.as_deref(), operations);
         let mut constants =
             self.link_class_constants(declaration, unit, unit_first, parent.as_ref(), &interfaces)?;
-        let (mut defaults, mut static_properties) =
-            self.link_class_properties(declaration, unit, unit_first, parent.as_ref())?;
+        let (mut defaults, mut static_properties) = self.link_class_properties(
+            declaration,
+            unit,
+            unit_first,
+            parent.as_ref(),
+            &interfaces,
+        )?;
         if !traits.is_empty() {
             self.compose_trait_members(
                 declaration,
@@ -361,6 +366,22 @@ impl Vm {
                 &mut constants,
             )?;
         }
+        if declaration.kind != ClassKind::Trait {
+            self.check_trait_property_overrides(
+                declaration,
+                unit,
+                &traits,
+                parent.as_deref(),
+                &interfaces,
+            )?;
+            for property in defaults
+                .iter()
+                .filter(|property| property.declaring == *name)
+            {
+                self.check_hook_overrides(property, parent.as_deref(), &interfaces)?;
+            }
+        }
+        self.link_property_contracts(declaration, unit, &interfaces, &mut defaults)?;
         if let Some(enum_info) = &mut enum_info {
             self.link_enum_members(
                 declaration,
@@ -382,6 +403,14 @@ impl Vm {
         for method in &declaration.methods {
             let function = self.code.declared(unit_first, method.function.index());
             self.code.set_declaring_class(function, index);
+        }
+        for property in &declaration.properties {
+            if let Some(hooks) = &property.hooks {
+                for hook in hooks.get.iter().chain(&hooks.set) {
+                    let function = self.code.declared(unit_first, hook.function.index());
+                    self.code.set_declaring_class(function, index);
+                }
+            }
         }
         let declaration_location = Some((unit_first, declaration_index));
         let class = Rc::new_cyclic(|identity| Class {

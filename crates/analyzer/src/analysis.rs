@@ -42,6 +42,7 @@ mod match_expression;
 mod member_expressions;
 mod members;
 mod not_supported;
+mod property_hooks;
 mod refine;
 mod reporting;
 mod short_circuit;

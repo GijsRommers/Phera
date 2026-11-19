@@ -10,19 +10,15 @@ impl Compiler<'_> {
     pub(crate) fn validate_parameter_features(
         &self,
         declaration: &super::functions::FunctionSource<'_>,
-        line: usize,
     ) -> Result<(), CompileError> {
         for parameter in declaration.parameters {
-            if !parameter.hooks.is_empty() {
-                return Err(self.error("Property hooks not supported yet", line));
-            }
             if parameter.modifiers.is_static {
                 return Err(self.error(
                     "Cannot use the static modifier on a parameter",
                     self.lines.line(parameter.span.start),
                 ));
             }
-            if parameter.modifiers.promotes_property()
+            if parameter.is_promoted()
                 && !declaration
                     .name
                     .rsplit_once("::")

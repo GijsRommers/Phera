@@ -154,6 +154,13 @@ impl Vm {
         } else {
             None
         };
+        // The property operation receives the generator immediately. Its
+        // continuation belongs to the caller, outside the detached activation.
+        let continuation = if frame.frame.has_extras() && destination.is_none() {
+            self.call_stack.current_extras_mut().property_hook.take()
+        } else {
+            None
+        };
         let object = self.classes.allocate(class);
         let activation = self.suspend_generator_frame(activation::Storage::default())?;
         let first_generator = self.generator_releases.is_none();
@@ -176,6 +183,13 @@ impl Vm {
         }
         if let Some(destination) = destination {
             self.set(destination, value);
+        } else if let Some(continuation) = continuation {
+            self.returned_hook = Some(crate::property_hook_continuation::ReturnedHook {
+                continuation,
+                value,
+            });
+            self.pending_callbacks = true;
+            return Ok(Some(BatchExit::Handlers));
         }
         Ok(first_generator.then_some(BatchExit::GeneratorTracking))
     }
