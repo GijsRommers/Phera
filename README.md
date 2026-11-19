@@ -53,7 +53,11 @@ runner yet.
 Built in, each checked call by call against real PHP: core, standard, ctype,
 date, dom (first stage), filter, hash, json, mbstring, openssl, pcre, PDO
 (SQLite, MySQL, PostgreSQL, with TLS), random, redis, reflection, serialize,
-session, SPL, sqlite3, streams, tokenizer.
+session, SPL, sqlite3, streams, tokenizer, Unix process functions, and POSIX queries.
+
+Unix scripts can launch programs with `shell_exec()`, backticks, and the process
+functions. Backticks emit PHP 8.5's compile-time deprecation. To disable program
+launching for web requests, run `phera serve --no-process public`.
 
 The `mysqli` and `pgsql` extensions share PDO's async connections, TLS and
 connection pool. For mysqli single statements, `MYSQLI_USE_RESULT` fetches one
@@ -61,8 +65,8 @@ row at a time, including in `foreach`. PostgreSQL supports the `pg_exec` alias
 and other PHP 8.5 aliases for supported operations. Compatibility testing is
 in progress. MySQL LOCAL INFILE is disabled.
 
-In progress: bcmath, curl, gmp, intl, process functions, sodium,
-zlib. Not started: gd, fileinfo, SimpleXML, XMLReader, XMLWriter, zip, sockets.
+In progress: bcmath, curl, gmp, intl, sodium, zlib.
+Not started: gd, fileinfo, SimpleXML, XMLReader, XMLWriter, zip, sockets.
 
 ## ✨ Goals
 
