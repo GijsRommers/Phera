@@ -96,6 +96,7 @@ mod intrinsics;
 mod iteration;
 mod iterator_instructions;
 mod iterators;
+mod last_error;
 mod locals;
 mod magic_method;
 mod magic_mutations;

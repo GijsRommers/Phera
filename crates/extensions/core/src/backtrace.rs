@@ -13,18 +13,23 @@ pub(crate) fn register(registry: &mut Registry) {
     registry.constant("DEBUG_BACKTRACE_IGNORE_ARGS", IGNORE_ARGS);
     registry.function(FunctionEntry::sync(
         "debug_backtrace",
-        &[
-            Param::new("options", ParamType::Int).with_default(ConstantValue::Int(PROVIDE_OBJECT)),
-            LIMIT,
-        ],
+        const {
+            &[
+                Param::new("options", ParamType::Int)
+                    .with_default(ConstantValue::Int(PROVIDE_OBJECT)),
+                LIMIT,
+            ]
+        },
         backtrace,
     ));
     registry.function(FunctionEntry::sync(
         "debug_print_backtrace",
-        &[
-            Param::new("options", ParamType::Int).with_default(ConstantValue::Int(0)),
-            LIMIT,
-        ],
+        const {
+            &[
+                Param::new("options", ParamType::Int).with_default(ConstantValue::Int(0)),
+                LIMIT,
+            ]
+        },
         print_backtrace,
     ));
 }

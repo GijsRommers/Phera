@@ -45,6 +45,7 @@ pub(crate) struct ErrorHandlers {
     pub(crate) warning_site: Option<crate::exception_traces::WarningSite>,
     pub(crate) pending: Vec<DiagnosticEvent>,
     pub(crate) reporting: i64,
+    pub(crate) last_error: Option<crate::last_error::LastError>,
     /// PHP formats saved trace strings using the current request limit, not creation-time text.
     pub(crate) trace_string_limit: usize,
 }
@@ -61,6 +62,7 @@ impl Default for ErrorHandlers {
             warning_site: None,
             pending: Vec::new(),
             reporting: 30719,
+            last_error: None,
             trace_string_limit: 15,
         }
     }
@@ -198,8 +200,9 @@ impl Vm {
                 false
             };
             if !handled {
-                self.report_event(&event);
-                if event.level == 256 {
+                let level = event.level;
+                self.report_event(event);
+                if level == 256 {
                     self.status = 255;
                     return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
                         (),
@@ -248,17 +251,8 @@ impl Vm {
     }
 
     /// Respect the reporting mask separately from whether a user callback was invoked.
-    pub(crate) fn report_event(&mut self, event: &DiagnosticEvent) {
-        if self.error_handlers.reporting & event.level != 0
-            && let Some(bytes) = self.diagnostic_reporter.report(
-                &event.kind,
-                event.message.clone(),
-                &event.location.file,
-                event.location.line,
-            )
-        {
-            self.out(&bytes);
-        }
+    pub(crate) fn report_event(&mut self, event: DiagnosticEvent) {
+        self.report_diagnostic(event.level, &event.kind, event.message, event.location);
     }
 }
 

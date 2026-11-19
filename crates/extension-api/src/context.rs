@@ -43,6 +43,14 @@ pub trait Context {
     /// Print a trace using the request's exception string parameter limit.
     fn print_backtrace(&mut self, _trace: &Value) {}
 
+    /// The most recent diagnostic that reached PHP's default error handler.
+    fn last_error(&self) -> Value {
+        Value::Null
+    }
+
+    /// Reset the request's last diagnostic.
+    fn clear_last_error(&mut self) {}
+
     /// Where warnings, notices and deprecations go.
     fn diagnostics(&mut self) -> &mut dyn Diagnostics;
 

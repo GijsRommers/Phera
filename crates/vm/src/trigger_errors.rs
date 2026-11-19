@@ -55,7 +55,7 @@ impl Vm {
             self.enqueue_diagnostic(event);
             self.drain_error_handlers().await?;
         } else {
-            self.report_event(&event);
+            self.report_event(event);
             if level == 256 {
                 self.status = 255;
                 return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(

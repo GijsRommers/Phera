@@ -66,6 +66,17 @@ impl Context for Vm {
         Some(self.location().file.into())
     }
 
+    fn last_error(&self) -> Value {
+        self.error_handlers
+            .last_error
+            .as_ref()
+            .map_or(Value::Null, crate::last_error::LastError::to_value)
+    }
+
+    fn clear_last_error(&mut self) {
+        self.error_handlers.last_error = None;
+    }
+
     fn diagnostics(&mut self) -> &mut dyn Diagnostics {
         self
     }
@@ -174,7 +185,7 @@ impl Context for Vm {
         {
             self.enqueue_diagnostic(event);
         } else {
-            self.report_event(&event);
+            self.report_event(event);
         }
     }
 

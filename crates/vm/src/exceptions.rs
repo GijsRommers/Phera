@@ -262,8 +262,13 @@ impl Vm {
         if object.class.name() == "ParseError" {
             let message = property_text(object, "message");
             let file = property_text(object, "file");
-            let line = property_text(object, "line");
+            let line = error_line(object);
             self.out(format!("\nParse error: {message} in {file} on line {line}\n").as_bytes());
+            self.record_last_error(
+                4,
+                message,
+                crate::diagnostics::SourceLocation { file, line },
+            );
             self.status = 255;
             return;
         }
@@ -277,13 +282,20 @@ impl Vm {
         } else {
             file
         };
-        let line = property_text(object, "line");
-        self.out(
-            format!("\nFatal error: Uncaught {text}\n  thrown in {file} on line {line}\n")
-                .as_bytes(),
+        let line = error_line(object);
+        let message = format!("Uncaught {text}\n  thrown");
+        self.out(format!("\nFatal error: {message} in {file} on line {line}\n").as_bytes());
+        self.record_last_error(
+            1,
+            message,
+            crate::diagnostics::SourceLocation { file, line },
         );
         self.status = 255;
     }
+}
+
+fn error_line(object: &Object) -> usize {
+    property_text(object, "line").parse().unwrap_or_default()
 }
 
 /// PHP stores inherited private fields under the native root declaring them.

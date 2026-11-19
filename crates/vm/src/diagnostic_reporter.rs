@@ -67,7 +67,7 @@ impl DiagnosticReporter {
     pub(crate) fn report(
         &mut self,
         kind: &str,
-        message: String,
+        message: &str,
         file: &str,
         line: usize,
     ) -> Option<Vec<u8>> {
