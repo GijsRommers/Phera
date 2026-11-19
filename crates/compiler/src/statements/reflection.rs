@@ -47,6 +47,14 @@ impl Compiler<'_> {
             return Ok(Vec::new());
         }
         let mut compiled = Vec::with_capacity(attributes.len());
+        let placement = match placement {
+            AttributePlacement::Promoted(target)
+                if self.has_builtin(attributes, "DelayedTargetValidation") =>
+            {
+                AttributePlacement::Declaration(target)
+            }
+            placement => placement,
+        };
         for attribute in attributes {
             if self.attribute_includes_target(attribute, placement) {
                 let line = self.lines.line(attribute.span.start);
@@ -120,7 +128,7 @@ impl Compiler<'_> {
             attributes: self.compile_attributes(
                 &parameter.attributes,
                 scope,
-                if parameter.modifiers.promotes_property() {
+                if parameter.is_promoted() {
                     AttributePlacement::Promoted(AttributeTarget::Parameter)
                 } else {
                     AttributePlacement::Declaration(AttributeTarget::Parameter)
@@ -131,7 +139,7 @@ impl Compiler<'_> {
                 .default
                 .as_ref()
                 .and_then(|expr| self.default_constant(expr)),
-            promoted: parameter.modifiers.promotes_property(),
+            promoted: parameter.is_promoted(),
         })
     }
 

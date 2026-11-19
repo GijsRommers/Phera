@@ -3,7 +3,7 @@
 use phera_ast as ast;
 use phera_bytecode::Reg;
 
-use crate::ir::{Argument, Instruction, Target, Unary};
+use crate::ir::{Argument, Constant, Instruction, Target, Unary};
 use crate::{CompileError, Compiler, binary};
 /// One deferred right operand, retaining its operator and source location.
 struct BinaryStep<'ast> {
@@ -34,6 +34,13 @@ impl Compiler<'_> {
                 });
                 node = left;
             }
+            // Backing storage is a lexical property of a hook, including references
+            // in code that can never run.
+            let mut known_truth = self
+                .hooked_property
+                .is_none()
+                .then(|| literal_truth(node))
+                .flatten();
             let mut lhs = if spine
                 .last()
                 .is_some_and(|step| step.operator == ast::BinaryOperator::NullCoalesce)
@@ -48,6 +55,15 @@ impl Compiler<'_> {
                 line,
             } in spine.into_iter().rev()
             {
+                if matches!(
+                    (operator, known_truth),
+                    (ast::BinaryOperator::And, Some(false)) | (ast::BinaryOperator::Or, Some(true))
+                ) {
+                    lhs =
+                        self.literal(Constant::Bool(operator == ast::BinaryOperator::Or), line)?;
+                    continue;
+                }
+                known_truth = None;
                 let watermark = self.next;
                 match operator {
                     ast::BinaryOperator::And
@@ -162,5 +178,19 @@ impl Compiler<'_> {
             line,
         );
         Ok(dst)
+    }
+}
+
+fn literal_truth(expression: &ast::Expression) -> Option<bool> {
+    match &expression.kind {
+        ast::ExpressionKind::Literal(literal) => Some(match literal {
+            ast::Literal::Null => false,
+            ast::Literal::Bool(value) => *value,
+            ast::Literal::Int(value) => *value != 0,
+            ast::Literal::Float(value) => *value != 0.0,
+            ast::Literal::String(value) => !value.is_empty() && value != b"0",
+        }),
+        ast::ExpressionKind::Array(values) if values.is_empty() => Some(false),
+        _ => None,
     }
 }

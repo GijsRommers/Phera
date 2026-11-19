@@ -1,12 +1,15 @@
 //! `var_export(1.0)` preserves the float type and honors `serialize_precision`.
 
+use std::rc::Rc;
+
 use phera_extension_api::value::{float_repr_with_precision, split_property_key};
 use phera_extension_api::{
-    ArrayKey, Context, FunctionEntry, LocalFuture, NativeResult, Param, ParamType, Registry, Value,
-    args,
+    ArrayKey, Context, FunctionEntry, LocalFuture, NativeResult, Param, ParamType, PhpArray,
+    PropertyPurpose, PropertyViewContinuation, PropertyViewRequest, Registry, Value, args,
 };
 
-use super::{Container, Place, Style, spaces, walk};
+use super::walker::{WalkView, Walker};
+use super::{Container, Place, Style, spaces};
 
 pub(crate) fn register(registry: &mut Registry) {
     const PARAMS: &[Param] = &[
@@ -21,17 +24,62 @@ pub(crate) fn register(registry: &mut Registry) {
 }
 
 fn var_export(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(render(context, arguments))
+    Box::pin(render(
+        context,
+        Export {
+            walker: Walker::default(),
+            out: Vec::new(),
+            arguments,
+        },
+        true,
+    ))
 }
 
-async fn render(context: &mut dyn Context, arguments: Vec<Value>) -> NativeResult {
-    let arguments = &arguments;
-    let mut out = Vec::new();
-    walk(&mut VarExport, &mut out, args::value(arguments, 0), context).await?;
-    if args::bool(arguments, 1).unwrap_or(false) {
-        Ok(Value::from(out))
+struct Export {
+    walker: Walker,
+    out: Vec<u8>,
+    arguments: Vec<Value>,
+}
+
+struct PendingExport {
+    export: Export,
+    view: WalkView,
+}
+
+impl PropertyViewContinuation for PendingExport {
+    fn resume(
+        self: Box<Self>,
+        context: &mut dyn Context,
+        properties: Rc<PhpArray>,
+    ) -> LocalFuture<'_, NativeResult> {
+        let Self { mut export, view } = *self;
+        export
+            .walker
+            .resume(&mut VarExport, &mut export.out, view, properties);
+        Box::pin(render(context, export, false))
+    }
+}
+
+async fn render(context: &mut dyn Context, mut export: Export, start: bool) -> NativeResult {
+    let root = start.then(|| args::value(&export.arguments, 0));
+    if let Some(view) = export
+        .walker
+        .advance(&mut VarExport, &mut export.out, root, context)
+        .await?
+    {
+        return Err(PropertyViewRequest {
+            object: view.object.clone(),
+            purpose: PropertyPurpose::Export,
+            function: "var_export",
+            arguments: Vec::new(),
+            continuation: Box::new(PendingExport { export, view }),
+        }
+        .suspend());
+    }
+    if args::bool(&export.arguments, 1).unwrap_or(false) {
+        Ok(Value::from(export.out))
     } else {
-        context.write(&out);
+        context.write(&export.out);
         Ok(Value::Null)
     }
 }

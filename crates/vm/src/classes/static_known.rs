@@ -32,6 +32,20 @@ impl Vm {
             .symbols
             .get(method.index())
             .ok_or_else(|| internal_error!("known method symbol"))?;
+        if binding == ClassBinding::Forward
+            && let Some((property, operation)) =
+                super::parent_property_hooks::ParentHook::parse(&method.written)
+        {
+            let parent = self
+                .current()
+                .and_then(|frame| frame.scope()?.parent.clone())
+                .ok_or_else(|| {
+                    NativeError::error(
+                        "Cannot use \"parent\" when current class scope has no parent",
+                    )
+                })?;
+            return self.prepare_parent_property_hook(&parent, property, operation);
+        }
         let name = self.class_symbol(symbol)?;
         let class = self.classes.get(&name).ok_or_else(|| {
             Self::class_member_miss(

@@ -36,7 +36,7 @@ impl Vm {
     }
 
     /// Integer keys follow positional order and string keys select declared or variadic slots.
-    fn route_callback_array(&mut self, array: &PhpArray) -> Result<(), NativeError> {
+    pub(crate) fn route_callback_array(&mut self, array: &PhpArray) -> Result<(), NativeError> {
         for (key, value) in array.iter() {
             match key {
                 ArrayKey::Int(_)

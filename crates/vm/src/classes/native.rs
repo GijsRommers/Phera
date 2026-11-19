@@ -157,6 +157,7 @@ impl ClassTable {
                     is_readonly: property.is_readonly,
                     static_initialized: Rc::new(std::cell::Cell::new(true)),
                     value_initialized: Rc::new(std::cell::Cell::new(property.default.is_some())),
+                    hooks: None,
                 });
             }
             if table.get(entry.name).is_none() {
@@ -193,7 +194,7 @@ impl ClassTable {
             }
             let enum_info = if let NativeKind::UnitEnum(cases) = entry.kind {
                 interfaces.extend(table.get("UnitEnum"));
-                Some(super::enums::link_native_unit_enum(
+                Some(super::enums::native_unit_enum(
                     entry.name,
                     cases,
                     &mut methods,
@@ -202,11 +203,6 @@ impl ClassTable {
                 ))
             } else {
                 None
-            };
-            let kind = match entry.kind {
-                NativeKind::Interface => ClassKind::Interface,
-                NativeKind::UnitEnum(_) => ClassKind::Enum,
-                _ => ClassKind::Class,
             };
             let is_throwable = entry.name == "Throwable"
                 || parent.as_ref().is_some_and(|parent| parent.is_throwable)
@@ -240,7 +236,11 @@ impl ClassTable {
                     interfaces,
                     traits: Vec::new(),
                     enum_info,
-                    kind,
+                    kind: match entry.kind {
+                        NativeKind::Interface => ClassKind::Interface,
+                        NativeKind::UnitEnum(_) => ClassKind::Enum,
+                        _ => ClassKind::Class,
+                    },
                     is_abstract: entry.kind == NativeKind::AbstractClass,
                     is_throwable,
                     has_native_layout: true,

@@ -43,6 +43,10 @@ impl Extension for Reflection {
             interfaces: &["Stringable"],
             ..ClassEntry::interface("Reflector")
         });
+        registry.class(ClassEntry {
+            kind: phera_extension_api::ClassKind::UnitEnum(&["Get", "Set"]),
+            ..ClassEntry::class("PropertyHookType")
+        });
         modifiers::register(registry);
         class::register(registry);
         member::register(registry);

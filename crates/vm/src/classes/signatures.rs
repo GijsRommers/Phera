@@ -82,7 +82,9 @@ impl Contract {
     fn display(&self, method: &Method, type_name: impl Fn(&str) -> String) -> String {
         let declared = |name: &str| {
             let name = type_name(name);
-            if super::magic::MagicMethods::is_linked_magic(&method.name) {
+            if super::magic::MagicMethods::is_linked_magic(&method.name)
+                || method.name.starts_with('$')
+            {
                 ordered_magic_union(&name)
             } else {
                 name
@@ -303,6 +305,15 @@ impl Vm {
         target: Option<&'a str>,
         unit: &phera_bytecode::CompiledUnit,
     ) -> Option<&'a str> {
+        self.unresolved_contract_types(source, target, unit).next()
+    }
+
+    pub(super) fn unresolved_contract_types<'a, 'vm>(
+        &'vm self,
+        source: Option<&'a str>,
+        target: Option<&'a str>,
+        unit: &'vm phera_bytecode::CompiledUnit,
+    ) -> impl Iterator<Item = &'a str> + use<'a, 'vm> {
         let members = |ty: &'a str| ty.split(['?', '|', '&', '(', ')']);
         let may_have_ancestry = |ty: Option<&str>| {
             ty.is_some_and(|ty| {
@@ -310,15 +321,14 @@ impl Vm {
                     .any(|name| name == "iterable" || name == "object" || is_class_type_name(name))
             })
         };
-        if !may_have_ancestry(source) || !may_have_ancestry(target) {
-            return None;
-        }
+        let comparable = may_have_ancestry(source) && may_have_ancestry(target);
         [source, target]
             .into_iter()
             .flatten()
             .flat_map(members)
-            .find(|name| {
-                is_class_type_name(name)
+            .filter(move |name| {
+                comparable
+                    && is_class_type_name(name)
                     && self.classes.get(name).is_none()
                     && !unit
                         .classes
@@ -487,7 +497,7 @@ fn is_class_type_name(name: &str) -> bool {
 
 /// PHP's declaration diagnostics list nominal members first and builtins
 /// in a fixed order, independent of the written union order.
-fn ordered_magic_union(ty: &str) -> String {
+pub(super) fn ordered_magic_union(ty: &str) -> String {
     if !ty.contains('|') {
         return ty.into();
     }

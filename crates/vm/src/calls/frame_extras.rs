@@ -29,6 +29,8 @@ pub(crate) struct FrameExtras {
     pub(crate) arguments: ArgumentFacts,
     /// PHP keeps the original list when the variadic local is changed or unset.
     pub(crate) variadic: Option<std::rc::Rc<phera_value::PhpArray>>,
+    /// A property operation resumes only when this hook returns normally.
+    pub(crate) property_hook: Option<Box<crate::property_hook_continuation::HookContinuation>>,
 }
 
 /// How many arguments a call passed and where the surplus ones are, for
@@ -63,12 +65,13 @@ impl FrameExtras {
             iterators: Iterators::new(0),
             arguments: ArgumentFacts::default(),
             variadic: None,
+            property_hook: None,
         }
     }
 
-    /// Whether the entry holds nothing but a called class, so that
-    /// returning has nothing to release.
-    pub(crate) fn holds_only_called_class(&self) -> bool {
+    /// A fast return to a register can release the called class alone.
+    /// Suspended hooks have no return register and never take that path.
+    pub(crate) fn plain_return_can_release(&self) -> bool {
         self.dynamic_count.is_none()
             && self.dynamic.is_empty()
             && self.iterators.is_empty()
@@ -85,5 +88,6 @@ impl FrameExtras {
         self.iterators.clear();
         self.arguments = ArgumentFacts::default();
         self.variadic = None;
+        self.property_hook = None;
     }
 }

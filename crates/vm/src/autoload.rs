@@ -30,6 +30,10 @@ enum MissFailure {
     Lookup(&'static str),
     Member(phera_source::deprecations::ItemKind, String),
     Signature(crate::error_traces::DeclarationFailure),
+    PropertySignature {
+        remaining: Vec<String>,
+        failure: crate::error_traces::DeclarationFailure,
+    },
 }
 
 impl ClassMiss {
@@ -57,6 +61,23 @@ impl ClassMiss {
         })))
     }
 
+    pub(crate) fn property_signature(
+        names: impl Iterator<Item = String>,
+        failure: crate::error_traces::DeclarationFailure,
+    ) -> NativeError {
+        let mut names = names;
+        let Some(name) = names.next() else {
+            return NativeError::Unwind(Unwind(Box::new(failure)));
+        };
+        NativeError::Unwind(Unwind(Box::new(Self {
+            name,
+            failure: MissFailure::PropertySignature {
+                remaining: names.collect(),
+                failure,
+            },
+        })))
+    }
+
     pub(crate) fn error(self) -> NativeError {
         match self.failure {
             MissFailure::Lookup(kind) => {
@@ -66,7 +87,9 @@ impl ClassMiss {
                 kind, &self.name, &member,
             )
             .unwrap_or_else(|| NativeError::error(format!("Class \"{}\" not found", self.name))),
-            MissFailure::Signature(failure) => NativeError::Unwind(Unwind(Box::new(failure))),
+            MissFailure::Signature(failure) | MissFailure::PropertySignature { failure, .. } => {
+                NativeError::Unwind(Unwind(Box::new(failure)))
+            }
         }
     }
 }
@@ -186,7 +209,18 @@ impl Vm {
         if !self.error_handlers.pending.is_empty() {
             self.drain_error_handlers().await?;
         }
-        if self.lookup_class(&miss.name).await?.is_none() {
+        if let MissFailure::PropertySignature { remaining, .. } = &miss.failure {
+            let mut attempted = HashSet::new();
+            let names = std::iter::once(&miss.name).chain(remaining);
+            for name in names.clone() {
+                if attempted.insert(name.to_ascii_lowercase()) {
+                    self.lookup_class(name).await?;
+                }
+            }
+            if names.clone().any(|name| self.classes.get(name).is_none()) {
+                return Err(miss.error());
+            }
+        } else if self.lookup_class(&miss.name).await?.is_none() {
             return Err(miss.error());
         }
         let frame = self

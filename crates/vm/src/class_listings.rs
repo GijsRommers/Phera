@@ -66,7 +66,13 @@ impl Vm {
                     }),
                 };
                 let key = ArrayKey::str(property.name.as_str());
-                if !visible || result.contains_key(&key) {
+                if !visible
+                    || property
+                        .hooks
+                        .as_ref()
+                        .is_some_and(|hooks| hooks.hooks.is_virtual)
+                    || result.contains_key(&key)
+                {
                     continue;
                 }
                 let value = if let Some(initializer) = &property.initializer {

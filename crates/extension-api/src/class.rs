@@ -80,7 +80,7 @@ pub enum ClassKind {
     /// A class that cannot be extended.
     FinalClass,
     Interface,
-    /// An internal unit enum with PHP-visible cases in declaration order.
+    /// An internal, unbacked enum with its cases in declaration order.
     UnitEnum(&'static [&'static str]),
 }
 

@@ -36,6 +36,11 @@ pub enum RequestCallback {
 pub enum PropertyView {
     Snapshot(Rc<PhpArray>),
     DebugInfo(Rc<PhpArray>),
+    /// var_dump displays typed slots even when the object does not store a value.
+    DebugSlots {
+        slots: Rc<PhpArray>,
+        uninitialized: std::collections::HashMap<phera_value::ArrayKey, String>,
+    },
     Recursive,
 }
 
@@ -349,6 +354,15 @@ pub trait Context {
 
     /// Whether the requesting operation will need to run a PHP property hook.
     fn property_view_runs_code(&self, _object: &Object, _purpose: crate::PropertyPurpose) -> bool {
+        false
+    }
+
+    /// Whether the caller can return a `PropertyViewRequest` and resume later.
+    fn property_view_can_suspend(
+        &self,
+        _object: &Object,
+        _purpose: crate::PropertyPurpose,
+    ) -> bool {
         false
     }
 

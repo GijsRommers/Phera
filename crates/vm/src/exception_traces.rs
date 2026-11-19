@@ -126,7 +126,13 @@ impl Vm {
                     .native_callback_sites
                     .get(callbacks - 1)
                     .is_some_and(|site| site.boundary == depth);
-            let internal = warning || callback;
+            let suspended_native = callee
+                .extras
+                .property_hook
+                .as_deref()
+                .and_then(crate::property_hook_continuation::HookContinuation::native_trace)
+                .is_some();
+            let internal = warning || callback || suspended_native;
             let include_parent =
                 depth > 1 && caller.is_some_and(|caller| caller.function_id().is_none());
             let mut entry = PhpArray::new();
@@ -196,6 +202,23 @@ impl Vm {
                     Some((&site.location.file, site.location.line)),
                     arguments.then(|| site.native.arguments.clone()),
                 );
+            } else if suspended_native
+                && let Some(native) = self
+                    .call_stack
+                    .extras(depth)
+                    .property_hook
+                    .as_deref()
+                    .and_then(crate::property_hook_continuation::HookContinuation::native_trace)
+            {
+                let caller = depth.checked_sub(1).and_then(|index| self.frame_at(index));
+                let location = caller.map(|frame| (frame.unit().file.as_str(), frame.line()));
+                append_native(
+                    &mut trace,
+                    &native.name,
+                    location,
+                    arguments.then(|| native.arguments.clone()),
+                );
+                child_file = caller.map(|frame| frame.cache().trace_file(frame.unit()));
             }
             if callbacks != 0
                 && let Some(file) =
@@ -342,7 +365,13 @@ fn append_native(
         entry.insert(ArrayKey::str("file"), Value::from(file));
         entry.insert(ArrayKey::str("line"), Value::Int(line as i64));
     }
-    entry.insert(ArrayKey::str("function"), Value::from(name));
+    if let Some((class, method)) = name.split_once("->") {
+        entry.insert(ArrayKey::str("function"), Value::from(method));
+        entry.insert(ArrayKey::str("class"), Value::from(class));
+        entry.insert(ArrayKey::str("type"), Value::from("->"));
+    } else {
+        entry.insert(ArrayKey::str("function"), Value::from(name));
+    }
     if let Some(arguments) = arguments {
         entry.insert(ArrayKey::str("args"), arguments);
     }

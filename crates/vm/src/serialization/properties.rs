@@ -7,6 +7,7 @@ use phera_value::{ArrayKey, Object, PhpArray, PropertyScope, Value, split_proper
 
 use super::property_index::DeclaredProperties;
 use crate::Vm;
+use crate::classes::class::PropertyDefault;
 
 impl Vm {
     pub(crate) fn ordered_serialization_properties(
@@ -54,8 +55,11 @@ impl Vm {
             return Some(key);
         };
         let declarations = DeclaredProperties::new(self, &class);
-        if class.defaults.is_empty() || declarations.key(&key).is_some() {
+        if class.defaults.is_empty() {
             return Some(key);
+        }
+        if let Some(property) = declarations.key(&key) {
+            return self.unserialized_storage_key(property);
         }
         let (name, scope) = split_property_key(spelling.as_bytes());
         if spelling.as_bytes().first() == Some(&0)
@@ -74,7 +78,29 @@ impl Vm {
         {
             return Some(key);
         }
-        Some(declarations.name(name).map_or(key, |prop| prop.key.clone()))
+        match declarations.name(name) {
+            Some(property) => self.unserialized_storage_key(property),
+            None => Some(key),
+        }
+    }
+
+    fn unserialized_storage_key(&mut self, property: &PropertyDefault) -> Option<ArrayKey> {
+        if property
+            .hooks
+            .as_ref()
+            .is_some_and(|hooks| hooks.hooks.is_virtual)
+        {
+            self.diagnostic(
+                "Warning",
+                format!(
+                    "unserialize(): Cannot unserialize value for virtual property {}::${}",
+                    phera_value::class_display_name(&property.declaring),
+                    property.name,
+                ),
+            );
+            return None;
+        }
+        Some(property.key.clone())
     }
 
     pub(crate) fn check_serialized_dynamic_property(

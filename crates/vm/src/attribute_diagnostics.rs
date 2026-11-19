@@ -33,7 +33,7 @@ impl Vm {
                 )
             )
         });
-        let name = &frame.function().name;
+        let name = self.code.function_name(frame.frame.function);
         let is_method = name.contains("::") && !name.starts_with("{closure:");
         let kind = if is_method { "Method" } else { "Function" };
         let Some(metadata) = frame
@@ -62,13 +62,28 @@ impl Vm {
         };
         let previous = std::mem::replace(&mut self.diagnostic_location, location);
         if let Some(message) = deprecated {
-            self.diagnostic("Deprecated", message);
+            self.attribute_deprecated(message);
         }
         if let Some(message) = nodiscard {
             self.warn(message);
         }
         self.diagnostic_location = previous;
         Ok(())
+    }
+    fn attribute_deprecated(&mut self, message: String) {
+        let event = crate::error_handlers::DiagnosticEvent {
+            level: 16384,
+            kind: "Deprecated".into(),
+            message,
+            location: self.location(),
+            trace_location: None,
+            native: None,
+        };
+        if self.handles_diagnostic(event.level) {
+            self.enqueue_diagnostic(event);
+        } else {
+            self.report_event(event);
+        }
     }
 }
 
