@@ -97,12 +97,17 @@ fn local_http() {
         server.address,
         server.tls_address.port()
     );
-    let setup = format!("$ca = {ca};\n$tmp = {tmp};\n$unix = {unix};\n");
+    let pin = &server.pin;
+    let setup = format!("$ca = {ca};\n$tmp = {tmp};\n$unix = {unix};\n$pin = '{pin}';\n");
     let extra = if oracle::supports_php_since("curl copy stream ownership", 80_513) {
         include_str!("copy_trace.php")
     } else {
         ""
     };
-    let script = format!("{prefix}{setup}{}\n{extra}", include_str!("local_http.php"));
+    let script = format!(
+        "{prefix}{setup}{}\n{}\n{extra}",
+        include_str!("local_http.php"),
+        include_str!("tls.php")
+    );
     compare("curl-local-http", &script);
 }

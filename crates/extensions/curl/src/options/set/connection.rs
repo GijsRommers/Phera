@@ -5,7 +5,7 @@ use phera_extension_api::{Context, NativeError};
 use crate::constants::ids::*;
 use crate::options::{HttpVersion, IpVersion, Settings, TlsVersions, path};
 
-use super::{Change, strings};
+use super::{Change, strings, tls};
 
 pub(super) fn change(
     context: &mut dyn Context,
@@ -72,12 +72,6 @@ pub(super) fn change(
                 .transpose()
                 .map_err(|_| NativeError::value_error("Cannot resolve CURLOPT_UNIX_SOCKET_PATH"))?;
         }
-        CURLOPT_CAINFO => {
-            transport.ca_file = text
-                .map(|value| path(context, &value))
-                .transpose()
-                .map_err(|_| NativeError::value_error("Cannot resolve CURLOPT_CAINFO"))?;
-        }
         CURLOPT_PORT => settings.port = u16::try_from(number).ok().filter(|p| *p != 0),
         CURLOPT_TCP_KEEPALIVE => transport.keepalive = number != 0,
         CURLOPT_TCP_KEEPIDLE => transport.keep_idle = number.max(1) as u64,
@@ -110,6 +104,9 @@ pub(super) fn change(
             ));
         }
         CURLOPT_INTERFACE => return Ok(Change::Refused("binding to an interface is unavailable")),
+        option if tls::is_blob(option) || tls::takes_text(option) => {
+            return tls::change(context, &mut transport.tls_files, option, text);
+        }
         _ => return Ok(strings::change(settings, option, text)),
     }
     Ok(Change::Applied)

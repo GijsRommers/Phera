@@ -3,6 +3,7 @@
 mod connection;
 mod settings;
 mod strings;
+mod tls;
 
 use phera_extension_api::{
     ArrayKey, Context, LocalFuture, NativeError, NativeResult, Value, args, value::to_bool,
@@ -81,12 +82,13 @@ async fn apply(
     // Conversion can call PHP. Publish only this option on the latest handle state.
     let mut text = None;
     let mut list = Vec::new();
-    if strings::takes_text(option)
+    let is_blob = tls::is_blob(option);
+    if (is_blob || strings::takes_text(option) || tls::takes_text(option))
         && !(option == CURLOPT_POSTFIELDS && matches!(value, Value::Array(_)))
     {
         if !matches!(value, Value::Null) || option == CURLOPT_POSTFIELDS {
             let converted = context.stringify(&value).await?;
-            if option != CURLOPT_POSTFIELDS && converted.as_bytes().contains(&0) {
+            if !is_blob && option != CURLOPT_POSTFIELDS && converted.as_bytes().contains(&0) {
                 return Err(NativeError::value_error(format!(
                     "{function}(): cURL option must not contain any null bytes"
                 )));

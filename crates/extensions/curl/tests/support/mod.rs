@@ -20,12 +20,13 @@ use hyper::{
     service::service_fn,
 };
 use hyper_util::rt::{TokioExecutor, TokioIo};
-use rustls::pki_types::PrivatePkcs8KeyDer;
 use tokio::{
     net::{TcpListener, TcpStream, UnixListener},
     sync::oneshot,
 };
 use tokio_rustls::TlsAcceptor;
+
+mod tls;
 
 type Body = UnsyncBoxBody<Bytes, std::io::Error>;
 
@@ -33,6 +34,7 @@ pub struct Server {
     pub address: SocketAddr,
     pub tls_address: SocketAddr,
     pub ca: PathBuf,
+    pub pin: String,
     pub unix: PathBuf,
     shutdown: Option<oneshot::Sender<()>>,
     task: Option<JoinHandle<()>>,
@@ -40,21 +42,8 @@ pub struct Server {
 
 impl Server {
     pub fn start(directory: &Path) -> Self {
-        let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_owned()]).unwrap();
         let ca = directory.join("ca.pem");
-        std::fs::write(&ca, cert.cert.pem()).unwrap();
-        let mut tls = rustls::ServerConfig::builder_with_provider(Arc::new(
-            rustls::crypto::ring::default_provider(),
-        ))
-        .with_safe_default_protocol_versions()
-        .unwrap()
-        .with_no_client_auth()
-        .with_single_cert(
-            vec![cert.cert.der().clone()],
-            PrivatePkcs8KeyDer::from(cert.signing_key.serialize_der()).into(),
-        )
-        .unwrap();
-        tls.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+        let (tls, pin) = tls::config(directory, &ca);
         let acceptor = TlsAcceptor::from(Arc::new(tls));
         let tcp = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let ssl = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -100,13 +89,17 @@ impl Server {
                                 tokio::spawn(async move {
                                     let Ok(tls) = acceptor.accept(stream).await else { return };
                                     let h2 = tls.get_ref().1.alpn_protocol() == Some(b"h2");
+                                    let authenticated = tls.get_ref().1.peer_certificates().is_some();
+                                    let service = service_fn(move |request| {
+                                        respond_tls(request, authenticated)
+                                    });
                                     let io = TokioIo::new(tls);
                                     if h2 {
                                         let _ = http2::Builder::new(TokioExecutor::new())
-                                            .serve_connection(io, service_fn(respond)).await;
+                                            .serve_connection(io, service).await;
                                     } else {
                                         let _ = http1::Builder::new()
-                                            .serve_connection(io, service_fn(respond)).await;
+                                            .serve_connection(io, service).await;
                                     }
                                 });
                             }
@@ -118,11 +111,26 @@ impl Server {
             address,
             tls_address,
             ca,
+            pin,
             unix,
             shutdown: Some(shutdown),
             task: Some(task),
         }
     }
+}
+
+async fn respond_tls(
+    request: Request<Incoming>,
+    authenticated: bool,
+) -> Result<Response<Body>, Infallible> {
+    if request.uri().path() == "/identity" {
+        return Ok(Response::new(full(if authenticated {
+            "authenticated"
+        } else {
+            "anonymous"
+        })));
+    }
+    respond(request).await
 }
 
 impl Drop for Server {

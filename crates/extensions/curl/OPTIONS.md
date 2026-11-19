@@ -19,8 +19,8 @@ one call stops at the first failed option.
 | `CURLOPT_BINARYTRANSFER` | Accepted and ignored | All transfers are binary-safe. |
 | `CURLOPT_BUFFERSIZE` | Implemented | HTTP status, file time, transfer-size limit, and read buffer options. |
 | `CURLOPT_CAINFO` | Implemented | Set PEM trust roots for TLS. |
-| `CURLOPT_CAINFO_BLOB` | Refused | Unavailable in the HTTP client. |
-| `CURLOPT_CAPATH` | Refused | TLS trust directories are unavailable. CAINFO takes a PEM file. |
+| `CURLOPT_CAINFO_BLOB` | Implemented | Load trust roots from PEM bytes. This takes precedence over `CAINFO`. |
+| `CURLOPT_CAPATH` | Implemented | Add PEM trust roots from a directory indexed by `openssl rehash`. |
 | `CURLOPT_CA_CACHE_TIMEOUT` | Refused | Unavailable in the HTTP client. |
 | `CURLOPT_CERTINFO` | Accepted and ignored | False keeps the default. Capturing the certificates is refused. |
 | `CURLOPT_CONNECTTIMEOUT` | Implemented | Transfer, connection, and minimum rate deadlines. |
@@ -101,7 +101,7 @@ one call stops at the first failed option.
 | `CURLOPT_ISSUERCERT` | Refused | Unavailable in the HTTP client. |
 | `CURLOPT_ISSUERCERT_BLOB` | Refused | Unavailable in the HTTP client. |
 | `CURLOPT_KEEP_SENDING_ON_ERROR` | Refused | Unavailable in the HTTP client. |
-| `CURLOPT_KEYPASSWD` | Refused | Unavailable in the HTTP client. |
+| `CURLOPT_KEYPASSWD` | Implemented | Password for an encrypted PKCS#8 private key. |
 | `CURLOPT_KRB4LEVEL` | Refused | Unavailable in the HTTP client. |
 | `CURLOPT_KRBLEVEL` | Refused | Unavailable in the HTTP client. |
 | `CURLOPT_LOCALPORT` | Refused | Unavailable in the HTTP client. |
@@ -132,7 +132,7 @@ one call stops at the first failed option.
 | `CURLOPT_NOSIGNAL` | Accepted and ignored | Tokio does not use process signals for transfers. |
 | `CURLOPT_PASSWORD` | Implemented | Basic and Bearer. Other authentication schemes are refused. |
 | `CURLOPT_PATH_AS_IS` | Refused | Unavailable in the HTTP client. |
-| `CURLOPT_PINNEDPUBLICKEY` | Refused | Public-key pinning is unavailable. |
+| `CURLOPT_PINNEDPUBLICKEY` | Implemented | Check one or more semicolon-separated `sha256//` leaf public-key pins. File-based pins are refused. |
 | `CURLOPT_PIPEWAIT` | Accepted and ignored | True uses Hyper pooling. False is refused. |
 | `CURLOPT_PORT` | Implemented | HTTP and HTTPS destinations. |
 | `CURLOPT_POST` | Implemented | Method and body selection. |
@@ -216,16 +216,16 @@ one call stops at the first failed option.
 | `CURLOPT_SSH_KNOWNHOSTS` | Refused | Protocol outside the HTTP scope. |
 | `CURLOPT_SSH_PRIVATE_KEYFILE` | Refused | Protocol outside the HTTP scope. |
 | `CURLOPT_SSH_PUBLIC_KEYFILE` | Refused | Protocol outside the HTTP scope. |
-| `CURLOPT_SSLCERT` | Refused | Client certificate authentication is unavailable. |
-| `CURLOPT_SSLCERTPASSWD` | Refused | Unavailable TLS policy control. |
-| `CURLOPT_SSLCERTTYPE` | Refused | Unavailable TLS policy control. |
-| `CURLOPT_SSLCERT_BLOB` | Refused | Unavailable TLS policy control. |
+| `CURLOPT_SSLCERT` | Implemented | Load the client certificate and optional chain from a file. |
+| `CURLOPT_SSLCERTPASSWD` | Implemented | Alias of `KEYPASSWD`. |
+| `CURLOPT_SSLCERTTYPE` | Implemented | Select PEM or DER. PKCS#12 and engine-backed identities are refused. |
+| `CURLOPT_SSLCERT_BLOB` | Implemented | Load the client certificate and optional chain from bytes. |
 | `CURLOPT_SSLENGINE` | Refused | The rustls client has no SSL engine. |
 | `CURLOPT_SSLENGINE_DEFAULT` | Refused | Unavailable TLS policy control. |
-| `CURLOPT_SSLKEY` | Refused | Client certificate authentication is unavailable. |
-| `CURLOPT_SSLKEYPASSWD` | Refused | Unavailable TLS policy control. |
-| `CURLOPT_SSLKEYTYPE` | Refused | Unavailable TLS policy control. |
-| `CURLOPT_SSLKEY_BLOB` | Refused | Unavailable TLS policy control. |
+| `CURLOPT_SSLKEY` | Implemented | Load the client private key from a file. |
+| `CURLOPT_SSLKEYPASSWD` | Implemented | Alias of `KEYPASSWD`. |
+| `CURLOPT_SSLKEYTYPE` | Implemented | Select PEM or DER. Engine-backed keys are refused. |
+| `CURLOPT_SSLKEY_BLOB` | Implemented | Load the client private key from bytes. |
 | `CURLOPT_SSLVERSION` | Implemented | TLS 1.2 and 1.3. Other protocol versions are refused. |
 | `CURLOPT_SSL_CIPHER_LIST` | Refused | Unavailable TLS policy control. |
 | `CURLOPT_SSL_EC_CURVES` | Refused | Unavailable TLS policy control. |

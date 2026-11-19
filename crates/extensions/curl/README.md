@@ -3,7 +3,13 @@
 Phera's curl extension implements the PHP 8.5 HTTP client API on Hyper and Tokio.
 HTTPS uses rustls with ring. The client loads native trust roots off the worker
 and falls back to WebPKI roots when the native store is empty. `CURLOPT_CAINFO`
-replaces the roots with certificates from the supplied PEM file.
+and `CURLOPT_CAINFO_BLOB` replace those roots with PEM certificates.
+`CURLOPT_CAPATH` adds certificates from a directory indexed by `openssl rehash`.
+Client authentication accepts PEM or DER certificates and keys, supplied
+as files or bytes. `CURLOPT_KEYPASSWD` decrypts encrypted PKCS#8 keys.
+`CURLOPT_PINNEDPUBLICKEY` checks SHA-256 pins for the leaf public key in
+addition to TLS verification. PKCS#12, traditional encrypted PEM private
+keys, and file-based public-key pins remain unavailable.
 
 The worker keeps up to 32 compatible client pools, each holding up to eight idle
 connections per origin with a 45-second idle timeout. The pool key includes

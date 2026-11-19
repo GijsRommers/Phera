@@ -89,6 +89,7 @@ impl Network {
                     format!("Protocol \"{}\" not supported", url.scheme()),
                 ));
             }
+            info.scheme = Some(url.scheme().to_owned());
             let actual_method = settings.custom_method.as_deref().unwrap_or(method.name());
             info.method = Some(actual_method.to_owned());
             let empty = Payload::default();
@@ -145,7 +146,7 @@ impl Network {
                 response.await
             }
             .map_err(client_error)?;
-            response::info(info, &response, &url, started);
+            response::info(info, &response, started);
             info.upload_length = payload.has_body.then_some(payload.bytes.len() as i64);
             info.uploaded += payload.bytes.len() as i64;
             info.timing.sent = info.timing.pretransfer.max(info.timing.queue);

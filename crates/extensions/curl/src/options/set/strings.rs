@@ -26,7 +26,6 @@ pub(super) fn takes_text(option: i64) -> bool {
             | CURLOPT_NOPROXY
             | CURLOPT_PROXYUSERPWD
             | CURLOPT_UNIX_SOCKET_PATH
-            | CURLOPT_CAINFO
             | CURLOPT_PROTOCOLS_STR
             | CURLOPT_REDIR_PROTOCOLS_STR
             | CURLOPT_DEFAULT_PROTOCOL

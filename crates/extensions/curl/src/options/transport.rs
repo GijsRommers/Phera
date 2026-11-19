@@ -1,6 +1,6 @@
 //! `CURLOPT_HTTP_VERSION` and connection options determine pool compatibility.
 
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 #[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
 pub(crate) enum HttpVersion {
@@ -29,7 +29,29 @@ pub(crate) enum TlsVersions {
     Tls13,
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Clone, Copy, Default, Hash, PartialEq, Eq)]
+pub(crate) enum TlsFormat {
+    #[default]
+    Pem,
+    Der,
+}
+
+#[derive(Clone, Default, Hash, PartialEq, Eq)]
+pub(crate) struct TlsFiles {
+    pub(crate) ca_file: Option<PathBuf>,
+    pub(crate) ca_dir: Option<PathBuf>,
+    pub(crate) ca_blob: Option<Arc<[u8]>>,
+    pub(crate) cert: Option<PathBuf>,
+    pub(crate) cert_blob: Option<Arc<[u8]>>,
+    pub(crate) cert_type: TlsFormat,
+    pub(crate) key: Option<PathBuf>,
+    pub(crate) key_blob: Option<Arc<[u8]>>,
+    pub(crate) key_type: TlsFormat,
+    pub(crate) key_password: Option<Arc<[u8]>>,
+    pub(crate) pins: Option<Arc<str>>,
+}
+
+#[derive(Clone, Hash, PartialEq, Eq)]
 pub(crate) struct Transport {
     pub(crate) http: HttpVersion,
     pub(crate) ip: IpVersion,
@@ -42,7 +64,7 @@ pub(crate) struct Transport {
     pub(crate) no_proxy: Option<String>,
     pub(crate) tunnel: bool,
     pub(crate) unix: Option<PathBuf>,
-    pub(crate) ca_file: Option<PathBuf>,
+    pub(crate) tls_files: TlsFiles,
     pub(crate) keepalive: bool,
     pub(crate) keep_idle: u64,
     pub(crate) keep_interval: u64,
@@ -66,7 +88,7 @@ impl Default for Transport {
             no_proxy: None,
             tunnel: false,
             unix: None,
-            ca_file: None,
+            tls_files: TlsFiles::default(),
             keepalive: false,
             keep_idle: 60,
             keep_interval: 60,

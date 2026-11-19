@@ -3,16 +3,14 @@
 use std::time::Instant;
 
 use hyper::{Response, Version, body::Incoming};
-use url::Url;
 
 use crate::{connector::ConnectionInfo, info::Info};
 
 use super::request;
 
-pub(super) fn info(info: &mut Info, response: &Response<Incoming>, url: &Url, started: Instant) {
+pub(super) fn info(info: &mut Info, response: &Response<Incoming>, started: Instant) {
     let duration = |instant: Instant| instant.saturating_duration_since(started);
     info.status = i64::from(response.status().as_u16());
-    info.scheme = Some(url.scheme().to_owned());
     info.http_version = match response.version() {
         Version::HTTP_10 => 1,
         Version::HTTP_11 => 2,

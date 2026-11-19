@@ -10,6 +10,7 @@ use phera_extension_api::{PhpArray, Value, value::Resource};
 
 pub(crate) use set::{set_array, set_option};
 pub(crate) use transport::{HttpVersion, IpVersion, TlsVersions, Transport};
+pub(crate) use transport::{TlsFiles, TlsFormat};
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum Method {

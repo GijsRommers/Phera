@@ -1,18 +1,18 @@
-//! `CURLOPT_CAINFO` replaces the trusted roots for a transfer.
+//! Builds a rustls client using the transfer's trust and identity settings.
+
+mod files;
+mod verify;
 
 use std::{
     io,
     sync::{Arc, OnceLock},
 };
 
-use rustls::{
-    ClientConfig, RootCertStore,
-    pki_types::{CertificateDer, pem::PemObject},
-};
+use rustls::{ClientConfig, RootCertStore, client::WebPkiServerVerifier};
 
 use crate::{
     error::TransferError,
-    options::{HttpVersion, TlsVersions, Transport},
+    options::{HttpVersion, TlsFiles, TlsVersions, Transport},
 };
 
 static ROOTS: OnceLock<RootCertStore> = OnceLock::new();
@@ -29,30 +29,15 @@ fn system_roots() -> &'static RootCertStore {
 }
 
 pub(super) async fn config(settings: &Transport) -> Result<Arc<ClientConfig>, TransferError> {
-    let roots = if let Some(path) = &settings.ca_file {
-        let pem = tokio::fs::read(path).await.map_err(|_| {
-            TransferError::new(
-                77,
-                format!("error setting certificate file: {}", path.display()),
-            )
-        })?;
-        let mut roots = RootCertStore::empty();
-        roots
-            .add_parsable_certificates(CertificateDer::pem_slice_iter(&pem).filter_map(Result::ok));
-        if roots.is_empty() {
-            return Err(TransferError::new(
-                77,
-                format!("error setting certificate file: {}", path.display()),
-            ));
-        }
-        roots
-    } else if let Some(roots) = ROOTS.get() {
-        roots.clone()
+    let (roots, identity) = if settings.tls_files == TlsFiles::default()
+        && let Some(roots) = ROOTS.get()
+    {
+        (roots.clone(), None)
     } else {
-        tokio::task::spawn_blocking(system_roots)
+        let files = settings.tls_files.clone();
+        tokio::task::spawn_blocking(move || files::load(&files))
             .await
-            .map_err(|_| TransferError::new(77, "Cannot load trusted root certificates"))?
-            .clone()
+            .map_err(|_| TransferError::new(77, "Cannot load TLS certificate configuration"))??
     };
     use rustls::version::{TLS12, TLS13};
     let versions: &[_] = match settings.tls {
@@ -60,12 +45,30 @@ pub(super) async fn config(settings: &Transport) -> Result<Arc<ClientConfig>, Tr
         TlsVersions::Tls12 => &[&TLS12],
         TlsVersions::Tls13 => &[&TLS13],
     };
-    let mut config =
-        ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
-            .with_protocol_versions(versions)
-            .map_err(|error| TransferError::new(35, error.to_string()))?
-            .with_root_certificates(roots)
-            .with_no_client_auth();
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let builder = ClientConfig::builder_with_provider(Arc::clone(&provider))
+        .with_protocol_versions(versions)
+        .map_err(|error| TransferError::new(35, error.to_string()))?;
+    let builder = if let Some(pins) = &settings.tls_files.pins {
+        let verifier = WebPkiServerVerifier::builder_with_provider(Arc::new(roots), provider)
+            .build()
+            .map_err(|error| TransferError::new(77, error.to_string()))?;
+        builder
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(verify::Pinned {
+                verifier,
+                pins: Arc::clone(pins),
+            }))
+    } else {
+        builder.with_root_certificates(roots)
+    };
+    let mut config = if let Some((certificates, key)) = identity {
+        builder
+            .with_client_auth_cert(certificates, key)
+            .map_err(|error| TransferError::new(58, error.to_string()))?
+    } else {
+        builder.with_no_client_auth()
+    };
     if settings.alpn {
         config.alpn_protocols = match settings.http {
             HttpVersion::OneZero | HttpVersion::OneOne => vec![b"http/1.1".to_vec()],
@@ -82,6 +85,10 @@ pub(super) fn handshake_error(error: io::Error) -> TransferError {
         .and_then(|error| error.downcast_ref::<rustls::Error>());
     if let Some(rustls::Error::InvalidCertificate(problem)) = tls {
         TransferError::new(60, format!("SSL certificate problem: {problem:?}"))
+    } else if let Some(rustls::Error::Other(problem)) = tls
+        && problem.0.is::<verify::PinMismatch>()
+    {
+        TransferError::new(90, problem.to_string())
     } else {
         TransferError::new(35, format!("TLS connection failed: {error}"))
     }
