@@ -14,6 +14,7 @@ mod directory;
 mod directory_class;
 mod errors;
 mod file_attributes;
+pub mod file_io;
 mod formatted;
 mod glob;
 mod handles;

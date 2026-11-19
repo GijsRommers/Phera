@@ -35,4 +35,4 @@ mod trait_property_overrides;
 pub(crate) use class::{
     Class, ConstantState, Invocation, LinkedConstant, Method, MethodBody, MethodContext,
 };
-pub(crate) use class_table::{ClassIndex, ClassTable};
+pub(crate) use class_table::{ClassDefinitions, ClassIndex, ClassTable};

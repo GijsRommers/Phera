@@ -38,7 +38,7 @@ pub(super) fn sapi_name(context: &mut dyn Context, _: &[Value]) -> NativeResult 
     Ok(Value::from(sapi(context).name()))
 }
 
-pub(super) fn sapi(context: &mut dyn Context) -> Sapi {
+pub fn sapi(context: &mut dyn Context) -> Sapi {
     context.state().get::<Sapi>().copied().unwrap_or_default()
 }
 

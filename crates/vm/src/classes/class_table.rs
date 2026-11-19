@@ -21,22 +21,19 @@ impl ClassIndex {
     }
 }
 
-/// One request owns the id pool; weak records exist solely for cycle cleanup.
+/// Definitions linked once per worker for built-ins, or per request for PHP classes.
 #[derive(Default)]
-pub(crate) struct ClassTable {
+pub(crate) struct ClassDefinitions {
     /// Preserve registration/declaration order for get_declared_classes.
     pub(crate) order: Vec<String>,
     pub(crate) entries: HashMap<String, Rc<Class>>,
     /// Every class, by number.
     numbered: Vec<Rc<Class>>,
     closure: Option<ClassIndex>,
-    pub(crate) has_dimensions: bool,
     pub(crate) has_property_views: bool,
-    pub(crate) objects: Vec<Weak<Object>>,
-    ids: Rc<ObjectIds>,
 }
 
-impl ClassTable {
+impl ClassDefinitions {
     /// The number the next registered class gets.
     pub(crate) fn next_index(&self) -> ClassIndex {
         ClassIndex(self.numbered.len() as u32)
@@ -45,7 +42,6 @@ impl ClassTable {
     /// Register a class made with [`ClassTable::next_index`] under its
     /// lowercased name.
     pub(crate) fn insert(&mut self, lowercase_name: String, class: Rc<Class>) {
-        debug_assert_eq!(class.index, self.next_index());
         self.has_property_views |= class
             .hooks
             .as_ref()
@@ -56,30 +52,100 @@ impl ClassTable {
         self.numbered.push(class.clone());
         self.entries.insert(lowercase_name, class);
     }
+}
+
+/// One request owns its class additions and objects. Built-ins keep their indices on the worker.
+pub(crate) struct ClassTable {
+    native: Rc<ClassDefinitions>,
+    local: ClassDefinitions,
+    pub(crate) has_dimensions: bool,
+    pub(crate) has_property_views: bool,
+    pub(crate) objects: Vec<Weak<Object>>,
+    ids: Rc<ObjectIds>,
+}
+
+impl ClassTable {
+    pub(crate) fn new(native: Rc<ClassDefinitions>) -> Self {
+        Self {
+            has_dimensions: false,
+            has_property_views: native.has_property_views,
+            native,
+            local: ClassDefinitions::default(),
+            objects: Vec::new(),
+            ids: Rc::default(),
+        }
+    }
+
+    pub(crate) fn next_index(&self) -> ClassIndex {
+        ClassIndex((self.native.numbered.len() + self.local.numbered.len()) as u32)
+    }
+
+    pub(crate) fn insert(&mut self, lowercase_name: String, class: Rc<Class>) {
+        debug_assert_eq!(class.index, self.next_index());
+        self.local.order.push(class.name.clone());
+        self.local.insert(lowercase_name, class);
+        self.has_property_views |= self.local.has_property_views;
+    }
+
+    pub(crate) fn alias(&mut self, name: String, class: Rc<Class>) -> bool {
+        if self.get_lowercase(&name).is_some() {
+            return false;
+        }
+        self.local.order.push(name.clone());
+        self.local.entries.insert(name, class);
+        true
+    }
+
+    pub(crate) fn names(&self) -> impl Iterator<Item = &str> {
+        self.native
+            .order
+            .iter()
+            .chain(&self.local.order)
+            .map(String::as_str)
+    }
 
     /// The class with number `index`.
     #[inline]
     pub(crate) fn class(&self, index: ClassIndex) -> &Rc<Class> {
-        &self.numbered[index.0 as usize]
+        let index = index.0 as usize;
+        let base = self.native.numbered.len();
+        if index < base {
+            &self.native.numbered[index]
+        } else {
+            &self.local.numbered[index - base]
+        }
     }
 
     pub(crate) fn numbered(&self, index: u32) -> Option<Rc<Class>> {
-        self.numbered.get(index as usize).cloned()
+        let index = index as usize;
+        let base = self.native.numbered.len();
+        if index < base {
+            self.native.numbered.get(index).cloned()
+        } else {
+            self.local.numbered.get(index - base).cloned()
+        }
     }
 
     /// The built-in Closure class is fixed for a request.
     pub(crate) fn closure_class(&self) -> Option<Rc<Class>> {
-        let index = self.closure?;
-        self.numbered.get(index.0 as usize).cloned()
+        let index = self.native.closure?;
+        self.native.numbered.get(index.0 as usize).cloned()
+    }
+
+    pub(crate) fn get_lowercase(&self, name: &str) -> Option<&Rc<Class>> {
+        self.local
+            .entries
+            .get(name)
+            .or_else(|| self.native.entries.get(name))
     }
 
     /// Class identifiers ignore case, including names produced by dynamic expressions.
     pub(crate) fn get(&self, name: &str) -> Option<Rc<Class>> {
         let name = name.strip_prefix('\\').unwrap_or(name);
         if name.bytes().any(|byte| byte.is_ascii_uppercase()) {
-            self.entries.get(&name.to_ascii_lowercase()).cloned()
+            self.get_lowercase(&name.to_ascii_lowercase()).cloned()
         } else {
-            self.entries.get(name).cloned()
+            self.get_lowercase(name).cloned()
         }
     }
 
@@ -141,11 +207,11 @@ mod tests {
     use phera_extension_api::Registry;
     use phera_value::{ArrayKey, Value};
 
-    use super::ClassTable;
+    use super::{ClassDefinitions, ClassTable};
 
     #[test]
     fn freed_object_ids_reuse_the_most_recently_freed_slot() {
-        let mut table = ClassTable::native(&Registry::new());
+        let mut table = ClassTable::new(Rc::new(ClassDefinitions::native(&Registry::new())));
         let class = table.get("stdClass").unwrap();
         let first = table.allocate(class.clone());
         let second = table.allocate(class.clone());
@@ -167,7 +233,7 @@ mod tests {
 
     #[test]
     fn a_million_linked_objects_drop_without_rust_recursion() {
-        let table = ClassTable::native(&Registry::new());
+        let table = ClassTable::new(Rc::new(ClassDefinitions::native(&Registry::new())));
         let class = table.get("stdClass").unwrap();
         let mut head = Value::Null;
         for index in 0..1_000_000 {

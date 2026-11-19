@@ -62,6 +62,23 @@ impl Context for Vm {
         Vm::include_path(self)
     }
 
+    fn source_location(&self) -> Option<(String, usize)> {
+        let location = self.location();
+        Some((location.file, location.line))
+    }
+
+    fn request_global(&self, name: &str) -> Option<Value> {
+        self.globals.get(name).cloned()
+    }
+
+    fn replace_request_global(&mut self, name: &str, value: Value) {
+        self.publish_global(name.into(), value);
+    }
+
+    fn register_request_finalizer(&mut self, callback: phera_extension_api::AsyncFn) {
+        self.request_callbacks.output.set_finalizer(callback);
+    }
+
     fn script_path(&self) -> Option<std::path::PathBuf> {
         Some(self.location().file.into())
     }
@@ -82,8 +99,27 @@ impl Context for Vm {
         Some(self.report_global_constant(constant))
     }
 
+    fn entry_script_path(&self) -> Option<std::path::PathBuf> {
+        let main = self.code.known_unit(crate::code_table::FunctionIndex(0))?;
+        Some(main.file.as_str().into())
+    }
+
     fn diagnostics(&mut self) -> &mut dyn Diagnostics {
         self
+    }
+
+    fn named_shutdown(
+        &mut self,
+        key: &'static str,
+        callback: Option<&'static str>,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(self.register_named_shutdown(key, callback))
+    }
+
+    fn has_method(&self, object: &phera_value::Object, name: &str) -> bool {
+        self.classes
+            .for_object(object)
+            .is_some_and(|class| class.methods.contains_key(&name.to_ascii_lowercase()))
     }
 
     fn warning_bytes(&mut self, message: &[u8]) {

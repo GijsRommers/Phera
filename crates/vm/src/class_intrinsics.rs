@@ -233,18 +233,17 @@ impl Vm {
     /// PHP lists the canonical declaration spelling, or the lowercased key for an alias.
     fn declared_classes(&self, function: ClassFunction) -> NativeResult {
         let mut listed = PhpArray::new();
-        for name in &self.classes.order {
+        for name in self.classes.names() {
             if self
                 .classes
-                .entries
-                .get(&name.to_ascii_lowercase())
+                .get_lowercase(&name.to_ascii_lowercase())
                 .is_some_and(|class| match function {
                     ClassFunction::DeclaredInterfaces => class.kind == ClassKind::Interface,
                     ClassFunction::DeclaredTraits => class.kind == ClassKind::Trait,
                     _ => class.kind.is_class(),
                 })
             {
-                listed.push(Value::from(name.as_str()))?;
+                listed.push(Value::from(name))?;
             }
         }
         Ok(Value::from(listed))

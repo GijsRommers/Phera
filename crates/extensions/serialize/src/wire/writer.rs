@@ -4,6 +4,10 @@
 pub struct Writer(Vec<u8>);
 
 impl Writer {
+    pub(crate) fn append(&mut self, bytes: &[u8]) {
+        self.0.extend_from_slice(bytes);
+    }
+
     pub fn finish(self) -> Vec<u8> {
         self.0
     }

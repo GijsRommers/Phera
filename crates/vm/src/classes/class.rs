@@ -290,9 +290,11 @@ impl Class {
             return *result;
         }
         let result = self.is_a(name);
-        self.declaration_matches
-            .borrow_mut()
-            .insert(name.to_owned(), result);
+        let mut declarations = self.declaration_matches.borrow_mut();
+        // Native definitions outlive requests. Cache only bounded, canonical ancestry matches.
+        if self.declaration.is_some() || (result && declarations.len() < 64) {
+            declarations.insert(name.to_owned(), result);
+        }
         result
     }
 }

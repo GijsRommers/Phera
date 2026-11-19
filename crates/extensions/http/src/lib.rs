@@ -20,7 +20,7 @@ use phera_extension_api::{
 };
 
 pub use head::ResponseHead;
-pub use request::{RequestHeaders, Sapi, register_web};
+pub use request::{RequestHeaders, Sapi, register_web, sapi};
 pub use uploads::UploadedFiles;
 
 pub struct Http;
@@ -131,6 +131,32 @@ fn header(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         head.status = status;
     }
     Ok(Value::Null)
+}
+
+/// Publishes a module-generated header through the SAPI response head.
+pub fn module_header(context: &mut dyn Context, line: &[u8]) {
+    let line = line.trim_ascii_end();
+    if valid_header_line(context, line) {
+        context
+            .state()
+            .get_or_default::<ResponseHead>()
+            .apply(line, true);
+    }
+}
+
+/// Replaces earlier cookies for this name and retains every other Set-Cookie line.
+pub fn module_cookie(context: &mut dyn Context, name: &[u8], line: &[u8]) -> bool {
+    let line = line.trim_ascii_end();
+    if !valid_header_line(context, line) {
+        return false;
+    }
+    let head = context.state().get_or_default::<ResponseHead>();
+    head.headers.retain(|(header, value)| {
+        !header.eq_ignore_ascii_case("set-cookie")
+            || value.split(|byte| *byte == b'=').next() != Some(name)
+    });
+    head.append_cookie(line);
+    true
 }
 
 pub(crate) fn headers_open(context: &mut dyn Context) -> bool {
