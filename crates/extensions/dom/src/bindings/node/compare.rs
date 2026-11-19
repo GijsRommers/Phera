@@ -133,7 +133,14 @@ pub(super) fn position(_: &mut dyn Context, this: This<'_>, arguments: &[Value])
                 .copied()
                 .chain(arena.children(parent))
                 .find(|&candidate| candidate == a || candidate == b);
-            if order == Some(a) { 4 } else { 2 }
+            let direction = if order == Some(a) { 4 } else { 2 };
+            if arena[a].kind == crate::tree::Kind::Attribute
+                && arena[b].kind == crate::tree::Kind::Attribute
+            {
+                direction | 32
+            } else {
+                direction
+            }
         }
         _ => 0,
     };

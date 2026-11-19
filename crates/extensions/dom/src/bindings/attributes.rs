@@ -6,9 +6,11 @@
 //! assert($document->getElementById('target') === $root);
 //! ```
 
+mod dtd;
 pub(super) mod namespaces;
 mod registration;
 
+use dtd::default_value;
 pub(super) use registration::register;
 
 use phera_extension_api::{Context, NativeError, NativeResult, PhpArray, Value, args};
@@ -30,41 +32,6 @@ pub(super) fn find(
             Some(namespace) => attr.namespace.as_deref() == namespace && attr.local == name,
             None => attr.qualified() == name,
         }
-    })
-}
-
-fn default_value<'a>(
-    arena: &'a Arena,
-    id: NodeId,
-    namespace: Option<Option<&str>>,
-    name: &str,
-) -> Option<&'a str> {
-    let doctype = arena
-        .children(Arena::DOCUMENT)
-        .find_map(|id| arena[id].doctype.as_deref())?;
-    let attributes = doctype
-        .attribute_defaults
-        .get(&arena[id].name.qualified())?;
-    attributes.iter().find_map(|(qualified, value)| {
-        let matches = match namespace {
-            None => qualified == name,
-            Some(namespace) => match qualified.split_once(':') {
-                Some((prefix, local)) => {
-                    local == name
-                        && namespace.is_some_and(|uri| {
-                            if prefix == "xml" {
-                                uri == XML
-                            } else {
-                                super::node::namespace_scope(arena, id)
-                                    .find(|(bound, _)| bound == prefix)
-                                    .is_some_and(|(_, bound)| bound == uri)
-                            }
-                        })
-                }
-                None => namespace.is_none() && qualified == name,
-            },
-        };
-        matches.then_some(value.as_str())
     })
 }
 
@@ -117,6 +84,16 @@ fn read(
     let node = this_node(this)?;
     let namespace = ns.then(|| factory::namespace(arguments, 0));
     let name = factory::argument(arguments, usize::from(ns)).unwrap_or_default();
+    if matches!(operation, Read::Remove)
+        && let Some(Some(uri)) = &namespace
+    {
+        super::namespace::remove_by_uri(
+            &mut node.shared.borrow_mut().document.arena,
+            node.id,
+            &name,
+            uri,
+        );
+    }
     let attribute = {
         let state = node.shared.borrow();
         let namespace = namespace.as_ref().map(|uri| uri.as_deref());
@@ -144,7 +121,10 @@ fn read(
         (Read::Node, Some(attribute)) => super::namespace::wrap(context, node.at(attribute)),
         (Read::Node, None) => Ok(if ns { Value::Null } else { Value::Bool(false) }),
         (Read::Remove, Some(attribute)) => {
-            node.shared.borrow_mut().remove(attribute);
+            let mut state = node.shared.borrow_mut();
+            if !ns || state.document.arena[attribute].name.namespace.as_deref() != Some(XMLNS) {
+                state.remove(attribute);
+            }
             Ok(if ns { Value::Null } else { Value::Bool(true) })
         }
         (Read::Remove, None) => Ok(if ns { Value::Null } else { Value::Bool(false) }),
@@ -237,11 +217,14 @@ fn names(_: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
     let state = node.shared.borrow();
     let arena = &state.document.arena;
     let mut values = PhpArray::new();
-    for &attribute in arena[node.id].attributes() {
-        let attr = &arena[attribute];
-        if attr.name.namespace.as_deref() != Some(XMLNS) {
-            let _ = values.push(Value::from(attr.name.local.as_str()));
-        }
+    let attributes = arena[node.id].attributes().iter().map(|&id| &arena[id]);
+    let declaration = |attribute: &&Node| attribute.name.namespace.as_deref() == Some(XMLNS);
+    for attr in attributes
+        .clone()
+        .filter(declaration)
+        .chain(attributes.filter(|attr| !declaration(attr)))
+    {
+        let _ = values.push(Value::from(attr.name.qualified()));
     }
     Ok(Value::from(values))
 }

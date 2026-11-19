@@ -6,6 +6,7 @@
 //! ```
 
 mod declarations;
+mod diagnostics;
 mod doctype;
 mod dtd;
 mod elements;
@@ -24,6 +25,7 @@ use quick_xml::{Error, Reader};
 use crate::document::{Document, ParseError, Settings};
 use crate::tree::{Arena, Kind, Name, Node, NodeId};
 
+use self::diagnostics::Position;
 use self::encoding::{decode, xml_char};
 use self::entities::Entities;
 
@@ -222,24 +224,6 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    fn finish(&self) -> Result<(), ParseError> {
-        match self.open.last() {
-            Some(frame) => {
-                let node = &self.document.arena[frame.id];
-                Err(ParseError::fatal(
-                    77,
-                    format!(
-                        "Premature end of data in tag {} line {}",
-                        node.name.qualified(),
-                        node.line
-                    ),
-                ))
-            }
-            None if !self.root => Err(ParseError::fatal(4, "Document is empty")),
-            None => Ok(()),
-        }
-    }
-
     fn unexpected_text(&self) -> ParseError {
         if self.root {
             extra_content()
@@ -334,62 +318,6 @@ impl<'a> Parser<'a> {
             Some(first) if arena[first].kind == Kind::Text => false,
             None if remaining.starts_with(b"</") => false,
             _ => remaining.starts_with(b"<"),
-        }
-    }
-
-    fn report(&mut self, mut error: ParseError) {
-        error.line = self.position.line;
-        error.column = self.position.column;
-        error.message.push('\n');
-        self.diagnostics.push(error);
-    }
-
-    fn reader_error(&self, error: Error) -> ParseError {
-        match error {
-            Error::IllFormed(IllFormedError::MismatchedEndTag { expected, found }) => {
-                let line = self.document.arena[self.parent()].line;
-                ParseError::fatal(
-                    76,
-                    format!("Opening and ending tag mismatch: {expected} line {line} and {found}"),
-                )
-            }
-            Error::IllFormed(IllFormedError::UnclosedReference) => {
-                ParseError::fatal(23, "EntityRef: expecting ';'")
-            }
-            other => ParseError::fatal(73, other.to_string()),
-        }
-    }
-}
-
-struct Position {
-    offset: usize,
-    line: usize,
-    column: usize,
-}
-
-impl Default for Position {
-    fn default() -> Self {
-        Self {
-            offset: 0,
-            line: 1,
-            column: 1,
-        }
-    }
-}
-
-impl Position {
-    fn advance(&mut self, input: &str, offset: usize) {
-        if self.offset == offset {
-            return;
-        }
-        if let Some(chunk) = input.get(self.offset..offset) {
-            if let Some((complete, tail)) = chunk.rsplit_once('\n') {
-                self.line += 1 + complete.bytes().filter(|&byte| byte == b'\n').count();
-                self.column = 1 + tail.chars().count();
-            } else {
-                self.column += chunk.chars().count();
-            }
-            self.offset = offset;
         }
     }
 }

@@ -38,7 +38,8 @@ pub(in crate::bindings) fn reconcile(arena: &mut Arena, parent: NodeId, root: No
     if names.is_empty() && declared.is_empty() {
         return;
     }
-    let mut inherited = Bindings::new(namespace_scope(arena, parent));
+    let scope = (arena[parent].kind == Kind::Element).then(|| namespace_scope(arena, parent));
+    let mut inherited = Bindings::new(scope.into_iter().flatten());
     let mut local = HashMap::new();
     for id in declared {
         let entry = &arena[id];

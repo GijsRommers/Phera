@@ -8,13 +8,15 @@
 
 mod cursor;
 mod dimensions;
+mod registration;
+
+pub(super) use registration::register;
 
 use std::rc::Rc;
 
 use phera_extension_api::{
-    ArrayKey, ClassEntry, ClassHooks, Context, MethodEntry, NativeDimensions, NativeError,
-    NativePropertyAccess, NativePropertyMutation, NativePropertyRead, NativeResult, Object, Param,
-    ParamType, PhpArray, PropertyPurpose, Registry, Value, args,
+    ArrayKey, Context, NativeError, NativePropertyMutation, NativePropertyRead, NativeResult,
+    Object, PhpArray, PropertyPurpose, Value, args,
 };
 
 use crate::tree::{Arena, Kind, NodeId};
@@ -182,10 +184,17 @@ fn wrap(
 }
 
 pub(super) fn tags(context: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> NativeResult {
-    let name = String::from_utf8_lossy(args::bytes(arguments, 0)).into_owned();
+    let object = receiver(this)?;
+    let name = path_parameter(
+        object,
+        "getElementsByTagName",
+        arguments,
+        0,
+        "qualifiedName",
+    )?;
     wrap(
         context,
-        location(receiver(this)?)?,
+        location(object)?,
         Selection::Tags {
             namespace: None,
             name,
@@ -199,19 +208,41 @@ pub(super) fn tags_ns(
     this: This<'_>,
     arguments: &[Value],
 ) -> NativeResult {
-    let namespace = args::string(arguments, 0)
-        .filter(|value| !value.as_bytes().is_empty())
-        .map(|value| String::from_utf8_lossy(value.as_bytes()).into_owned());
-    let name = String::from_utf8_lossy(args::bytes(arguments, 1)).into_owned();
+    let object = receiver(this)?;
+    let namespace = path_parameter(object, "getElementsByTagNameNS", arguments, 0, "namespace")?;
+    let namespace = (!namespace.is_empty()).then_some(namespace);
+    let name = path_parameter(object, "getElementsByTagNameNS", arguments, 1, "localName")?;
     wrap(
         context,
-        location(receiver(this)?)?,
+        location(object)?,
         Selection::Tags {
             namespace: Some(namespace),
             name,
         },
         "DOMNodeList",
     )
+}
+
+fn path_parameter(
+    object: &Object,
+    method: &str,
+    arguments: &[Value],
+    index: usize,
+    name: &str,
+) -> Result<String, NativeError> {
+    let bytes = args::bytes(arguments, index);
+    if bytes.contains(&0) {
+        let class = if object.class.is_instance_of("DOMDocument") {
+            "DOMDocument"
+        } else {
+            "DOMElement"
+        };
+        return Err(NativeError::value_error(format!(
+            "{class}::{method}(): Argument #{} (${name}) must not contain any null bytes",
+            index + 1,
+        )));
+    }
+    Ok(String::from_utf8_lossy(bytes).into_owned())
 }
 
 fn collection(object: &Object) -> Result<Collection, NativeError> {
@@ -239,7 +270,9 @@ fn item(context: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> Nativ
 }
 
 fn item_at(context: &mut dyn Context, object: &Object, index: i64) -> NativeResult {
-    let collection = collection(object)?;
+    let Some(collection): Option<Collection> = native(object) else {
+        return Ok(Value::Null);
+    };
     let id = usize::try_from(index)
         .ok()
         .and_then(|index| collection.snapshot().get(index).copied());
@@ -324,70 +357,4 @@ fn projection(
         );
     }
     Ok(table)
-}
-
-const HOOKS: ClassHooks = ClassHooks {
-    iterator: Some(cursor::iterator),
-    properties: Some(projection),
-    property_access: Some(&NativePropertyAccess { read, mutate }),
-    count: Some(count_hook),
-    dimensions: Some(NativeDimensions {
-        fallback_if_overridden: &[],
-        get: dimensions::get,
-        exists: dimensions::exists,
-        set: dimensions::set,
-        unset: dimensions::unset,
-        reference: None,
-        bind: None,
-        direct: None,
-    }),
-    ..ClassHooks::EMPTY
-};
-
-pub(super) fn register(registry: &mut Registry) {
-    const ITEM: MethodEntry = MethodEntry::public(
-        "item",
-        const { &[Param::new("index", ParamType::Int)] },
-        item,
-    );
-    const COUNT: MethodEntry = MethodEntry::public("count", &[], count).tentative_return("int");
-    const ITERATOR: MethodEntry =
-        MethodEntry::public("getIterator", &[], cursor::get_iterator).returning("Iterator");
-    registry.class(ClassEntry {
-        interfaces: &["IteratorAggregate", "Countable"],
-        methods: const { &[ITEM, COUNT, ITERATOR] },
-        hooks: Some(&HOOKS),
-        ..ClassEntry::class("DOMNodeList")
-    });
-    registry.class(ClassEntry {
-        interfaces: &["IteratorAggregate", "Countable"],
-        methods: const {
-            const {
-                &[
-                    ITEM.tentative_return("?DOMNode"),
-                    COUNT,
-                    ITERATOR,
-                    MethodEntry::public(
-                        "getNamedItem",
-                        const { &[Param::new("qualifiedName", ParamType::String)] },
-                        named,
-                    )
-                    .tentative_return("?DOMNode"),
-                    MethodEntry::public(
-                        "getNamedItemNS",
-                        const {
-                            &[
-                                Param::new("namespace", ParamType::String).nullable(),
-                                Param::new("localName", ParamType::String),
-                            ]
-                        },
-                        named_ns,
-                    )
-                    .tentative_return("?DOMNode"),
-                ]
-            }
-        },
-        hooks: Some(&HOOKS),
-        ..ClassEntry::class("DOMNamedNodeMap")
-    });
 }

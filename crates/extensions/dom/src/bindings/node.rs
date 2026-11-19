@@ -196,6 +196,14 @@ pub(in crate::bindings) fn namespace_scope(
     arena: &Arena,
     id: NodeId,
 ) -> impl Iterator<Item = (String, String)> + '_ {
+    let id = if arena[id].kind == Kind::Document {
+        arena
+            .children(id)
+            .find(|&child| arena[child].kind == Kind::Element)
+            .unwrap_or(id)
+    } else {
+        id
+    };
     std::iter::once(id)
         .chain(arena.ancestors(id))
         .flat_map(|id| {

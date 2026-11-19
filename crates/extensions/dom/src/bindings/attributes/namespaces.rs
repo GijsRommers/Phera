@@ -25,7 +25,11 @@ pub(in crate::bindings) fn bind(
     let Some(uri) = name.namespace.as_deref() else {
         return;
     };
-    if uri == XML || uri == XMLNS {
+    if uri == XML {
+        name.prefix = Some("xml".into());
+        return;
+    }
+    if uri == XMLNS {
         return;
     }
     let mut scope = std::collections::HashMap::new();

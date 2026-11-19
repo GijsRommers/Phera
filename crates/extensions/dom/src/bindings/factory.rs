@@ -192,15 +192,11 @@ pub(super) fn construct_element(
     args: &[Value],
 ) -> NativeResult {
     let uri = namespace(args, 2);
-    construct(
-        this,
-        element(
-            argument(args, 0),
-            argument(args, 1),
-            uri.clone(),
-            uri.is_some(),
-        )?,
-    )
+    let name = argument(args, 0).unwrap_or_default();
+    if !names::valid(&name) {
+        return Err(dom_error(5, "Invalid Character Error"));
+    }
+    construct(this, element(Some(name), argument(args, 1), uri, true)?)
 }
 
 pub(super) fn construct_attribute(
@@ -288,6 +284,9 @@ pub(super) fn checked_name(
     ns: bool,
 ) -> Result<Name, NativeError> {
     if !names::valid(&name) {
+        if ns && (namespace.is_some() || name.contains(':')) {
+            return Err(dom_error(14, "Namespace Error"));
+        }
         return Err(dom_error(5, "Invalid Character Error"));
     }
     if !ns {

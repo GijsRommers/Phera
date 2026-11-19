@@ -6,8 +6,10 @@
 //! ```
 
 mod reconciliation;
+mod removal;
 
 pub(super) use reconciliation::reconcile;
+pub(super) use removal::remove_by_uri;
 
 use std::rc::Rc;
 

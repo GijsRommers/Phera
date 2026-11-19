@@ -17,7 +17,7 @@ use crate::xpath::{
     callback::{Callback, Failure},
 };
 
-use super::super::{Location, This, factory, location, receiver};
+use super::super::{Location, This, dom_error, factory, location, receiver};
 use super::State;
 
 const PHP_NAMESPACE: &str = "http://php.net/xpath";
@@ -73,7 +73,7 @@ pub(super) fn register(
     let state = native
         .as_mut()
         .and_then(|data| data.downcast_mut::<State>())
-        .ok_or_else(|| NativeError::error("DOMXPath object is uninitialized"))?;
+        .ok_or_else(|| dom_error(11, "Invalid State Error"))?;
     state.php.enabled = true;
     state.php.unrestricted = unrestricted;
     state.php.named.extend(additions);
@@ -137,7 +137,7 @@ pub(super) fn register_ns(
     let state = native
         .as_mut()
         .and_then(|data| data.downcast_mut::<State>())
-        .ok_or_else(|| NativeError::error("DOMXPath object is uninitialized"))?;
+        .ok_or_else(|| dom_error(11, "Invalid State Error"))?;
     state
         .php
         .namespaced
