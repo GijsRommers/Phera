@@ -70,7 +70,7 @@ impl Analyzer<'_> {
         let empty = Default::default();
         let templates = self
             .context
-            .class
+            .documentation_class
             .as_ref()
             .and_then(|class| self.index.class(class))
             .map_or(&empty, |class| &class.documented.templates);

@@ -79,8 +79,8 @@ impl Signature {
                 );
             }
         }
-        let resolved = self.returns.substitute(&inferred, None);
-        if let ValueType::Conditional(conditional) = &resolved {
+        let mut resolved = self.returns.substitute(&inferred, None);
+        while let ValueType::Conditional(conditional) = &resolved {
             let subject = if let Some(name) = &conditional.variable {
                 actual.get(name.as_str()).copied().or_else(|| {
                     (!arguments.iter().any(|argument| argument.spread)
@@ -93,29 +93,33 @@ impl Signature {
             } else {
                 Some(&conditional.subject)
             };
-            if let Some(subject) = subject {
-                let relation =
-                    conditional
-                        .tested
-                        .accepts(subject, index, TypePolicy::Documentation);
-                let selection = match relation {
-                    Compatibility::Accepts => Some(true),
-                    Compatibility::Rejects
-                        if (conditional.tested == ValueType::Null && subject.excludes_null())
-                            || subject == &ValueType::Null =>
-                    {
-                        Some(false)
-                    }
-                    _ => None,
-                };
-                if let Some(matches) = selection {
-                    return if matches == (conditional.test == crate::types::ConditionTest::Is) {
-                        conditional.yes.clone()
-                    } else {
-                        conditional.no.clone()
-                    };
+            let Some(subject) = subject else {
+                break;
+            };
+            let relation = conditional
+                .tested
+                .accepts(subject, index, TypePolicy::Documentation);
+            let matches = match relation {
+                Compatibility::Accepts => true,
+                Compatibility::Rejects
+                    if (conditional.tested == ValueType::Null && subject.excludes_null())
+                        || matches!(
+                            subject,
+                            ValueType::Null
+                                | ValueType::StringLiteral(_)
+                                | ValueType::IntLiteral(_)
+                                | ValueType::BoolLiteral(_)
+                        ) =>
+                {
+                    false
                 }
-            }
+                _ => break,
+            };
+            resolved = if matches == (conditional.test == crate::types::ConditionTest::Is) {
+                conditional.yes.clone()
+            } else {
+                conditional.no.clone()
+            };
         }
         resolved
     }
@@ -151,6 +155,14 @@ fn infer_templates(
     let mut pending = vec![(expected, given)];
     while let Some((expected, given)) = pending.pop() {
         match (expected, given) {
+            (T::Union(arms), _) => pending.extend(
+                arms.iter()
+                    .filter(|arm| {
+                        arm.accepts(given, index, TypePolicy::Documentation)
+                            == Compatibility::Accepts
+                    })
+                    .map(|arm| (arm, given)),
+            ),
             (T::Template(template), _)
                 if variables.contains(&template.name)
                     && template

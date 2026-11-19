@@ -50,6 +50,7 @@ impl Analyzer<'_> {
         self.context.scope_kind = ScopeKind::Function;
         self.context.incomplete = false;
         self.context.class = None;
+        self.context.documentation_class = None;
         self.context.this_class = None;
         self.context.object = false;
         self.context.unbound_this = None;
@@ -97,6 +98,9 @@ impl Analyzer<'_> {
             || crate::collect::anonymous_name(&self.file.path, class.span.start),
             |n| self.context.names.declaration(&n.name),
         ));
+        self.context
+            .documentation_class
+            .clone_from(&self.context.class);
         self.check_attributes(&class.attributes, &mut Scope::default());
         if self.level >= 2 && class.doc_comment.is_some() {
             self.read_documentation(class.doc_comment);

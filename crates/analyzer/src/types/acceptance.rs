@@ -143,6 +143,21 @@ fn atomic(
         (String, StringLiteral(_) | StringRefinement(_) | ClassString(_)) => true,
         (StringRefinement(kind), StringLiteral(bytes)) => string_accepts(*kind, bytes),
         (StringRefinement(StringKind::NonEmpty), ClassString(_)) => true,
+        (ClassString(bound), StringLiteral(value)) => {
+            let Some(class) = std::str::from_utf8(value)
+                .ok()
+                .and_then(|name| index.class(name.trim_start_matches('\\')))
+            else {
+                return Rejects;
+            };
+            if **bound == Object {
+                true
+            } else if let Some(bound) = bound.class_name() {
+                return nominal(bound, &class.name, index);
+            } else {
+                return Uncertain;
+            }
+        }
         (StringRefinement(StringKind::NonEmpty), StringRefinement(StringKind::Truthy)) => true,
         (UnknownCallable, Callable(_)) => true,
         (Class(name), Callable(_)) if name.eq_ignore_ascii_case("Closure") => true,
