@@ -44,6 +44,7 @@ pub struct Runtime {
     environment: Arc<Environment>,
     startup_ini: Arc<[(String, String)]>,
     web_development: bool,
+    no_process: bool,
 }
 
 /// A web worker links the process's native definitions once on its own thread.
@@ -97,6 +98,8 @@ impl Runtime {
         registry.load(&phera_ext_standard::Standard);
         registry.load(&phera_ext_tokenizer::Tokenizer);
         registry.load(&phera_ext_streams::Streams);
+        registry.load(&phera_ext_process::Process);
+        registry.load(&phera_ext_process::Posix);
         registry.load(&phera_ext_ctype::Ctype);
         registry.load(&phera_ext_date::Date);
         registry.load(&phera_ext_dom::Libxml);
@@ -124,6 +127,7 @@ impl Runtime {
         registry.load(&phera_ext_session::Session);
         let mut web_registry = registry.clone();
         phera_ext_http::register_web(&mut web_registry);
+        phera_ext_process::register_cli_process_control(&mut registry);
         registry.constant("PHP_SAPI", Sapi::Cli.name());
         let registry = Arc::new(registry);
         let web_registry = Arc::new(web_registry);
@@ -135,6 +139,7 @@ impl Runtime {
             environment: Arc::new(environment),
             startup_ini: Arc::new([]),
             web_development: false,
+            no_process: false,
         }
     }
 
@@ -147,6 +152,11 @@ impl Runtime {
     /// Start web requests with display enabled for local development.
     pub fn with_web_development(mut self, enabled: bool) -> Self {
         self.web_development = enabled;
+        self
+    }
+
+    pub fn without_web_processes(mut self, disabled: bool) -> Self {
+        self.no_process = disabled;
         self
     }
 
@@ -343,6 +353,7 @@ impl Runtime {
         *vm.state_mut().get_or_default::<Sapi>() = sapi;
         if matches!(sapi, Sapi::Web) {
             vm.use_web_execution_time();
+            phera_ext_process::configure_web(vm.state_mut(), self.no_process);
         }
         for (name, value) in self.startup_ini.iter() {
             vm.set_startup_ini(name, value);

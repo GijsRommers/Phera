@@ -32,6 +32,7 @@ phera-ext-spl.workspace = true
 phera-ext-standard.workspace = true
 phera-ext-tokenizer.workspace = true
 phera-ext-streams.workspace = true
+phera-ext-process.workspace = true
 phera-value.workspace = true
 phera-vm.workspace = true
 tokio.workspace = true

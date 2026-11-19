@@ -14,6 +14,7 @@ Usage:
     --listen ADDRESS                      default 127.0.0.1:8080, or
                                           0.0.0.0:$PORT when PORT is set
     --workers N                           default: one per CPU core
+    --no-process                          forbid starting external programs
     --request-timeout SECONDS             stop a request after this long
                                           (default 60; 0: never)
     --request-read-timeout SECONDS        receive headers and body in this
@@ -75,6 +76,7 @@ pub(crate) struct ServeOptions {
     /// `--compress`: gzip or brotli for clients that accept it. Off unless
     /// given, since the proxy in front usually compresses.
     pub compress: bool,
+    pub no_process: bool,
     /// `--request-timeout`: `None` keeps the server's default, and
     /// `Some(None)` (given as 0) lets a request run without a limit.
     pub request_timeout: Option<Option<Duration>>,
@@ -242,6 +244,7 @@ fn parse_serve(
         listen: None,
         workers: None,
         compress: false,
+        no_process: false,
         request_timeout: None,
         request_read_timeout: None,
         trusted_proxies: None,
@@ -272,6 +275,7 @@ fn parse_serve(
             }
             "--compress" => options.compress = true,
             "--dev" => options.dev = true,
+            "--no-process" => options.no_process = true,
             "--trusted-proxies" => {
                 let list = arguments
                     .next()

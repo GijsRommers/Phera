@@ -32,7 +32,7 @@ Measured in November 2026 against PHP 8.5, the same script or request on both.
 | WordPress | Not yet: `mysqli` is being built |
 | PHP's own test suite (php-src, 13,388 tests) | 8,704 pass |
 | Speed of plain scripts | Between about the same CPU time as PHP's interpreter (arrays, arithmetic) and 5.5 times as much (method calls) |
-| Speed of a framework request | Roughly 10 times slower than PHP with opcache (one Laravel API request: about 150 ms against 9 to 17 ms). Phera links every class again for each request; sharing linked code between requests and forking a booted application are designed ([architecture, 5.4](docs/architecture.md)) and not built |
+| Speed of a framework request | Roughly 10 times slower than PHP with opcache (one Laravel API request: about 150 ms against 9 to 17 ms). Phera links every class again for each request; sharing linked code between requests, forking a booted application and a worker mode with FrankenPHP's interface are designed ([architecture, 5.4](docs/architecture.md)) and not built. Measured CPU per request for a Laravel route with two MySQL queries: 34 million cycles on PHP with opcache, 369 million on Phera |
 
 ## 🧰 The `phera` command
 
@@ -64,10 +64,14 @@ and closes the connection.
 Built in, each checked call by call against real PHP: core, standard, ctype,
 date, dom (first stage), filter, hash, json, mbstring, openssl, pcre, PDO
 (SQLite, MySQL, PostgreSQL, with TLS), random, redis, reflection, serialize,
-session, SPL, sqlite3, streams, tokenizer.
+session, SPL, sqlite3, streams, tokenizer, Unix process functions, and POSIX queries.
 
-In progress: bcmath, curl, gmp, intl, mysqli, pgsql, process functions, sodium,
-zlib. Not started: gd, fileinfo, SimpleXML, XMLReader, XMLWriter, zip, sockets.
+Unix scripts can launch programs with `shell_exec()`, backticks, and the process
+functions. Backticks emit PHP 8.5's compile-time deprecation. To disable program
+launching for web requests, run `phera serve --no-process public`.
+
+In progress: bcmath, curl, gmp, intl, mysqli, pgsql, sodium, zlib.
+Not started: gd, fileinfo, SimpleXML, XMLReader, XMLWriter, zip, sockets.
 
 ## ✨ Goals
 

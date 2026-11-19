@@ -67,7 +67,9 @@ fn dir(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Nati
 async fn open(context: &mut dyn Context, arguments: Vec<Value>, function: &str) -> NativeResult {
     let name = args::bytes(&arguments, 0);
     check_path(function, "#1 ($directory)", name)?;
-    validate(args::value(&arguments, 1), function, 2)?;
+    let stream_context = args::value(&arguments, 1);
+    validate(stream_context, function, 2)?;
+    files(context).use_default_context(stream_context);
     if name.is_empty() {
         return Ok(Value::Bool(false));
     }
@@ -152,7 +154,9 @@ fn scandir(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, 
     Box::pin(async move {
         let name = args::bytes(&arguments, 0);
         check_path("scandir", "#1 ($directory)", name)?;
-        validate(args::value(&arguments, 2), "scandir", 3)?;
+        let stream_context = args::value(&arguments, 2);
+        validate(stream_context, "scandir", 3)?;
+        files(context).use_default_context(stream_context);
         if name.is_empty() {
             return Err(NativeError::value_error(
                 "scandir(): Argument #1 ($directory) must not be empty",
