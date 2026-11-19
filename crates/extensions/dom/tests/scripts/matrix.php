@@ -18,13 +18,16 @@ foreach (['alpha', 'book', 'item', 'café'] as $name) {
                 row("$case loadXML", $document->loadXML($source));
                 row("$case diagnostics", libxml_get_errors());
                 $root = $document->documentElement;
-                row("$case documentElement", [$root->nodeName, $root->textContent, $root->getLineNo()]);
+                row("$case documentElement", [
+                    $root->nodeName, $root->textContent, $root->getLineNo(),
+                ]);
                 row("$case element list", [$root->childNodes->length,
                     $document->getElementsByTagName('value')->item(0)->nodeName,
                     isset($root->childNodes[1]), $root->childNodes[1]->nodeName]);
                 row("$case unformatted save", $document->saveXML());
                 $document->formatOutput = true;
-                row("$case formatted save", $document->saveXML(null, LIBXML_NOEMPTYTAG | LIBXML_NOXMLDECL));
+                $flags = LIBXML_NOEMPTYTAG | LIBXML_NOXMLDECL;
+                row("$case formatted save", $document->saveXML(null, $flags));
                 row("$case subtree save", $document->saveXML($root->lastChild));
                 row("$case C14N", $root->C14N());
                 row("$case getElementById", $document->getElementById('the-id')?->nodeName);
@@ -37,13 +40,18 @@ foreach (['alpha', 'book', 'item', 'café'] as $name) {
                 $root->appendChild($node);
                 row("$case insert", [$list->length, $node === $root->lastChild]);
                 $root->removeChild($node);
-                row("$case remove", [$list->length, $node->parentNode, $node->ownerDocument === $document]);
+                row("$case remove", [
+                    $list->length, $node->parentNode, $node->ownerDocument === $document,
+                ]);
             }
         }
     }
 }
 
-foreach (['plain', '<r>', '<a/><b/>', '<r>&bad;</r>', '', '<r a="1" a="2"/>', "<r>\x01</r>"] as $input) {
+$malformed = [
+    'plain', '<r>', '<a/><b/>', '<r>&bad;</r>', '', '<r a="1" a="2"/>', "<r>\x01</r>",
+];
+foreach ($malformed as $input) {
     foreach ([0, LIBXML_NOERROR, LIBXML_NOBLANKS] as $options) {
         $document = new DOMDocument();
         $case = bin2hex($input) . "/$options";
@@ -82,7 +90,9 @@ foreach ([
     $source = '<?xml version="1.0" encoding="' . $encoding . '"?><r>' . $content . '</r>';
     row("$encoding encoded load", $document->loadXML($source));
     row("$encoding encoded document", [
-        $document->encoding, $document->documentElement?->textContent, bin2hex($document->saveXML()),
+        $document->encoding,
+        $document->documentElement?->textContent,
+        bin2hex($document->saveXML()),
     ]);
     row("$encoding encoded diagnostics", libxml_get_errors());
 }
@@ -97,3 +107,21 @@ row('canonical XPath subset', $document->C14N(true, false, [
     'query' => '//r:r | //r:item | //namespace::*',
     'namespaces' => ['r' => 'urn:root'],
 ]));
+
+foreach ([
+    ["\xff\xfe", 'UTF-16LE', 'UTF-16'],
+    ["\xfe\xff", 'UTF-16BE', 'UTF-16'],
+    ['', 'UTF-16LE', 'UTF-16LE'],
+] as [$head, $inputEncoding, $declaredEncoding]) {
+    $source = '<?xml version="1.0" encoding="' . $declaredEncoding . '"?><r>é</r>';
+    $bytes = $head . mb_convert_encoding($source, $inputEncoding, 'UTF-8');
+    $document = new DOMDocument();
+    libxml_clear_errors();
+    row("$inputEncoding load", $document->loadXML($bytes));
+    row("$inputEncoding document", [
+        $document->encoding,
+        $document->documentElement?->textContent,
+        bin2hex($document->saveXML()),
+    ]);
+    row("$inputEncoding diagnostics", libxml_get_errors());
+}

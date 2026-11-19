@@ -77,11 +77,15 @@ fn stream_context(context: &mut dyn Context, arguments: &[Value]) -> NativeResul
             context.state().get_or_default::<Config>().stream_context = Some(argument.clone());
             Ok(Value::Null)
         }
-        Value::Resource(_) => Err(NativeError::type_error(
-            "libxml_set_streams_context(): supplied resource is not a valid Stream-Context resource",
-        )),
+        Value::Resource(_) => Err(NativeError::type_error(concat!(
+            "libxml_set_streams_context(): supplied resource ",
+            "is not a valid Stream-Context resource"
+        ))),
         value => Err(NativeError::type_error(format!(
-            "libxml_set_streams_context(): Argument #1 ($context) must be of type resource, {} given",
+            concat!(
+                "libxml_set_streams_context(): Argument #1 ($context) ",
+                "must be of type resource, {} given"
+            ),
             value.type_name(),
         ))),
     }

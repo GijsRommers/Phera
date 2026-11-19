@@ -79,9 +79,10 @@ fn canonicalize(
         })?;
         let query_value = query_value.deref();
         let Value::String(expression) = &*query_value else {
+            let actual = query_value.type_name();
             return Err(NativeError::type_error(format!(
-                "{method}(): Argument #{number} ($xpath) \"query\" option must be a string, {} given",
-                query_value.type_name(),
+                "{method}(): Argument #{number} ($xpath) \"query\" option must be a string, \
+                 {actual} given",
             )));
         };
         let mut namespaces = HashMap::new();
