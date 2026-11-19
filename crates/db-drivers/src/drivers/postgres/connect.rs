@@ -12,6 +12,7 @@ use tokio_postgres::{Client, Config, Connection, NoTls, SimpleQueryMessage, tls:
 use super::stream::ObservedStream;
 use super::tls::{Mode, negotiate};
 use super::{IDLE, Postgres, error};
+use super::{native, observations::Observations};
 use crate::drivers::connection_error;
 use crate::dsn::Dsn;
 use crate::errors::DbError;
@@ -23,6 +24,7 @@ pub(super) async fn open(
     user: &str,
     password: &str,
     status: Arc<AtomicU8>,
+    observations: Option<Arc<Observations>>,
 ) -> Result<Connected, DbError> {
     let system_roots = dsn.get("sslrootcert", "") == "system";
     let default_mode = if system_roots {
@@ -58,7 +60,7 @@ pub(super) async fn open(
             let socket = UnixStream::connect(&path).await.map_err(connection_error)?;
             return startup(
                 &config,
-                ObservedStream::new(Box::new(socket), status),
+                ObservedStream::new(Box::new(socket), status, observations),
                 host,
                 port,
             )
@@ -70,7 +72,7 @@ pub(super) async fn open(
         let socket = negotiate(socket, dsn, host, port, mode).await?;
         match startup(
             &config,
-            ObservedStream::new(socket, status.clone()),
+            ObservedStream::new(socket, status.clone(), observations.clone()),
             host,
             port,
         )
@@ -79,9 +81,14 @@ pub(super) async fn open(
             Err((_, true)) if mode == Mode::Allow => {
                 let socket = tcp(address, port).await?;
                 let socket = negotiate(socket, dsn, host, port, Mode::Require).await?;
-                startup(&config, ObservedStream::new(socket, status), host, port)
-                    .await
-                    .map_err(|(error, _)| error)
+                startup(
+                    &config,
+                    ObservedStream::new(socket, status, observations),
+                    host,
+                    port,
+                )
+                .await
+                .map_err(|(error, _)| error)
             }
             result => result.map_err(|(error, _)| error),
         }
@@ -161,9 +168,27 @@ fn certificate_name_error(presented: &[String], host: &str) -> String {
 impl Postgres {
     pub async fn connect(dsn: &Dsn, user: &str, password: &str) -> Result<Self, DbError> {
         let transaction = Arc::new(AtomicU8::new(IDLE));
-        let (client, connection) = open(dsn, user, password, transaction.clone()).await?;
+        let observations = dsn
+            .options
+            .postgres_native
+            .then(|| Arc::new(Observations::default()));
+        let (client, connection) = open(
+            dsn,
+            user,
+            password,
+            transaction.clone(),
+            observations.clone(),
+        )
+        .await?;
+        let native = observations
+            .as_ref()
+            .map(|observations| native::State::new(observations.clone()));
         let task = tokio::spawn(async move {
-            let _ = connection.await;
+            if let Some(observations) = observations {
+                Observations::listen(connection, &observations).await;
+            } else {
+                let _ = connection.await;
+            }
         });
         let mut driver = Self {
             client,
@@ -172,6 +197,7 @@ impl Postgres {
             transaction,
             retire: false,
             lazy: None,
+            native,
         };
         let messages = driver
             .client

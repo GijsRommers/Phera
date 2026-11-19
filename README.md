@@ -61,6 +61,12 @@ PHP source ─▶ lexer ─▶ parser ─▶ AST ─▶ compiler ─▶ bytecode
 | `phera-server`   | HTTP transport on top of the runtime                                 |
 | `phera-cli`      | The `phera` binary, for running scripts and `phera serve`            |
 
+Phera provides async MySQL and PostgreSQL access through PDO and through the
+mysqli and pgsql extensions. They use the same protocol clients and connection
+pool. The native APIs cover basic connections, queries, prepared statements,
+and result fetching. The native extensions are still being checked for full
+PHP compatibility. MySQL LOCAL INFILE is disabled.
+
 Crates planned for later include `io`, `stdlib`, `postgres`, `mysql`, `redis`,
 and eventually a `jit`. See [`docs/architecture.md`](docs/architecture.md) for
 the details.

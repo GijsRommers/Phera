@@ -3,6 +3,7 @@
 #[derive(Clone, Default, PartialEq, Eq, Hash)]
 pub struct ConnectOptions {
     pub timeout: Option<i64>,
+    pub postgres_native: bool,
     pub mysql: MysqlOptions,
 }
 

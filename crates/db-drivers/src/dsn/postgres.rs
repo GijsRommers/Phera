@@ -73,3 +73,33 @@ mod tests {
         assert!(fields("dbname='unterminated", true).is_err());
     }
 }
+
+/// Parse libpq's PostgreSQL URL form, such as `pg_connect('postgres://host/app')`.
+pub fn uri_fields(source: &str) -> Result<BTreeMap<String, String>, String> {
+    let url = url::Url::parse(source).map_err(|error| error.to_string())?;
+    let text = |value: &str| {
+        percent_encoding::percent_decode_str(value)
+            .decode_utf8_lossy()
+            .into_owned()
+    };
+    let mut fields = BTreeMap::new();
+    if let Some(host) = url.host_str() {
+        fields.insert("host".into(), text(host.trim_matches(['[', ']'])));
+    }
+    if let Some(port) = url.port() {
+        fields.insert("port".into(), port.to_string());
+    }
+    if !url.username().is_empty() {
+        fields.insert("user".into(), text(url.username()));
+    }
+    if let Some(password) = url.password() {
+        fields.insert("password".into(), text(password));
+    }
+    if let Some(path) = url.path().strip_prefix('/').filter(|path| !path.is_empty()) {
+        fields.insert("dbname".into(), text(path));
+    }
+    for (name, value) in url.query_pairs() {
+        fields.insert(name.into_owned(), value.into_owned());
+    }
+    Ok(fields)
+}

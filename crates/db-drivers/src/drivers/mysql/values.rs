@@ -17,6 +17,15 @@ pub fn parameter(value: &BoundValue) -> MysqlValue {
 }
 
 pub fn convert(columns: Vec<mysql_async::Column>, rows: Vec<Row>, affected: u64) -> Rows {
+    convert_with_numeric_types(columns, rows, affected, true)
+}
+
+pub fn convert_with_numeric_types(
+    columns: Vec<mysql_async::Column>,
+    rows: Vec<Row>,
+    affected: u64,
+    native: bool,
+) -> Rows {
     let values: Vec<Vec<Value>> = rows
         .into_iter()
         .map(|row| {
@@ -26,7 +35,7 @@ pub fn convert(columns: Vec<mysql_async::Column>, rows: Vec<Row>, affected: u64)
                 .into_iter()
                 .map(|value| value.unwrap_or(MysqlValue::NULL))
                 .zip(&columns)
-                .map(|(value, column)| cell(value, column.column_type(), column.decimals()))
+                .map(|(value, column)| cell(value, column.column_type(), column.decimals(), native))
                 .collect()
         })
         .collect();
@@ -48,7 +57,7 @@ pub fn convert(columns: Vec<mysql_async::Column>, rows: Vec<Row>, affected: u64)
     }
 }
 
-fn cell(value: MysqlValue, kind: ColumnType, decimals: u8) -> Value {
+fn cell(value: MysqlValue, kind: ColumnType, decimals: u8, native: bool) -> Value {
     match value {
         MysqlValue::NULL => Value::Null,
         MysqlValue::Int(value) => Value::Int(value),
@@ -62,8 +71,14 @@ fn cell(value: MysqlValue, kind: ColumnType, decimals: u8) -> Value {
                 let number = bytes
                     .iter()
                     .fold(0_u64, |value, byte| (value << 8) | u64::from(*byte));
+                if !native {
+                    return Value::from(number.to_string());
+                }
                 return i64::try_from(number)
                     .map_or_else(|_| Value::from(number.to_string()), Value::Int);
+            }
+            if !native {
+                return Value::from(bytes);
             }
             let text = String::from_utf8_lossy(&bytes);
             match kind {

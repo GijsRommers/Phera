@@ -10,6 +10,9 @@ mod connect;
 mod information;
 mod lazy;
 mod metadata;
+mod native;
+mod observations;
+pub use native::{NativeColumn, NativeResult, NativeSequence};
 mod parameters;
 mod protocol;
 mod stream;
@@ -57,6 +60,7 @@ pub struct Postgres {
     /// cannot clear; see `prepare_query`.
     retire: bool,
     lazy: Option<lazy::Active>,
+    native: Option<native::State>,
 }
 
 impl Drop for Postgres {
@@ -88,6 +92,9 @@ impl Postgres {
 
     pub async fn reset(&mut self) -> Result<(), DbError> {
         self.discard_lazy();
+        if let Some(native) = &mut self.native {
+            native.reset();
+        }
         // Separate protocol messages: DISCARD ALL cannot execute in a transaction.
         self.client
             .batch_execute("ROLLBACK")

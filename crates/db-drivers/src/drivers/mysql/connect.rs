@@ -83,6 +83,7 @@ impl Mysql {
             charset: dsn.fields.get("charset").cloned(),
             database: dsn.get("dbname", "").to_owned(),
             options: settings.clone(),
+            reusable: true,
             host: dsn.get("host", "localhost").to_owned(),
             unix_socket: dsn.fields.contains_key("unix_socket"),
         })

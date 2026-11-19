@@ -106,6 +106,8 @@ impl Runtime {
         registry.php_module("iconv");
         registry.load(&phera_ext_pcre::Pcre);
         registry.load(&phera_ext_pdo::Pdo);
+        registry.load(&phera_ext_mysqli::Mysqli);
+        registry.load(&phera_ext_pgsql::Pgsql);
         registry.php_module("pdo_mysql");
         registry.php_module("pdo_pgsql");
         registry.php_module("pdo_sqlite");

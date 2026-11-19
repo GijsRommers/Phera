@@ -314,7 +314,7 @@ impl Driver {
     fn reusable(&self) -> bool {
         match self {
             Self::Postgres(driver) => driver.reusable(),
-            Self::Mysql(_) => true,
+            Self::Mysql(driver) => driver.reusable(),
             Self::Sqlite(_) => false,
         }
     }

@@ -7,6 +7,8 @@ use mysql_async::{Conn, Params, Row, Statement};
 
 mod connect;
 mod information;
+mod native;
+pub use native::{Outcome, Reply, identifier};
 mod stream;
 mod tls;
 pub mod values;
@@ -31,6 +33,7 @@ pub struct Mysql {
     database: String,
     options: MysqlOptions,
     host: String,
+    reusable: bool,
     unix_socket: bool,
 }
 

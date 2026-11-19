@@ -97,3 +97,31 @@ pub async fn convert(
     }
     Ok(values)
 }
+
+/// Render a whole binary row in the text formats used by pgsql.
+pub async fn format_row(
+    client: &Client,
+    row: &Row,
+    sql: &str,
+) -> Result<Vec<Option<Vec<u8>>>, DbError> {
+    let values: Result<Vec<Option<Binary>>, _> =
+        (0..row.len()).map(|index| row.try_get(index)).collect();
+    let values = values.map_err(|cause| error(cause, sql))?;
+    let parameters: Vec<_> = values
+        .iter()
+        .zip(row.columns())
+        .map(|(value, column)| (value as &(dyn ToSql + Sync), column.type_().clone()))
+        .collect();
+    let result = client
+        .query_typed_one(sql, &parameters)
+        .await
+        .map_err(|cause| error(cause, sql))?;
+    (0..result.len())
+        .map(|index| {
+            result
+                .try_get::<_, Option<&str>>(index)
+                .map(|text| text.map(|text| text.as_bytes().to_vec()))
+                .map_err(|cause| error(cause, sql))
+        })
+        .collect()
+}

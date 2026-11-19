@@ -27,6 +27,14 @@ impl Diagnostics for Vm {
 }
 
 impl Context for Vm {
+    fn extension_value(&self, key: &'static str) -> Option<Value> {
+        self.extension_values.get(key).cloned()
+    }
+
+    fn set_extension_value(&mut self, key: &'static str, value: Value) {
+        self.extension_values.insert(key, value);
+    }
+
     fn reflection(
         &mut self,
     ) -> Option<&mut dyn phera_extension_api::reflection::ReflectionContext> {

@@ -20,6 +20,11 @@ rustls-rustcrypto.workspace = true
 tokio-rustls.workspace = true
 webpki-roots.workspace = true
 futures-core.workspace = true
+fallible-iterator.workspace = true
+futures-util.workspace = true
+postgres-protocol.workspace = true
+percent-encoding.workspace = true
+url.workspace = true
 
 [dev-dependencies]
 rcgen.workspace = true

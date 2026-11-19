@@ -1,6 +1,7 @@
 //! Async database leases. For example, pg_pconnect() can reuse an idle session.
 
 use std::collections::BTreeMap;
+use std::thread::{self, ThreadId};
 use std::time::Duration;
 
 use phera_io_pool::{AcquireError, IoRuntime, Lease, Options, Pool};
@@ -29,6 +30,7 @@ pub static POOL: Pool<Key, Driver> = Pool::new(
 /// part of the key and is never printed, which is why there is no `Debug`.
 #[derive(PartialEq, Eq, Hash)]
 pub struct Key {
+    worker: Option<ThreadId>,
     driver: DriverName,
     fields: BTreeMap<String, String>,
     options: ConnectOptions,
@@ -58,6 +60,7 @@ impl Key {
                 DriverName::Mysql | DriverName::Sqlite => String::new(),
             });
         Self {
+            worker: None,
             driver: dsn.driver,
             fields,
             options: dsn.options.clone(),
@@ -71,6 +74,7 @@ impl Key {
 #[derive(Clone, Copy)]
 pub enum Policy {
     Pooled,
+    Persistent,
     Unpooled,
 }
 
@@ -104,6 +108,11 @@ pub async fn acquire_from(
             pool.acquire(Key::new(dsn, username, password), connect)
                 .await
         }
+        Policy::Persistent => {
+            let mut key = Key::new(dsn, username, password);
+            key.worker = Some(thread::current().id());
+            pool.acquire(key, connect).await
+        }
         Policy::Unpooled => pool.connect_unpooled(connect).await,
     };
     lease.map_err(|error| match error {
@@ -114,4 +123,15 @@ pub async fn acquire_from(
         )),
         AcquireError::Connect(error) => error,
     })
+}
+
+/// Run driver work on its I/O thread and flatten lease and protocol errors.
+pub async fn run<T, F>(lease: &Lease<Driver>, operation: F) -> Result<T, DbError>
+where
+    T: Send + 'static,
+    F: for<'a> FnOnce(&'a mut Driver) -> phera_io_pool::Operation<'a, Result<T, DbError>>
+        + Send
+        + 'static,
+{
+    lease.run(operation).await.map_err(connection_error)?
 }

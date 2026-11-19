@@ -7,6 +7,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::task::{Context, Poll};
 
+use super::observations::Observations;
+
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 pub(super) trait Socket: AsyncRead + AsyncWrite + Send + Sync + Unpin {}
@@ -18,10 +20,14 @@ pub struct ObservedStream {
 }
 
 impl ObservedStream {
-    pub(super) fn new(socket: Box<dyn Socket>, status: Arc<AtomicU8>) -> Self {
+    pub(super) fn new(
+        socket: Box<dyn Socket>,
+        status: Arc<AtomicU8>,
+        observations: Option<Arc<Observations>>,
+    ) -> Self {
         Self {
             socket,
-            parser: Parser::new(status),
+            parser: Parser::new(status, observations),
         }
     }
 }
@@ -34,13 +40,17 @@ enum Frame {
 struct Parser {
     frame: Frame,
     status: Arc<AtomicU8>,
+    observations: Option<Arc<Observations>>,
+    packet: bytes::BytesMut,
 }
 
 impl Parser {
-    fn new(status: Arc<AtomicU8>) -> Self {
+    fn new(status: Arc<AtomicU8>, observations: Option<Arc<Observations>>) -> Self {
         Self {
             frame: Self::header(),
             status,
+            observations,
+            packet: bytes::BytesMut::new(),
         }
     }
 
@@ -62,6 +72,15 @@ impl Parser {
                     if *used == 5 {
                         let remaining = u32::from_be_bytes([bytes[1], bytes[2], bytes[3], bytes[4]])
                             .saturating_sub(4) as usize;
+                        if remaining > 0
+                            && remaining <= 4 * 1024 * 1024
+                            && self
+                                .observations
+                                .as_ref()
+                                .is_some_and(|observations| observations.interested(bytes[0]))
+                        {
+                            self.packet.extend_from_slice(bytes);
+                        }
                         self.frame = if remaining == 0 {
                             Self::header()
                         } else {
@@ -77,13 +96,25 @@ impl Parser {
                     if *kind == b'Z' && *remaining == 1 {
                         self.status.store(input[0], Ordering::Release);
                     }
+                    if !self.packet.is_empty() {
+                        self.packet.extend_from_slice(&input[..length]);
+                    }
                     *remaining -= length;
                     input = &input[length..];
                     if *remaining == 0 {
                         self.frame = Self::header();
+                        self.flush();
                     }
                 }
             }
+        }
+    }
+    fn flush(&mut self) {
+        if !self.packet.is_empty() {
+            if let Some(observations) = &self.observations {
+                observations.record(&mut self.packet);
+            }
+            self.packet.clear();
         }
     }
 }
@@ -129,7 +160,7 @@ mod tests {
     #[test]
     fn observes_fragmented_frames_and_ignores_payload_lookalikes() {
         let status = Arc::new(AtomicU8::new(b'I'));
-        let mut parser = Parser::new(status.clone());
+        let mut parser = Parser::new(status.clone(), None);
         let packet = b"D\0\0\0\x0aZ\0\0\0\x05TZ\0\0\0\x05E";
         for byte in packet {
             parser.observe(&[*byte]);

@@ -91,6 +91,7 @@ impl FromPhp for ConnectOptions {
         });
         Ok(Self {
             timeout,
+            postgres_native: false,
             mysql: MysqlOptions {
                 autocommit,
                 init,
