@@ -80,7 +80,17 @@ impl Proxy {
                 key.display()
             ));
         }
-        Postgres::connect(&Dsn::parse(&dsn).unwrap(), "phera", "phera").await
+        Postgres::connect(
+            &Dsn {
+                driver: crate::dsn::DriverName::Postgres,
+                fields: crate::dsn::postgres::fields(dsn.strip_prefix("pgsql:").unwrap(), true)
+                    .unwrap(),
+                options: Default::default(),
+            },
+            "phera",
+            "phera",
+        )
+        .await
     }
 }
 

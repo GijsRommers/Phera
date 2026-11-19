@@ -19,6 +19,7 @@ members = [
     "crates/extension-api",
     "crates/sqlite",
     "crates/io-pool",
+    "crates/db-drivers",
     "crates/extensions/*",
 ]
 
@@ -46,6 +47,7 @@ sha1_011 = { package = "sha1", version = "0.11" }
 redis = { version = "=1.0.5", default-features = false, features = ["tokio-comp", "tokio-rustls-comp", "tls-rustls-webpki-roots"] }
 phera-ext-reflection = { path = "crates/extensions/reflection" }
 phera-ext-redis = { path = "crates/extensions/redis" }
+phera-db-drivers = { path = "crates/db-drivers" }
 phera-io-pool = { path = "crates/io-pool" }
 phera-dotenv = { path = "crates/dotenv" }
 indexmap = "2"

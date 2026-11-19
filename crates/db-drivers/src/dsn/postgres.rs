@@ -5,10 +5,10 @@ use std::iter::Peekable;
 
 use super::c_space;
 
-pub(super) fn fields(input: &str) -> Result<BTreeMap<String, String>, String> {
+pub fn fields(input: &str, pdo: bool) -> Result<BTreeMap<String, String>, String> {
     let mut input = input
         .chars()
-        .map(|ch| if ch == ';' { ' ' } else { ch })
+        .map(|ch| if pdo && ch == ';' { ' ' } else { ch })
         .peekable();
     let mut fields = BTreeMap::new();
     while input.peek().is_some() {
@@ -62,11 +62,14 @@ mod tests {
 
     #[test]
     fn parses_laravel_style_quotes_and_libpq_escapes() {
-        let options =
-            fields("host=localhost;dbname='my database'; application_name='a\\'b'").unwrap();
+        let options = fields(
+            "host=localhost;dbname='my database'; application_name='a\\'b'",
+            true,
+        )
+        .unwrap();
         assert_eq!(options["dbname"], "my database");
         assert_eq!(options["application_name"], "a'b");
         assert_eq!(options["host"], "localhost");
-        assert!(fields("dbname='unterminated").is_err());
+        assert!(fields("dbname='unterminated", true).is_err());
     }
 }

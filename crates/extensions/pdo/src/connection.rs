@@ -4,6 +4,9 @@ mod construct;
 
 pub use construct::construct;
 
+use crate::dsn::ParseDsn;
+use crate::errors::PdoError;
+
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 

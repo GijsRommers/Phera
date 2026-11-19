@@ -2011,6 +2011,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "phera-db-drivers"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "chrono",
+ "futures-core",
+ "mysql_async",
+ "phera-extension-api",
+ "phera-io-pool",
+ "phera-sqlite",
+ "rcgen",
+ "rsa",
+ "rustls",
+ "rustls-native-certs",
+ "rustls-rustcrypto",
+ "sha1 0.11.0",
+ "tempfile",
+ "tokio",
+ "tokio-postgres",
+ "tokio-rustls",
+ "webpki-roots",
+]
+
+[[package]]
 name = "phera-dotenv"
 version = "0.1.0"
 dependencies = [
@@ -2174,24 +2198,14 @@ dependencies = [
 name = "phera-ext-pdo"
 version = "0.1.0"
 dependencies = [
- "bytes",
- "chrono",
- "futures-core",
  "mysql_async",
+ "phera-db-drivers",
  "phera-extension-api",
  "phera-io-pool",
  "phera-sqlite",
- "rcgen",
- "rsa",
- "rustls",
- "rustls-native-certs",
- "rustls-rustcrypto",
- "sha1 0.11.0",
  "tempfile",
  "tokio",
  "tokio-postgres",
- "tokio-rustls",
- "webpki-roots",
 ]
 
 [[package]]
