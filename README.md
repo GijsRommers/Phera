@@ -32,7 +32,7 @@ Measured in November 2026 against PHP 8.5, the same script or request on both.
 | WordPress | Compatibility testing in progress for the new `mysqli` extension |
 | PHP's own test suite (php-src, 13,388 tests) | 8,704 pass |
 | Speed of plain scripts | Between about the same CPU time as PHP's interpreter (arrays, arithmetic) and 5.5 times as much (method calls) |
-| Speed of a framework request | Roughly 10 times slower than PHP with opcache (one Laravel API request: about 150 ms against 9 to 17 ms). Phera links every class again for each request; sharing linked code between requests and forking a booted application are designed ([architecture, 5.4](docs/architecture.md)) and not built |
+| Speed of a framework request | Roughly 10 times slower than PHP with opcache (one Laravel API request: about 150 ms against 9 to 17 ms). Phera links every class again for each request; sharing linked code between requests, forking a booted application and a worker mode with FrankenPHP's interface are designed ([architecture, 5.4](docs/architecture.md)) and not built. Measured CPU per request for a Laravel route with two MySQL queries: 34 million cycles on PHP with opcache, 369 million on Phera |
 
 ## 🧰 The `phera` command
 
