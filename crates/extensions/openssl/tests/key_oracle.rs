@@ -106,10 +106,18 @@ fn match_key_and_signature_behaviour() {
             }
         }
     }
+    let mut empty_ecdsa = Matrix::new();
     for (index, (_, public)) in keys.iter().enumerate() {
         let algorithm = if index == 4 { 0 } else { 7 };
         for signature in [Value::from(""), Value::from("x"), Value::from(vec![0; 256])] {
-            matrix.case(
+            let empty_ec_signature = matches!(index, 1..=3)
+                && matches!(&signature, Value::String(bytes) if bytes.is_empty());
+            let cases = if empty_ec_signature {
+                &mut empty_ecdsa
+            } else {
+                &mut matrix
+            };
+            let result = cases.case(
                 "openssl_verify",
                 vec![
                     Value::from("message"),
@@ -119,7 +127,13 @@ fn match_key_and_signature_behaviour() {
                 ],
                 None,
             );
+            if empty_ec_signature {
+                assert_eq!(result, Some((Value::Int(-1), Value::Null)));
+            }
         }
+    }
+    if oracle::supports_php_since("empty ECDSA signatures on P-256, P-384 and P-521", 80_513) {
+        empty_ecdsa.check("openssl_empty_ecdsa_signatures");
     }
     for (index, (private, public)) in keys.iter().enumerate() {
         let (registry, mut context) = native();
