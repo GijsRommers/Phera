@@ -1,3 +1,5 @@
+//! Native parameters keep PHP declarations such as `str_pad($string, $length)`.
+
 use phera_value::Value;
 
 use crate::{ConstantValue, Context, LocalFuture, NativeResult};
@@ -162,6 +164,15 @@ pub struct FunctionEntry {
     pub name: &'static str,
     pub params: &'static [Param],
     pub handler: NativeFn,
+    pub arity: FunctionArity,
+}
+
+/// Some signatures (for example `mt_rand()` or `mt_rand($min, $max)`)
+/// describe multiple argument forms. Their handlers check arity before types.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum FunctionArity {
+    Parameters,
+    Handler,
 }
 
 impl FunctionEntry {
@@ -170,6 +181,7 @@ impl FunctionEntry {
             name,
             params,
             handler: NativeFn::Sync(handler),
+            arity: FunctionArity::Parameters,
         }
     }
 
@@ -182,7 +194,13 @@ impl FunctionEntry {
             name,
             params,
             handler: NativeFn::Async(handler),
+            arity: FunctionArity::Parameters,
         }
+    }
+
+    pub const fn with_handler_arity(mut self) -> Self {
+        self.arity = FunctionArity::Handler;
+        self
     }
 
     /// How many arguments a call must pass at least.

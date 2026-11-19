@@ -6,19 +6,6 @@ use phera_ext_standard::Standard;
 use phera_extension_api::testing::oracle;
 use phera_extension_api::{Extension, Registry};
 
-const UNCHECKED_ARITY: &[&str] = &[
-    "array_udiff",
-    "array_udiff_assoc",
-    "array_udiff_uassoc",
-    "array_diff_ukey",
-    "array_diff_uassoc",
-    "array_uintersect",
-    "array_uintersect_assoc",
-    "array_uintersect_uassoc",
-    "array_intersect_ukey",
-    "array_intersect_uassoc",
-];
-
 #[test]
 fn signatures_match_php() {
     let mut registry = Registry::new();
@@ -53,14 +40,7 @@ fn signatures_match_php() {
                 )
             })
             .collect();
-        let mut signature = format!("{name}({})", params.join(", "));
-        // These declare `$array` optional on purpose: they check the number
-        // of arguments themselves, because PHP's minimum depends on how many
-        // callbacks the function takes.
-        if UNCHECKED_ARITY.contains(&name) {
-            signature = signature.replacen("array?", "array", 1);
-        }
-        rust.push(signature);
+        rust.push(format!("{name}({})", params.join(", ")));
         labels.push(name.to_string());
     }
     let php = oracle::run_php("standard_signatures", &script).expect("PHP oracle required");

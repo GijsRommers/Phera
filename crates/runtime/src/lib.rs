@@ -15,6 +15,8 @@ mod http;
 #[cfg(test)]
 mod ini_tests;
 #[cfg(test)]
+mod native_parameter_tests;
+#[cfg(test)]
 mod process_oracle_tests;
 
 use std::path::Path;

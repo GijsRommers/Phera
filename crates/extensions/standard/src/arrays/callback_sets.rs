@@ -80,11 +80,12 @@ const ARRAY_UDIFF: FunctionEntry = FunctionEntry::asynchronous(
     // PHP checks the callbacks at the end before the arrays, and needs one
     // more argument per callback; run() does all of it, in that order.
     &[
-        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("array", ParamType::Mixed),
         Param::new("rest", ParamType::Mixed).variadic(),
     ],
     array_udiff,
-);
+)
+.with_handler_arity();
 
 fn array_udiff(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     let variant = Variant {
@@ -103,11 +104,12 @@ const ARRAY_UDIFF_ASSOC: FunctionEntry = FunctionEntry::asynchronous(
     // PHP checks the callbacks at the end before the arrays, and needs one
     // more argument per callback; run() does all of it, in that order.
     &[
-        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("array", ParamType::Mixed),
         Param::new("rest", ParamType::Mixed).variadic(),
     ],
     array_udiff_assoc,
-);
+)
+.with_handler_arity();
 
 fn array_udiff_assoc(
     context: &mut dyn Context,
@@ -129,11 +131,12 @@ const ARRAY_UDIFF_UASSOC: FunctionEntry = FunctionEntry::asynchronous(
     // PHP checks the callbacks at the end before the arrays, and needs one
     // more argument per callback; run() does all of it, in that order.
     &[
-        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("array", ParamType::Mixed),
         Param::new("rest", ParamType::Mixed).variadic(),
     ],
     array_udiff_uassoc,
-);
+)
+.with_handler_arity();
 
 fn array_udiff_uassoc(
     context: &mut dyn Context,
@@ -155,11 +158,12 @@ const ARRAY_DIFF_UKEY: FunctionEntry = FunctionEntry::asynchronous(
     // PHP checks the callbacks at the end before the arrays, and needs one
     // more argument per callback; run() does all of it, in that order.
     &[
-        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("array", ParamType::Mixed),
         Param::new("rest", ParamType::Mixed).variadic(),
     ],
     array_diff_ukey,
-);
+)
+.with_handler_arity();
 
 fn array_diff_ukey(
     context: &mut dyn Context,
@@ -181,11 +185,12 @@ const ARRAY_DIFF_UASSOC: FunctionEntry = FunctionEntry::asynchronous(
     // PHP checks the callbacks at the end before the arrays, and needs one
     // more argument per callback; run() does all of it, in that order.
     &[
-        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("array", ParamType::Mixed),
         Param::new("rest", ParamType::Mixed).variadic(),
     ],
     array_diff_uassoc,
-);
+)
+.with_handler_arity();
 
 fn array_diff_uassoc(
     context: &mut dyn Context,
@@ -207,11 +212,12 @@ const ARRAY_UINTERSECT: FunctionEntry = FunctionEntry::asynchronous(
     // PHP checks the callbacks at the end before the arrays, and needs one
     // more argument per callback; run() does all of it, in that order.
     &[
-        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("array", ParamType::Mixed),
         Param::new("rest", ParamType::Mixed).variadic(),
     ],
     array_uintersect,
-);
+)
+.with_handler_arity();
 
 fn array_uintersect(
     context: &mut dyn Context,
@@ -233,11 +239,12 @@ const ARRAY_UINTERSECT_ASSOC: FunctionEntry = FunctionEntry::asynchronous(
     // PHP checks the callbacks at the end before the arrays, and needs one
     // more argument per callback; run() does all of it, in that order.
     &[
-        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("array", ParamType::Mixed),
         Param::new("rest", ParamType::Mixed).variadic(),
     ],
     array_uintersect_assoc,
-);
+)
+.with_handler_arity();
 
 fn array_uintersect_assoc(
     context: &mut dyn Context,
@@ -259,11 +266,12 @@ const ARRAY_UINTERSECT_UASSOC: FunctionEntry = FunctionEntry::asynchronous(
     // PHP checks the callbacks at the end before the arrays, and needs one
     // more argument per callback; run() does all of it, in that order.
     &[
-        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("array", ParamType::Mixed),
         Param::new("rest", ParamType::Mixed).variadic(),
     ],
     array_uintersect_uassoc,
-);
+)
+.with_handler_arity();
 
 fn array_uintersect_uassoc(
     context: &mut dyn Context,
@@ -285,11 +293,12 @@ const ARRAY_INTERSECT_UKEY: FunctionEntry = FunctionEntry::asynchronous(
     // PHP checks the callbacks at the end before the arrays, and needs one
     // more argument per callback; run() does all of it, in that order.
     &[
-        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("array", ParamType::Mixed),
         Param::new("rest", ParamType::Mixed).variadic(),
     ],
     array_intersect_ukey,
-);
+)
+.with_handler_arity();
 
 fn array_intersect_ukey(
     context: &mut dyn Context,
@@ -311,11 +320,12 @@ const ARRAY_INTERSECT_UASSOC: FunctionEntry = FunctionEntry::asynchronous(
     // PHP checks the callbacks at the end before the arrays, and needs one
     // more argument per callback; run() does all of it, in that order.
     &[
-        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("array", ParamType::Mixed),
         Param::new("rest", ParamType::Mixed).variadic(),
     ],
     array_intersect_uassoc,
-);
+)
+.with_handler_arity();
 
 fn array_intersect_uassoc(
     context: &mut dyn Context,

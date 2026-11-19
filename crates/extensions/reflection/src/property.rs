@@ -143,12 +143,13 @@ pub(crate) fn register(registry: &mut Registry) {
                     "setValue",
                     const {
                         &[
-                            Param::new("objectOrValue", ParamType::Mixed).optional(),
+                            Param::new("objectOrValue", ParamType::Mixed),
                             Param::new("value", ParamType::Mixed).optional(),
                         ]
                     },
                     set_value,
-                ),
+                )
+                .with_preparation(|_, _, _| Ok(phera_extension_api::MethodPreparation::Prepared)),
                 MethodEntry::public("hasType", &[], |_, o, _| {
                     data(o, |m| Value::Bool(m.declared_type.is_some()))
                 }),

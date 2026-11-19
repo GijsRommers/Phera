@@ -126,7 +126,11 @@ pub(crate) fn register(registry: &mut Registry) {
                 ),
                 MethodEntry::public("__toString", &[], |_, o, _| {
                     data(o, |p| {
-                        Value::from(format!("Parameter #{} [ ${} ]\n", p.position, p.name))
+                        Value::from(if p.internal {
+                            crate::function::display::display_parameter(p)
+                        } else {
+                            format!("Parameter #{} [ ${} ]\n", p.position, p.name)
+                        })
                     })
                 })
                 .returning("string"),
@@ -261,6 +265,9 @@ fn default_value(
             Some(ParameterDefault::Literal(value)) => Ok(value),
             Some(ParameterDefault::Expression(initializer)) => {
                 engine(context)?.reflect_evaluate(initializer).await
+            }
+            Some(ParameterDefault::NativeEnumCase { class, case }) => {
+                engine(context)?.reflect_class_constant(class, case)
             }
             None => Err(exception(
                 "Internal error: Failed to retrieve the default value",

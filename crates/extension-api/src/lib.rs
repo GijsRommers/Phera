@@ -9,6 +9,7 @@ mod class;
 mod context;
 mod error;
 mod function;
+pub mod native_parameters;
 mod object_handlers;
 mod registry;
 pub mod serialization;
@@ -30,7 +31,9 @@ pub use class::{
 pub use context::{Context, GeneratorOperation, LocalFuture, PropertyView, RequestCallback};
 mod property_view_request;
 pub use error::{NativeError, NativeResult, Unwind};
-pub use function::{AsyncFn, FunctionEntry, NativeFn, Param, ParamType, SyncFn, SyncSelector};
+pub use function::{
+    AsyncFn, FunctionArity, FunctionEntry, NativeFn, Param, ParamType, SyncFn, SyncSelector,
+};
 pub use object_handlers::{
     ClassHooks, DimensionReferenceMode, DirectDimensions, IteratorFactory, NativeClone,
     NativeCompare, NativeComparison, NativeCount, NativeDimensions, NativeIterator,

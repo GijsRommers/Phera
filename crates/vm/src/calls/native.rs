@@ -7,7 +7,7 @@ use crate::calls::callback_binding::{ArgumentBinding, ArgumentOrigin};
 use crate::calls::prepared_call::PreparedCallee;
 use crate::classes::MethodBody;
 use phera_bytecode::Reg;
-use phera_extension_api::{NativeError, NativeFn, NativeResult};
+use phera_extension_api::{FunctionArity, NativeError, NativeFn, NativeResult, prepare_arguments};
 use phera_value::Value;
 
 impl Vm {
@@ -65,8 +65,12 @@ impl Vm {
                 .await?;
         }
         let previous = std::mem::replace(&mut self.argument_origin, origin);
-        let prepared =
-            self.prepare_call_recording(entry.name, entry.params, &mut arguments, binding);
+        let prepared = match entry.arity {
+            FunctionArity::Parameters => {
+                self.prepare_call_recording(entry.name, entry.params, &mut arguments, binding)
+            }
+            FunctionArity::Handler => prepare_arguments(&entry, &mut arguments, self),
+        };
         self.argument_origin = previous;
         if let Err(error) = prepared
             && let Err(error) = self
@@ -223,37 +227,20 @@ impl Vm {
         let mut missing = None;
         for index in 0..call.sent as usize {
             let value = self.registers.window_mut(slots.slot(index), 1)[0].take();
-            let value = value.unwrap_or_else(|| match callee.target {
-                CallTarget::Intrinsic(intrinsic) => {
-                    if matches!(intrinsic, crate::intrinsics::Intrinsic::CallUserFunc) && index == 0
-                    {
-                        missing.get_or_insert(("call_user_func", 1, "callback"));
-                    }
-                    intrinsic.named_default(index)
+            let value = value.unwrap_or_else(|| match self.fill_native_gap(&callee, index) {
+                Ok(value) => value,
+                Err(error) => {
+                    missing.get_or_insert(error);
+                    Value::Null
                 }
-                CallTarget::Native(entry) => {
-                    if let Some(parameter) = entry.params.get(index)
-                        && !parameter.optional
-                    {
-                        missing.get_or_insert((entry.name, index + 1, parameter.name));
-                    }
-                    named_default(entry.params, index)
-                }
-                CallTarget::Method { ref method, .. } => match method.body {
-                    MethodBody::Native(entry) => named_default(entry.params, index),
-                    _ => Value::Null,
-                },
-                _ => Value::Null,
             });
             arguments.push(value);
         }
         self.registers.truncate(slots.base);
-        if let Some((function, number, parameter)) = missing {
-            self.failed_native = Some(self.native_function_trace(function, &arguments));
+        if let Some(error) = missing {
+            self.record_native_gap_error(&callee, &arguments);
             self.call_stack.recycle_native_arguments(arguments);
-            return Err(NativeError::argument_count_error(format!(
-                "{function}(): Argument #{number} (${parameter}) not passed"
-            )));
+            return Err(error);
         }
         let origin = callee.argument_binding.origin(self.argument_origin);
         let named = &details.extra_named;
@@ -518,13 +505,4 @@ impl Vm {
         let start = named.first().map_or(0, |(index, _)| *index);
         Box::pin(self.closure_method_named(operation, receiver, arguments, start, names, origin))
     }
-}
-
-// Omitted optional tail arguments still use the handler's usual defaults.
-fn named_default(parameters: &[phera_extension_api::Param], index: usize) -> Value {
-    parameters
-        .get(index)
-        .and_then(|parameter| parameter.default)
-        .map(|default| default.to_value())
-        .unwrap_or_default()
 }

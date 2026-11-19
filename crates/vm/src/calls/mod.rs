@@ -35,6 +35,7 @@ pub(crate) mod frame_extras;
 pub(crate) mod frame_view;
 pub(crate) mod magic_dispatch;
 mod native;
+mod native_defaults;
 mod native_ready;
 mod native_signature;
 pub(crate) mod parameter_binding;

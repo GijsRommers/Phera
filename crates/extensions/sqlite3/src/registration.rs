@@ -117,8 +117,15 @@ const DATABASE: &[MethodEntry] = &[
 ];
 
 const STATEMENT: &[MethodEntry] = &[
-    MethodEntry::public("__construct", &[], private_constructor)
-        .with_visibility(phera_extension_api::Visibility::Private),
+    MethodEntry::public(
+        "__construct",
+        &[
+            Param::new("sqlite3", ParamType::Class("SQLite3")),
+            Param::new("query", ParamType::String),
+        ],
+        private_constructor,
+    )
+    .with_visibility(phera_extension_api::Visibility::Private),
     MethodEntry::public(
         "bindValue",
         &[

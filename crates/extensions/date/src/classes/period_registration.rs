@@ -36,13 +36,14 @@ const METHODS: &[MethodEntry] = &[
     MethodEntry::public(
         "__construct",
         &[
-            Param::new("start", ParamType::Mixed).optional(),
+            Param::new("start", ParamType::Mixed),
             Param::new("interval", ParamType::Mixed).optional(),
             Param::new("end", ParamType::Mixed).optional(),
-            Param::new("options", ParamType::Mixed).variadic(),
+            Param::new("options", ParamType::Mixed).optional(),
         ],
         period::construct,
-    ),
+    )
+    .with_preparation(|_, _, _| Ok(phera_extension_api::MethodPreparation::Prepared)),
     MethodEntry::public(
         "createFromISO8601String",
         &[
