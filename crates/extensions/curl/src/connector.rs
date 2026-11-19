@@ -200,10 +200,13 @@ struct PoolKey {
     dns: Option<usize>,
     timeout: Option<Duration>,
     idle: usize,
+    scope: u64,
 }
 
+type WorkerPool = VecDeque<(PoolKey, HttpClient)>;
+
 thread_local! {
-    static WORKER: RefCell<VecDeque<(PoolKey, HttpClient)>> = const { RefCell::new(VecDeque::new()) };
+    static WORKER: RefCell<WorkerPool> = const { RefCell::new(VecDeque::new()) };
 }
 
 pub(crate) async fn client(
@@ -211,7 +214,11 @@ pub(crate) async fn client(
     url: &Url,
     dns: Option<SharedDns>,
 ) -> Result<(HttpClient, Option<Vec<u8>>), TransferError> {
-    let proxy = proxy::select(&settings.transport, url)?;
+    let proxy = if settings.transport.unix.is_some() {
+        None
+    } else {
+        proxy::select(&settings.transport, url)?
+    };
     let forward_auth = proxy
         .as_ref()
         .filter(|_| url.scheme() == "http" && !settings.transport.tunnel)
@@ -223,8 +230,15 @@ pub(crate) async fn client(
         dns: dns.as_ref().map(|dns| Arc::as_ptr(dns) as usize),
         timeout: settings.connect_timeout,
         idle: settings.pool_idle,
+        scope: settings.pool_scope,
     };
-    let reusable = !(settings.fresh || settings.forbid_reuse);
+    let h2 = matches!(settings.transport.http, HttpVersion::TwoPrior)
+        || url.scheme() == "https"
+            && !matches!(
+                settings.transport.http,
+                HttpVersion::OneZero | HttpVersion::OneOne
+            );
+    let reusable = !(settings.fresh || settings.forbid_reuse || (h2 && !settings.multiplex));
     if reusable
         && let Some(client) = WORKER.with(|pool| {
             let mut pool = pool.borrow_mut();

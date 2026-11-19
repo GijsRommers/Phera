@@ -6,7 +6,10 @@ use futures_util::FutureExt;
 use phera_extension_api::{Context, LocalFuture, NativeError, NativeResult, Value, args};
 
 use super::{Handle, Multi, RECURSIVE, Work, handle, set_reference};
-use crate::{constants::ids::*, transfer::Transfer};
+use crate::{
+    constants::ids::*,
+    transfer::{PoolOptions, Transfer},
+};
 
 pub(super) fn exec(context: &mut dyn Context, values: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
@@ -20,6 +23,15 @@ pub(super) fn exec(context: &mut dyn Context, values: Vec<Value>) -> LocalFuture
         for _ in 0..32 {
             start(context, &multi).await?;
             if step(context, &multi).await? == 0 {
+                let active = multi
+                    .borrow()
+                    .entries
+                    .iter()
+                    .any(|entry| matches!(entry.work, Work::Running(_)));
+                if active {
+                    // PHP may call exec repeatedly before select. Give Tokio's I/O driver a turn.
+                    tokio::task::yield_now().await;
+                }
                 break;
             }
         }
@@ -62,7 +74,7 @@ fn host(entry: &super::Entry) -> String {
 }
 
 async fn start(context: &mut dyn Context, multi: &Handle) -> Result<(), NativeError> {
-    let selected = {
+    let (selected, pool) = {
         let multi = multi.borrow();
         let mut host_counts = HashMap::new();
         let mut total = 0;
@@ -88,11 +100,17 @@ async fn start(context: &mut dyn Context, multi: &Handle) -> Result<(), NativeEr
             total += 1;
             selected.push((index, entry.object.clone(), entry.handle.clone()));
         }
-        selected
+        (
+            selected,
+            PoolOptions {
+                max_cached: multi.max_cached,
+                multiplex: multi.multiplex,
+            },
+        )
     };
     for (index, object, handle) in selected {
         multi.borrow_mut().entries[index].work = Work::Stepping;
-        let transfer = Transfer::start(context, object, handle).await?;
+        let transfer = Transfer::start(context, object, handle, pool).await?;
         multi.borrow_mut().entries[index].work = Work::Running(Box::new(transfer));
     }
     Ok(())

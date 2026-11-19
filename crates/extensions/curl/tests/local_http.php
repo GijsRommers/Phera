@@ -25,7 +25,9 @@ run('preserve-post', fn() => transfer_result(load_url($base . '/redirect-307', [
 run('redirect-limit', fn() => transfer_result(load_url($base . '/redirect', [
     CURLOPT_FOLLOWLOCATION => true, CURLOPT_MAXREDIRS => 1,
 ])));
-run('gzip', fn() => transfer_result(load_url($base . '/gzip', [CURLOPT_ACCEPT_ENCODING => 'gzip'])));
+run('gzip', fn() => transfer_result(load_url($base . '/gzip', [
+    CURLOPT_ACCEPT_ENCODING => 'gzip',
+])));
 run('chunks', fn() => transfer_result(load_url($base . '/chunks')));
 run('cut', fn() => transfer_result(load_url($base . '/cut')));
 run('timeout', function () use ($base) {
@@ -39,7 +41,9 @@ run('timeout', function () use ($base) {
         preg_replace('/after \d+ milliseconds/', 'after {elapsed} milliseconds', $error)];
 
 });
-run('http-failure', fn() => transfer_result(load_url($base . '/fail', [CURLOPT_FAILONERROR => true])));
+run('http-failure', fn() => transfer_result(load_url($base . '/fail', [
+    CURLOPT_FAILONERROR => true,
+])));
 run('limit', fn() => transfer_result(load_url($base . '/large', [CURLOPT_MAXFILESIZE => 100])));
 run('basic', fn() => transfer_result(load_url($base . '/echo', [
     CURLOPT_USERPWD => 'user:password', CURLOPT_HTTPAUTH => CURLAUTH_BASIC,
@@ -120,4 +124,45 @@ run('multi', function () use ($base) {
     }
     return [count(curl_multi_get_handles($multi)), $queued, $results,
         array_map(curl_multi_getcontent(...), $handles)];
+});
+
+run('cross-origin-credentials', function () use ($base) {
+    $port = parse_url($base, PHP_URL_PORT);
+    $options = [
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_RESOLVE => ["localhost:$port:127.0.0.1"],
+        CURLOPT_HTTPHEADER => ['Authorization: Bearer private', 'Cookie: private=1'],
+    ];
+    $restricted = transfer_result(load_url($base . '/cross', $options));
+    $allowed = transfer_result(load_url($base . '/cross', $options + [
+        CURLOPT_UNRESTRICTED_AUTH => true,
+    ]));
+    return [$restricted, $allowed];
+});
+run('proxy-http', fn() => transfer_result(load_url('http://localhost/echo', [
+    CURLOPT_PROXY => $base, CURLOPT_NOPROXY => '',
+])));
+run('proxy-connect', fn() => transfer_result(load_url($tls . '/echo', [
+    CURLOPT_PROXY => $base, CURLOPT_NOPROXY => '', CURLOPT_CAINFO => $ca,
+])));
+run('unix-socket', fn() => transfer_result(load_url('http://localhost/echo', [
+    CURLOPT_UNIX_SOCKET_PATH => $unix,
+])));
+run('connect-to', fn() => transfer_result(load_url('http://localhost/echo', [
+    CURLOPT_CONNECT_TO => ['localhost:80:127.0.0.1:' . parse_url($base, PHP_URL_PORT)],
+])));
+run('bearer', fn() => transfer_result(load_url($base . '/echo', [
+    CURLOPT_USERPWD => 'user:password', CURLOPT_HTTPAUTH => CURLAUTH_BEARER,
+    CURLOPT_XOAUTH2_BEARER => 'opaque-token',
+])));
+run('read-callback', fn() => transfer_result(load_url($base . '/echo', [
+    CURLOPT_UPLOAD => true, CURLOPT_INFILESIZE => 6,
+    CURLOPT_READFUNCTION => fn($handle, $stream, $bytes) => substr("abc\0de", 0, $bytes),
+])));
+run('keep-alive', function () use ($base) {
+    $handle = load_url($base . '/echo');
+    $one = curl_exec($handle);
+    $port = curl_getinfo($handle, CURLINFO_LOCAL_PORT);
+    $two = curl_exec($handle);
+    return [$one, $two, $port > 0 && $port === curl_getinfo($handle, CURLINFO_LOCAL_PORT)];
 });

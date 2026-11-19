@@ -69,7 +69,12 @@ impl Vm {
             if class.origin == crate::classes::class::ClassOrigin::Native
                 && matches!(
                     class.name.as_str(),
-                    "Directory"
+                    "CURLFile"
+                        | "CurlHandle"
+                        | "CurlMultiHandle"
+                        | "CurlShareHandle"
+                        | "CurlSharePersistentHandle"
+                        | "Directory"
                         | "Fiber"
                         | "Generator"
                         | "InternalIterator"

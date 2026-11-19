@@ -2,22 +2,25 @@
 
 use std::{cell::Cell, rc::Rc, time::Instant};
 
-use hyper::{Response, Version, body::Incoming};
 use url::Url;
 
 use crate::{
-    connector::{self, ConnectionInfo},
+    connector,
     cookies::CookieJar,
+    easy::Handle,
     error::TransferError,
     info::Info,
     options::{Method, Settings},
     share::SharedDns,
 };
 
+mod response;
+
 use super::{Event, Sender, download, request, upload::Payload};
 
 pub(super) struct Network {
     pub(super) settings: Settings,
+    pub(super) handle: Handle,
     pub(super) payload: Payload,
     pub(super) jar: CookieJar,
     pub(super) cookie_engine: bool,
@@ -38,8 +41,9 @@ impl Network {
                     Err(TransferError::new(
                         28,
                         format!(
-                            "Operation timed out after {} milliseconds with {received} bytes received",
+                            "Operation timed out after {} milliseconds with {} bytes received",
                             started.elapsed().as_millis(),
+                            received,
                         ),
                     ))
                 }
@@ -62,18 +66,20 @@ impl Network {
         started: Instant,
         wire: &Rc<Cell<i64>>,
     ) -> Result<(), TransferError> {
-        let settings = &self.settings;
-        let mut url = settings
+        let mut configuration = self.settings.clone();
+        let mut url = configuration
             .normalized_url()
-            .ok_or_else(|| url_error(settings))?;
-        if let Some(port) = settings.port {
+            .ok_or_else(|| url_error(&configuration))?;
+        if let Some(port) = configuration.port {
             let _ = url.set_port(Some(port));
         }
         let original = url.origin();
-        let mut method = settings.method;
-        let mut referer = settings.referer.clone();
+        let mut method = configuration.method;
+        let mut referer = configuration.referer.clone();
+        let mut follow = configuration.follow;
         let mut first = true;
         loop {
+            let settings = &configuration;
             info.url = Some(url.to_string());
             if !settings.protocols.permits(url.scheme())
                 || (!first && !settings.redirect_protocols.permits(url.scheme()))
@@ -128,6 +134,7 @@ impl Network {
                 }
             }
             wire.set(0);
+            info.timing.queue = started.elapsed();
             let response = client.request(request);
             let speed = download::LowSpeed::new(settings);
             let response = if let Some(deadline) = speed.deadline() {
@@ -138,10 +145,10 @@ impl Network {
                 response.await
             }
             .map_err(client_error)?;
-            response_info(info, &response, &url, started);
+            response::info(info, &response, &url, started);
             info.upload_length = payload.has_body.then_some(payload.bytes.len() as i64);
             info.uploaded += payload.bytes.len() as i64;
-            info.timing.sent = info.timing.first_byte;
+            info.timing.sent = info.timing.pretransfer.max(info.timing.queue);
             if self.cookie_engine {
                 let mut jar = self.jar.borrow_mut();
                 for value in response.headers().get_all("set-cookie") {
@@ -173,22 +180,25 @@ impl Network {
                 None
             };
             info.redirect_url = redirect.as_ref().map(Url::to_string);
-            let lines = headers(&response);
+            let lines = response::headers(&response);
             info.header_size += lines.iter().map(|line| line.len() as i64).sum::<i64>();
+            let (acknowledge, callback) = tokio::sync::oneshot::channel();
             if sender
-                .send(Event::Head(Box::new(info.clone()), lines))
+                .send(Event::Head(Box::new(info.clone()), lines, acknowledge))
                 .await
                 .is_err()
+                || callback.await.is_err()
             {
                 return Ok(());
             }
+            follow = follow && self.handle.borrow().settings.follow;
             if settings.fail_on_error && status >= 400 {
                 return Err(TransferError::new(
                     22,
                     format!("The requested URL returned error: {status}"),
                 ));
             }
-            if let Some(target) = redirect.filter(|_| settings.follow) {
+            if let Some(target) = redirect.filter(|_| follow) {
                 if settings.max_redirects >= 0 && info.redirect_count >= settings.max_redirects {
                     return Err(TransferError::new(
                         47,
@@ -207,6 +217,16 @@ impl Network {
                 info.redirect_count += 1;
                 info.timing.redirect = started.elapsed();
                 first = false;
+                let current = &self.handle.borrow().settings;
+                configuration.headers.clone_from(&current.headers);
+                configuration
+                    .custom_method
+                    .clone_from(&current.custom_method);
+                configuration
+                    .transport
+                    .proxy
+                    .clone_from(&current.transport.proxy);
+                configuration.transport.http = current.transport.http;
                 continue;
             }
             if settings.max_file_size != 0
@@ -281,74 +301,4 @@ fn client_error(error: hyper_util::client::legacy::Error) -> TransferError {
             format!("Failure when receiving data from the peer: {error}"),
         )
     }
-}
-
-fn response_info(info: &mut Info, response: &Response<Incoming>, url: &Url, started: Instant) {
-    let duration = |instant: Instant| instant.saturating_duration_since(started);
-    info.status = i64::from(response.status().as_u16());
-    info.scheme = Some(url.scheme().to_owned());
-    info.http_version = match response.version() {
-        Version::HTTP_10 => 1,
-        Version::HTTP_11 => 2,
-        Version::HTTP_2 => 3,
-        _ => 0,
-    };
-    info.content_type = response
-        .headers()
-        .get("content-type")
-        .map(|value| value.as_bytes().to_vec());
-    info.download_length = response
-        .headers()
-        .get("content-length")
-        .and_then(|value| value.to_str().ok()?.parse::<i64>().ok());
-    info.auth_available = request::auth_available(response.headers(), "www-authenticate");
-    info.proxy_auth_available = request::auth_available(response.headers(), "proxy-authenticate");
-    info.retry_after = response
-        .headers()
-        .get("retry-after")
-        .and_then(|value| {
-            let value = value.to_str().ok()?;
-            value.parse().ok().or_else(|| {
-                let date = httpdate::parse_http_date(value).ok()?;
-                let future = date.duration_since(std::time::SystemTime::now()).ok()?;
-                Some(future.as_secs() as i64)
-            })
-        })
-        .unwrap_or(0);
-    info.timing.first_byte = started.elapsed();
-    if let Some(connection) = response.extensions().get::<ConnectionInfo>() {
-        info.peer = connection.peer;
-        info.local = connection.local;
-        if connection.connected >= started && info.connection_id != Some(connection.id) {
-            info.new_connections += 1;
-            info.timing.lookup = duration(connection.lookup);
-            info.timing.connect = duration(connection.connected);
-            info.timing.tls = connection.tls.map_or(std::time::Duration::ZERO, duration);
-        }
-        info.timing.pretransfer = duration(connection.tls.unwrap_or(connection.connected));
-        info.connection_id = Some(connection.id);
-        info.proxy = connection.proxy;
-        info.proxy_connect_code = connection.proxy_connect_code;
-        info.proxy_auth = i64::from(connection.proxy_auth);
-    }
-}
-
-fn headers(response: &Response<Incoming>) -> Vec<Vec<u8>> {
-    let version = match response.version() {
-        Version::HTTP_10 => "HTTP/1.0",
-        Version::HTTP_2 => "HTTP/2",
-        _ => "HTTP/1.1",
-    };
-    let status = response.status();
-    let reason = if response.version() == Version::HTTP_2 {
-        ""
-    } else {
-        status.canonical_reason().unwrap_or("")
-    };
-    let mut headers = vec![format!("{version} {} {reason}\r\n", status.as_u16()).into_bytes()];
-    for (name, value) in response.headers() {
-        headers.push(request::line(name.as_str(), value.as_bytes()));
-    }
-    headers.push(b"\r\n".to_vec());
-    headers
 }

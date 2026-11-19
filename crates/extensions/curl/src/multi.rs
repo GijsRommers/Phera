@@ -111,25 +111,30 @@ fn handle(values: &[Value]) -> Result<Handle, NativeError> {
     classes::state(easy::object(values, 0)?)
 }
 
-fn add(_: &mut dyn Context, values: &[Value]) -> NativeResult {
+fn add(context: &mut dyn Context, values: &[Value]) -> NativeResult {
     let multi = handle(values)?;
     let object = easy::object(values, 1)?.clone();
     let handle: easy::Handle = classes::state(&object)?;
     let mut state = multi.borrow_mut();
+    let attached = {
+        let easy = handle.borrow();
+        easy.active
+            || easy
+                .multi
+                .as_ref()
+                .and_then(|owner| owner.upgrade())
+                .is_some()
+    };
     let error = if state.executing {
         RECURSIVE
-    } else if handle
-        .borrow()
-        .multi
-        .as_ref()
-        .and_then(|owner| owner.upgrade())
-        .is_some()
-    {
-        7
-    } else if handle.borrow().active {
+    } else if attached {
         7
     } else {
-        handle.borrow_mut().multi = Some(Rc::downgrade(&multi));
+        let mut easy = handle.borrow_mut();
+        easy.settings
+            .discard_closed_streams(context, "curl_multi_add_handle");
+        easy.multi = Some(Rc::downgrade(&multi));
+        drop(easy);
         state.entries.push(Entry {
             object,
             handle,
@@ -220,6 +225,7 @@ fn setopt(context: &mut dyn Context, values: &[Value]) -> NativeResult {
             return Ok(Value::Bool(false));
         }
         _ => {
+            multi.error = 6;
             return Err(NativeError::value_error(
                 "curl_multi_setopt(): Argument #2 ($option) is not a valid cURL multi option",
             ));

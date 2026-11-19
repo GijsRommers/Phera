@@ -63,6 +63,7 @@ pub(crate) struct Share {
     pub(crate) cookies: Option<CookieJar>,
     pub(crate) dns: Option<SharedDns>,
     pub(crate) attachments: usize,
+    pub(crate) pool_scope: u64,
     error: i64,
 }
 
@@ -110,7 +111,8 @@ fn persistent(context: &mut dyn Context, values: &[Value]) -> NativeResult {
                 Value::Int(CURL_LOCK_DATA_COOKIE) => {
                     return Err(NativeError::value_error(concat!(
                         "curl_share_init_persistent(): Argument #1 ($share_options) must not ",
-                        "contain CURL_LOCK_DATA_COOKIE because sharing cookies across PHP requests is unsafe"
+                        "contain CURL_LOCK_DATA_COOKIE because sharing cookies ",
+                        "across PHP requests is unsafe"
                     )));
                 }
                 Value::Int(option)
@@ -133,12 +135,19 @@ fn persistent(context: &mut dyn Context, values: &[Value]) -> NativeResult {
             options.push(option);
         }
     }
+    if options.is_empty() {
+        return Err(NativeError::value_error(
+            "curl_share_init_persistent(): Argument #1 ($share_options) must not be empty",
+        ));
+    }
     options.sort_unstable();
     options.dedup();
     thread_local! {
         static DNS: SharedDns = SharedDns::default();
     }
+    let mask = options.iter().fold(0u64, |mask, option| mask | 1 << option);
     let share = Share {
+        pool_scope: 1 << 63 | mask,
         dns: options
             .contains(&CURL_LOCK_DATA_DNS)
             .then(|| DNS.with(Clone::clone)),
@@ -173,6 +182,7 @@ fn setopt(context: &mut dyn Context, values: &[Value]) -> NativeResult {
     let share: ShareHandle = classes::state(easy::object(values, 0)?)?;
     let option = args::int(values, 1).unwrap_or_default();
     if !matches!(option, CURLSHOPT_SHARE | CURLSHOPT_UNSHARE) {
+        share.borrow_mut().error = 1;
         return Err(NativeError::value_error(
             "curl_share_setopt(): Argument #2 ($option) is not a valid cURL share option",
         ));
@@ -198,7 +208,17 @@ fn setopt(context: &mut dyn Context, values: &[Value]) -> NativeResult {
             }
             0
         }
-        (_, CURL_LOCK_DATA_CONNECT) => 0,
+        (_, CURL_LOCK_DATA_CONNECT) => {
+            use std::sync::atomic::{AtomicU64, Ordering};
+            static SCOPES: AtomicU64 = AtomicU64::new(1);
+            share.pool_scope = if enabled {
+                SCOPES.fetch_add(1, Ordering::Relaxed)
+            } else {
+                0
+            };
+            0
+        }
+        (_, CURL_LOCK_DATA_PSL) => 0,
         _ => 5,
     };
     Ok(Value::Bool(share.error == 0))

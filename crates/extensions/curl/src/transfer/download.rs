@@ -27,9 +27,8 @@ pub(super) async fn deliver(
         let wire_bytes = wire_bytes.clone();
         move |chunk| {
             chunk
-                .map(|bytes| {
+                .inspect(|bytes| {
                     wire_bytes.set(wire_bytes.get().saturating_add(bytes.len() as i64));
-                    bytes
                 })
                 .map_err(io::Error::other)
         }
@@ -55,7 +54,10 @@ pub(super) async fn deliver(
         Some(_) => {
             return Err(TransferError::new(
                 61,
-                "Unrecognized content encoding type. libcurl understands deflate, gzip content encodings.",
+                concat!(
+                    "Unrecognized content encoding type. ",
+                    "libcurl understands deflate, gzip content encodings."
+                ),
             ));
         }
     };

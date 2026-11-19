@@ -16,7 +16,14 @@ foreach (range(-1, 14) as $i) {
 }
 run('init', fn() => curl_init());
 run('init/nul', fn() => curl_init("\0"));
-run('getinfo/init', fn() => curl_getinfo(curl_init()));
+run('getinfo/init', function () use ($oracleFields) {
+    $info = curl_getinfo(curl_init());
+    // Default paths depend on the oracle's TLS backend and its system package.
+    foreach (['cainfo', 'capath'] as $path) {
+        if (isset($info[$path]) && is_string($info[$path])) { $info[$path] = ''; }
+    }
+    return array_intersect_key($info, array_fill_keys($oracleFields, true));
+});
 run('getinfo/option-invalid', fn() => curl_getinfo($handle, 9000));
 run('getinfo/private', function () use ($handle) {
     curl_setopt($handle, CURLOPT_PRIVATE, ['keep' => 2]);
@@ -69,6 +76,17 @@ run('file-accessors', function () {
     return [$file->getFilename(), $file->getMimeType(), $file->getPostFilename(), $file];
 });
 run('string-file', fn() => new CURLStringFile("raw\0bytes", 'test.txt'));
-foreach (['CurlHandle', 'CurlMultiHandle', 'CurlShareHandle', 'CurlSharePersistentHandle'] as $class) {
+$classes = ['CurlHandle', 'CurlMultiHandle', 'CurlShareHandle', 'CurlSharePersistentHandle'];
+foreach ($classes as $class) {
     run("construct/$class", fn() => new $class());
 }
+run('integer-cast', function () {
+    $a = curl_init();
+    $b = curl_multi_init();
+    return [(int)$a === spl_object_id($a), (int)$b === spl_object_id($b)];
+});
+run('safe-upload', fn() => curl_setopt($handle, CURLOPT_SAFE_UPLOAD, false));
+run('invalid-callback', fn() => curl_setopt($handle, CURLOPT_HEADERFUNCTION, 'undefined'));
+run('invalid-array-callback', fn() => curl_setopt_array($handle, [
+    CURLOPT_WRITEFUNCTION => 'undefined',
+]));

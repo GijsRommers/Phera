@@ -8,6 +8,7 @@
 
 mod context_options;
 mod copy;
+mod crypto_constants;
 mod csv;
 mod data_uri;
 mod directory;
@@ -64,6 +65,7 @@ impl Extension for Streams {
 
     fn register(&self, registry: &mut Registry) {
         context_options::register(registry);
+        crypto_constants::register(registry);
         copy::register(registry);
         csv::register(registry);
         directory::register(registry);

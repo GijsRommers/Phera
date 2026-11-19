@@ -131,6 +131,8 @@ pub(crate) struct Settings {
     pub(crate) verbose: bool,
     pub(crate) header_out: bool,
     pub(crate) pool_idle: usize,
+    pub(crate) pool_scope: u64,
+    pub(crate) multiplex: bool,
     pub(crate) private: Option<Value>,
 }
 
@@ -186,6 +188,8 @@ impl Default for Settings {
             verbose: false,
             header_out: false,
             pool_idle: 8,
+            pool_scope: 0,
+            multiplex: true,
             private: None,
         }
     }
@@ -194,6 +198,35 @@ impl Default for Settings {
 impl Settings {
     pub(crate) fn effective_method(&self) -> &str {
         self.custom_method.as_deref().unwrap_or(self.method.name())
+    }
+
+    pub(crate) fn discard_closed_streams(
+        &mut self,
+        context: &mut dyn phera_extension_api::Context,
+        function: &str,
+    ) {
+        let closed = |stream: &Rc<Resource>| stream.is_closed();
+        let mut warn = |option: &str, fallback: &str| {
+            context.warning(format!(
+                "{function}(): {option} resource has gone away, resetting to {fallback}"
+            ));
+        };
+        if self.stderr.as_ref().is_some_and(closed) {
+            self.stderr = None;
+            warn("CURLOPT_STDERR", "stderr");
+        }
+        if matches!(&self.header, Some(Output::Stream(stream)) if closed(stream)) {
+            self.header = None;
+            warn("CURLOPT_WRITEHEADER", "default");
+        }
+        if matches!(&self.output, Output::Stream(stream) if closed(stream)) {
+            self.output = Output::Print;
+            warn("CURLOPT_FILE", "default");
+        }
+        if self.input.as_ref().is_some_and(closed) {
+            self.input = None;
+            warn("CURLOPT_INFILE", "default");
+        }
     }
 
     pub(crate) fn normalized_url(&self) -> Option<url::Url> {

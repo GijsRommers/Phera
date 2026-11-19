@@ -16,7 +16,10 @@ use std::{
 
 use bytes::Bytes;
 use phera_extension_api::{Context, LocalFuture, NativeError, Object, Value};
-use tokio::sync::mpsc::{self, Receiver};
+use tokio::sync::{
+    mpsc::{self, Receiver},
+    oneshot,
+};
 
 use crate::{
     cookies::{self, CookieJar},
@@ -29,10 +32,25 @@ use crate::{
 type Sender = mpsc::Sender<Event>;
 
 enum Event {
-    Head(Box<Info>, Vec<Vec<u8>>),
+    Head(Box<Info>, Vec<Vec<u8>>, oneshot::Sender<()>),
     Body(Bytes, i64),
     Trace(String),
     Done(Box<Info>, Option<TransferError>),
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct PoolOptions {
+    pub(crate) max_cached: usize,
+    pub(crate) multiplex: bool,
+}
+
+impl Default for PoolOptions {
+    fn default() -> Self {
+        Self {
+            max_cached: 0,
+            multiplex: true,
+        }
+    }
 }
 
 pub(crate) struct Transfer {
@@ -52,6 +70,7 @@ impl Transfer {
         context: &mut dyn Context,
         object: Rc<Object>,
         handle: Handle,
+        pool: PoolOptions,
     ) -> Result<Self, NativeError> {
         let started = Instant::now();
         let (settings, cookies, cookie_engine, dns) = {
@@ -65,12 +84,27 @@ impl Transfer {
                 .share
                 .as_ref()
                 .and_then(|share| share.borrow().dns.clone());
-            (
-                easy.settings.clone(),
-                easy.cookies(),
-                easy.cookie_engine(),
-                dns,
-            )
+            let function = if easy
+                .multi
+                .as_ref()
+                .and_then(|multi| multi.upgrade())
+                .is_some()
+            {
+                "curl_multi_exec"
+            } else {
+                "curl_exec"
+            };
+            easy.settings.discard_closed_streams(context, function);
+            let mut settings = easy.settings.clone();
+            if pool.max_cached != 0 {
+                settings.pool_idle = settings.pool_idle.min(pool.max_cached);
+            }
+            settings.multiplex = pool.multiplex;
+            settings.pool_scope = easy
+                .share
+                .as_ref()
+                .map_or(0, |share| share.borrow().pool_scope);
+            (settings, easy.cookies(), easy.cookie_engine(), dns)
         };
         let (sender, receiver) = mpsc::channel(1);
         // Own the active flag before performing a PHP callback that can throw or suspend.
@@ -98,6 +132,7 @@ impl Transfer {
             Ok(payload) => {
                 let network = network::Network {
                     settings: settings.clone(),
+                    handle: transfer.handle.clone(),
                     payload,
                     jar: transfer.cookies.clone(),
                     cookie_engine,
@@ -140,9 +175,11 @@ impl Transfer {
     ) -> Result<Poll<()>, NativeError> {
         poll_fn(|cx| self.poll_ready(cx)).await;
         let outcome = match self.buffered.take() {
-            Some(Event::Head(info, lines)) => {
+            Some(Event::Head(info, lines, ready)) => {
                 self.handle.borrow_mut().info = *info;
-                output::head(self, context, lines).await?
+                let outcome = output::head(self, context, lines).await?;
+                let _ = ready.send(());
+                outcome
             }
             Some(Event::Body(data, size)) => {
                 self.handle.borrow_mut().info.downloaded = size;
@@ -174,7 +211,7 @@ impl Transfer {
         let mut easy = self.handle.borrow_mut();
         easy.info.timing.total = self.started.elapsed();
         easy.error = error;
-        easy.content = matches!(self.settings.output, Output::Return)
+        easy.content = matches!(easy.settings.output, Output::Return)
             .then(|| std::mem::take(&mut self.content));
         easy.active = false;
     }

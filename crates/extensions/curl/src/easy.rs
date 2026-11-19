@@ -266,7 +266,8 @@ fn exec(context: &mut dyn Context, values: Vec<Value>) -> LocalFuture<'_, Native
                 "curl_exec(): Attempt to perform cURL handle from a callback",
             ));
         }
-        let mut transfer = crate::transfer::Transfer::start(context, object, handle).await?;
+        let mut transfer =
+            crate::transfer::Transfer::start(context, object, handle, Default::default()).await?;
         while transfer.step(context).await?.is_pending() {}
         Ok(transfer.result())
     })

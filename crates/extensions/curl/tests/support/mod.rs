@@ -21,7 +21,10 @@ use hyper::{
 };
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use rustls::pki_types::PrivatePkcs8KeyDer;
-use tokio::{net::TcpListener, sync::oneshot};
+use tokio::{
+    net::{TcpListener, TcpStream, UnixListener},
+    sync::oneshot,
+};
 use tokio_rustls::TlsAcceptor;
 
 type Body = UnsyncBoxBody<Bytes, std::io::Error>;
@@ -30,6 +33,7 @@ pub struct Server {
     pub address: SocketAddr,
     pub tls_address: SocketAddr,
     pub ca: PathBuf,
+    pub unix: PathBuf,
     shutdown: Option<oneshot::Sender<()>>,
     task: Option<JoinHandle<()>>,
 }
@@ -58,6 +62,9 @@ impl Server {
         ssl.set_nonblocking(true).unwrap();
         let address = tcp.local_addr().unwrap();
         let tls_address = ssl.local_addr().unwrap();
+        let unix = directory.join("curl.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&unix).unwrap();
+        listener.set_nonblocking(true).unwrap();
         let (shutdown, stop) = oneshot::channel();
         let task = thread::spawn(move || {
             tokio::runtime::Builder::new_current_thread()
@@ -67,11 +74,21 @@ impl Server {
                 .block_on(async {
                     let tcp = TcpListener::from_std(tcp).unwrap();
                     let ssl = TcpListener::from_std(ssl).unwrap();
+                    let unix = UnixListener::from_std(listener).unwrap();
                     let mut stop = stop;
                     loop {
                         tokio::select! {
                             _ = &mut stop => break,
                             Ok((stream, _)) = tcp.accept() => {
+                                tokio::spawn(async move {
+                                    let _ = http1::Builder::new().serve_connection(
+                                        TokioIo::new(stream), service_fn(move |request| {
+                                            proxy_or_respond(request, tls_address)
+                                        }),
+                                    ).with_upgrades().await;
+                                });
+                            }
+                            Ok((stream, _)) = unix.accept() => {
                                 tokio::spawn(async move {
                                     let _ = http1::Builder::new().serve_connection(
                                         TokioIo::new(stream), service_fn(respond),
@@ -101,6 +118,7 @@ impl Server {
             address,
             tls_address,
             ca,
+            unix,
             shutdown: Some(shutdown),
             task: Some(task),
         }
@@ -137,6 +155,14 @@ async fn respond(request: Request<Incoming>) -> Result<Response<Body>, Infallibl
             let code = if path == "/redirect-307" { 307 } else { 302 };
             response = response.status(code).header("location", target);
             full("redirect body")
+        }
+        "/cross" => {
+            let host = request.headers().get("host").unwrap().to_str().unwrap();
+            let (_, port) = host.rsplit_once(':').unwrap();
+            response = response
+                .status(302)
+                .header("location", format!("http://localhost:{port}/echo"));
+            full("redirect to a different host")
         }
         "/cookie" => {
             response = response.header("set-cookie", "test=sample; Path=/; HttpOnly");
@@ -192,6 +218,28 @@ async fn respond(request: Request<Incoming>) -> Result<Response<Body>, Infallibl
         }
     };
     Ok(response.body(data).unwrap())
+}
+
+async fn proxy_or_respond(
+    mut request: Request<Incoming>,
+    target: SocketAddr,
+) -> Result<Response<Body>, Infallible> {
+    if request.method() != hyper::Method::CONNECT {
+        return respond(request).await;
+    }
+    let authority = format!("localhost:{}", target.port());
+    if request.uri().authority().map(|value| value.as_str()) != Some(&authority) {
+        return Ok(Response::builder().status(403).body(full("")).unwrap());
+    }
+    let upgrade = hyper::upgrade::on(&mut request);
+    tokio::spawn(async move {
+        if let Ok(upgraded) = upgrade.await
+            && let Ok(mut socket) = TcpStream::connect(target).await
+        {
+            let _ = tokio::io::copy_bidirectional(&mut TokioIo::new(upgraded), &mut socket).await;
+        }
+    });
+    Ok(Response::new(full("")))
 }
 
 fn chunks(cut: bool) -> Body {

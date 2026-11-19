@@ -22,6 +22,14 @@ pub(crate) fn register(registry: &mut Registry) {
     });
     const OPTIONS: &[PropertyEntry] =
         &[PropertyEntry::typed("options", PropertyType::Array, Visibility::Public).readonly()];
+    const NON_CLONEABLE: ClassHooks = ClassHooks {
+        clone: Some(NativeClone::Copy(reject_clone)),
+        ..ClassHooks::EMPTY
+    };
+    const MULTI_HOOKS: ClassHooks = ClassHooks {
+        cast_object_id: true,
+        ..NON_CLONEABLE
+    };
     for name in [
         "CurlMultiHandle",
         "CurlShareHandle",
@@ -35,9 +43,10 @@ pub(crate) fn register(registry: &mut Registry) {
             } else {
                 &[]
             },
-            hooks: Some(&ClassHooks {
-                clone: Some(NativeClone::Copy(reject_clone)),
-                ..ClassHooks::EMPTY
+            hooks: Some(if name == "CurlMultiHandle" {
+                &MULTI_HOOKS
+            } else {
+                &NON_CLONEABLE
             }),
             ..ClassEntry::class(name)
         });

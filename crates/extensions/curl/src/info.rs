@@ -12,6 +12,7 @@ use crate::easy::{Easy, handle};
 
 #[derive(Clone, Default)]
 pub(crate) struct Timing {
+    pub(crate) queue: Duration,
     pub(crate) lookup: Duration,
     pub(crate) connect: Duration,
     pub(crate) tls: Duration,
@@ -133,6 +134,7 @@ fn field(easy: &Easy, option: i64) -> NativeResult {
         CURLINFO_STARTTRANSFER_TIME_T => Value::Int(micros(time.first_byte)),
         CURLINFO_REDIRECT_TIME_T => Value::Int(micros(time.redirect)),
         CURLINFO_POSTTRANSFER_TIME_T => Value::Int(micros(time.sent)),
+        CURLINFO_QUEUE_TIME_T => Value::Int(micros(time.queue)),
         CURLINFO_SIZE_UPLOAD => Value::Float(info.uploaded as f64),
         CURLINFO_SIZE_DOWNLOAD => Value::Float(info.downloaded as f64),
         CURLINFO_SPEED_DOWNLOAD => Value::Float(speed(info.downloaded, time.total) as f64),
@@ -181,7 +183,6 @@ fn field(easy: &Easy, option: i64) -> NativeResult {
         | CURLINFO_OS_ERRNO
         | CURLINFO_PROXY_ERROR
         | CURLINFO_PROXY_SSL_VERIFYRESULT
-        | CURLINFO_QUEUE_TIME_T
         | CURLINFO_RTSP_CLIENT_CSEQ
         | CURLINFO_RTSP_CSEQ_RECV
         | CURLINFO_RTSP_SERVER_CSEQ => Value::Int(0),

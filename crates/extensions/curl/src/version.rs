@@ -28,7 +28,7 @@ pub(crate) fn version(_: &mut dyn Context, _: &[Value]) -> NativeResult {
         ("GSSAPI", 0),
         ("KERBEROS5", 0),
         ("UNIX_SOCKETS", CURL_VERSION_UNIX_SOCKETS),
-        ("PSL", 0),
+        ("PSL", CURL_VERSION_PSL),
         ("HTTPS_PROXY", 0),
         ("MULTI_SSL", 0),
         ("BROTLI", CURL_VERSION_BROTLI),
@@ -45,16 +45,18 @@ pub(crate) fn version(_: &mut dyn Context, _: &[Value]) -> NativeResult {
         features |= bit;
         names.insert(ArrayKey::str(name), Value::Bool(bit != 0));
     }
+    // SDKs compare the numeric prefix as a cURL API compatibility floor.
+    // The backend and actual Phera version remain visible in the same string.
     let mut version = PhpArray::new();
     for (name, value) in [
-        ("version_number", Value::Int(0x00_01_00)),
+        ("version_number", Value::Int(0x07_22_00)),
         ("age", Value::Int(11)),
         ("features", Value::Int(features)),
         ("feature_list", Value::from(names)),
         ("ssl_version_number", Value::Int(0)),
         (
             "version",
-            Value::from(concat!("Phera/", env!("CARGO_PKG_VERSION"))),
+            Value::from(concat!("7.34.0-pl-Phera/", env!("CARGO_PKG_VERSION"))),
         ),
         (
             "host",

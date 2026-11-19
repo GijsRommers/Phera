@@ -30,7 +30,10 @@ fn error_text(code: i64) -> &'static str {
         2 => "Failed initialization",
         3 => "URL using bad/illegal format or missing URL",
         4 => {
-            "A requested feature, protocol or option was not found built-in in this libcurl due to a build-time decision."
+            concat!(
+                "A requested feature, protocol or option was not found built-in ",
+                "in this libcurl due to a build-time decision."
+            )
         }
         5 => "Could not resolve proxy name",
         6 => "Could not resolve hostname",

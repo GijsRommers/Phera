@@ -33,7 +33,10 @@ pub(super) async fn build(
         }
         (Method::Put, _) => return read(context, object, settings).await,
         (Method::Post, None) if settings.read.is_some() || settings.input.is_some() => {
-            return read(context, object, settings).await;
+            return Ok(read(context, object, settings).await?.map(|mut payload| {
+                payload.content_type = Some("application/x-www-form-urlencoded".to_owned());
+                payload
+            }));
         }
         (Method::Post, None) => Payload {
             content_type: Some("application/x-www-form-urlencoded".to_owned()),
