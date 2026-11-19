@@ -1,2 +1,2 @@
 <?php
-$found = strpos($text, $needle) !== false;
+$found = strpos('alphabet', 'alpha') !== false;

@@ -10,8 +10,8 @@ use crate::lint::{
     traversal::Node,
 };
 use phera_ast::{
-    Argument, Arguments, BinaryOperator as Op, Expression, ExpressionKind as Expr, Literal,
-    MemberName, Name, NameKind, StatementKind as Stmt, UnaryOperator, UseKind, Variable,
+    Argument, Arguments, BinaryOperator as Op, CastKind, Expression, ExpressionKind as Expr,
+    Literal, MemberName, Name, NameKind, StatementKind as Stmt, UnaryOperator, UseKind, Variable,
 };
 
 pub(super) const RULES: &[Rule] = &[
@@ -20,7 +20,7 @@ pub(super) const RULES: &[Rule] = &[
         "Use str_contains() for a strict strpos() comparison with false.",
         "$found = strpos($text, $needle) !== false;",
         "$found = str_contains($text, $needle);",
-        "Safe fix for direct, positional calls on one line.",
+        "Safe fix for a known built-in and string arguments. With unproven arguments, the unsafe fix can change error and deprecation messages. Namespace fallbacks are suggestions only.",
         Visit::Expression,
         str_contains,
     ),
@@ -29,7 +29,7 @@ pub(super) const RULES: &[Rule] = &[
         "Use str_starts_with() for strpos() compared strictly with zero.",
         "$starts = strpos($text, $needle) === 0;",
         "$starts = str_starts_with($text, $needle);",
-        "Safe fix for direct, positional calls on one line.",
+        "Safe fix for a known built-in and string arguments. With unproven arguments, the unsafe fix can change error and deprecation messages. Namespace fallbacks are suggestions only.",
         Visit::Expression,
         str_starts,
     ),
@@ -131,21 +131,69 @@ fn strpos(
     } else {
         return;
     };
-    let Some([haystack, needle]) = args(context, call, "strpos") else {
+    let Expr::Call {
+        callee,
+        arguments: Arguments::List(arguments),
+    } = &call.kind
+    else {
         return;
     };
+    let Expr::Name(name) = &callee.kind else {
+        return;
+    };
+    let [haystack, needle] = arguments.as_slice() else {
+        return;
+    };
+    if arguments
+        .iter()
+        .any(|argument| argument.name.is_some() || argument.spread)
+    {
+        return;
+    }
     let message = format!(
         "Use {}() for this strpos() comparison.",
         String::from_utf8_lossy(replacement)
     );
-    report_replacement(
-        context,
-        rule,
-        expr.span,
-        &message,
-        call_pieces(context, replacement, &haystack.value, &needle.value),
-        false,
-    );
+    let resolved = context.names.resolve(name, UseKind::Function);
+    let is_strpos = |name: &str| name.eq_ignore_ascii_case("strpos");
+    match resolved.as_slice() {
+        [name] if is_strpos(name) => {
+            let strings = string_expression(&haystack.value) && string_expression(&needle.value);
+            report_replacement(
+                context,
+                rule,
+                expr.span,
+                &message,
+                call_pieces(context, replacement, &haystack.value, &needle.value),
+                !strings,
+            );
+        }
+        [local, fallback]
+            if is_strpos(fallback)
+                && !context.index.is_some_and(|index| {
+                    index.functions.contains_key(&local.to_ascii_lowercase())
+                }) =>
+        {
+            context.report(
+                rule,
+                expr.span,
+                format!("{message} Confirm this call resolves to the PHP built-in."),
+            );
+        }
+        _ => {}
+    }
+}
+
+fn string_expression(expression: &Expression) -> bool {
+    matches!(
+        expression.kind,
+        Expr::Literal(Literal::String(_))
+            | Expr::InterpolatedString(_)
+            | Expr::Cast {
+                kind: CastKind::String,
+                ..
+            }
+    )
 }
 
 fn str_ends(context: &mut Context<'_>, node: Node<'_>) {

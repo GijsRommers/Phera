@@ -15,12 +15,15 @@ use phera_source::Span;
 use std::collections::{HashMap, HashSet};
 
 pub(super) const RULES: &[Rule] = &[
-    local(
-        "unused-variable",
-        "Detect locals assigned but never read.",
-        "function f() { $a = 1; }",
-        "function f() {}",
-    ),
+    Rule {
+        default: DefaultStatus::Enabled,
+        ..local(
+            "unused-variable",
+            "Detect standalone assignments to locals whose values are never read.",
+            "function f() { $a = 1; }",
+            "function f() {}",
+        )
+    },
     local(
         "unused-parameter",
         "Detect unused parameters of closures and private methods.",
@@ -79,6 +82,8 @@ const fn local(
 struct Bindings<'a> {
     writes: HashMap<&'a str, Span>,
     write_targets: HashSet<usize>,
+    standalone_assignments: HashSet<usize>,
+    unused_candidates: HashMap<&'a str, Span>,
     reads: HashSet<&'a str>,
     parameters: HashSet<&'a str>,
     candidates: Vec<Candidate<'a>>,
@@ -125,6 +130,9 @@ impl<'a> Locals<'a> {
                         .entry(Some(function.span.start))
                         .or_default()
                         .parameters(&function.parameters, false),
+                    Stmt::Expression(expr) if matches!(expr.kind, Expr::Assign { .. }) => {
+                        bindings.standalone_assignments.insert(expr.span.start);
+                    }
                     Stmt::Try { catches, .. } => {
                         for catch in catches {
                             if let Some(name) = &catch.variable {
@@ -143,10 +151,13 @@ impl<'a> Locals<'a> {
                         ..
                     } => {
                         if !by_reference {
-                            bindings.write(value);
+                            bindings.write(value, WriteUse::Binding);
                             if let Some(key) = key {
-                                bindings.write(key);
+                                bindings.write(key, WriteUse::Binding);
                             }
+                        } else if let Some(name) = super::suspicious::variable(value) {
+                            // Subsequent writes may still update the last element.
+                            bindings.parameters.insert(name);
                         }
                     }
                     Stmt::Goto(name) => {
@@ -177,7 +188,14 @@ impl<'a> Locals<'a> {
             | Expr::Eval(_)
             | Expr::Include { .. }
             | Expr::AssignReference { .. } => bindings.dynamic = true,
-            Expr::Assign { target, .. } => bindings.write(target),
+            Expr::Assign { target, .. } => {
+                let usage = if bindings.standalone_assignments.contains(&expr.span.start) {
+                    WriteUse::Standalone
+                } else {
+                    WriteUse::Binding
+                };
+                bindings.write(target, usage);
+            }
             Expr::Closure(closure) => {
                 bindings
                     .reads
@@ -281,7 +299,7 @@ impl<'a> Locals<'a> {
                     context.report(candidate.rule, candidate.span, message);
                 }
             }
-            for (name, span) in &bindings.writes {
+            for (name, span) in &bindings.unused_candidates {
                 if !bindings.reads.contains(name)
                     && !bindings.is_binding(name, false)
                     && !name.starts_with('_')
@@ -306,6 +324,12 @@ impl<'a> Locals<'a> {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WriteUse {
+    Binding,
+    Standalone,
+}
+
 impl<'a> Bindings<'a> {
     fn parameters(&mut self, parameters: &'a [Parameter], report: bool) {
         for param in parameters {
@@ -320,20 +344,16 @@ impl<'a> Bindings<'a> {
         }
     }
 
-    fn write(&mut self, root: &'a Expression) {
+    fn write(&mut self, root: &'a Expression, usage: WriteUse) {
         let mut pending = vec![root];
         while let Some(target) = pending.pop() {
             match &target.kind {
                 Expr::Variable(Variable::Named(name)) => {
                     self.write_targets.insert(target.span.start);
-                    self.writes
-                        .entry(name)
-                        .and_modify(|span| {
-                            if target.span.start < span.start {
-                                *span = target.span;
-                            }
-                        })
-                        .or_insert(target.span);
+                    remember_first(&mut self.writes, name, target.span);
+                    if usage == WriteUse::Standalone {
+                        remember_first(&mut self.unused_candidates, name, target.span);
+                    }
                 }
                 Expr::List(items) => pending.extend(items.iter().flatten().map(|item| &item.value)),
                 _ => {}
@@ -359,4 +379,15 @@ impl<'a> Bindings<'a> {
                     | "_ENV"
             )
     }
+}
+
+fn remember_first<'a>(writes: &mut HashMap<&'a str, Span>, name: &'a str, position: Span) {
+    writes
+        .entry(name)
+        .and_modify(|first| {
+            if position.start < first.start {
+                *first = position;
+            }
+        })
+        .or_insert(position);
 }

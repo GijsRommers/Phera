@@ -1,2 +1,2 @@
 <?php
-$starts = \str_starts_with($text, $needle);
+$starts = \str_starts_with('alphabet', 'alpha');

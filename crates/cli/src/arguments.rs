@@ -31,9 +31,8 @@ Usage:
                                           laravel
     --no-install                          do not fetch packages
   phera --dump <file.php>                 print the compiled bytecode
-  phera check [--level 0|1|2|3] [--format text|json|github] [--no-progress]
-  phera lint [paths...] [--fix] [--only GROUP]         lint PHP source
-              [--generate-baseline FILE] <paths...>
+  phera check [OPTIONS] <paths...>        type-check PHP (see check --help)
+  phera lint [OPTIONS] [paths...]         lint PHP (see lint --help)
   phera --version
 
 ENV OPTIONS: --env-file PATH (repeatable) or --no-env-file";
@@ -49,6 +48,7 @@ pub(crate) enum Command {
         script: String,
     },
     Serve(ServeOptions),
+    Help(&'static str),
     Check(phera_analyzer::config::Options),
     Lint(phera_analyzer::lint::Command),
     New(crate::new::NewOptions),
@@ -89,11 +89,15 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
         }
         Some("check") => {
             arguments.next();
-            phera_analyzer::config::Options::parse(arguments).map(Command::Check)
+            analyzer_command(arguments, crate::check::HELP, |args| {
+                phera_analyzer::config::Options::parse(args).map(Command::Check)
+            })
         }
         Some("lint") => {
             arguments.next();
-            phera_analyzer::lint::Options::parse(arguments).map(Command::Lint)
+            analyzer_command(arguments, crate::lint::HELP, |args| {
+                phera_analyzer::lint::Options::parse(args).map(Command::Lint)
+            })
         }
         Some("serve") => {
             arguments.next();
@@ -116,6 +120,22 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
             })
         }
     }
+}
+
+fn analyzer_command(
+    arguments: impl Iterator<Item = String>,
+    help: &'static str,
+    parse: impl FnOnce(std::vec::IntoIter<String>) -> Result<Command, String>,
+) -> Result<Command, String> {
+    let arguments: Vec<_> = arguments.collect();
+    if arguments
+        .iter()
+        .take_while(|arg| *arg != "--")
+        .any(|arg| matches!(arg.as_str(), "--help" | "-h"))
+    {
+        return Ok(Command::Help(help));
+    }
+    parse(arguments.into_iter())
 }
 
 fn parse_new(mut arguments: impl Iterator<Item = String>) -> Result<NewOptions, String> {

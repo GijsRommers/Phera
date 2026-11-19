@@ -17,6 +17,8 @@ pub fn run(options: &Options) -> Result<Report, String> {
         "missing-parent-constructor",
         "unreachable-catch",
         "override-attribute",
+        "str-contains",
+        "str-starts-with",
     ]
     .iter()
     .any(|name| enabled.severities.contains_key(name))

@@ -85,7 +85,7 @@ pub(super) const RULES: &[Rule] = &[
         "Require a comment or an explicit exit between nonempty cases.",
         "switch ($n) { case 1: a(); case 2: b(); }",
         "switch ($n) { case 1: a(); break; case 2: b(); }",
-        DefaultStatus::OptIn,
+        DefaultStatus::Enabled,
         Visit::Statement,
         blocks::fallthrough,
     ),
@@ -125,15 +125,17 @@ pub(super) const RULES: &[Rule] = &[
         Visit::Statement,
         blocks::unreachable_catch,
     ),
-    suspicious(
-        "foreach-reference-not-unset",
-        "Unbind a foreach reference before continuing in the same scope.",
-        "foreach ($items as &$item) { $item++; } echo 1;",
-        "foreach ($items as &$item) { $item++; } unset($item); echo 1;",
-        DefaultStatus::OptIn,
-        Visit::Block,
-        blocks::foreach_reference,
-    ),
+    Rule {
+        name: "foreach-reference-not-unset",
+        description: "Unbind a foreach reference before reusing its variable.",
+        bad: "foreach ($items as &$item) { $item++; } $item = 0;",
+        good: "foreach ($items as &$item) { $item++; } unset($item); $item = 0;",
+        default: DefaultStatus::Enabled,
+        group: Group::Suspicious,
+        visit: Visit::Namespace,
+        check: None,
+        fix: "The default looks for a later use in the same callable along a block continuation. Explicit selection also reports references left in scope without reuse.",
+    },
     suspicious(
         "discarded-exception",
         "Detect a broad exception catch that does not retain the exception.",
@@ -163,16 +165,16 @@ pub(super) const RULES: &[Rule] = &[
     ),
     suspicious(
         "self-comparison",
-        "Detect comparisons of a variable with itself.",
+        "Detect comparisons of a variable with itself, allowing NaN checks.",
         "$same = $a === $a;",
         "$same = $a === $b;",
-        DefaultStatus::OptIn,
+        DefaultStatus::Enabled,
         Visit::Expression,
         expressions::self_comparison,
     ),
     suspicious(
         "loose-comparison",
-        "Detect loose comparisons between incompatible scalar literals.",
+        "Detect loose comparisons between incompatible literals. Selecting the rule or group also checks dynamic null comparisons.",
         "$same = 0 == 'x';",
         "$same = 0 === 'x';",
         DefaultStatus::Enabled,
@@ -275,21 +277,27 @@ const fn suspicious(
     }
 }
 
-fn condition(node: Node<'_>) -> Option<&phera_ast::Expression> {
+fn conditions(node: Node<'_>, mut visit: impl FnMut(&phera_ast::Expression)) {
     use phera_ast::StatementKind::*;
     let Node::Statement(statement) = node else {
-        return None;
+        return;
     };
     match &statement.kind {
-        If { condition, .. } | While { condition, .. } | DoWhile { condition, .. } => {
-            Some(condition)
+        If {
+            condition, elseifs, ..
+        } => {
+            visit(condition);
+            for branch in elseifs {
+                visit(&branch.condition);
+            }
         }
-        For { condition, .. } => condition.last(),
-        _ => None,
+        While { condition, .. } | DoWhile { condition, .. } => visit(condition),
+        For { condition, .. } => condition.last().into_iter().for_each(visit),
+        _ => {}
     }
 }
 
-fn variable(expression: &phera_ast::Expression) -> Option<&str> {
+pub(super) fn variable(expression: &phera_ast::Expression) -> Option<&str> {
     use phera_ast::{ExpressionKind, Variable};
     match &expression.kind {
         ExpressionKind::Variable(Variable::Named(name)) => Some(name),

@@ -63,6 +63,7 @@ pub struct Options {
     strict_types: bool,
     select: Vec<&'static Rule>,
     groups: Vec<Group>,
+    all: bool,
     skip: HashSet<&'static str>,
     settings: HashMap<&'static str, Option<Severity>>,
     group_settings: HashMap<&'static str, bool>,
@@ -84,6 +85,7 @@ impl Default for Options {
             strict_types: false,
             select: Vec::new(),
             groups: Vec::new(),
+            all: false,
             skip: HashSet::new(),
             settings: HashMap::new(),
             group_settings: HashMap::new(),
@@ -122,7 +124,15 @@ impl Options {
                 "--fix-unsafe" => options.fix = FixMode::All,
                 "--format" => options.format = format(&value()?)?,
                 "--rule" => options.select.push(named(&value()?)?),
-                "--only" => options.groups.push(Group::parse(&value()?)?),
+                "--only" => {
+                    let group = value()?;
+                    if group == "all" {
+                        options.all = true;
+                    } else {
+                        options.groups.push(Group::parse(&group)?);
+                    }
+                }
+                "--all" => options.all = true,
                 "--skip" => {
                     options.skip.insert(named(&value()?)?.name);
                 }
@@ -245,6 +255,14 @@ impl Options {
         Ok(())
     }
 
+    pub(super) fn explicitly_enabled(&self, name: &str, group: Group) -> bool {
+        self.all
+            || self.select.iter().any(|rule| rule.name == name)
+            || self.groups.contains(&group)
+            || self.settings.get(name).is_some_and(Option::is_some)
+            || self.group_settings.get(group.name()) == Some(&true)
+    }
+
     pub(super) fn severity(&self, rule: &Rule) -> Option<Severity> {
         if self.skip.contains(rule.name) {
             return None;
@@ -254,7 +272,7 @@ impl Options {
             .select
             .iter()
             .any(|selected| selected.name == rule.name);
-        if explicitly_selected {
+        if self.all || explicitly_selected {
             return Some(configured.flatten().unwrap_or_default());
         }
         if rule.name == "strict-types" && !self.strict_types && configured.is_none() {

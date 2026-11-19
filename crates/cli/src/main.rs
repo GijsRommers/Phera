@@ -29,6 +29,10 @@ fn main() -> ExitCode {
         }) => run::script(&script, &arguments, files),
         Ok(Command::Dump { script }) => run::dump(&script),
         Ok(Command::Serve(options)) => serve::serve(options),
+        Ok(Command::Help(help)) => {
+            print!("{help}");
+            ExitCode::SUCCESS
+        }
         Ok(Command::Check(options)) => check::check(options),
         Ok(Command::Lint(command)) => lint::command(command),
         Ok(Command::New(options)) => new::project(&options),

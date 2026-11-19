@@ -28,6 +28,7 @@ pub(super) fn self_comparison(context: &mut Context<'_>, node: Node<'_>) {
             right,
         } = &expr.kind
         && comparison(*operator)
+        && !matches!(operator, Op::NotIdentical | Op::NotEqual)
         && let Some(name) = variable(left)
         && variable(right) == Some(name)
     {
@@ -51,12 +52,27 @@ pub(super) fn loose_comparison(context: &mut Context<'_>, node: Node<'_>) {
     else {
         return;
     };
-    if !matches!(operator, Op::Equal | Op::NotEqual)
-        || !matches!(
+    if !matches!(operator, Op::Equal | Op::NotEqual) {
+        return;
+    }
+    if matches!(left.kind, Expr::Literal(Literal::Null))
+        != matches!(right.kind, Expr::Literal(Literal::Null))
+    {
+        // A typed nullable object or callable can already compare accurately. With
+        // no expression types, report the dynamic pattern when the rule is selected.
+        if !matches!(
             (&left.kind, &right.kind),
             (Expr::Literal(_), Expr::Literal(_))
-        )
-    {
+        ) && !context
+            .options
+            .explicitly_enabled("loose-comparison", crate::lint::Group::Suspicious)
+        {
+            return;
+        }
+        context.report(
+            "loose-comparison", expr.span,
+            "Loose comparison with null coerces other values. Use a strict comparison to test for null.",
+        );
         return;
     }
     let (Expr::Literal(left), Expr::Literal(right)) = (&left.kind, &right.kind) else {
@@ -64,8 +80,8 @@ pub(super) fn loose_comparison(context: &mut Context<'_>, node: Node<'_>) {
     };
     let trap = match (left, right) {
         (Literal::String(a), Literal::String(b)) => numeric(a) != numeric(b),
-        (Literal::String(_), Literal::Null | Literal::Int(_) | Literal::Float(_))
-        | (Literal::Null | Literal::Int(_) | Literal::Float(_), Literal::String(_)) => true,
+        (Literal::String(_), Literal::Int(_) | Literal::Float(_))
+        | (Literal::Int(_) | Literal::Float(_), Literal::String(_)) => true,
         _ => false,
     };
     if trap {

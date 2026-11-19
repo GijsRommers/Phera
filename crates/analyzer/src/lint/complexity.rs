@@ -180,11 +180,10 @@ impl Counts {
 fn decisions(node: Node<'_>) -> (usize, usize) {
     match node {
         Node::Statement(statement) => match &statement.kind {
-            Stmt::If { .. }
-            | Stmt::For { .. }
-            | Stmt::Foreach { .. }
-            | Stmt::While { .. }
-            | Stmt::DoWhile { .. } => (1, 1),
+            Stmt::If { elseifs, .. } => (1 + elseifs.len(), 1 + elseifs.len()),
+            Stmt::For { .. } | Stmt::Foreach { .. } | Stmt::While { .. } | Stmt::DoWhile { .. } => {
+                (1, 1)
+            }
             Stmt::Switch { cases, .. } => (
                 cases.iter().filter(|case| case.condition.is_some()).count(),
                 1,

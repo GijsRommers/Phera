@@ -1,1 +1,1 @@
-2	switch-fallthrough	The previous case falls through into this one without a comment.
+6	switch-fallthrough	The previous case falls through into this one without a comment.

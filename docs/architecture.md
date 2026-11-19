@@ -1435,11 +1435,14 @@ phera lint
 phera lint src tests --fix
 phera lint src --fix-unsafe
 phera lint --only style --skip strict-types
+phera lint --only all
 phera lint --rule unused-import --format github
 phera lint --explain unused-import
 ```
 
-`--rule` and `--only` can be repeated to select rules and groups. `--skip`
+`--rule` and `--only` can be repeated to select rules and groups. `--only all`
+and `--all` select every rule. Use `phera lint --help` for the command options
+and `phera lint --list-rules` for the rule names and examples. `--skip`
 excludes a rule from that selection. Output uses the shared text, JSON or
 GitHub annotation renderer. A run returns 1 if findings remain and 2 if it
 cannot run. The parser and deprecation rules target PHP 8.5. The common

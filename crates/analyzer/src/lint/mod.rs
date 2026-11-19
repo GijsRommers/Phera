@@ -13,6 +13,7 @@
 
 mod complexity;
 mod fix;
+mod foreach_reference;
 mod imports;
 mod index;
 mod locals;
@@ -242,6 +243,10 @@ fn lint_namespace(context: &mut Context<'_>, namespace: String, statements: &[St
         enabled.severities.contains_key("unused-import"),
     );
     let mut locals = enabled.locals.then(locals::Locals::default);
+    let mut references = enabled
+        .severities
+        .contains_key(foreach_reference::NAME)
+        .then(foreach_reference::References::default);
     let mut members = enabled.members.then(members::Members::default);
     let mut complexity = enabled.complexity.then(complexity::Counts::default);
     let mut classes = Vec::new();
@@ -254,6 +259,9 @@ fn lint_namespace(context: &mut Context<'_>, namespace: String, statements: &[St
                 classes.push(class);
             }
             members.observe(context, node, scope);
+        }
+        if let Some(references) = &mut references {
+            references.observe(node, scope);
         }
         if let Some(locals) = &mut locals {
             locals.observe(node, scope);
@@ -281,6 +289,9 @@ fn lint_namespace(context: &mut Context<'_>, namespace: String, statements: &[St
     imports.report(context, statements);
     if let Some(complexity) = complexity {
         complexity.report(context);
+    }
+    if let Some(references) = references {
+        references.report(context);
     }
     if let Some(locals) = locals {
         locals.report(context);

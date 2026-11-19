@@ -1,2 +1,2 @@
 <?php
-foreach ($items as &$item) { $item++; } echo 1;
+foreach ($items as &$item) { $item++; } $item = 0;

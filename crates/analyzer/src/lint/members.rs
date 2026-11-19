@@ -28,7 +28,7 @@ pub(super) const RULES: &[Rule] = &[
         "Detect a private property without a class-local read.",
         "class C { private int $x; function reset() { $this->x = 0; } }",
         "class C {}",
-        DefaultStatus::OptIn,
+        DefaultStatus::Enabled,
     ),
     rule(
         Group::Unused,
@@ -103,6 +103,9 @@ struct ClassUses<'a> {
     names: HashSet<String>,
     property_reads: HashSet<String>,
     direct_writes: HashSet<usize>,
+    retained_references: HashSet<&'a str>,
+    stored_statics: HashSet<&'a str>,
+    cleared_statics: HashSet<&'a str>,
     writes: Vec<(&'a str, Span, Option<usize>)>,
     parent_constructed: bool,
     dynamic: bool,
@@ -155,28 +158,13 @@ impl<'a> Members<'a> {
                     uses.property_reads.insert(name.to_owned());
                 }
             }
-            Expr::Assign { target, .. }
-            | Expr::AssignReference { target, .. }
-            | Expr::CompoundAssign { target, .. }
-            | Expr::IncDec { target, .. } => {
-                if matches!(expression.kind, Expr::Assign { .. })
-                    && matches!(
-                        target.kind,
-                        Expr::Property { .. } | Expr::StaticProperty { .. }
-                    )
-                {
-                    uses.direct_writes.insert(target.span.start);
-                }
-                if let Expr::Property {
-                    target: receiver,
-                    name: MemberName::Identifier(name),
-                    ..
-                } = &target.kind
-                    && matches!(&receiver.kind, Expr::Variable(Variable::Named(name)) if name == "this")
-                {
-                    uses.writes.push((&name.name, name.span, scope.callable));
-                }
+            Expr::Assign { target, value } => {
+                uses.assignment(target, value);
+                uses.property_write(target, scope.callable);
             }
+            Expr::AssignReference { target, .. }
+            | Expr::CompoundAssign { target, .. }
+            | Expr::IncDec { target, .. } => uses.property_write(target, scope.callable),
             Expr::Eval(_) | Expr::Include { .. } => uses.dynamic = true,
             _ => {}
         }
@@ -288,7 +276,54 @@ impl<'a> Members<'a> {
     }
 }
 
-impl ClassUses<'_> {
+impl<'a> ClassUses<'a> {
+    fn assignment(&mut self, target: &'a phera_ast::Expression, value: &phera_ast::Expression) {
+        match &target.kind {
+            Expr::Property {
+                name: MemberName::Identifier(name),
+                ..
+            } => {
+                self.direct_writes.insert(target.span.start);
+                // A property can keep aliases alive across clones through an array of references.
+                let mut pending = vec![value];
+                while let Some(value) = pending.pop() {
+                    if let Expr::Array(items) = &value.kind {
+                        if items.iter().any(|item| item.by_reference) {
+                            self.retained_references.insert(&name.name);
+                            break;
+                        }
+                        pending.extend(items.iter().map(|item| &item.value));
+                    }
+                }
+            }
+            Expr::StaticProperty {
+                name: Variable::Named(name),
+                ..
+            } => {
+                self.direct_writes.insert(target.span.start);
+                // A static slot that is filled and later cleared can hold a memory reserve or resource.
+                if matches!(value.kind, Expr::Literal(phera_ast::Literal::Null)) {
+                    self.cleared_statics.insert(name);
+                } else {
+                    self.stored_statics.insert(name);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn property_write(&mut self, target: &'a phera_ast::Expression, callable: Option<usize>) {
+        if let Expr::Property {
+            target: receiver,
+            name: MemberName::Identifier(name),
+            ..
+        } = &target.kind
+            && matches!(&receiver.kind, Expr::Variable(Variable::Named(name)) if name == "this")
+        {
+            self.writes.push((&name.name, name.span, callable));
+        }
+    }
+
     fn read_property(&mut self, name: &str, span: Span) {
         if !self.direct_writes.contains(&span.start) {
             self.property_reads.insert(name.to_owned());
@@ -296,7 +331,10 @@ impl ClassUses<'_> {
     }
 
     fn check_property(&self, context: &mut Context<'_>, name: &str, span: Span) {
-        if !self.property_reads.contains(name) {
+        if !self.property_reads.contains(name)
+            && !self.retained_references.contains(name)
+            && !(self.stored_statics.contains(name) && self.cleared_statics.contains(name))
+        {
             context.report(
                 "unused-private-property",
                 span,

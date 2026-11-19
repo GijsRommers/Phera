@@ -48,7 +48,7 @@ impl Options {
                     break;
                 }
                 "--level" => {
-                    options.level = level(&arguments.next().ok_or("--level needs 0, 1 or 2")?)?
+                    options.level = level(&arguments.next().ok_or("--level needs 0, 1, 2 or 3")?)?
                 }
                 "--format" => {
                     options.format = match arguments.next().as_deref() {

@@ -1,2 +1,2 @@
 <?php
-$starts = strpos($text, $needle) === 0;
+$starts = strpos('alphabet', 'alpha') === 0;

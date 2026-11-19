@@ -1,28 +1,30 @@
 //! Block checks detect `return; echo 1;` without control-flow or type inference.
 
-use super::{Context, Node, condition, variable};
+use super::{Context, Node, conditions, variable};
 use crate::lint::source::is_comment;
 use phera_ast::{ExpressionKind as Expr, Literal, Statement, StatementKind as Stmt};
 use phera_source::Span;
 
 pub(super) fn assignment_in_condition(context: &mut Context<'_>, node: Node<'_>) {
-    if let Some(condition) = condition(node)
-        && let Expr::Assign { target, value } = &condition.kind
-        && variable(target).is_some()
-        && matches!(value.kind, Expr::Literal(_))
-    {
-        context.report(
-            "assignment-in-condition",
-            condition.span,
-            "Assignment used as a condition. Did you mean to compare values?",
-        );
-    }
+    conditions(node, |condition| {
+        if let Expr::Assign { target, value } = &condition.kind
+            && variable(target).is_some()
+            && matches!(value.kind, Expr::Literal(_))
+        {
+            context.report(
+                "assignment-in-condition",
+                condition.span,
+                "Assignment used as a condition. Did you mean to compare values?",
+            );
+        }
+    });
 }
 
 pub(super) fn constant_condition(context: &mut Context<'_>, node: Node<'_>) {
-    if let Some(condition) = condition(node)
-        && let Expr::Literal(literal) = &condition.kind
-    {
+    conditions(node, |condition| {
+        let Expr::Literal(literal) = &condition.kind else {
+            return;
+        };
         let truthy = match literal {
             Literal::Bool(value) => *value,
             Literal::Null => false,
@@ -35,7 +37,7 @@ pub(super) fn constant_condition(context: &mut Context<'_>, node: Node<'_>) {
             condition.span,
             format!("This condition is always {truthy}."),
         );
-    }
+    });
 }
 
 pub(super) fn identical_branches(context: &mut Context<'_>, node: Node<'_>) {
@@ -44,12 +46,16 @@ pub(super) fn identical_branches(context: &mut Context<'_>, node: Node<'_>) {
     };
     let Stmt::If {
         then,
+        elseifs,
         otherwise: Some(otherwise),
         ..
     } = &statement.kind
     else {
         return;
     };
+    if !elseifs.is_empty() {
+        return;
+    }
     let span = |statements: &[Statement]| {
         Some(Span::new(
             statements.first()?.span.start,
@@ -155,11 +161,17 @@ pub(super) fn fallthrough(context: &mut Context<'_>, node: Node<'_>) {
         let Some(last) = case.body.last() else {
             continue;
         };
-        if exits(last) {
+        if case_exits(last) {
             continue;
         }
-        let gap = Span::new(last.span.end, next.span.start);
-        if !context.source.within(gap).iter().any(is_comment) {
+        // An annotation can be in the final braces of a case or above the next label.
+        let gap = Span::new(last.span.start, next.span.start);
+        if !context
+            .source
+            .within(gap)
+            .iter()
+            .any(|token| is_comment(token) && marks_fallthrough(context.source.slice(token.span)))
+        {
             context.report(
                 "switch-fallthrough",
                 next.span,
@@ -167,6 +179,86 @@ pub(super) fn fallthrough(context: &mut Context<'_>, node: Node<'_>) {
             );
         }
     }
+}
+
+fn case_exits(last: &Statement) -> bool {
+    let mut pending = vec![last];
+    while let Some(statement) = pending.pop() {
+        if exits(statement) {
+            continue;
+        }
+        match &statement.kind {
+            Stmt::Block(body) => {
+                let Some(last) = body.last() else {
+                    return false;
+                };
+                pending.push(last);
+            }
+            Stmt::If {
+                then,
+                elseifs,
+                otherwise: Some(otherwise),
+                ..
+            } => {
+                let (Some(then), Some(otherwise)) = (then.last(), otherwise.last()) else {
+                    return false;
+                };
+                for branch in elseifs {
+                    let Some(last) = branch.body.last() else {
+                        return false;
+                    };
+                    pending.push(last);
+                }
+                pending.extend([then, otherwise]);
+            }
+            Stmt::Try {
+                body,
+                catches,
+                finally,
+            } => {
+                if finally
+                    .as_ref()
+                    .and_then(|block| block.last())
+                    .is_some_and(exits)
+                {
+                    continue;
+                }
+                let Some(last) = body.last() else {
+                    return false;
+                };
+                pending.push(last);
+                for catch in catches {
+                    let Some(last) = catch.body.last() else {
+                        return false;
+                    };
+                    pending.push(last);
+                }
+            }
+            _ => return false,
+        }
+    }
+    true
+}
+
+fn marks_fallthrough(comment: &[u8]) -> bool {
+    let mut previous = &[][..];
+    for word in comment
+        .split(|byte| !byte.is_ascii_alphabetic())
+        .filter(|word| !word.is_empty())
+    {
+        let matches = |text: &[u8]| word.eq_ignore_ascii_case(text);
+        if matches(b"fallthrough")
+            || matches(b"through")
+                && [b"fall".as_slice(), b"falls", b"falling"]
+                    .iter()
+                    .any(|verb| previous.eq_ignore_ascii_case(verb))
+            || matches(b"break") && previous.eq_ignore_ascii_case(b"no")
+        {
+            return true;
+        }
+        previous = word;
+    }
+    false
 }
 
 pub(super) fn empty_catch(context: &mut Context<'_>, node: Node<'_>) {
@@ -287,38 +379,6 @@ pub(super) fn unreachable_catch(context: &mut Context<'_>, node: Node<'_>) {
             resolved.push(name.clone());
         }
         previous.extend(resolved);
-    }
-}
-
-pub(super) fn foreach_reference(context: &mut Context<'_>, node: Node<'_>) {
-    let Node::Block(body) = node else {
-        return;
-    };
-    for pair in body.windows(2) {
-        let [statement, next] = pair else {
-            continue;
-        };
-        let Stmt::Foreach {
-            value,
-            by_reference: true,
-            ..
-        } = &statement.kind
-        else {
-            continue;
-        };
-        let Some(name) = variable(value) else {
-            continue;
-        };
-        if matches!(&next.kind, Stmt::Unset(items) if items.iter().any(|item| variable(item) == Some(name)))
-            || matches!(next.kind, Stmt::Return(_))
-        {
-            continue;
-        }
-        context.report(
-            "foreach-reference-not-unset",
-            value.span,
-            format!("Unset ${name} after foreach to release the last element reference."),
-        );
     }
 }
 

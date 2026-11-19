@@ -1,1 +1,3 @@
 2	loose-comparison	Use a strict comparison for these scalar literals.
+3	loose-comparison	Loose comparison with null coerces other values. Use a strict comparison to test for null.
+4	loose-comparison	Loose comparison with null coerces other values. Use a strict comparison to test for null.

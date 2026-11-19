@@ -1,2 +1,2 @@
 <?php
-$found = \str_contains($text, $needle);
+$found = \str_contains('alphabet', 'alpha');
