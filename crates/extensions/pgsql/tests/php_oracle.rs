@@ -30,6 +30,11 @@ const CALLS: &[(&str, &str)] = &[
         "pid",
         "pg_get_pid($db) === (int)pg_fetch_result(pg_query($db, 'SELECT pg_backend_pid()'), 0, 0)",
     ),
+    (
+        "syntax-error",
+        "(function () use ($db) {
+        $value = pg_query($db, 'SELECT FROM'); return [$value, pg_last_error($db)]; })()",
+    ),
     ("rows", "pg_num_rows(rows($db))"),
     ("fields", "pg_num_fields(rows($db))"),
     ("affected", "pg_affected_rows(rows($db))"),

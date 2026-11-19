@@ -63,6 +63,20 @@ fn mysqli_matches_the_php_oracle() {
     for (label, expression) in CALLS {
         add(&mut script, &mut labels, label, expression);
     }
+    if oracle::supports_php_since("mysqlnd patch-version metadata", 80513) {
+        add(
+            &mut script,
+            &mut labels,
+            "client-info",
+            "mysqli_get_client_info()",
+        );
+        add(
+            &mut script,
+            &mut labels,
+            "client-version",
+            "mysqli_get_client_version()",
+        );
+    }
     for mode in [1, 2, 3] {
         for (label, expression) in [
             ("all", format!("rows($db)->fetch_all({mode})")),
