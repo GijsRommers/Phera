@@ -162,11 +162,10 @@ impl Vm {
     }
 }
 
-/// Every interface of `class`, in the order PHP keeps them: the parent
-/// class's list first (reversed for a child without its own implements list),
-/// then the interfaces the class names itself, and
-/// only then what those interfaces extend, each interface's own list
-/// taken back to front.
+/// Every interface of `class`, in PHP's linked order. User classes with an
+/// implements list add their direct interfaces first, then inherited ones.
+/// Native classes inherit their parent's list backwards and immediately
+/// append each named interface's own interfaces in reverse order.
 ///
 /// ```php
 /// interface A {} interface B extends A {} interface C {}
@@ -177,6 +176,8 @@ impl Vm {
 /// A class or interface is worked out after everything it builds on, with
 /// a list of work to do in place of recursion.
 pub(crate) fn interfaces_in_php_order(class: &Class) -> Vec<&Class> {
+    use crate::classes::class::ClassOrigin;
+
     let mut lists: std::collections::HashMap<&str, Vec<&Class>> = Default::default();
     let mut pending = vec![(class, false)];
     while let Some((current, parts_are_ready)) = pending.pop() {
@@ -196,26 +197,57 @@ pub(crate) fn interfaces_in_php_order(class: &Class) -> Vec<&Class> {
         }
         let list_of = |part: &Class| lists.get(part.name.as_str()).cloned().unwrap_or_default();
         let mut list = current.parent.as_deref().map(list_of).unwrap_or_default();
+        if current.origin == ClassOrigin::Native {
+            list.reverse();
+            // Registering a native __toString adds Stringable before inheritance.
+            if current
+                .methods
+                .get("__tostring")
+                .is_some_and(|method| method.declaring == current.name)
+                && let Some(stringable) = current
+                    .interfaces
+                    .iter()
+                    .map(|named| named.as_ref())
+                    .chain(list.iter().copied())
+                    .find(|named| named.name == "Stringable")
+            {
+                list.retain(|named| named.name != "Stringable");
+                list.insert(0, stringable);
+            }
+            for named in &current.interfaces {
+                if append_interface(&mut list, named) {
+                    for interface in list_of(named).into_iter().rev() {
+                        append_interface(&mut list, interface);
+                    }
+                }
+            }
+            lists.insert(current.name.as_str(), list);
+            continue;
+        }
         if current.interfaces.is_empty() {
             list.reverse();
         }
         let inherited = list.len();
         for named in &current.interfaces {
-            if !list.iter().any(|known| known.name == named.name) {
-                list.push(named);
-            }
+            append_interface(&mut list, named);
         }
         for index in inherited..list.len() {
             let extended = list_of(list[index]);
             for interface in extended.into_iter().rev() {
-                if !list.iter().any(|known| known.name == interface.name) {
-                    list.push(interface);
-                }
+                append_interface(&mut list, interface);
             }
         }
         lists.insert(current.name.as_str(), list);
     }
     lists.remove(class.name.as_str()).unwrap_or_default()
+}
+
+fn append_interface<'a>(list: &mut Vec<&'a Class>, interface: &'a Class) -> bool {
+    if list.iter().any(|known| known.name == interface.name) {
+        return false;
+    }
+    list.push(interface);
+    true
 }
 
 /// PHP lists declared methods before inherited methods, retaining source order within each class.

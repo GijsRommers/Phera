@@ -151,6 +151,15 @@ impl ClassTable {
                 .iter()
                 .filter_map(|name| table.get(name))
                 .collect();
+            if entry.kind == NativeKind::Interface {
+                for interface in &interfaces {
+                    for (name, method) in &interface.methods {
+                        methods
+                            .entry(name.clone())
+                            .or_insert_with(|| method.clone());
+                    }
+                }
+            }
             let mut constants = parent
                 .as_ref()
                 .map(|class| class.constants.clone())

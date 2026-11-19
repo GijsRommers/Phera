@@ -4,6 +4,7 @@ mod arrays;
 mod containers;
 mod files;
 mod iterators;
+mod metadata;
 
 pub type Cases = Vec<(String, String, String)>;
 
@@ -46,7 +47,7 @@ pub fn methods(cases: &mut Cases, setup: &str, calls: &[&str]) {
     }
 }
 
-pub fn matrix() -> [(&'static str, Cases); 23] {
+pub fn matrix() -> [(&'static str, Cases); 24] {
     [
         ("ArrayObject", arrays::container("ArrayObject")),
         ("ArrayIterator", arrays::container("ArrayIterator")),
@@ -77,5 +78,6 @@ pub fn matrix() -> [(&'static str, Cases); 23] {
             files::directory("RecursiveDirectoryIterator"),
         ),
         ("GlobIterator", files::directory("GlobIterator")),
+        ("SPL_metadata", metadata::cases()),
     ]
 }
