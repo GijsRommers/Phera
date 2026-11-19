@@ -63,6 +63,7 @@ impl Compiler<'_> {
         while let ast::ExpressionKind::Index { target, .. }
         | ast::ExpressionKind::Property { target, .. } = &node.kind
         {
+            self.note_hook_backing(node);
             postfix.push(node);
             node = target;
         }

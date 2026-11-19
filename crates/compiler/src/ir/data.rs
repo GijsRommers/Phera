@@ -186,8 +186,10 @@ pub struct ClassProperty {
     pub visibility: phera_bytecode::Visibility,
     pub is_static: bool,
     pub is_readonly: bool,
+
     pub ty: Option<String>,
     pub default: Option<usize>,
+    pub hooks: Option<Box<phera_bytecode::PropertyHooks<usize>>>,
 }
 
 /// Constant initializers execute only when the linked class first needs their value.

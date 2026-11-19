@@ -169,6 +169,14 @@ impl Vm {
                 });
             }
             for (slot, property) in properties {
+                let is_virtual = property
+                    .hooks
+                    .as_ref()
+                    .is_some_and(|hooks| hooks.hooks.is_virtual);
+                let is_abstract = property
+                    .hooks
+                    .as_ref()
+                    .is_some_and(|hooks| hooks.methods().any(|hook| hook.is_abstract));
                 let mut info = MemberInfo {
                     name: property.name.clone(),
                     class: property.declaring.clone(),
@@ -177,6 +185,8 @@ impl Vm {
                         | flags(property.static_storage.is_some(), 16)
                         | flags(property.is_readonly, 128)
                         | flags(property.is_final, 32)
+                        | flags(is_virtual, 512)
+                        | flags(is_abstract, 64)
                         | flags(
                             property.set_visibility == Some(Visibility::Protected)
                                 || property.is_readonly
@@ -186,7 +196,7 @@ impl Vm {
                         )
                         | flags(property.set_visibility == Some(Visibility::Private), 4096),
                     declared_type: property.ty.as_ref().map(|ty| ty.display.clone()),
-                    has_default: property.initialized,
+                    has_default: property.initialized && !is_virtual,
                     property: Some(PropertyHandle {
                         class: class.index.number(),
                         slot,

@@ -87,7 +87,11 @@ impl Compiler<'_> {
             Some(named) if named.name == "assertion" => Some("description".to_string()),
             Some(_) => return None,
         };
-        let written = self.source.get(condition.span.start..condition.span.end)?;
+        let formatted =
+            super::assertion_text::format(self.source, condition.span, &condition.value);
+        let written = formatted
+            .as_deref()
+            .or_else(|| self.source.get(condition.span.start..condition.span.end))?;
         let text = [b"assert(", written.trim_ascii(), b")"].concat();
         Some((text, description_name))
     }

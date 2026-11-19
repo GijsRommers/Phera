@@ -9,6 +9,7 @@ pub(crate) enum ClassFunction {
     GetParentClass,
     GetCalledClass,
     GetObjectVars,
+    GetMangledObjectVars,
     GetClassVars,
     PropertyExists,
     MethodExists,
@@ -36,6 +37,7 @@ impl ClassFunction {
         Self::GetParentClass,
         Self::GetCalledClass,
         Self::GetObjectVars,
+        Self::GetMangledObjectVars,
         Self::GetClassVars,
         Self::PropertyExists,
         Self::MethodExists,
@@ -70,6 +72,7 @@ impl ClassFunction {
             Self::GetParentClass => "get_parent_class",
             Self::GetCalledClass => "get_called_class",
             Self::GetObjectVars => "get_object_vars",
+            Self::GetMangledObjectVars => "get_mangled_object_vars",
             Self::GetClassVars => "get_class_vars",
             Self::PropertyExists => "property_exists",
             Self::MethodExists => "method_exists",
@@ -99,7 +102,10 @@ impl ClassFunction {
         const OBJECT_OR_CLASS: Param = Param::new("object_or_class", ParamType::Mixed);
         match self {
             Self::GetClass => const { &[OBJECT.optional()] },
-            Self::GetObjectVars | Self::ObjectId | Self::ObjectHash => const { &[OBJECT] },
+            Self::GetObjectVars
+            | Self::GetMangledObjectVars
+            | Self::ObjectId
+            | Self::ObjectHash => const { &[OBJECT] },
             Self::GetParentClass => const { &[OBJECT_OR_CLASS.optional()] },
             Self::ClassMethods => const { &[OBJECT_OR_CLASS] },
             Self::GetClassVars => const { &[CLASS] },

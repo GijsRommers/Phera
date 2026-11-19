@@ -11,7 +11,9 @@ use phera_value::{ArrayKey, Object, Value, to_bool};
 
 use crate::Vm;
 use crate::access_mode::Missing;
+use crate::classes::property_hooks::HookRead;
 use crate::classes::{Class, Method};
+use crate::code_table::FunctionIndex;
 use crate::path_update::property_name;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -45,6 +47,17 @@ pub(crate) enum PropertyRead {
 pub(crate) struct ReadProperty {
     pub(crate) value: Value,
     pub(crate) source: PropertyReadSource,
+}
+
+pub(crate) enum PropertyReadStep {
+    Value(ReadProperty),
+    Hook(FunctionIndex, Rc<Object>),
+}
+
+impl From<ReadProperty> for PropertyReadStep {
+    fn from(value: ReadProperty) -> Self {
+        Self::Value(value)
+    }
 }
 
 #[derive(PartialEq, Eq)]
@@ -183,21 +196,12 @@ impl Vm {
         result
     }
 
-    pub(crate) async fn read_overloaded_property(
+    pub(crate) async fn plan_property_read(
         &mut self,
         value: Value,
         key: ArrayKey,
         mode: PropertyRead,
-    ) -> NativeResult {
-        Ok(self.resolve_property_read(value, key, mode).await?.value)
-    }
-
-    pub(crate) async fn resolve_property_read(
-        &mut self,
-        value: Value,
-        key: ArrayKey,
-        mode: PropertyRead,
-    ) -> Result<ReadProperty, phera_extension_api::NativeError> {
+    ) -> Result<PropertyReadStep, phera_extension_api::NativeError> {
         let missing = match mode {
             PropertyRead::Read | PropertyRead::Update => Missing::Warn,
             PropertyRead::Coalesce => Missing::Silent,
@@ -206,7 +210,7 @@ impl Vm {
         let Value::Object(object) = &value else {
             return self
                 .read_property(value, key, missing)
-                .map(ReadProperty::stored);
+                .map(|value| ReadProperty::stored(value).into());
         };
         let name = property_name(&key);
         let native = if mode == PropertyRead::Update {
@@ -225,9 +229,28 @@ impl Vm {
             self.native_property_read(object, &name, missing)?
         };
         if let Some(value) = native {
-            return Ok(ReadProperty::stored(value));
+            return Ok(ReadProperty::stored(value).into());
         }
-        let Some(class) = self.classes.for_object(object).filter(|class| {
+        let class = self.classes.for_object(object);
+        let (stored, accessible) = self.property_slot(object, &name);
+        if let Some(class) = &class
+            && let Some(property) = accessible
+                .as_ref()
+                .and_then(|key| crate::classes::property_hooks::for_key(class, key))
+            && let Some(hooks) = &property.hooks
+        {
+            match self.declared_hook_read(object, property, hooks, false)? {
+                HookRead::Value(value) => return Ok(ReadProperty::stored(value).into()),
+                HookRead::Getter(function) => {
+                    return Ok(PropertyReadStep::Hook(function, object.clone()));
+                }
+                HookRead::Storage => {}
+            }
+            return self
+                .read_declared_property(object, &name, missing)
+                .map(|value| ReadProperty::stored(value).into());
+        }
+        let Some(class) = class.filter(|class| {
             class
                 .magic
                 .as_ref()
@@ -235,11 +258,10 @@ impl Vm {
         }) else {
             return self
                 .read_declared_property(object, &name, missing)
-                .map(ReadProperty::stored);
+                .map(|value| ReadProperty::stored(value).into());
         };
-        let (stored, accessible) = self.property_slot(object, &name);
         if let Some(stored) = stored {
-            return Ok(ReadProperty::stored(stored));
+            return Ok(ReadProperty::stored(stored).into());
         }
         if accessible
             .as_ref()
@@ -247,7 +269,7 @@ impl Vm {
         {
             return self
                 .read_declared_property(object, &name, missing)
-                .map(ReadProperty::stored);
+                .map(|value| ReadProperty::stored(value).into());
         }
         if !matches!(mode, PropertyRead::Read | PropertyRead::Update) {
             if let Some(method) = self.property_hook(&class, object, &key, PropertyHook::Isset) {
@@ -262,19 +284,19 @@ impl Vm {
                     )
                     .await?;
                 if !to_bool(&exists) {
-                    return Ok(ReadProperty::stored(Value::Null));
+                    return Ok(ReadProperty::stored(Value::Null).into());
                 }
                 if mode == PropertyRead::Isset {
-                    return Ok(ReadProperty::stored(Value::Bool(true)));
+                    return Ok(ReadProperty::stored(Value::Bool(true)).into());
                 }
             } else if mode != PropertyRead::Coalesce {
-                return Ok(ReadProperty::stored(Value::Null));
+                return Ok(ReadProperty::stored(Value::Null).into());
             }
         }
         let Some(method) = self.property_hook(&class, object, &key, PropertyHook::Get) else {
             return self
                 .read_declared_property(object, &name, missing)
-                .map(ReadProperty::stored);
+                .map(|value| ReadProperty::stored(value).into());
         };
         let result = self
             .invoke_property_hook(
@@ -288,6 +310,6 @@ impl Vm {
             .await?;
         self.validate_getter_value(&class, accessible.as_ref(), result)
             .await
-            .map(ReadProperty::from_getter)
+            .map(|value| ReadProperty::from_getter(value).into())
     }
 }

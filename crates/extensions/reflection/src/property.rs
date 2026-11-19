@@ -2,10 +2,12 @@
 
 use std::rc::Rc;
 
-use phera_extension_api::reflection::{ClassSelector, MemberKind, PropertyRead};
+use phera_extension_api::reflection::{
+    ClassSelector, MemberInfo, MemberKind, PropertyHookKind, PropertyRead, PropertyWrite,
+};
 use phera_extension_api::{
     ArrayKey, ClassEntry, ConstantValue, Context, MethodEntry, NativeError, NativeResult, Object,
-    Param, ParamType, Registry, Value, args,
+    Param, ParamType, PhpArray, Registry, Value, args,
 };
 
 use crate::class::NAME_PROPERTY;
@@ -20,6 +22,8 @@ const OBJECT: &[Param] = const {
         .nullable()
         .with_default(ConstantValue::Null)]
 };
+const HOOK: &[Param] = const { &[Param::new("type", ParamType::Class("PropertyHookType"))] };
+const HOOKS: [PropertyHookKind; 2] = [PropertyHookKind::Get, PropertyHookKind::Set];
 const RAW_OBJECT: &[Param] = const { &[Param::new("object", ParamType::Object)] };
 
 pub(crate) fn register(registry: &mut Registry) {
@@ -67,10 +71,13 @@ pub(crate) fn register(registry: &mut Registry) {
                 MethodEntry::public("isProtected", &[], |_, o, _| has_modifier(o, 2)),
                 MethodEntry::public("isPrivate", &[], |_, o, _| has_modifier(o, 4)),
                 MethodEntry::public("isStatic", &[], |_, o, _| has_modifier(o, 16)),
-                MethodEntry::public("isFinal", &[], |_, o, _| has_modifier(o, 32)),
-                MethodEntry::public("isAbstract", &[], |_, o, _| has_modifier(o, 64)),
+                MethodEntry::public("isFinal", &[], |_, o, _| has_modifier(o, 32))
+                    .returning("bool"),
+                MethodEntry::public("isAbstract", &[], |_, o, _| has_modifier(o, 64))
+                    .returning("bool"),
                 MethodEntry::public("isReadOnly", &[], |_, o, _| has_modifier(o, 128)),
-                MethodEntry::public("isVirtual", &[], |_, o, _| has_modifier(o, 512)),
+                MethodEntry::public("isVirtual", &[], |_, o, _| has_modifier(o, 512))
+                    .returning("bool"),
                 MethodEntry::public("isProtectedSet", &[], |_, o, _| has_modifier(o, 2048)),
                 MethodEntry::public("isPrivateSet", &[], |_, o, _| has_modifier(o, 4096)),
                 MethodEntry::public("isDefault", &[], |_, o, _| {
@@ -93,8 +100,9 @@ pub(crate) fn register(registry: &mut Registry) {
                     read(c, o, a, PropertyRead::Initialized, "isInitialized")
                 }),
                 MethodEntry::public("getRawValue", RAW_OBJECT, |c, o, a| {
-                    read(c, o, a, PropertyRead::Value, "getRawValue")
-                }),
+                    read(c, o, a, PropertyRead::Raw, "getRawValue")
+                })
+                .returning("mixed"),
                 MethodEntry::public(
                     "setRawValue",
                     const {
@@ -105,29 +113,15 @@ pub(crate) fn register(registry: &mut Registry) {
                     },
                     |c, o, a| {
                         let member = reflected(o)?;
-                        let mut static_property = member.modifiers & 16 != 0;
-                        if !static_property
-                            && let Some(object) = args::object(a, 0)
-                            && !object.class.is_instance_of(&member.class)
-                        {
-                            static_property = engine(c)?
-                                .reflect_members(
-                                    ClassSelector::Name(object.class.name()),
-                                    MemberKind::Property,
-                                )
-                                .iter()
-                                .any(|property| {
-                                    property.name == member.name && property.modifiers & 16 != 0
-                                });
-                        }
-                        if static_property {
+                        if member.modifiers & 16 != 0 {
                             return Err(crate::exception(
                                 "May not use setRawValue on static properties",
                             ));
                         }
-                        set_value(c, o, a)
+                        set_raw(c, member, a)
                     },
-                ),
+                )
+                .returning("void"),
                 MethodEntry::public(
                     "setValue",
                     const {
@@ -145,12 +139,49 @@ pub(crate) fn register(registry: &mut Registry) {
                     crate::types::make(c, reflected(o)?.declared_type.as_deref())
                 }),
                 MethodEntry::public("getSettableType", &[], |c, o, _| {
-                    crate::types::make(c, reflected(o)?.declared_type.as_deref())
-                }),
-                MethodEntry::public("hasHooks", &[], |_, o, _| data(o, |_| Value::Bool(false))),
-                MethodEntry::public("getHooks", &[], |_, o, _| {
-                    data(o, |_| Value::from(phera_extension_api::PhpArray::new()))
-                }),
+                    let ty = engine(c)?.reflect_property_settable_type(&*reflected(o)?);
+                    crate::types::make(c, ty.as_deref())
+                })
+                .returning("?ReflectionType"),
+                MethodEntry::public("hasHooks", &[], |c, o, _| {
+                    let member = reflected(o)?;
+                    let engine = engine(c)?;
+                    Ok(Value::Bool(HOOKS.iter().any(|kind| {
+                        engine.reflect_property_hook(&member, *kind).is_some()
+                    })))
+                })
+                .returning("bool"),
+                MethodEntry::public("getHooks", &[], |c, o, _| {
+                    let member = reflected(o)?;
+                    let mut hooks = PhpArray::new();
+                    for kind in HOOKS {
+                        if let Some(target) = engine(c)?.reflect_property_hook(&member, kind) {
+                            hooks.insert(
+                                ArrayKey::str(kind.name()),
+                                crate::function::make(c, target)?,
+                            );
+                        }
+                    }
+                    Ok(Value::from(hooks))
+                })
+                .returning("array"),
+                MethodEntry::public("hasHook", HOOK, |c, o, a| {
+                    let member = reflected(o)?;
+                    let kind = hook_kind(a)?;
+                    Ok(Value::Bool(
+                        engine(c)?.reflect_property_hook(&member, kind).is_some(),
+                    ))
+                })
+                .returning("bool"),
+                MethodEntry::public("getHook", HOOK, |c, o, a| {
+                    let member = reflected(o)?;
+                    let kind = hook_kind(a)?;
+                    match engine(c)?.reflect_property_hook(&member, kind) {
+                        Some(target) => crate::function::make(c, target),
+                        None => Ok(Value::Null),
+                    }
+                })
+                .returning("?ReflectionMethod"),
                 MethodEntry::public("getDocComment", &[], |_, o, _| doc(o)),
                 MethodEntry::public("setAccessible", ACCESS, |_, o, _| {
                     reflected(o)?;
@@ -204,11 +235,27 @@ fn read(
     if member.dynamic
         && let Some(object) = object
     {
+        if let Some(actual) = declared_property(context, &object, &member.name)? {
+            if matches!(mode, PropertyRead::Raw) && actual.modifiers & 16 != 0 {
+                return Err(crate::exception(
+                    "May not use getRawValue on static properties",
+                ));
+            }
+            return engine(context)?.reflect_property_read(&actual, Some(object), mode);
+        }
         let value = object.get(&ArrayKey::str(member.name.as_str()));
         return if matches!(mode, PropertyRead::Initialized) {
             Ok(Value::Bool(value.is_some()))
+        } else if let Some(value) = value {
+            Ok(value.deref().clone())
         } else {
-            Ok(value.unwrap_or_default())
+            let class = object
+                .class
+                .name()
+                .split_once('\0')
+                .map_or(object.class.name(), |(name, _)| name);
+            context.warning(format!("Undefined property: {class}::${}", member.name));
+            Ok(Value::Null)
         };
     }
     engine(context)?.reflect_property_read(&member, object, mode)
@@ -227,8 +274,74 @@ fn default_value(
     engine(context)?.reflect_property_read(&member, None, PropertyRead::Default)
 }
 
+fn hook_kind(args: &[Value]) -> Result<PropertyHookKind, NativeError> {
+    let name = args::object(args, 0).and_then(|object| object.get(&ArrayKey::str("name")));
+    match name {
+        Some(Value::String(name)) if name.as_bytes() == b"Get" => Ok(PropertyHookKind::Get),
+        Some(Value::String(name)) if name.as_bytes() == b"Set" => Ok(PropertyHookKind::Set),
+        _ => Err(NativeError::type_error("Expected a PropertyHookType case")),
+    }
+}
+
+fn declared_property(
+    context: &mut dyn Context,
+    object: &Object,
+    name: &str,
+) -> Result<Option<Rc<MemberInfo>>, NativeError> {
+    Ok(engine(context)?
+        .reflect_members(
+            ClassSelector::Name(object.class.name()),
+            MemberKind::Property,
+        )
+        .iter()
+        .find(|candidate| candidate.name == name)
+        .cloned())
+}
+
+fn set_raw(context: &mut dyn Context, member: Rc<MemberInfo>, args: &[Value]) -> NativeResult {
+    let object = args::object(args, 0).cloned();
+    let value = args.get(1).cloned().unwrap_or_default();
+    if let Some(object) = object.as_ref()
+        && (member.dynamic || !object.class.is_instance_of(&member.class))
+        && let Some(actual) = declared_property(context, object, &member.name)?
+    {
+        if actual.modifiers & 16 != 0 {
+            return Err(crate::exception(
+                "May not use setRawValue on static properties",
+            ));
+        }
+        return engine(context)?.reflect_property_write(
+            &actual,
+            Some(object.clone()),
+            value,
+            PropertyWrite::Raw,
+        );
+    }
+    if member.dynamic
+        && let Some(object) = object
+    {
+        return engine(context)?.reflect_dynamic_property_write(object, &member.name, value);
+    }
+    engine(context)?.reflect_property_write(&member, object, value, PropertyWrite::Raw)
+}
+
 fn set_value(context: &mut dyn Context, this: Option<&Rc<Object>>, args: &[Value]) -> NativeResult {
     let member = reflected(this)?;
+    let (object, value) = write_arguments(context, &member, args)?;
+    if member.dynamic
+        && let Some(object) = object
+    {
+        engine(context)?.reflect_dynamic_property_write(object, &member.name, value)
+    } else {
+        engine(context)?.reflect_property_write(&member, object, value, PropertyWrite::Value)
+    }
+}
+
+fn write_arguments(
+    context: &mut dyn Context,
+    member: &MemberInfo,
+    args: &[Value],
+) -> Result<(Option<Rc<Object>>, Value), NativeError> {
     let (object, value) = match args {
         [value] if member.modifiers & 16 != 0 => {
             context.deprecated(
@@ -255,11 +368,5 @@ fn set_value(context: &mut dyn Context, this: Option<&Rc<Object>>, args: &[Value
             ));
         }
     };
-    if member.dynamic
-        && let Some(object) = object
-    {
-        crate::engine(context)?.reflect_dynamic_property_write(object, &member.name, value.clone())
-    } else {
-        engine(context)?.reflect_property_write(&member, object, value.clone())
-    }
+    Ok((object, value.clone()))
 }

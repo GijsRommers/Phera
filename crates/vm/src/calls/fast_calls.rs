@@ -88,16 +88,20 @@ impl Machine<'_> {
         let Some(frame) = self.stack.current().copied() else {
             return Step::Slow;
         };
-        let facts = self.code.facts(frame.function);
         let Some(destination) = frame.destination() else {
-            return Step::Slow;
+            return if frame.discards_result() {
+                self.leave_discarded(frame, source)
+            } else {
+                Step::Slow
+            };
         };
+        let facts = self.code.facts(frame.function);
         let depth = self.stack.depth();
         let kind = frame.kind();
         let start = frame.base() - kind.prefix();
         if depth <= self.stop + 1
             || facts.local.is_none()
-            || (frame.has_extras() && !self.stack.extras(depth - 1).holds_only_called_class())
+            || (frame.has_extras() && !self.stack.extras(depth - 1).plain_return_can_release())
             || self.stack.has_calls_from(start)
         {
             return Step::Slow;
@@ -137,6 +141,46 @@ impl Machine<'_> {
         self.registers.truncate(start);
         self.registers
             .put(caller.base() + destination.index(), value);
+        Step::Switched(Position {
+            frame: caller,
+            ip: caller.ip(),
+        })
+    }
+}
+
+impl Machine<'_> {
+    /// A setter with no suspended caller action returns without publishing a result.
+    #[inline(never)]
+    fn leave_discarded(&mut self, frame: Frame, source: Option<Reg>) -> Step {
+        if self.stack.depth() <= self.stop + 1
+            || frame.has_extras()
+            || self.stack.has_calls_from(frame.start())
+        {
+            return Step::Slow;
+        }
+        let value = match source {
+            None => &Value::Null,
+            Some(source) => match self.registers.window(frame.base() + source.index(), 1) {
+                [Some(value)] if !value.is_reference() => value,
+                _ => return Step::Slow,
+            },
+        };
+        if self
+            .code
+            .facts(frame.function)
+            .return_mask
+            .is_some_and(|mask| {
+                !mask.intersects(crate::types::own_type(value))
+                    && !(mask.intersects(phera_bytecode::TypeMask::VOID) && value.is_null())
+            })
+        {
+            return Step::Slow;
+        }
+        let Some(caller) = self.stack.caller().copied() else {
+            return Step::Slow;
+        };
+        self.stack.pop();
+        self.registers.truncate(frame.start());
         Step::Switched(Position {
             frame: caller,
             ip: caller.ip(),

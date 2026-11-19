@@ -117,7 +117,27 @@ impl Context for Vm {
         object: &phera_value::Object,
         purpose: phera_extension_api::PropertyPurpose,
     ) -> bool {
-        purpose == phera_extension_api::PropertyPurpose::Debug && self.has_debug_info(object)
+        match purpose {
+            phera_extension_api::PropertyPurpose::Debug => self.has_debug_info(object),
+            phera_extension_api::PropertyPurpose::Json => {
+                self.hooked_property_class(object).is_some()
+            }
+            _ => false,
+        }
+    }
+
+    fn property_view_can_suspend(
+        &self,
+        object: &phera_value::Object,
+        purpose: phera_extension_api::PropertyPurpose,
+    ) -> bool {
+        self.native_view_depth == Some(self.call_stack.depth())
+            && matches!(
+                purpose,
+                phera_extension_api::PropertyPurpose::Json
+                    | phera_extension_api::PropertyPurpose::Export
+            )
+            && self.hooked_property_class(object).is_some()
     }
 
     fn has_visible_property(&self, object: &phera_value::Object, name: &str) -> bool {
@@ -132,8 +152,30 @@ impl Context for Vm {
         function: &'static str,
         arguments: &[Value],
     ) -> LocalFuture<'_, Result<phera_extension_api::PropertyView, NativeError>> {
-        if self.property_view_runs_code(&object, purpose) {
+        if purpose == phera_extension_api::PropertyPurpose::Debug && self.has_debug_info(&object) {
             return self.debug_properties(object, function, arguments);
+        }
+        if matches!(
+            purpose,
+            phera_extension_api::PropertyPurpose::Json
+                | phera_extension_api::PropertyPurpose::Export
+        ) && let Some(class) = self.hooked_property_class(&object)
+        {
+            let native = crate::error_traces::NativeTrace::new(function, arguments);
+            return Box::pin(async move {
+                let properties = self
+                    .enumerate_hooked_native(object, class, purpose, native)
+                    .await?;
+                Ok(phera_extension_api::PropertyView::Snapshot(
+                    std::rc::Rc::new(properties),
+                ))
+            });
+        }
+        if function == "var_dump"
+            && let Some(class) = self.hooked_property_class(&object)
+        {
+            let view = self.dump_hooked_slots(&object, &class);
+            return Box::pin(std::future::ready(Ok(view)));
         }
         let view = self.object_properties(&object, purpose).map(|properties| {
             phera_extension_api::PropertyView::Snapshot(std::rc::Rc::new(properties))
@@ -461,6 +503,11 @@ impl Context for Vm {
         object: &phera_value::Object,
         purpose: phera_extension_api::PropertyPurpose,
     ) -> Result<phera_value::PhpArray, phera_extension_api::NativeError> {
+        if purpose == phera_extension_api::PropertyPurpose::ArrayCast
+            && let Some(class) = self.hooked_property_class(object)
+        {
+            return Ok(self.raw_hooked_slots(object, &class));
+        }
         let projection = object
             .class
             .as_any()

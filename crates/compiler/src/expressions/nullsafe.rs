@@ -35,6 +35,7 @@ impl Compiler<'_> {
         | ast::ExpressionKind::MethodCall { target, .. }
         | ast::ExpressionKind::Index { target, .. } = &root.kind
         {
+            self.note_hook_backing(root);
             chain.push(root);
             root = target;
         }

@@ -77,11 +77,7 @@ pub(crate) fn register(registry: &mut Registry) {
                 }),
                 MethodEntry::public_async("getDeclaringClass", &[], declaring),
                 MethodEntry::public("hasPrototype", &[], |c, o, _| {
-                    Ok(Value::Bool(
-                        engine(c)?
-                            .reflect_prototype(method(&*reflected(o)?)?)
-                            .is_some(),
-                    ))
+                    Ok(Value::Bool(prototype_target(c, &*reflected(o)?)?.is_some()))
                 }),
                 MethodEntry::public("getPrototype", &[], prototype),
                 MethodEntry::public("setAccessible", ACCESS, |_, o, _| {
@@ -110,7 +106,7 @@ pub(crate) fn register(registry: &mut Registry) {
                             ));
                         }
                         let target = match &function.target {
-                            FunctionTarget::ClosureInvoke(_) => function.target.clone(),
+                            FunctionTarget::ClosureInvoke(_) | FunctionTarget::PropertyHook { .. } => function.target.clone(),
                             _ => FunctionTarget::Method {
                                 class: member.class.clone(),
                                 name: member.name.clone(),
@@ -233,19 +229,31 @@ fn declaring(
 fn prototype(context: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
     let function = reflected(this)?;
     let member = method(&function)?;
-    let prototype = engine(context)?.reflect_prototype(member).ok_or_else(|| {
+    let prototype = prototype_target(context, &function)?.ok_or_else(|| {
         exception(format!(
             "Method {}::{} does not have a prototype",
             member.class, member.name
         ))
     })?;
-    make(
-        context,
-        FunctionTarget::Method {
-            class: prototype.class,
-            name: prototype.name,
-        },
-    )
+    make(context, prototype)
+}
+
+fn prototype_target(
+    context: &mut dyn Context,
+    function: &phera_extension_api::reflection::FunctionInfo,
+) -> Result<Option<FunctionTarget>, phera_extension_api::NativeError> {
+    let engine = engine(context)?;
+    Ok(match function.target {
+        FunctionTarget::PropertyHook { property, kind } => {
+            engine.reflect_hook_prototype(property, kind)
+        }
+        _ => engine
+            .reflect_prototype(method(function)?)
+            .map(|prototype| FunctionTarget::Method {
+                class: prototype.class,
+                name: prototype.name,
+            }),
+    })
 }
 
 enum Arguments<'a> {

@@ -57,17 +57,42 @@ impl Vm {
             }
             Operation::GetClass
             | Operation::GetObjectVars
+            | Operation::GetMangledObjectVars
             | Operation::ObjectId
             | Operation::ObjectHash => {
                 let Value::Object(object) = value else {
                     return Err(internal_error!("class function object"));
                 };
+                if matches!(function, Operation::GetObjectVars)
+                    && let Some(class) = self.hooked_property_class(&object)
+                {
+                    let native = crate::error_traces::NativeTrace::new(
+                        function.name(),
+                        &[Value::Object(object.clone())],
+                    );
+                    let properties = self
+                        .enumerate_hooked_native(
+                            object,
+                            class,
+                            phera_extension_api::PropertyPurpose::ObjectVars,
+                            native,
+                        )
+                        .await?;
+                    return Ok(Value::from(properties));
+                }
                 return Ok(match function {
                     Operation::GetClass => Value::from(object.class.name()),
                     Operation::GetObjectVars => Value::from(self.visible_properties(
                         &object,
                         phera_extension_api::PropertyPurpose::ObjectVars,
                     )?),
+                    Operation::GetMangledObjectVars => {
+                        Value::from(phera_extension_api::Context::object_properties(
+                            self,
+                            &object,
+                            phera_extension_api::PropertyPurpose::ArrayCast,
+                        )?)
+                    }
                     Operation::ObjectId => Value::Int(object.id.into()),
                     _ => Value::from(object.handle_hash()),
                 });

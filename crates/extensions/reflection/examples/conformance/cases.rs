@@ -9,6 +9,9 @@ pub(crate) struct Surface {
 impl Surface {
     pub fn arguments(&self, method: &str) -> &'static str {
         match method {
+            "getHook" | "hasHook" => {
+                "[[], [PropertyHookType::Get], [PropertyHookType::Set], [null], ['get']]"
+            }
             "getAttributes" => {
                 "[[], ['AuditMarker'], ['AuditMarker', 2], [null, -1], ['Missing', 2]]"
             }
@@ -34,7 +37,9 @@ impl Surface {
             | "skipLazyInitialization"
             | "getLazyInitializer"
             | "initializeLazyObject"
-            | "markLazyObjectAsInitialized" => "[[], [null], [new Subject()], [new stdClass()]]",
+            | "markLazyObjectAsInitialized" => {
+                "[[], [null], [new Subject()], [new HookedSubject()], [new stdClass()]]"
+            }
             "newInstance" => "[[], [3], ['bad']]",
             "newInstanceArgs" => {
                 "[[], [[]], [['id' => 3]], [[3]], [['nonexistent' => 4]], ['bad']]"
@@ -44,18 +49,18 @@ impl Surface {
                 "[[], ['Subject::method'], ['noClass::method'], ['noSeparator']]"
             }
             "invoke" | "getClosure" if self.reflector == "ReflectionMethod" => {
-                "[[], [null], [new Subject()], [new Subject(), 3], [new stdClass()]]"
+                "[[], [null], [new Subject()], [new Subject(), 3], [new HookedSubject()], [new HookedSubject(), 3], [new stdClass()]]"
             }
             "invoke" => "[[], [3], ['bad'], ['value' => 5]]",
             "invokeArgs" if self.reflector == "ReflectionMethod" => {
-                "[[], [null, []], [new Subject(), []], [new Subject(), ['value' => 3]], [new stdClass(), []]]"
+                "[[], [null, []], [new Subject(), []], [new Subject(), ['value' => 3]], [new HookedSubject(), ['value' => 3]], [new stdClass(), []]]"
             }
             "invokeArgs" => "[[], [[]], [[3]], [['value' => 5]], [['bogus' => 3]], [null]]",
             "getValue" | "isInitialized" if self.reflector == "ReflectionProperty" => {
-                "[[], [null], [new Subject()], [new stdClass()]]"
+                "[[], [null], [new Subject()], [new HookedSubject()], [new stdClass()]]"
             }
             "setValue" | "setRawValue" | "setRawValueWithoutLazyInitialization" => {
-                "[[], [3], [null, '3'], [new Subject(), '3'], [new stdClass(), 3]]"
+                "[[], [3], [null, '3'], [new Subject(), '3'], [new HookedSubject(), '3'], [new stdClass(), 3]]"
             }
             "setAccessible" => "[[], [true], [false], [[]]]",
             "fromArrayElement" => "[[], [[1], 0], [[1], '0'], [[], -1]]",
@@ -162,6 +167,8 @@ pub(crate) fn surfaces() -> Vec<Surface> {
                 "new ReflectionMethod('Subject', 'reference')",
                 "new ReflectionMethod('ArrayAccess', 'offsetGet')",
                 "new ReflectionMethod('PDO', 'query')",
+                "(new ReflectionProperty('HookedSubject', 'hooked'))->getHook(PropertyHookType::Get)",
+                "(new ReflectionProperty('HookedSubject', 'hooked'))->getHook(PropertyHookType::Set)",
             ],
         ),
         (
@@ -172,6 +179,9 @@ pub(crate) fn surfaces() -> Vec<Surface> {
                 "new ReflectionProperty('Typed', 'integer')",
                 "new ReflectionProperty('Asymmetric', 'id')",
                 "new ReflectionProperty('ProtectedProperty', 'value')",
+                "new ReflectionProperty('HookedSubject', 'hooked')",
+                "new ReflectionProperty('HookedSubject', 'virtual')",
+                "new ReflectionProperty('HookedContract', 'hooked')",
             ],
         ),
         (
