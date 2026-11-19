@@ -5,6 +5,7 @@
 use phera_extension_api::PhpArray;
 use phera_io_pool::Operation;
 
+use crate::constants::ATTR_SERVER_INFO;
 use crate::drivers::{Column, Driver, Prepared, Rows, connection_error};
 use crate::errors::DbError;
 use crate::metadata::Metadata;
@@ -144,6 +145,34 @@ impl Lease {
                 match driver {
                     Driver::Sqlite(sqlite) => sqlite.set_timeout(milliseconds).await,
                     _ => Err(connection_error("ATTR_TIMEOUT is set on SQLite only")),
+                }
+            })
+        })
+        .await
+    }
+
+    pub async fn mysql_autocommit(&mut self, enabled: bool) -> Result<(), DbError> {
+        self.run(move |driver| {
+            Box::pin(async move {
+                if let Driver::Mysql(mysql) = driver {
+                    mysql.set_autocommit(enabled).await
+                } else {
+                    Err(connection_error("ATTR_AUTOCOMMIT is set on MySQL only"))
+                }
+            })
+        })
+        .await
+    }
+
+    pub async fn server_attribute(&mut self, attribute: i64) -> Result<String, DbError> {
+        self.run(move |driver| {
+            Box::pin(async move {
+                match (driver, attribute) {
+                    (Driver::Mysql(mysql), ATTR_SERVER_INFO) => mysql.server_info().await,
+                    (Driver::Postgres(postgres), ATTR_SERVER_INFO) => postgres.server_info().await,
+                    (Driver::Mysql(mysql), _) => Ok(mysql.connection_status()),
+                    (Driver::Postgres(postgres), _) => Ok(postgres.connection_status().into()),
+                    (Driver::Sqlite(_), _) => Err(connection_error("Missing server connection")),
                 }
             })
         })

@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 use phera_extension_api::NativeError;
 
+use crate::connect_options::ConnectOptions;
 use crate::drivers::connection_error;
 use crate::errors::DbError;
 
@@ -29,6 +30,7 @@ impl DriverName {
 pub struct Dsn {
     pub driver: DriverName,
     pub fields: BTreeMap<String, String>,
+    pub options: ConnectOptions,
 }
 
 impl Dsn {
@@ -55,23 +57,22 @@ impl Dsn {
         // is the file name, semicolons included.
         if driver == DriverName::Sqlite {
             fields.insert("filename".into(), rest.into());
-            return Ok(Self { driver, fields });
+            return Ok(Self {
+                driver,
+                fields,
+                options: ConnectOptions::default(),
+            });
         }
         for field in rest.split(';').filter(|field| !field.trim().is_empty()) {
             if let Some((key, value)) = field.split_once('=') {
                 fields.insert(key.trim().to_owned(), value.trim().to_owned());
             }
         }
-        for (key, value) in &fields {
-            if key.starts_with("ssl") && !(key == "sslmode" && value == "disable") {
-                return Err(crate::errors::exception(
-                    "TLS is not supported yet",
-                    None,
-                    0,
-                ));
-            }
-        }
-        Ok(Self { driver, fields })
+        Ok(Self {
+            driver,
+            fields,
+            options: ConnectOptions::default(),
+        })
     }
 
     pub fn get<'a>(&'a self, key: &str, default: &'a str) -> &'a str {
@@ -156,9 +157,11 @@ mod tests {
     }
 
     #[test]
-    fn rejects_tls_and_unknown_drivers() {
-        assert!(Dsn::parse("pgsql:sslmode=require").is_err());
-        assert!(Dsn::parse("mysql:ssl_ca=ca.pem").is_err());
+    fn preserves_tls_fields_and_rejects_unknown_drivers() {
+        let dsn = Dsn::parse("pgsql:sslmode=require;sslrootcert=ca.pem").unwrap();
+        assert_eq!(dsn.get("sslmode", ""), "require");
+        assert_eq!(dsn.get("sslrootcert", ""), "ca.pem");
+        assert!(Dsn::parse("unknown:host=localhost").is_err());
         assert_eq!(Dsn::parse("sqlite:foo").unwrap().get("filename", ""), "foo");
         assert!(Dsn::parse("pgsql:sslmode=disable").is_ok());
     }

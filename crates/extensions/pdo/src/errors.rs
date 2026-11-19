@@ -50,6 +50,7 @@ impl DbError {
             "23000" => "Integrity constraint violation",
             "23502" => "Not null violation",
             "23503" => "Foreign key violation",
+            "55000" => "Object not in prerequisite state",
             "22P02" => "Invalid text representation",
             "22012" => "Division by zero",
             "08006" => "Connection failure",

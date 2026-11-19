@@ -26,6 +26,7 @@
 pub mod mysql;
 pub mod postgres;
 pub mod sqlite;
+mod tls;
 
 use std::time::Duration;
 

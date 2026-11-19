@@ -74,11 +74,7 @@ pub fn convert(
     for (index, (value, column)) in row.iter().zip(columns).enumerate() {
         let value = stringify(context, value.clone(), attributes)?;
         if !matches!(mode, FetchMode::Num) {
-            let name = match attributes.case {
-                ColumnCase::Natural => column.name.clone(),
-                ColumnCase::Upper => column.name.to_uppercase(),
-                ColumnCase::Lower => column.name.to_lowercase(),
-            };
+            let name = column_name(column, attributes);
             let key = if matches!(mode, FetchMode::Object) {
                 ArrayKey::str(name)
             } else {
@@ -94,6 +90,20 @@ pub fn convert(
         context.create_object("stdClass", values)
     } else {
         Ok(Value::from(values))
+    }
+}
+
+fn column_name(column: &Column, attributes: &Attributes) -> String {
+    let name = match (&column.metadata, attributes.mysql_table_names) {
+        (crate::metadata::Metadata::Mysql(mysql), true) => {
+            format!("{}.{}", mysql.table_str(), column.name)
+        }
+        _ => column.name.clone(),
+    };
+    match attributes.case {
+        ColumnCase::Natural => name,
+        ColumnCase::Upper => name.to_ascii_uppercase(),
+        ColumnCase::Lower => name.to_ascii_lowercase(),
     }
 }
 

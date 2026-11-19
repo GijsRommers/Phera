@@ -1,11 +1,16 @@
 //! MySQL uses binary prepared statements, or text queries for `ATTR_EMULATE_PREPARES`.
 
+use std::time::Duration;
+
 use mysql_async::prelude::Queryable;
 use mysql_async::{Conn, OptsBuilder, Params, Row, Statement};
 
+mod information;
+mod tls;
 pub mod values;
 
 use super::{Prepared, RawRows};
+use crate::connect_options::MysqlOptions;
 use crate::dsn::Dsn;
 use crate::errors::DbError;
 use crate::parameters::{BoundValue, literal, quote};
@@ -19,24 +24,52 @@ pub struct Mysql {
     pending_exec_rows: bool,
     charset: Option<String>,
     database: String,
+    options: MysqlOptions,
+    host: String,
+    unix_socket: bool,
 }
 
 impl Mysql {
     pub async fn connect(dsn: &Dsn, user: &str, password: &str) -> Result<Self, DbError> {
         let port = dsn.port()?;
-        let options = OptsBuilder::default()
-            .ip_or_hostname(dsn.get("host", "localhost"))
-            .tcp_port(port)
-            .user(Some(user))
-            .pass(Some(password))
-            .db_name(Some(dsn.get("dbname", "")))
-            .prefer_socket(false)
-            .socket(dsn.fields.get("unix_socket").cloned());
-        let mut connection = Conn::new(options).await.map_err(|failure| {
-            let mut failure = error(failure);
-            failure.state = "HY000".into();
-            failure
-        })?;
+        let settings = &dsn.options.mysql;
+        let connect = async {
+            let mut options = OptsBuilder::default()
+                .ip_or_hostname(dsn.get("host", "localhost"))
+                .tcp_port(port)
+                .user(Some(user))
+                .pass(Some(password))
+                .db_name(Some(dsn.get("dbname", "")))
+                .prefer_socket(false)
+                .socket(dsn.fields.get("unix_socket").cloned())
+                .client_found_rows(settings.found_rows);
+            if settings.compress {
+                options = options.compression(mysql_async::Compression::default());
+            }
+            if let Some(tls) = &settings.ssl {
+                options = options.ssl_opts(tls::options(tls).await?);
+            }
+            Conn::new(options).await.map_err(|failure| {
+                if settings.ssl.is_some() && !matches!(failure, mysql_async::Error::Server(_)) {
+                    return tls::failure();
+                }
+                let mut failure = error(failure);
+                failure.state = "HY000".into();
+                failure
+            })
+        };
+        let seconds = dsn.options.timeout.unwrap_or(30) as u32;
+        let mut connection = if seconds == 0 {
+            connect.await?
+        } else {
+            tokio::time::timeout(Duration::from_secs(u64::from(seconds)), connect)
+                .await
+                .map_err(|_| DbError {
+                    state: "HY000".into(),
+                    code: Some(2002),
+                    detail: "Connection timed out".into(),
+                })??
+        };
         if let Some(charset) = dsn.fields.get("charset") {
             if !charset
                 .bytes()
@@ -57,6 +90,7 @@ impl Mysql {
             .query_first("SELECT VERSION()")
             .await
             .map_err(error)?;
+        configure(&mut connection, settings).await?;
         Ok(Self {
             connection,
             version: version.unwrap_or_default(),
@@ -64,6 +98,9 @@ impl Mysql {
             pending_exec_rows: false,
             charset: dsn.fields.get("charset").cloned(),
             database: dsn.get("dbname", "").to_owned(),
+            options: settings.clone(),
+            host: dsn.get("host", "localhost").to_owned(),
+            unix_socket: dsn.fields.contains_key("unix_socket"),
         })
     }
 
@@ -92,6 +129,7 @@ impl Mysql {
                 .await
                 .map_err(error)?;
         }
+        configure(&mut self.connection, &self.options).await?;
         self.last_insert_id = 0;
         self.pending_exec_rows = false;
         Ok(())
@@ -103,6 +141,18 @@ impl Mysql {
 
     pub async fn health(&mut self) -> Result<(), DbError> {
         self.connection.ping().await.map_err(error)
+    }
+
+    pub async fn set_autocommit(&mut self, enabled: bool) -> Result<(), DbError> {
+        self.check_pending()?;
+        self.connection
+            .query_drop(if enabled {
+                "SET autocommit=1"
+            } else {
+                "SET autocommit=0"
+            })
+            .await
+            .map_err(error)
     }
 
     pub async fn prepare(&mut self, sql: &Sql) -> Result<Statement, DbError> {
@@ -222,6 +272,25 @@ impl Mysql {
     pub fn last_id(&self) -> String {
         self.last_insert_id.to_string()
     }
+}
+
+async fn configure(connection: &mut Conn, settings: &MysqlOptions) -> Result<(), DbError> {
+    if settings.ignore_space {
+        connection
+            .query_drop("SET sql_mode = CONCAT_WS(',', NULLIF(@@sql_mode, ''), 'IGNORE_SPACE')")
+            .await
+            .map_err(error)?;
+    }
+    if let Some(init) = &settings.init {
+        connection.query_drop(init).await.map_err(error)?;
+    }
+    if !settings.autocommit {
+        connection
+            .query_drop("SET autocommit=0")
+            .await
+            .map_err(error)?;
+    }
+    Ok(())
 }
 
 pub fn error(error: mysql_async::Error) -> DbError {

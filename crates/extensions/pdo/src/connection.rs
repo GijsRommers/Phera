@@ -8,10 +8,12 @@ use phera_extension_api::{
 };
 use tokio::sync::Mutex;
 
-use crate::attributes::Attributes;
-use crate::constants::{PARAM_BOOL, PARAM_INT, PARAM_NULL, PARAM_STR};
+use crate::attributes::{self, AttributeCall, Attributes};
+use crate::constants::{
+    ATTR_ERRMODE, ATTR_PERSISTENT, PARAM_BOOL, PARAM_INT, PARAM_NULL, PARAM_STR,
+};
 use crate::dsn::{DriverName, Dsn};
-use crate::errors::{DbError, ErrorState, unsupported};
+use crate::errors::{DbError, ErrorMode, ErrorState, unsupported};
 use crate::pool::{self, Lease, Policy};
 
 pub struct Session {
@@ -43,6 +45,38 @@ impl Session {
 
     pub fn success(&self) {
         *self.error.borrow_mut() = ErrorState::Success;
+    }
+
+    pub fn fail_get_attribute(&self, context: &mut dyn Context, error: DbError) -> NativeResult {
+        *self.error.borrow_mut() = ErrorState::Failed(DbError {
+            detail: String::new(),
+            ..error.clone()
+        });
+        error.report(context, self.attribute_error_mode(), "PDO::getAttribute")
+    }
+
+    pub fn fail_attribute(
+        &self,
+        context: &mut dyn Context,
+        error: DbError,
+        call: AttributeCall,
+    ) -> NativeResult {
+        let actual = self.attributes.borrow().errors;
+        if matches!(call, AttributeCall::Construct) && !matches!(actual, ErrorMode::Exception) {
+            return Err(crate::errors::exception(
+                format!("PDO::__construct(): {}", error.message()),
+                None,
+                0,
+            ));
+        }
+        self.fail(context, error, "PDO::setAttribute")
+    }
+
+    fn attribute_error_mode(&self) -> ErrorMode {
+        match self.attributes.borrow().errors {
+            ErrorMode::Exception => ErrorMode::Exception,
+            _ => ErrorMode::Warning,
+        }
     }
 }
 
@@ -80,13 +114,35 @@ pub fn construct<'a>(
         let policy = Policy::from_options(args::array(&arguments, 3).map(Rc::as_ref));
         let mut attributes = Attributes::new(dsn.driver);
         if let Some(options) = args::array(&arguments, 3) {
-            for (key, value) in options.iter() {
-                if let ArrayKey::Int(attribute) = key
-                    && attribute != pool::PHERA_ATTR_POOL
-                    && crate::attributes::constructor_accepts(dsn.driver, attribute)
-                {
-                    attributes.set(context, attribute, value)?;
+            if let Some(value) = options.get(&ArrayKey::Int(ATTR_PERSISTENT)) {
+                use phera_extension_api::value::{is_numeric, to_int};
+                attributes.persistent = match &*value.deref() {
+                    Value::String(text)
+                        if !text.as_bytes().is_empty() && !is_numeric(text.as_bytes()) =>
+                    {
+                        true
+                    }
+                    value => to_int(value, context.diagnostics())? != 0,
+                };
+            }
+            if let Some(value) = options.get(&ArrayKey::Int(ATTR_ERRMODE)) {
+                attributes.errors =
+                    match phera_extension_api::value::to_int(value, context.diagnostics())? {
+                        0 => ErrorMode::Silent,
+                        1 => ErrorMode::Warning,
+                        _ => ErrorMode::Exception,
+                    };
+            }
+            if dsn.driver == DriverName::Sqlite {
+                for (key, value) in options.iter() {
+                    if let ArrayKey::Int(attribute) = key {
+                        attributes::sqlite_pre_open(context, &mut attributes, attribute, value)?;
+                    }
                 }
+            } else {
+                dsn.options =
+                    crate::connect_options::ConnectOptions::from_php(context, dsn.driver, options)?;
+                attributes.autocommit = dsn.options.mysql.autocommit;
             }
         }
         if dsn.driver == DriverName::Sqlite {
@@ -108,7 +164,7 @@ pub fn construct<'a>(
             }
         };
         let version = driver.version().to_owned();
-        *object.native.borrow_mut() = Some(Box::new(Rc::new(Session {
+        let connection = Rc::new(Session {
             driver: Mutex::new(driver),
             name: dsn.driver,
             version,
@@ -117,7 +173,22 @@ pub fn construct<'a>(
             last_error: RefCell::new(None),
             transaction: Cell::new(false),
             statement_sequence: Cell::new(0),
-        })));
+        });
+        if let Some(options) = args::array(&arguments, 3) {
+            for (key, value) in options.iter() {
+                if let ArrayKey::Int(attribute) = key {
+                    attributes::apply(
+                        context,
+                        &connection,
+                        attribute,
+                        value,
+                        AttributeCall::Construct,
+                    )
+                    .await?;
+                }
+            }
+        }
+        *object.native.borrow_mut() = Some(Box::new(connection));
         Ok(Value::Null)
     })
 }

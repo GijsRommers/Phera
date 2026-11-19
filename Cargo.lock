@@ -1420,13 +1420,16 @@ dependencies = [
  "mysql_common",
  "percent-encoding",
  "rand 0.10.4",
+ "rustls",
  "serde",
  "socket2",
  "thiserror",
  "tokio",
+ "tokio-rustls",
  "tokio-util",
  "twox-hash",
  "url",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -1828,8 +1831,13 @@ dependencies = [
  "phera-extension-api",
  "phera-io-pool",
  "phera-sqlite",
+ "rustls",
+ "rustls-native-certs",
+ "rustls-rustcrypto",
  "tokio",
  "tokio-postgres",
+ "tokio-rustls",
+ "webpki-roots",
 ]
 
 [[package]]

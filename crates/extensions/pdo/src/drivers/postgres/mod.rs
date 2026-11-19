@@ -6,21 +6,24 @@
 //! $statement->execute([1, 'b' => 'two']); // sent as SELECT $1::int AS a, $2::text AS b
 //! ```
 
+mod connect;
+mod information;
 mod metadata;
 mod parameters;
 mod protocol;
 mod stream;
 mod text;
+mod tls;
 pub mod values;
+mod verify;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 
 use protocol::TextParameter;
 pub use protocol::error;
-use stream::ObservedStream;
 use tokio_postgres::types::ToSql;
-use tokio_postgres::{Client, Config, NoTls, SimpleQueryMessage, Statement};
+use tokio_postgres::{Client, SimpleQueryMessage, Statement};
 
 use super::{Column, Prepared, RawRows, connection_error};
 use crate::dsn::Dsn;
@@ -60,37 +63,8 @@ impl Drop for Postgres {
 
 impl Postgres {
     pub async fn connect(dsn: &Dsn, user: &str, password: &str) -> Result<Self, DbError> {
-        let host = dsn.get("host", "localhost");
-        let port = dsn.port()?;
-        let mut config = Config::new();
-        config
-            .host(host)
-            .port(port)
-            .dbname(dsn.get("dbname", user))
-            .user(user)
-            .password(password)
-            .ssl_mode(tokio_postgres::config::SslMode::Disable);
-        if let Some(options) = dsn.fields.get("options") {
-            config.options(options);
-        }
-        if let Some(name) = dsn.fields.get("application_name") {
-            config.application_name(name);
-        }
         let transaction = Arc::new(AtomicU8::new(IDLE));
-        let stream = ObservedStream::connect(host, port, transaction.clone())
-            .await
-            .map_err(connection_error)?;
-        let (client, connection) = config.connect_raw(stream, NoTls).await.map_err(|error| {
-            let detail = match error.as_db_error() {
-                Some(database) => format!("{}:  {}", database.severity(), database.message()),
-                None => error.to_string(),
-            };
-            connection_error(format!(
-                "connection to server at \"{}\", port {} failed: {detail}",
-                dsn.get("host", "localhost"),
-                dsn.get("port", "5432")
-            ))
-        })?;
+        let (client, connection) = connect::open(dsn, user, password, transaction.clone()).await?;
         let task = tokio::spawn(async move {
             let _ = connection.await;
         });
