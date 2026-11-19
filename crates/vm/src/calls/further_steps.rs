@@ -9,7 +9,8 @@
 //! borrowed state and that are as frequent as calls and returns. The ones
 //! here are frequent in framework code but rarer in tight loops: plain
 //! value operators (`crate::fast_values`), declared property reads and
-//! writes (`fast_properties`), calls by name (`fast_named_calls`). They
+//! writes (`fast_properties`), calls by name (`fast_named_calls`), class
+//! names (`fast_class_names`). They
 //! are reached through this one function, kept out of line, because every
 //! case added to `step` itself changes how the compiler lays out the
 //! whole loop (measured: two to five percent on loops that never run
@@ -58,6 +59,9 @@ impl Machine<'_> {
                 self.increment_property::<GUARDED>(position, (mode, dst), path)
             }
             Instruction::InitCall { function } => self.prepare_named_call(position, function),
+            Instruction::FetchClassName { dst, class } => {
+                self.fetch_class_name::<GUARDED>(position, dst, class)
+            }
             _ => Step::Slow,
         }
     }

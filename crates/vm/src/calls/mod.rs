@@ -27,6 +27,7 @@ mod discarded_results;
 pub(crate) mod execution_loop;
 mod fast_arguments;
 mod fast_calls;
+mod fast_class_names;
 mod fast_dimensions;
 mod fast_methods;
 mod fast_named_calls;
