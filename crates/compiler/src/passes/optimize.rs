@@ -59,7 +59,7 @@ pub(crate) fn optimize(function: &mut Function) {
             target.0 = offsets.get(target.index()).copied().unwrap_or(target.0);
         }
     }
-    function.instructions = instructions;
+    function.instructions = instructions.into();
     function.lines = lines;
     fuse_integer_operands(function);
     crate::passes::direct_operands::optimize(function);
@@ -114,7 +114,7 @@ fn compact_nops(function: &mut Function) {
         instructions.push(instruction);
         lines.push(function.lines.get(index).copied().unwrap_or(1));
     }
-    function.instructions = instructions;
+    function.instructions = instructions.into();
     function.lines = lines;
 }
 

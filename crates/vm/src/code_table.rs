@@ -257,9 +257,11 @@ impl CodeTable {
     }
 
     /// The function's instructions, which the interpreter loop borrows.
+    /// They are read from the function's facts, not through its file, on
+    /// every call and return.
     #[inline]
     pub(crate) fn instructions(&self, function: FunctionIndex) -> &[Instruction] {
-        &self.function(function).instructions
+        &self.facts(function).instructions
     }
 }
 

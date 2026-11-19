@@ -233,7 +233,7 @@ pub(crate) fn literal_initializer(
 ) -> Option<Value> {
     use phera_bytecode::Instruction;
     let instructions = &code.function(*reference).instructions;
-    let [load, Instruction::Return { src }] = instructions.as_slice() else {
+    let [load, Instruction::Return { src }] = &instructions[..] else {
         return None;
     };
     let LiteralLoad { destination, value } = match *load {

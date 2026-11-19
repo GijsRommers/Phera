@@ -9,8 +9,10 @@
 //! mask for a one-bit check of an argument), parameter 2 by reference, the
 //! return type `float`, how many registers a frame needs. It is made once,
 //! when the file is loaded, and read on every call, so it is kept small.
+//! It also holds the function's instructions, shared with the compiled
+//! file, so that a call or a return reaches them from here.
 
-use phera_bytecode::{Function, Type, TypeMask};
+use phera_bytecode::{Code, Function, Type, TypeMask};
 
 use crate::code_table::{FunctionIndex, UnitIndex};
 
@@ -18,6 +20,8 @@ use crate::code_table::{FunctionIndex, UnitIndex};
 /// call, so it is kept small and next to nothing else.
 #[derive(Clone)]
 pub(crate) struct FunctionFacts {
+    /// The function's instructions, which the interpreter loop runs.
+    pub(crate) instructions: Code,
     pub(crate) unit: UnitIndex,
     /// `None` for a file's top-level code, else its number within the file.
     pub(crate) local: Option<u32>,
@@ -102,6 +106,7 @@ impl FunctionFacts {
         let general = body.parameters.len() > 64
             || body.argument_layout == phera_bytecode::ArgumentLayout::Variadic;
         Self {
+            instructions: body.instructions.clone(),
             unit,
             local,
             unit_first,
