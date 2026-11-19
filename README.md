@@ -65,6 +65,11 @@ Crates planned for later include `io`, `stdlib`, `postgres`, `mysql`, `redis`,
 and eventually a `jit`. See [`docs/architecture.md`](docs/architecture.md) for
 the details.
 
+## PHP extensions
+
+- [curl](crates/extensions/curl/README.md) provides asynchronous HTTP and HTTPS,
+  including HTTP/2, connection reuse, and PHP's easy and multi interfaces.
+
 ## 🛠️ Building
 
 You'll need a recent stable Rust toolchain with 2024 edition support (1.85+).
