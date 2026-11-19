@@ -2,83 +2,9 @@
 
 use phera_extension_api::testing::{oracle, scripts::Comparison};
 
-const COLUMNS: &[(&str, &str, &str, &str)] = &[
-    ("tiny", "TINYINT", "-128", "127"),
-    ("utiny", "TINYINT UNSIGNED", "0", "255"),
-    ("small", "SMALLINT", "-32768", "32767"),
-    ("usmall", "SMALLINT UNSIGNED", "0", "65535"),
-    ("medium", "MEDIUMINT", "-8388608", "8388607"),
-    ("umedium", "MEDIUMINT UNSIGNED", "0", "16777215"),
-    ("integer", "INT", "-2147483648", "2147483647"),
-    ("uinteger", "INT UNSIGNED", "0", "4294967295"),
-    (
-        "big",
-        "BIGINT",
-        "-9223372036854775808",
-        "9223372036854775807",
-    ),
-    (
-        "ubig",
-        "BIGINT UNSIGNED",
-        "9223372036854775808",
-        "18446744073709551615",
-    ),
-    (
-        "decimal",
-        "DECIMAL(24,6)",
-        "-1234567891011123.123456",
-        "0.001230",
-    ),
-    ("float", "FLOAT", "-1.234567", "1.25"),
-    ("double", "DOUBLE", "-1.234567891234", "1.25"),
-    (
-        "bit",
-        "BIT(64)",
-        "b'1010'",
-        "b'1111111111111111111111111111111111111111111111111111111111111111'",
-    ),
-    ("date", "DATE", "'1000-01-01'", "'2024-02-29'"),
-    (
-        "time",
-        "TIME(6)",
-        "'-838:59:58.000123'",
-        "'00:00:00.120000'",
-    ),
-    (
-        "datetime",
-        "DATETIME(6)",
-        "'1000-01-01 00:00:00'",
-        "'2024-02-29 12:34:56.123456'",
-    ),
-    (
-        "timestamp",
-        "TIMESTAMP(6)",
-        "'2000-01-01 00:00:00'",
-        "'2024-02-29 12:34:56.123456'",
-    ),
-    ("year", "YEAR", "1901", "2155"),
-    ("char", "CHAR(10)", "'🐾'", "'short    '"),
-    ("varchar", "VARCHAR(10)", "'🐾'", "'short    '"),
-    ("binary", "BINARY(6)", "X'00FF'", "X'5C'"),
-    ("varbinary", "VARBINARY(6)", "X'00FF'", "X'5C'"),
-    ("tinyblob", "TINYBLOB", "X'00FF'", "X''"),
-    ("blob", "BLOB", "X'00FF0D0A'", "X''"),
-    ("mediumblob", "MEDIUMBLOB", "X'00FF0D0A'", "X''"),
-    ("longblob", "LONGBLOB", "X'00FF0D0A'", "X''"),
-    ("tinytext", "TINYTEXT", "'🐾'", "''"),
-    ("text", "TEXT", "'🐾'", "''"),
-    ("mediumtext", "MEDIUMTEXT", "'🐾'", "''"),
-    ("longtext", "LONGTEXT", "'🐾'", "''"),
-    ("enum", "ENUM('red','blue')", "'red'", "'blue'"),
-    ("set", "SET('red','blue')", "'red,blue'", "''"),
-    ("json", "JSON", r#"'{"b":true,"a":null}'"#, "'[1,2]'"),
-    (
-        "geometry",
-        "GEOMETRY",
-        "ST_GeomFromText('POINT(1 2)')",
-        "ST_GeomFromText('LINESTRING(1 2,3 4)')",
-    ),
-];
+mod mysql_columns;
+
+use mysql_columns::COLUMNS;
 
 const MATRIX: &str = r#"
 function matrix_connect($native) {
@@ -106,11 +32,13 @@ function matrix_read($r, $mode, $procedural) {
         'column' => $procedural ? mysqli_fetch_column($r) : $r->fetch_column(),
         'object' => $procedural ? mysqli_fetch_object($r) : $r->fetch_object(),
         'both' => $procedural ? mysqli_fetch_array($r, MYSQLI_BOTH) : $r->fetch_array(MYSQLI_BOTH),
-        'array-num' => $procedural ? mysqli_fetch_array($r, MYSQLI_NUM) : $r->fetch_array(MYSQLI_NUM),
+        'array-num' => $procedural
+            ? mysqli_fetch_array($r, MYSQLI_NUM) : $r->fetch_array(MYSQLI_NUM),
         'array-assoc' => $procedural
             ? mysqli_fetch_array($r, MYSQLI_ASSOC) : $r->fetch_array(MYSQLI_ASSOC),
         'all-num' => $procedural ? mysqli_fetch_all($r, MYSQLI_NUM) : $r->fetch_all(MYSQLI_NUM),
-        'all-assoc' => $procedural ? mysqli_fetch_all($r, MYSQLI_ASSOC) : $r->fetch_all(MYSQLI_ASSOC),
+        'all-assoc' => $procedural
+            ? mysqli_fetch_all($r, MYSQLI_ASSOC) : $r->fetch_all(MYSQLI_ASSOC),
         'all-both' => $procedural ? mysqli_fetch_all($r, MYSQLI_BOTH) : $r->fetch_all(MYSQLI_BOTH),
     };
 }
@@ -120,10 +48,13 @@ function matrix_run($db, $sql, $name, $native) {
             $api = $procedural ? 'procedural' : 'object';
             foreach (['assoc', 'row', 'column', 'object', 'both',
                 'array-num', 'array-assoc', 'all-num', 'all-assoc', 'all-both'] as $mode) {
-                run("$name-$native-$protocol-$api-$mode", function () use ($db, $sql, $protocol, $procedural, $mode) {
+                $label = "$name-$native-$protocol-$api-$mode";
+                run($label, function () use ($db, $sql, $protocol, $procedural, $mode) {
                     $r = matrix_query($db, $sql, $protocol, $procedural);
                     try {
-                        if (str_starts_with($mode, 'all-')) return matrix_read($r, $mode, $procedural);
+                        if (str_starts_with($mode, 'all-')) {
+                            return matrix_read($r, $mode, $procedural);
+                        }
                         return [matrix_read($r, $mode, $procedural),
                             matrix_read($r, $mode, $procedural),
                             matrix_read($r, $mode, $procedural),
@@ -278,14 +209,16 @@ fn mysqli_php_matrix() {
     script.push_str(&format!(
         "foreach ([0, 1] as $native) {{
             $db = matrix_connect($native);
-            $db->query(\"CREATE TEMPORARY TABLE matrix_types (id INT PRIMARY KEY, {fields}) DEFAULT CHARSET utf8mb4\");
+            $db->query(\"CREATE TEMPORARY TABLE matrix_types
+                (id INT PRIMARY KEY, {fields}) DEFAULT CHARSET utf8mb4\");
             $db->query(\"INSERT INTO matrix_types VALUES (1, {}), (2, {}), (3, {null})\");\n",
         row(true).replace('"', "\\\""),
         row(false).replace('"', "\\\""),
     ));
     for (name, _, _, _) in COLUMNS {
         script.push_str(&format!(
-            "matrix_run($db, 'SELECT `{name}` AS v FROM matrix_types ORDER BY id', '{name}', $native);\n"
+            "matrix_run($db, 'SELECT `{name}` AS v FROM matrix_types ORDER BY id',
+             '{name}', $native);\n"
         ));
     }
     script.push_str(
@@ -303,7 +236,8 @@ fn mysqli_php_matrix() {
     run('stmt-no-rows-and-eof', function () use ($db) {
         $db->query('CREATE TEMPORARY TABLE matrix_stmt (n INT)');
         $insert = $db->prepare('INSERT INTO matrix_stmt VALUES (42)');
-        $out = [$insert->store_result(), $insert->execute(), $insert->store_result(), $insert->num_rows];
+        $out = [$insert->store_result(), $insert->execute(),
+            $insert->store_result(), $insert->num_rows];
         $select = $db->prepare('SELECT n FROM matrix_stmt');
         $out[] = [$select->execute(), $select->fetch(), $select->num_rows,
             $select->fetch(), $select->num_rows];
@@ -319,6 +253,16 @@ fn mysqli_php_matrix() {
         $stmt->execute();
         return $stmt->get_result()->fetch_column();
     });
+    run('multi-final-ok-packet', function () use ($db) {
+        $db->query('CREATE TEMPORARY TABLE matrix_batch (n INT)');
+        $started = $db->multi_query('SELECT 1 AS n; INSERT INTO matrix_batch VALUES (41)');
+        $row = $db->store_result()->fetch_row();
+        $more = $db->more_results();
+        $next = $db->next_result();
+        $out = [$started, $row, $more, $next, $db->affected_rows, $db->more_results()];
+        $db->query('DROP TEMPORARY TABLE matrix_batch');
+        return $out;
+    });
     run('multi-next-error', function () use ($db) {
         mysqli_report(MYSQLI_REPORT_OFF);
         try {
@@ -328,7 +272,8 @@ fn mysqli_php_matrix() {
             $blocked = [$st->prepare('SELECT 2'), $st->errno];
             $first = $db->store_result()->fetch_row();
             return [$start, $busy, $blocked, $first, $db->more_results(),
-                $db->next_result(), $db->errno, $db->more_results(), $db->query('SELECT 2')->fetch_row()];
+                $db->next_result(), $db->errno, $db->more_results(),
+                $db->query('SELECT 2')->fetch_row()];
         } finally {
             mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
         }
@@ -339,7 +284,9 @@ fn mysqli_php_matrix() {
         $before = [$result->num_rows, $result->fetch_column(), $result->num_rows];
         $failure = null;
         try { $db->query('SELECT 9'); }
-        catch (mysqli_sql_exception $e) { $failure = [$e->getCode(), $e->getSqlState(), $e->getMessage()]; }
+        catch (mysqli_sql_exception $e) {
+            $failure = [$e->getCode(), $e->getSqlState(), $e->getMessage()];
+        }
         $result->free();
         return [$before, $failure, $db->query('SELECT 9')->fetch_column()];
     });
@@ -370,7 +317,9 @@ fn mysqli_php_matrix() {
         });
     }
     foreach ([0, 1, 2, 3, 4, 5, 6, 7, 255] as $report) {
-        foreach (['SELECT FROM', 'SELECT missing_column FROM (SELECT 1) AS t', 'SELECT * FROM no_matrix_table'] as $i => $sql) {
+        $errors = ['SELECT FROM', 'SELECT missing_column FROM (SELECT 1) AS t',
+            'SELECT * FROM no_matrix_table'];
+        foreach ($errors as $i => $sql) {
             run("report-$report-$i", function () use ($db, $sql, $report) {
                 mysqli_report($report);
                 try {
@@ -386,5 +335,5 @@ fn mysqli_php_matrix() {
     }
 "#,
     );
-    comparison.check_matrix(&script, COLUMNS.len() * 120 + 48);
+    comparison.check_matrix(&script, COLUMNS.len() * 120 + 49);
 }

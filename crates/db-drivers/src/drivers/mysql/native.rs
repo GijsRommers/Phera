@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use futures_util::TryStreamExt;
 use mysql_async::consts::StatusFlags;
 use mysql_async::prelude::Queryable;
 use mysql_async::{ChangeUserOpts, Params, Row, Statement};
@@ -146,51 +147,43 @@ impl Mysql {
             self.validate_native_text(sql).await?;
         }
         let mut result = self.connection()?.query_iter(sql).await.map_err(error)?;
-        let mut outcomes = Vec::new();
-        loop {
-            let columns = result.columns_ref().to_vec();
-            let mut reply = Reply {
-                affected: result.affected_rows(),
-                insert_id: result.last_insert_id().unwrap_or(0),
-                info: result.info().into_owned(),
-                warnings: result.warnings(),
-            };
-            let mut rows = Vec::new();
-            // next() consumes the boundary and can surface a later statement's
-            // server error at that point. Preserve the completed result ahead of it.
-            let next_error = loop {
-                match result.next().await {
-                    Ok(Some(row)) => rows.push(row),
-                    Ok(None) => break None,
-                    Err(error_value) => break Some(error(error_value)),
-                }
-            };
-            if !columns.is_empty() {
-                reply.affected = rows.len() as u64;
+        if multiple {
+            let mut outcomes = Vec::new();
+            loop {
+                // is_empty() does not distinguish a pending OK packet from the end
+                // of the batch and can also hide a queued server error.
+                let set = match result.stream::<Row>().await {
+                    Ok(Some(set)) => set,
+                    Ok(None) => break,
+                    Err(cause) if outcomes.is_empty() => return Err(error(cause)),
+                    Err(cause) => {
+                        outcomes.push(Err(error(cause)));
+                        break;
+                    }
+                };
+                let columns = set.columns_ref().to_vec();
+                let reply = Reply {
+                    affected: set.affected_rows(),
+                    insert_id: set.last_insert_id().unwrap_or(0),
+                    info: set.info().into_owned(),
+                    warnings: set.get_warnings(),
+                };
+                let rows = set.try_collect().await.map_err(error)?;
+                outcomes.push(Ok(buffered_outcome(columns, rows, reply)));
             }
-            outcomes.push(Ok(Outcome {
-                rows: RawRows::Mysql {
-                    columns,
-                    rows,
-                    affected: reply.affected,
-                },
-                reply,
-            }));
-            if let Some(error_value) = next_error {
-                if multiple {
-                    outcomes.push(Err(error_value));
-                    // mysql_async may also surface the queued result error during cleanup.
-                    let _ = result.drop_result().await;
-                    return Ok(outcomes);
-                }
-                return Err(error_value);
-            }
-            if result.is_empty() {
-                break;
-            }
+            return Ok(outcomes);
         }
+
+        let columns = result.columns_ref().to_vec();
+        let reply = Reply {
+            affected: result.affected_rows(),
+            insert_id: result.last_insert_id().unwrap_or(0),
+            info: result.info().into_owned(),
+            warnings: result.warnings(),
+        };
+        let rows = result.collect().await.map_err(error)?;
         result.drop_result().await.map_err(error)?;
-        Ok(outcomes)
+        Ok(vec![Ok(buffered_outcome(columns, rows, reply))])
     }
 
     pub fn backslashes_enabled(&self) -> bool {
@@ -202,6 +195,24 @@ impl Mysql {
                     .status_flags()
                     .contains(StatusFlags::SERVER_STATUS_NO_BACKSLASH_ESCAPES)
             })
+    }
+}
+
+fn buffered_outcome(
+    columns: Vec<mysql_async::Column>,
+    rows: Vec<Row>,
+    mut reply: Reply,
+) -> Outcome {
+    if !columns.is_empty() {
+        reply.affected = rows.len() as u64;
+    }
+    Outcome {
+        rows: RawRows::Mysql {
+            columns,
+            rows,
+            affected: reply.affected,
+        },
+        reply,
     }
 }
 
