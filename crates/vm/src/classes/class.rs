@@ -281,8 +281,8 @@ impl Class {
         }
         let result = self.is_a(name);
         let mut declarations = self.declaration_matches.borrow_mut();
-        // Native definitions live across requests. Arbitrary PHP spellings cannot grow them.
-        if self.declaration.is_some() || declarations.len() < 64 {
+        // Native definitions outlive requests. Cache only bounded, canonical ancestry matches.
+        if self.declaration.is_some() || (result && declarations.len() < 64) {
             declarations.insert(name.to_owned(), result);
         }
         result
