@@ -133,7 +133,15 @@ fn server_logs_optional_fatal_trace_with_display_disabled() {
         1,
         &[("fatal.php", FATAL)],
         ".",
-        &["-d", "fatal_error_backtraces=1", "-d", "error_log=php.log"],
+        &[
+            "--dev",
+            "-d",
+            "display_errors=0",
+            "-d",
+            "fatal_error_backtraces=1",
+            "-d",
+            "error_log=php.log",
+        ],
     );
     assert_eq!(site.get("/fatal.php"), (500, String::new()));
     let log = std::fs::read_to_string(site.root.join("php.log")).expect("read fatal error log");
@@ -177,7 +185,7 @@ fn server_hides_diagnostics_by_default_and_dev_can_display_them() {
         1,
         &[("throw.php", THROW)],
         ".",
-        &["--dev", "-d", "display_errors=stderr", "-d", "log_errors=0"],
+        &["--dev", "-d", "log_errors=0"],
     );
     let (status, body) = dev.get("/throw.php");
     assert_eq!(status, 200);
