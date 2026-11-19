@@ -203,7 +203,7 @@ impl Vm {
             IteratorState {
                 snapshot: None,
                 traversal: None,
-                traversal_reference: false,
+                traversal_mode: crate::calls::frame::TraversalMode::Value,
                 property_hooks: Some(Box::new(HookedPropertyIterator::new(
                     object, class, binding,
                 ))),
