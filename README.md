@@ -17,27 +17,68 @@ applications actually use, with Symfony and Laravel setting the bar for what has
 to work.
 
 > [!WARNING]
-> Phera is in its earliest stages. The workspace and crate boundaries are in
-> place and the lexer is complete, but the parser is just getting started. It
-> can't run PHP yet.
+> Phera is in early development. It runs real applications, but it is slower
+> than PHP today and not ready for production. The numbers below say how far
+> it is.
+
+## 📍 Where it stands
+
+Measured in November 2026 against PHP 8.5, the same script or request on both.
+
+| What | State |
+| --- | --- |
+| Laravel 13 JSON API with Eloquent | Runs. `artisan migrate` and 20 API requests (validation, create, read, update, delete, pagination, relations, a transaction) give PHP's answers on SQLite, MySQL and PostgreSQL |
+| Symfony 7.4 | A skeleton route runs. An application with Doctrine does not yet: it needs destructors that run at the end of a statement, which is being built |
+| WordPress | Not yet: `mysqli` is being built |
+| PHP's own test suite (php-src, 13,388 tests) | 8,704 pass |
+| Speed of plain scripts | Between about the same CPU time as PHP's interpreter (arrays, arithmetic) and 5.5 times as much (method calls) |
+| Speed of a framework request | Roughly 10 times slower than PHP with opcache (one Laravel API request: about 150 ms against 9 to 17 ms). Phera links every class again for each request; sharing linked code between requests and forking a booted application are designed ([architecture, 5.4](docs/architecture.md)) and not built |
+
+## 🧰 The `phera` command
+
+| Command | What it does |
+| --- | --- |
+| `phera file.php` | Runs a script |
+| `phera serve public` | Serves a directory over HTTP: one process, one worker thread per core, many requests per thread |
+| `phera new shop` | Starts a project: a small JSON application, or Symfony's or Laravel's official one |
+| `phera check src` | Type-checks PHP with PHPStan's levels and identifiers; reads a PHPStan baseline |
+| `phera lint src` | Finds unused code and suspicious constructs; `--fix` applies the safe fixes |
+| `phera --dump file.php` | Prints the compiled bytecode |
+
+`phera <command> --help` lists the options. There is no formatter and no test
+runner yet.
+
+## 🧩 Extensions
+
+Built in, each checked call by call against real PHP: core, standard, ctype,
+date, dom (first stage), filter, hash, json, mbstring, openssl, pcre, PDO
+(SQLite, MySQL, PostgreSQL, with TLS), random, redis, reflection, serialize,
+session, SPL, sqlite3, streams, tokenizer.
+
+In progress: bcmath, curl, gmp, intl, mysqli, pgsql, process functions, sodium,
+zlib. Not started: gd, fileinfo, SimpleXML, XMLReader, XMLWriter, zip, sockets.
 
 ## ✨ Goals
 
-- 🐘 **Framework-driven scope.** If Symfony and Laravel need it, it's in. If nothing modern uses it, it probably isn't.
+- 🐘 **Framework-driven scope.** Symfony, Laravel and WordPress set the bar for what has to work. If nothing modern uses it, it probably isn't in.
 - 🚀 **High concurrency.** Serve many requests in parallel from a single process.
 - 🧱 **Clean layering.** Each stage of the pipeline is its own crate with strict, one-way dependencies.
-- 🦀 **Rust all the way down.** Memory safety and predictable performance, no C extensions required.
-- 🌐 **Batteries included.** `phera serve` boots an HTTP server straight from the CLI.
+- 🦀 **Safe Rust.** No `unsafe` in Phera's own code, and no C libraries for parsing what comes from the network.
+- 🌐 **Batteries included.** `phera serve` is the web server; no PHP-FPM and no separate server in front.
 
 ### What's left out on purpose
 
-The lexer handles everything PHP 8.5 can lex, with a few deliberate exceptions
-that nothing modern depends on. Each is a clear error, not a silent gap:
+Deprecated parts of PHP that nothing modern depends on are not built. Using one
+is a clear error (`Phera\NotSupportedException` or a compile error), never a
+silently different answer:
 
-- Backtick shell execution (`` `ls` ``)
 - `${expr}` string interpolation, deprecated since PHP 8.2 (`"{$expr}"` works)
 - The `(real)` cast, removed in PHP 8
 - Short `<?` and ASP `<%` open tags
+- The other items listed in [`crates/source/data/deprecations.tsv`](crates/source/data/deprecations.tsv)
+
+Why things are the way they are is written down in
+[`docs/decisions.md`](docs/decisions.md).
 
 ## 🏗️ Architecture
 
@@ -61,9 +102,9 @@ PHP source ─▶ lexer ─▶ parser ─▶ AST ─▶ compiler ─▶ bytecode
 | `phera-server`   | HTTP transport on top of the runtime                                 |
 | `phera-cli`      | The `phera` binary, for running scripts and `phera serve`            |
 
-Crates planned for later include `io`, `stdlib`, `postgres`, `mysql`, `redis`,
-and eventually a `jit`. See [`docs/architecture.md`](docs/architecture.md) for
-the details.
+The extensions live under `crates/extensions/`, behind `phera-extension-api`.
+See [`docs/architecture.md`](docs/architecture.md) for the design and
+[`docs/decisions.md`](docs/decisions.md) for the decisions behind it.
 
 ## Built-in extensions
 
@@ -81,7 +122,8 @@ PHP output-buffer compression or `phera serve --compress` for server compression
 
 ## 🛠️ Building
 
-You'll need a recent stable Rust toolchain with 2024 edition support (1.85+).
+You'll need the Rust toolchain named in `rust-toolchain.toml` (rustup installs
+it by itself) and a C compiler for the bundled PCRE2.
 
 ```sh
 git clone <repo-url> phera
@@ -90,7 +132,9 @@ cargo build
 cargo test
 ```
 
-The `phera` binary ends up in `target/debug/phera`.
+The `phera` binary ends up in `target/debug/phera`; `cargo build --release`
+builds the fast one. [`CONTRIBUTING.md`](CONTRIBUTING.md) describes the full
+check, which compares every built-in function with real PHP 8.5.
 
 ## 🧪 Testing
 
@@ -107,16 +151,8 @@ far that is. `tests/fixtures/` holds Phera's own `.phpt` test programs.
 | `make phpt` | Runs every selected test and fixture through the `phera` binary and checks the output |
 | `make phpt-lexer` | Lexes each test's code with Phera and with PHP's `token_get_all`, and compares them |
 
-`make phpt` isn't part of `make test` yet, since Phera can't run PHP. Narrow
-either runner with `FILTER=<part of a path>`.
-
-The lexer comparison needs a `php` binary and skips itself without one. Its
-token stream matches `token_get_all` exactly, including inside interpolated
-strings and heredocs. Tests that use syntax Phera rejects on purpose, or whose
-code Phera rejects where PHP expects a parse error too, are counted as not
-relevant rather than failed. Point it at a php-src checkout with
-`make phpt-lexer PHP_SRC=/path/to/php-src` to run it over every test there; the
-lexer passes all of them.
+Narrow either runner with `FILTER=<part of a path>`. The lexer comparison needs
+a `php` binary and skips itself without one.
 
 To check the tests themselves against real PHP, run them with PHP instead:
 

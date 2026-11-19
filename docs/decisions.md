@@ -1,67 +1,76 @@
-# Design decisions
+# Decisions
 
-## 2026-11-19
+Every decision that shapes Phera is written down here: what was decided, why,
+and what was turned down. The newest entries are at the top of each part. A
+pull request that takes a decision adds its entry in the same pull request.
 
-### Decimal arithmetic uses integer coefficients
+"Owner" means Gijs Rommers decided it. "Design" means it was decided during
+design or review work and the owner can overrule it.
 
-BCMath stores each value as a signed `num-bigint` coefficient and an explicit
-decimal scale. It aligns coefficients for addition and comparison and uses
-integer division to truncate toward zero. This preserves trailing zeroes in
-`BcMath\Number` while supporting computations beyond machine integer precision.
-Floating point would lose decimal digits. A general decimal crate would still
-require separate rules for PHP's truncation, rounding modes, and result scales.
+## Scope and compatibility
 
-### Native binary operators run after scalar dispatch
+| Date | Decision | Why | Turned down | By |
+| --- | --- | --- | --- | --- |
+| 2026-11-19 | WordPress is a target next to Symfony and Laravel. `mysqli` and the `pg_*` functions are built as thin layers over the database drivers PDO already uses. | WordPress is the most used PHP application and talks to MySQL only through `mysqli`. One client per database keeps pooling, TLS and type mapping in one place. | A second, separate MySQL client for `mysqli`. | Owner |
+| 2026-11-19 | Phera follows the newest PHP 8.5 patch release. A comparison whose PHP answer changed in a patch release is marked with the version it holds from and is skipped, visibly, on an older PHP. It is never removed. | Patch releases are bug fixes; CI moves to them on its own; nobody runs an old patch on purpose. | Pinning CI to one patch version. | Owner |
+| 2026-11-19 | PHP 8.5 only. The two-version design for PHP 8.6 (architecture.md 6.3) is parked. | Decided by the owner after seeing the design. | Carrying 8.5 and 8.6 side by side now. | Owner |
+| 2026-11-19 | `Fiber` stays as a complete class. It is a compatibility API (Monolog and others ask `Fiber::getCurrent()`), not part of Phera's concurrency, which is tasks on Tokio. | More real code runs unchanged. | Reducing it to `Fiber::getCurrent()` returning null. | Design |
+| 2026-11-17 | A deprecated named item that nothing in use needs is not built and throws `Phera\NotSupportedException` or a compile error. Deprecated behaviour of a supported operation stays as in PHP, message included. | A clear error beats a silently different answer; the list is `crates/source/data/deprecations.tsv`. | Reproducing every legacy corner. | Owner |
 
-Native classes can handle an operator with both original operands through
-`ClassHooks::binary`, or decline and let the VM apply the usual PHP rules.
-The VM checks for a native hook after the scalar fast path and uses its existing
-slow instruction dispatch. This keeps operand order for noncommutative
-operations and avoids hard-coding BCMath or GMP arithmetic in the VM.
+## Safety and dependencies
 
-### GMP uses Rust integer algorithms and a request-local generator
+| Date | Decision | Why | Turned down | By |
+| --- | --- | --- | --- | --- |
+| 2026-11-19 | TLS uses rustls with the `ring` provider, for databases, Redis and HTTP clients. A CI job scans the lock file for known advisories. | `ring` is audited and widely deployed. The pure Rust provider used before was a pre-release that calls itself not ready for production. `ring` holds C and assembly inside the dependency; Phera's own crates stay free of `unsafe`. | Keeping the pre-release provider; OpenSSL. | Design |
+| 2026-11-19 | Cryptography (`openssl_*`, `sodium_*`, password hashing) is built from audited Rust crates. Phera implements no cipher, hash, padding or secret comparison itself. What no audited crate offers is left out and listed. | Home-made cryptography is where runtimes get broken. | Linking OpenSSL or libsodium. | Design |
+| 2026-11-19 | DOM and XML are Phera's own safe tree with pure Rust parsers (`quick-xml`, `html5ever`), not libxml2. No external entity is ever loaded while parsing a string. `DOMDocument::loadHTML()` therefore differs from PHP for malformed HTML 4. | A C parser fed with documents from the network gives up the memory safety the runtime exists for. | Binding libxml2 for byte-exact output. | Design |
+| 2026-11-19 | curl is built on `hyper` and rustls, not on libcurl. Only `http` and `https` exist; other protocols are refused with libcurl's error. | Same reason as DOM. Refusing `file://`, `gopher://` and the like also closes a class of request-forgery problems. | Binding libcurl. | Design |
+| 2026-11-19 | `LOAD DATA LOCAL INFILE` is refused in PDO and `mysqli`. | It lets a database server read files of the client. | Supporting it behind an option. | Design |
+| 2026-11-17 | No `unsafe` in Phera's own crates; a workspace lint forbids it and CI checks it. Where a design seems to need it, the answer is a safe design that may be slower. A specific use may be proposed to the owner for a gain of about ten times; it is never written without his decision. | The owner's rule. | | Owner |
 
-GMP shares the `num-bigint` representation and uses `num-integer` for
-rounding divisions, modular arithmetic, and the Euclidean algorithm. It uses
-Miller–Rabin over the same representation for primality. Integer string
-conversion implements PHP's base and prefix rules before parsing the digits.
-A C GMP binding would reproduce its internal implementation but add a native
-dependency. The generator implements GMP's Mersenne Twister seeding and
-output algorithm because a different generator would break seed replay.
+## Server and requests
 
-### Scalar casts use the existing value conversion paths
+| Date | Decision | Why | Turned down | By |
+| --- | --- | --- | --- | --- |
+| 2026-11-19 | Snapshot and fork is built in four steps: linked code shared per worker; a snapshot at `Phera\snapshot()` with a copy per request; adapters for Symfony and Laravel; copy on first write only if measurements ask for it (architecture.md 5.4). | One Laravel request costs 10 to 17 times PHP's time, and most of that is work repeated per request that opcache does once. Step 1 helps every application; the snapshot removes the framework's boot. | Worker mode as in FrankenPHP or Octane: faster still, but state leaks between requests unless the application is written for it. | Owner asked for it; design |
+| 2026-11-19 | A program started by a web request (`proc_open`, `exec`) is terminated when the request ends. `phera serve --no-process` forbids starting programs. `pcntl_fork` is not built. | One process serves many requests on few threads: an abandoned child would outlive its request unseen, and a multi-threaded async process cannot fork safely. | PHP-FPM's behaviour of letting children live. | Design |
+| 2026-11-19 | The execution time limit counts the CPU time a request spends running PHP code and is checked where the interpreter already hands over to the scheduler. One long call into a built-in function is not interrupted. | A check per instruction would slow every script; waiting for a database must not count, as in PHP on Unix. | A wall-clock limit; a clock read in the interpreter loop. | Design |
+| 2026-11-19 | A multipart boundary longer than 70 bytes is refused, and parsing stops when the request is abandoned. | RFC 2046's limit. A very long boundary made parsing take minutes after the client had gone (security round 3). | | Design |
 
-Native classes supply optional scalar casts through their class handle. This
-keeps explicit casts and truth tests consistent and avoids adding GMP-specific
-branches to scalar bytecode. The VM uses the same native dispatch for GMP
-unary operators, leaving ordinary unary operations with the value layer.
+## Tools
 
-The compiler's literal operands and indexed compound assignments share the
-same native dispatch as ordinary operators. This preserves overloading where
-an instruction has a scalar fast path but sees an object at runtime.
+| Date | Decision | Why | Turned down | By |
+| --- | --- | --- | --- | --- |
+| 2026-11-19 | The repository holds no directories of loose helper scripts. A helper worth keeping is a Rust test or a command of the tooling crate; a one-off stays outside the repository. Decisions go into this file, and the README is updated with every change a user can see. | The owner reads the repository to follow the project. | | Owner |
+| 2026-11-19 | `phera lint` reports by default only what gave no false finding on the Symfony and Laravel code bases; unused variables, unused private properties, switch fall-through and self-comparison are among the defaults. Style, naming and complexity rules are opt-in. | A linter that cries wolf gets switched off. | All rules on by default. | Design |
+| 2026-11-19 | `phera check` uses PHPStan's levels and identifiers, and reads a PHPStan baseline. | Projects can switch without relearning or rewriting their configuration. | Own level scheme. | Design |
+| 2026-11-18 | Phera has no template engine of its own for now; Twig and Blade run as PHP. A native renderer is designed (architecture.md 11.6) and not built. | The frameworks' own engines must work anyway. | | Design |
 
-### zlib uses the HTTP server's pure Rust DEFLATE backend
+## Speed and method
 
-The extension uses the workspace's `flate2` with its `miniz_oxide` backend.
-Explicit gzip and zlib framing preserves checksums and gives the decoder
-control over output bounds and consumed bytes. The encoder emits stored
-blocks directly for one-shot level zero. Using the platform's C zlib would
-add a native dependency and tie the implementation to its version. The
-version constants expose the targeted zlib 1.2.12 interface.
+| Date | Decision | Why | Turned down | By |
+| --- | --- | --- | --- | --- |
+| 2026-11-19 | Speed is compared with PHP started as `php -n` (no Xdebug), with a second column for opcache and the JIT, and reported in cycles or CPU time next to instructions. | An earlier comparison used a PHP with Xdebug loaded and made Phera look faster than it is. Phera also retires fewer instructions per cycle than PHP, so instruction counts alone understate the gap. | Instruction counts as the only measure. | Design |
+| 2026-11-19 | Built-in calls use the special forms PHP's own compiler has (`strlen`, `count`, type checks, `in_array` with a literal, `sprintf`, constant folding of pure functions). A shortcut tests properties of the call and never the spelling of a script. | They are observable in PHP only through speed, and each has a fixture proving equal behaviour, traces included. | Shortcuts tuned to benchmark scripts. | Design |
+| 2026-11-18 | A change must not make any benchmark script more than 1 percent slower in instructions. The destructors work has a stated exception: no script more than 2 percent, at most three above 1 percent, the sum not slower, every overage named. | The interpreter loop is sensitive to layout; small costs add up unseen. Correct object lifetime has a real price. | No rule; a rule without exception. | Design |
 
-### Preset dictionaries are supplied as DEFLATE history
+## Process
 
-A non-final stored block seeds the decoder with dictionary bytes before it
-processes input. Checksums and reported input length start with the caller's
-data. The encoder can advertise a preset dictionary without requiring the
-backend to reference it. Replacing the backend solely for dictionary and
-compression-strategy tuning would diverge from the server's existing dependency.
+| Date | Decision | Why | Turned down | By |
+| --- | --- | --- | --- | --- |
+| 2026-11-19 | CI runs the test suite as three jobs side by side, and a draft pull request gets only the three short checks. | One job took 20 to 24 minutes; work in progress filled the runners. | | Design |
+| 2026-11-19 | Finished pull requests are merged into one batch branch, reviewed together and merged with one CI run. A batch merges only when a run of all php-src tests shows no test going from pass to fail. | Every merge makes the other branches out of date; the full php-src run finds regressions the repository's own selection does not. | Merging one by one. | Design |
+| 2026-11-17 | Every pull request is reviewed against real PHP before it merges, whoever wrote it: its own scripts, the php-src tests, the benchmarks. The review is recorded on the pull request. | CI is only the first filter. | | Owner |
 
-### gzip files reuse the PHP stream resource
+## Native math and compression
 
-The gzip backing handles transparent reads and writes and shares stream
-position, modes and aliases. Gzip I/O and close run through Tokio's blocking
-pool. A separate resource type would break mixing `gzread` with `fclose` or
-ordinary stream operations. Gzip output buffering is explicit through
-`ob_gzhandler`; the INI setting stores configuration without installing a
-buffer at request startup. The streams crate has no filter registration API.
+| Date | Decision | Why | Turned down | By |
+| --- | --- | --- | --- | --- |
+| 2026-11-19 | BCMath stores a signed `num-bigint` coefficient with an explicit decimal scale. | Exact integer division truncates toward zero, and the scale preserves trailing zeroes on `BcMath\Number`. | Floating point and a general-purpose decimal crate, which would still require PHP-specific scale and rounding rules. | Design |
+| 2026-11-19 | BCMath checks unusually large result scales before materializing powers of ten or formatted output. | A syntactically valid scale can request gigabytes of storage. | Waiting for the host allocator after starting the computation. | Design |
+| 2026-11-19 | Native operators run after scalar dispatch, including the fallback for inline literal operands. Native casts use the value layer's existing conversion paths. | Math objects can preserve their arithmetic and casts from PHP operators and built-ins without adding extension names to the VM. | Per-extension VM branches and a second scalar conversion path. | Design |
+| 2026-11-19 | GMP uses `num-bigint`, `num-integer`, Miller–Rabin, and a request-local Mersenne Twister with GMP's seeding algorithm. | Integer operations stay in Rust and seeded sequences remain reproducible. | A C GMP dependency or a generator that changes the seeded sequence. | Design |
+| 2026-11-19 | zlib uses the same `flate2` and `miniz_oxide` backend as the server. It frames gzip and zlib members explicitly and emits stored blocks directly for one-shot level zero. | Framing controls checksums, consumed byte counts, and the decompression limit. The version constants describe the targeted zlib 1.2.12 interface. | Binding the platform's C zlib and tying behavior to its version. | Design |
+| 2026-11-19 | The decoder primes its DEFLATE history with a non-final stored block for preset dictionaries. | References to dictionary bytes decode with the shared backend while PHP's reported input length and checksums start at the caller's data. | Replacing the server's backend solely for dictionary and compression-strategy support. | Design |
+| 2026-11-19 | Gzip files use the PHP stream resource and run file I/O and explicit close on Tokio's blocking pool. | Ordinary stream functions and `gz*` aliases share the same handle and cursor. | A gzip-only resource that cannot be passed to other stream functions. | Design |
+| 2026-11-19 | `ob_gzhandler` negotiates output coding when installed explicitly. The `zlib.output_compression` INI setting stores configuration. | The runtime already supports explicit PHP output buffering and independent HTTP compression. | Installing a new output buffer at request startup. | Design |
