@@ -227,6 +227,7 @@ impl Serializer<'_> {
                 output.push_str(if html { ">" } else { "?>" });
             }
             Kind::Doctype => write_doctype(node, output),
+            Kind::Entity | Kind::Notation => {}
             Kind::EntityReference => {
                 let _ = write!(output, "&{};", node.name.local);
             }

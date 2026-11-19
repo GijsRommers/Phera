@@ -184,4 +184,10 @@ pub(in crate::bindings) fn register(registry: &mut Registry) {
         parent: Some("DOMNode"),
         ..ClassEntry::class("DOMDocumentType")
     });
+    for class in ["DOMEntity", "DOMNotation"] {
+        registry.class(ClassEntry {
+            parent: Some("DOMNode"),
+            ..ClassEntry::class(class)
+        });
+    }
 }

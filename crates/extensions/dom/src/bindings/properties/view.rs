@@ -117,6 +117,18 @@ pub(in crate::bindings) fn view(
         ),
         Kind::ProcessingInstruction => (&["target", "data"], &[]),
         Kind::EntityReference => (&[], &[]),
+        Kind::Entity => (
+            &[
+                "publicId",
+                "systemId",
+                "notationName",
+                "actualEncoding",
+                "encoding",
+                "version",
+            ],
+            &[],
+        ),
+        Kind::Notation => (&["publicId", "systemId"], &[]),
     };
     for &name in primary.iter().chain(inherited).chain(NODE) {
         if name == "ownerDocument" && !owned {

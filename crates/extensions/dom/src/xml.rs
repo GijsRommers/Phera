@@ -5,6 +5,7 @@
 //! echo $document->documentElement->firstChild->nodeName;
 //! ```
 
+mod declarations;
 mod doctype;
 mod dtd;
 mod elements;

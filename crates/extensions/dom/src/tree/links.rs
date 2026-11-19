@@ -67,7 +67,7 @@ impl Arena {
         let allows_child = match self[parent].kind {
             Kind::Document => !matches!(
                 self[child].kind,
-                Kind::Document | Kind::Attribute | Kind::Fragment
+                Kind::Document | Kind::Attribute | Kind::Fragment | Kind::Entity | Kind::Notation
             ),
             Kind::Element | Kind::Fragment => matches!(
                 self[child].kind,
@@ -79,6 +79,8 @@ impl Arena {
                     | Kind::EntityReference
             ),
             Kind::Attribute => matches!(self[child].kind, Kind::Text | Kind::EntityReference),
+            Kind::Doctype => matches!(self[child].kind, Kind::Entity | Kind::Notation),
+            Kind::Entity => self[child].kind == Kind::Text,
             _ => false,
         };
         if !allows_child || parent == child {

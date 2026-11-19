@@ -25,6 +25,8 @@ pub enum Kind {
     Text,
     Cdata,
     EntityReference,
+    Entity,
+    Notation,
     ProcessingInstruction,
     Comment,
     Document,
@@ -60,6 +62,14 @@ pub struct Doctype {
     pub public_id: String,
     pub system_id: String,
     pub internal_subset: Option<String>,
+    pub notations: String,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct DtdEntry {
+    pub public_id: Option<String>,
+    pub system_id: Option<String>,
+    pub notation: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -69,7 +79,8 @@ pub struct Node {
     pub value: String,
     pub line: usize,
     pub is_id: bool,
-    pub doctype: Option<Doctype>,
+    pub doctype: Option<Box<Doctype>>,
+    pub dtd_entry: Option<Box<DtdEntry>>,
     parent: Option<NodeId>,
     first: Option<NodeId>,
     last: Option<NodeId>,
@@ -87,6 +98,7 @@ impl Node {
             line: 0,
             is_id: false,
             doctype: None,
+            dtd_entry: None,
             parent: None,
             first: None,
             last: None,

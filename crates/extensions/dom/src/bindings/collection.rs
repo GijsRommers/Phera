@@ -25,6 +25,7 @@ use super::{Location, This, location, native, receiver};
 enum Selection {
     Children,
     Attributes,
+    Declarations(Kind),
     Snapshot(Rc<[NodeId]>),
     Tags {
         namespace: Option<Option<String>>,
@@ -43,7 +44,14 @@ impl Collection {
         let id = self.root.id;
         match &self.selection {
             Selection::Snapshot(nodes) => nodes.to_vec(),
-            Selection::Children => arena.children(id).collect(),
+            Selection::Children => arena
+                .children(id)
+                .filter(|&id| arena[id].kind != Kind::Notation)
+                .collect(),
+            Selection::Declarations(kind) => arena
+                .children(id)
+                .filter(|&id| arena[id].kind == *kind)
+                .collect(),
             Selection::Attributes => arena[id]
                 .attributes()
                 .iter()
@@ -101,6 +109,15 @@ pub(super) fn children(context: &mut dyn Context, root: Location) -> NativeResul
 
 pub(super) fn attributes(context: &mut dyn Context, root: Location) -> NativeResult {
     wrap(context, root, Selection::Attributes, "DOMNamedNodeMap")
+}
+
+pub(super) fn declarations(context: &mut dyn Context, root: Location, kind: Kind) -> NativeResult {
+    wrap(
+        context,
+        root,
+        Selection::Declarations(kind),
+        "DOMNamedNodeMap",
+    )
 }
 
 fn wrap(

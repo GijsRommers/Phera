@@ -59,8 +59,10 @@ impl NativeIterator for Cursor {
 
     fn key(&mut self, _: &mut dyn Context) -> NativeResult {
         self.refresh();
-        if matches!(self.collection.selection, Selection::Attributes)
-            && let Some(&id) = self.ids.get(self.index)
+        if matches!(
+            self.collection.selection,
+            Selection::Attributes | Selection::Declarations(_)
+        ) && let Some(&id) = self.ids.get(self.index)
         {
             let state = self.collection.root.shared.borrow();
             return Ok(state.document.arena[id].name.local.clone().into());

@@ -150,11 +150,11 @@ impl TreeSink for Sink {
     ) {
         let handle = self.allocate(Kind::Doctype, name.to_string(), "");
         let mut arena = self.arena.borrow_mut();
-        arena[handle.id].doctype = Some(Doctype {
+        arena[handle.id].doctype = Some(Box::new(Doctype {
             public_id: public_id.to_string(),
             system_id: system_id.to_string(),
-            internal_subset: None,
-        });
+            ..Doctype::default()
+        }));
         let _ = arena.insert(Arena::DOCUMENT, handle.id, None);
     }
 

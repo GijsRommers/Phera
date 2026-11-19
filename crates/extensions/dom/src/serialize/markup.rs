@@ -28,7 +28,7 @@ pub(super) fn write_doctype(node: &Node, output: &mut String) {
             let _ = write!(output, " \"{}\"", doctype.system_id);
         }
         if let Some(subset) = &doctype.internal_subset {
-            let _ = write!(output, " [\n{subset}]");
+            let _ = write!(output, " [\n{}{subset}]", doctype.notations);
         }
     }
     output.push('>');

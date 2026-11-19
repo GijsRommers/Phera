@@ -135,11 +135,11 @@ fn adjust_tree(arena: &mut Arena, source: &str, options: Options) {
         .find(|&id| arena[id].kind == Kind::Doctype);
     let doctype = if doctype.is_none() && !options.omit_default_doctype {
         let mut node = Node::new(Kind::Doctype, Name::new("html"), "");
-        node.doctype = Some(Doctype {
+        node.doctype = Some(Box::new(Doctype {
             public_id: "-//W3C//DTD HTML 4.0 Transitional//EN".into(),
             system_id: "http://www.w3.org/TR/REC-html40/loose.dtd".into(),
-            internal_subset: None,
-        });
+            ..Doctype::default()
+        }));
         Some(arena.allocate(node))
     } else {
         doctype

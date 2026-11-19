@@ -32,11 +32,11 @@ fn create_doctype(context: &mut dyn Context, _: This<'_>, arguments: &[Value]) -
     let name = checked_name(name, None, false)?;
     let mut document = Document::default();
     let mut node = Node::new(Kind::Doctype, name, "");
-    node.doctype = Some(Doctype {
+    node.doctype = Some(Box::new(Doctype {
         public_id: argument(arguments, 1).unwrap_or_default(),
         system_id: argument(arguments, 2).unwrap_or_default(),
-        internal_subset: None,
-    });
+        ..Doctype::default()
+    }));
     let id = document.arena.allocate(node);
     Location::new(document, false, id).wrap(context)
 }

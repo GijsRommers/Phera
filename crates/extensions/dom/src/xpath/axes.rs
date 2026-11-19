@@ -58,7 +58,7 @@ impl Eval<'_> {
         candidates.retain(|&id| {
             let node = &arena[id];
             match &step.test {
-                Test::Node => node.kind != Kind::Doctype,
+                Test::Node => !matches!(node.kind, Kind::Doctype | Kind::Entity | Kind::Notation),
                 Test::Any => node.kind == principal,
                 Test::Named(_) => qualified.is_some_and(|(namespace, local)| {
                     node.kind == principal

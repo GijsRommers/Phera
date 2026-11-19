@@ -128,6 +128,8 @@ impl Location {
                 Kind::Doctype => "DOMDocumentType",
                 Kind::Fragment => "DOMDocumentFragment",
                 Kind::EntityReference => "DOMEntityReference",
+                Kind::Entity => "DOMEntity",
+                Kind::Notation => "DOMNotation",
             }
         };
         let value = context.create_object(class, PhpArray::new())?;
@@ -188,7 +190,7 @@ fn text(arena: &Arena, id: NodeId) -> String {
             }
             text
         }
-        Kind::Doctype => String::new(),
+        Kind::Doctype | Kind::Entity | Kind::Notation => String::new(),
         _ => arena[id].value.clone(),
     }
 }
