@@ -2,6 +2,8 @@ name: CI
 
 on:
   pull_request:
+    # `ready_for_review` starts the long jobs when a draft becomes ready.
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
 
@@ -41,8 +43,29 @@ jobs:
           shared-key: linux
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
-  test:
-    name: Test (Linux, PHP 8.5, PostgreSQL 17, MySQL 8.4)
+  # The test suite runs as three jobs side by side. In one job it took 20
+  # minutes, and a third of that was one crate: `cargo test` runs the test
+  # programs one after another. Each part has its own build cache, because
+  # each builds a different set of crates.
+  test-part:
+    name: Tests (${{ matrix.part.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        part:
+          - name: mbstring
+            key: mbstring
+            packages: --package phera-ext-mbstring
+          - name: command line and fixtures
+            key: cli
+            packages: --package phera-cli
+          - name: all other crates
+            key: rest
+            packages: --workspace --exclude phera-ext-mbstring --exclude phera-cli
+    # A draft gets the three short checks only. Work in progress is pushed
+    # often, and its long jobs kept finished pull requests waiting for a
+    # free runner.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -80,7 +103,7 @@ jobs:
           toolchain: '1.99.1'
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
-          shared-key: linux
+          shared-key: linux-${{ matrix.part.key }}
       - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
         with:
           php-version: '8.5'
@@ -103,8 +126,20 @@ jobs:
       # Fail on missing prerequisites instead of silently skipping the PDO suites.
       - name: Verify PHP version, extensions and database connections
         run: make ci-prerequisites
-      - name: Test workspace against real PHP
-        run: cargo test --workspace --no-fail-fast
+      - name: Test against real PHP
+        run: cargo test ${{ matrix.part.packages }} --no-fail-fast
+
+  test:
+    name: Test (Linux, PHP 8.5, PostgreSQL 17, MySQL 8.4)
+    # The name is a required check in the branch protection, so it stays. It
+    # passes when every part of the suite passed. `always()` makes it fail
+    # when a part failed: a skipped job would count as passed.
+    needs: test-part
+    if: always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every part of the test suite passed
+        run: test "${{ needs.test-part.result }}" = "success"
 
   pdo-end-to-end:
     name: PDO end to end
@@ -112,6 +147,7 @@ jobs:
     # is although the job now runs the SQLite and Redis comparisons too.
     # Runs the comparison scripts of PDO, SQLite3 and Redis through the release
     # binary; every one of them must match real PHP.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
