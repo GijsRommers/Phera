@@ -189,3 +189,32 @@ pub struct DeclarationWarning {
     pub message: String,
     pub line: u32,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::union_in_php_order;
+
+    #[test]
+    fn built_in_types_follow_php_order_and_class_names_stay_first() {
+        assert_eq!(union_in_php_order("int|string"), "string|int");
+        assert_eq!(
+            union_in_php_order("null|float|bool|int|array|string|Countable|Stringable"),
+            "Countable|Stringable|array|string|int|float|bool|null"
+        );
+        assert_eq!(union_in_php_order("B|A|false"), "B|A|false");
+    }
+
+    #[test]
+    fn one_type_or_null_is_written_with_a_question_mark() {
+        assert_eq!(union_in_php_order("null|int"), "?int");
+        assert_eq!(union_in_php_order("?int"), "?int");
+        assert_eq!(union_in_php_order("int"), "int");
+        assert_eq!(union_in_php_order("int|string|null"), "string|int|null");
+    }
+
+    #[test]
+    fn intersections_are_left_as_written() {
+        assert_eq!(union_in_php_order("B&A"), "B&A");
+        assert_eq!(union_in_php_order("(B&A)|null"), "(B&A)|null");
+    }
+}
