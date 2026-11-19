@@ -126,6 +126,7 @@ impl Runtime {
         registry.load(&phera_ext_session::Session);
         let mut web_registry = registry.clone();
         phera_ext_http::register_web(&mut web_registry);
+        phera_ext_process::register_cli_process_control(&mut registry);
         registry.constant("PHP_SAPI", Sapi::Cli.name());
         let registry = Arc::new(registry);
         let web_registry = Arc::new(web_registry);

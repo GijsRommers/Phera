@@ -9,6 +9,7 @@
 mod child;
 mod command;
 mod descriptors;
+mod pcntl;
 mod posix;
 mod proc;
 mod shell;
@@ -16,6 +17,7 @@ mod shell;
 use phera_extension_api::{Context, Extension, NativeError, Registry, RequestState};
 
 pub struct Process;
+pub use pcntl::register_cli as register_cli_process_control;
 pub use posix::Posix;
 
 impl Extension for Process {

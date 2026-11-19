@@ -294,13 +294,15 @@ Tokio waits for a child or work on its pipes without blocking the worker.
 `phera serve --no-process` makes program-starting functions throw `Error`.
 Program execution is enabled by default. The PHP execution time limit also
 counts waits on children and their streams toward the request budget. The HTTP
-request timeout covers the whole handler and cancels any pending wait. PHP's Unix process resource
-destructor closes its pipes and checks child status without waiting or
-sending a signal. Ordinary CLI process cleanup follows this behaviour. Phera
-gives each web child its own process group and terminates abandoned children
-at request cleanup while their leader is still tracked. Programs that
-explicitly detach can keep running. Explicit closure waits asynchronously
+request timeout covers the whole handler and cancels any pending wait.
+At CLI shutdown an open `proc_open()` handle closes its pipes and checks
+child status without waiting. An open `popen()` stream closes its pipe and
+reaps the child before the CLI returns. Explicit closure waits asynchronously
 and returns the child's exit status.
+
+Phera gives each web child its own process group and terminates abandoned
+children at request cleanup while their leader is still tracked. Programs
+that explicitly detach can keep running. [Process decisions](decisions.md)
 
 ## 6. Scope
 
@@ -312,7 +314,8 @@ classes, interfaces, traits, enums, readonly, attributes, anonymous classes, lat
 static binding, magic methods, exceptions with `finally`, generators, `match`,
 nullsafe, destructuring, alternative control syntax, heredoc and nowdoc,
 `declare(strict_types=1)` with parameter and return type checks, `include` and
-autoloading, `eval`, property hooks, asymmetric visibility, the pipe operator, and deprecated backticks.
+autoloading, `eval`, property hooks, asymmetric visibility, and the pipe operator.
+Backticks are supported and emit PHP 8.5's compile-time deprecation.
 
 **Language, left out:** `(real)`, short and
 ASP tags, `goto`, `declare(ticks)` and `__halt_compiler` data access.
@@ -322,9 +325,14 @@ assertions out, as PHP's production configuration does, comes with the
 configuration file.
 Fiber switching and request-local state are described in section 9.5.
 
-**Runtime, left out:** opcache and JIT settings, FFI, phar, pcntl, the C
-extension ABI, `dl()`, startup configuration from an INI file, and functions
-removed or deprecated before PHP 8.
+**Runtime, in scope:** Unix program execution, including `shell_exec()` and
+`popen()`, plus POSIX queries. The CLI exposes named `SIG*` constants and
+reports a `Phera\NotSupportedException` for `pcntl_fork()`, `pcntl_exec()`, and
+the `pcntl_wait*()` calls.
+
+**Runtime, left out:** opcache and JIT settings, FFI, phar, pcntl signal
+handlers and alarms, the C extension ABI, `dl()`, startup configuration from
+an INI file, and functions removed or deprecated before PHP 8.
 
 **Extensions, first wave:** standard (strings, arrays, math, output, variables,
 files, `sprintf`, `serialize`), spl, json, pcre (bound to PCRE2), ctype, mbstring,

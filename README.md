@@ -29,12 +29,14 @@ to work.
 - 🦀 **Rust all the way down.** Memory safety and predictable performance, no C extensions required.
 - 🌐 **Batteries included.** `phera serve` boots an HTTP server straight from the CLI.
 
+PHP scripts can launch programs with `shell_exec()`, backticks, and the process
+functions. Backticks emit PHP 8.5's compile-time deprecation.
+
 ### What's left out on purpose
 
 The lexer handles everything PHP 8.5 can lex, with a few deliberate exceptions
 that nothing modern depends on. Each is a clear error, not a silent gap:
 
-- Backtick shell execution (`` `ls` ``)
 - `${expr}` string interpolation, deprecated since PHP 8.2 (`"{$expr}"` works)
 - The `(real)` cast, removed in PHP 8
 - Short `<?` and ASP `<%` open tags

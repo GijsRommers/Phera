@@ -14,5 +14,8 @@ phera-ext-streams.workspace = true
 rustix = { workspace = true, features = ["pty"] }
 tokio = { workspace = true, features = ["io-util", "process"] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix-libc-wrappers.workspace = true
+
 [lints]
 workspace = true
