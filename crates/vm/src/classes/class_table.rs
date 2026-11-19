@@ -175,6 +175,7 @@ impl Drop for ClassTable {
         drop(self.ids.close());
         for object in self.objects.iter().filter_map(Weak::upgrade) {
             object.update(|properties| *properties = phera_value::PhpArray::new());
+            drop(object.take_attachments());
             if let Ok(mut native) = object.native.try_borrow_mut() {
                 *native = None;
             }

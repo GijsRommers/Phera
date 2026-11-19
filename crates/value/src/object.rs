@@ -2,7 +2,8 @@
 
 use std::any::Any;
 use std::cell::{Cell, RefCell};
-use std::rc::Rc;
+use std::collections::HashMap;
+use std::rc::{Rc, Weak};
 
 use crate::array::{ArrayKey, PhpArray};
 use crate::destruction::{Destruction, DoomedObjects};
@@ -63,6 +64,8 @@ pub struct Object {
     pub native: RefCell<Option<Box<dyn Any>>>,
     /// Whether `__destruct` still has to run; see `crate::destruction`.
     pub(crate) destruction: Cell<Destruction>,
+    /// Values `WeakMap`s keep for this object; see `crate::attachments`.
+    pub(crate) attachments: crate::attachments::Attachments,
     /// Gives the id back to its pool when the object is freed. Moved, not
     /// copied, into the object that waits for its destructor, so the id
     /// stays taken until that object is really gone.
@@ -78,6 +81,7 @@ impl Object {
             properties: RefCell::new(PhpArray::new()),
             native: RefCell::new(None),
             destruction: Cell::new(Destruction::Never),
+            attachments: Cell::new(None),
             lease: None,
         }
     }
@@ -95,9 +99,12 @@ impl Object {
         class: Rc<dyn ClassHandle>,
         properties: PhpArray,
     ) -> Self {
+        let (id, serial) = ids.take();
         let lease = IdLease {
-            id: ids.take(),
+            id,
+            serial,
             pool: ids.clone(),
+            incarnated: false,
         };
         Object {
             id: lease.id,
@@ -105,6 +112,7 @@ impl Object {
             properties: RefCell::new(properties),
             native: RefCell::new(None),
             destruction: Cell::new(Destruction::Never),
+            attachments: Cell::new(None),
             lease: Some(lease),
         }
     }
@@ -190,6 +198,9 @@ pub struct ObjectIds {
     state: RefCell<IdState>,
     /// Objects whose destructor is due; see `crate::destruction`.
     pub(crate) doomed: DoomedObjects,
+    /// The object that now carries each id whose object was handed over
+    /// for its destructor; see `crate::weak_object`.
+    pub(crate) incarnations: RefCell<HashMap<u32, Weak<Object>>>,
 }
 
 #[derive(Debug, Default)]
@@ -201,6 +212,8 @@ struct IdState {
     /// PHP stops reusing ids while it destroys the objects left at the end
     /// of a request.
     no_reuse: bool,
+    /// Serial numbers handed out so far.
+    serials: u64,
 }
 
 impl ObjectIds {
@@ -208,15 +221,19 @@ impl ObjectIds {
         Rc::new(ObjectIds::default())
     }
 
-    pub(crate) fn take(&self) -> u32 {
+    /// A free id, and a serial number that no other object of the request
+    /// gets (see `crate::weak_object`).
+    pub(crate) fn take(&self) -> (u32, u64) {
         let mut state = self.state.borrow_mut();
+        state.serials += 1;
+        let serial = state.serials;
         if !state.no_reuse
             && let Some(id) = state.free.pop()
         {
-            return id;
+            return (id, serial);
         }
         state.highest = state.highest.saturating_add(1);
-        state.highest
+        (state.highest, serial)
     }
 
     fn give_back(&self, id: u32) {
@@ -243,11 +260,22 @@ impl ObjectIds {
 /// Returns an object's id to the pool when dropped.
 pub(crate) struct IdLease {
     pub(crate) id: u32,
+    /// Never reused within the request: tells this object from a later one
+    /// that gets the same id.
+    pub(crate) serial: u64,
     pub(crate) pool: Rc<ObjectIds>,
+    /// The object was handed over for its destructor and is registered in
+    /// the pool's incarnations.
+    pub(crate) incarnated: bool,
 }
 
 impl Drop for IdLease {
     fn drop(&mut self) {
+        if self.incarnated
+            && let Ok(mut incarnations) = self.pool.incarnations.try_borrow_mut()
+        {
+            incarnations.remove(&self.id);
+        }
         self.pool.give_back(self.id);
     }
 }

@@ -178,6 +178,10 @@ impl Vm {
     /// first, until a pass changes nothing.
     async fn destroy_globals(&mut self) -> Result<(), NativeError> {
         self.run_destructors().await?;
+        // With no destructor due anywhere, neither phase has work.
+        if !self.object_ids.has_due() {
+            return Ok(());
+        }
         let count = self
             .request_end
             .main
@@ -218,6 +222,9 @@ impl Vm {
     /// Phase 3: every object whose destructor has not run, by id, including
     /// objects created meanwhile.
     async fn destroy_remaining_objects(&mut self) -> Result<(), NativeError> {
+        if !self.object_ids.has_due() {
+            return Ok(());
+        }
         self.classes.ids().stop_reuse();
         let mut index = 0;
         while let Some(object) = self.classes.objects.get(index) {

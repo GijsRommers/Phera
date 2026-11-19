@@ -130,7 +130,7 @@ impl Object {
     /// that waits in the queue for its destructor.
     fn hand_over(&mut self) {
         self.no_longer_due();
-        let Some(lease) = self.lease.take() else {
+        let Some(mut lease) = self.lease.take() else {
             return;
         };
         let pool = lease.pool.clone();
@@ -138,15 +138,21 @@ impl Object {
             self.lease = Some(lease);
             return;
         }
+        lease.incarnated = true;
         let doomed = Object {
             id: self.id,
             class: self.class.clone(),
             properties: RefCell::new(self.properties.take()),
             native: RefCell::new(self.native.take()),
             destruction: Cell::new(Destruction::Done),
+            attachments: Cell::new(self.attachments.take()),
             lease: Some(lease),
         };
-        pool.doomed.push(Rc::new(doomed));
+        let doomed = Rc::new(doomed);
+        if let Ok(mut incarnations) = pool.incarnations.try_borrow_mut() {
+            incarnations.insert(self.id, Rc::downgrade(&doomed));
+        }
+        pool.doomed.push(doomed);
     }
 }
 

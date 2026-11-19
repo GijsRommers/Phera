@@ -27,7 +27,7 @@
 //! (through the same flag as due destructors). A run costs time in
 //! proportion to the live objects and what they hold; when it frees fewer
 //! than 100 values the threshold grows by 10,000, as PHP's does, and the next
-//! run never comes before twice as many allocations as there are live objects, so
+//! run never comes before four times as many allocations as there are live objects, so
 //! that a program with a large live heap and no cycles pays a constant
 //! amount per allocation for the walks.
 
@@ -174,12 +174,12 @@ impl Vm {
             };
         }
         // A run walks every live object, so the next one waits for at least
-        // twice as many allocations as there are live objects: a large heap
+        // four times as many allocations as there are live objects: a large heap
         // that holds no cycles costs a constant amount per allocation, not a
         // walk every 10,000.
         let live = self.object_ids.live();
         self.classes
-            .request_collection_after(self.cycles.threshold.max(live.saturating_mul(2)));
+            .request_collection_after(self.cycles.threshold.max(live.saturating_mul(4)));
         Ok(())
     }
 
@@ -239,12 +239,13 @@ impl Vm {
 /// object is freed while another is being emptied.
 fn break_apart(garbage: Garbage) {
     let mut contents = Vec::new();
+    let mut values = Vec::new();
     for object in &garbage.objects {
         if let Some(properties) = object.update(std::mem::take) {
             contents.push(properties);
         }
+        values.extend(object.take_attachments());
     }
-    let mut values = Vec::new();
     for cell in &garbage.references {
         if let Ok(mut value) = cell.try_borrow_mut() {
             values.push(std::mem::take(&mut *value));

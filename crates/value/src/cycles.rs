@@ -99,7 +99,9 @@ impl Node {
                 let Ok(properties) = object.properties.try_borrow() else {
                     return false;
                 };
-                properties.values().for_each(visit);
+                let mut visit = visit;
+                properties.values().for_each(&mut visit);
+                object.visit_attachments(&mut visit);
                 true
             }
             Node::Array(array) => {
@@ -193,7 +195,10 @@ impl Walk {
 /// handle outside the walk counts as an owner.
 pub fn find_garbage(objects: impl IntoIterator<Item = Rc<Object>>) -> Garbage {
     let mut walk = Walk::default();
-    for object in objects {
+    // An object that holds no array, object or reference cannot be part of
+    // a cycle: it stays out of the walk, which keeps a large heap of plain
+    // objects cheap, and is counted at the end if garbage holds it.
+    for object in objects.into_iter().filter(|object| !is_leaf(object)) {
         let node = Node::Object(object);
         walk.enter(node.key(), || node);
     }
@@ -205,6 +210,9 @@ pub fn find_garbage(objects: impl IntoIterator<Item = Rc<Object>>) -> Garbage {
             let Some(key) = key_of(value) else {
                 return;
             };
+            if matches!(value, Value::Object(object) if is_leaf(object)) {
+                return;
+            }
             let child = match walk.index_of.get(&key) {
                 Some(&known) => known,
                 None => match Node::of(value) {
@@ -241,7 +249,7 @@ pub fn find_garbage(objects: impl IntoIterator<Item = Rc<Object>>) -> Garbage {
             }
         }
     }
-    // 3. The rest is garbage.
+    // 3. The rest is garbage, with the leaf objects only garbage holds.
     let mut garbage = Garbage::default();
     for entry in entries.into_iter().filter(|entry| !entry.alive) {
         match entry.node {
@@ -250,8 +258,60 @@ pub fn find_garbage(objects: impl IntoIterator<Item = Rc<Object>>) -> Garbage {
             Node::Reference(cell) => garbage.references.push(cell),
         }
     }
+    let leaves = held_leaves(&garbage);
+    garbage.objects.extend(leaves);
     garbage.objects.sort_by_key(|object| object.id);
     garbage
+}
+
+/// Whether an object holds nothing that could lead back to it.
+fn is_leaf(object: &Object) -> bool {
+    let Ok(native) = object.native.try_borrow() else {
+        return false;
+    };
+    let Ok(properties) = object.properties.try_borrow() else {
+        return false;
+    };
+    native.is_none()
+        && !object.has_attachments()
+        && !properties.values().any(|value| {
+            matches!(
+                value,
+                Value::Array(_) | Value::Object(_) | Value::Reference(_)
+            )
+        })
+}
+
+/// The leaf objects that only `garbage` holds: every handle on them comes
+/// from a garbage value.
+fn held_leaves(garbage: &Garbage) -> Vec<Rc<Object>> {
+    let mut held: HashMap<usize, (Rc<Object>, usize), BuildHasherDefault<AddressHasher>> =
+        HashMap::default();
+    let mut tally = |value: &Value| {
+        if let Value::Object(object) = value
+            && is_leaf(object)
+        {
+            let entry = held
+                .entry(Rc::as_ptr(object) as *const () as usize)
+                .or_insert_with(|| (object.clone(), 0));
+            entry.1 += 1;
+        }
+    };
+    for object in &garbage.objects {
+        Node::Object(object.clone()).visit_children(&mut tally);
+    }
+    for array in &garbage.arrays {
+        array.values().for_each(&mut tally);
+    }
+    for cell in &garbage.references {
+        if let Ok(value) = cell.try_borrow() {
+            tally(&value);
+        }
+    }
+    held.into_values()
+        .filter(|(object, owners)| Rc::strong_count(object) == owners + 1)
+        .map(|(object, _)| object)
+        .collect()
 }
 
 #[cfg(test)]

@@ -19,10 +19,7 @@ fn modify(
     key: &Rc<Object>,
     change: impl FnOnce(&mut Value) -> Value,
 ) -> NativeResult {
-    crate::native_state::update_present_state(map, |state: &mut Map| {
-        let (weak, value) = state.0.get_mut(&key.id)?;
-        (weak.as_ptr() == Rc::as_ptr(key)).then(|| change(value))
-    })?
+    crate::native_state::update_present_state(map, |state: &mut Map| state.update(key, change))?
     .flatten()
     .ok_or_else(|| missing_key(key))
 }
