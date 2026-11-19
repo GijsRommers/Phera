@@ -85,7 +85,7 @@ impl Compiler<'_> {
                                 self.lines.line(property.span.start),
                             ));
                         }
-                        if modifiers.is_abstract && property.hooks.is_empty() {
+                        if modifiers.is_abstract && !property.has_hook_list {
                             return Err(
                                 self.error("Only hooked properties may be declared abstract", line)
                             );

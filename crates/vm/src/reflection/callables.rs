@@ -47,8 +47,8 @@ impl Vm {
                 let object = closure_invoke_receiver(receiver)?;
                 self.resolve_callable(&Value::Object(object))?
             }
-            FunctionTarget::Method { class, name } => {
-                let (class, method) = self.reflection_method(class, name)?;
+            FunctionTarget::Method { .. } | FunctionTarget::PropertyHook { .. } => {
+                let (class, method) = self.reflection_target_method(target)?;
                 let scope = self
                     .classes
                     .get(&method.declaring)
@@ -76,6 +76,19 @@ impl Vm {
             }
         };
         Ok(callee)
+    }
+
+    pub(super) fn reflection_target_method(
+        &self,
+        target: &FunctionTarget,
+    ) -> Result<(Rc<Class>, Rc<Method>), NativeError> {
+        match target {
+            FunctionTarget::Method { class, name } => self.reflection_method(class, name),
+            FunctionTarget::PropertyHook { property, kind } => {
+                self.reflection_hook_method(*property, *kind)
+            }
+            _ => Err(exception("Expected a method")),
+        }
     }
 
     pub(super) fn reflection_method(
@@ -125,8 +138,8 @@ impl Vm {
         let mut values = PhpArray::new();
         let function = match target {
             FunctionTarget::Named(name) => function_of(&self.resolve_callee(name)?.target),
-            FunctionTarget::Method { class, name } => {
-                method_function(&self.reflection_method(class, name)?.1)
+            FunctionTarget::Method { .. } | FunctionTarget::PropertyHook { .. } => {
+                method_function(&self.reflection_target_method(target)?.1)
             }
             FunctionTarget::ClosureInvoke(_) => None,
             FunctionTarget::Closure(object) => {

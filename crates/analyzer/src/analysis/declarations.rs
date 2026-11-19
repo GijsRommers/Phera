@@ -154,6 +154,15 @@ impl Analyzer<'_> {
                         if let Some(default) = &item.default {
                             self.expression(default, &mut Scope::default(), false);
                         }
+                        if consumer_contexts.is_empty() {
+                            self.property_hooks(&item.name, ty.as_ref(), &item.hooks);
+                        } else {
+                            for consumer in &consumer_contexts {
+                                self.context.class = Some(consumer.clone());
+                                self.property_hooks(&item.name, ty.as_ref(), &item.hooks);
+                            }
+                            self.context.class.clone_from(&declaring_class);
+                        }
                     }
                 }
                 ClassMemberKind::Constant {
@@ -221,6 +230,9 @@ impl Analyzer<'_> {
             }
         }
         self.check_type(method.return_type.as_ref());
+        for parameter in &method.parameters {
+            self.property_hooks(&parameter.name, parameter.ty.as_ref(), &parameter.hooks);
+        }
         if let Some(body) = &method.body {
             let flow = self.block(body, &mut scope);
             self.check_return_path(flow, body, span);

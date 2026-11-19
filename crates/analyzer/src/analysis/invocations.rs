@@ -66,6 +66,11 @@ impl Analyzer<'_> {
                 name,
                 arguments,
             } => {
+                if let Some(result) =
+                    self.parent_hook_call(class, name, arguments, scope, expression.span)
+                {
+                    return result;
+                }
                 let class_name = self.class_expression(class, scope);
                 if class_name.is_never() {
                     return ValueType::Never;

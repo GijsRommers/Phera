@@ -43,6 +43,7 @@ mod match_expression;
 mod member_expressions;
 mod members;
 mod not_supported;
+mod property_hooks;
 mod receiver_types;
 mod refine;
 mod refine_types;

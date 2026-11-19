@@ -128,8 +128,25 @@ pub struct PropertyDeclaration {
     pub visibility: Visibility,
     pub is_static: bool,
     pub is_readonly: bool,
+
     pub ty: Option<TypeId>,
     pub default: Option<Initializer>,
+    pub hooks: Option<Box<PropertyHooks<FunctionId>>>,
+}
+
+/// Hook functions use regular function IDs but do not appear in the method table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PropertyHooks<F> {
+    pub get: Option<PropertyHook<F>>,
+    pub set: Option<PropertyHook<F>>,
+    pub is_virtual: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PropertyHook<F> {
+    pub function: F,
+    pub is_abstract: bool,
+    pub is_final: bool,
 }
 
 /// Methods reuse ordinary function bytecode and its parameter/return metadata.
