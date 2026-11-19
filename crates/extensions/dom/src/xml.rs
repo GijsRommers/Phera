@@ -15,6 +15,7 @@ mod entities;
 pub(crate) mod names;
 mod replacement;
 pub(crate) use encoding::supported_encoding;
+pub use names::valid as valid_name;
 
 use std::borrow::Cow;
 use std::collections::HashMap;

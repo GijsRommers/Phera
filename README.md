@@ -53,10 +53,11 @@ runner yet.
 Built in, each checked call by call against real PHP: core, standard, ctype,
 date, dom (first stage), filter, hash, json, mbstring, openssl, pcre, PDO
 (SQLite, MySQL, PostgreSQL, with TLS), random, redis, reflection, serialize,
-session, SPL, sqlite3, streams, tokenizer.
+session, SPL, sqlite3, streams, tokenizer, and `XMLWriter` (`xmlwriter_*` and
+memory, local file URI, and PHP stream output).
 
 In progress: bcmath, curl, gmp, intl, mysqli, pgsql, process functions, sodium,
-zlib. Not started: gd, fileinfo, SimpleXML, XMLReader, XMLWriter, zip, sockets.
+zlib. Not started: gd, fileinfo, SimpleXML, XMLReader, zip, sockets.
 
 ## ✨ Goals
 

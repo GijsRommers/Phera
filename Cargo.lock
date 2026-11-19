@@ -2305,6 +2305,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "phera-ext-xmlwriter"
+version = "0.1.0"
+dependencies = [
+ "encoding_rs",
+ "percent-encoding",
+ "phera-ext-dom",
+ "phera-ext-streams",
+ "phera-extension-api",
+ "tokio",
+]
+
+[[package]]
 name = "phera-extension-api"
 version = "0.1.0"
 dependencies = [
@@ -2374,6 +2386,7 @@ dependencies = [
  "phera-ext-standard",
  "phera-ext-streams",
  "phera-ext-tokenizer",
+ "phera-ext-xmlwriter",
  "phera-extension-api",
  "phera-value",
  "phera-vm",
