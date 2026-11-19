@@ -48,8 +48,15 @@ impl Vm {
                 }
                 self.error_handlers.trace_string_limit = limit;
             }
-            "precision" | "serialize_precision" if integer(bytes) < -1 => return false,
-            "unserialize_max_depth" | "zend.assertions" | "memory_limit" => {
+            "precision" => {
+                let precision = integer(bytes);
+                if precision < -1 {
+                    return false;
+                }
+                self.ini_overrides.precision = Some(precision as i32);
+            }
+            "serialize_precision" if integer(bytes) < -1 => return false,
+            "unserialize_max_depth" | "zend.assertions" | "memory_limit" | "fiber.stack_size" => {
                 if !self.ini_quantity(entry.name, bytes) {
                     return false;
                 }
@@ -83,6 +90,10 @@ impl Vm {
             self.warn(
                 "zend.assertions may be completely enabled or disabled only in php.ini".into(),
             );
+            return false;
+        }
+        if name == "fiber.stack_size" && number < 0 {
+            self.warn("fiber.stack_size must be a positive number".into());
             return false;
         }
         // Zend allocates its heap in 2 MiB segments. The request has no Zend heap,

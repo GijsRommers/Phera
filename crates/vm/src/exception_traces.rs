@@ -20,9 +20,9 @@ impl Vm {
     /// Frame entries point at the caller's call instruction and omit the main frame.
     pub(crate) fn throwable_trace(&mut self, origin: crate::exceptions::TraceOrigin) -> Value {
         let trace = if self.generator_traces.is_empty() {
-            self.trace_frames::<false>(origin, true)
+            self.trace_frames::<false>(origin, true, false)
         } else {
-            self.trace_frames::<true>(origin, true)
+            self.trace_frames::<true>(origin, true, false)
         };
         if !self.error_handlers.trace_ignore_args {
             return trace;
@@ -41,12 +41,12 @@ impl Vm {
         Value::from(result)
     }
 
-    pub(crate) fn trace_without_fiber_caller(&mut self) -> Value {
+    pub(crate) fn trace_without_fiber_caller(&mut self, include_objects: bool) -> Value {
         let origin = crate::exceptions::TraceOrigin::Construction;
         if self.generator_traces.is_empty() {
-            self.trace_frames::<false>(origin, false)
+            self.trace_frames::<false>(origin, false, include_objects)
         } else {
-            self.trace_frames::<true>(origin, false)
+            self.trace_frames::<true>(origin, false, include_objects)
         }
     }
 
@@ -54,6 +54,7 @@ impl Vm {
         &mut self,
         origin: crate::exceptions::TraceOrigin,
         include_fiber_caller: bool,
+        include_objects: bool,
     ) -> Value {
         let mut trace = PhpArray::new();
         if let Some(native) = matches!(origin, crate::exceptions::TraceOrigin::Engine)
@@ -121,6 +122,9 @@ impl Vm {
             entry.insert(ArrayKey::str("function"), Value::from(name));
             if let Some(class) = class {
                 entry.insert(ArrayKey::str("class"), Value::from(class));
+                if include_objects && let Some(object) = callee.this() {
+                    entry.insert(ArrayKey::str("object"), Value::Object(object.clone()));
+                }
                 let kind = if callee.this().is_some() { "->" } else { "::" };
                 entry.insert(ArrayKey::str("type"), Value::from(kind));
             }
@@ -184,13 +188,26 @@ impl Vm {
                 }
             }
         }
-        if let Some(name) = self
+        if let Some((name, receiver)) = self
             .frame_at(0)
             .filter(|frame| frame.function_id().is_some())
-            .map(|frame| frame.function().name.clone())
+            .map(|frame| (frame.function().name.clone(), frame.this().cloned()))
         {
             let mut entry = PhpArray::new();
-            entry.insert(ArrayKey::str("function"), Value::from(name));
+            if let Some((class, method)) = name
+                .split_once("::")
+                .filter(|_| !name.starts_with("{closure:"))
+            {
+                entry.insert(ArrayKey::str("function"), Value::from(method));
+                entry.insert(ArrayKey::str("class"), Value::from(class));
+                let access = if receiver.is_some() { "->" } else { "::" };
+                if include_objects && let Some(object) = receiver {
+                    entry.insert(ArrayKey::str("object"), Value::Object(object));
+                }
+                entry.insert(ArrayKey::str("type"), Value::from(access));
+            } else {
+                entry.insert(ArrayKey::str("function"), Value::from(name));
+            }
             entry.insert(ArrayKey::str("args"), self.trace_arguments(0));
             let _ = trace.push(Value::Array(Rc::new(entry)));
         }

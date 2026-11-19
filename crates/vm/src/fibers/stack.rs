@@ -7,7 +7,8 @@ use std::rc::{Rc, Weak};
 use phera_extension_api::{LocalFuture, NativeError, NativeResult, fiber::FiberInspection};
 use phera_value::{Object, Value};
 
-use super::trace::Site;
+use super::caller::CallerStack;
+use super::trace::{Site, Waiting};
 use crate::Vm;
 
 pub(super) enum Input {
@@ -23,6 +24,8 @@ pub(super) struct Exchange {
     pub(super) input: Cell<Option<Input>>,
     pub(super) yielded: Cell<Option<Value>>,
     pub(super) site: RefCell<Option<Site>>,
+    pub(super) caller: RefCell<Option<CallerStack>>,
+    pub(super) waiting: RefCell<Option<Waiting>>,
     pub(super) inspected: Cell<Option<NativeResult>>,
     pub(super) depth: Cell<usize>,
     reporting: Cell<i64>,
@@ -47,6 +50,8 @@ impl Exchange {
             input: Cell::new(None),
             yielded: Cell::new(None),
             site: RefCell::new(None),
+            caller: RefCell::new(None),
+            waiting: RefCell::new(None),
             inspected: Cell::new(None),
             depth: Cell::new(0),
             reporting: Cell::new(request.fiber_initial_reporting()),
@@ -76,6 +81,21 @@ impl Exchange {
 }
 
 impl Vm {
+    pub(super) fn check_fiber_stack_size(&self) -> Result<(), NativeError> {
+        let Some(value) = self.ini_override(b"fiber.stack_size") else {
+            return Ok(());
+        };
+        let (size, _) = phera_extension_api::ini::parse_quantity(value.as_bytes());
+        let minimum = rustix::param::page_size().saturating_mul(2);
+        if size < minimum as i64 {
+            return Err(NativeError::throw(
+                "Exception",
+                format!("Fiber stack size is too small, it needs to be at least {minimum} bytes"),
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn fiber_initial_reporting(&self) -> i64 {
         let value = self.ini_get(b"error_reporting");
         value
@@ -112,6 +132,7 @@ impl Vm {
         swap(&mut self.constants, &mut other.constants);
         swap(&mut self.frame_limit, &mut other.frame_limit);
         swap(&mut self.status, &mut other.status);
+        swap(&mut self.fiber_bailout, &mut other.fiber_bailout);
         swap(
             &mut self.error_handlers.exception,
             &mut other.error_handlers.exception,

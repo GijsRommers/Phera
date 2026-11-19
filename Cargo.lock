@@ -2046,6 +2046,7 @@ dependencies = [
  "phera-extension-api",
  "phera-source",
  "phera-value",
+ "rustix",
  "tokio",
 ]
 

@@ -87,9 +87,11 @@ impl Vm {
         let error = self.materialize_error(error);
         match error {
             NativeError::Throw { class, message, .. } => {
-                let SourceLocation { file, line } = self.location();
-                let text = self.error_trace(class, &message, &file, line);
-                self.out(text.as_bytes());
+                if self.error_handlers.display_errors {
+                    let SourceLocation { file, line } = self.location();
+                    let text = self.error_trace(class, &message, &file, line);
+                    self.out(text.as_bytes());
+                }
                 self.status = 255;
             }
             NativeError::Unwind(state) => {
@@ -101,13 +103,15 @@ impl Vm {
                     .0
                     .downcast::<crate::error_traces::DeclarationFailure>()
                 {
-                    self.out(
-                        format!(
-                            "\nFatal error: {} in {} on line {}\n",
-                            failure.message, failure.file, failure.line
-                        )
-                        .as_bytes(),
-                    );
+                    if self.error_handlers.display_errors {
+                        self.out(
+                            format!(
+                                "\nFatal error: {} in {} on line {}\n",
+                                failure.message, failure.file, failure.line
+                            )
+                            .as_bytes(),
+                        );
+                    }
                     self.status = 255;
                 }
             }
@@ -126,7 +130,8 @@ pub(crate) struct OperatorDiagnostics<'vm> {
 impl<'vm> OperatorDiagnostics<'vm> {
     /// Detach the reusable buffer while retaining the VM needed to publish it on every exit.
     pub(crate) fn new(vm: &'vm mut Vm) -> Self {
-        let buffer = vm.diagnostic_reporter.take_operator();
+        let mut buffer = vm.diagnostic_reporter.take_operator();
+        buffer.float_precision = Some(vm.float_precision());
         Self { vm, buffer }
     }
 }

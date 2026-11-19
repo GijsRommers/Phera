@@ -259,6 +259,10 @@ impl Vm {
 
     /// Stored object metadata survives complete unwinding of the original stack.
     pub(crate) fn report_throwable(&mut self, object: &Rc<Object>) {
+        if !self.error_handlers.display_errors {
+            self.status = 255;
+            return;
+        }
         if object.class.name() == "ParseError" {
             let message = property_text(object, "message");
             let file = property_text(object, "file");

@@ -17,7 +17,10 @@
 //! owning stack. A suspended fiber is closed by a graceful unwind at
 //! request shutdown so its finally blocks can run.
 
+mod caller;
 mod class;
+mod globals;
+mod lifecycle;
 mod reflection;
 mod stack;
 mod switch;
@@ -44,6 +47,7 @@ pub(crate) fn register(registry: &mut Registry) {
 
 struct Fiber {
     callable: Value,
+    live: Option<Weak<stack::Exchange>>,
     state: State,
 }
 

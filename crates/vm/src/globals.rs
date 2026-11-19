@@ -25,6 +25,10 @@ impl Globals {
         self.values.remove(name);
     }
 
+    pub(crate) fn get(&self, name: &str) -> Option<&Value> {
+        self.values.get(name)
+    }
+
     pub(crate) fn iter(&self) -> impl Iterator<Item = (&String, &Value)> {
         self.values.iter()
     }

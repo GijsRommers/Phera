@@ -9,6 +9,10 @@ use phera_value::{Diagnostics, Value};
 use crate::Vm;
 
 impl Diagnostics for Vm {
+    fn float_precision(&self) -> i32 {
+        Vm::float_precision(self)
+    }
+
     fn warning(&mut self, message: String) {
         self.diagnostic("Warning", message)
     }
@@ -58,7 +62,7 @@ impl Context for Vm {
         Box::pin(Vm::fiber_operation(self, object, operation))
     }
 
-    fn suspend_fiber(&mut self, value: Value) -> LocalFuture<'_, NativeResult> {
+    fn suspend_fiber(&mut self, value: Option<Value>) -> LocalFuture<'_, NativeResult> {
         Box::pin(self.fiber_suspend(value))
     }
 

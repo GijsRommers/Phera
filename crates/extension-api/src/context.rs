@@ -130,23 +130,23 @@ pub trait Context {
 
     fn fiber_operation(
         &mut self,
-        object: Rc<Object>,
+        _object: Rc<Object>,
         _operation: crate::fiber::FiberOperation,
     ) -> LocalFuture<'_, NativeResult> {
-        Box::pin(std::future::ready(crate::fiber::unavailable(Some(object))))
+        Box::pin(std::future::ready(crate::fiber::unavailable()))
     }
 
-    fn suspend_fiber(&mut self, _value: Value) -> LocalFuture<'_, NativeResult> {
+    fn suspend_fiber(&mut self, _value: Option<Value>) -> LocalFuture<'_, NativeResult> {
         let error = crate::fiber::fiber_error("Cannot suspend outside of a fiber");
         Box::pin(std::future::ready(Err(error)))
     }
 
     fn inspect_fiber(
         &mut self,
-        object: Rc<Object>,
+        _object: Rc<Object>,
         _inspection: crate::fiber::FiberInspection,
     ) -> LocalFuture<'_, NativeResult> {
-        Box::pin(std::future::ready(crate::fiber::unavailable(Some(object))))
+        Box::pin(std::future::ready(crate::fiber::unavailable()))
     }
 
     /// The location of the first write that committed the response headers.

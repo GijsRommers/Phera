@@ -108,11 +108,7 @@ fn resume(
     object: Option<Rc<Object>>,
     mut args: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
-    operate(
-        context,
-        object,
-        FiberOperation::Resume(args.pop().unwrap_or_default()),
-    )
+    operate(context, object, FiberOperation::Resume(args.pop()))
 }
 
 fn throw(
@@ -132,7 +128,7 @@ fn suspend(
     _: Option<Rc<Object>>,
     mut args: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
-    context.suspend_fiber(args.pop().unwrap_or_default())
+    context.suspend_fiber(args.pop())
 }
 
 fn operate(
@@ -157,7 +153,7 @@ fn status(object: Option<&Rc<Object>>, test: impl FnOnce(&State) -> bool) -> Nat
     Ok(Value::Bool(with_state(object, |fiber| test(&fiber.state))?))
 }
 
-fn get_return(_: &mut dyn Context, object: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
+fn get_return(context: &mut dyn Context, object: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
     let object = object.ok_or_else(|| internal_error!("fiber return receiver"))?;
     with_state(object, |fiber| {
         let message = match &fiber.state {
@@ -171,4 +167,5 @@ fn get_return(_: &mut dyn Context, object: Option<&Rc<Object>>, _: &[Value]) -> 
             "Cannot get fiber return value: {message}"
         )))
     })?
+    .map_err(|error| context.native_call_error("Fiber::getReturn", &[], error))
 }

@@ -231,6 +231,7 @@ pub struct Vm {
     autoload: autoload::Autoloaders,
     ini_overrides: ini::IniOverrides,
     active_fiber: Option<Box<fibers::Active>>,
+    fiber_bailout: bool,
     suspended_fibers: fibers::SuspendedFibers,
 }
 
@@ -268,6 +269,7 @@ impl Vm {
             autoload: Default::default(),
             ini_overrides: Default::default(),
             active_fiber: None,
+            fiber_bailout: false,
             suspended_fibers: Default::default(),
             native_callback_sites: Vec::new(),
             debug_objects: Vec::new(),

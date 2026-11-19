@@ -30,21 +30,26 @@ pub(super) const CLASS: ClassEntry = ClassEntry {
         .returning("Fiber"),
         MethodEntry::public("getCallable", &[], callable).returning("callable"),
         MethodEntry::public_async("getExecutingFile", &[], |cx, object, _| {
-            inspect(cx, object.as_ref(), FiberInspection::File)
-        })
-        .returning("?string"),
-        MethodEntry::public_async("getExecutingLine", &[], |cx, object, _| {
-            inspect(cx, object.as_ref(), FiberInspection::Line)
-        })
-        .returning("?int"),
-        MethodEntry::public_async("getTrace", TRACE, |cx, object, args| {
             inspect(
                 cx,
                 object.as_ref(),
-                FiberInspection::Trace(args::int(&args, 0).unwrap_or(1)),
+                FiberInspection::File,
+                "ReflectionFiber::getExecutingFile",
+                None,
             )
         })
-        .returning("array"),
+        .returning("?string"),
+        MethodEntry::public_async("getExecutingLine", &[], |cx, object, _| {
+            inspect(
+                cx,
+                object.as_ref(),
+                FiberInspection::Line,
+                "ReflectionFiber::getExecutingLine",
+                None,
+            )
+        })
+        .returning("?int"),
+        MethodEntry::public_async("getTrace", TRACE, trace).returning("array"),
     ],
     ..ClassEntry::class("ReflectionFiber")
 };
@@ -99,13 +104,45 @@ fn callable(_: &mut dyn Context, object: Option<&Rc<Object>>, _: &[Value]) -> Na
     })?
 }
 
+fn trace(
+    context: &mut dyn Context,
+    object: Option<Rc<Object>>,
+    mut args: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    let Some(reflection) = object else {
+        return Box::pin(std::future::ready(Err(internal_error!(
+            "fiber reflection receiver"
+        ))));
+    };
+    let options = args::int(&args, 0).unwrap_or(1);
+    let argument = args.pop();
+    let inspection = FiberInspection::Trace {
+        options,
+        reflection: reflection.clone(),
+        argument: argument.clone(),
+    };
+    inspect(
+        context,
+        Some(&reflection),
+        inspection,
+        "ReflectionFiber::getTrace",
+        argument,
+    )
+}
+
 fn inspect<'a>(
     context: &'a mut dyn Context,
     object: Option<&Rc<Object>>,
     inspection: FiberInspection,
+    method: &'static str,
+    argument: Option<Value>,
 ) -> LocalFuture<'a, NativeResult> {
-    match target(object) {
-        Ok(target) => context.inspect_fiber(target, inspection),
-        Err(error) => Box::pin(std::future::ready(Err(error))),
-    }
+    let target = target(object);
+    Box::pin(async move {
+        let result = match target {
+            Ok(target) => context.inspect_fiber(target, inspection).await,
+            Err(error) => Err(error),
+        };
+        result.map_err(|error| context.native_call_error(method, argument.as_slice(), error))
+    })
 }

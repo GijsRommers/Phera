@@ -265,11 +265,11 @@ ASP tags, `goto`, `declare(ticks)` and `__halt_compiler` data access.
 `AssertionError` with the condition as written. A setting that compiles
 assertions out, as PHP's production configuration does, comes with the
 configuration file.
-Fibers come after everything else works.
+Fiber switching and request-local state are described in section 9.5.
 
 **Runtime, left out:** opcache and JIT settings, FFI, phar, pcntl, posix, the C
-extension ABI, `dl()`, most of `php.ini` (a small fixed set of settings is
-honoured), and functions removed or deprecated before PHP 8.
+extension ABI, `dl()`, startup configuration from an INI file, and functions
+removed or deprecated before PHP 8.
 
 **Extensions, first wave:** standard (strings, arrays, math, output, variables,
 files, `sprintf`, `serialize`), spl, json, pcre (bound to PCRE2), ctype, mbstring,
@@ -341,8 +341,10 @@ silence:
 - **Legacy package layouts** (PSR-0 autoloading, `target-dir`,
   `include-path`, PEAR-style trees): `phera install` stops and names the
   package and the field. Nothing is installed half.
-- **`php.ini` settings** outside the honoured set: `ini_set()` returns false,
-  as PHP does for an unknown setting.
+- **INI directives.** The runtime recognizes PHP directives from its loaded
+  modules and its INI registry enforces their runtime access modes. The
+  settings with no engine consumer are enumerated in
+  [the generated catalog notes](../crates/extension-api/data/ini-storage-only.md).
 
 Something merely not built yet is different: it keeps PHP's own error
 ("Call to undefined function ...") until it exists.
@@ -542,7 +544,7 @@ calls, and unwind continuations. A native callback can leave the same owned
 future pending, so suspension inside `array_map()` preserves both the native
 callback and the PHP frames above it. The caller polls that future until the
 fiber yields a value, completes, or throws. Ordinary I/O pending keeps
-control with Tokio.
+control with Tokio. Backtraces read parked caller frames only when needed.
 
 Only the active stack owns the request data during a switch. At an explicit
 suspension the fiber lends that data back through a shared slot. The caller

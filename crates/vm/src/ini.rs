@@ -3,12 +3,28 @@
 //! and the parsed fields that execution consumes without a hash lookup.
 //!
 //! Display and reporting settings affect diagnostics. Include paths, query
-//! separators, serialization and exception settings affect their consumers.
-//! Extensions can register validation and apply hooks for their own entries.
-//! Every other catalog entry is storage-only unless an extension installs a
-//! hook. In particular, `memory_limit` and `max_execution_time` do not set
-//! engine limits. The server owns request timeout and request body limits.
+//! separators, float formatting, serialization, and exception settings affect
+//! their consumers. Date, mbstring, and PCRE use the same request registry.
+//! Read the generated list below for the directives without runtime consumers.
+//!
+//! The server sets request timeout and request body limits. PHP memory and
+//! execution time limits are recorded without changing those engine limits.
 //! No PHP configuration file is loaded.
+//!
+//! The session extension can register its update callbacks with
+//! `Registry::ini_update`. Loading its PHP module installs the generated
+//! session entries and their access modes. Session methods that change an INI
+//! directive should write through `Context::ini_set`; the extension can
+//! reject writes while a session is active using its update callback.
+//!
+//! Some recorded options have partial effects. The assertion guard is checked
+//! after argument evaluation; bail and callback are only remembered.
+//! `display_errors=stderr` uses the normal diagnostic sink. The mbstring
+//! settings apply only to encodings and operations implemented by Phera.
+//! The fiber stack size validates PHP's lower bound without allocating a
+//! native stack. PCRE settings use a separately compiled cache entry.
+
+#![doc = include_str!("../../extension-api/data/ini-storage-only.md")]
 
 use phera_extension_api::ini::{IniDefinition, boolean, integer, parse_quantity};
 use phera_extension_api::{ArrayKey, NativeResult, PhpArray, PhpString, Value};
@@ -21,6 +37,7 @@ mod effects;
 pub(crate) struct IniOverrides {
     values: Vec<Option<PhpString>>,
     reporting_number: Option<i64>,
+    precision: Option<i32>,
 }
 
 impl IniOverrides {
@@ -37,9 +54,19 @@ impl IniOverrides {
 }
 
 impl Vm {
+    pub(crate) fn float_precision(&self) -> i32 {
+        self.ini_overrides.precision.unwrap_or(14)
+    }
+
     pub(crate) fn ini_get(&self, name: &[u8]) -> Option<PhpString> {
         let (slot, entry) = self.registry.ini_entry(name)?;
         Some(self.ini_local(slot, entry).unwrap_or_default())
+    }
+
+    /// Directives with a null default can be explicitly set to the empty string.
+    pub(crate) fn ini_override(&self, name: &[u8]) -> Option<&PhpString> {
+        let (slot, _) = self.registry.ini_entry(name)?;
+        self.ini_overrides.get(slot)
     }
 
     fn ini_local(&self, slot: usize, entry: &IniDefinition) -> Option<PhpString> {
