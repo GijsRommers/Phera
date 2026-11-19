@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use phera_extension_api::testing::legacy_tls::LegacyTlsServer;
 use rustls::ServerConfig;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -195,4 +196,30 @@ async fn encrypted_connections_present_the_configured_client_certificate() {
         .connect("localhost", "verify-full", Some(&root), Some((&cert, &key)))
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn rejects_a_server_restricted_to_tls_1_0() {
+    let directory = tempfile::tempdir().unwrap();
+    let server = LegacyTlsServer::start("pgsql", directory.path());
+    let php = server.php_client(
+        r#"
+        try {
+            new PDO('pgsql:host=127.0.0.1;port=' . $argv[3] .
+                ';sslmode=require;ssl_min_protocol_version=TLSv1.2;connect_timeout=3');
+        } catch (PDOException $e) {
+            echo $e->getMessage();
+        }
+        "#,
+    );
+    let port = server.port();
+    let dsn = Dsn::parse(&format!("pgsql:host=127.0.0.1;port={port};sslmode=require")).unwrap();
+    let error = Postgres::connect(&dsn, "phera", "phera")
+        .await
+        .err()
+        .expect("TLS 1.0 must be rejected");
+    assert_eq!((error.state.as_str(), error.code), ("08006", Some(7)));
+    // Some libpq builds include an extra hint about the allowed protocol range.
+    let phera = format!("SQLSTATE[08006] [7] {}", error.detail);
+    assert_eq!(php.lines().next(), Some(phera.as_str()), "{php}");
 }

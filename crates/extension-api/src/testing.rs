@@ -5,6 +5,7 @@
 
 mod classes;
 mod exceptions;
+pub mod legacy_tls;
 pub mod oracle;
 pub mod scripts;
 pub mod serve;
