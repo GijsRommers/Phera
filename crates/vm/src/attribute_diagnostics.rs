@@ -74,7 +74,7 @@ impl Vm {
         let event = crate::error_handlers::DiagnosticEvent {
             level: 16384,
             kind: "Deprecated".into(),
-            message,
+            message: message.into(),
             location: self.location(),
             trace_location: None,
             native: None,

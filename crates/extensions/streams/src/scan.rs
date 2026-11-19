@@ -56,7 +56,7 @@ fn scan_string(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     scan_line(args::bytes(arguments, 0), format, arguments)
 }
 
-fn scan_line(data: &[u8], format: Format<'_>, arguments: &[Value]) -> NativeResult {
+pub(crate) fn scan_line(data: &[u8], format: Format<'_>, arguments: &[Value]) -> NativeResult {
     let data = data.split(|&b| b == 0).next().unwrap_or_default();
     let mut rest = data;
     let mut values = PhpArray::new();

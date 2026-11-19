@@ -21,6 +21,20 @@ pub enum IteratorStep {
 /// A request-local iterator. Values and keys are fetched separately so each language
 /// operation calls only the methods PHP calls, in the same order.
 pub trait Traversal {
+    /// Combined foreach entry from a cursor which can run without the VM.
+    fn next_entry(&mut self, _with_key: bool) -> Option<(Value, Option<Value>)> {
+        None
+    }
+
+    /// Native cursors can complete a step without allocating a future.
+    fn step_native(
+        &mut self,
+        _context: &mut dyn Context,
+        _operation: IteratorStep,
+    ) -> Option<NativeResult> {
+        None
+    }
+
     /// The VM can advance this cursor directly if its generator is suspended.
     fn generator(&self) -> Option<&Rc<Object>> {
         None
@@ -67,15 +81,27 @@ impl Future for StepFuture<'_> {
 
 pub type TraversalResult = Result<Box<dyn Traversal>, NativeError>;
 
+/// Poll only iterators whose operations can call PHP.
+pub async fn step(
+    iterator: &mut dyn Traversal,
+    context: &mut dyn Context,
+    operation: IteratorStep,
+) -> NativeResult {
+    match iterator.step_native(context, operation) {
+        Some(result) => result,
+        None => iterator.step(context, operation).await,
+    }
+}
+
 /// Read the current element without observing an unused key.
 pub async fn current(
     iterator: &mut dyn Traversal,
     context: &mut dyn Context,
     with_key: bool,
 ) -> Result<(Value, Option<Value>), NativeError> {
-    let value = iterator.step(context, IteratorStep::Current).await?;
+    let value = step(iterator, context, IteratorStep::Current).await?;
     let key = if with_key {
-        Some(iterator.step(context, IteratorStep::Key).await?)
+        Some(step(iterator, context, IteratorStep::Key).await?)
     } else {
         None
     };
