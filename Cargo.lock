@@ -2161,12 +2161,12 @@ dependencies = [
  "percent-encoding",
  "phera-ext-streams",
  "phera-extension-api",
+ "phera-io-pool",
  "phera-runtime",
  "pkcs8",
  "psl",
  "rcgen",
  "rustls",
- "rustls-native-certs",
  "sha2 0.10.9",
  "socket2",
  "tempfile",
@@ -2175,7 +2175,6 @@ dependencies = [
  "tokio-util",
  "tower-service",
  "url",
- "webpki-roots",
 ]
 
 [[package]]

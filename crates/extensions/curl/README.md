@@ -1,7 +1,8 @@
 # PHP curl on Phera
 
 Phera's curl extension implements the PHP 8.5 HTTP client API on Hyper and Tokio.
-HTTPS uses rustls with ring. The client loads native trust roots off the worker
+HTTPS uses the shared rustls and ring configuration in `phera-io-pool`. The
+client loads native trust roots off the worker
 and falls back to WebPKI roots when the native store is empty. `CURLOPT_CAINFO`
 and `CURLOPT_CAINFO_BLOB` replace those roots with PEM certificates.
 `CURLOPT_CAPATH` adds certificates from a directory indexed by `openssl rehash`.

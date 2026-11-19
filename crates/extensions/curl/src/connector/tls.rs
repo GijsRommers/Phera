@@ -3,54 +3,49 @@
 mod files;
 mod verify;
 
-use std::{
-    io,
-    sync::{Arc, OnceLock},
-};
+use std::{io, sync::Arc};
 
-use rustls::{ClientConfig, RootCertStore};
+use phera_io_pool::tls as shared;
+use rustls::{
+    ClientConfig, RootCertStore,
+    version::{TLS12, TLS13},
+};
+use tokio::sync::OnceCell;
 
 use crate::{
     error::TransferError,
     options::{HttpVersion, TlsFiles, TlsVersions, Transport},
 };
 
-static ROOTS: OnceLock<RootCertStore> = OnceLock::new();
-
-fn system_roots() -> &'static RootCertStore {
-    ROOTS.get_or_init(|| {
-        let mut roots = RootCertStore::empty();
-        roots.add_parsable_certificates(rustls_native_certs::load_native_certs().certs);
-        if roots.is_empty() {
-            roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-        }
-        roots
-    })
-}
+static ROOTS: OnceCell<RootCertStore> = OnceCell::const_new();
 
 pub(super) async fn config(settings: &Transport) -> Result<Arc<ClientConfig>, TransferError> {
-    let (roots, identity) = if settings.verify_peer
-        && settings.tls_files == TlsFiles::default()
-        && let Some(roots) = ROOTS.get()
+    let explicit = &settings.tls_files;
+    let roots = if settings.verify_peer && explicit.ca_file.is_none() && explicit.ca_blob.is_none()
     {
-        (roots.clone(), None)
+        ROOTS.get_or_init(shared::system_store).await.clone()
     } else {
-        let files = settings.tls_files.clone();
+        RootCertStore::empty()
+    };
+    let (roots, identity) = if *explicit == TlsFiles::default() {
+        (roots, None)
+    } else {
+        let files = explicit.clone();
         let verify_peer = settings.verify_peer;
-        tokio::task::spawn_blocking(move || files::load(&files, verify_peer))
+        tokio::task::spawn_blocking(move || files::load(&files, verify_peer, roots))
             .await
             .map_err(|_| TransferError::new(77, "Cannot load TLS certificate configuration"))??
     };
-    use rustls::version::{TLS12, TLS13};
-    let versions: &[_] = match settings.tls {
-        TlsVersions::Modern => &[&TLS13, &TLS12],
-        TlsVersions::Tls12 => &[&TLS12],
-        TlsVersions::Tls13 => &[&TLS13],
-    };
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let builder = ClientConfig::builder_with_provider(Arc::clone(&provider))
-        .with_protocol_versions(versions)
-        .map_err(|error| TransferError::new(35, error.to_string()))?;
+    let provider = shared::provider();
+    let builder =
+        match settings.tls {
+            TlsVersions::Modern => shared::client_builder(),
+            TlsVersions::Tls12 => ClientConfig::builder_with_provider(provider.clone())
+                .with_protocol_versions(&[&TLS12]),
+            TlsVersions::Tls13 => ClientConfig::builder_with_provider(provider.clone())
+                .with_protocol_versions(&[&TLS13]),
+        };
+    let builder = builder.map_err(|error| TransferError::new(35, error.to_string()))?;
     let builder =
         if settings.verify_peer && settings.verify_host && settings.tls_files.pins.is_none() {
             builder.with_root_certificates(roots)

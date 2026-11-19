@@ -21,17 +21,18 @@ pub(super) type Identity = (Vec<CertificateDer<'static>>, PrivateKeyDer<'static>
 pub(super) fn load(
     files: &TlsFiles,
     verify_peer: bool,
+    roots: RootCertStore,
 ) -> Result<(RootCertStore, Option<Identity>), TransferError> {
     let roots = if verify_peer {
-        roots(files)?
+        load_roots(roots, files)?
     } else {
-        RootCertStore::empty()
+        roots
     };
     let identity = identity(files)?;
     Ok((roots, identity))
 }
 
-fn roots(files: &TlsFiles) -> Result<RootCertStore, TransferError> {
+fn load_roots(initial: RootCertStore, files: &TlsFiles) -> Result<RootCertStore, TransferError> {
     let mut roots = if let Some(bytes) = &files.ca_blob {
         let mut roots = RootCertStore::empty();
         if !add_roots(&mut roots, bytes) {
@@ -55,7 +56,7 @@ fn roots(files: &TlsFiles) -> Result<RootCertStore, TransferError> {
         }
         roots
     } else {
-        super::system_roots().clone()
+        initial
     };
     if let Some(path) = &files.ca_dir {
         let invalid = || {

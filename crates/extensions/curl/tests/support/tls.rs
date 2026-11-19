@@ -24,7 +24,7 @@ pub(super) fn config(directory: &Path, ca: &Path) -> (ServerConfig, String) {
         .subject_public_key_info();
     let pin = format!("sha256//{}", STANDARD.encode(Sha256::digest(public_key)));
 
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let provider = phera_io_pool::tls::provider().clone();
     let verifier = WebPkiClientVerifier::builder_with_provider(
         Arc::new(client_material(directory)),
         Arc::clone(&provider),

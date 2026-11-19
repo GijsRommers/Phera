@@ -4,6 +4,10 @@ function loopback_tls($tls, $options) {
     ]);
 }
 run('tls-capath', fn() => transfer_result(loopback_tls($tls, [CURLOPT_CAPATH => $tmp . '/capath'])));
+run('tls-default-protocol-after-url', fn() => transfer_result(load_url(substr($tls, 8) . '/identity', [
+    CURLOPT_DEFAULT_PROTOCOL => 'https', CURLOPT_CAINFO => $ca,
+    CURLOPT_RESOLVE => ['localhost:' . parse_url($tls, PHP_URL_PORT) . ':127.0.0.1'],
+])));
 run('tls-pinned', fn() => transfer_result(loopback_tls($tls, [
     CURLOPT_CAINFO_BLOB => file_get_contents($ca),
     CURLOPT_PINNEDPUBLICKEY => 'sha256//AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=;' . $pin,
