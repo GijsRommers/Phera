@@ -74,6 +74,9 @@ routing rules of the host.
 - Cookie files use Netscape format. A handle writes its cookie jar when a
   transfer finishes or when an application sends `COOKIELIST` `FLUSH`.
   PHP normally writes its jar when the handle is freed.
+- HTTP authentication supports Basic and Bearer. Digest remains unavailable.
+  `digest_auth` 0.3.1 can fail on valid UTF-8 challenges, and a replacement
+  needs challenge parsing, nonce handling, and upload replay rules.
 - Share handles can share cookies, DNS, and a connection-pool namespace.
   Persistent handles share the DNS cache and pool by normalized option set.
   Persistent cookie sharing is rejected. Dedicated TLS-session sharing

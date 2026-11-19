@@ -44,7 +44,7 @@ pub(super) fn text_list(list: Vec<Vec<u8>>) -> Vec<String> {
 
 pub(super) fn change(settings: &mut Settings, option: i64, bytes: Option<Vec<u8>>) -> Change {
     match option {
-        CURLOPT_URL => settings.url = text(bytes),
+        CURLOPT_URL => settings.set_url(text(bytes)),
         CURLOPT_CUSTOMREQUEST => settings.custom_method = text(bytes),
         CURLOPT_ACCEPT_ENCODING => settings.encoding = text(bytes),
         CURLOPT_USERAGENT => settings.agent = bytes,
@@ -75,7 +75,8 @@ pub(super) fn change(settings: &mut Settings, option: i64, bytes: Option<Vec<u8>
         CURLOPT_DEFAULT_PROTOCOL => {
             let protocol = text(bytes).unwrap_or_else(|| "http".into());
             match protocol.to_ascii_lowercase().as_str() {
-                "http" | "https" => settings.default_protocol = protocol.to_ascii_lowercase(),
+                "http" => settings.set_default_protocol("http"),
+                "https" => settings.set_default_protocol("https"),
                 _ => return Change::Refused("only HTTP and HTTPS are available"),
             }
         }

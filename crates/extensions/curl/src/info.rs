@@ -104,7 +104,7 @@ fn field(easy: &Easy, option: i64) -> NativeResult {
         Value::Int(address.map_or(-1, |address| i64::from(address.port())))
     };
     Ok(match option {
-        CURLINFO_EFFECTIVE_URL => match (&easy.settings.url, &info.url) {
+        CURLINFO_EFFECTIVE_URL => match (easy.settings.url(), &info.url) {
             (_, Some(value)) => Value::from(value.clone()),
             (None, None) => Value::from(""),
             (Some(_), None) => easy

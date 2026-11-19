@@ -83,7 +83,7 @@ impl Protocols {
 
 #[derive(Clone)]
 pub(crate) struct Settings {
-    pub(crate) url: Option<String>,
+    target: Option<Rc<Target>>,
     pub(crate) method: Method,
     pub(crate) custom_method: Option<String>,
     pub(crate) headers: Vec<Vec<u8>>,
@@ -127,7 +127,7 @@ pub(crate) struct Settings {
     pub(crate) forbid_reuse: bool,
     pub(crate) protocols: Protocols,
     pub(crate) redirect_protocols: Protocols,
-    pub(crate) default_protocol: String,
+    default_protocol: &'static str,
     pub(crate) stderr: Option<Rc<Resource>>,
     pub(crate) verbose: bool,
     pub(crate) header_out: bool,
@@ -140,7 +140,7 @@ pub(crate) struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            url: None,
+            target: None,
             method: Method::Get,
             custom_method: None,
             headers: Vec::new(),
@@ -184,7 +184,7 @@ impl Default for Settings {
             forbid_reuse: false,
             protocols: Protocols::default(),
             redirect_protocols: Protocols::default(),
-            default_protocol: "http".to_owned(),
+            default_protocol: "http",
             stderr: None,
             verbose: false,
             header_out: false,
@@ -230,15 +230,51 @@ impl Settings {
         }
     }
 
-    pub(crate) fn normalized_url(&self) -> Option<url::Url> {
-        let input = self.url.as_deref()?.trim();
-        if input.is_empty() {
-            return None;
-        }
-        if input.contains("://") {
-            url::Url::parse(input).ok()
+    pub(crate) fn url(&self) -> Option<&str> {
+        self.target.as_ref().map(|target| target.input.as_str())
+    }
+
+    pub(crate) fn normalized_url(&self) -> Option<&url::Url> {
+        self.target.as_ref()?.parsed.as_ref()
+    }
+
+    pub(crate) fn origin(&self) -> Option<Rc<str>> {
+        self.target.as_ref()?.origin.clone()
+    }
+
+    pub(crate) fn set_url(&mut self, input: Option<String>) {
+        self.target = input.map(|input| Rc::new(Target::new(input, self.default_protocol)));
+    }
+
+    pub(crate) fn set_default_protocol(&mut self, protocol: &'static str) {
+        self.default_protocol = protocol;
+        self.set_url(self.url().map(str::to_owned));
+    }
+}
+
+struct Target {
+    input: String,
+    parsed: Option<url::Url>,
+    origin: Option<Rc<str>>,
+}
+
+impl Target {
+    fn new(input: String, default_protocol: &str) -> Self {
+        let trimmed = input.trim();
+        let parsed = if trimmed.is_empty() {
+            None
+        } else if trimmed.contains("://") {
+            url::Url::parse(trimmed).ok()
         } else {
-            url::Url::parse(&format!("{}://{input}", self.default_protocol)).ok()
+            url::Url::parse(&format!("{default_protocol}://{trimmed}")).ok()
+        };
+        let origin = parsed
+            .as_ref()
+            .map(|url| Rc::from(url.origin().ascii_serialization()));
+        Self {
+            input,
+            parsed,
+            origin,
         }
     }
 }

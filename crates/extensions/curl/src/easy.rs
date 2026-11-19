@@ -130,7 +130,8 @@ fn init(context: &mut dyn Context, values: &[Value]) -> NativeResult {
                 "curl_init(): cURL option must not contain any null bytes",
             ));
         }
-        easy.settings.url = Some(String::from_utf8_lossy(url.as_bytes()).into_owned());
+        easy.settings
+            .set_url(Some(String::from_utf8_lossy(url.as_bytes()).into_owned()));
     }
     classes::create(context, "CurlHandle", Rc::new(RefCell::new(easy)))
 }

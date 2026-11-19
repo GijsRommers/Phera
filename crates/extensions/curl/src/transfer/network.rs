@@ -69,6 +69,7 @@ impl Network {
         let mut configuration = self.settings.clone();
         let mut url = configuration
             .normalized_url()
+            .cloned()
             .ok_or_else(|| url_error(&configuration))?;
         if let Some(port) = configuration.port {
             let _ = url.set_port(Some(port));
@@ -274,7 +275,7 @@ impl Network {
 }
 
 fn url_error(settings: &Settings) -> TransferError {
-    match settings.url.as_deref() {
+    match settings.url() {
         None => TransferError::new(3, "No URL set"),
         Some(url) if url.trim().ends_with("://") => {
             TransferError::new(3, "URL rejected: No host present")

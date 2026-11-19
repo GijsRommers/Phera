@@ -1,6 +1,6 @@
 //! `curl_multi_select($multi, 0.25)` waits for progress without blocking its worker.
 
-use std::{collections::HashMap, future::poll_fn, task::Poll, time::Duration};
+use std::{collections::HashMap, future::poll_fn, rc::Rc, task::Poll, time::Duration};
 
 use futures_util::FutureExt;
 use phera_extension_api::{Context, LocalFuture, NativeError, NativeResult, Value, args};
@@ -64,13 +64,8 @@ impl Drop for Executing {
     }
 }
 
-fn host(entry: &super::Entry) -> String {
-    entry
-        .handle
-        .borrow()
-        .settings
-        .normalized_url()
-        .map_or_else(String::new, |url| url.origin().ascii_serialization())
+fn host(entry: &super::Entry) -> Option<Rc<str>> {
+    entry.handle.borrow().settings.origin()
 }
 
 async fn start(context: &mut dyn Context, multi: &Handle) -> Result<(), NativeError> {
@@ -78,10 +73,14 @@ async fn start(context: &mut dyn Context, multi: &Handle) -> Result<(), NativeEr
         let multi = multi.borrow();
         let mut host_counts = HashMap::new();
         let mut total = 0;
-        for entry in &multi.entries {
-            if matches!(entry.work, Work::Running(_)) {
-                total += 1;
-                *host_counts.entry(host(entry)).or_insert(0) += 1;
+        if multi.max_total != 0 || multi.max_host != 0 {
+            for entry in &multi.entries {
+                if matches!(entry.work, Work::Running(_)) {
+                    total += 1;
+                    if multi.max_host != 0 {
+                        *host_counts.entry(host(entry)).or_insert(0) += 1;
+                    }
+                }
             }
         }
         let mut selected = Vec::new();
@@ -92,11 +91,13 @@ async fn start(context: &mut dyn Context, multi: &Handle) -> Result<(), NativeEr
             if !matches!(entry.work, Work::New) {
                 continue;
             }
-            let count = host_counts.entry(host(entry)).or_insert(0);
-            if multi.max_host != 0 && *count >= multi.max_host {
-                continue;
+            if multi.max_host != 0 {
+                let count = host_counts.entry(host(entry)).or_insert(0);
+                if *count >= multi.max_host {
+                    continue;
+                }
+                *count += 1;
             }
-            *count += 1;
             total += 1;
             selected.push((index, entry.object.clone(), entry.handle.clone()));
         }
