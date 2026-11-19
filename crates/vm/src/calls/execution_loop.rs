@@ -25,7 +25,6 @@ use crate::calls::registers::Registers;
 use crate::classes::ClassTable;
 use crate::code_table::CodeTable;
 use crate::fast::{ScalarStep, array_index_step, scalar_step};
-use crate::fast_values::value_step;
 
 /// How many loop rounds or calls a script may run before it lets other tasks
 /// on the same thread have a turn.
@@ -306,36 +305,17 @@ impl Machine<'_> {
                 mode: phera_bytecode::FetchMode::Read,
                 ..
             } => match self.fetch_native_dimension(position, dst, base, index) {
-                Step::Slow => self.value_step::<GUARDED>(&instruction, position),
+                Step::Slow => self.further_step::<GUARDED>(instruction, position),
                 done => done,
             },
-            Instruction::Binary { .. }
-            | Instruction::Unary { .. }
-            | Instruction::JumpIfNull { .. }
-            | Instruction::JumpIfNotNull { .. }
-            | Instruction::NewArray { .. }
-            | Instruction::FetchIndex { .. } => self.value_step::<GUARDED>(&instruction, position),
-            Instruction::Fetch {
-                dst,
-                path,
-                mode: phera_bytecode::FetchMode::Read,
-            } => self.fetch_property::<GUARDED>(position, dst, path),
             Instruction::AppendLocal { local, src } => {
                 self.write_native_dimension(position, local, None, src)
             }
-            Instruction::AssignPath { path, src } => {
-                let written = if self.classes.has_dimensions {
-                    self.write_dimension_path(position, path, src)
-                } else {
-                    Step::Slow
-                };
-                match written {
-                    Step::Slow => self.assign_property::<GUARDED>(position, path, src),
+            Instruction::AssignPath { path, src } if self.classes.has_dimensions => {
+                match self.write_dimension_path(position, path, src) {
+                    Step::Slow => self.further_step::<GUARDED>(instruction, position),
                     done => done,
                 }
-            }
-            Instruction::IncDecPath { mode, dst, path } => {
-                self.increment_property::<GUARDED>(position, (mode, dst), path)
             }
             Instruction::CallDirect {
                 function,
@@ -344,7 +324,6 @@ impl Machine<'_> {
                 dst,
                 ..
             } => self.enter_direct(position, function, (args, count), dst),
-            Instruction::InitCall { function } => self.prepare_named_call(position, function),
             Instruction::InitMethodCall { receiver, method } => {
                 self.prepare_method(position, receiver, method)
             }
@@ -371,30 +350,7 @@ impl Machine<'_> {
             }
             Instruction::Return { src } => self.leave_plain::<GUARDED>(Some(src)),
             Instruction::ReturnNull => self.leave_plain::<GUARDED>(None),
-            _ => Step::Slow,
-        }
-    }
-
-    /// A simple instruction on values other than integers (see
-    /// `crate::fast_values`). It runs here, after the inner loop has
-    /// stopped at it, rather than inside that loop, whose code a call to
-    /// it would slow down.
-    #[inline(always)]
-    fn value_step<const GUARDED: bool>(
-        &mut self,
-        instruction: &Instruction,
-        position: Position,
-    ) -> Step {
-        let slots = self.registers.tail_mut(position.frame.base());
-        let mut ip = position.ip;
-        match value_step::<GUARDED>(instruction, slots, &mut ip) {
-            ScalarStep::Fallback => Step::Slow,
-            // A jump back is a loop round, like one in the inner loop.
-            ScalarStep::Complete if ip < position.ip && self.spend_work() => {
-                self.publish(ip);
-                Step::Yield
-            }
-            ScalarStep::Complete => Step::Done(ip),
+            _ => self.further_step::<GUARDED>(instruction, position),
         }
     }
 
