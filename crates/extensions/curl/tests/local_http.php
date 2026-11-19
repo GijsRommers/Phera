@@ -1,0 +1,123 @@
+function load_url($url, $options = []) {
+    $handle = curl_init($url);
+    curl_setopt_array($handle, $options + [CURLOPT_RETURNTRANSFER => true, CURLOPT_PROXY => '']);
+    return $handle;
+}
+function transfer_result($handle) {
+    $body = curl_exec($handle);
+    $info = curl_getinfo($handle);
+    return [$body, $info['http_code'], $info['content_type'], $info['http_version'],
+        $info['effective_method'], $info['redirect_count'], $info['scheme'],
+        curl_errno($handle), curl_error($handle)];
+}
+run('get', fn() => transfer_result(load_url($base . '/echo')));
+run('post', fn() => transfer_result(load_url($base . '/echo', [
+    CURLOPT_POSTFIELDS => "{\"hello\":\"world\"}",
+    CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'X-Test: accepted'],
+])));
+run('head', fn() => transfer_result(load_url($base . '/echo', [CURLOPT_NOBODY => true])));
+run('redirect', fn() => transfer_result(load_url($base . '/redirect', [
+    CURLOPT_FOLLOWLOCATION => true, CURLOPT_AUTOREFERER => true, CURLOPT_POSTFIELDS => 'change',
+])));
+run('preserve-post', fn() => transfer_result(load_url($base . '/redirect-307', [
+    CURLOPT_FOLLOWLOCATION => true, CURLOPT_POSTFIELDS => 'keep',
+])));
+run('redirect-limit', fn() => transfer_result(load_url($base . '/redirect', [
+    CURLOPT_FOLLOWLOCATION => true, CURLOPT_MAXREDIRS => 1,
+])));
+run('gzip', fn() => transfer_result(load_url($base . '/gzip', [CURLOPT_ACCEPT_ENCODING => 'gzip'])));
+run('chunks', fn() => transfer_result(load_url($base . '/chunks')));
+run('cut', fn() => transfer_result(load_url($base . '/cut')));
+run('timeout', function () use ($base) {
+    $handle = load_url($base . '/wait', [CURLOPT_TIMEOUT_MS => 40]);
+    $result = curl_exec($handle);
+    $error = curl_error($handle);
+    $valid = preg_match('/^Operation timed out after (\d+) milliseconds with 0 bytes received$/',
+        $error, $parts);
+    return [$result, curl_errno($handle),
+        $valid && (int) $parts[1] >= 40 && (int) $parts[1] < 120,
+        preg_replace('/after \d+ milliseconds/', 'after {elapsed} milliseconds', $error)];
+
+});
+run('http-failure', fn() => transfer_result(load_url($base . '/fail', [CURLOPT_FAILONERROR => true])));
+run('limit', fn() => transfer_result(load_url($base . '/large', [CURLOPT_MAXFILESIZE => 100])));
+run('basic', fn() => transfer_result(load_url($base . '/echo', [
+    CURLOPT_USERPWD => 'user:password', CURLOPT_HTTPAUTH => CURLAUTH_BASIC,
+])));
+run('tls', fn() => transfer_result(load_url($tls . '/echo', [
+    CURLOPT_RESOLVE => ['localhost:' . parse_url($tls, PHP_URL_PORT) . ':127.0.0.1'],
+    CURLOPT_CAINFO => $ca, CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_2_0,
+])));
+run('cookies', function () use ($base) {
+    $handle = load_url($base . '/cookie', [CURLOPT_COOKIEFILE => '']);
+    $first = curl_exec($handle);
+    $cookies = curl_getinfo($handle, CURLINFO_COOKIELIST);
+    curl_setopt($handle, CURLOPT_URL, $base . '/echo');
+    return [$first, $cookies, curl_exec($handle)];
+});
+run('share-cookies', function () use ($base) {
+    $share = curl_share_init();
+    curl_share_setopt($share, CURLSHOPT_SHARE, CURL_LOCK_DATA_COOKIE);
+    $first = load_url($base . '/cookie', [CURLOPT_SHARE => $share]);
+    $second = load_url($base . '/echo', [CURLOPT_SHARE => $share]);
+    $disabled = [curl_exec($first), curl_exec($second)];
+    curl_setopt($first, CURLOPT_COOKIEFILE, '');
+    curl_setopt($second, CURLOPT_COOKIEFILE, '');
+    return [$disabled, curl_exec($first), curl_exec($second)];
+});
+run('multipart', function () use ($base, $tmp) {
+    $path = $tmp . '/file.txt';
+    file_put_contents($path, 'disk content');
+    return transfer_result(load_url($base . '/multipart', [
+        CURLOPT_POSTFIELDS => ['a' => 'text', 'b' => curl_file_create($path, 'text/plain', 'b.txt'),
+            'c' => new CURLStringFile('memory content', 'c.txt', 'text/plain')],
+    ]));
+});
+run('file', function () use ($base, $tmp) {
+    $path = $tmp . '/output.txt';
+    $file = fopen($path, 'wb');
+    $handle = load_url($base . '/large');
+    curl_setopt($handle, CURLOPT_FILE, $file);
+    $ok = curl_exec($handle);
+    fclose($file);
+    return [$ok, filesize($path), hash_file('sha256', $path)];
+});
+run('callbacks', function () use ($base) {
+    $body = '';
+    $header = '';
+    $handle = load_url($base . '/echo');
+    curl_setopt_array($handle, [
+        CURLOPT_HEADERFUNCTION => function ($h, $data) use (&$header) {
+            $header .= $data;
+            return strlen($data);
+        },
+        CURLOPT_WRITEFUNCTION => function ($h, $data) use (&$body) {
+            $body .= $data;
+            return strlen($data);
+        },
+    ]);
+    return [curl_exec($handle), $body, strstr($header, "\r\n", true),
+        str_contains($header, "content-type: application/octet-stream\r\n")];
+});
+run('multi', function () use ($base) {
+    $multi = curl_multi_init();
+    $handles = [];
+    foreach (range(1, 10) as $i) {
+        $handles[] = $handle = load_url($base . '/echo', [CURLOPT_HTTPHEADER => ['X-Test: ' . $i]]);
+        curl_multi_add_handle($multi, $handle);
+    }
+    $loops = 0;
+    do {
+        curl_multi_exec($multi, $running);
+        if ($running) {
+            curl_multi_select($multi, 1.0);
+        }
+        if (++$loops > 500) { throw new RuntimeException('multi made no progress'); }
+    } while ($running);
+    $results = [];
+    while ($message = curl_multi_info_read($multi, $queued)) {
+        $results[count($results)] = $message['result'];
+    }
+    return [count(curl_multi_get_handles($multi)), $queued, $results,
+        array_map(curl_multi_getcontent(...), $handles)];
+});

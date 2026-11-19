@@ -14,6 +14,11 @@ pub trait ClassHandle: Any {
         self.name().eq_ignore_ascii_case(name)
     }
 
+    /// Some native handles expose their object ID through an explicit integer cast.
+    fn casts_to_object_id(&self) -> bool {
+        false
+    }
+
     fn is_traversable(&self) -> bool {
         self.is_instance_of("Traversable")
     }

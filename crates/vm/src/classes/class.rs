@@ -119,6 +119,12 @@ pub(crate) struct MethodContext {
 }
 
 impl ClassHandle for Class {
+    fn casts_to_object_id(&self) -> bool {
+        self.hooks
+            .as_ref()
+            .is_some_and(|hooks| hooks.cast_object_id)
+    }
+
     fn is_traversable(&self) -> bool {
         self.operations
             .has(super::operations::ClassOperations::TRAVERSABLE)

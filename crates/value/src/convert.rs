@@ -350,7 +350,8 @@ pub fn to_int(v: &Value, diag: &mut dyn Diagnostics) -> Result<i64, OpError> {
             None => 0,
         }),
         Value::Array(a) => Ok(i64::from(!a.is_empty())),
-        // Casting an object warns and gives 1; only arithmetic on one throws.
+        Value::Object(o) if o.class.casts_to_object_id() => Ok(i64::from(o.id)),
+        // Casting an ordinary object warns and gives 1; only arithmetic on one throws.
         Value::Object(o) => {
             diag.warning(format!(
                 "Object of class {} could not be converted to int",

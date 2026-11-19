@@ -113,6 +113,7 @@ pub(super) fn inherit_hooks(
     };
     let base = base.map_or(phera_extension_api::ClassHooks::EMPTY, |hooks| **hooks);
     Some(Rc::new(phera_extension_api::ClassHooks {
+        cast_object_id: own.cast_object_id || base.cast_object_id,
         clone: own.clone.or(base.clone),
         compare: own.compare.or(base.compare),
         properties: own.properties.or(base.properties),

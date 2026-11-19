@@ -131,6 +131,8 @@ pub type MethodForwarder = fn(&Object) -> Result<Option<Rc<Object>>, NativeError
 
 #[derive(Clone, Copy, Default)]
 pub struct ClassHooks {
+    /// An explicit PHP integer cast exposes the native handle's object ID.
+    pub cast_object_id: bool,
     pub clone: Option<NativeClone>,
     pub compare: Option<NativeCompare>,
     /// Whole-object enumeration, with the consuming operation supplied as a purpose.
@@ -150,6 +152,7 @@ pub struct ClassHooks {
 
 impl ClassHooks {
     pub const EMPTY: Self = Self {
+        cast_object_id: false,
         clone: None,
         compare: None,
         properties: None,
