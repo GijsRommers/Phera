@@ -133,6 +133,12 @@ impl Object {
             .map_or_else(|_| PhpArray::new(), |properties| properties.clone())
     }
 
+    /// Reads the stored table without cloning it or entering a PHP callback.
+    pub fn with_properties<R>(&self, read: impl FnOnce(&PhpArray) -> R) -> Option<R> {
+        let properties = self.properties.try_borrow().ok()?;
+        Some(read(&properties))
+    }
+
     /// Changes the properties in place, for writes into a property such as
     /// `$this->items[] = $x`, which must not copy the array inside.
     ///

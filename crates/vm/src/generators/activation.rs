@@ -49,16 +49,19 @@ impl Activation {
         self.storage.registers.get_mut(self.frame.kind().prefix()..)
     }
 
-    pub(super) fn has_receiver(&self) -> bool {
-        let prefix = self.frame.kind().prefix();
-        prefix > 0
-            && matches!(
-                self.storage.registers.get(prefix - 1),
-                Some(Some(Value::Object(_)))
-            )
+    pub(super) fn receiver(&self) -> Option<&std::rc::Rc<phera_value::Object>> {
+        let slot = self.frame.kind().prefix().checked_sub(1)?;
+        match self.storage.registers.get(slot)?.as_ref()? {
+            Value::Object(object) => Some(object),
+            _ => None,
+        }
     }
 
-    pub(super) fn trace_arguments(&self, function: &phera_bytecode::Function) -> Value {
+    pub(super) fn trace_arguments(
+        &self,
+        code: &crate::code_table::CodeTable,
+    ) -> crate::exception_traces::TraceArguments {
+        let function = code.function(self.frame.function);
         let slots = self
             .storage
             .registers
@@ -83,7 +86,13 @@ impl Activation {
         let extra = slots
             .get(count..count + arguments.extra)
             .unwrap_or_default();
-        crate::exception_traces::argument_values(function, supplied, slots, extra)
+        crate::exception_traces::snapshot_arguments(
+            code,
+            self.frame.function,
+            supplied,
+            slots,
+            extra,
+        )
     }
 
     pub(super) fn set_result(

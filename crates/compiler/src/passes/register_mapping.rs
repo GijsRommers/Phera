@@ -47,6 +47,7 @@ impl Instruction {
                 *destination = map(*destination);
                 *source = map(*source);
             }
+            Instruction::AttributeDiagnostics => {}
             Instruction::ThisOrNull { destination } => *destination = map(*destination),
             Instruction::Capture { source, .. } => *source = map(*source),
             Instruction::Closure { destination, .. } => *destination = map(*destination),
@@ -130,7 +131,9 @@ impl Instruction {
             Instruction::Clear { register } => *register = map(*register),
             Instruction::StartCall { .. } => {}
             Instruction::StartDynamicCall { callee } => *callee = map(*callee),
-            Instruction::FinishCall { destination: dst }
+            Instruction::FinishCall {
+                destination: dst, ..
+            }
             | Instruction::FinishCallable { destination: dst } => *dst = map(*dst),
             Instruction::Send { argument } => match &mut argument.source {
                 crate::ir::ArgumentSource::Value(register) => *register = map(*register),

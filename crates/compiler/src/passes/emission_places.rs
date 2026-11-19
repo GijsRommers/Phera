@@ -161,6 +161,7 @@ impl Tables {
         name: Reg,
         fallback: Option<String>,
         arguments: Vec<ir::Argument>,
+        result: phera_bytecode::CallResult,
     ) -> Instruction {
         function
             .instructions
@@ -170,6 +171,6 @@ impl Tables {
             let instruction = self.send_argument(function, argument);
             function.instructions.push(instruction);
         }
-        Instruction::Call { dst }
+        Instruction::Call { dst, result }
     }
 }

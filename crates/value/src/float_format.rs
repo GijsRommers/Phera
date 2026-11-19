@@ -190,17 +190,24 @@ pub fn float_repr(v: f64) -> String {
 
 /// The decimal format requested by PHP's `serialize_precision` INI setting.
 pub fn float_repr_with_precision(value: f64, precision: i32) -> String {
+    with_float_repr(value, precision, str::to_owned)
+}
+
+/// Write a float without allocating a temporary string for ordinary precisions.
+pub fn with_float_repr<T>(value: f64, precision: i32, write: impl FnOnce(&str) -> T) -> T {
     if precision < 0 || !value.is_finite() {
-        return float_repr(value);
+        return write(gcvt(value, -1).as_str());
     }
     if (1..=17).contains(&precision) {
-        return gcvt(value, precision).as_str().to_owned();
+        return write(gcvt(value, precision).as_str());
     }
     if precision == 0 {
-        return gcvt_layout(&rounded_digits(value, 1), 0)
-            .as_str()
-            .to_owned();
+        return write(gcvt_layout(&rounded_digits(value, 1), 0).as_str());
     }
+    write(&float_repr_high_precision(value, precision))
+}
+
+fn float_repr_high_precision(value: f64, precision: i32) -> String {
     // A binary64 has at most 767 significant decimal digits in its exact expansion.
     let places = (precision - 1).min(767) as usize;
     let scientific = format!("{:.places$e}", value.abs());

@@ -58,12 +58,18 @@ impl Vm {
         ancestors: &mut Ancestors,
     ) -> Result<Progress, NativeError> {
         let delegated = !ancestors.is_empty();
-        if delegated && let Some(site) = self.generator_traces.last_mut() {
-            std::mem::swap(&mut site.ancestors, ancestors);
+        if let Some(site) = self.generator_traces.last_mut() {
+            site.active = Some(Rc::as_ptr(object));
+            if delegated {
+                std::mem::swap(&mut site.ancestors, ancestors);
+            }
         }
         let result = self.run_traced_generator(object, activation, input).await;
-        if delegated && let Some(site) = self.generator_traces.last_mut() {
-            std::mem::swap(&mut site.ancestors, ancestors);
+        if let Some(site) = self.generator_traces.last_mut() {
+            site.active = None;
+            if delegated {
+                std::mem::swap(&mut site.ancestors, ancestors);
+            }
         }
         result
     }

@@ -1,8 +1,8 @@
 //! Lexical closures keep their own frame, as in `function () use ($x) { return $x; }`.
 
+use crate::statements::functions::{FunctionBody, FunctionSource};
 use phera_ast as ast;
 use phera_bytecode::{CaptureKind, ClosureBinding, Reg};
-use phera_source::Span;
 
 use crate::ir::Instruction;
 use crate::policies::DeclarationTiming;
@@ -13,25 +13,23 @@ impl Compiler<'_> {
     pub(crate) fn compile_closure(
         &mut self,
         closure: &ast::Closure,
-        span: Span,
         line: usize,
     ) -> Result<Reg, CompileError> {
         let captures = self.closure_captures(closure, line)?;
-        let declaration = ast::FunctionDeclaration {
-            attributes: closure.attributes.clone(),
-            name: ast::Identifier {
-                name: self.closure_name(line),
-                span,
-            },
+        let name = self.closure_name(line);
+        let declaration = FunctionSource {
+            span: closure.declaration_span,
+            doc_comment: closure.doc_comment,
+            attributes: &closure.attributes,
+            name: &name,
             by_reference: closure.by_reference,
             is_generator: closure.is_generator,
-            parameters: closure.parameters.clone(),
-            return_type: closure.return_type.clone(),
-            body: closure.body.clone(),
+            parameters: &closure.parameters,
+            return_type: closure.return_type.as_ref(),
+            body: FunctionBody::Statements(&closure.body),
         };
         let function = self.functions.len();
-        self.compile_captured_function(&declaration, DeclarationTiming::Hoisted, line, &captures)?;
-        self.hoisted.retain(|candidate| *candidate != function);
+        self.compile_captured_function(&declaration, DeclarationTiming::Hidden, line, &captures)?;
         for capture in &closure.uses {
             let source = self.local(&capture.name)?;
             let kind = if capture.by_reference {
@@ -41,8 +39,17 @@ impl Compiler<'_> {
             };
             self.emit(Instruction::Capture { source, kind }, line);
         }
+        self.emit_closure(function, closure.is_static, line)
+    }
+
+    pub(super) fn emit_closure(
+        &mut self,
+        function: usize,
+        is_static: bool,
+        line: usize,
+    ) -> Result<Reg, CompileError> {
         let destination = self.allocate_register()?;
-        let binding = if closure.is_static {
+        let binding = if is_static {
             ClosureBinding::Static
         } else {
             ClosureBinding::Bound
@@ -107,7 +114,7 @@ impl Compiler<'_> {
     }
 
     /// PHP 8.5 names nested closures after their enclosing function for traces and diagnostics.
-    fn closure_name(&self, line: usize) -> String {
+    pub(super) fn closure_name(&self, line: usize) -> String {
         let parent = if self.function.name == "{main}" {
             self.file.to_owned()
         } else if self.function.name.starts_with("{closure:") {

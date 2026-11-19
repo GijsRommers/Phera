@@ -191,8 +191,8 @@ impl Parser<'_> {
                 // the right side is a class name reference, so not even `**`
                 // binds into it: `a instanceof b ** c` is `(a instanceof b) ** c`.
                 self.bump()?;
-                let span = self.span_since(left.span);
                 let right = self.parse_expr(prec::CLONE)?;
+                let span = self.span_since(left.span);
                 left = Expression {
                     kind: ExpressionKind::InstanceOf {
                         value: Box::new(left),
@@ -221,8 +221,8 @@ impl Parser<'_> {
                 Assoc::Left | Assoc::Nonassoc => level + 1,
                 Assoc::Right => level,
             };
-            let span = self.span_since(left.span);
             let right = self.parse_expr(next_min)?;
+            let span = self.span_since(left.span);
             left = Expression {
                 kind: ExpressionKind::Binary {
                     operator: op,
@@ -1270,6 +1270,11 @@ impl Parser<'_> {
         is_static: bool,
         start: Span,
     ) -> Result<Expression, ParseError> {
+        let declaration_start = self.peek_span();
+        let doc_comment = self
+            .doc_comment()
+            .or_else(|| self.doc_comment_before(start.start))
+            .or_else(|| self.declaration_doc_comment(&attributes));
         if self.at(TokenKind::Function) {
             self.bump()?;
             let by_reference = self.eat(TokenKind::Ampersand)?;
@@ -1285,6 +1290,8 @@ impl Parser<'_> {
             self.close_brace()?;
             Ok(Expression {
                 kind: ExpressionKind::Closure(Box::new(Closure {
+                    declaration_span: self.span_since(declaration_start),
+                    doc_comment,
                     attributes,
                     is_static,
                     by_reference,
@@ -1305,6 +1312,8 @@ impl Parser<'_> {
             let (body, is_generator) = self.generator_body(|parser| parser.parse_expr(0))?;
             Ok(Expression {
                 kind: ExpressionKind::ArrowFunction(Box::new(ArrowFunction {
+                    declaration_span: self.span_since(declaration_start),
+                    doc_comment,
                     attributes,
                     is_static,
                     by_reference,

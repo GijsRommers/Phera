@@ -163,7 +163,8 @@ impl Vm {
 }
 
 /// Every interface of `class`, in the order PHP keeps them: the parent
-/// class's list first, then the interfaces the class names itself, and
+/// class's list first (reversed for a child without its own implements list),
+/// then the interfaces the class names itself, and
 /// only then what those interfaces extend, each interface's own list
 /// taken back to front.
 ///
@@ -175,7 +176,7 @@ impl Vm {
 ///
 /// A class or interface is worked out after everything it builds on, with
 /// a list of work to do in place of recursion.
-fn interfaces_in_php_order(class: &Class) -> Vec<&Class> {
+pub(crate) fn interfaces_in_php_order(class: &Class) -> Vec<&Class> {
     let mut lists: std::collections::HashMap<&str, Vec<&Class>> = Default::default();
     let mut pending = vec![(class, false)];
     while let Some((current, parts_are_ready)) = pending.pop() {
@@ -195,6 +196,9 @@ fn interfaces_in_php_order(class: &Class) -> Vec<&Class> {
         }
         let list_of = |part: &Class| lists.get(part.name.as_str()).cloned().unwrap_or_default();
         let mut list = current.parent.as_deref().map(list_of).unwrap_or_default();
+        if current.interfaces.is_empty() {
+            list.reverse();
+        }
         let inherited = list.len();
         for named in &current.interfaces {
             if !list.iter().any(|known| known.name == named.name) {
@@ -216,7 +220,7 @@ fn interfaces_in_php_order(class: &Class) -> Vec<&Class> {
 
 /// PHP lists declared methods before inherited methods, retaining source order within each class.
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
-struct MethodOrder {
+pub(crate) struct MethodOrder {
     /// Zero denotes the requested class, then each successive parent.
     depth: usize,
     /// User function order or the native registration position.
@@ -225,7 +229,7 @@ struct MethodOrder {
 
 impl Vm {
     /// A method's declaring class determines its position independently of hash table order.
-    fn method_listing_order(&self, class: &Class, method: &Method) -> MethodOrder {
+    pub(crate) fn method_listing_order(&self, class: &Class, method: &Method) -> MethodOrder {
         let mut ancestor = Some(class);
         let mut depth = 0;
         while let Some(class) = ancestor {
@@ -250,8 +254,11 @@ impl Vm {
             }
             crate::classes::MethodBody::Native(_) => self
                 .registry
-                .classes()
-                .find(|class| class.name == method.declaring)
+                .get_class(&method.declaring)
+                .or_else(|| {
+                    let generator = &crate::generators::class::ENTRY;
+                    (method.declaring == generator.name).then_some(generator)
+                })
                 .and_then(|class| {
                     class
                         .methods

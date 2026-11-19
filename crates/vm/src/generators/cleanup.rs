@@ -13,7 +13,7 @@ use std::{
 };
 
 use phera_extension_api::{LocalFuture, NativeError, Unwind};
-use phera_value::Value;
+use phera_value::{Object, Value};
 
 use crate::{Vm, exception_unwind::append_previous, exceptions::Thrown, finally::Continuation};
 
@@ -25,7 +25,11 @@ pub(crate) struct Releases(RefCell<Vec<Released>>);
 pub(super) type ReleaseQueue = Weak<Releases>;
 
 enum Released {
-    Owners(State, Option<Item>),
+    Owners {
+        state: State,
+        item: Option<Item>,
+        closure: Option<Rc<Object>>,
+    },
     Close(Activation),
 }
 
@@ -39,10 +43,11 @@ pub(crate) fn close_complete() -> NativeError {
 impl Drop for Generator {
     fn drop(&mut self) {
         if let Some(queue) = self.releases.upgrade() {
-            queue.0.borrow_mut().push(Released::Owners(
-                std::mem::replace(&mut self.state, State::Failed),
-                self.item.take(),
-            ));
+            queue.0.borrow_mut().push(Released::Owners {
+                state: std::mem::replace(&mut self.state, State::Failed),
+                item: self.item.take(),
+                closure: self.closure.take(),
+            });
         }
     }
 }
@@ -108,7 +113,11 @@ impl Vm {
         loop {
             let released = queue.0.borrow_mut().pop();
             match released {
-                Some(Released::Owners(state, item)) => {
+                Some(Released::Owners {
+                    state,
+                    item,
+                    closure,
+                }) => {
                     match state {
                         State::Yielded(activation, _) | State::Ready(activation) => {
                             queue.0.borrow_mut().push(Released::Close(activation));
@@ -120,6 +129,7 @@ impl Vm {
                         _ => drop(state),
                     }
                     drop(item);
+                    drop(closure);
                 }
                 Some(Released::Close(activation)) => self.close_generator(activation).await?,
                 None => return Ok(()),

@@ -33,6 +33,9 @@ pub enum Instruction {
     GeneratorReturn {
         src: Reg,
     },
+    /// Publish deprecation or discard diagnostics for an attributed declaration.
+    AttributeDiagnostics,
+
     /// Validate and coerce a pending return before calling finally; retain reference cells.
     CheckReturn {
         source: Reg,
@@ -411,6 +414,7 @@ pub enum Instruction {
     /// Runs the prepared call; `dst` receives the return value.
     Call {
         dst: Reg,
+        result: CallResult,
     },
     /// Calls a function declared unconditionally at the top level of this
     /// file, which therefore exists before any of the file's code runs. The
@@ -423,6 +427,7 @@ pub enum Instruction {
         args: Reg,
         count: u16,
         dst: Reg,
+        result: CallResult,
     },
     /// `f(...)`: instead of calling, puts the prepared callee into `dst` as a
     /// callable value.
@@ -695,4 +700,11 @@ pub enum CaptureKind {
 pub enum ClosureBinding {
     Bound,
     Static,
+}
+
+/// A caller may discard the result of a call used as a statement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallResult {
+    Used,
+    Discarded,
 }

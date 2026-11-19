@@ -22,8 +22,6 @@ fn later_milestones_remain_compile_errors() {
         "<?php class Example {static function method(){}} Example::method(...);",
         "<?php class Example {function method(){}} (new Example)->method(...);",
         "<?php class Example {public int $value {get => 1;}}",
-        "<?php class Example {public private(set) int $value;}",
-        "<?php #[Other] class Example {}",
     ] {
         if matches!(
             source,
@@ -57,6 +55,21 @@ fn generator_body_starts_with_a_suspension_boundary() {
         [function] if function.is_generator
             && matches!(function.instructions.first(), Some(phera_bytecode::Instruction::GeneratorStart))
     ));
+}
+
+#[test]
+fn class_declaration_retains_attributes_and_set_visibility() {
+    let unit = phera_compiler::compile(
+        "<?php #[Other] class Example {public private(set) int $value;}",
+        "supported.php",
+    )
+    .unwrap();
+    let class = &unit.classes[0];
+    assert_eq!(class.metadata.attributes[0].name, "Other");
+    assert_eq!(
+        class.properties[0].set_visibility,
+        Some(phera_bytecode::Visibility::Private)
+    );
 }
 
 #[test]

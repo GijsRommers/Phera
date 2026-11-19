@@ -81,6 +81,8 @@ pub(crate) fn register(registry: &mut Registry) {
     registry.constant("PHP_FLOAT_MIN", f64::MIN_POSITIVE);
     registry.constant("PHP_FLOAT_DIG", 15);
     registry.constant("NAN", f64::NAN);
+    registry.constant("DEBUG_BACKTRACE_PROVIDE_OBJECT", 1_i64);
+    registry.constant("DEBUG_BACKTRACE_IGNORE_ARGS", 2_i64);
     registry.constant("INF", f64::INFINITY);
 
     for &(name, level) in ERROR_LEVELS {

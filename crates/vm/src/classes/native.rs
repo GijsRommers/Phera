@@ -39,6 +39,7 @@ impl ClassTable {
                 allows_dynamic_properties: true,
                 methods: HashMap::new(),
                 method_table: std::cell::OnceCell::new(),
+                serialized_fields: std::cell::OnceCell::new(),
                 constructor: None,
                 magic: None,
                 property_template: Some(phera_value::PhpArray::new()),
@@ -99,7 +100,13 @@ impl ClassTable {
                             signature: std::cell::OnceCell::new(),
                             name: name.into(),
                             declaring: "Closure".into(),
-                            visibility: Visibility::Public,
+                            visibility: if operation
+                                == crate::closure_methods::ClosureMethod::Construct
+                            {
+                                Visibility::Private
+                            } else {
+                                Visibility::Public
+                            },
                             is_static: matches!(
                                 operation,
                                 crate::closure_methods::ClosureMethod::Bind
@@ -127,6 +134,8 @@ impl ClassTable {
                     Visibility::Public => ArrayKey::str(property.name),
                 };
                 defaults.push(PropertyDefault {
+                    set_visibility: None,
+                    is_final: false,
                     static_storage: None,
                     key,
                     value: property
@@ -167,7 +176,7 @@ impl ClassTable {
                             .deprecated_constants
                             .iter()
                             .find(|(key, _)| key == name)
-                            .map(|(_, message)| *message),
+                            .map(|(_, message)| (*message).to_owned()),
                         declaring: entry.name.into(),
                         visibility: Visibility::Public,
                         is_final: false,
@@ -223,6 +232,7 @@ impl ClassTable {
                     magic: super::magic::MagicMethods::link(&methods),
                     methods,
                     method_table: std::cell::OnceCell::new(),
+                    serialized_fields: std::cell::OnceCell::new(),
                     property_template: super::class::property_template(&defaults),
                     defaults,
                     static_properties: Vec::new(),
@@ -270,6 +280,7 @@ fn property_type(ty: phera_extension_api::PropertyType) -> Type {
         PropertyType::Int => (TypeMask::INT, "int"),
         PropertyType::Float => (TypeMask::FLOAT, "float"),
         PropertyType::String => (TypeMask::STRING, "string"),
+        PropertyType::NullableString => (TypeMask::STRING.union(TypeMask::NULL), "?string"),
         PropertyType::Array => (TypeMask::ARRAY, "array"),
         PropertyType::Object => (TypeMask::OBJECT, "object"),
         PropertyType::Mixed => (TypeMask::MIXED, "mixed"),

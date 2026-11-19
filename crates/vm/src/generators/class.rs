@@ -16,6 +16,9 @@ use phera_value::{ArrayKey, Object, PhpArray, Value};
 
 use super::{State, state};
 
+pub(crate) const INSTANTIATION_ERROR: &str =
+    "The \"Generator\" class is reserved for internal use and cannot be manually instantiated";
+
 const SEND: &[Param] = &[Param::new("value", ParamType::Mixed)];
 const THROW: &[Param] = &[Param::new("exception", ParamType::Class("Throwable"))];
 
@@ -45,14 +48,6 @@ pub(crate) const ENTRY: ClassEntry = ClassEntry {
             run(cx, object, GeneratorOperation::Method(IteratorStep::Rewind))
         })
         .returning("void"),
-        MethodEntry::public_async("next", &[], |cx, object, _| {
-            run(
-                cx,
-                object,
-                GeneratorOperation::Method(IteratorStep::Advance),
-            )
-        })
-        .returning("void"),
         MethodEntry::public_async("valid", &[], |cx, object, _| {
             run(cx, object, GeneratorOperation::Method(IteratorStep::Valid))
         })
@@ -69,6 +64,14 @@ pub(crate) const ENTRY: ClassEntry = ClassEntry {
             run(cx, object, GeneratorOperation::Method(IteratorStep::Key))
         })
         .returning("mixed"),
+        MethodEntry::public_async("next", &[], |cx, object, _| {
+            run(
+                cx,
+                object,
+                GeneratorOperation::Method(IteratorStep::Advance),
+            )
+        })
+        .returning("void"),
         MethodEntry::public_window("send", SEND, &SEND_METHOD).returning("mixed"),
         MethodEntry::public_async("throw", THROW, |cx, object, mut arguments| {
             run(

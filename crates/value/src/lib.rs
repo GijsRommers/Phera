@@ -18,7 +18,9 @@ pub use convert::{
 pub use error::{
     CollectDiagnostics, DiagnosticKind, Diagnostics, ErrorKind, NoDiagnostics, OpError,
 };
-pub use float_format::{float_repr, float_repr_with_precision, float_to_string_precision14};
+pub use float_format::{
+    float_repr, float_repr_with_precision, float_to_string_precision14, with_float_repr,
+};
 pub use object::{
     ClassHandle, Object, ObjectIds, PropertyScope, Resource, class_display_name, split_property_key,
 };

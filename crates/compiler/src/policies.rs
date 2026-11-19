@@ -7,15 +7,11 @@ pub(crate) enum DeclarationTiming {
     Hoisted,
     /// Conditional and nested declarations are installed when executed.
     AtExecution,
+    /// An initializer reached only through declaration metadata.
+    Hidden,
 }
 
-/// PHP keeps class, function and constant aliases in separate namespaces.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum NameKind {
-    Class,
-    Function,
-    Constant,
-}
+pub(crate) use phera_bytecode::reflection::NameKind;
 
 /// Whether foreach copies values or binds the loop variable to each element.
 #[derive(Clone, Copy, PartialEq, Eq)]

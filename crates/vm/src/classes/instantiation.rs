@@ -116,7 +116,7 @@ impl Vm {
         }
         if class.name == "Generator" {
             return Err(NativeError::error(
-                "The \"Generator\" class is reserved for internal use and cannot be manually instantiated",
+                crate::generators::class::INSTANTIATION_ERROR,
             ));
         }
         if matches!(class.kind, ClassKind::Interface | ClassKind::Trait) {

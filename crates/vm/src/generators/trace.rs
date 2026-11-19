@@ -8,14 +8,15 @@
 use std::rc::Rc;
 
 use phera_extension_api::{GeneratorOperation, NativeError, traversal::IteratorStep};
-use phera_value::{ArrayKey, PhpArray, Value};
+use phera_value::{ArrayKey, Object, PhpArray, Value};
 
-use crate::{Vm, error_traces::NativeTrace};
+use crate::{classes::ClassTable, code_table::CodeTable, error_traces::NativeTrace};
 
 use super::{State, resume::Ancestors, state};
 
 pub(crate) struct Site {
     pub(crate) boundary: usize,
+    pub(super) active: Option<*const Object>,
     pub(super) ancestors: Ancestors,
     method: Option<Method>,
 }
@@ -54,6 +55,7 @@ impl Site {
         };
         Self {
             boundary,
+            active: None,
             ancestors: Ancestors::new(),
             method,
         }
@@ -76,24 +78,25 @@ impl Method {
     }
 }
 
-impl Vm {
+impl Site {
     /// Only a failing or explicitly inspected generator needs to read the suspended windows.
     pub(crate) fn append_generator_trace(
         &self,
-        site: &Site,
+        code: &CodeTable,
+        classes: &mut ClassTable,
         trace: &mut PhpArray,
         mut entry: PhpArray,
         caller: (&str, usize),
         via_callback: bool,
     ) {
-        for ancestor in site.ancestors.iter().rev() {
+        for ancestor in self.ancestors.iter().rev() {
             let frame = state(ancestor, |generator| {
                 let State::Delegating(activation, ..) = &generator.state else {
                     return None;
                 };
                 let frame = activation.frame;
-                let function = self.code.function(frame.function);
-                let file = &self.code.unit(frame.function).file;
+                let function = code.function(frame.function);
+                let file = &code.unit(frame.function).file;
                 let line = function
                     .lines
                     .get(frame.ip().saturating_sub(1))
@@ -111,27 +114,30 @@ impl Vm {
                     suspended.insert(ArrayKey::str("class"), Value::from(class));
                     suspended.insert(
                         ArrayKey::str("type"),
-                        Value::from(if activation.has_receiver() {
+                        Value::from(if activation.receiver().is_some() {
                             "->"
                         } else {
                             "::"
                         }),
                     );
                 }
-                suspended.insert(ArrayKey::str("args"), activation.trace_arguments(function));
-                Some(suspended)
+                Some((suspended, activation.trace_arguments(code)))
             });
-            if let Ok(Some(suspended)) = frame {
+            if let Ok(Some((mut suspended, arguments))) = frame {
+                suspended.insert(
+                    ArrayKey::str("args"),
+                    crate::exception_traces::materialize_trace_arguments(classes, arguments),
+                );
                 let _ = trace.push(Value::Array(Rc::new(entry)));
                 entry = suspended;
             }
         }
         place(
             &mut entry,
-            (site.method.is_none() && !via_callback).then_some(caller),
+            (self.method.is_none() && !via_callback).then_some(caller),
         );
         let _ = trace.push(Value::Array(Rc::new(entry)));
-        if let Some(method) = &site.method {
+        if let Some(method) = &self.method {
             let mut entry = PhpArray::new();
             place(&mut entry, (!via_callback).then_some(caller));
             entry.insert(ArrayKey::str("class"), Value::from("Generator"));

@@ -1,5 +1,6 @@
 //! Property writes enforce declaration types and readonly state before modifying storage.
 
+use crate::property_set_visibility::PropertyChange;
 use crate::{Vm, access_mode::Mutation, inline_stack::InlineStack, path_update::PathKey};
 use phera_extension_api::{NativeError, NativePropertyMutation};
 use phera_value::Value;
@@ -15,6 +16,7 @@ impl Vm {
         self.coerce_property_in_mode(value, property, declaration_type, None)
     }
 
+    /// An explicit mode overrides the caller’s strictness for internal property writes.
     pub(crate) fn coerce_property_in_mode(
         &mut self,
         value: Value,
@@ -66,6 +68,7 @@ impl Vm {
         class: phera_bytecode::Reg,
         name: phera_bytecode::Reg,
         value: &mut Value,
+        change: PropertyChange,
     ) -> Result<(), NativeError> {
         let (class_name, name) = self.static_property_names(class, name)?;
         let class = self
@@ -78,6 +81,10 @@ impl Vm {
             .rev()
             .find(|property| property.name == name)
             .ok_or_else(|| internal_error!("static property"))?;
+        self.check_set_visibility(property, change)?;
+        if !matches!(change, PropertyChange::Direct | PropertyChange::Bind) {
+            return Ok(());
+        }
         if let Some(declaration_type) = &property.ty {
             let converted = self.coerce_property(value.clone(), property, declaration_type)?;
             if !matches!(value, Value::Reference(_)) {
@@ -104,7 +111,6 @@ impl Vm {
                 "Cannot indirectly modify readonly property {declaring}::${name}"
             )));
         }
-        let scope = self.current().and_then(|frame| frame.scope());
         if crate::property_storage::read(object, key).is_some()
             && !self.clone_can_update(object, key)
         {
@@ -117,20 +123,12 @@ impl Vm {
                 "Cannot {action} readonly property {declaring}::${name}"
             )));
         }
-        if scope.is_none_or(|scope| !scope.is_a(&property.declaring)) {
-            let action = if mutation == Mutation::Unset {
-                "unset"
-            } else {
-                "modify"
-            };
-            let from = scope
-                .map(|scope| format!("scope {}", phera_value::class_display_name(&scope.name)))
-                .unwrap_or_else(|| "global scope".into());
-            return Err(NativeError::error(format!(
-                "Cannot {action} protected(set) readonly property {declaring}::${name} from {from}"
-            )));
-        }
-        Ok(())
+        let change = if mutation == Mutation::Unset {
+            PropertyChange::Unset
+        } else {
+            PropertyChange::Direct
+        };
+        self.check_set_visibility(property, change)
     }
 
     /// Validate each object boundary, including indirect mutations of readonly arrays.
@@ -181,6 +179,22 @@ impl Vm {
                                 steps.peek().is_some(),
                                 mutation,
                             )?;
+                        }
+                        if !property.is_readonly && property.set_visibility.is_some() {
+                            let indirect = steps.peek().is_some();
+                            if !indirect
+                                || crate::property_storage::read(object, key)
+                                    .map_or(mutation != Mutation::Unset, |value| {
+                                        !value.deref().is_object()
+                                    })
+                            {
+                                let change = match mutation {
+                                    Mutation::Unset if !indirect => PropertyChange::Unset,
+                                    Mutation::Assign if !indirect => PropertyChange::Direct,
+                                    _ => PropertyChange::Indirect,
+                                };
+                                self.check_set_visibility(property, change)?;
+                            }
                         }
                         if steps.peek().is_none()
                             && mutation != Mutation::Unset

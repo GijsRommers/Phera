@@ -1,6 +1,7 @@
 //! Byte-oriented string matrices compared with the installed PHP executable.
 
 mod oracle_table;
+mod pack_oracle;
 
 use oracle_table::OracleTable;
 use phera_extension_api::{ArrayKey, PhpArray, Value};

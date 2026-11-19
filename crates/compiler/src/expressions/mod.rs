@@ -25,12 +25,8 @@ impl Compiler<'_> {
                 self.compile_yield(key.as_deref(), value.as_deref(), line)
             }
             ExpressionKind::YieldFrom(source) => self.compile_yield_from(source, line),
-            ExpressionKind::ArrowFunction(arrow) => {
-                self.compile_arrow(arrow, expression.span, line)
-            }
-            ExpressionKind::Closure(closure) => {
-                self.compile_closure(closure, expression.span, line)
-            }
+            ExpressionKind::ArrowFunction(arrow) => self.compile_arrow(arrow, line),
+            ExpressionKind::Closure(closure) => self.compile_closure(closure, line),
             ExpressionKind::Throw(operand) => {
                 let source = self.compile_expression(operand)?;
                 self.emit(crate::ir::Instruction::Throw { source }, line);

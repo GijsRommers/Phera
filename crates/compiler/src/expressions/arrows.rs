@@ -1,8 +1,9 @@
 //! Arrow functions capture referenced outer locals by value: `$f = fn($x) => $x + $offset;`.
 
+use crate::policies::DeclarationTiming;
+use crate::statements::functions::{FunctionBody, FunctionSource};
 use phera_ast as ast;
 use phera_bytecode::{CaptureKind, Reg};
-use phera_source::Span;
 
 use crate::ir::Instruction;
 use crate::{CompileError, Compiler};
@@ -12,30 +13,22 @@ impl Compiler<'_> {
     pub(crate) fn compile_arrow(
         &mut self,
         arrow: &ast::ArrowFunction,
-        span: Span,
         line: usize,
     ) -> Result<Reg, CompileError> {
-        let closure = ast::Closure {
-            attributes: arrow.attributes.clone(),
-            is_static: arrow.is_static,
+        let name = self.closure_name(line);
+        let declaration = FunctionSource {
+            span: arrow.declaration_span,
+            doc_comment: arrow.doc_comment,
+            attributes: &arrow.attributes,
+            name: &name,
             by_reference: arrow.by_reference,
             is_generator: arrow.is_generator,
-            parameters: arrow.parameters.clone(),
-            uses: Vec::new(),
-            return_type: arrow.return_type.clone(),
-            body: vec![ast::Statement {
-                kind: ast::StatementKind::Return(Some(arrow.body.clone())),
-                span,
-            }],
+            parameters: &arrow.parameters,
+            return_type: arrow.return_type.as_ref(),
+            body: FunctionBody::Arrow(&arrow.body),
         };
         let function = self.functions.len();
-        let destination = self.compile_closure(&closure, span, line)?;
-        let creation = self
-            .function
-            .instructions
-            .pop()
-            .ok_or_else(|| self.error("Missing arrow creation", line))?;
-        self.function.lines.pop();
+        self.compile_captured_function(&declaration, DeclarationTiming::Hidden, line, &[])?;
         let body = &mut self.functions[function];
         let captures = body.locals[body.parameters.len()..].to_vec();
         body.captures = captures.len();
@@ -49,7 +42,6 @@ impl Compiler<'_> {
                 line,
             );
         }
-        self.emit(creation, line);
-        Ok(destination)
+        self.emit_closure(function, arrow.is_static, line)
     }
 }

@@ -14,7 +14,7 @@
 
 use std::rc::Rc;
 
-use phera_value::{Object, Value};
+use phera_value::{Object, PhpString, Value};
 
 use crate::{ClassHooks, ConstantValue, Context, LocalFuture, NativeError, NativeResult, Param};
 
@@ -47,12 +47,20 @@ pub struct WindowMethod {
     pub try_ready: fn(&mut dyn Context, &Object, Option<&Value>) -> Option<NativeResult>,
     pub run: AsyncMethod,
 }
+/// An async method that forwards names from its variadic arguments into a PHP call.
+pub type AsyncNamedMethod = for<'a> fn(
+    &'a mut dyn Context,
+    Option<Rc<Object>>,
+    Vec<Value>,
+    &'a [(usize, PhpString)],
+) -> LocalFuture<'a, NativeResult>;
 
 #[derive(Clone, Copy)]
 pub enum NativeMethod {
     Sync(SyncMethod),
     Async(AsyncMethod),
     Window(&'static WindowMethod),
+    AsyncNamed(AsyncNamedMethod),
     /// Declared but without a body: an interface method, or an abstract one.
     Abstract,
 }
@@ -143,6 +151,23 @@ impl MethodEntry {
         }
     }
 
+    pub const fn public_async_named(
+        name: &'static str,
+        params: &'static [Param],
+        handler: AsyncNamedMethod,
+    ) -> Self {
+        MethodEntry {
+            name,
+            params,
+            handler: NativeMethod::AsyncNamed(handler),
+            preparation: None,
+            visibility: Visibility::Public,
+            is_static: false,
+            is_final: false,
+            return_type: None,
+        }
+    }
+
     /// A method an interface or abstract class requires.
     pub const fn required(name: &'static str, params: &'static [Param]) -> Self {
         MethodEntry {
@@ -198,6 +223,7 @@ pub enum PropertyType {
     Array,
     Object,
     Mixed,
+    NullableString,
     NullableClass(&'static str),
 }
 
@@ -250,6 +276,7 @@ impl PropertyEntry {
 /// Instance access for native properties whose values live outside ordinary storage.
 pub enum NativePropertyRead {
     Read,
+    Update,
     Quiet,
     Isset,
     Exists,

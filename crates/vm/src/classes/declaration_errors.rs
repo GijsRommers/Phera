@@ -113,6 +113,91 @@ pub(crate) fn check_property_visibility(
 }
 
 impl crate::Vm {
+    /// Private ancestor properties occupy separate slots. Visible properties inherit a write contract.
+    pub(super) fn check_property_override(
+        &self,
+        property: &PropertyDefault,
+        inherited: &PropertyDefault,
+        unit: &CompiledUnit,
+    ) -> Result<(), NativeError> {
+        let class = &property.declaring;
+        let name = &property.name;
+        let parent = &inherited.declaring;
+        if inherited.is_final {
+            return Err(NativeError::error(format!(
+                "Cannot override final property {parent}::${name}"
+            )));
+        }
+        let inherited_static = inherited.static_storage.is_some();
+        if property.static_storage.is_some() != inherited_static {
+            let (base, child) = if inherited_static {
+                ("static", "non static")
+            } else {
+                ("non static", "static")
+            };
+            return Err(NativeError::error(format!(
+                "Cannot redeclare {base} {parent}::${name} as {child} {class}::${name}"
+            )));
+        }
+        if property.is_readonly != inherited.is_readonly {
+            let (base, child) = if inherited.is_readonly {
+                ("readonly", "non-readonly")
+            } else {
+                ("non-readonly", "readonly")
+            };
+            return Err(NativeError::error(format!(
+                "Cannot redeclare {base} property {parent}::${name} as {child} {class}::${name}"
+            )));
+        }
+        let inherited_set = inherited.set_visibility.unwrap_or(inherited.visibility);
+        let narrower_set = matches!(
+            (inherited_set, property.set_visibility),
+            (
+                Visibility::Public,
+                Some(Visibility::Protected | Visibility::Private)
+            ) | (Visibility::Protected, Some(Visibility::Private))
+        );
+        if narrower_set {
+            let required = if inherited.set_visibility.is_some() {
+                format!("protected(set) (as in class {parent}) or weaker")
+            } else {
+                format!("omitted (as in class {parent})")
+            };
+            return Err(NativeError::error(format!(
+                "Set access level of {class}::${name} must be {required}"
+            )));
+        }
+        let required = match (inherited.visibility, property.visibility) {
+            (Visibility::Public, Visibility::Protected | Visibility::Private) => {
+                Some(("public", ""))
+            }
+            (Visibility::Protected, Visibility::Private) => Some(("protected", " or weaker")),
+            _ => None,
+        };
+        if let Some((visibility, suffix)) = required {
+            return Err(NativeError::error(format!(
+                "Access level to {class}::${name} must be {visibility} (as in class {parent}){suffix}"
+            )));
+        }
+        if property.set_visibility.is_some() || inherited.set_visibility.is_some() {
+            let child = property.ty.as_ref().map(|ty| ty.display.as_str());
+            let base = inherited.ty.as_ref().map(|ty| ty.display.as_str());
+            if child.is_some() != base.is_some()
+                || !self.type_subset(child, class, base, parent, unit)
+                || !self.type_subset(base, parent, child, class, unit)
+            {
+                let required = base.map_or_else(
+                    || format!("omitted to match the parent definition in class {parent}"),
+                    |ty| format!("{ty} (as in class {parent})"),
+                );
+                return Err(NativeError::error(format!(
+                    "Type of {class}::${name} must be {required}"
+                )));
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn magic_override_error(
         &self,
         method: &super::Method,

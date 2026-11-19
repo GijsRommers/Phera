@@ -38,12 +38,13 @@ impl Vm {
             {
                 return Ok(Some(BatchExit::Instruction(instruction)));
             }
-            I::Call { dst } => return self.call::<TRACK_GENERATORS>(dst, work),
+            I::Call { dst, .. } => return self.call::<TRACK_GENERATORS>(dst, work),
             I::CallDirect {
                 function,
                 args,
                 count,
                 dst,
+                ..
             } => return self.call_direct_general(function, args, count, dst, work),
             I::GeneratorStart
             | I::Yield { .. }
@@ -101,6 +102,7 @@ impl Vm {
             I::ReceiveDefault { param, passed } => self.receive_default(param, passed)?,
 
             I::Nop => {}
+            I::AttributeDiagnostics => self.function_attribute_diagnostics()?,
             I::LoadNull { dst } => self.set(dst, Value::Null),
             I::LoadBool { dst, value } => self.set(dst, Value::Bool(value)),
             I::LoadInt { dst, value } => self.set(dst, Value::Int(i64::from(value))),

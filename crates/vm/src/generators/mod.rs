@@ -13,6 +13,7 @@ mod delegation;
 mod execution;
 mod in_place;
 mod operations;
+mod reflection;
 mod resume;
 pub(crate) use operations::local_observation;
 pub(crate) mod trace;
@@ -33,6 +34,8 @@ use delegation::Delegate;
 struct Generator {
     releases: cleanup::ReleaseQueue,
     name: Value,
+    function: crate::code_table::FunctionIndex,
+    closure: Option<Rc<Object>>,
     reference: bool,
     state: State,
     leaf: Option<Weak<Object>>,
@@ -137,6 +140,8 @@ impl Vm {
             .current()
             .ok_or_else(|| internal_error!("generator frame"))?;
         let name = Value::from(frame.function().name.clone());
+        let function = frame.frame.function;
+        let closure = frame.closure().cloned();
         let destination = frame.frame.destination();
         let reference = frame.function().returns_reference;
         let constructed = if frame.frame.kind() == CallKind::Constructor {
@@ -155,6 +160,8 @@ impl Vm {
         *object.native.borrow_mut() = Some(Box::new(Generator {
             releases: self.generator_release_queue(),
             name,
+            function,
+            closure,
             reference,
             state: State::Created(activation),
             leaf: None,
