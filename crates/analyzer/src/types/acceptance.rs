@@ -4,6 +4,9 @@
 use super::*;
 use crate::index::Index;
 
+mod leaf;
+use leaf::atomic;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Compatibility {
     Accepts,
@@ -15,6 +18,7 @@ pub enum Compatibility {
 pub enum TypePolicy {
     Documentation,
     Strict,
+    WeakValue,
     Coercive,
 }
 
@@ -65,6 +69,9 @@ impl ValueType {
                     }
                     match (expected, given) {
                         (_, Self::Mixed) => results.push(Uncertain),
+                        (_, Self::Void) if policy != TypePolicy::Documentation => {
+                            pending.push(Step::Compare(expected, &Self::Null));
+                        }
                         (_, Self::Class(name))
                             if index.class(name).is_none()
                                 && let Some(constant) = index.doc_global_constant(name)
@@ -73,20 +80,35 @@ impl ValueType {
                             pending.push(Step::Compare(expected, constant));
                         }
                         (_, Self::Union(types)) => {
-                            pending.push(Step::Reduce(types.len(), Requirement::All));
+                            let requirement = if policy == TypePolicy::Documentation {
+                                Requirement::All
+                            } else {
+                                Requirement::Any
+                            };
+                            pending.push(Step::Reduce(types.len(), requirement));
                             pending.extend(types.iter().map(|ty| Step::Compare(expected, ty)));
                         }
                         (_, Self::Template(template)) => {
                             pending.push(Step::Compare(expected, &template.bound))
                         }
                         (_, Self::Conditional(conditional)) => {
-                            pending.push(Step::Reduce(2, Requirement::All));
+                            let requirement = if policy == TypePolicy::Documentation {
+                                Requirement::All
+                            } else {
+                                Requirement::Any
+                            };
+                            pending.push(Step::Reduce(2, requirement));
                             pending.push(Step::Compare(expected, &conditional.yes));
                             pending.push(Step::Compare(expected, &conditional.no));
                         }
                         (Self::Union(types), _) => {
                             pending.push(Step::Reduce(types.len(), Requirement::Any));
                             pending.extend(types.iter().map(|ty| Step::Compare(ty, given)));
+                        }
+                        (Self::Conditional(conditional), _) => {
+                            pending.push(Step::Reduce(2, Requirement::Any));
+                            pending.push(Step::Compare(&conditional.yes, given));
+                            pending.push(Step::Compare(&conditional.no, given));
                         }
                         (Self::Intersection(types), _) => {
                             pending.push(Step::Reduce(types.len(), Requirement::All));
@@ -102,12 +124,92 @@ impl ValueType {
                         (Self::ClassString(expected), Self::ClassString(given)) => {
                             pending.push(Step::Compare(expected, given));
                         }
+                        (Self::Callable(expected), Self::Callable(given)) => {
+                            let required = given
+                                .parameters
+                                .iter()
+                                .filter(|parameter| !parameter.optional && !parameter.variadic)
+                                .count();
+                            let promises = expected
+                                .parameters
+                                .iter()
+                                .filter(|parameter| !parameter.optional && !parameter.variadic)
+                                .count();
+                            if required > promises {
+                                results.push(Rejects);
+                                continue;
+                            }
+                            let count = expected.parameters.len().min(given.parameters.len());
+                            pending.push(Step::Reduce(1 + count, Requirement::All));
+                            pending.push(Step::Compare(&expected.returns, &given.returns));
+                            pending.extend(
+                                expected
+                                    .parameters
+                                    .iter()
+                                    .zip(&given.parameters)
+                                    .map(|(p, g)| Step::Compare(&g.ty, &p.ty)),
+                            );
+                        }
                         (Self::Collection(expected), Self::Collection(given))
-                            if collection_accepts(expected, given) =>
+                            if collection_accepts(expected, given, policy) =>
                         {
                             pending.push(Step::Reduce(2, Requirement::All));
                             pending.push(Step::Compare(&expected.key, &given.key));
                             pending.push(Step::Compare(&expected.value, &given.value));
+                        }
+                        (Self::Collection(expected), Self::Shape(given)) => {
+                            if given.kind == ShapeKind::Object
+                                || expected.kind == CollectionKind::List && !list_shape(given)
+                                || expected.non_empty
+                                    && given.fields.is_empty()
+                                    && given.remainder.is_none()
+                            {
+                                results.push(Rejects);
+                                continue;
+                            }
+                            let start = pending.len();
+                            pending.push(Step::Reduce(0, Requirement::All));
+                            for field in &given.fields {
+                                let key = match field.key {
+                                    ShapeKey::Integer(_) => &Self::Int,
+                                    ShapeKey::String(_) => &Self::String,
+                                };
+                                pending.push(Step::Compare(&expected.key, key));
+                                pending.push(Step::Compare(&expected.value, &field.value));
+                            }
+                            if let Some(remainder) = &given.remainder {
+                                pending.push(Step::Compare(&expected.key, &remainder.key));
+                                pending.push(Step::Compare(&expected.value, &remainder.value));
+                            }
+                            pending[start] =
+                                Step::Reduce(pending.len() - start - 1, Requirement::All);
+                        }
+                        (Self::Shape(expected), Self::Shape(given)) => {
+                            if (expected.kind == ShapeKind::Object)
+                                != (given.kind == ShapeKind::Object)
+                                || (expected.kind == ShapeKind::List && !list_shape(given))
+                            {
+                                results.push(Rejects);
+                                continue;
+                            }
+                            let start = pending.len();
+                            pending.push(Step::Reduce(0, Requirement::All));
+                            if expected.fields.iter().all(|field| {
+                                if let Some(other) =
+                                    given.fields.iter().find(|other| other.key == field.key)
+                                {
+                                    pending.push(Step::Compare(&field.value, &other.value));
+                                    true
+                                } else {
+                                    field.optional || given.remainder.is_some()
+                                }
+                            }) {
+                                pending[start] =
+                                    Step::Reduce(pending.len() - start - 1, Requirement::All);
+                            } else {
+                                pending.truncate(start);
+                                results.push(Rejects);
+                            }
                         }
                         (_, _) => results.push(atomic(expected, given, index, policy)),
                     }
@@ -118,146 +220,22 @@ impl ValueType {
     }
 }
 
-fn collection_accepts(expected: &Collection, given: &Collection) -> bool {
-    (!expected.non_empty || given.non_empty)
+fn collection_accepts(expected: &Collection, given: &Collection, policy: TypePolicy) -> bool {
+    (!expected.non_empty || given.non_empty || policy != TypePolicy::Documentation)
         && (expected.kind == given.kind
             || expected.kind == CollectionKind::Iterable
-            || expected.kind == CollectionKind::Array && given.kind == CollectionKind::List)
+            || expected.kind == CollectionKind::Array && given.kind == CollectionKind::List
+            || expected.kind == CollectionKind::List
+                && given.kind == CollectionKind::Array
+                && policy != TypePolicy::Documentation)
 }
 
-fn atomic(
-    expected: &ValueType,
-    given: &ValueType,
-    index: &Index,
-    policy: TypePolicy,
-) -> Compatibility {
-    use Compatibility::*;
-    use ValueType::*;
-    let accepted = match (expected, given) {
-        (Object, Class(_) | Generic(_) | Callable(_) | This) => true,
-        (Object, Shape(shape)) => shape.kind == ShapeKind::Object,
-        (Int, IntLiteral(_) | IntRange(..)) => true,
-        (IntRange(min, max), IntLiteral(value)) => (min..=max).contains(&value),
-        (IntRange(min, max), IntRange(start, end)) => min <= start && end <= max,
-        (Bool, BoolLiteral(_)) => true,
-        (String, StringLiteral(_) | StringRefinement(_) | ClassString(_)) => true,
-        (StringRefinement(kind), StringLiteral(bytes)) => string_accepts(*kind, bytes),
-        (StringRefinement(StringKind::NonEmpty), ClassString(_)) => true,
-        (ClassString(bound), StringLiteral(value)) => {
-            let Some(class) = std::str::from_utf8(value)
-                .ok()
-                .and_then(|name| index.class(name.trim_start_matches('\\')))
-            else {
-                return Rejects;
-            };
-            if **bound == Object {
-                true
-            } else if let Some(bound) = bound.class_name() {
-                return nominal(bound, &class.name, index);
-            } else {
-                return Uncertain;
-            }
-        }
-        (StringRefinement(StringKind::NonEmpty), StringRefinement(StringKind::Truthy)) => true,
-        (UnknownCallable, Callable(_)) => true,
-        (Class(name), Callable(_)) if name.eq_ignore_ascii_case("Closure") => true,
-        (Class(name), This) if matches!(name.as_str(), "self" | "static") => true,
-        (Class(expected), Class(given))
-            if ["self", "static"].contains(&expected.as_str())
-                && ["self", "static"].contains(&given.as_str()) =>
-        {
-            true
-        }
-        (UnknownCallable, Class(name)) => {
-            name.eq_ignore_ascii_case("Closure") || index.method(name, "__invoke").is_some()
-        }
-        (UnknownCallable, Generic(generic)) => index.method(&generic.base, "__invoke").is_some(),
-        (UnknownCallable, String | StringLiteral(_) | Array | Collection(_) | Shape(_)) => {
-            return Uncertain;
-        }
-        (Array, Collection(collection)) => collection.kind != CollectionKind::Iterable,
-        (Iterable, Array | Collection(_)) => true,
-        (Array | Iterable, Shape(shape)) => shape.kind != ShapeKind::Object,
-        (Collection(collection), Array | Shape(_)) if collection.kind != CollectionKind::List => {
-            return Uncertain;
-        }
-        (Iterable, Class(class)) => return nominal("Traversable", class, index),
-        (expected, given) if expected.class_name().is_some() && given.class_name().is_some() => {
-            let relation = nominal(
-                expected.class_name().unwrap_or_default(),
-                given.class_name().unwrap_or_default(),
-                index,
-            );
-            return if relation == Accepts && matches!(expected, Generic(_)) {
-                Uncertain
-            } else {
-                relation
-            };
-        }
-        (Projection(_) | TypeConstant(_), _) | (_, Projection(_) | TypeConstant(_)) => {
-            return Uncertain;
-        }
-        (Float, Int | IntLiteral(_) | IntRange(..)) if policy != TypePolicy::Documentation => true,
-        (
-            Bool,
-            Int | IntLiteral(_) | IntRange(..) | Float | String | StringLiteral(_)
-            | StringRefinement(_),
-        ) if policy == TypePolicy::Coercive => true,
-        (String, Int | IntLiteral(_) | IntRange(..) | Float | Bool | BoolLiteral(_))
-            if policy == TypePolicy::Coercive =>
-        {
-            true
-        }
-        (String, Class(class)) if policy == TypePolicy::Coercive => {
-            index.method(class, "__toString").is_some()
-        }
-        (Int | Float, StringLiteral(literal)) if policy == TypePolicy::Coercive => numeric(literal),
-        (Int | Float, String | StringRefinement(_)) if policy == TypePolicy::Coercive => {
-            return Uncertain;
-        }
-        (Int | Float, Bool | BoolLiteral(_)) | (Int, Float) if policy == TypePolicy::Coercive => {
-            true
-        }
-        _ => false,
-    };
-    if accepted { Accepts } else { Rejects }
-}
-
-fn nominal(expected: &str, given: &str, index: &Index) -> Compatibility {
-    use Compatibility::*;
-    if expected.eq_ignore_ascii_case(given)
-        || index
-            .ancestry(given)
-            .iter()
-            .any(|class| class.name.eq_ignore_ascii_case(expected))
-    {
-        Accepts
-    } else if index.class(expected).is_none()
-        || index.class(given).is_none()
-        || !index.complete(given)
-        || ["self", "static", "parent"].contains(&expected)
-        || ["self", "static", "parent"].contains(&given)
-    {
-        Uncertain
-    } else {
-        Rejects
-    }
-}
-
-fn numeric(bytes: &[u8]) -> bool {
-    std::str::from_utf8(bytes)
-        .ok()
-        .and_then(|text| text.trim().parse::<f64>().ok())
-        .is_some_and(f64::is_finite)
-}
-
-fn string_accepts(kind: StringKind, bytes: &[u8]) -> bool {
-    match kind {
-        StringKind::NonEmpty => !bytes.is_empty(),
-        StringKind::Truthy => !bytes.is_empty() && bytes != b"0",
-        StringKind::Numeric => numeric(bytes),
-        StringKind::Literal => true,
-        StringKind::Lowercase => !bytes.iter().any(u8::is_ascii_uppercase),
-        StringKind::Uppercase => !bytes.iter().any(u8::is_ascii_lowercase),
-    }
+fn list_shape(shape: &Shape) -> bool {
+    shape.kind == ShapeKind::List
+        || shape.remainder.is_none()
+            && shape
+                .fields
+                .iter()
+                .enumerate()
+                .all(|(i, field)| field.key == ShapeKey::Integer(i as i64))
 }

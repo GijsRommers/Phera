@@ -64,14 +64,20 @@ impl Analyzer<'_> {
             }
             self.apply_global_effects(resolved.signature.as_ref(), scope);
         }
-        if let Some(name) = resolved.intrinsic {
-            self.intrinsic(&name, arguments, scope);
+        if let Some(name) = &resolved.intrinsic {
+            self.intrinsic(name, arguments, scope);
         }
         if matches!(arguments, Arguments::FirstClassCallable) {
             resolved.signature.map_or(ValueType::Mixed, |s| {
                 ValueType::Callable(std::sync::Arc::new(s))
             })
         } else {
+            if self.level >= 2
+                && let Some(name) = &resolved.intrinsic
+                && let Some(ty) = self.builtin_result(name, arguments, &facts.types, scope)
+            {
+                return ty;
+            }
             resolved.signature.map_or(ValueType::Mixed, |s| {
                 s.infer_return(arguments, &facts.types, self.index)
             })

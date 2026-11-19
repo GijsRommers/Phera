@@ -21,9 +21,11 @@ mod atoms;
 mod attributes;
 mod binding_statements;
 mod bindings;
+mod builtin_facts;
 mod callable_signatures;
 mod calls;
 mod closure_binding;
+mod closure_effects;
 mod coalesce_assignment;
 mod composite;
 mod condition;
@@ -43,6 +45,7 @@ mod match_expression;
 mod member_expressions;
 mod members;
 mod not_supported;
+mod operators;
 mod property_hooks;
 mod receiver_types;
 mod refine;
@@ -52,6 +55,7 @@ mod short_circuit;
 mod statements;
 mod switch;
 mod type_docs;
+mod value_contracts;
 mod write;
 
 pub const MAX_DEPTH: usize = 256;
@@ -68,6 +72,7 @@ pub struct Context {
     pub returns: ValueType,
     pub declared_return: bool,
     pub documented_return: Option<ValueType>,
+    pub inferred_return: Option<ValueType>,
     pub generator: bool,
     pub by_reference: bool,
     pub function: String,
@@ -80,6 +85,7 @@ pub struct Analyzer<'a> {
     pub dependencies: &'a mut Dependencies,
     pub file: &'a ParsedFile,
     pub level: u8,
+    pub strict_types: bool,
     pub diagnostics: Vec<Diagnostic>,
     pub context: Context,
     pub depth: usize,
@@ -103,6 +109,11 @@ impl<'a> Analyzer<'a> {
             dependencies,
             file,
             level,
+            strict_types: file.program.statements.iter().any(|statement| {
+                matches!(&statement.kind, StatementKind::Declare { directives, .. }
+                    if directives.iter().any(|directive| directive.name.name.eq_ignore_ascii_case("strict_types")
+                        && matches!(directive.value.kind, ExpressionKind::Literal(Literal::Int(1)))))
+            }),
             diagnostics: Vec::new(),
             depth: 0,
             checked_declarations: std::collections::BTreeSet::new(),
@@ -126,6 +137,7 @@ impl<'a> Analyzer<'a> {
                 returns: ValueType::Mixed,
                 declared_return: false,
                 documented_return: None,
+                inferred_return: None,
                 generator: false,
                 by_reference: false,
                 function: "top level".into(),
@@ -262,8 +274,7 @@ pub enum Access {
     Inferred,
     Guarded,
     GuardedStatic,
-    Static,
-    Forwarded,
+    Static { has_object: bool, late_bound: bool },
     LateStatic { has_object: bool },
 }
 
@@ -278,7 +289,20 @@ impl Access {
     pub fn static_call(self) -> bool {
         matches!(
             self,
-            Self::Static | Self::GuardedStatic | Self::LateStatic { has_object: false }
+            Self::Static {
+                has_object: false,
+                ..
+            } | Self::GuardedStatic
+                | Self::LateStatic { has_object: false }
+        )
+    }
+    pub fn late_bound(self) -> bool {
+        matches!(
+            self,
+            Self::Static {
+                late_bound: true,
+                ..
+            } | Self::LateStatic { .. }
         )
     }
     pub fn dynamic_receiver(self) -> bool {

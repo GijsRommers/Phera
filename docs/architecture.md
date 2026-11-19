@@ -930,6 +930,10 @@ What PHPStan and Psalm do: find errors without running the code.
   the relevant `strict_types` setting. PHPDoc acceptance compares the
   refined types. Keep unknown acceptance distinct from a proven mismatch
   so that these levels can analyse untyped code.
+  For example, a known `string` returned from an `int` function is a
+  level 3 mismatch. A weak return context permits a `Stringable` object
+  when the function returns `string`. A callback that can write a captured
+  property invalidates earlier facts about that property.
 - **Analysis concurrency.** Composer resolution and declaration linking
   precede each analysis pass. Workers analyse independent files against a
   shared index and return unresolved class requests alongside their

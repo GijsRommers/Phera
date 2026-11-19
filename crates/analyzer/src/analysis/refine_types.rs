@@ -57,7 +57,7 @@ impl Analyzer<'_> {
                 narrowed
             };
             if narrowed != ValueType::Never {
-                scope.facts.record(place, narrowed, span);
+                scope.facts.record(place, narrowed, Some(span));
             }
         }
     }

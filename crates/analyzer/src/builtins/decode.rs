@@ -37,6 +37,7 @@ pub fn decode(data: &str) -> Index {
                         PropertyInfo {
                             ty: decode_type(f[2]),
                             documented_type: None,
+                            null_default: false,
                             modifiers: modifiers(f[3]),
                             location: location(f[4]),
                         },
@@ -108,6 +109,7 @@ fn signature(f: &[&str]) -> Signature {
         accepts_extra: f[6] == "true",
         unbound_this: Vec::new(),
         global_effects: crate::global_effects::GlobalEffects::None,
+        captured_writes: Vec::new(),
         location: location(f[7]),
     }
 }

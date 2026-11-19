@@ -11,6 +11,7 @@ mod display;
 mod substitution;
 
 pub use acceptance::{Compatibility, TypePolicy};
+pub use substitution::RelativeTypes;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ValueType {
@@ -140,6 +141,22 @@ pub enum ConditionTest {
 }
 
 impl ValueType {
+    pub fn value_choices(&self) -> Self {
+        if !matches!(self, Self::Conditional(_)) {
+            return self.clone();
+        }
+        let mut pending = vec![self];
+        let mut result = Self::Never;
+        while let Some(ty) = pending.pop() {
+            if let Self::Conditional(conditional) = ty {
+                pending.extend([&conditional.no, &conditional.yes]);
+            } else {
+                result = result.join(ty);
+            }
+        }
+        result
+    }
+
     pub fn join(&self, other: &Self) -> Self {
         if matches!(self, Self::Never) {
             return other.clone();
@@ -149,6 +166,14 @@ impl ValueType {
         }
         if self == other {
             return self.clone();
+        }
+        if matches!((self, other), (Self::BoolLiteral(left), Self::BoolLiteral(right)) if left != right)
+            || matches!(
+                (self, other),
+                (Self::Bool, Self::BoolLiteral(_)) | (Self::BoolLiteral(_), Self::Bool)
+            )
+        {
+            return Self::Bool;
         }
         if matches!(self, Self::Mixed) || matches!(other, Self::Mixed) {
             return Self::Mixed;

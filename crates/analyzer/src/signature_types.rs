@@ -3,7 +3,7 @@
 
 use crate::{
     index::{ClassInfo, Index, PropertyInfo, Signature},
-    types::{Compatibility, TypePolicy, ValueType},
+    types::{Compatibility, RelativeTypes, TypePolicy, ValueType},
 };
 use phera_ast::{Argument, Arguments};
 use std::collections::{BTreeMap, BTreeSet};
@@ -35,16 +35,17 @@ impl Signature {
                 bindings.remove(name);
             }
         }
-        if !bindings.is_empty() {
+        let relative = RelativeTypes {
+            receiver,
+            owner: &owner.name,
+            parent: owner.parents.first().map(String::as_str),
+        };
+        if !bindings.is_empty() || index.read_type_docs {
             for parameter in &mut self.parameters {
-                parameter.ty = parameter.ty.substitute(&bindings, Some(receiver));
+                parameter.ty = parameter.ty.substitute(&bindings, Some(relative));
             }
         }
-        if self.documentation.is_some()
-            || matches!(&self.returns, ValueType::Class(name) if name == "static")
-        {
-            self.returns = self.returns.substitute(&bindings, Some(receiver));
-        }
+        self.returns = self.returns.substitute(&bindings, Some(relative));
         self
     }
 
@@ -155,14 +156,28 @@ fn infer_templates(
     let mut pending = vec![(expected, given)];
     while let Some((expected, given)) = pending.pop() {
         match (expected, given) {
-            (T::Union(arms), _) => pending.extend(
-                arms.iter()
-                    .filter(|arm| {
-                        arm.accepts(given, index, TypePolicy::Documentation)
-                            == Compatibility::Accepts
-                    })
-                    .map(|arm| (arm, given)),
-            ),
+            (T::Union(arms), _) => {
+                // In `T|Closure(): T`, a known closure binds the result type
+                // through the callable arm before falling back to bare T.
+                let precise = arms.iter().any(|arm| {
+                    matches!(
+                        (arm, given),
+                        (T::Callable(_), T::Callable(_))
+                            | (T::Collection(_), T::Collection(_) | T::Shape(_))
+                            | (T::ClassString(_), T::ClassString(_))
+                    ) && arm.accepts(given, index, TypePolicy::Documentation)
+                        != Compatibility::Rejects
+                });
+                pending.extend(
+                    arms.iter()
+                        .filter(|arm| {
+                            (!precise || !matches!(arm, T::Template(_)))
+                                && arm.accepts(given, index, TypePolicy::Documentation)
+                                    != Compatibility::Rejects
+                        })
+                        .map(|arm| (arm, given)),
+                );
+            }
             (T::Template(template), _)
                 if variables.contains(&template.name)
                     && template
@@ -176,6 +191,16 @@ fn infer_templates(
                     .or_insert_with(|| given.clone());
             }
             (T::ClassString(expected), T::ClassString(given)) => pending.push((expected, given)),
+            (T::Callable(expected), T::Callable(given)) => {
+                pending.push((&expected.returns, &given.returns));
+                pending.extend(
+                    expected
+                        .parameters
+                        .iter()
+                        .zip(&given.parameters)
+                        .map(|(expected, given)| (&expected.ty, &given.ty)),
+                );
+            }
             (T::Collection(expected), T::Collection(given)) => {
                 pending.extend([(&expected.key, &given.key), (&expected.value, &given.value)])
             }
@@ -231,7 +256,16 @@ fn class_bindings(index: &Index, owner: &str, receiver: &ValueType) -> BTreeMap<
             });
             pending.push(documented.map_or_else(
                 || ValueType::Class(base.clone()),
-                |ty| ty.substitute(&bindings, Some(receiver)),
+                |ty| {
+                    ty.substitute(
+                        &bindings,
+                        Some(RelativeTypes {
+                            receiver,
+                            owner: &class.name,
+                            parent: class.parents.first().map(String::as_str),
+                        }),
+                    )
+                },
             ));
         }
     }
@@ -240,10 +274,15 @@ fn class_bindings(index: &Index, owner: &str, receiver: &ValueType) -> BTreeMap<
 
 impl PropertyInfo {
     pub fn effective_type(&self, index: &Index) -> ValueType {
-        self.documented_type.as_ref().map_or_else(
+        let ty = self.documented_type.as_ref().map_or_else(
             || self.ty.clone(),
             |annotation| refine(&self.ty, annotation, index),
-        )
+        );
+        if self.null_default && !self.ty.excludes_null() {
+            ty.join(&ValueType::Null)
+        } else {
+            ty
+        }
     }
 }
 

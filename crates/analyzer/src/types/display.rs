@@ -6,6 +6,7 @@ use std::fmt::{self, Display, Formatter};
 enum Part<'a> {
     Type(&'a ValueType),
     Text(&'static str),
+    Field(&'a Field, bool),
 }
 
 impl Display for ValueType {
@@ -16,6 +17,26 @@ impl Display for ValueType {
                 Part::Text(text) => {
                     f.write_str(text)?;
                     continue;
+                }
+                Part::Field(field, keyed) => {
+                    if keyed {
+                        match &field.key {
+                            ShapeKey::Integer(key) => write!(f, "{key}")?,
+                            ShapeKey::String(key)
+                                if key
+                                    .bytes()
+                                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_') =>
+                            {
+                                f.write_str(key)?
+                            }
+                            ShapeKey::String(key) => write!(f, "'{}'", key.escape_default())?,
+                        }
+                        if field.optional {
+                            f.write_str("?")?;
+                        }
+                        f.write_str(": ")?;
+                    }
+                    &field.value
                 }
                 Part::Type(ty) => ty,
             };
@@ -103,10 +124,30 @@ impl Display for ValueType {
                     }
                     continue;
                 }
-                Self::Shape(shape) => match shape.kind {
-                    ShapeKind::Array | ShapeKind::List => "array",
-                    ShapeKind::Object => "object",
-                },
+                Self::Shape(shape) => {
+                    f.write_str(if shape.kind == ShapeKind::Object {
+                        "object{"
+                    } else {
+                        "array{"
+                    })?;
+                    parts.push(Part::Text("}"));
+                    if shape.remainder.is_some() {
+                        parts.push(Part::Text("..."));
+                        if !shape.fields.is_empty() {
+                            parts.push(Part::Text(", "));
+                        }
+                    }
+                    for (index, field) in shape.fields.iter().enumerate().rev() {
+                        parts.push(Part::Field(
+                            field,
+                            shape.kind != ShapeKind::List || field.optional,
+                        ));
+                        if index != 0 {
+                            parts.push(Part::Text(", "));
+                        }
+                    }
+                    continue;
+                }
                 Self::Callable(_) => "Closure",
                 Self::Projection(projection) => {
                     let (name, operand) = match projection.as_ref() {

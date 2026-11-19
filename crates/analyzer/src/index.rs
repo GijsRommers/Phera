@@ -34,6 +34,7 @@ pub struct Signature {
     pub accepts_extra: bool,
     pub unbound_this: Vec<Location>,
     pub global_effects: crate::global_effects::GlobalEffects,
+    pub captured_writes: Vec<crate::scope::Place>,
 }
 
 impl Signature {
@@ -69,6 +70,7 @@ impl Signature {
             accepts_extra: false,
             unbound_this: Vec::new(),
             global_effects: crate::global_effects::GlobalEffects::None,
+            captured_writes: Vec::new(),
         }
     }
     pub fn apply_phpdoc(&mut self, doc: Option<&str>, names: &Names) {
@@ -88,6 +90,7 @@ impl Signature {
 pub struct PropertyInfo {
     pub ty: ValueType,
     pub documented_type: Option<ValueType>,
+    pub null_default: bool,
     pub modifiers: Modifiers,
     pub location: Location,
 }

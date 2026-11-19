@@ -174,7 +174,8 @@ fn level(value: &str) -> Result<u8, String> {
         "0" => Ok(0),
         "1" => Ok(1),
         "2" => Ok(2),
-        _ => Err("Supported check levels are 0 through 2".into()),
+        "3" => Ok(3),
+        _ => Err("Supported check levels are 0 through 3".into()),
     }
 }
 

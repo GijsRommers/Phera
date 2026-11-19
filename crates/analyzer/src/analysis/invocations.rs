@@ -59,7 +59,15 @@ impl Analyzer<'_> {
                 } else {
                     Access::object(target)
                 };
-                self.method_call(&ty, name, arguments, scope, expression.span, access)
+                let result = self.method_call(&ty, name, arguments, scope, expression.span, access);
+                if self.level >= 2
+                    && result == ValueType::Void
+                    && !scope.facts.is_empty()
+                    && let Some(receiver) = crate::scope::Place::of(target)
+                {
+                    scope.facts.forget_receiver(&receiver);
+                }
+                result
             }
             ExpressionKind::StaticCall {
                 class,
@@ -102,10 +110,12 @@ impl Analyzer<'_> {
                         Access::LateStatic {
                             has_object: forwarding,
                         }
-                    } else if forwarding {
-                        Access::Forwarded
                     } else {
-                        Access::Static
+                        Access::Static {
+                            has_object: forwarding,
+                            late_bound: matches!(&class.kind, ExpressionKind::Name(name)
+                                if name.text.eq_ignore_ascii_case("self") || name.text.eq_ignore_ascii_case("parent")),
+                        }
                     },
                 )
             }

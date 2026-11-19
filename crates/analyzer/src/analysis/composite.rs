@@ -26,6 +26,14 @@ impl Analyzer<'_> {
                 }
                 super::arrays::offset_type(&target, &key)
             }
+            ExpressionKind::Unary { operator, operand } if self.level >= 3 => {
+                let ty = self.expression(operand, scope, quiet);
+                if ty == ValueType::Never {
+                    ty
+                } else {
+                    super::operators::unary_type(*operator, ty)
+                }
+            }
             ExpressionKind::Cast { kind, operand } if self.level >= 2 => {
                 let ty = self.expression(operand, scope, quiet);
                 if ty == ValueType::Never {

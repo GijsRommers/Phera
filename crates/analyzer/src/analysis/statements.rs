@@ -157,16 +157,27 @@ impl Analyzer<'_> {
             if self.context.by_reference && matches!(value.kind, ExpressionKind::Variable(_)) {
                 self.ensure_reference(value, scope);
             }
-            self.expression(value, scope, false);
+            let given = self.expression(value, scope, false);
+            if let Some(inferred) = &mut self.context.inferred_return {
+                *inferred = inferred.join(&given);
+            }
+            self.check_return_value(Some(value), &given, scope, span);
             if self.context.returns == ValueType::Void {
                 self.report(Finding::VoidReturn, span);
             }
+        } else if self.level >= 3 {
+            self.check_return_value(None, &ValueType::Null, scope, span);
         } else if self.level >= 1
             && self.context.declared_return
             && !self.context.generator
             && self.context.returns != ValueType::Void
         {
             self.report(Finding::MissingReturn(self.context.function.clone()), span);
+        }
+        if value.is_none()
+            && let Some(inferred) = &mut self.context.inferred_return
+        {
+            *inferred = inferred.join(&ValueType::Null);
         }
         self.record_return(scope);
         Flow::Terminal

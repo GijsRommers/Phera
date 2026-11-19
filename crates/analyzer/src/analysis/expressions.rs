@@ -88,6 +88,9 @@ impl Analyzer<'_> {
         ) {
             self.record_exception(scope);
         }
+        if self.level >= 3 {
+            return super::operators::binary_type(operator, &left_ty, &right_ty);
+        }
         match operator {
             BinaryOperator::Concat => ValueType::String,
             BinaryOperator::Equal

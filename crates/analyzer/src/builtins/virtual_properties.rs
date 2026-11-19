@@ -30,6 +30,7 @@ pub fn add(index: &mut Index) {
                     .or_insert_with(|| PropertyInfo {
                         ty: ty.clone(),
                         documented_type: None,
+                        null_default: false,
                         modifiers: Default::default(),
                         location: info.location.clone(),
                     });

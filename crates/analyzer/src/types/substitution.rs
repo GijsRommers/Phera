@@ -6,9 +6,28 @@ use std::collections::BTreeMap;
 
 const MAX_TYPE_DEPTH: usize = 48;
 
+#[derive(Clone, Copy)]
+pub struct RelativeTypes<'a> {
+    pub receiver: &'a ValueType,
+    pub owner: &'a str,
+    pub parent: Option<&'a str>,
+}
+
+impl RelativeTypes<'_> {
+    fn class(&self, name: &str) -> Option<&str> {
+        match name {
+            "self" => Some(self.owner),
+            "parent" => self.parent,
+            "static" => self.receiver.class_name(),
+            _ => None,
+        }
+    }
+}
+
 enum Step<'a> {
     Visit(&'a ValueType, usize),
     Collection(&'a Collection),
+    Shape(&'a Shape),
     Generic(&'a Generic),
     Union(usize),
     Intersection(usize),
@@ -17,7 +36,26 @@ enum Step<'a> {
 }
 
 impl ValueType {
-    pub fn substitute(&self, templates: &BTreeMap<String, Self>, receiver: Option<&Self>) -> Self {
+    pub fn substitute(
+        &self,
+        templates: &BTreeMap<String, Self>,
+        relative: Option<RelativeTypes<'_>>,
+    ) -> Self {
+        if !matches!(
+            self,
+            Self::Collection(_)
+                | Self::Shape(_)
+                | Self::ClassString(_)
+                | Self::Generic(_)
+                | Self::Union(_)
+                | Self::Intersection(_)
+                | Self::Template(_)
+                | Self::Conditional(_)
+                | Self::Class(_)
+                | Self::This
+        ) {
+            return self.clone();
+        }
         let mut pending = vec![Step::Visit(self, 0)];
         let mut results = Vec::new();
         while let Some(step) = pending.pop() {
@@ -38,17 +76,33 @@ impl ValueType {
                             if matches!(ty, Self::This)
                                 || ty.class_name().is_some_and(|name| name == "static") =>
                         {
-                            receiver
-                                .filter(|receiver| fits(receiver, depth))
-                                .cloned()
+                            relative
+                                .filter(|relative| fits(relative.receiver, depth))
+                                .map(|relative| relative.receiver.clone())
                                 .unwrap_or_else(|| ty.clone())
                         }
+                        Self::Class(name) => relative
+                            .and_then(|relative| {
+                                relative.class(name).map(|name| Self::Class(name.into()))
+                            })
+                            .unwrap_or_else(|| ty.clone()),
                         Self::Collection(collection) => {
                             pending.push(Step::Collection(collection));
                             pending.extend([
                                 Step::Visit(&collection.value, depth),
                                 Step::Visit(&collection.key, depth),
                             ]);
+                            continue;
+                        }
+                        Self::Shape(shape) => {
+                            pending.push(Step::Shape(shape));
+                            pending.extend(
+                                shape
+                                    .fields
+                                    .iter()
+                                    .rev()
+                                    .map(|field| Step::Visit(&field.value, depth)),
+                            );
                             continue;
                         }
                         Self::ClassString(bound) => {
@@ -100,16 +154,30 @@ impl ValueType {
                         ..collection.clone()
                     }))
                 }
+                Step::Shape(shape) => {
+                    let values =
+                        results.split_off(results.len().saturating_sub(shape.fields.len()));
+                    let fields = shape
+                        .fields
+                        .iter()
+                        .zip(values)
+                        .map(|(field, value)| Field {
+                            value,
+                            ..field.clone()
+                        })
+                        .collect();
+                    Self::Shape(Arc::new(Shape {
+                        fields,
+                        ..shape.clone()
+                    }))
+                }
                 Step::Generic(generic) => {
                     let arguments =
                         results.split_off(results.len().saturating_sub(generic.arguments.len()));
-                    let base = if generic.base == "static" {
-                        receiver.and_then(Self::class_name).unwrap_or(&generic.base)
-                    } else {
-                        &generic.base
-                    };
                     Self::Generic(Arc::new(Generic {
-                        base: base.into(),
+                        base: relative
+                            .and_then(|relative| relative.class(&generic.base).map(str::to_string))
+                            .unwrap_or_else(|| generic.base.clone()),
                         arguments,
                     }))
                 }
@@ -163,6 +231,9 @@ fn fits(ty: &ValueType, depth: usize) -> bool {
             ValueType::ClassString(bound) => pending.push((bound, next)),
             ValueType::Collection(collection) => {
                 pending.extend([(&collection.key, next), (&collection.value, next)])
+            }
+            ValueType::Shape(shape) => {
+                pending.extend(shape.fields.iter().map(|field| (&field.value, next)))
             }
             ValueType::Template(template) => pending.push((&template.bound, next)),
             _ => {}

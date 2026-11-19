@@ -63,7 +63,7 @@ impl Place {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Fact {
     pub ty: ValueType,
-    pub span: Span,
+    pub narrowed_at: Option<Span>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -78,12 +78,20 @@ impl Facts {
         self.0.get(place)
     }
 
-    pub fn record(&mut self, place: Place, ty: ValueType, span: Span) {
-        self.0.insert(place, Fact { ty, span });
+    pub fn record(&mut self, place: Place, ty: ValueType, narrowed_at: Option<Span>) {
+        self.0.insert(place, Fact { ty, narrowed_at });
     }
 
     pub fn forget_variable(&mut self, name: &str) {
         self.0.retain(|place, _| place.root != name);
+    }
+
+    pub fn forget_receiver(&mut self, receiver: &Place) {
+        self.0.retain(|place, _| {
+            place.root != receiver.root
+                || place.members.len() <= receiver.members.len()
+                || !place.members.starts_with(&receiver.members)
+        });
     }
 
     pub fn forget_write(&mut self, target: Option<&Place>) {

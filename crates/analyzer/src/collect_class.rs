@@ -119,6 +119,9 @@ fn add_member(
                                 .or_else(|| doc.variables.get(&None))
                                 .map(|annotation| annotation.ty.clone())
                         }),
+                        null_default: p.default.as_ref().is_some_and(|value| {
+                            matches!(value.kind, ExpressionKind::Literal(Literal::Null))
+                        }),
                         modifiers: *modifiers,
                         location: location(p.span.start),
                     },
@@ -184,6 +187,7 @@ fn add_method(
                 PropertyInfo {
                     ty: ValueType::declared(p.ty.as_ref(), names),
                     documented_type: None,
+                    null_default: false,
                     modifiers: p.modifiers,
                     location: location(p.span.start),
                 },

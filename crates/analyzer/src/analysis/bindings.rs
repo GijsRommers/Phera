@@ -95,6 +95,10 @@ impl Analyzer<'_> {
         self.apply_binding(span, closure.is_static);
         self.context.function = "Closure".into();
         self.context.declared_return = closure.return_type.is_some();
+        self.context.documented_return = None;
+        self.context.inferred_return =
+            (self.level >= 2 && closure.return_type.is_none() && !closure.is_generator)
+                .then_some(ValueType::Never);
         self.context.generator =
             self.context.declared_return && generators::body_yields(&closure.body);
         self.context.by_reference = closure.by_reference;
@@ -114,8 +118,22 @@ impl Analyzer<'_> {
                 line: self.file.lines.line(span.start),
             },
         );
+        if let Some(inferred) = self.context.inferred_return.take() {
+            signature.returns = if flow == super::statements::Flow::Next {
+                if inferred == ValueType::Never {
+                    ValueType::Void
+                } else {
+                    inferred.join(&ValueType::Null)
+                }
+            } else {
+                inferred
+            };
+        }
         signature.unbound_this = self.context.unbound_this.take().unwrap_or_default();
         signature.global_effects = crate::global_effects::of(&closure.body);
+        if self.level >= 2 {
+            signature.captured_writes = super::closure_effects::captured_writes(closure);
+        }
         self.context = previous;
         self.exception_scopes = exceptions;
         self.controls = controls;
@@ -138,11 +156,17 @@ impl Analyzer<'_> {
         }
         self.context.unbound_this = (!arrow.is_static && !previous.object).then(Vec::new);
         self.apply_binding(span, arrow.is_static);
+        self.context.function = "Closure".into();
+        self.context.generator = arrow.is_generator;
+        self.context.documented_return = None;
+        self.context.inferred_return = None;
+        self.context.returns = ValueType::declared(arrow.return_type.as_ref(), &self.context.names);
         self.check_attributes(&arrow.attributes, &mut inner);
         self.parameter_scope(&arrow.parameters, &mut inner);
         self.check_type(arrow.return_type.as_ref());
-        self.expression(&arrow.body, &mut inner, false);
-        if ValueType::declared(arrow.return_type.as_ref(), &self.context.names) == ValueType::Void {
+        let given = self.expression(&arrow.body, &mut inner, false);
+        self.check_return_value(Some(&arrow.body), &given, &inner, span);
+        if self.context.returns == ValueType::Void {
             self.report(Finding::VoidReturn, span);
         }
         let mut signature = Signature::new(
@@ -154,6 +178,9 @@ impl Analyzer<'_> {
                 line: self.file.lines.line(span.start),
             },
         );
+        if self.level >= 2 && arrow.return_type.is_none() && !arrow.is_generator {
+            signature.returns = given;
+        }
         signature.unbound_this = self.context.unbound_this.take().unwrap_or_default();
         signature.global_effects = crate::global_effects::expression(&arrow.body);
         self.context = previous;

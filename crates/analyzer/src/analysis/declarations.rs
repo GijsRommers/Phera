@@ -1,7 +1,6 @@
 //! Declaration checks: `class C implements Countable {}` lacks `count()`.
 //! Bodies get fresh parameter scopes; traits defer consumer-dependent member facts.
 
-use super::statements::Flow;
 use super::*;
 
 impl Analyzer<'_> {
@@ -57,8 +56,9 @@ impl Analyzer<'_> {
         self.context.function = self.context.names.declaration(&function.name.name);
         self.context.declared_return = function.return_type.is_some();
         self.context.documented_return = None;
-        self.context.generator =
-            self.context.declared_return && generators::body_yields(&function.body);
+        self.context.inferred_return = None;
+        self.context.generator = (self.context.declared_return || self.level >= 3)
+            && generators::body_yields(&function.body);
         self.context.by_reference = function.by_reference;
         self.context.returns =
             ValueType::declared(function.return_type.as_ref(), &self.context.names);
@@ -156,7 +156,8 @@ impl Analyzer<'_> {
                     }
                     for item in items {
                         if let Some(default) = &item.default {
-                            self.expression(default, &mut Scope::default(), false);
+                            let given = self.expression(default, &mut Scope::default(), false);
+                            self.check_property_default(&item.name, &given, item.span);
                         }
                         if consumer_contexts.is_empty() {
                             self.property_hooks(&item.name, ty.as_ref(), &item.hooks);
@@ -215,7 +216,8 @@ impl Analyzer<'_> {
         self.context.function = method.name.name.clone();
         self.context.declared_return = method.return_type.is_some();
         self.context.documented_return = None;
-        self.context.generator = self.context.declared_return
+        self.context.inferred_return = None;
+        self.context.generator = (self.context.declared_return || self.level >= 3)
             && method
                 .body
                 .as_ref()
@@ -287,45 +289,6 @@ impl Analyzer<'_> {
         }
         for method in missing {
             self.report(Finding::MissingMethod(name.into(), method), span);
-        }
-    }
-
-    pub fn check_return_path(&mut self, flow: Flow, body: &[Statement], span: Span) {
-        if self.context.returns == ValueType::Void {
-            self.void_returns(body);
-            return;
-        }
-        if self.context.incomplete
-            || flow != Flow::Next
-            || !self.context.declared_return
-            || self.context.generator
-            || (self.context.returns == ValueType::Never && self.level == 0)
-        {
-            return;
-        }
-        let mut blocks = vec![body];
-        while let Some(block) = blocks.pop() {
-            for statement in block {
-                // Syntactic fallthrough cannot prove that a goto body is
-                // missing a return. Each explicit return is still checked.
-                if matches!(statement.kind, StatementKind::Goto(_)) {
-                    return;
-                }
-                blocks.extend(crate::collect::child_blocks(statement));
-            }
-        }
-        let span = body.last().map_or(span, |statement| statement.span);
-        self.report(Finding::MissingReturn(self.context.function.clone()), span);
-    }
-    fn void_returns(&mut self, body: &[Statement]) {
-        let mut pending = vec![body];
-        while let Some(block) = pending.pop() {
-            for statement in block {
-                if matches!(statement.kind, StatementKind::Return(Some(_))) {
-                    self.report(Finding::VoidReturn, statement.span);
-                }
-                pending.extend(crate::collect::child_blocks(statement));
-            }
         }
     }
 }

@@ -42,14 +42,15 @@ impl Analyzer<'_> {
         };
         let collect = self.level >= 5
             || self.level >= 2
-                && signature
-                    .and_then(|signature| signature.documentation.as_deref())
-                    .is_some_and(|doc| {
-                        !doc.template_names.is_empty()
-                            || doc.returns.as_ref().is_some_and(|annotation| {
-                                matches!(annotation.ty, ValueType::Conditional(_))
-                            })
-                    });
+                && (super::builtin_facts::takes_facts(label)
+                    || signature
+                        .and_then(|signature| signature.documentation.as_deref())
+                        .is_some_and(|doc| {
+                            !doc.template_names.is_empty()
+                                || doc.returns.as_ref().is_some_and(|annotation| {
+                                    matches!(annotation.ty, ValueType::Conditional(_))
+                                })
+                        }));
         let types = collect.then_some(&mut facts.types);
         if self.evaluate_arguments(arguments, signature, scope, types) == Evaluation::Never {
             facts.evaluation = Evaluation::Never;
@@ -98,6 +99,13 @@ impl Analyzer<'_> {
             }
             if ty == ValueType::Never {
                 return Evaluation::Never;
+            }
+            if !scope.facts.is_empty()
+                && let ValueType::Callable(signature) = &ty
+            {
+                for target in &signature.captured_writes {
+                    scope.facts.forget_write(Some(target));
+                }
             }
             if self.context.scope_kind == ScopeKind::Global
                 && (ty.may_be_callable() || parameter.is_some_and(|p| p.ty.may_be_callable()))

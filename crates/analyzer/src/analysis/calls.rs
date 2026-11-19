@@ -38,8 +38,14 @@ impl Analyzer<'_> {
             };
         };
         self.dependencies.resolve(self.index, class);
-        let fallback_receiver = ValueType::Class(class.into());
-        let receiver = if ty.class_name().is_some() {
+        let late_class = access
+            .late_bound()
+            .then_some(self.context.class.as_deref())
+            .flatten();
+        let fallback_receiver = ValueType::Class(late_class.unwrap_or(class).into());
+        let receiver = if late_class.is_none()
+            && (ty.class_name().is_some() || matches!(ty, ValueType::Intersection(_)))
+        {
             ty
         } else {
             &fallback_receiver
@@ -129,11 +135,16 @@ impl Analyzer<'_> {
                 self.index.method_owner(class, dispatcher).map_or(
                     ValueType::Mixed,
                     |(owner, signature)| {
-                        signature
+                        let returns = signature
                             .clone()
                             .typed(self.index)
                             .for_receiver(self.index, owner, receiver)
-                            .returns
+                            .returns;
+                        if returns == ValueType::Void {
+                            ValueType::Mixed
+                        } else {
+                            returns
+                        }
                     },
                 )
             } else {

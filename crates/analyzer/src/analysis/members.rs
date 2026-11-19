@@ -104,6 +104,27 @@ impl Analyzer<'_> {
                 .class(class)
                 .and_then(|c| c.parents.first())
                 .map_or(ValueType::Mixed, |p| ValueType::Class(p.clone())),
+            ValueType::Union(_)
+            | ValueType::Intersection(_)
+            | ValueType::Collection(_)
+            | ValueType::Shape(_)
+            | ValueType::Conditional(_)
+            | ValueType::Generic(_)
+            | ValueType::ClassString(_)
+                if self.level >= 2 =>
+            {
+                ty.substitute(
+                    &Default::default(),
+                    Some(crate::types::RelativeTypes {
+                        receiver: &ValueType::Class(class.into()),
+                        owner: class,
+                        parent: self
+                            .index
+                            .class(class)
+                            .and_then(|class| class.parents.first().map(String::as_str)),
+                    }),
+                )
+            }
             _ => ty,
         }
     }
