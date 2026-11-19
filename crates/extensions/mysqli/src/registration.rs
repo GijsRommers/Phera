@@ -88,7 +88,10 @@ static DRIVER_PROPERTIES: NativePropertyAccess = NativePropertyAccess {
         Ok(match name {
             "client_info" => Some(Value::from(properties::CLIENT_INFO)),
             "client_version" => Some(Value::Int(properties::CLIENT_VERSION)),
-            "driver_version" => Some(Value::Int(101009)),
+            "driver_version" => {
+                context.deprecated("The driver_version property is deprecated".into());
+                Some(Value::Int(101009))
+            }
             "report_mode" => Some(Value::Int(errors::mode(context))),
             _ => None,
         })

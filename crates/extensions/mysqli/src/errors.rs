@@ -73,14 +73,10 @@ pub fn report(
     }
     if connect || mode(context) & 1 != 0 {
         context.warning(format!(
-            "{call}(): ({}{}): {}",
+            "{call}(): ({}/{}): {}",
             error.state,
-            if connect {
-                format!("/{}", error.code.unwrap_or(0))
-            } else {
-                String::new()
-            },
-            error.detail
+            error.code.unwrap_or(0),
+            error.detail,
         ));
     }
     Ok(Value::Bool(false))

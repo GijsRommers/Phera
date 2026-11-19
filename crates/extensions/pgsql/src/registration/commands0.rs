@@ -128,4 +128,21 @@ pub const ENTRIES: &[FunctionEntry] = &[
         ],
         dml::execute::<5>,
     ),
+    FunctionEntry::asynchronous(
+        "pg_put_line",
+        &[
+            Param::new("connection", ParamType::Mixed),
+            Param::new("query", ParamType::String).optional(),
+        ],
+        copy::line::<false>,
+    ),
+    FunctionEntry::asynchronous(
+        "pg_end_copy",
+        &[
+            Param::new("connection", ParamType::Class("PgSql\\Connection"))
+                .nullable()
+                .with_default(ConstantValue::Null),
+        ],
+        copy::line::<true>,
+    ),
 ];

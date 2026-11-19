@@ -92,4 +92,5 @@ pub const ENTRIES: &[MethodEntry] = &[
         dispatch::result_method::<{ result::FIELDS }>,
     )
     .tentative_return("array"),
+    MethodEntry::public("getIterator", &[], result::get_iterator).returning("Iterator"),
 ];

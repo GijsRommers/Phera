@@ -28,7 +28,7 @@ pub async fn execute<const OP: usize>(
         return match state.more.pop_front() {
             Some(Ok(outcome)) => {
                 state.observe(&outcome);
-                state.pending = Some(outcome);
+                state.pending = outcome.rows.has_columns().then_some(outcome);
                 Ok(Value::Bool(true))
             }
             Some(Err(error)) => failure(context, &mut state, error, call),

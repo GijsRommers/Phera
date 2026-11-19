@@ -67,7 +67,7 @@ pool. The native APIs cover basic connections, queries, prepared statements,
 and result fetching. The native extensions are still being checked for full
 PHP compatibility. MySQL LOCAL INFILE is disabled.
 
-Crates planned for later include `io`, `stdlib`, `postgres`, `mysql`, `redis`,
+Crates planned for later include `io` and `stdlib`,
 and eventually a `jit`. See [`docs/architecture.md`](docs/architecture.md) for
 the details.
 

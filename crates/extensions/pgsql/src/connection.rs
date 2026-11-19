@@ -108,14 +108,13 @@ pub fn connect<const PERSISTENT: bool>(
             Some(Value::Array(array)) => (*array).clone(),
             _ => PhpArray::new(),
         };
-        if flags & 2 == 0 {
-            if let Some(Value::Object(object)) = cache.get(&key) {
-                if object_handle(object)?.borrow().lease.is_some() {
-                    let value = Value::Object(object.clone());
-                    context.set_extension_value(DEFAULT, value.clone());
-                    return Ok(value);
-                }
-            }
+        if flags & 2 == 0
+            && let Some(Value::Object(object)) = cache.get(&key)
+            && object_handle(object)?.borrow().lease.is_some()
+        {
+            let value = Value::Object(object.clone());
+            context.set_extension_value(DEFAULT, value.clone());
+            return Ok(value);
         }
         let mut dsn = match parse(&connection_string) {
             Ok(dsn) => dsn,
@@ -154,7 +153,6 @@ pub fn connect<const PERSISTENT: bool>(
         .await
         .map_err(|error| NativeError::error(error.detail))?;
         let value = context.create_object("PgSql\\Connection", PhpArray::new())?;
-        let mut dsn = dsn;
         dsn.fields.remove("password");
         if let Value::Object(object) = &value {
             let state = Rc::new(RefCell::new(Connection {

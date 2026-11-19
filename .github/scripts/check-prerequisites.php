@@ -34,6 +34,23 @@ $mysql = new PDO('mysql:host=127.0.0.1;port=33069', 'root', $rootPassword);
 $mysql->exec("CREATE USER IF NOT EXISTS 'phera_pool'@'%' IDENTIFIED BY 'phera_pool'");
 $mysql->exec("GRANT ALL ON phera_test.* TO 'phera_pool'@'%'");
 
+// Native API oracle tests use separate databases so they can run alongside PDO.
+if (getenv('GITHUB_ACTIONS') === 'true') {
+    $mysql->exec('CREATE DATABASE IF NOT EXISTS mysqli_ext');
+    $mysql->exec("GRANT ALL ON mysqli_ext.* TO 'phera'@'%'");
+    if (!$postgres->query("SELECT 1 FROM pg_database WHERE datname = 'pgsql_ext'")->fetchColumn()) {
+        $postgres->exec('CREATE DATABASE pgsql_ext');
+    }
+}
+mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
+$mysqli = mysqli_connect('127.0.0.1', 'phera', 'phera', 'mysqli_ext', 33069);
+mysqli_close($mysqli);
+$pgsql = pg_connect('host=127.0.0.1 port=54329 dbname=pgsql_ext user=phera password=phera');
+if ($pgsql === false) {
+    throw new RuntimeException('Cannot connect to the pgsql test database');
+}
+pg_close($pgsql);
+
 foreach (['pgsql' => 54329, 'mysql' => 33069] as $driver => $port) {
     new PDO("$driver:host=127.0.0.1;port=$port;dbname=phera_test", 'phera_pool', 'phera_pool');
 }

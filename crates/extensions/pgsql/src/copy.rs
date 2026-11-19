@@ -75,3 +75,36 @@ pub fn copy<const FROM: bool>(c: &mut dyn Context, a: Vec<Value>) -> LocalFuture
         }
     })
 }
+
+pub fn line<const END: bool>(c: &mut dyn Context, a: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        let call = if END { "pg_end_copy" } else { "pg_put_line" };
+        let explicit = args::object(&a, 0).is_some();
+        let conn = if explicit {
+            args::value(&a, 0)
+        } else {
+            &Value::Null
+        };
+        let handle = connection::argument(c, conn, call)?;
+        let lease = handle.borrow().lease()?;
+        let row = args::bytes(&a, usize::from(explicit)).to_vec();
+        let status = connection::run(&lease, move |driver| {
+            Box::pin(async move {
+                if END {
+                    driver.end_copy().await
+                } else {
+                    driver.put_line(row).await
+                }
+            })
+        })
+        .await;
+        match status {
+            Ok(()) => Ok(Value::Bool(true)),
+            Err(error) => {
+                handle.borrow_mut().last_error.clone_from(&error.detail);
+                c.warning(format!("{call}(): {}", error.detail));
+                Ok(Value::Bool(false))
+            }
+        }
+    })
+}

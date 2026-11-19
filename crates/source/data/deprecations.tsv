@@ -27,24 +27,24 @@ constant	GSLC_SSL_NO_AUTH	8.5	as it is broken since PHP 8.0	keep
 constant	GSLC_SSL_ONEWAY_AUTH	8.5	as it is broken since PHP 8.0	omit
 constant	GSLC_SSL_TWOWAY_AUTH	8.5	as it is broken since PHP 8.0	omit
 constant	MT_RAND_PHP	8.3	as it uses a biased non-standard variant of Mt19937	omit
-constant	MYSQLI_DATA_TRUNCATED	8.1	as it was unused	omit
-constant	MYSQLI_IS_MARIADB	8.2	as it is always false	omit
-constant	MYSQLI_NO_DATA	8.1	as it was unused	omit
-constant	MYSQLI_REFRESH_BACKUP_LOG	8.4	as mysqli_refresh() is deprecated	omit
-constant	MYSQLI_REFRESH_GRANT	8.4	as mysqli_refresh() is deprecated	omit
-constant	MYSQLI_REFRESH_HOSTS	8.4	as mysqli_refresh() is deprecated	omit
-constant	MYSQLI_REFRESH_LOG	8.4	as mysqli_refresh() is deprecated	omit
-constant	MYSQLI_REFRESH_MASTER	8.4	as mysqli_refresh() is deprecated	omit
-constant	MYSQLI_REFRESH_REPLICA	8.4	as mysqli_refresh() is deprecated	omit
-constant	MYSQLI_REFRESH_SLAVE	8.4	as mysqli_refresh() is deprecated	omit
-constant	MYSQLI_REFRESH_STATUS	8.4	as mysqli_refresh() is deprecated	omit
-constant	MYSQLI_REFRESH_TABLES	8.4	as mysqli_refresh() is deprecated	omit
-constant	MYSQLI_REFRESH_THREADS	8.4	as mysqli_refresh() is deprecated	omit
-constant	MYSQLI_SERVER_PS_OUT_PARAMS	8.1	as it was unused	omit
-constant	MYSQLI_SERVER_QUERY_NO_GOOD_INDEX_USED	8.1	as it was unused	omit
-constant	MYSQLI_SERVER_QUERY_NO_INDEX_USED	8.1	as it was unused	omit
-constant	MYSQLI_SERVER_QUERY_WAS_SLOW	8.1	as it was unused	omit
-constant	MYSQLI_STORE_RESULT_COPY_DATA	8.4	as the mysqli_store_result() parameter is unused since 8.1	omit
+constant	MYSQLI_DATA_TRUNCATED	8.1	as it was unused	keep
+constant	MYSQLI_IS_MARIADB	8.2	as it is always false	keep
+constant	MYSQLI_NO_DATA	8.1	as it was unused	keep
+constant	MYSQLI_REFRESH_BACKUP_LOG	8.4	as mysqli_refresh() is deprecated	keep
+constant	MYSQLI_REFRESH_GRANT	8.4	as mysqli_refresh() is deprecated	keep
+constant	MYSQLI_REFRESH_HOSTS	8.4	as mysqli_refresh() is deprecated	keep
+constant	MYSQLI_REFRESH_LOG	8.4	as mysqli_refresh() is deprecated	keep
+constant	MYSQLI_REFRESH_MASTER	8.4	as mysqli_refresh() is deprecated	keep
+constant	MYSQLI_REFRESH_REPLICA	8.4	as mysqli_refresh() is deprecated	keep
+constant	MYSQLI_REFRESH_SLAVE	8.4	as mysqli_refresh() is deprecated	keep
+constant	MYSQLI_REFRESH_STATUS	8.4	as mysqli_refresh() is deprecated	keep
+constant	MYSQLI_REFRESH_TABLES	8.4	as mysqli_refresh() is deprecated	keep
+constant	MYSQLI_REFRESH_THREADS	8.4	as mysqli_refresh() is deprecated	keep
+constant	MYSQLI_SERVER_PS_OUT_PARAMS	8.1	as it was unused	keep
+constant	MYSQLI_SERVER_QUERY_NO_GOOD_INDEX_USED	8.1	as it was unused	keep
+constant	MYSQLI_SERVER_QUERY_NO_INDEX_USED	8.1	as it was unused	keep
+constant	MYSQLI_SERVER_QUERY_WAS_SLOW	8.1	as it was unused	keep
+constant	MYSQLI_STORE_RESULT_COPY_DATA	8.4	as the mysqli_store_result() parameter is unused since 8.1	keep
 constant	PGSQL_LIBPQ_VERSION_STR	8.0	as it is the same as PGSQL_LIBPQ_VERSION	omit
 constant	SID	8.4	as GET/POST sessions were deprecated	omit
 constant	SOAP_FUNCTIONS_ALL	8.4	as enabling all functions is a possible security concern	omit

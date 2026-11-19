@@ -45,10 +45,8 @@ pub fn escape<const OP: usize>(
             return Ok(Value::from(escape_bytea(value, standard)));
         }
         let bytes = value.split(|byte| *byte == 0).next().unwrap_or_default();
-        if OP == LITERAL || OP == IDENTIFIER {
-            if std::str::from_utf8(bytes).is_err() {
-                return Ok(Value::Bool(false));
-            }
+        if matches!(OP, LITERAL | IDENTIFIER) && std::str::from_utf8(bytes).is_err() {
+            return Ok(Value::Bool(false));
         }
         let quote = if OP == IDENTIFIER { b'"' } else { b'\'' };
         let escaping = OP == LITERAL && bytes.contains(&b'\\') || OP == STRING && !standard;

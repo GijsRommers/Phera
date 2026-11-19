@@ -49,6 +49,10 @@ enum Status {
 }
 
 impl Connection {
+    pub fn connected(&self) -> bool {
+        matches!(self.status, Status::Open(_))
+    }
+
     pub fn lease(&self) -> Result<Lease<Driver>, NativeError> {
         match &self.status {
             Status::Open(lease) => Ok(lease.clone()),
@@ -183,13 +187,12 @@ pub async fn connect(
     dsn.fields.insert("port".into(), port.to_string());
     dsn.fields
         .insert("dbname".into(), text(3).unwrap_or_default());
-    if host == "localhost" {
-        if let Some(socket) = text(5)
+    if host == "localhost"
+        && let Some(socket) = text(5)
             .or_else(|| default(b"mysqli.default_socket"))
             .filter(|socket| !socket.is_empty())
-        {
-            dsn.fields.insert("unix_socket".into(), socket);
-        }
+    {
+        dsn.fields.insert("unix_socket".into(), socket);
     }
     if let Some(charset) = &state.borrow().charset {
         dsn.fields.insert("charset".into(), charset.clone());

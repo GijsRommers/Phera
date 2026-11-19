@@ -91,8 +91,11 @@ pub fn get(context: &mut dyn Context, object: &Object, name: &str) -> NativeResu
     }
     let state = initialize(object);
     let state = state.borrow();
-    state.lease()?;
+    state.ensure_not_closed()?;
     let error = state.error.as_ref();
+    if !state.connected() && !matches!(name, "errno" | "error") {
+        return Err(NativeError::error("Property access is not allowed yet"));
+    }
     Ok(match name {
         "affected_rows" if error.is_some() => Value::Int(-1),
         "affected_rows" => uint(state.reply.affected),

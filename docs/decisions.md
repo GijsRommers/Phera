@@ -36,3 +36,15 @@ Refuse MySQL LOCAL INFILE at the API boundary, and keep the driver without a
 file handler. Require a server-side single-statement parse when a mysqli query
 contains a statement separator. The client negotiates multi-statements and
 does not expose a way to toggle that capability after connecting.
+
+## 2026-11-19 — Scope of the initial native APIs
+
+Retain the deprecated mysqli constants requested by the API surface and
+emit their PHP diagnostics on access. The implementation reports unsupported
+mysqli asynchronous queries and keeps the PostgreSQL large-object class for
+type identity. Reusing the buffered result cursor for mysqli USE_RESULT covers
+fetch shape while leaving wire streaming and busy-connection parity open.
+
+Use PostgreSQL's shared COPY sink for `pg_put_line()` and `pg_end_copy()`
+after `COPY FROM STDIN`. This avoids storing a second connection or emulating
+COPY with one INSERT per row.

@@ -66,3 +66,13 @@ impl NativeIterator for Cursor {
         Ok(Value::Int(self.index))
     }
 }
+
+pub fn get_iterator(
+    context: &mut dyn Context,
+    this: Option<&Rc<Object>>,
+    _: &[Value],
+) -> NativeResult {
+    let object = this.cloned().ok_or_else(closed)?;
+    let iterator = iterator(context, object)?;
+    context.create_iterator(iterator)
+}

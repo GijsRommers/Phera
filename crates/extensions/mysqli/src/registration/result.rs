@@ -17,6 +17,7 @@ const HOOKS: ClassHooks = ClassHooks {
 pub fn register(registry: &mut Registry) {
     registry.class(ClassEntry {
         methods: &METHODS,
+        interfaces: &["IteratorAggregate"],
         hooks: Some(&HOOKS),
         ..ClassEntry::class("mysqli_result")
     });
@@ -25,8 +26,8 @@ pub fn register(registry: &mut Registry) {
     }
 }
 
-const METHODS: [MethodEntry; 15] = {
-    let mut methods = [methods0::ENTRIES[0]; 15];
+const METHODS: [MethodEntry; 16] = {
+    let mut methods = [methods0::ENTRIES[0]; 16];
     let mut index = 0;
     let groups = [methods0::ENTRIES];
     let mut group = 0;

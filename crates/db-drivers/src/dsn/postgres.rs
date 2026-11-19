@@ -56,24 +56,6 @@ fn skip_space(input: &mut Peekable<impl Iterator<Item = char>>) {
     while input.next_if(|ch| c_space(*ch)).is_some() {}
 }
 
-#[cfg(test)]
-mod tests {
-    use super::fields;
-
-    #[test]
-    fn parses_laravel_style_quotes_and_libpq_escapes() {
-        let options = fields(
-            "host=localhost;dbname='my database'; application_name='a\\'b'",
-            true,
-        )
-        .unwrap();
-        assert_eq!(options["dbname"], "my database");
-        assert_eq!(options["application_name"], "a'b");
-        assert_eq!(options["host"], "localhost");
-        assert!(fields("dbname='unterminated", true).is_err());
-    }
-}
-
 /// Parse libpq's PostgreSQL URL form, such as `pg_connect('postgres://host/app')`.
 pub fn uri_fields(source: &str) -> Result<BTreeMap<String, String>, String> {
     let url = url::Url::parse(source).map_err(|error| error.to_string())?;
@@ -102,4 +84,22 @@ pub fn uri_fields(source: &str) -> Result<BTreeMap<String, String>, String> {
         fields.insert(name.into_owned(), value.into_owned());
     }
     Ok(fields)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fields;
+
+    #[test]
+    fn parses_laravel_style_quotes_and_libpq_escapes() {
+        let options = fields(
+            "host=localhost;dbname='my database'; application_name='a\\'b'",
+            true,
+        )
+        .unwrap();
+        assert_eq!(options["dbname"], "my database");
+        assert_eq!(options["application_name"], "a'b");
+        assert_eq!(options["host"], "localhost");
+        assert!(fields("dbname='unterminated", true).is_err());
+    }
 }

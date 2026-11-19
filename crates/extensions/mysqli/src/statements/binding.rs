@@ -88,7 +88,9 @@ pub fn parameters(
         }
         if list.len() != count {
             return Err(NativeError::value_error(format!(
-                "{call}(): Argument #{arg} ($params) must consist of exactly {count} elements"
+                "{call}(): Argument #{arg} ($params) must consist of exactly {count} elements, \
+                 {} present",
+                list.len(),
             )));
         }
         return list

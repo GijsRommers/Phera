@@ -48,12 +48,15 @@ pub struct NativeResult {
     pub affected: u64,
     pub command: String,
     pub error: Option<DbError>,
+    pub copy_in: bool,
 }
 
 impl NativeResult {
     pub fn status(&self) -> i64 {
         if self.error.is_some() {
             7
+        } else if self.copy_in {
+            4
         } else if !self.columns.is_empty() {
             2
         } else {
@@ -67,6 +70,7 @@ pub type NativeSequence = Vec<NativeResult>;
 pub(super) struct State {
     observations: Arc<Observations>,
     statements: HashMap<String, Statement>,
+    copy: Option<std::pin::Pin<Box<tokio_postgres::CopyInSink<bytes::Bytes>>>>,
 }
 
 impl State {
@@ -74,11 +78,13 @@ impl State {
         Self {
             observations,
             statements: HashMap::new(),
+            copy: None,
         }
     }
 
     pub fn reset(&mut self) {
         self.statements.clear();
+        self.copy = None;
         self.observations.reset();
     }
 }
@@ -126,6 +132,16 @@ impl Postgres {
     }
 
     pub async fn native_query(&mut self, sql: &str) -> Result<NativeSequence, DbError> {
+        if self.native()?.copy.is_some() {
+            return Err(DbError::general("COPY is in progress"));
+        }
+        if copy::is_copy_from_stdin(sql) {
+            self.begin_copy(sql).await?;
+            return Ok(vec![NativeResult {
+                copy_in: true,
+                ..NativeResult::default()
+            }]);
+        }
         let observations = self.native()?.observations.clone();
         observations.capture();
         let response = self.client.simple_query(sql).await;

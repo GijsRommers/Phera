@@ -1,13 +1,15 @@
 //! `pg_fetch_assoc($result)` reads the next row as PostgreSQL strings and nulls.
 
 pub mod fields;
+mod object;
+pub use object::fetch_object;
 
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
 use phera_db_drivers::drivers::postgres::NativeResult as Rows;
 use phera_extension_api::{
-    ArrayKey, Context, LocalFuture, NativeError, NativeResult, Object, PhpArray, Value, args,
+    ArrayKey, Context, NativeError, NativeResult, Object, PhpArray, Value, args,
 };
 
 use crate::connection;
@@ -154,7 +156,7 @@ pub fn execute<const OP: usize>(c: &mut dyn Context, a: &[Value]) -> NativeResul
         VALUE | LENGTH | IS_NULL => return cell::<OP>(c, state, a, call),
         ALL | ALL_COLUMNS => {
             let mode = if OP == ALL {
-                Mode::parse(args::int(a, 1).unwrap_or(1), call, 2)?
+                Mode::parse(args::int(a, 1).unwrap_or(1), call, 2, true)?
             } else {
                 Mode::Num
             };
@@ -175,8 +177,8 @@ pub fn execute<const OP: usize>(c: &mut dyn Context, a: &[Value]) -> NativeResul
         _ => {
             let mode = match OP {
                 ASSOC => Mode::Assoc,
-                BOTH => Mode::parse(args::int(a, 2).unwrap_or(3), call, 3)?,
-                ROW => Mode::parse(args::int(a, 2).unwrap_or(2), call, 3)?,
+                BOTH => Mode::parse(args::int(a, 2).unwrap_or(3), call, 3, false)?,
+                ROW => Mode::parse(args::int(a, 2).unwrap_or(2), call, 3, false)?,
                 _ => Mode::Both,
             };
             let row = state.row(c, args::int(a, 1), call)?;
@@ -231,45 +233,6 @@ fn cell<const OP: usize>(
     Ok(Value::Bool(false))
 }
 
-pub fn fetch_object(c: &mut dyn Context, a: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(async move {
-        let name = args::string(&a, 2).map_or_else(|| "stdClass".into(), |s| s.to_string_lossy());
-        if c.lookup_class(&name).await?.is_none() {
-            return Err(NativeError::type_error(format!(
-                "pg_fetch_object(): Argument #3 ($class) must be a valid class name, {name} given"
-            )));
-        }
-        let handle = of(&a)?;
-        let row = {
-            let mut result = handle.borrow_mut();
-            let state = result.as_mut().ok_or_else(closed)?;
-            let index = state.row(c, args::int(&a, 1), "pg_fetch_object")?;
-            index
-                .and_then(|index| state.rows.values.get(index))
-                .map(|row| state.array(row, Mode::Assoc))
-        };
-        let Some(row) = row else {
-            return Ok(Value::Bool(false));
-        };
-        let value = c.create_object(&name, row)?;
-        let arguments = args::array(&a, 3);
-        if let Value::Object(object) = &value {
-            if c.has_method(object, "__construct") {
-                let arguments = arguments.map_or_else(Vec::new, |arguments| {
-                    arguments.iter().map(|(_, arg)| arg.clone()).collect()
-                });
-                c.call_method(object.clone(), "__construct", arguments)
-                    .await?;
-            } else if arguments.is_some_and(|a| !a.is_empty()) {
-                return Err(NativeError::value_error(
-                    "pg_fetch_object(): Argument #4 ($constructor_args) must be empty                      when class has no constructor",
-                ));
-            }
-        }
-        Ok(value)
-    })
-}
-
 fn from_cell(value: Option<&Vec<u8>>) -> Value {
     value.map_or(Value::Null, |value| Value::from(value.clone()))
 }
@@ -304,11 +267,23 @@ impl ResultSet {
         let mut result = PhpArray::new();
         for (index, (column, value)) in self.rows.columns.iter().zip(row).enumerate() {
             let value = from_cell(value.as_ref());
-            if matches!(mode, Mode::Num | Mode::Both) {
-                result.insert(ArrayKey::Int(index as i64), value.clone());
-            }
-            if matches!(mode, Mode::Assoc | Mode::Both) {
-                result.insert(ArrayKey::str(column.name.as_str()), value);
+            let key = ArrayKey::str(column.name.as_str());
+            let index = ArrayKey::Int(index as i64);
+            match mode {
+                Mode::Num => {
+                    result.insert(index, value);
+                }
+                Mode::Assoc => {
+                    result.insert(key, value);
+                }
+                Mode::Both => {
+                    result.insert(index, value.clone());
+                    result.insert(key, value);
+                }
+                Mode::AssocFirst => {
+                    result.insert(key, value.clone());
+                    result.insert(index, value);
+                }
             }
         }
         result
@@ -320,16 +295,23 @@ enum Mode {
     Num,
     Assoc,
     Both,
+    AssocFirst,
 }
 
 impl Mode {
-    fn parse(mode: i64, call: &str, argument: usize) -> Result<Self, NativeError> {
-        match mode {
+    fn parse(
+        mode: i64,
+        call: &str,
+        argument: usize,
+        assoc_first: bool,
+    ) -> Result<Self, NativeError> {
+        match mode & 3 {
             1 => Ok(Self::Assoc),
             2 => Ok(Self::Num),
+            3 if assoc_first => Ok(Self::AssocFirst),
             3 => Ok(Self::Both),
             _ => Err(NativeError::value_error(format!(
-                "{call}(): Argument #{argument} ($mode) must be PGSQL_ASSOC, PGSQL_NUM, or PGSQL_BOTH"
+                "{call}(): Argument #{argument} ($mode) must be one of PGSQL_ASSOC, PGSQL_NUM, or PGSQL_BOTH"
             ))),
         }
     }

@@ -49,11 +49,6 @@ pub async fn execute<const OP: usize>(
     if OP == WARNINGS && handle.borrow().reply.warnings == 0 {
         return Ok(Value::Bool(false));
     }
-    let charset = handle
-        .borrow()
-        .charset
-        .clone()
-        .unwrap_or_else(|| "utf8mb4".into());
     let requested = name.clone();
     let answer = run(&lease, move |mysql| {
         Box::pin(async move {
@@ -65,16 +60,11 @@ pub async fn execute<const OP: usize>(
                 PING => mysql.health().await?,
                 STAT => return mysql.server_info().await.map(Answer::Text),
                 GET_CHARSET => {
-                    let query = format!(
-                        "SELECT CHARACTER_SET_NAME, DEFAULT_COLLATE_NAME, MAXLEN \
-                     FROM information_schema.CHARACTER_SETS WHERE CHARACTER_SET_NAME = '@charset' \
-                     OR CHARACTER_SET_NAME = @@character_set_client"
-                    )
-                    .replace("@charset", &charset.replace('\'', "''"));
-                    return mysql
-                        .query_native(query.as_bytes(), false)
-                        .await
-                        .map(Answer::Results);
+                    let query = b"SELECT cs.CHARACTER_SET_NAME, c.COLLATION_NAME, \
+                        cs.MAXLEN, c.ID FROM information_schema.CHARACTER_SETS cs \
+                        JOIN information_schema.COLLATIONS c USING (CHARACTER_SET_NAME) \
+                        WHERE c.COLLATION_NAME = @@collation_connection";
+                    return mysql.query_native(query, false).await.map(Answer::Results);
                 }
                 WARNINGS => {
                     return mysql
@@ -194,7 +184,7 @@ fn charset_object(context: &mut dyn Context, rows: &[Vec<Value>]) -> NativeResul
         ("dir", Value::from("")),
         ("min_length", Value::Int(1)),
         ("max_length", row.get(2).cloned().unwrap_or(Value::Null)),
-        ("number", Value::Int(0)),
+        ("number", row.get(3).cloned().unwrap_or(Value::Int(0))),
         ("state", Value::Int(1)),
         ("comment", Value::from("")),
     ] {

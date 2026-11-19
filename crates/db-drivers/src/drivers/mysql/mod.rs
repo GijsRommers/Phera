@@ -288,6 +288,12 @@ async fn require_single_statement(connection: &mut Conn, sql: &str) -> Result<()
 
 pub fn error(error: mysql_async::Error) -> DbError {
     match error {
+        mysql_async::Error::Driver(mysql_async::DriverError::LocalInfile(_)) => DbError {
+            state: "HY000".into(),
+            code: Some(2068),
+            detail: "MySQL LOCAL INFILE is disabled because it lets the server read client files"
+                .into(),
+        },
         mysql_async::Error::Server(error) => DbError {
             state: error.state,
             code: Some(i64::from(error.code)),

@@ -41,11 +41,17 @@ pub fn execute<const OP: usize>(
             describe(context, &column)
         }
         FIELD_DIRECT | FIELD_SEEK => {
-            let Some(index) = usize::try_from(index).ok().filter(|i| column(*i).is_some()) else {
+            let index = usize::try_from(index).map_err(|_| {
+                NativeError::value_error(format!(
+                    "{call}(): Argument #{arg} ($index) must be greater than or equal to 0"
+                ))
+            })?;
+            if column(index).is_none() {
                 return Err(NativeError::value_error(format!(
-                    "{call}(): Argument #{arg} ($index) must be a valid field offset"
+                    "{call}(): Argument #{arg} ($index) must be less than the number of fields \
+                     for this result set"
                 )));
-            };
+            }
             if OP == FIELD_SEEK {
                 result.field = index;
                 Ok(Value::Bool(true))
