@@ -1,7 +1,8 @@
 //! `session_create_id('app-')` prefixes 32 random lower-case hexadecimal digits.
 
 use phera_extension_api::{
-    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, PhpString, Value, args,
+    Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, PhpString,
+    Value, args,
 };
 
 use crate::{
@@ -17,7 +18,7 @@ pub const FUNCTIONS: &[FunctionEntry] = &[
         &[Param::new("id", ParamType::String).nullable().optional()],
         session_id,
     ),
-    FunctionEntry::sync(
+    FunctionEntry::asynchronous(
         "session_create_id",
         &[Param::new("prefix", ParamType::String).optional()],
         create,
@@ -52,9 +53,13 @@ fn session_id(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         return Ok(Value::Bool(false));
     }
     let id = &mut state(context).id;
-    let previous = Value::from(c_string(id.as_bytes()).to_vec());
+    let previous = Value::from(
+        id.as_ref()
+            .map_or(b"".as_slice(), |id| c_string(id.as_bytes()))
+            .to_vec(),
+    );
     if let Some(next) = next {
-        *id = next.clone();
+        *id = Some(next.clone());
     }
     Ok(previous)
 }
@@ -63,8 +68,12 @@ pub fn c_string(bytes: &[u8]) -> &[u8] {
     bytes.split(|byte| *byte == 0).next().unwrap_or_default()
 }
 
-fn create(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let prefix = args::bytes(arguments, 0);
+fn create(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(create_prefixed(context, arguments))
+}
+
+async fn create_prefixed(context: &mut dyn Context, arguments: Vec<Value>) -> NativeResult {
+    let prefix = args::bytes(&arguments, 0);
     let label = "session_create_id(): Argument #1 ($prefix)";
     if prefix.contains(&0) {
         return Err(NativeError::value_error(format!(
@@ -84,7 +93,21 @@ fn create(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         );
         return Ok(Value::Bool(false));
     }
-    let mut id = prefix.to_vec();
-    id.extend_from_slice(random()?.as_bytes());
-    Ok(Value::from(id))
+    let mut result = prefix.to_vec();
+    let function = "session_create_id";
+    if !crate::state::active(context) || state(context).in_handler {
+        result.extend_from_slice(random()?.as_bytes());
+        return Ok(Value::from(result));
+    }
+    for _ in 0..3 {
+        let id = crate::user_handler::create(context, function).await?;
+        if !crate::storage::validates(context)
+            || !crate::storage::validate(context, &id, function).await?
+        {
+            result.extend_from_slice(id.as_bytes());
+            return Ok(Value::from(result));
+        }
+    }
+    context.warning(format!("{function}(): Failed to create new ID"));
+    Ok(Value::Bool(false))
 }

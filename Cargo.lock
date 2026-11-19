@@ -1845,8 +1845,13 @@ dependencies = [
 name = "phera-ext-session"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "getrandom 0.3.4",
+ "phera-ext-http",
+ "phera-ext-serialize",
+ "phera-ext-streams",
  "phera-extension-api",
+ "tokio",
 ]
 
 [[package]]

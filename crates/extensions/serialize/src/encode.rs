@@ -1,6 +1,7 @@
 //! `serialize([$object, $object])` emits `r:2;` for the second object occurrence.
 
 mod objects;
+pub(crate) mod sequence;
 
 use std::{collections::HashMap, rc::Rc};
 
@@ -70,7 +71,14 @@ impl Encoder {
         context: &mut dyn Context,
         value: &Value,
     ) -> Result<(), NativeError> {
-        let mut value = value.try_deref()?.clone();
+        self.write_root(context, value.try_deref()?.clone()).await
+    }
+
+    async fn write_root(
+        &mut self,
+        context: &mut dyn Context,
+        mut value: Value,
+    ) -> Result<(), NativeError> {
         loop {
             if let Some(object) = self.value(context, value)?
                 && !self.write_plain_object(context, &object)?

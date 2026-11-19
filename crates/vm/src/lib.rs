@@ -353,6 +353,11 @@ impl Vm {
         if let Err(error) = self.finish_headers().await {
             self.unwind(error);
         }
+        if let Some(finalizer) = self.request_callbacks.finalizer.take()
+            && let Err(error) = finalizer(self, Vec::new()).await
+        {
+            self.report_uncaught(error).await;
+        }
         self.status
     }
 

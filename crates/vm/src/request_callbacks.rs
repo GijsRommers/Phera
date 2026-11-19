@@ -11,7 +11,14 @@ use crate::{Vm, calls::call_state::Callee};
 #[derive(Default)]
 pub(crate) struct RequestCallbacks {
     pub(crate) headers: Option<Callee>,
-    shutdown: VecDeque<(Callee, Vec<Value>)>,
+    pub(crate) finalizer: Option<phera_extension_api::AsyncFn>,
+    shutdown: VecDeque<Shutdown>,
+}
+
+struct Shutdown {
+    key: Option<&'static str>,
+    callback: Callee,
+    arguments: Vec<Value>,
 }
 
 impl Vm {
@@ -37,12 +44,43 @@ impl Vm {
                 Ok(Value::Bool(true))
             }
             RequestCallback::Shutdown => {
-                self.request_callbacks
-                    .shutdown
-                    .push_back((callee, arguments.collect()));
+                self.request_callbacks.shutdown.push_back(Shutdown {
+                    key: None,
+                    callback: callee,
+                    arguments: arguments.collect(),
+                });
                 Ok(Value::Null)
             }
         }
+    }
+
+    pub(crate) async fn register_named_shutdown(
+        &mut self,
+        key: &'static str,
+        callback: Option<&'static str>,
+    ) -> NativeResult {
+        if let Some(callback) = callback {
+            let callback = self.request_callable(key, &Value::from(callback)).await?;
+            if let Some(entry) = self
+                .request_callbacks
+                .shutdown
+                .iter_mut()
+                .find(|entry| entry.key == Some(key))
+            {
+                entry.callback = callback;
+            } else {
+                self.request_callbacks.shutdown.push_back(Shutdown {
+                    key: Some(key),
+                    callback,
+                    arguments: Vec::new(),
+                });
+            }
+        } else {
+            self.request_callbacks
+                .shutdown
+                .retain(|entry| entry.key != Some(key));
+        }
+        Ok(Value::Null)
     }
 
     pub(crate) async fn request_callable(
@@ -67,7 +105,12 @@ impl Vm {
     }
 
     pub(crate) async fn run_shutdown_callbacks(&mut self) {
-        while let Some((callback, arguments)) = self.request_callbacks.shutdown.pop_front() {
+        while let Some(Shutdown {
+            callback,
+            arguments,
+            ..
+        }) = self.request_callbacks.shutdown.pop_front()
+        {
             if let Err(error) = self.invoke_resolved_callable(callback, arguments).await
                 && !self.report_uncaught(error).await
             {

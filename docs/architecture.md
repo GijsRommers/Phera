@@ -247,6 +247,33 @@ an existing nginx `fastcgi_pass`. A proxy reaches Phera over HTTP like any
 other upstream. This can be revisited if someone needs to keep an nginx
 configuration unchanged.
 
+### 5.3 PHP file sessions
+
+`session_start()` keeps its settings, handler, original payload and live
+`$_SESSION` reference in the request. The VM runs a registered session finalizer
+after user shutdown callbacks and output finalization. An object registered with
+`session_set_save_handler($handler)` normally closes earlier through PHP's shutdown
+callback queue. The VM still needs request-end destructor dispatch to reproduce
+the ordering of implicit session close around PHP destructors.
+
+The files handler reads and writes `sess_<id>` in the configured directory or the
+system temporary directory. It uses PHP's wire formats and defaults new files to
+mode `0600`. It validates the complete ID before resolving the file and rejects
+symlinks at the last path component. A process-wide table of weak async mutexes
+queues requests to the same canonical path across workers. While holding its
+mutex, a request opens and exclusively locks the file through the streams blocking
+pool. If PHP-FPM or another Phera process already holds the advisory lock, it
+retries after an asynchronous delay, leaving the worker and the blocking pool free
+between attempts.
+
+The descriptor and mutex guard stay with the request through read, script
+execution, and write. Early close, read-and-close, abort, and request cancellation
+release them. A cancelled request waiting for the lock or running PHP code does
+not write its changes. When a close has already handed a complete payload to the
+blocking pool, that operation keeps the lock until it completes. The file stays
+on the same inode so PHP processes opening it can coordinate using the same
+advisory lock.
+
 ## 6. Scope
 
 In: the PHP that Symfony and Laravel and their dependencies run in production.

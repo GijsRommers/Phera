@@ -46,6 +46,22 @@ pub trait Context {
     /// Per-request storage for extensions; see [`RequestState`].
     fn state(&mut self) -> &mut RequestState;
 
+    /// The PHP source location of the current operation.
+    fn source_location(&self) -> Option<(String, usize)> {
+        None
+    }
+
+    /// Looks up a request global such as `$_COOKIE`.
+    fn request_global(&self, _name: &str) -> Option<Value> {
+        None
+    }
+
+    /// Replaces the symbol, retaining aliases to the old variable.
+    fn replace_request_global(&mut self, _name: &str, _value: Value) {}
+
+    /// Flushes an extension after user shutdown callbacks and output finalization.
+    fn register_request_finalizer(&mut self, _callback: crate::AsyncFn) {}
+
     /// The PHP file making this call, for include-path lookups.
     fn script_path(&self) -> Option<std::path::PathBuf> {
         None
@@ -95,6 +111,20 @@ pub trait Context {
         _arguments: Vec<Value>,
     ) -> LocalFuture<'_, NativeResult> {
         Box::pin(async { Err(NativeError::error("This context has no request lifecycle")) })
+    }
+
+    /// Registers or removes a named slot without changing its order among shutdown callbacks.
+    fn named_shutdown(
+        &mut self,
+        _key: &'static str,
+        _callback: Option<&'static str>,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(async { Err(NativeError::error("This context has no request lifecycle")) })
+    }
+
+    /// Whether an object declares this method, including inherited methods.
+    fn has_method(&self, _object: &Object, _name: &str) -> bool {
+        false
     }
 
     /// Convert a value to a PHP string. A VM context may run __toString.

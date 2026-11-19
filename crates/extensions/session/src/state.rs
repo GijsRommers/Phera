@@ -1,13 +1,22 @@
 //! `session_id('example')` sets the ID for this request alone.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, rc::Rc};
 
-use phera_extension_api::{Context, PhpString};
+use phera_extension_api::{Context, Object, PhpString, Value};
+
+use crate::files::Files;
 
 #[derive(Default)]
 pub struct SessionState {
     pub settings: HashMap<&'static str, PhpString>,
-    pub id: PhpString,
+    pub id: Option<PhpString>,
+    pub active: bool,
+    pub variables: Option<Value>,
+    pub before: Option<Vec<u8>>,
+    pub files: Option<Files>,
+    pub user: Option<Rc<Object>>,
+    pub user_open: bool,
+    pub in_handler: bool,
     pub started: Option<(String, usize)>,
 }
 
@@ -19,7 +28,7 @@ pub fn active(context: &mut dyn Context) -> bool {
     context
         .state()
         .get::<SessionState>()
-        .is_some_and(|session| session.started.is_some())
+        .is_some_and(|session| session.active)
 }
 
 pub fn after_start(context: &mut dyn Context, message: &str) -> String {

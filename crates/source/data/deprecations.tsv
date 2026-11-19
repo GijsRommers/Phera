@@ -46,6 +46,7 @@ constant	MYSQLI_SERVER_QUERY_NO_INDEX_USED	8.1	as it was unused	omit
 constant	MYSQLI_SERVER_QUERY_WAS_SLOW	8.1	as it was unused	omit
 constant	MYSQLI_STORE_RESULT_COPY_DATA	8.4	as the mysqli_store_result() parameter is unused since 8.1	omit
 constant	PGSQL_LIBPQ_VERSION_STR	8.0	as it is the same as PGSQL_LIBPQ_VERSION	omit
+constant	SID	8.4	as GET/POST sessions were deprecated	omit
 constant	SOAP_FUNCTIONS_ALL	8.4	as enabling all functions is a possible security concern	omit
 constant	SUNFUNCS_RET_DOUBLE	8.4	as date_sunrise() and date_sunset() were deprecated in 8.1	omit
 constant	SUNFUNCS_RET_STRING	8.4	as date_sunrise() and date_sunset() were deprecated in 8.1	omit

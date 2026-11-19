@@ -5,6 +5,7 @@ mod objects;
 mod options;
 mod plain;
 mod plain_object;
+pub(crate) mod sequence;
 
 use std::{borrow::Cow, rc::Rc};
 
@@ -18,6 +19,7 @@ use graph::{Content, Graph, Members, Place};
 use options::Options;
 
 struct Decoder<'a> {
+    diagnostic_function: &'a str,
     reader: Reader<'a>,
     graph: Graph,
     frames: Vec<Frame>,
@@ -78,6 +80,7 @@ pub async fn unserialize(context: &mut dyn Context, arguments: &[Value]) -> Nati
         return plain::read(context, input.as_bytes(), options.max_depth);
     }
     let mut decoder = Decoder {
+        diagnostic_function: "unserialize",
         reader: Reader::new(input.as_bytes()),
         graph: Graph::default(),
         frames: Vec::new(),
@@ -127,7 +130,7 @@ impl Decoder<'_> {
                 continue;
             }
             let token = self.reader.token(true);
-            emit_diagnostic(context, &mut self.reader);
+            emit_diagnostic_for(context, &mut self.reader, self.diagnostic_function);
             let Some(frame) = self.frames.last_mut() else {
                 return Err(Failure::Parse);
             };
@@ -154,7 +157,7 @@ impl Decoder<'_> {
     async fn value(&mut self, context: &mut dyn Context, place: Place) -> BuildResult<()> {
         let start = self.reader.offset();
         let token = self.reader.token(false);
-        emit_diagnostic(context, &mut self.reader);
+        emit_diagnostic_for(context, &mut self.reader, self.diagnostic_function);
         let token = token?;
         self.graph.enter(
             place,
@@ -284,16 +287,20 @@ fn array_key(token: Token<'_>, container: &Container) -> BuildResult<ArrayKey> {
 }
 
 fn emit_diagnostic(context: &mut dyn Context, reader: &mut Reader<'_>) {
+    emit_diagnostic_for(context, reader, "unserialize");
+}
+
+fn emit_diagnostic_for(context: &mut dyn Context, reader: &mut Reader<'_>, function: &str) {
     match reader.take_diagnostic() {
         Some(Diagnostic::UnexpectedEnd) => {
-            context.warning("unserialize(): Unexpected end of serialized data".into())
+            context.warning(format!("{function}(): Unexpected end of serialized data"))
         }
         Some(Diagnostic::NumberOutOfRange) => {
-            context.warning("unserialize(): Numerical result out of range".into())
+            context.warning(format!("{function}(): Numerical result out of range"))
         }
-        Some(Diagnostic::EscapedString) => {
-            context.deprecated("unserialize(): Unserializing the 'S' format is deprecated".into())
-        }
+        Some(Diagnostic::EscapedString) => context.deprecated(format!(
+            "{function}(): Unserializing the 'S' format is deprecated"
+        )),
         Some(Diagnostic::BadObjectData) => context.warning("Bad unserialize data".into()),
         Some(Diagnostic::InsufficientCustomData {
             required,
@@ -301,7 +308,7 @@ fn emit_diagnostic(context: &mut dyn Context, reader: &mut Reader<'_>) {
             length_overflow,
         }) => {
             if length_overflow {
-                context.warning("unserialize(): Numerical result out of range".into());
+                context.warning(format!("{function}(): Numerical result out of range"));
             }
             context.warning(format!(
                 "Insufficient data for unserializing - {required} required, {present} present"

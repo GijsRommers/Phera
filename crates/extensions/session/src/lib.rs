@@ -2,9 +2,21 @@
 //!
 //! Mutable settings, identifiers, handlers, and open files belong to a single request.
 
+mod classes;
+mod codec;
+mod cookie_params;
+mod file_handler;
+mod files;
+mod headers;
 mod id;
+mod lifecycle;
+mod regenerate;
 mod settings;
+mod start;
 mod state;
+mod storage;
+mod user_handler;
+mod variables;
 
 use phera_extension_api::{Extension, FunctionEntry, Registry, Value};
 
@@ -23,8 +35,22 @@ impl Extension for Session {
         registry.function(FunctionEntry::sync("session_status", &[], |context, _| {
             Ok(Value::Int(if state::active(context) { 2 } else { 1 }))
         }));
-        for &function in id::FUNCTIONS.iter().chain(settings::FUNCTIONS) {
-            registry.function(function);
+        for group in [
+            id::FUNCTIONS,
+            settings::FUNCTIONS,
+            lifecycle::FUNCTIONS,
+            cookie_params::FUNCTIONS,
+            variables::FUNCTIONS,
+            user_handler::FUNCTIONS,
+        ] {
+            for &function in group {
+                registry.function(function);
+            }
+        }
+        registry.function(start::FUNCTION);
+        registry.function(regenerate::FUNCTION);
+        for &class in classes::CLASSES {
+            registry.class(class);
         }
     }
 }
