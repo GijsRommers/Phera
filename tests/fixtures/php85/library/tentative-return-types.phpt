@@ -15,24 +15,24 @@ foreach ([
 ] as $class => $methods) {
     foreach ($methods as $name) {
         $method = new ReflectionMethod($class, $name);
-        echo $class, '::', $name, ' ', $method->getReturnType(), ' / ',
-            $method->getTentativeReturnType(), PHP_EOL;
+        echo $class, '::', $name, ' ', $method->getReturnType() ?? '-', ' / ',
+            $method->getTentativeReturnType() ?? '-', PHP_EOL;
     }
 }
 --EXPECT--
-DirectoryIterator::key  / mixed
-DirectoryIterator::current  / mixed
-DateTime::createFromInterface DateTime / 
-DateTimeImmutable::__set_state  / DateTimeImmutable
-DateTimeImmutable::createFromInterface DateTimeImmutable / 
-DateTimeImmutable::modify  / DateTimeImmutable
-DateTimeImmutable::add  / DateTimeImmutable
-DateTimeImmutable::sub  / DateTimeImmutable
-DateTimeImmutable::setTimezone  / DateTimeImmutable
-DateTimeImmutable::setTime  / DateTimeImmutable
-DateTimeImmutable::setDate  / DateTimeImmutable
-DateTimeImmutable::setISODate  / DateTimeImmutable
-DateTimeImmutable::setTimestamp  / DateTimeImmutable
-DateTimeZone::__set_state  / DateTimeZone
-DateInterval::__set_state  / DateInterval
-DatePeriod::__set_state  / DatePeriod
+DirectoryIterator::key - / mixed
+DirectoryIterator::current - / mixed
+DateTime::createFromInterface DateTime / -
+DateTimeImmutable::__set_state - / DateTimeImmutable
+DateTimeImmutable::createFromInterface DateTimeImmutable / -
+DateTimeImmutable::modify - / DateTimeImmutable
+DateTimeImmutable::add - / DateTimeImmutable
+DateTimeImmutable::sub - / DateTimeImmutable
+DateTimeImmutable::setTimezone - / DateTimeImmutable
+DateTimeImmutable::setTime - / DateTimeImmutable
+DateTimeImmutable::setDate - / DateTimeImmutable
+DateTimeImmutable::setISODate - / DateTimeImmutable
+DateTimeImmutable::setTimestamp - / DateTimeImmutable
+DateTimeZone::__set_state - / DateTimeZone
+DateInterval::__set_state - / DateInterval
+DatePeriod::__set_state - / DatePeriod
