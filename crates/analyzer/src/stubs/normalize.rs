@@ -5,6 +5,21 @@ use phera_lexer::{Lexer, TokenKind};
 
 pub fn normalize(file: &str, source: &str, report: &mut String) -> Result<String, String> {
     let mut result = source.to_string();
+    if file == "ext/openssl/openssl.stub.php" {
+        const PARENT: &str = "class OpensslException extends Exception";
+        if let Some(offset) = result.find(PARENT) {
+            // openssl.c passes zend_ce_exception when registering this class.
+            // `class OpensslException extends \Exception` has the same parent in PHP source.
+            let line = phera_source::LineTable::new(&result).line(offset);
+            report.push_str(&format!(
+                "{file}:{line}: qualify OpensslException's global parent\n"
+            ));
+            result.replace_range(
+                offset..offset + PARENT.len(),
+                r"class OpensslException extends \Exception",
+            );
+        }
+    }
     result = rename_pseudo_functions(file, result, report);
     let mut lexer = Lexer::new(&result);
     let mut tokens = Vec::new();

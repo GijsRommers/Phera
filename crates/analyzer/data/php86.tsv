@@ -2580,7 +2580,7 @@ K	numberformatter::TYPE_INT64	int	0,false,false,false,false,-	ext/intl/formatter
 K	numberformatter::ZERO_DIGIT_SYMBOL	int	0,false,false,false,false,-	ext/intl/formatter/formatter.stub.php:156
 C	odbc\connection	Odbc\Connection	0	0,false,false,false,false,-				false	ext/odbc/odbc.stub.php:10
 C	odbc\result	Odbc\Result	0	0,false,false,false,false,-				false	ext/odbc/odbc.stub.php:18
-C	openssl\opensslexception	Openssl\OpensslException	0	0,false,false,false,false,-	Openssl\Exception			false	ext/openssl/openssl.stub.php:7
+C	openssl\opensslexception	Openssl\OpensslException	0	0,false,false,false,false,-	Exception			false	ext/openssl/openssl.stub.php:7
 C	openssl\psk	Openssl\Psk	0	0,false,false,true,false,-				false	ext/openssl/openssl.stub.php:14
 M	openssl\psk::__construct	psk:string:false:false:false,identity:null|string:true:false:false	mixed	0,false,false,false,false,-	false	false	ext/openssl/openssl.stub.php:29
 P	openssl\psk::identity	null|string	0,false,false,false,true,-	ext/openssl/openssl.stub.php:27
