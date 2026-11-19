@@ -179,7 +179,8 @@ async fn posix_queries_match_php() {
             "[]",
         ] {
             cases.check(format!(
-                "$value = posix_access({filename}, {flags}); return [$value, posix_get_last_error()];"
+                "$value = posix_access({filename}, {flags}); \
+                 return [$value, posix_get_last_error()];"
             ));
         }
     }
@@ -195,7 +196,10 @@ async fn posix_queries_match_php() {
     }
     for mode in ["0600", "0666", "0777", "0000", "null", "[]"] {
         cases.check(format!(
-            "$path = tempnam(sys_get_temp_dir(), 'phera-fifo'); unlink($path);              try {{ $value = posix_mkfifo($path, {mode});                 return [$value, posix_mkfifo($path, {mode}), posix_get_last_error()];              }} finally {{ if (file_exists($path)) unlink($path); }}"
+            "$path = tempnam(sys_get_temp_dir(), 'phera-fifo'); unlink($path); \
+             try {{ $value = posix_mkfifo($path, {mode}); \
+             return [$value, posix_mkfifo($path, {mode}), posix_get_last_error()]; \
+             }} finally {{ if (file_exists($path)) unlink($path); }}"
         ));
     }
     cases.compare("unix-posix-queries").await;

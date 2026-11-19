@@ -294,8 +294,7 @@ Tokio waits for a child or work on its pipes without blocking the worker.
 `phera serve --no-process` makes program-starting functions throw `Error`.
 Program execution is enabled by default. The PHP execution time limit also
 counts waits on children and their streams toward the request budget. The HTTP
-request timeout covers the
-whole handler and cancels any pending wait. PHP's Unix process resource
+request timeout covers the whole handler and cancels any pending wait. PHP's Unix process resource
 destructor closes its pipes and checks child status without waiting or
 sending a signal. Ordinary CLI process cleanup follows this behaviour. Phera
 gives each web child its own process group and terminates abandoned children

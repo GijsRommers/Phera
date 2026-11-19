@@ -84,7 +84,8 @@ fn select(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, N
                         _ => "Output",
                     };
                     context.warning(format!(
-                        "stream_select(): Cannot represent a stream of type {kind} as a select()able descriptor"
+                        "stream_select(): Cannot represent a stream of type {kind} \
+                         as a select()able descriptor"
                     ));
                 }
             }
@@ -100,7 +101,8 @@ fn select(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, N
             .unwrap_or(0);
         if max_fd >= FD_SETSIZE as i32 {
             context.warning(format!(
-                "stream_select(): select() cannot monitor descriptor {max_fd}                  (FD_SETSIZE={FD_SETSIZE})"
+                "stream_select(): select() cannot monitor descriptor {max_fd} \
+                 (FD_SETSIZE={FD_SETSIZE})"
             ));
             return Ok(Value::Bool(false));
         }
@@ -152,7 +154,8 @@ fn timeout(arguments: &[Value]) -> Result<Option<Duration>, NativeError> {
     }
     if seconds.is_none() && micros.is_some_and(|micros| micros != 0) {
         return Err(NativeError::value_error(
-            "stream_select(): Argument #5 ($microseconds) must be null when argument #4 ($seconds) is null",
+            "stream_select(): Argument #5 ($microseconds) must be null \
+             when argument #4 ($seconds) is null",
         ));
     }
     Ok(seconds.map(|seconds| {

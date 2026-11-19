@@ -62,7 +62,8 @@ async fn shell_helpers_match_php() {
             "['key' => 'value']",
         ] {
             cases.check(format!(
-                "$out = {initial}; $code = -123; $last = exec({command}, $out, $code);                  return [$last, $out, $code];"
+                "$out = {initial}; $code = -123; $last = exec({command}, $out, $code); \
+                 return [$last, $out, $code];"
             ));
         }
     }
@@ -80,7 +81,9 @@ async fn shell_helpers_match_php() {
     }
     cases.check("$p = popen('printf line', 'r'); return [fgets($p), feof($p), pclose($p)];".into());
     cases.check(
-        "$p = popen('/bin/cat >/dev/null', 'w');          return [fwrite($p, 'read until EOF'), pclose($p)];".into(),
+        "$p = popen('/bin/cat >/dev/null', 'w'); \
+         return [fwrite($p, 'read until EOF'), pclose($p)];"
+            .into(),
     );
     for name in [
         "exec",
@@ -124,7 +127,11 @@ async fn process_descriptors_and_status_match_php() {
         for env in ["null", "[]", "['ONE' => 42, 'TWO' => 'two words']"] {
             for cwd in ["null", "'/'"] {
                 cases.check(format!(
-                    "$p = proc_open({command}, [0=>['null'], 1=>['pipe','w'], 2=>['pipe','w']],                      $pipes, {cwd}, {env}, ['bypass_shell'=>true]);                      if (!$p) return [$p, $pipes];                      return [stream_get_contents($pipes[1]), stream_get_contents($pipes[2]),                      proc_close($p), is_resource($pipes[1])];"
+                    "$p = proc_open({command}, [0=>['null'], 1=>['pipe','w'], 2=>['pipe','w']], \
+                     $pipes, {cwd}, {env}, ['bypass_shell'=>true]); \
+                     if (!$p) return [$p, $pipes]; \
+                     return [stream_get_contents($pipes[1]), stream_get_contents($pipes[2]), \
+                     proc_close($p), is_resource($pipes[1])];"
                 ));
             }
         }
@@ -151,32 +158,64 @@ async fn process_descriptors_and_status_match_php() {
         "17",
     ] {
         cases.check(format!(
-            "$pipes = 'unchanged'; $p = proc_open('exit 0', {descriptors}, $pipes);              return [$p ? proc_close($p) : $p, is_array($pipes) ? array_keys($pipes) : $pipes];"
+            "$pipes = 'unchanged'; $p = proc_open('exit 0', {descriptors}, $pipes); \
+             return [$p ? proc_close($p) : $p, is_array($pipes) ? array_keys($pipes) : $pipes];"
         ));
     }
     for code in [0, 1, 23, 255] {
         cases.check(format!(
-            "$p = proc_open('exit {code}', [1 => ['pipe','w']], $pipes);              stream_get_contents($pipes[1]);              do {{ $one = proc_get_status($p); }} while ($one['running']);              $two = proc_get_status($p);              $one['pid'] = $one['pid'] > 0; $two['pid'] = $two['pid'] > 0;              return [$one, $two, proc_close($p)];"
+            "$p = proc_open('exit {code}', [1 => ['pipe','w']], $pipes); \
+             stream_get_contents($pipes[1]); \
+             do {{ $one = proc_get_status($p); }} while ($one['running']); \
+             $two = proc_get_status($p); \
+             $one['pid'] = $one['pid'] > 0; $two['pid'] = $two['pid'] > 0; \
+             return [$one, $two, proc_close($p)];"
         ));
     }
     cases.check(
-        "$child = proc_open(['/bin/cat'], [0 => ['pipe','r'], 1 => ['pipe','w']], $pipes);          $n = fwrite($pipes[0], 'stdin until EOF'); fclose($pipes[0]);          return [$n, stream_get_contents($pipes[1]), proc_close($child)];".into(),
-    );
-    cases.check(
-        "$child = proc_open(['/bin/sh', '-c', 'printf abc >&3; printf xyz >&2'],           [1 => ['pipe','w'], 2 => ['redirect', 1], 3 => ['pipe','w']], $pipes);          return [stream_get_contents($pipes[3]), stream_get_contents($pipes[1]), proc_close($child)];"
+        "$child = proc_open(['/bin/cat'], [0 => ['pipe','r'], 1 => ['pipe','w']], $pipes); \
+         $n = fwrite($pipes[0], 'stdin until EOF'); fclose($pipes[0]); \
+         return [$n, stream_get_contents($pipes[1]), proc_close($child)];"
             .into(),
     );
     cases.check(
-        "$child = proc_open(['/bin/sh', '-c', 'printf output; printf discarded >&2'],           [1 => ['file', '/dev/null', 'w'], 2 => fopen('/dev/null', 'w')], $pipes);          return [$pipes, proc_close($child)];".into(),
+        "$child = proc_open(['/bin/sh', '-c', 'printf abc >&3; printf xyz >&2'], \
+         [1 => ['pipe','w'], 2 => ['redirect', 1], 3 => ['pipe','w']], $pipes); \
+         return [stream_get_contents($pipes[3]), stream_get_contents($pipes[1]), \
+                 proc_close($child)];"
+            .into(),
     );
     cases.check(
-        "$child = proc_open(['/bin/sleep', '10'], [], $pipes);          $sent = proc_terminate($child, 15);          do { $status = proc_get_status($child); } while ($status['running']);          $status['pid'] = $status['pid'] > 0;          return [$sent, $status, proc_close($child)];".into(),
+        "$child = proc_open(['/bin/sh', '-c', 'printf output; printf discarded >&2'], \
+         [1 => ['file', '/dev/null', 'w'], 2 => fopen('/dev/null', 'w')], $pipes); \
+         return [$pipes, proc_close($child)];"
+            .into(),
     );
     cases.check(
-        "$child = proc_open(['/bin/sh', '-c', 'head -c 5242880 /dev/zero'],                             [1 => ['pipe','w']], $pipes);          $data = stream_get_contents($pipes[1]);          return [strlen($data), sha1($data), proc_close($child)];".into(),
+        "$child = proc_open(['/bin/sleep', '10'], [], $pipes); \
+         $sent = proc_terminate($child, 15); \
+         do { $status = proc_get_status($child); } while ($status['running']); \
+         $status['pid'] = $status['pid'] > 0; \
+         return [$sent, $status, proc_close($child)];"
+            .into(),
     );
     cases.check(
-        "$child = proc_open(['/bin/sh', '-c', 'printf one; printf two >&2'],                             [1 => ['pipe','w'], 2 => ['socket']], $pipes);          foreach ($pipes as $p) { stream_set_blocking($p, false); }          $out = [1=>'',2=>'']; $other = null;          while ($pipes) { $read = $pipes; stream_select($read, $other, $other, 2);            foreach ($read as $k=>$p) { $out[$k] .= fread($p, 8192);              if (feof($p)) { fclose($p); unset($pipes[$k]); } } }          return [$out, proc_close($child)];".into(),
+        "$child = proc_open(['/bin/sh', '-c', 'head -c 5242880 /dev/zero'], \
+         [1 => ['pipe','w']], $pipes); \
+         $data = stream_get_contents($pipes[1]); \
+         return [strlen($data), sha1($data), proc_close($child)];"
+            .into(),
+    );
+    cases.check(
+        "$child = proc_open(['/bin/sh', '-c', 'printf one; printf two >&2'], \
+         [1 => ['pipe','w'], 2 => ['socket']], $pipes); \
+         foreach ($pipes as $p) { stream_set_blocking($p, false); } \
+         $out = [1=>'',2=>'']; $other = null; \
+         while ($pipes) { $read = $pipes; stream_select($read, $other, $other, 2); \
+         foreach ($read as $k=>$p) { $out[$k] .= fread($p, 8192); \
+         if (feof($p)) { fclose($p); unset($pipes[$k]); } } } \
+         return [$out, proc_close($child)];"
+            .into(),
     );
     for function in ["proc_terminate", "proc_close", "proc_get_status", "pclose"] {
         for arg in [

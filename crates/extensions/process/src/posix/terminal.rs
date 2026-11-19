@@ -65,7 +65,8 @@ fn terminal(
         } else {
             let given = crate::descriptors::given(original);
             context.warning(format!(
-                "{function}(): Argument #1 ($file_descriptor) must be of type int|resource, {given} given",
+                "{function}(): Argument #1 ($file_descriptor) must be of type \
+                 int|resource, {given} given",
             ));
             if !coerce_on_error {
                 return Ok(Value::Bool(false));
