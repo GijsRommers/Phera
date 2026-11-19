@@ -10,7 +10,7 @@ use phera_bytecode::{
     Symbol, SymbolId, Type, TypeId, TypeMask,
 };
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::ir;
 
@@ -26,6 +26,8 @@ pub(crate) struct Tables {
     name_ids: HashMap<String, u32>,
     constant_ids: HashMap<ConstantValue, u32>,
     symbol_ids: HashMap<Symbol, u32>,
+    /// The registers of the function being lowered that append in place.
+    pub(crate) appending: HashSet<Reg>,
 }
 
 /// A literal as a hashable key: floats by their bits, so `-0.0` and `0.0`
@@ -187,6 +189,7 @@ impl Tables {
             ..Function::default()
         };
         let scratch = Reg(source.registers as u16);
+        self.appending = crate::passes::lowering::appending_registers(&source.instructions);
         let mut offsets = Vec::new();
         for (index, instruction) in source.instructions.into_iter().enumerate() {
             offsets.push(function.instructions.len() as u32);

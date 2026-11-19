@@ -1,5 +1,7 @@
 //! Instruction translation and interning of access paths.
 
+use std::collections::{HashMap, HashSet};
+
 use phera_bytecode::{
     CastKind, Function, FunctionId, IncludeKind, Instruction, IterId, Reg, RuntimeError, Target,
     UnaryOp,
@@ -252,20 +254,20 @@ impl Tables {
             Old::Unset(place) => Instruction::UnsetPath {
                 path: path(self, function, place),
             },
-            // A concatenation onto its own left operand, as the steps of a
-            // `.` chain and of an interpolated string are compiled, appends
-            // in place: copying the growing string at every step would make
-            // a template of n pieces take n² time.
+            // A register that a long `.` chain or interpolated string builds
+            // up appends in place (see `appending_registers`).
             Old::Binary {
                 destination,
                 operator: ir::Binary::Concat,
                 left,
                 right,
-            } if destination == left && left != right => Instruction::AssignOp {
-                op: phera_bytecode::BinaryOp::Concat,
-                local: destination,
-                src: right,
-            },
+            } if destination == left && left != right && self.appending.contains(&destination) => {
+                Instruction::AssignOp {
+                    op: phera_bytecode::BinaryOp::Concat,
+                    local: destination,
+                    src: right,
+                }
+            }
             Old::Binary {
                 destination: dst,
                 operator: op,
@@ -455,4 +457,38 @@ impl Tables {
         };
         function.instructions.push(instruction);
     }
+}
+
+/// How many pieces a register must have appended onto itself before the
+/// appending is done in place.
+const LONG_CONCATENATION: usize = 16;
+
+/// The registers onto which a function concatenates at least
+/// [`LONG_CONCATENATION`] pieces, as a long `.` chain or interpolated string
+/// does: `"<td>$a</td><td>$b</td>..."`.
+///
+/// Such a register appends in place (`AssignOp`), because copying the
+/// growing string at every step would make a template of n pieces take n²
+/// time. A short concatenation such as `$prefix . ':' . $name` stays a plain
+/// `Binary`, which is cheaper per step.
+pub(crate) fn appending_registers(instructions: &[ir::Instruction]) -> HashSet<Reg> {
+    let mut steps: HashMap<Reg, usize> = HashMap::new();
+    for instruction in instructions {
+        if let ir::Instruction::Binary {
+            destination,
+            operator: ir::Binary::Concat,
+            left,
+            right,
+        } = instruction
+            && destination == left
+            && left != right
+        {
+            *steps.entry(*destination).or_default() += 1;
+        }
+    }
+    steps
+        .into_iter()
+        .filter(|&(_, count)| count >= LONG_CONCATENATION)
+        .map(|(register, _)| register)
+        .collect()
 }
