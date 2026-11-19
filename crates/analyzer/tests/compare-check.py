@@ -26,7 +26,7 @@ def identity(root, path, diagnostic, aliases):
 def phpstan(root, report):
     if "error_details" in report:
         if sum(map(len, report["error_details"].values())) != report["errors"]:
-            raise ValueError("PHPStan truncated its report. Rerun with --no-ansi outside agent mode.")
+            raise ValueError("PHPStan truncated its report. Rerun with --verbose or disable the Composer PHPStan wrapper.")
         groups = report["error_details"]
     else:
         if report["errors"]:

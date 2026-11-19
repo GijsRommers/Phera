@@ -69,7 +69,7 @@ impl Analyzer<'_> {
             self.index
                 .functions
                 .get(&name.to_ascii_lowercase())
-                .map(|signature| (name, signature))
+                .map(|signature| (name, signature.clone()))
         });
         if found.is_none() {
             let excluded = candidates
@@ -89,15 +89,19 @@ impl Analyzer<'_> {
             }
         }
         let intrinsic = found
+            .as_ref()
             .filter(|(name, _)| {
                 self.index
                     .builtin_functions
                     .contains(&name.to_ascii_lowercase())
             })
-            .map(|(name, _)| name.to_string());
+            .map(|(name, _)| (*name).clone());
         ResolvedCall {
-            signature: found.map(|(_, signature)| signature.clone()),
-            label: format!("{}()", found.map_or(&candidates[0], |(name, _)| name)),
+            label: format!(
+                "{}()",
+                found.as_ref().map_or(&candidates[0], |(name, _)| name)
+            ),
+            signature: found.map(|(_, signature)| signature),
             intrinsic,
             kind: CallKind::Direct,
         }
@@ -131,6 +135,7 @@ impl Analyzer<'_> {
                 ValueType::Mixed
             };
         };
+        self.dependencies.resolve(self.index, class);
         let signature = self.index.method(class, &method.name).cloned();
         if signature.is_none()
             && let Some(item) = self.omitted_builtin_member(ItemKind::Method, class, &method.name)

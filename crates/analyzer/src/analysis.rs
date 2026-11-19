@@ -2,6 +2,7 @@
 //! Recursive nesting is bounded at 256; uncertain or deeper expressions are mixed.
 
 use crate::{
+    dependencies::Dependencies,
     diagnostic::Diagnostic,
     index::Index,
     names::Names,
@@ -63,7 +64,8 @@ pub struct Context {
 }
 
 pub struct Analyzer<'a> {
-    pub index: &'a Index,
+    pub index: &'a mut Index,
+    pub dependencies: &'a mut Dependencies,
     pub file: &'a ParsedFile,
     pub level: u8,
     pub diagnostics: Vec<Diagnostic>,
@@ -77,9 +79,15 @@ pub struct Analyzer<'a> {
 }
 
 impl<'a> Analyzer<'a> {
-    pub fn new(index: &'a Index, file: &'a ParsedFile, level: u8) -> Self {
+    pub fn new(
+        index: &'a mut Index,
+        dependencies: &'a mut Dependencies,
+        file: &'a ParsedFile,
+        level: u8,
+    ) -> Self {
         Self {
             index,
+            dependencies,
             file,
             level,
             diagnostics: Vec::new(),
@@ -158,6 +166,9 @@ impl<'a> Analyzer<'a> {
                 .cloned(),
             _ => Some(self.context.names.resolve(name, UseKind::Class)[0].clone()),
         };
+        if let Some(class) = &resolved {
+            self.dependencies.resolve(self.index, class);
+        }
         if let Some(class) = &resolved
             && self.index.class(class).is_none()
             && !self

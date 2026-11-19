@@ -44,6 +44,7 @@ impl Analyzer<'_> {
         quiet: bool,
         access: PropertyAccess,
     ) -> ValueType {
+        self.dependencies.resolve(self.index, class);
         if let Some(property) = self.index.property(class, name) {
             self.relative_type(property.ty.clone(), class)
         } else {

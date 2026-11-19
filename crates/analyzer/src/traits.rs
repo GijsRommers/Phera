@@ -4,15 +4,27 @@
 use crate::index::{Index, MemberAdaptation};
 
 pub fn link(index: &mut Index) {
-    for _ in 0..256 {
-        let classes: Vec<_> = index
-            .classes
-            .iter()
-            .map(|(name, c)| (name.clone(), c.adaptations.clone()))
-            .collect();
+    let classes: Vec<_> = index
+        .classes
+        .iter()
+        .filter(|(_, class)| !class.adaptations.is_empty())
+        .map(|(name, _)| name.clone())
+        .collect();
+    link_classes(index, &classes);
+}
+
+pub fn link_classes(index: &mut Index, names: &[String]) {
+    let classes: Vec<_> = names
+        .iter()
+        .filter_map(|name| {
+            let class = index.classes.get(name)?;
+            Some((name, class.adaptations.clone()))
+        })
+        .collect();
+    loop {
         let mut changed = false;
-        for (class_name, adaptations) in classes {
-            for adaptation in adaptations {
+        for (class_name, adaptations) in &classes {
+            for adaptation in adaptations.iter().cloned() {
                 let (source, method, alias, visibility) = match adaptation {
                     MemberAdaptation::Alias {
                         source,
@@ -20,7 +32,7 @@ pub fn link(index: &mut Index) {
                         alias,
                         visibility,
                     } => (
-                        source.unwrap_or_else(|| class_name.clone()),
+                        source.unwrap_or_else(|| (*class_name).clone()),
                         method,
                         alias,
                         visibility,
@@ -35,7 +47,7 @@ pub fn link(index: &mut Index) {
                 if let Some(visibility) = visibility {
                     signature.modifiers.visibility = Some(visibility);
                 }
-                if let Some(class) = index.classes.get_mut(&class_name)
+                if let Some(class) = index.classes.get_mut(*class_name)
                     && !class.methods.contains_key(&alias)
                 {
                     class.methods.insert(alias, signature);

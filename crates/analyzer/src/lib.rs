@@ -6,9 +6,11 @@ pub mod baseline;
 pub mod builtins;
 pub mod collect;
 mod collect_class;
+mod composer;
 pub mod config;
 mod constant_types;
 mod constants;
+mod dependencies;
 pub mod diagnostic;
 mod enums;
 pub mod global_effects;
@@ -29,6 +31,7 @@ use diagnostic::Diagnostic;
 pub struct Report {
     pub diagnostics: Vec<Diagnostic>,
     pub files: usize,
+    pub vendor_files: usize,
     pub elapsed: std::time::Duration,
 }
 
@@ -53,16 +56,30 @@ fn check_project(options: &Options) -> Result<Report, String> {
     for file in &files {
         collect::collect(&mut index, &file.path, &file.source, &file.program);
     }
+    let scan = project::discover(&options.scan, &options.exclude)?;
+    let mut dependencies = dependencies::Dependencies::load(&mut index, &options.paths, &paths)?;
+    for path in &scan {
+        dependencies.load_file(&mut index, path)?;
+    }
+    let classes = index
+        .classes
+        .values()
+        .map(|class| class.name.clone())
+        .collect();
+    dependencies.resolve_classes(&mut index, classes);
     traits::link(&mut index);
     for file in &files {
-        let found = analysis::Analyzer::new(&index, file, options.level).run();
-        diagnostics.extend(found.into_iter().filter(|d| !suppress::suppressed(file, d)));
+        let mut found =
+            analysis::Analyzer::new(&mut index, &mut dependencies, file, options.level).run();
+        suppress::filter(file, &mut found);
+        diagnostics.extend(found);
     }
     diagnostics.sort();
     diagnostics.dedup();
     Ok(Report {
         diagnostics,
         files: paths.len(),
+        vendor_files: dependencies.vendor_files,
         elapsed: start.elapsed(),
     })
 }
