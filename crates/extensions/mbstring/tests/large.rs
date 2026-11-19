@@ -6,7 +6,7 @@ use phera_extension_api::testing::{TestContext, call, oracle};
 use phera_extension_api::{Extension, Registry, Value};
 #[test]
 fn megabyte_strings() {
-    let mut registry = Registry::new();
+    let mut registry = Registry::for_level(phera_extension_api::testing::oracle::test_level());
     Mbstring.register(&mut registry);
     let pattern = "AéΣ中👩🏽‍💻e\u{301}";
     let repeat = 1_048_576 / pattern.len();

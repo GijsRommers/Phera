@@ -21,7 +21,7 @@ use crate::encoding::{self, Encoding, Family, Transfer};
 use crate::state::Settings;
 use crate::{ENCODING, STRING, unicode};
 
-pub fn register(registry: &mut Registry) {
+pub fn register<const UPDATED: bool>(registry: &mut Registry) {
     registry.function(FunctionEntry::sync("mb_strlen", MB_STRLEN, mb_strlen));
     registry.function(FunctionEntry::sync("mb_substr", MB_SUBSTR, mb_substr));
     registry.function(FunctionEntry::sync(
@@ -29,7 +29,11 @@ pub fn register(registry: &mut Registry) {
         MB_STR_SPLIT,
         mb_str_split,
     ));
-    registry.function(FunctionEntry::sync("mb_strwidth", MB_STRWIDTH, mb_strwidth));
+    registry.function(FunctionEntry::sync(
+        "mb_strwidth",
+        MB_STRWIDTH,
+        mb_strwidth::<UPDATED>,
+    ));
     registry.function(FunctionEntry::sync("mb_ord", MB_ORD, mb_ord));
     registry.function(FunctionEntry::sync("mb_chr", MB_CHR, mb_chr));
     registry.function(FunctionEntry::sync("mb_scrub", MB_SCRUB, mb_scrub));
@@ -241,9 +245,9 @@ const MB_STRWIDTH: &[Param] = &[STRING, ENCODING];
 
 /// `mb_strwidth(string $string, ?string $encoding = null): int`: East Asian
 /// wide and full-width characters count as two.
-fn mb_strwidth(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
+fn mb_strwidth<const UPDATED: bool>(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     let (points, _) = decode_argument(ctx, a, 1, "mb_strwidth")?;
-    let width: usize = points.into_iter().map(unicode::width).sum();
+    let width: usize = points.into_iter().map(unicode::width::<UPDATED>).sum();
     Ok(Value::Int(width as i64))
 }
 

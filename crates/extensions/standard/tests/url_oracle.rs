@@ -10,7 +10,7 @@ use phera_extension_api::{
 
 #[test]
 fn url_and_query_calls_match_php() {
-    let mut registry = Registry::new();
+    let mut registry = Registry::for_level(phera_extension_api::testing::oracle::test_level());
     registry.load(&Standard);
     let mut script = format!("<?php\n{}", oracle::PHP_PREAMBLE);
     let mut labels = Vec::new();

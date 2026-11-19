@@ -9,7 +9,7 @@ use phera_extension_api::{
 };
 
 fn registry() -> Registry {
-    let mut registry = Registry::new();
+    let mut registry = Registry::for_level(phera_extension_api::testing::oracle::test_level());
     Mbstring.register(&mut registry);
     registry
 }

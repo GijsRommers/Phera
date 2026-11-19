@@ -129,6 +129,7 @@ impl Compiler<'_> {
             let implicit = ast::Parameter {
                 attributes: Vec::new(),
                 doc_comment: None,
+                parameter_doc_comment: None,
                 modifiers: ast::Modifiers::default(),
                 ty: declaration.ty.cloned(),
                 by_reference: false,

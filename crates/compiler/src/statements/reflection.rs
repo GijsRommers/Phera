@@ -124,7 +124,12 @@ impl Compiler<'_> {
             .default
             .as_ref()
             .map(|expression| self.remember_initializer(expression, scope));
+        let doc_comment = parameter.parameter_doc_comment;
+        if doc_comment.is_some() {
+            self.reflection.has_doc_comments.set(true);
+        }
         Ok(ParameterMetadata {
+            doc_comment,
             attributes: self.compile_attributes(
                 &parameter.attributes,
                 scope,

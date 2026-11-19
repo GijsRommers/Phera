@@ -51,11 +51,14 @@ impl Extension for Mbstring {
     }
 
     fn register(&self, registry: &mut Registry) {
-        text::register(registry);
-        casing::register(registry);
-        search::register(registry);
-        trim::register(registry);
-        cut::register(registry);
+        if registry
+            .level()
+            .has(phera_extension_api::Change::MbstringUnicode18)
+        {
+            register_unicode::<true>(registry);
+        } else {
+            register_unicode::<false>(registry);
+        }
         conversion::register(registry);
         names::register(registry);
         settings::register(registry);
@@ -68,6 +71,14 @@ impl Extension for Mbstring {
             registry.constant(&format!("MB_CASE_{}", case.constant_name()), case as i64);
         }
     }
+}
+
+fn register_unicode<const UPDATED: bool>(registry: &mut Registry) {
+    text::register::<UPDATED>(registry);
+    casing::register::<UPDATED>(registry);
+    search::register::<UPDATED>(registry);
+    trim::register(registry);
+    cut::register::<UPDATED>(registry);
 }
 
 /// PHP's string conversion for values the argument checks do not reach,

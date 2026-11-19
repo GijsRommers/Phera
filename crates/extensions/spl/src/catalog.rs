@@ -66,6 +66,13 @@ const CLASSES: &[&str] = &[
     "UnexpectedValueException",
 ];
 
+fn classes_deprecated(context: &mut dyn Context, args: &[Value]) -> NativeResult {
+    context.deprecated(
+        "Function spl_classes() is deprecated since 8.6, use ReflectionExtension::getClassNames() instead".into(),
+    );
+    classes(context, args)
+}
+
 fn classes(_: &mut dyn Context, _: &[Value]) -> NativeResult {
     Ok(Value::from(
         CLASSES
@@ -76,5 +83,13 @@ fn classes(_: &mut dyn Context, _: &[Value]) -> NativeResult {
 }
 
 pub(crate) fn register(registry: &mut Registry) {
-    registry.function(FunctionEntry::sync("spl_classes", &[], classes));
+    let handler = if registry
+        .level()
+        .has(phera_extension_api::Change::SplClassesDeprecated)
+    {
+        classes_deprecated
+    } else {
+        classes
+    };
+    registry.function(FunctionEntry::sync("spl_classes", &[], handler));
 }

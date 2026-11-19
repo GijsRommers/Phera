@@ -263,7 +263,7 @@ impl Registry {
     pub fn methods<'a>(
         &'a self,
         entry: &'a ClassEntry,
-    ) -> impl Iterator<Item = &'a crate::MethodEntry> {
+    ) -> impl DoubleEndedIterator<Item = &'a crate::MethodEntry> {
         entry.methods.iter().chain(
             self.additional_methods
                 .get(entry.name)

@@ -5,21 +5,21 @@ use phera_extension_api::{
     Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Value,
 };
 
-use super::format::{Code, Number, count, diagnostic_byte};
+use super::format::{Code, Number, count, diagnostic_byte, modifier};
 
-pub const PACK: FunctionEntry = FunctionEntry::asynchronous(
-    "pack",
-    &[
-        Param::new("format", ParamType::String),
-        Param::new("values", ParamType::Mixed).variadic(),
-    ],
-    |context, mut arguments| {
+const PARAMS: &[Param] = &[
+    Param::new("format", ParamType::String),
+    Param::new("values", ParamType::Mixed).variadic(),
+];
+
+pub(super) const fn entry<const MODIFIERS: bool>() -> FunctionEntry {
+    FunctionEntry::asynchronous("pack", PARAMS, |context, mut arguments| {
         Box::pin(async move {
-            let result = pack(context, &mut arguments).await;
+            let result = pack::<MODIFIERS>(context, &mut arguments).await;
             result.map_err(|error| context.native_call_error("pack", &arguments, error))
         })
-    },
-);
+    })
+}
 
 struct Field {
     symbol: u8,
@@ -40,11 +40,14 @@ fn type_message(symbol: u8, suffix: &str) -> String {
     format!("Type {}: {suffix}", diagnostic_byte(symbol))
 }
 
-async fn pack(context: &mut dyn Context, args: &mut [Value]) -> NativeResult {
+async fn pack<const MODIFIERS: bool>(
+    context: &mut dyn Context,
+    args: &mut [Value],
+) -> NativeResult {
     let Some((Value::String(format), values)) = args.split_first_mut() else {
         return Err(NativeError::error("pack(): missing binary format"));
     };
-    let fields = parse(context, format.as_bytes(), values).await?;
+    let fields = parse::<MODIFIERS>(context, format.as_bytes(), values).await?;
     let size = output_size(context, &fields)?;
     let mut output = Vec::new();
     output
@@ -137,7 +140,7 @@ fn missing_value() -> NativeError {
     NativeError::error("pack(): missing planned argument")
 }
 
-async fn parse(
+async fn parse<const MODIFIERS: bool>(
     context: &mut dyn Context,
     mut format: &[u8],
     values: &mut [Value],
@@ -146,9 +149,11 @@ async fn parse(
     let mut cursor = 0usize;
     while let Some((&symbol, rest)) = format.split_first() {
         format = rest;
+        let order = modifier::<MODIFIERS>(&mut format);
         let repeat = count(&mut format).and_then(|n| usize::try_from(n as i32).ok());
         let code = Code::parse(symbol)
-            .ok_or_else(|| NativeError::value_error(type_message(symbol, "unknown format code")))?;
+            .ok_or_else(|| NativeError::value_error(type_message(symbol, "unknown format code")))?
+            .with_modifier(symbol, order)?;
         let count = match code {
             Code::String(kind) | Code::Hex(kind) => {
                 let value = values.get_mut(cursor).ok_or_else(|| {

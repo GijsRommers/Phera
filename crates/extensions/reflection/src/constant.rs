@@ -4,7 +4,8 @@ use std::rc::Rc;
 
 use phera_extension_api::reflection::ConstantInfo;
 use phera_extension_api::{
-    ClassEntry, Context, MethodEntry, NativeResult, Object, Param, ParamType, Registry, Value, args,
+    Availability, ClassEntry, Context, MethodEntry, NativeResult, Object, Param, ParamType,
+    Registry, Value, args,
 };
 
 use crate::class::{NAME_PROPERTY, split};
@@ -64,14 +65,54 @@ pub(crate) fn register(registry: &mut Registry) {
                             .await
                     })
                 }),
-                MethodEntry::public("__toString", &[], |_, o, _| {
-                    read(o, |c| Value::from(format!("Constant [ {} ]\n", c.name)))
-                })
-                .returning("string"),
+                MethodEntry::public("__toString", &[], render::<false>).returning("string"),
             ]
         },
         ..ClassEntry::class("ReflectionConstant")
     });
+    if registry
+        .level()
+        .has(phera_extension_api::Change::ReflectionBooleanConstantText)
+    {
+        registry.method_at(
+            Availability::Since86,
+            "ReflectionConstant",
+            MethodEntry::public("__toString", &[], render::<true>).returning("string"),
+        );
+    }
+    registry.method_at(
+        Availability::Since86,
+        "ReflectionConstant",
+        MethodEntry::public("inNamespace", &[], |_, o, _| {
+            read(o, |constant| Value::Bool(constant.name.contains('\\')))
+        })
+        .returning("bool"),
+    );
+}
+
+fn render<const WORDS: bool>(
+    context: &mut dyn Context,
+    this: Option<&Rc<Object>>,
+    _: &[Value],
+) -> NativeResult {
+    let constant = constant(this)?;
+    if let Value::Bool(value) = engine(context)?.reflect_constant_value(&constant.name)? {
+        let value = boolean_text::<WORDS>(value);
+        return Ok(Value::from(format!(
+            "Constant [ bool {} ] {{ {value} }}\n",
+            constant.name
+        )));
+    }
+    Ok(Value::from(format!("Constant [ {} ]\n", constant.name)))
+}
+
+pub(super) fn boolean_text<const WORDS: bool>(value: bool) -> &'static str {
+    match (WORDS, value) {
+        (true, true) => "true",
+        (true, false) => "false",
+        (false, true) => "1",
+        (false, false) => "",
+    }
 }
 
 fn construct(

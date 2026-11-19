@@ -14,6 +14,7 @@ mod combine;
 mod combine_recursive;
 mod filter;
 mod find;
+mod intersect;
 mod keys;
 mod ordering;
 mod pointer;
@@ -40,6 +41,7 @@ pub(crate) mod zend_sort;
 pub(crate) fn register(registry: &mut Registry) {
     let filter = filter::functions(registry.level());
     let keys = keys::functions(registry.level());
+    let sets = sets::functions(registry.level());
     let modules = [
         build::FUNCTIONS,
         callback_sets::FUNCTIONS,
@@ -48,10 +50,9 @@ pub(crate) fn register(registry: &mut Registry) {
         &filter,
         find::FUNCTIONS,
         &keys,
-        keys::FUNCTIONS,
         pointer::FUNCTIONS,
         range::FUNCTIONS,
-        sets::FUNCTIONS,
+        &sets,
         slice::FUNCTIONS,
         sort::FUNCTIONS,
         stack::FUNCTIONS,

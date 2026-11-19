@@ -6,8 +6,9 @@ use phera_extension_api::reflection::{
     AttributeInfo, AttributeTarget, AttributeValue, builtin_flags, target_names,
 };
 use phera_extension_api::{
-    ArrayKey, ClassEntry, ConstantValue, Context, LocalFuture, MethodEntry, NativeError,
-    NativeResult, Object, Param, ParamType, PhpArray, Registry, Value, Visibility, args,
+    ArrayKey, Availability, ClassEntry, ConstantValue, Context, LocalFuture, MethodEntry,
+    NativeError, NativeResult, Object, Param, ParamType, PhpArray, Registry, Value, Visibility,
+    args,
 };
 
 use crate::{UNCLONEABLE, allocate, engine, load};
@@ -70,6 +71,22 @@ pub(crate) fn register(registry: &mut Registry) {
         hooks: Some(&UNCLONEABLE),
         ..ClassEntry::class("ReflectionAttribute")
     });
+    for method in [
+        MethodEntry::public("inNamespace", &[], |_, o, _| {
+            Ok(Value::Bool(attribute(o)?.info.name.contains('\\')))
+        })
+        .returning("bool"),
+        MethodEntry::public("getNamespaceName", &[], |_, o, _| {
+            Ok(Value::from(crate::class::split(&attribute(o)?.info.name).0))
+        })
+        .returning("string"),
+        MethodEntry::public("getShortName", &[], |_, o, _| {
+            Ok(Value::from(crate::class::split(&attribute(o)?.info.name).1))
+        })
+        .returning("string"),
+    ] {
+        registry.method_at(Availability::Since86, "ReflectionAttribute", method);
+    }
 }
 
 fn attribute(this: Option<&Rc<Object>>) -> Result<ReflectedAttribute, NativeError> {

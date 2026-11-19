@@ -19,15 +19,11 @@ fixtures/class-functions/get-parent-class-invalid.phpt	Class lookup errors quote
 fixtures/class-functions/is-a-disallows-string-by-default.phpt	String is_a() with allow_string=false
 fixtures/classes/constructor-return.phpt	Constructor returns a value
 fixtures/classes/m3c-contract-reference-return.phpt	Reference return signature spacing
-fixtures/classes/m3c-intrinsic-spl_object_hash.phpt	spl_object_hash()
 fixtures/closures/fake_builtin_equality.phpt	Equality of first-class closures wrapping internal functions
 fixtures/closures/nested_fake_equality.phpt	Equality of first-class closures wrapping internal functions
 fixtures/enums/temporary-case-dynamic-property-write.phpt	Write to property of an object held in a constant
 fixtures/enums/temporary-case-increment.phpt	Write to property of an object held in a constant
 fixtures/enums/temporary-case-name-write.phpt	Write to property of an object held in a constant
-fixtures/exceptions/engine_json_own.phpt	JsonException includes JSON error position
-fixtures/exceptions/engine_json_parent.phpt	JsonException includes JSON error position
-fixtures/exceptions/engine_json_throwable.phpt	JsonException includes JSON error position
 fixtures/exceptions/finally_double_return.phpt	Return from finally
 fixtures/exceptions/finally_invalid_return_previous.phpt	Return from finally
 fixtures/exceptions/finally_override.phpt	Return from finally
@@ -45,14 +41,11 @@ fixtures/includes/require_once-missing5.phpt	Failed include diagnostic formats t
 fixtures/magic-methods/debug-hook-throws.phpt	__debugInfo() capitalization in fatal diagnostics
 fixtures/magic-methods/debug-invalid-result.phpt	__debugInfo() capitalization in fatal diagnostics
 fixtures/magic-methods/declaration-debuginfo-nullable-return.phpt	Nullable __debugInfo() result
-fixtures/magic-methods/tostring-array-intersect-order.phpt	Earlier conversion in array_intersect()
 fixtures/output-buffering/handler-output.phpt	Output from printf() in an output handler is attributed to main()
-fixtures/packing/named-arguments.phpt	Named variadic argument rejection in pack()
 fixtures/property-hooks/reflection-storage.phpt	Access diagnostics for get-only and set-only virtual properties
 fixtures/property-hooks/virtual-access.phpt	Access diagnostics for get-only and set-only virtual properties
 fixtures/serialize/enum-errors.phpt	unserialize() diagnoses empty input and handles invalid enum values differently
 fixtures/serialize/malformed.phpt	unserialize() diagnoses empty input and handles invalid enum values differently
-fixtures/spl/file_stream_iteration.phpt	SplFileObject CSV methods
 fixtures/spl/weak_map_references.phpt	WeakMap reference assignment can create a key
 fixtures/traits/trait-alias-keeps-identity.phpt	class_uses() reports the alias for an aliased trait
 fixtures/types/weak-scalar-conversion.phpt	Calling a function named is

@@ -317,6 +317,7 @@ pub type ParameterDefault = AttributeValue;
 
 #[derive(Clone)]
 pub struct ParameterInfo {
+    pub doc_comment: Option<phera_value::PhpString>,
     pub name: String,
     pub position: usize,
     pub declared_type: Option<String>,

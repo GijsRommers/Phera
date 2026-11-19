@@ -6,7 +6,7 @@ use phera_extension_api::{Registry, Value};
 
 #[test]
 fn request_timezone_and_invalid_identifiers() {
-    let mut registry = Registry::new();
+    let mut registry = Registry::for_level(phera_extension_api::testing::oracle::test_level());
     registry.load(&phera_ext_core::Core);
     registry.load(&Date);
     let mut context = TestContext::default();

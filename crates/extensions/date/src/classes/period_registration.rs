@@ -69,7 +69,8 @@ const METHODS: &[MethodEntry] = &[
         &[Param::new("array", ParamType::Array)],
         serialization::set_state,
     )
-    .static_(),
+    .static_()
+    .tentative_return("DatePeriod"),
 ];
 
 const fn property(name: &'static str, ty: PropertyType) -> PropertyEntry {

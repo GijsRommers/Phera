@@ -84,6 +84,15 @@ impl Extension for Http {
                 context.register_request_callback(RequestCallback::Headers, arguments)
             },
         ));
+        let return_type = if registry
+            .level()
+            .has(phera_extension_api::Change::HeaderRegisterCallbackReturnType)
+        {
+            "true"
+        } else {
+            "bool"
+        };
+        registry.describe_function("header_register_callback", return_type, None);
         registry.function(FunctionEntry::asynchronous(
             "register_shutdown_function",
             SHUTDOWN_PARAMS,

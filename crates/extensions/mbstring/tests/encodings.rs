@@ -6,7 +6,7 @@ use phera_extension_api::testing::{TestContext, call, oracle};
 use phera_extension_api::{Extension, Registry, Value};
 #[test]
 fn every_representable_scalar() {
-    let mut registry = Registry::new();
+    let mut registry = Registry::for_level(phera_extension_api::testing::oracle::test_level());
     Mbstring.register(&mut registry);
     let mut ctx = TestContext::default();
     let mut comparisons = 0;

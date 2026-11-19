@@ -69,6 +69,7 @@ pub struct DeclarationMetadata {
 /// Parameter metadata indexed by its position in the function signature.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ParameterMetadata {
+    pub doc_comment: Option<Span>,
     pub attributes: Vec<Attribute>,
     pub default: Option<Initializer>,
     pub default_constant: Option<String>,

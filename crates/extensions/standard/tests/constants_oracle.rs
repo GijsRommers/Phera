@@ -6,7 +6,7 @@ use phera_extension_api::{Extension, Registry, Value};
 
 #[test]
 fn every_registered_constant_matches_php() {
-    let mut registry = Registry::new();
+    let mut registry = Registry::for_level(phera_extension_api::testing::oracle::test_level());
     Standard.register(&mut registry);
     let mut entries: Vec<_> = registry.constants().collect();
     entries.sort_by_key(|(name, _)| *name);

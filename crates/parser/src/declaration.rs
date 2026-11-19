@@ -813,6 +813,7 @@ impl Parser<'_> {
             }
         }
 
+        let type_comment = self.doc_comment();
         let ty = if self.can_start_type(false) {
             Some(self.parse_type_expr(false)?)
         } else {
@@ -821,6 +822,7 @@ impl Parser<'_> {
 
         let by_reference = self.eat(TokenKind::Ampersand)?;
         let variadic = self.eat(TokenKind::Ellipsis)?;
+        let variable_comment = self.doc_comment();
         let token = self.expect(TokenKind::Variable, "a parameter")?;
         let name = self.text_of(&token)[1..].to_string();
         let default = if self.eat(TokenKind::Assign)? {
@@ -838,8 +840,14 @@ impl Parser<'_> {
             Vec::new()
         };
 
+        let parameter_doc_comment = self
+            .doc_comment()
+            .or(variable_comment)
+            .or(type_comment)
+            .or(doc_comment);
         Ok(Parameter {
             doc_comment,
+            parameter_doc_comment,
             attributes,
             modifiers,
             ty,

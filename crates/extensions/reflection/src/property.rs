@@ -111,15 +111,7 @@ pub(crate) fn register(registry: &mut Registry) {
                             Param::new("value", ParamType::Mixed),
                         ]
                     },
-                    |c, o, a| {
-                        let member = reflected(o)?;
-                        if member.modifiers & 16 != 0 {
-                            return Err(crate::exception(
-                                "May not use setRawValue on static properties",
-                            ));
-                        }
-                        set_raw(c, member, a)
-                    },
+                    set_raw_value::<false>,
                 )
                 .returning("void"),
                 MethodEntry::public(
@@ -130,7 +122,7 @@ pub(crate) fn register(registry: &mut Registry) {
                             Param::new("value", ParamType::Mixed).optional(),
                         ]
                     },
-                    set_value,
+                    set_value::<false>,
                 ),
                 MethodEntry::public("hasType", &[], |_, o, _| {
                     data(o, |m| Value::Bool(m.declared_type.is_some()))
@@ -201,6 +193,38 @@ pub(crate) fn register(registry: &mut Registry) {
         hooks: Some(&UNCLONEABLE),
         ..ClassEntry::class("ReflectionProperty")
     });
+    use phera_extension_api::{Availability, Change, NativeMethod};
+    let level = registry.level();
+    for (change, method, handler) in [
+        (
+            Change::ReflectionSetValueOtherClassDeprecated,
+            "setValue",
+            set_value::<true> as phera_extension_api::SyncMethod,
+        ),
+        (
+            Change::ReflectionSetRawValueOtherClassDeprecated,
+            "setRawValue",
+            set_raw_value::<true>,
+        ),
+    ] {
+        if !level.has(change) {
+            continue;
+        }
+        if let Some(current) = registry
+            .get_class("ReflectionProperty")
+            .and_then(|class| class.methods.iter().find(|entry| entry.name == method))
+            .copied()
+        {
+            registry.method_at(
+                Availability::Since86,
+                "ReflectionProperty",
+                MethodEntry {
+                    handler: NativeMethod::Sync(handler),
+                    ..current
+                },
+            );
+        }
+    }
 }
 
 fn read(
@@ -298,6 +322,28 @@ fn declared_property(
         .cloned())
 }
 
+fn set_raw_value<const DEPRECATE: bool>(
+    context: &mut dyn Context,
+    this: Option<&Rc<Object>>,
+    args: &[Value],
+) -> NativeResult {
+    let member = reflected(this)?;
+    if member.modifiers & 16 != 0 {
+        return Err(crate::exception(
+            "May not use setRawValue on static properties",
+        ));
+    }
+    if DEPRECATE {
+        deprecate_other_class(
+            context,
+            &member,
+            args::object(args, 0).map(Rc::as_ref),
+            "setRawValue",
+        );
+    }
+    set_raw(context, member, args)
+}
+
 fn set_raw(context: &mut dyn Context, member: Rc<MemberInfo>, args: &[Value]) -> NativeResult {
     let object = args::object(args, 0).cloned();
     let value = args.get(1).cloned().unwrap_or_default();
@@ -325,15 +371,36 @@ fn set_raw(context: &mut dyn Context, member: Rc<MemberInfo>, args: &[Value]) ->
     engine(context)?.reflect_property_write(&member, object, value, PropertyWrite::Raw)
 }
 
-fn set_value(context: &mut dyn Context, this: Option<&Rc<Object>>, args: &[Value]) -> NativeResult {
+fn set_value<const DEPRECATE: bool>(
+    context: &mut dyn Context,
+    this: Option<&Rc<Object>>,
+    args: &[Value],
+) -> NativeResult {
     let member = reflected(this)?;
     let (object, value) = write_arguments(context, &member, args)?;
+    if DEPRECATE {
+        deprecate_other_class(context, &member, object.as_deref(), "setValue");
+    }
     if member.dynamic
         && let Some(object) = object
     {
         engine(context)?.reflect_dynamic_property_write(object, &member.name, value)
     } else {
         engine(context)?.reflect_property_write(&member, object, value, PropertyWrite::Value)
+    }
+}
+
+fn deprecate_other_class(
+    context: &mut dyn Context,
+    member: &MemberInfo,
+    object: Option<&Object>,
+    method: &str,
+) {
+    if !member.dynamic && object.is_some_and(|object| !object.class.is_instance_of(&member.class)) {
+        context.deprecated(format!(
+            "Calling ReflectionProperty::{method}() with a given object that is not an \
+             instance of the class this property was declared in is deprecated"
+        ));
     }
 }
 

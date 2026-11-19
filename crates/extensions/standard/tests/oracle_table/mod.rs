@@ -23,7 +23,7 @@ pub struct OracleTable {
 
 impl OracleTable {
     pub fn new() -> Self {
-        let mut registry = Registry::new();
+        let mut registry = Registry::for_level(phera_extension_api::testing::oracle::test_level());
         Standard.register(&mut registry);
         Self {
             registry,

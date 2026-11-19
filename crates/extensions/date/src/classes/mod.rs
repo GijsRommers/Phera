@@ -7,6 +7,7 @@ mod datetime;
 mod datetime_factory;
 mod datetime_functions;
 mod datetime_registration;
+mod tentative;
 pub(super) use datetime_registration::RFC7231_FORMAT;
 mod datetime_serialization;
 mod instant;
@@ -58,6 +59,7 @@ pub fn register(registry: &mut Registry) {
     datetime_functions::register(registry);
     interval_registration::register(registry);
     period_registration::register(registry);
+    tentative::register(registry);
 }
 
 fn receiver(this: This<'_>) -> Result<&Rc<Object>, NativeError> {

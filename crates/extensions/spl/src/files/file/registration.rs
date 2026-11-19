@@ -135,6 +135,7 @@ pub(in crate::files) fn register(registry: &mut Registry) {
         },
         ..ClassEntry::class(FILE)
     });
+    register_csv_deprecations(registry);
     registry.class(ClassEntry {
         parent: Some(FILE),
         methods: const {
@@ -146,4 +147,38 @@ pub(in crate::files) fn register(registry: &mut Registry) {
         },
         ..ClassEntry::class(TEMP)
     });
+}
+
+fn register_csv_deprecations(registry: &mut Registry) {
+    use phera_extension_api::{Availability, Change};
+    if !registry
+        .level()
+        .has(Change::SplFileObjectCsvMethodsDeprecated)
+    {
+        return;
+    }
+    for entry in [
+        Method::public_async("fgetcsv", CSV, |c, o, a| {
+            c.deprecated("Method SplFileObject::fgetcsv() is deprecated since 8.6".into());
+            csv::get_csv(c, o, a)
+        })
+        .tentative_return("array|false"),
+        Method::public_async("fputcsv", WRITE_CSV, |c, o, a| {
+            c.deprecated("Method SplFileObject::fputcsv() is deprecated since 8.6".into());
+            csv::put_csv(c, o, a)
+        })
+        .tentative_return("int|false"),
+        Method::public("setCsvControl", CSV, |c, o, a| {
+            c.deprecated("Method SplFileObject::setCsvControl() is deprecated since 8.6".into());
+            csv::set(c, o, a)
+        })
+        .tentative_return("void"),
+        Method::public("getCsvControl", &[], |c, o, a| {
+            c.deprecated("Method SplFileObject::getCsvControl() is deprecated since 8.6".into());
+            csv::read_controls(c, o, a)
+        })
+        .tentative_return("array"),
+    ] {
+        registry.method_at(Availability::Since86, FILE, entry);
+    }
 }

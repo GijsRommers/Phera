@@ -18,7 +18,7 @@ mod string;
 
 use error::Error;
 use phera_extension_api::{
-    ClassEntry, Extension, FunctionEntry, MethodEntry, Param, ParamType, Registry,
+    ClassEntry, ConstantValue, Extension, FunctionEntry, MethodEntry, Param, ParamType, Registry,
 };
 
 pub struct Json;
@@ -45,7 +45,7 @@ impl Extension for Json {
             Param::new("associative", ParamType::Bool)
                 .nullable()
                 .optional(),
-            Param::new("depth", ParamType::Int).optional(),
+            Param::new("depth", ParamType::Int).with_default(ConstantValue::Int(512)),
             Param::new("flags", ParamType::Int).optional(),
         ];
 
@@ -54,16 +54,17 @@ impl Extension for Json {
             Param::new("depth", ParamType::Int).optional(),
             Param::new("flags", ParamType::Int).optional(),
         ];
-        registry.function(FunctionEntry::sync(
-            "json_decode",
-            DECODE,
-            decode::json_decode,
-        ));
-        registry.function(FunctionEntry::sync(
-            "json_validate",
-            VALIDATE,
-            decode::json_validate,
-        ));
+        let locations = registry
+            .level()
+            .has(phera_extension_api::Change::JsonErrorLocations);
+        let (decode, validate): (phera_extension_api::SyncFn, phera_extension_api::SyncFn) =
+            if locations {
+                (decode::json_decode::<true>, decode::json_validate::<true>)
+            } else {
+                (decode::json_decode::<false>, decode::json_validate::<false>)
+            };
+        registry.function(FunctionEntry::sync("json_decode", DECODE, decode));
+        registry.function(FunctionEntry::sync("json_validate", VALIDATE, validate));
         registry.function(FunctionEntry::sync("json_last_error", &[], error::last));
         registry.function(FunctionEntry::sync(
             "json_last_error_msg",

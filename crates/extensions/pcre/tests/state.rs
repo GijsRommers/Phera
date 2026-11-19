@@ -6,7 +6,7 @@ use phera_extension_api::{Extension, Registry, Value};
 
 #[test]
 fn errors_are_request_local_and_quote_preserves_them() {
-    let mut registry = Registry::new();
+    let mut registry = Registry::for_level(phera_extension_api::testing::oracle::test_level());
     Pcre.register(&mut registry);
     let mut first = TestContext::default();
     let mut second = TestContext::default();
@@ -41,7 +41,7 @@ fn errors_are_request_local_and_quote_preserves_them() {
 
 #[test]
 fn inline_utf_uses_checked_matching_unlike_php_without_u() {
-    let mut registry = Registry::new();
+    let mut registry = Registry::for_level(phera_extension_api::testing::oracle::test_level());
     Pcre.register(&mut registry);
     let mut context = TestContext::default();
     // Do not send malformed input to PHP's unchecked (*UTF) path: PCRE2 documents

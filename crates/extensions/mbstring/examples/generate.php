@@ -1,6 +1,10 @@
 <?php
-// PHP 8.5 / Unicode 17 reference tables; no runtime PHP dependency.
-if (PHP_VERSION_ID < 80500 || PHP_VERSION_ID >= 80600) throw new Exception('PHP 8.5 required');
+// Reference tables from both PHP oracles. PHP is only needed to regenerate them.
+$unicode = match (PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION) {
+    '8.5' => '17.0',
+    '8.6' => '18.0',
+    default => throw new Exception('PHP 8.5 or 8.6 required'),
+};
 $dir = $argv[1];
 $maps = array_fill(0, 8, '');
 $width = ''; $properties = '';
@@ -25,6 +29,10 @@ for ($cp = 0; $cp <= 0x10FFFF; $cp++) {
 foreach ($maps as $mode => $map) file_put_contents("$dir/case-$mode.bin", $map);
 file_put_contents("$dir/width.bin", $width);
 file_put_contents("$dir/properties.bin", $properties);
+file_put_contents("$dir/version.txt", PHP_VERSION . "; Unicode $unicode\n");
+echo "Generated Unicode $unicode tables from PHP ", PHP_VERSION, "\n";
+if ($unicode === '18.0') return;
+
 // Single-byte tables; Phera's own list of names is in src/encoding.rs.
 foreach (mb_list_encodings() as $name) {
     if (str_starts_with($name,'ISO-8859-') || str_starts_with($name,'Windows-') ||
@@ -38,8 +46,6 @@ foreach (mb_list_encodings() as $name) {
         file_put_contents("$dir/single-$name.bin", $table);
     }
 }
-file_put_contents("$dir/version.txt", PHP_VERSION."; Unicode 17.0\n");
-echo "Generated Unicode 17 and encoding tables from PHP ", PHP_VERSION, "\n";
 $entities = '';
 foreach (get_html_translation_table(HTML_ENTITIES, ENT_QUOTES|ENT_HTML401, 'UTF-8') as $c => $n) {
     $entities .= mb_ord($c).' '.$n."\n";

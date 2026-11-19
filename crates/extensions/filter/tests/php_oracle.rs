@@ -94,7 +94,7 @@ fn php_filter_matrix() {
 fn php_api_errors_and_metadata() {
     let mut matrix = Matrix::default();
     matrix.expression("filter_list()");
-    let mut registry = Registry::new();
+    let mut registry = Registry::for_level(phera_extension_api::testing::oracle::test_level());
     registry.class(ClassEntry::class("Exception"));
     registry.load(&Filter);
     let mut names = registry

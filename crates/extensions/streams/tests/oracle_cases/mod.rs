@@ -47,7 +47,7 @@ pub async fn check(name: &str, cases: &[Case], oracle_cwd: &Path, native_cwd: &P
         .map(str::to_owned)
         .collect::<Vec<_>>();
 
-    let mut registry = Registry::new();
+    let mut registry = Registry::for_level(phera_extension_api::testing::oracle::test_level());
     registry.load(&Streams);
     let mut context = TestContext::default();
     set_request(

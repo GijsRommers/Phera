@@ -16,12 +16,12 @@ use crate::encoding::{ByteOrder, Encoding, Family};
 use crate::text::{bounds, decode_argument, encode_result};
 use crate::{ENCODING, STRING, unicode};
 
-pub fn register(registry: &mut Registry) {
+pub fn register<const UPDATED: bool>(registry: &mut Registry) {
     registry.function(FunctionEntry::sync("mb_strcut", MB_STRCUT, mb_strcut));
     registry.function(FunctionEntry::sync(
         "mb_strimwidth",
         MB_STRIMWIDTH,
-        mb_strimwidth,
+        mb_strimwidth::<UPDATED>,
     ));
 }
 
@@ -155,7 +155,7 @@ const MB_STRIMWIDTH: &[Param] = &[
 /// ?string $encoding = null): string`: the string from character `$start`,
 /// cut to `$width` columns including the marker, which is added only when
 /// something was cut.
-fn mb_strimwidth(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
+fn mb_strimwidth<const UPDATED: bool>(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     let (points, encoding) = decode_argument(ctx, a, 4, "mb_strimwidth")?;
     let start = args::int(a, 1).unwrap_or(0);
     let start = if start < 0 {
@@ -172,7 +172,7 @@ fn mb_strimwidth(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     let width_of = |points: &[u32]| {
         points
             .iter()
-            .map(|&point| unicode::width(point))
+            .map(|&point| unicode::width::<UPDATED>(point))
             .sum::<usize>()
     };
     let mut width = args::int(a, 2).unwrap_or(0);
@@ -200,7 +200,7 @@ fn mb_strimwidth(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     let kept = rest
         .iter()
         .take_while(|&&point| {
-            used += unicode::width(point);
+            used += unicode::width::<UPDATED>(point);
             used <= budget
         })
         .count();

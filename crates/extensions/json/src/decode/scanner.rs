@@ -31,6 +31,7 @@ pub(super) enum Token {
 pub(super) struct Scanner<'a> {
     bytes: &'a [u8],
     pos: usize,
+    token_start: usize,
     flags: DecodeFlags,
 }
 
@@ -39,6 +40,7 @@ impl<'a> Scanner<'a> {
         Self {
             bytes,
             pos: 0,
+            token_start: 0,
             flags,
         }
     }
@@ -53,10 +55,17 @@ impl<'a> Scanner<'a> {
         Some(byte)
     }
 
+    pub fn token_start(&self) -> usize {
+        self.token_start
+    }
+
     /// Outside strings PHP accepts only the four JSON whitespace characters.
-    pub fn next(&mut self) -> Result<Token, Error> {
+    pub fn next<const LOCATIONS: bool>(&mut self) -> Result<Token, Error> {
         while matches!(self.peek(), Some(b' ' | b'\t' | b'\r' | b'\n')) {
             self.pos += 1;
+        }
+        if LOCATIONS {
+            self.token_start = self.pos;
         }
         Ok(match self.take() {
             None => Token::End,
@@ -66,10 +75,10 @@ impl<'a> Scanner<'a> {
             Some(b'}') => Token::Close(Container::Object),
             Some(b':') => Token::Colon,
             Some(b',') => Token::Comma,
-            Some(b'"') => Token::Value(Value::from(self.string()?)),
+            Some(b'"') => Token::Value(Value::from(self.string::<LOCATIONS>()?)),
             Some(b'-' | b'0'..=b'9') => {
                 self.pos -= 1;
-                Token::Value(self.number()?)
+                Token::Value(self.number::<LOCATIONS>()?)
             }
             Some(b'n') => {
                 self.literal(b"ull")?;
@@ -128,11 +137,17 @@ impl<'a> Scanner<'a> {
     }
 
     /// The bytes of a string, after its opening quote, with escapes decoded.
-    fn string(&mut self) -> Result<Vec<u8>, Error> {
+    fn string<const LOCATIONS: bool>(&mut self) -> Result<Vec<u8>, Error> {
         let mut output = Vec::new();
         loop {
             match self.peek() {
-                None => return Err(Error::Control),
+                None => {
+                    return Err(if LOCATIONS {
+                        Error::Syntax
+                    } else {
+                        Error::Control
+                    });
+                }
                 Some(b'"') => {
                     self.pos += 1;
                     return Ok(output);
@@ -209,7 +224,7 @@ impl<'a> Scanner<'a> {
 
     /// An integer too large for an int is a float, or with
     /// `JSON_BIGINT_AS_STRING` a string of its digits.
-    fn number(&mut self) -> Result<Value, Error> {
+    fn number<const LOCATIONS: bool>(&mut self) -> Result<Value, Error> {
         let start = self.pos;
         if self.peek() == Some(b'-') {
             self.pos += 1;
@@ -221,23 +236,32 @@ impl<'a> Scanner<'a> {
         }
         let mut integer = true;
         if self.peek() == Some(b'.') {
-            integer = false;
+            let dot = self.pos;
             self.pos += 1;
-            if !self.peek().is_some_and(|byte| byte.is_ascii_digit()) {
+            if self.peek().is_some_and(|byte| byte.is_ascii_digit()) {
+                integer = false;
+                self.digits();
+            } else if LOCATIONS {
+                // PHP lexes the complete number prefix. The dot is a new token.
+                self.pos = dot;
+            } else {
                 return Err(Error::Syntax);
             }
-            self.digits();
         }
         if matches!(self.peek(), Some(b'e' | b'E')) {
-            integer = false;
+            let exponent = self.pos;
             self.pos += 1;
             if matches!(self.peek(), Some(b'+' | b'-')) {
                 self.pos += 1;
             }
-            if !self.peek().is_some_and(|byte| byte.is_ascii_digit()) {
+            if self.peek().is_some_and(|byte| byte.is_ascii_digit()) {
+                integer = false;
+                self.digits();
+            } else if LOCATIONS {
+                self.pos = exponent;
+            } else {
                 return Err(Error::Syntax);
             }
-            self.digits();
         }
         let text = std::str::from_utf8(self.bytes.get(start..self.pos).ok_or(Error::Syntax)?)
             .map_err(|_| Error::Syntax)?;

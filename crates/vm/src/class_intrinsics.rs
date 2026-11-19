@@ -94,7 +94,12 @@ impl Vm {
                         )?)
                     }
                     Operation::ObjectId => Value::Int(object.id.into()),
-                    _ => Value::from(object.handle_hash()),
+                    _ => {
+                        if self.spl_object_hash_deprecated {
+                            self.diagnostic("Deprecated", "Function spl_object_hash() is deprecated since 8.6, consider using spl_object_id() instead".into());
+                        }
+                        Value::from(object.handle_hash())
+                    }
                 });
             }
             Operation::ClassAlias => {

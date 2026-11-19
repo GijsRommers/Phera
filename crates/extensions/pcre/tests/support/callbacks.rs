@@ -16,7 +16,7 @@ pub struct Harness {
 }
 impl Default for Harness {
     fn default() -> Self {
-        let mut registry = Registry::new();
+        let mut registry = Registry::for_level(phera_extension_api::testing::oracle::test_level());
         Pcre.register(&mut registry);
         Standard.register(&mut registry);
         Self {

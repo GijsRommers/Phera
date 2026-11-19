@@ -21,7 +21,7 @@ const UNCHECKED_ARITY: &[&str] = &[
 
 #[test]
 fn signatures_match_php() {
-    let mut registry = Registry::new();
+    let mut registry = Registry::for_level(phera_extension_api::testing::oracle::test_level());
     Standard.register(&mut registry);
     let mut functions: Vec<_> = registry.functions().collect();
     functions.sort_by_key(|entry| entry.name);

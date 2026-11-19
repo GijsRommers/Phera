@@ -15,11 +15,49 @@ pub enum LanguageLevel {
 /// A change to an operation that exists at both language levels.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Change {
+    /// The listed DateTime, DateTimeImmutable, DateTimeZone, DateInterval, and
+    /// DatePeriod methods now have tentative static return types.
+    DateTentativeStaticReturnTypes,
+    /// DirectoryIterator::key() now returns int|string, and
+    /// DirectoryIterator::current() returns string|SplFileInfo|static.
+    DirectoryIteratorReturnTypes,
+    /// The following SplFileObject methods are now deprecated: fgetcsv(),
+    /// fputcsv(), setCsvControl(), and getCsvControl().
+    SplFileObjectCsvMethodsDeprecated,
+    /// The spl_classes() function is now deprecated.
+    SplClassesDeprecated,
+    /// The spl_object_hash() function is now deprecated.
+    SplObjectHashDeprecated,
+    /// Calling ReflectionProperty::setValue() with an object that is not an
+    /// instance of the class on which the property was declared is now deprecated.
+    ReflectionSetValueOtherClassDeprecated,
+    /// Calling ReflectionProperty::setRawValue() with an object that is not an
+    /// instance of the class on which the property was declared is now deprecated.
+    ReflectionSetRawValueOtherClassDeprecated,
+    /// Calling ReflectionMethod::invoke() or ReflectionMethod::invokeArgs() with
+    /// an object and a static method is now deprecated.
+    ReflectionInvokeStaticWithObjectDeprecated,
+    /// The outputs of ReflectionClassConstant::__toString() and
+    /// ReflectionConstant::__toString() for constants with boolean values have been
+    /// changed to use `true` and `false` rather than `1` and an empty string.
+    ReflectionBooleanConstantText,
+    /// Unicode data tables have been updated to Unicode 18.0.
+    MbstringUnicode18,
+    /// filter_var_array() return type has been narrowed from array|false|null to array|false.
+    FilterVarArrayReturnType,
+    /// header_register_callback() now declares true as its return type.
+    HeaderRegisterCallbackReturnType,
+    /// Added extra info about error location to the JSON error messages returned
+    /// from json_last_error_msg() and JsonException message.
+    JsonErrorLocations,
     /// Form feed (\f) is now added to the default trimmed characters of trim(), rtrim() and ltrim().
     TrimFormFeed,
     /// preg_grep() now returns false instead of a partial array when a PCRE execution error occurs
     /// (e.g. malformed UTF-8 input with the /u modifier).
     PregGrepReturnsFalse,
+    /// array_intersect() with at least two arrays now converts values to strings
+    /// while scanning its inputs instead of during sort comparisons.
+    ArrayIntersectConvertsBeforeFiltering,
     /// array_filter() now raises a ValueError when an invalid $mode argument value is passed.
     ArrayFilterMode,
     /// array_change_key_case() now raises a ValueError when an invalid $case argument value is passed.
@@ -49,10 +87,11 @@ pub enum Change {
     UsleepLimit,
     /// pack() and unpack() now accept the "<" and ">" endianness modifiers on
     /// the signed and unsigned integer format codes.
-    PackIntegerEndianness,
     /// pack() and unpack() now accept the "<" and ">" endianness modifiers on
     /// the float and double format codes.
-    PackFloatEndianness,
+    PackEndiannessModifiers,
+    /// PHP rejects named variadic arguments to pack() before entering the native function.
+    PackNamedVariadicsError,
 }
 
 /// Availability of a native declaration, resolved when the registry is built.
@@ -102,8 +141,22 @@ impl LanguageLevel {
 
     pub const fn has(self, change: Change) -> bool {
         match change {
-            Change::TrimFormFeed
+            Change::DateTentativeStaticReturnTypes
+            | Change::DirectoryIteratorReturnTypes
+            | Change::SplFileObjectCsvMethodsDeprecated
+            | Change::SplClassesDeprecated
+            | Change::SplObjectHashDeprecated
+            | Change::ReflectionSetValueOtherClassDeprecated
+            | Change::ReflectionSetRawValueOtherClassDeprecated
+            | Change::ReflectionInvokeStaticWithObjectDeprecated
+            | Change::ReflectionBooleanConstantText
+            | Change::MbstringUnicode18
+            | Change::FilterVarArrayReturnType
+            | Change::HeaderRegisterCallbackReturnType
+            | Change::JsonErrorLocations
+            | Change::TrimFormFeed
             | Change::PregGrepReturnsFalse
+            | Change::ArrayIntersectConvertsBeforeFiltering
             | Change::ArrayFilterMode
             | Change::ArrayChangeKeyCase
             | Change::EnvironmentRejectsNul
@@ -115,8 +168,8 @@ impl LanguageLevel {
             | Change::NumberFormatDecimals
             | Change::SleepLimit
             | Change::UsleepLimit
-            | Change::PackIntegerEndianness
-            | Change::PackFloatEndianness => matches!(self, Self::Php86),
+            | Change::PackNamedVariadicsError
+            | Change::PackEndiannessModifiers => matches!(self, Self::Php86),
         }
     }
 

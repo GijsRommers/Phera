@@ -23,15 +23,47 @@ use crate::encoding::{self, Encoding};
 use crate::text;
 use crate::unicode::{self, Case};
 
-pub fn register(registry: &mut Registry) {
-    registry.function(FunctionEntry::sync("mb_strpos", POSITION, mb_strpos));
-    registry.function(FunctionEntry::sync("mb_strrpos", POSITION, mb_strrpos));
-    registry.function(FunctionEntry::sync("mb_stripos", POSITION, mb_stripos));
-    registry.function(FunctionEntry::sync("mb_strripos", POSITION, mb_strripos));
-    registry.function(FunctionEntry::sync("mb_strstr", PORTION, mb_strstr));
-    registry.function(FunctionEntry::sync("mb_strrchr", PORTION, mb_strrchr));
-    registry.function(FunctionEntry::sync("mb_stristr", PORTION, mb_stristr));
-    registry.function(FunctionEntry::sync("mb_strrichr", PORTION, mb_strrichr));
+pub fn register<const UPDATED: bool>(registry: &mut Registry) {
+    registry.function(FunctionEntry::sync(
+        "mb_strpos",
+        POSITION,
+        mb_strpos::<UPDATED>,
+    ));
+    registry.function(FunctionEntry::sync(
+        "mb_strrpos",
+        POSITION,
+        mb_strrpos::<UPDATED>,
+    ));
+    registry.function(FunctionEntry::sync(
+        "mb_stripos",
+        POSITION,
+        mb_stripos::<UPDATED>,
+    ));
+    registry.function(FunctionEntry::sync(
+        "mb_strripos",
+        POSITION,
+        mb_strripos::<UPDATED>,
+    ));
+    registry.function(FunctionEntry::sync(
+        "mb_strstr",
+        PORTION,
+        mb_strstr::<UPDATED>,
+    ));
+    registry.function(FunctionEntry::sync(
+        "mb_strrchr",
+        PORTION,
+        mb_strrchr::<UPDATED>,
+    ));
+    registry.function(FunctionEntry::sync(
+        "mb_stristr",
+        PORTION,
+        mb_stristr::<UPDATED>,
+    ));
+    registry.function(FunctionEntry::sync(
+        "mb_strrichr",
+        PORTION,
+        mb_strrichr::<UPDATED>,
+    ));
     registry.function(FunctionEntry::sync(
         "mb_substr_count",
         MB_SUBSTR_COUNT,
@@ -68,29 +100,34 @@ const POSITION: &[Param] = &[
 ];
 
 /// `mb_strpos(string $haystack, string $needle, int $offset = 0, ?string $encoding = null): int|false`
-fn mb_strpos(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
-    position(ctx, a, "mb_strpos", Search::First)
+fn mb_strpos<const UPDATED: bool>(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
+    position::<UPDATED>(ctx, a, "mb_strpos", Search::First)
 }
 
 /// `mb_strrpos(string $haystack, string $needle, int $offset = 0, ?string $encoding = null): int|false`
-fn mb_strrpos(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
-    position(ctx, a, "mb_strrpos", Search::Last)
+fn mb_strrpos<const UPDATED: bool>(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
+    position::<UPDATED>(ctx, a, "mb_strrpos", Search::Last)
 }
 
 /// `mb_stripos(string $haystack, string $needle, int $offset = 0, ?string $encoding = null): int|false`
-fn mb_stripos(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
-    position(ctx, a, "mb_stripos", Search::FirstFolded)
+fn mb_stripos<const UPDATED: bool>(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
+    position::<UPDATED>(ctx, a, "mb_stripos", Search::FirstFolded)
 }
 
 /// `mb_strripos(string $haystack, string $needle, int $offset = 0, ?string $encoding = null): int|false`
-fn mb_strripos(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
-    position(ctx, a, "mb_strripos", Search::LastFolded)
+fn mb_strripos<const UPDATED: bool>(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
+    position::<UPDATED>(ctx, a, "mb_strripos", Search::LastFolded)
 }
 
-fn position(ctx: &mut dyn Context, a: &[Value], function: &str, search: Search) -> NativeResult {
+fn position<const UPDATED: bool>(
+    ctx: &mut dyn Context,
+    a: &[Value],
+    function: &str,
+    search: Search,
+) -> NativeResult {
     let encoding = encoding::argument(ctx, a, 3, function)?;
-    let haystack = searchable(args::bytes(a, 0), encoding, search.folded());
-    let needle = searchable(args::bytes(a, 1), encoding, search.folded());
+    let haystack = searchable::<UPDATED>(args::bytes(a, 0), encoding, search.folded());
+    let needle = searchable::<UPDATED>(args::bytes(a, 1), encoding, search.folded());
     let offset = args::int(a, 2).unwrap_or(0);
     let found = find(&haystack, &needle, offset, search.reverse()).ok_or_else(|| {
         NativeError::value_error(format!(
@@ -108,31 +145,36 @@ const PORTION: &[Param] = &[
 ];
 
 /// `mb_strstr(string $haystack, string $needle, bool $before_needle = false, ?string $encoding = null): string|false`
-fn mb_strstr(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
-    portion(ctx, a, "mb_strstr", Search::First)
+fn mb_strstr<const UPDATED: bool>(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
+    portion::<UPDATED>(ctx, a, "mb_strstr", Search::First)
 }
 
 /// `mb_strrchr(string $haystack, string $needle, bool $before_needle = false, ?string $encoding = null): string|false`
-fn mb_strrchr(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
-    portion(ctx, a, "mb_strrchr", Search::Last)
+fn mb_strrchr<const UPDATED: bool>(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
+    portion::<UPDATED>(ctx, a, "mb_strrchr", Search::Last)
 }
 
 /// `mb_stristr(string $haystack, string $needle, bool $before_needle = false, ?string $encoding = null): string|false`
-fn mb_stristr(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
-    portion(ctx, a, "mb_stristr", Search::FirstFolded)
+fn mb_stristr<const UPDATED: bool>(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
+    portion::<UPDATED>(ctx, a, "mb_stristr", Search::FirstFolded)
 }
 
 /// `mb_strrichr(string $haystack, string $needle, bool $before_needle = false, ?string $encoding = null): string|false`
-fn mb_strrichr(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
-    portion(ctx, a, "mb_strrichr", Search::LastFolded)
+fn mb_strrichr<const UPDATED: bool>(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
+    portion::<UPDATED>(ctx, a, "mb_strrichr", Search::LastFolded)
 }
 
 /// The haystack from the needle on, or before it.
-fn portion(ctx: &mut dyn Context, a: &[Value], function: &str, search: Search) -> NativeResult {
+fn portion<const UPDATED: bool>(
+    ctx: &mut dyn Context,
+    a: &[Value],
+    function: &str,
+    search: Search,
+) -> NativeResult {
     let encoding = encoding::argument(ctx, a, 3, function)?;
     let haystack = args::bytes(a, 0);
-    let searched = searchable(haystack, encoding, search.folded());
-    let needle = searchable(args::bytes(a, 1), encoding, search.folded());
+    let searched = searchable::<UPDATED>(haystack, encoding, search.folded());
+    let needle = searchable::<UPDATED>(args::bytes(a, 1), encoding, search.folded());
     let Some(Some(index)) = find(&searched, &needle, 0, search.reverse()) else {
         return Ok(Value::Bool(false));
     };
@@ -171,13 +213,17 @@ fn mb_substr_count(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
 
 /// The string as PHP searches it: UTF-8, folded for the case-insensitive
 /// functions, invalid sequences as 0xFF.
-fn searchable(bytes: &[u8], encoding: Encoding, folded: bool) -> Cow<'_, [u8]> {
+fn searchable<const UPDATED: bool>(
+    bytes: &[u8],
+    encoding: Encoding,
+    folded: bool,
+) -> Cow<'_, [u8]> {
     if encoding == Encoding::Utf8 && !folded {
         return Cow::Borrowed(bytes);
     }
     let mut points = decode(bytes, encoding);
     if folded {
-        points = unicode::convert(&points, Case::FoldSimple);
+        points = unicode::convert::<UPDATED>(&points, Case::FoldSimple);
     }
     let mut utf8 = Vec::with_capacity(points.len());
     for point in points {

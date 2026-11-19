@@ -81,7 +81,8 @@ const METHODS: &[MethodEntry] = &[
         &[Param::new("array", ParamType::Array)],
         timezone::set_state,
     )
-    .static_(),
+    .static_()
+    .tentative_return("DateTimeZone"),
 ];
 
 fn name(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {

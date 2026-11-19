@@ -135,6 +135,18 @@ pub(crate) fn register(registry: &mut Registry) {
         hooks: Some(&UNCLONEABLE),
         ..ClassEntry::class("ReflectionParameter")
     });
+    registry.method_at(
+        phera_extension_api::Availability::Since86,
+        "ReflectionParameter",
+        MethodEntry::public("getDocComment", &[], |_, o, _| {
+            data(o, |p| {
+                p.doc_comment
+                    .clone()
+                    .map_or(Value::Bool(false), Value::String)
+            })
+        })
+        .returning("string|false"),
+    );
 }
 
 fn parameter(

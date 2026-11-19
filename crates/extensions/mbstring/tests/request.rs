@@ -11,7 +11,7 @@ fn pair(a: Value, b: Value) -> Value {
 }
 #[test]
 fn reference_outputs() {
-    let mut registry = Registry::new();
+    let mut registry = Registry::for_level(phera_extension_api::testing::oracle::test_level());
     Mbstring.register(&mut registry);
     let mut script = format!("<?php\n{}", oracle::PHP_PREAMBLE);
     let mut rust = Vec::new();
@@ -76,7 +76,7 @@ fn reference_outputs() {
 }
 #[test]
 fn settings_are_request_local() {
-    let mut registry = Registry::new();
+    let mut registry = Registry::for_level(phera_extension_api::testing::oracle::test_level());
     Mbstring.register(&mut registry);
     let mut first = TestContext::default();
     let mut second = TestContext::default();

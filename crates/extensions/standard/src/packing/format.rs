@@ -1,5 +1,7 @@
 //! `pack('n2C*', 1, 2, 3, 4)` reads a decimal count and a star count.
 
+use phera_extension_api::NativeError;
+
 #[derive(Clone, Copy)]
 pub(super) enum Endian {
     Native,
@@ -45,7 +47,52 @@ pub(super) enum Code {
     Seek,
 }
 
+/// Reads a byte-order modifier immediately after the code, before its repeat count.
+pub(super) fn modifier<const MODIFIERS: bool>(format: &mut &[u8]) -> Option<(Endian, char)> {
+    if !MODIFIERS {
+        return None;
+    }
+    let (&next, rest) = format.split_first()?;
+    let endian = match next {
+        b'<' => Endian::Little,
+        b'>' => Endian::Big,
+        _ => return None,
+    };
+    *format = rest;
+    Some((endian, char::from(next)))
+}
+
 impl Code {
+    pub(super) fn with_modifier(
+        self,
+        symbol: u8,
+        modifier: Option<(Endian, char)>,
+    ) -> Result<Self, NativeError> {
+        let Some((endian, marker)) = modifier else {
+            return Ok(self);
+        };
+        let symbol = char::from(symbol);
+        match self {
+            Self::Numeric(_, Endian::Native) if matches!(symbol, 'i' | 'I') => {
+                Err(NativeError::value_error(format!(
+                    "Endianness modifier is not supported for format code '{symbol}'"
+                )))
+            }
+            Self::Numeric(number, Endian::Native) if number.size() > 1 => {
+                Ok(Self::Numeric(number, endian))
+            }
+            Self::Numeric(_, Endian::Little | Endian::Big) => {
+                Err(NativeError::value_error(format!(
+                    "Endianness modifier '{marker}' cannot be applied to format code '{symbol}' \
+                     which already has inherent endianness"
+                )))
+            }
+            _ => Err(NativeError::value_error(format!(
+                "Endianness modifier is not supported for format code '{symbol}'"
+            ))),
+        }
+    }
+
     pub(super) fn parse(byte: u8) -> Option<Self> {
         use Endian::{Big, Little, Native};
         use Number::{Double, Float, Signed, Unsigned};

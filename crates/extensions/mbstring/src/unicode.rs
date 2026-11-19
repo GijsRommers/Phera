@@ -1,4 +1,4 @@
-//! Case mapping and display width as PHP 8.5 has them, from Unicode 17:
+//! Case mapping and display width from the tables shipped by the selected PHP version:
 //!
 //! ```php
 //! mb_convert_case('ß', MB_CASE_UPPER);         // "SS": full mapping
@@ -91,19 +91,49 @@ const MAPPINGS: [&[u8]; 8] = [
 const CASED_LIMIT: usize = 0x20000;
 const UNUSED: u32 = u32::MAX;
 
-/// Sorted code points of the characters `mb_strwidth` counts as two.
-const WIDE: &[u8] = include_bytes!("../data/width.bin");
+/// Characters PHP treats as cased or case-ignorable, and display widths.
+struct Tables {
+    mappings: [&'static [u8]; 8],
+    width: &'static [u8],
+    properties: &'static [u8],
+    cached_mappings: [OnceLock<Vec<[u32; 3]>>; 8],
+}
 
-/// Sorted records of five bytes, a code point and its [`Property`] bits,
-/// for the characters that matter to title case and final sigma.
-const PROPERTIES: &[u8] = include_bytes!("../data/properties.bin");
+static UNICODE_17: Tables = Tables {
+    mappings: MAPPINGS,
+    width: include_bytes!("../data/width.bin"),
+    properties: include_bytes!("../data/properties.bin"),
+    cached_mappings: [const { OnceLock::new() }; 8],
+};
+
+static UNICODE_18: Tables = Tables {
+    mappings: [
+        include_bytes!("../data/php86/case-0.bin"),
+        include_bytes!("../data/php86/case-1.bin"),
+        include_bytes!("../data/php86/case-2.bin"),
+        include_bytes!("../data/php86/case-3.bin"),
+        include_bytes!("../data/php86/case-4.bin"),
+        include_bytes!("../data/php86/case-5.bin"),
+        include_bytes!("../data/php86/case-6.bin"),
+        include_bytes!("../data/php86/case-7.bin"),
+    ],
+    width: include_bytes!("../data/php86/width.bin"),
+    properties: include_bytes!("../data/php86/properties.bin"),
+    cached_mappings: [const { OnceLock::new() }; 8],
+};
+
+fn tables<const UPDATED: bool>() -> &'static Tables {
+    if UPDATED { &UNICODE_18 } else { &UNICODE_17 }
+}
+
 /// The character is cased: it starts or continues a word.
 const CASED: u8 = 1;
 /// The character is case-ignorable: it neither starts nor ends a word.
 const CASE_IGNORABLE: u8 = 2;
 
-pub fn width(point: u32) -> usize {
-    let wide = WIDE
+pub fn width<const UPDATED: bool>(point: u32) -> usize {
+    let wide = tables::<UPDATED>()
+        .width
         .as_chunks::<4>()
         .0
         .binary_search_by_key(&point, |record| read_u32(record))
@@ -111,30 +141,32 @@ pub fn width(point: u32) -> usize {
     if wide { 2 } else { 1 }
 }
 
-fn properties(point: u32) -> u8 {
-    let records = PROPERTIES.as_chunks::<5>().0;
-    records
-        .binary_search_by_key(&point, |record| read_u32(record))
-        .map_or(0, |found| records[found][4])
-}
+impl Tables {
+    fn properties(&self, point: u32) -> u8 {
+        let records = self.properties.as_chunks::<5>().0;
+        records
+            .binary_search_by_key(&point, |record| read_u32(record))
+            .map_or(0, |found| records[found][4])
+    }
 
-/// The case table of `case` as a direct lookup by code point, built on
-/// first use: binary search per character costs too much for long strings.
-fn table(case: Case) -> &'static [[u32; 3]] {
-    static TABLES: [OnceLock<Vec<[u32; 3]>>; 8] = [const { OnceLock::new() }; 8];
-    let index = case as usize;
-    TABLES[index].get_or_init(|| {
-        let mut table = vec![[UNUSED; 3]; CASED_LIMIT];
-        for record in MAPPINGS[index].as_chunks::<16>().0 {
-            let point = read_u32(record) as usize;
-            table[point] = [
-                read_u32(&record[4..]),
-                read_u32(&record[8..]),
-                read_u32(&record[12..]),
-            ];
-        }
-        table
-    })
+    /// Direct lookup by code point, built on first use.
+    fn case_table(&self, case: Case) -> &[[u32; 3]] {
+        let index = case as usize;
+        self.cached_mappings[index].get_or_init(|| {
+            let mut table = vec![[UNUSED; 3]; CASED_LIMIT];
+            for record in self.mappings[index].as_chunks::<16>().0 {
+                let point = read_u32(record) as usize;
+                if let Some(entry) = table.get_mut(point) {
+                    *entry = [
+                        read_u32(&record[4..]),
+                        read_u32(&record[8..]),
+                        read_u32(&record[12..]),
+                    ];
+                }
+            }
+            table
+        })
+    }
 }
 
 fn map_one(point: u32, table: &[[u32; 3]], output: &mut Vec<u32>) {
@@ -146,21 +178,22 @@ fn map_one(point: u32, table: &[[u32; 3]], output: &mut Vec<u32>) {
     }
 }
 
-pub fn convert(points: &[u32], case: Case) -> Vec<u32> {
+pub fn convert<const UPDATED: bool>(points: &[u32], case: Case) -> Vec<u32> {
     let mut output = Vec::with_capacity(points.len());
     let title = matches!(case, Case::Title | Case::TitleSimple);
-    let outside = table(case);
-    let inside = table(case.inside_word());
+    let data = tables::<UPDATED>();
+    let outside = data.case_table(case);
+    let inside = data.case_table(case.inside_word());
     let mut in_word = false;
     for (index, &point) in points.iter().enumerate() {
         let effective = if in_word { case.inside_word() } else { case };
-        if point == CAPITAL_SIGMA && effective == Case::Lower && final_sigma(points, index) {
+        if point == CAPITAL_SIGMA && effective == Case::Lower && final_sigma(data, points, index) {
             output.push(FINAL_SIGMA);
         } else {
             map_one(point, if in_word { inside } else { outside }, &mut output);
         }
         if title && point != crate::codec::BAD {
-            let property = properties(point);
+            let property = data.properties(point);
             if property & CASE_IGNORABLE == 0 {
                 in_word = property & CASED != 0;
             }
@@ -174,10 +207,10 @@ const FINAL_SIGMA: u32 = 0x3C2;
 
 /// Full lower case writes Σ as ς at the end of a word: after a cased
 /// character and not before one, skipping case-ignorable characters.
-fn final_sigma(points: &[u32], index: usize) -> bool {
-    let significant = |point: &&u32| properties(**point) & CASE_IGNORABLE == 0;
+fn final_sigma(data: &Tables, points: &[u32], index: usize) -> bool {
+    let significant = |point: &&u32| data.properties(**point) & CASE_IGNORABLE == 0;
     let previous = points[..index].iter().rev().find(significant);
     let next = points[index + 1..].iter().find(significant);
-    let cased = |point: &u32| properties(*point) & CASED != 0;
+    let cased = |point: &u32| data.properties(*point) & CASED != 0;
     previous.is_some_and(cased) && !next.is_some_and(cased)
 }

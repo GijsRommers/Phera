@@ -116,10 +116,10 @@ pub(crate) fn register(registry: &mut Registry) {
                     },
                 ),
                 MethodEntry::public_async_named("invoke", &[INSTANCE, ARGS], |c, o, a, names| {
-                    invoke(c, o, a, Arguments::Forwarded(names))
+                    invoke::<false>(c, o, a, Arguments::Forwarded(names))
                 }),
                 MethodEntry::public_async("invokeArgs", &[INSTANCE, ARRAY], |c, o, a| {
-                    invoke(c, o, a, Arguments::Array)
+                    invoke::<false>(c, o, a, Arguments::Array)
                 }),
                 MethodEntry::public("__toString", &[], |_, o, _| {
                     let f = reflected(o)?;
@@ -131,6 +131,26 @@ pub(crate) fn register(registry: &mut Registry) {
         },
         ..ClassEntry::class("ReflectionMethod")
     });
+    use phera_extension_api::{Availability, Change};
+    if registry
+        .level()
+        .has(Change::ReflectionInvokeStaticWithObjectDeprecated)
+    {
+        registry.method_at(
+            Availability::Since86,
+            "ReflectionMethod",
+            MethodEntry::public_async_named("invoke", &[INSTANCE, ARGS], |c, o, a, names| {
+                invoke::<true>(c, o, a, Arguments::Forwarded(names))
+            }),
+        );
+        registry.method_at(
+            Availability::Since86,
+            "ReflectionMethod",
+            MethodEntry::public_async("invokeArgs", &[INSTANCE, ARRAY], |c, o, a| {
+                invoke::<true>(c, o, a, Arguments::Array)
+            }),
+        );
+    }
 }
 
 fn construct(
@@ -261,7 +281,7 @@ enum Arguments<'a> {
     Forwarded(&'a [(usize, PhpString)]),
 }
 
-fn invoke<'a>(
+fn invoke<'a, const DEPRECATE: bool>(
     context: &'a mut dyn Context,
     this: Option<Rc<Object>>,
     args: Vec<Value>,
@@ -270,6 +290,18 @@ fn invoke<'a>(
     Box::pin(async move {
         let function = reflected(this.as_ref())?;
         let object = args::object(&args, 0).cloned();
+        if DEPRECATE && object.is_some() && function.is_static {
+            let method = method(&function)?;
+            let name = match mode {
+                Arguments::Array => "invokeArgs",
+                Arguments::Forwarded(_) => "invoke",
+            };
+            context.deprecated(format!(
+                "Calling ReflectionMethod::{name}() for static method {}::{}() \
+                 does not need an object parameter",
+                method.class, method.name
+            ));
+        }
         let arguments = match mode {
             Arguments::Array => argument_array(&args, 1),
             Arguments::Forwarded(names) => forwarded_arguments(args, 1, names)?,

@@ -175,7 +175,7 @@ fn php_matrix() {
 }
 #[test]
 fn million_levels() {
-    let mut registry = Registry::new();
+    let mut registry = Registry::for_level(phera_extension_api::testing::oracle::test_level());
     Json.register(&mut registry);
     let mut context = TestContext::default();
     let depth = 1_000_000;

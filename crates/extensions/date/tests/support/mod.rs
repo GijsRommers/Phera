@@ -13,7 +13,7 @@ pub struct Matrix {
 
 impl Matrix {
     pub fn new() -> Self {
-        let mut registry = Registry::new();
+        let mut registry = Registry::for_level(phera_extension_api::testing::oracle::test_level());
         registry.load(&phera_ext_core::Core);
         registry.load(&Date);
         Self {

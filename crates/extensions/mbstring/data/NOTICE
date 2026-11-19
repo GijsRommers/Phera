@@ -6,3 +6,6 @@ uses Unicode 17.0; these files do not use the newer tables in php-src main.
 rare.bin is the little-endian binary representation of rare_cp_bitvec.h from
 PHP's ext/mbstring. Copyright The PHP Group and Contributors; see PHP-LICENSE.
 Source: https://github.com/php/php-src/blob/PHP-8.5/ext/mbstring/rare_cp_bitvec.h
+
+The php86/ case, property and width files come from PHP 8.6.0RC7, which
+uses Unicode 18.0. Single-byte and CJK encoding tables are shared.

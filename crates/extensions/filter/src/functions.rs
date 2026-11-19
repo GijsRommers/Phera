@@ -33,6 +33,15 @@ pub fn register(registry: &mut Registry) {
         ARRAY,
         array,
     ));
+    let return_type = if registry
+        .level()
+        .has(phera_extension_api::Change::FilterVarArrayReturnType)
+    {
+        "array|false"
+    } else {
+        "array|false|null"
+    };
+    registry.describe_function("filter_var_array", return_type, None);
 }
 
 fn var(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {

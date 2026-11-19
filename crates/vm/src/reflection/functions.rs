@@ -277,6 +277,12 @@ impl Vm {
                     }
                 });
                 ParameterInfo {
+                    doc_comment: metadata
+                        .and_then(|meta| meta.doc_comment)
+                        .and_then(|span| {
+                            unit.reflection_source.as_deref()?.get(span.start..span.end)
+                        })
+                        .map(phera_value::PhpString::from),
                     name: unit.names[param.name.index()].clone(),
                     position,
                     declared_type,
@@ -326,6 +332,7 @@ fn native_parameter(position: usize, param: Param) -> ParameterInfo {
         name.into()
     };
     ParameterInfo {
+        doc_comment: None,
         name: param.name.into(),
         position,
         declared_type: Some(declared_type),

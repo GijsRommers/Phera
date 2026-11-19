@@ -49,7 +49,8 @@ const METHODS: &[MethodEntry] = &[
         &[Param::new("array", ParamType::Array)],
         interval_serialization::set_state,
     )
-    .static_(),
+    .static_()
+    .tentative_return("DateInterval"),
 ];
 
 fn format(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {

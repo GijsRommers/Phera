@@ -78,6 +78,7 @@ pub fn call_method(
         lineage(registry, class).into_iter().find_map(|entry| {
             registry
                 .methods(entry)
+                .rev()
                 .find(|candidate| candidate.name.eq_ignore_ascii_case(method))
                 .map(|candidate| (entry, candidate))
         });

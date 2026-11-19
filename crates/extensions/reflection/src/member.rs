@@ -74,18 +74,50 @@ pub(crate) fn register(registry: &mut Registry) {
                 MethodEntry::public_async("getAttributes", crate::attribute::FILTER, |c, o, a| {
                     attributes(c, o, a, "ReflectionClassConstant")
                 }),
-                MethodEntry::public("__toString", &[], |_, o, _| {
-                    data(o, |m| {
-                        Value::from(format!("Constant [ {}::{} ]\n", m.class, m.name))
-                    })
-                })
-                .returning("string"),
+                MethodEntry::public("__toString", &[], constant_string::<false>)
+                    .returning("string"),
             ]
         },
         hooks: Some(&UNCLONEABLE),
         ..ClassEntry::class("ReflectionClassConstant")
     });
+    if registry
+        .level()
+        .has(phera_extension_api::Change::ReflectionBooleanConstantText)
+    {
+        registry.method_at(
+            phera_extension_api::Availability::Since86,
+            "ReflectionClassConstant",
+            MethodEntry::public("__toString", &[], constant_string::<true>).returning("string"),
+        );
+    }
     crate::property::register(registry);
+}
+
+fn constant_string<const WORDS: bool>(
+    context: &mut dyn Context,
+    this: Option<&Rc<Object>>,
+    _: &[Value],
+) -> NativeResult {
+    let member = reflected(this)?;
+    if let Value::Bool(value) =
+        engine(context)?.reflect_class_constant(&member.class, &member.name)?
+    {
+        let visibility = match member.modifiers & 7 {
+            2 => "protected",
+            4 => "private",
+            _ => "public",
+        };
+        let value = crate::constant::boolean_text::<WORDS>(value);
+        return Ok(Value::from(format!(
+            "Constant [ {visibility} bool {} ] {{ {value} }}\n",
+            member.name
+        )));
+    }
+    Ok(Value::from(format!(
+        "Constant [ {}::{} ]\n",
+        member.class, member.name
+    )))
 }
 
 pub(crate) fn construct(

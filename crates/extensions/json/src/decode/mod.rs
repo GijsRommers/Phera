@@ -10,20 +10,23 @@
 mod parser;
 mod scanner;
 use crate::{
-    error::{self, Error},
+    error::{self, Details, Error},
     flags::{DecodeFlags, INVALID_UTF8_IGNORE},
 };
 use phera_extension_api::{Context, NativeError, NativeResult, PhpArray, Value, args};
 
 /// `$associative`, when given, overrides `JSON_OBJECT_AS_ARRAY`.
-pub(crate) fn json_decode(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+pub(crate) fn json_decode<const LOCATIONS: bool>(
+    context: &mut dyn Context,
+    arguments: &[Value],
+) -> NativeResult {
     let bytes = args::bytes(arguments, 0);
     let mut flags = DecodeFlags::from_bits(args::int(arguments, 3).unwrap_or(0));
     if let Some(associative) = args::bool(arguments, 1) {
         flags.associative = associative;
     }
     if !flags.throw_on_error {
-        *context.state().get_or_default::<Error>() = Error::None;
+        *context.state().get_or_default::<Details>() = Details::default();
     }
     if bytes.is_empty() {
         return error::finish(context, Error::Syntax, flags.throw_on_error, Value::Null);
@@ -44,17 +47,20 @@ pub(crate) fn json_decode(context: &mut dyn Context, arguments: &[Value]) -> Nat
             Value::from(properties)
         }
     };
-    let result = parser::parse(bytes, depth, flags, &mut make_object);
+    let result = parser::parse::<LOCATIONS>(bytes, depth, flags, &mut make_object);
     match result {
         Ok(value) => error::finish(context, Error::None, flags.throw_on_error, value),
-        Err(error) => error::finish(context, error, flags.throw_on_error, Value::Null),
+        Err(error) => error::finish_details(context, error, flags.throw_on_error, Value::Null),
     }
 }
 
 /// Like decoding, but builds nothing. Of the flags only
 /// `JSON_INVALID_UTF8_IGNORE` is allowed, and an object key starting with
 /// NUL is valid here.
-pub(crate) fn json_validate(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+pub(crate) fn json_validate<const LOCATIONS: bool>(
+    context: &mut dyn Context,
+    arguments: &[Value],
+) -> NativeResult {
     let bits = args::int(arguments, 2).unwrap_or(0);
     if bits != 0 && bits != INVALID_UTF8_IGNORE {
         return Err(NativeError::value_error(
@@ -65,15 +71,15 @@ pub(crate) fn json_validate(context: &mut dyn Context, arguments: &[Value]) -> N
     if bytes.is_empty() {
         return error::finish(context, Error::Syntax, false, Value::Bool(false));
     }
-    *context.state().get_or_default::<Error>() = Error::None;
+    *context.state().get_or_default::<Details>() = Details::default();
     let depth = depth(args::int(arguments, 1).unwrap_or(512), "json_validate", 2)?;
     let mut flags = DecodeFlags::from_bits(bits);
     flags.associative = true;
     // Validation never builds objects: it parses in associative mode.
     let mut never_called = |properties: PhpArray| Value::from(properties);
-    let result = parser::parse(bytes, depth, flags, &mut never_called);
+    let result = parser::parse::<LOCATIONS>(bytes, depth, flags, &mut never_called);
     let error = result.as_ref().err().copied().unwrap_or_default();
-    error::finish(context, error, false, Value::Bool(result.is_ok()))
+    error::finish_details(context, error, false, Value::Bool(result.is_ok()))
 }
 
 /// `$depth` must be from 1 to `i32::MAX`, PHP's C int.

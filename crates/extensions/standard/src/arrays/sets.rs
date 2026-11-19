@@ -7,8 +7,8 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use phera_extension_api::{
-    Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, PhpArray,
-    Value, args,
+    Change, Context, FunctionEntry, LanguageLevel, LocalFuture, NativeError, NativeFn,
+    NativeResult, Param, ParamType, PhpArray, Value, args,
 };
 
 use super::ordering::SortFlags;
@@ -16,15 +16,25 @@ use super::zend_sort;
 use crate::arguments::{required_array, stringify};
 use crate::constants::SORT_STRING;
 
-pub(super) const FUNCTIONS: &[FunctionEntry] = &[
-    ARRAY_DIFF,
-    ARRAY_DIFF_KEY,
-    ARRAY_DIFF_ASSOC,
-    ARRAY_INTERSECT,
-    ARRAY_INTERSECT_KEY,
-    ARRAY_INTERSECT_ASSOC,
-    ARRAY_UNIQUE,
-];
+pub(super) fn functions(level: LanguageLevel) -> [FunctionEntry; 7] {
+    let intersection = if level.has(Change::ArrayIntersectConvertsBeforeFiltering) {
+        FunctionEntry {
+            handler: NativeFn::Async(super::intersect::intersect),
+            ..ARRAY_INTERSECT
+        }
+    } else {
+        ARRAY_INTERSECT
+    };
+    [
+        ARRAY_DIFF,
+        ARRAY_DIFF_KEY,
+        ARRAY_DIFF_ASSOC,
+        intersection,
+        ARRAY_INTERSECT_KEY,
+        ARRAY_INTERSECT_ASSOC,
+        ARRAY_UNIQUE,
+    ]
+}
 
 /// `array_diff(array $array, array ...$arrays): array`, the entries whose
 /// value is in none of the other arrays.

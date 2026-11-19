@@ -174,6 +174,7 @@ pub const DEFAULT_FRAME_LIMIT: usize = 250_000;
 
 /// One request interpreter; PHP calls use heap frames rather than Rust recursion.
 pub struct Vm {
+    spl_object_hash_deprecated: bool,
     classes: classes::ClassTable,
     enum_cases: classes::enums::EnumCases,
     native_callback_sites: Vec<error_traces::NativeCallbackSite>,
@@ -246,6 +247,9 @@ impl Vm {
             })
             .collect();
         Self {
+            spl_object_hash_deprecated: registry
+                .level()
+                .has(phera_extension_api::Change::SplObjectHashDeprecated),
             enum_cases: classes::enums::EnumCases::default(),
             classes: classes::ClassTable::native(&registry),
             autoload: Default::default(),

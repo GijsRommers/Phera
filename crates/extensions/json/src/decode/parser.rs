@@ -10,7 +10,10 @@
 //! ```
 
 use super::scanner::{Container, Scanner, Token};
-use crate::{error::Error, flags::DecodeFlags};
+use crate::{
+    error::{Details, Error},
+    flags::DecodeFlags,
+};
 use phera_extension_api::{ArrayKey, PhpArray, Value};
 
 /// Turns the members of a JSON object into a PHP object. The parser does
@@ -42,17 +45,32 @@ struct Frame {
 
 /// Parses a whole document. `factory` makes the objects, unless
 /// `flags.associative` asks for arrays.
-pub(super) fn parse(
+pub(super) fn parse<const LOCATIONS: bool>(
     bytes: &[u8],
     depth: usize,
     flags: DecodeFlags,
     factory: ObjectFactory<'_>,
-) -> Result<Value, Error> {
+) -> Result<Value, Details> {
     let mut scanner = Scanner::new(bytes, flags);
+    parse_tokens::<LOCATIONS>(&mut scanner, depth, flags, factory).map_err(|error| {
+        if LOCATIONS {
+            Details::at(error, bytes, scanner.token_start())
+        } else {
+            error.into()
+        }
+    })
+}
+
+fn parse_tokens<const LOCATIONS: bool>(
+    scanner: &mut Scanner<'_>,
+    depth: usize,
+    flags: DecodeFlags,
+    factory: ObjectFactory<'_>,
+) -> Result<Value, Error> {
     let mut frames: Vec<Frame> = Vec::new();
     let mut root = None;
     loop {
-        let token = scanner.next()?;
+        let token = scanner.next::<LOCATIONS>()?;
         if frames.is_empty() && root.is_some() {
             return if matches!(token, Token::End) {
                 root.ok_or(Error::Syntax)

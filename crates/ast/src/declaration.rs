@@ -29,6 +29,8 @@ pub struct FunctionDeclaration {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Parameter {
     pub doc_comment: Option<Span>,
+    /// PHP 8.6 reflection also recognizes a doc comment after the parameter.
+    pub parameter_doc_comment: Option<Span>,
     pub attributes: Vec<Attribute>,
     /// Non-empty only for constructor property promotion.
     pub modifiers: Modifiers,

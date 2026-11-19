@@ -68,6 +68,16 @@ pub(super) fn register(registry: &mut Registry) {
         },
         ..ClassEntry::class(DIRECTORY)
     });
+    use phera_extension_api::{Availability, Change};
+    if registry.level().has(Change::DirectoryIteratorReturnTypes) {
+        for method in [
+            Method::public("key", &[], d::index).tentative_return("string|int"),
+            Method::public("current", &[], d::identity)
+                .tentative_return("SplFileInfo|static|string"),
+        ] {
+            registry.method_at(Availability::Since86, DIRECTORY, method);
+        }
+    }
     registry.class(ClassEntry {
         parent: Some(DIRECTORY),
         constants: CONSTANTS,

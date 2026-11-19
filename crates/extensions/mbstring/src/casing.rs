@@ -18,52 +18,60 @@ use crate::text::{decode_argument, encode_result, substring};
 use crate::unicode::{self, Case};
 use crate::{ENCODING, STRING};
 
-pub fn register(registry: &mut Registry) {
+pub fn register<const UPDATED: bool>(registry: &mut Registry) {
     registry.function(FunctionEntry::sync(
         "mb_strtoupper",
         ONE_STRING,
-        mb_strtoupper,
+        mb_strtoupper::<UPDATED>,
     ));
     registry.function(FunctionEntry::sync(
         "mb_strtolower",
         ONE_STRING,
-        mb_strtolower,
+        mb_strtolower::<UPDATED>,
     ));
-    registry.function(FunctionEntry::sync("mb_ucfirst", ONE_STRING, mb_ucfirst));
-    registry.function(FunctionEntry::sync("mb_lcfirst", ONE_STRING, mb_lcfirst));
+    registry.function(FunctionEntry::sync(
+        "mb_ucfirst",
+        ONE_STRING,
+        mb_ucfirst::<UPDATED>,
+    ));
+    registry.function(FunctionEntry::sync(
+        "mb_lcfirst",
+        ONE_STRING,
+        mb_lcfirst::<UPDATED>,
+    ));
     registry.function(FunctionEntry::sync(
         "mb_convert_case",
         MB_CONVERT_CASE,
-        mb_convert_case,
+        mb_convert_case::<UPDATED>,
     ));
 }
 
 const ONE_STRING: &[Param] = &[STRING, ENCODING];
 
 /// `mb_strtoupper(string $string, ?string $encoding = null): string`
-fn mb_strtoupper(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
-    change_case(ctx, a, "mb_strtoupper", Case::Upper)
+fn mb_strtoupper<const UPDATED: bool>(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
+    change_case::<UPDATED>(ctx, a, "mb_strtoupper", Case::Upper)
 }
 
 /// `mb_strtolower(string $string, ?string $encoding = null): string`
-fn mb_strtolower(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
-    change_case(ctx, a, "mb_strtolower", Case::Lower)
+fn mb_strtolower<const UPDATED: bool>(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
+    change_case::<UPDATED>(ctx, a, "mb_strtolower", Case::Lower)
 }
 
 /// `mb_ucfirst(string $string, ?string $encoding = null): string`
-fn mb_ucfirst(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
-    change_first(ctx, a, "mb_ucfirst", Case::Title)
+fn mb_ucfirst<const UPDATED: bool>(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
+    change_first::<UPDATED>(ctx, a, "mb_ucfirst", Case::Title)
 }
 
 /// `mb_lcfirst(string $string, ?string $encoding = null): string`
-fn mb_lcfirst(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
-    change_first(ctx, a, "mb_lcfirst", Case::Lower)
+fn mb_lcfirst<const UPDATED: bool>(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
+    change_first::<UPDATED>(ctx, a, "mb_lcfirst", Case::Lower)
 }
 
 const MB_CONVERT_CASE: &[Param] = &[STRING, Param::new("mode", ParamType::Int), ENCODING];
 
 /// `mb_convert_case(string $string, int $mode, ?string $encoding = null): string`
-fn mb_convert_case(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
+fn mb_convert_case<const UPDATED: bool>(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     let case = Case::from_mode(args::int(a, 1).unwrap_or(0)).ok_or_else(|| {
         NativeError::value_error(
             "mb_convert_case(): Argument #2 ($mode) must be one of the MB_CASE_* constants",
@@ -72,26 +80,36 @@ fn mb_convert_case(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     let (points, encoding) = decode_argument(ctx, a, 2, "mb_convert_case")?;
     Ok(Value::from(encode_result(
         ctx,
-        &unicode::convert(&points, case),
+        &unicode::convert::<UPDATED>(&points, case),
         encoding,
     )))
 }
 
-fn change_case(ctx: &mut dyn Context, a: &[Value], function: &str, case: Case) -> NativeResult {
+fn change_case<const UPDATED: bool>(
+    ctx: &mut dyn Context,
+    a: &[Value],
+    function: &str,
+    case: Case,
+) -> NativeResult {
     let (points, encoding) = decode_argument(ctx, a, 1, function)?;
     if let Some(quirk) = uuencode_quirk(&points, encoding, args::bytes(a, 0)) {
         return Ok(quirk);
     }
     Ok(Value::from(encode_result(
         ctx,
-        &unicode::convert(&points, case),
+        &unicode::convert::<UPDATED>(&points, case),
         encoding,
     )))
 }
 
 /// Changes the first character and copies the rest as it is, so invalid
 /// bytes after it survive.
-fn change_first(ctx: &mut dyn Context, a: &[Value], function: &str, case: Case) -> NativeResult {
+fn change_first<const UPDATED: bool>(
+    ctx: &mut dyn Context,
+    a: &[Value],
+    function: &str,
+    case: Case,
+) -> NativeResult {
     let (points, encoding) = decode_argument(ctx, a, 1, function)?;
     let bytes = args::bytes(a, 0);
     if let Some(quirk) = uuencode_quirk(&points, encoding, bytes) {
@@ -103,7 +121,7 @@ fn change_first(ctx: &mut dyn Context, a: &[Value], function: &str, case: Case) 
     let first = substring(ctx, bytes, 0, Some(1), encoding);
     let mut changed = encode_result(
         ctx,
-        &unicode::convert(&decode(&first, encoding), case),
+        &unicode::convert::<UPDATED>(&decode(&first, encoding), case),
         encoding,
     );
     if changed == *first {

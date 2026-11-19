@@ -26,7 +26,7 @@ pub struct Matrix {
 }
 impl Matrix {
     pub fn new() -> Self {
-        let mut registry = Registry::new();
+        let mut registry = Registry::for_level(phera_extension_api::testing::oracle::test_level());
         Json.register(&mut registry);
         Self {
             registry,

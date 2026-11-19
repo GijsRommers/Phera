@@ -722,7 +722,7 @@ function invoke($name,$args){global $diag;$diag='';$refs=[];if(in_array($name,['
         *groups.entry(group).or_insert(0usize) += 1;
     }
     eprintln!("Oracle group counts: {groups:?}");
-    let mut registry = Registry::new();
+    let mut registry = Registry::for_level(phera_extension_api::testing::oracle::test_level());
     registry.load(&Standard);
     let mut failures = Vec::new();
     let mut tolerant_comparisons = std::collections::BTreeMap::new();

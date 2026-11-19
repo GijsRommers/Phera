@@ -436,7 +436,7 @@ fn arrays_match_php() {
 /// The task's explicit depth limit must use a PHP Error rather than a Rust stack overflow.
 #[test]
 fn recursive_depth_guard() {
-    let mut registry = Registry::new();
+    let mut registry = Registry::for_level(phera_extension_api::testing::oracle::test_level());
     Standard.register(&mut registry);
     let mut value = Value::Null;
     for _ in 0..10_005 {

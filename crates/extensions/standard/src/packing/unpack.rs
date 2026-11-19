@@ -5,22 +5,22 @@ use phera_extension_api::{
     args,
 };
 
-use super::format::{Code, Endian, Number, count, diagnostic_byte};
+use super::format::{Code, Endian, Number, count, diagnostic_byte, modifier};
 
-pub const UNPACK: FunctionEntry = FunctionEntry::sync(
-    "unpack",
-    &[
-        Param::new("format", ParamType::String),
-        Param::new("string", ParamType::String),
-        Param::new("offset", ParamType::Int).optional(),
-    ],
-    |context, arguments| {
-        unpack(context, arguments)
+const PARAMS: &[Param] = &[
+    Param::new("format", ParamType::String),
+    Param::new("string", ParamType::String),
+    Param::new("offset", ParamType::Int).optional(),
+];
+
+pub(super) const fn entry<const MODIFIERS: bool>() -> FunctionEntry {
+    FunctionEntry::sync("unpack", PARAMS, |context, arguments| {
+        unpack::<MODIFIERS>(context, arguments)
             .map_err(|error| context.native_call_error("unpack", arguments, error))
-    },
-);
+    })
+}
 
-fn unpack(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn unpack<const MODIFIERS: bool>(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let (Some(format), Some(input)) = (args::string(arguments, 0), args::string(arguments, 1))
     else {
         return Err(NativeError::error(
@@ -40,6 +40,7 @@ fn unpack(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let mut format = format.as_bytes();
     while let Some((&symbol, rest)) = format.split_first() {
         format = rest;
+        let order = modifier::<MODIFIERS>(&mut format);
         let repeat = count(&mut format);
         if repeat.is_some_and(|repeat| repeat > i32::MAX as i64) {
             warning(context, symbol, "integer overflow");
@@ -52,13 +53,15 @@ fn unpack(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
             .unwrap_or(format.len());
         let name = &format[..name_end.min(200)];
         format = format.get(name_end + 1..).unwrap_or_default();
-        let code = Code::parse(symbol).ok_or_else(|| {
-            let symbol = diagnostic_byte(symbol);
-            NativeError::value_error(format!(
-                "Invalid format type {}",
-                symbol.trim_end_matches('\0')
-            ))
-        })?;
+        let code = Code::parse(symbol)
+            .ok_or_else(|| {
+                let symbol = diagnostic_byte(symbol);
+                NativeError::value_error(format!(
+                    "Invalid format type {}",
+                    symbol.trim_end_matches('\0')
+                ))
+            })?
+            .with_modifier(symbol, order)?;
         let remaining = &data[position..];
         match code {
             Code::Back => {
