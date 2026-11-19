@@ -35,6 +35,7 @@ pub struct Attributes {
     pub transaction_mode: i64,
     pub autocommit: bool,
     pub mysql_table_names: bool,
+    pub mysql_buffered: bool,
     pub national_strings: bool,
     pub pgsql_disable_prepares: bool,
 }
@@ -56,6 +57,7 @@ impl Attributes {
             transaction_mode: 0,
             autocommit: true,
             mysql_table_names: false,
+            mysql_buffered: true,
             national_strings: false,
             pgsql_disable_prepares: false,
         }
@@ -249,11 +251,7 @@ fn change(
             attrs.national_strings = integer(value)? == STR_NATL
         }
         (DriverName::Mysql, ATTR_FETCH_TABLE_NAMES) => attrs.mysql_table_names = boolean(value)?,
-        (DriverName::Mysql, MYSQL_BUFFERED) => {
-            if !boolean(value)? {
-                return Err(unsupported("Unbuffered MySQL queries"));
-            }
-        }
+        (DriverName::Mysql, MYSQL_BUFFERED) => attrs.mysql_buffered = boolean(value)?,
         (DriverName::Postgres, PGSQL_DISABLE_PREPARES) => {
             attrs.pgsql_disable_prepares = boolean(value)?
         }
@@ -349,7 +347,7 @@ pub fn get<'a>(
                 STR_CHAR
             }),
             (DriverName::Mysql, ATTR_FETCH_TABLE_NAMES) => Value::Bool(attrs.mysql_table_names),
-            (DriverName::Mysql, MYSQL_BUFFERED) => Value::Bool(true),
+            (DriverName::Mysql, MYSQL_BUFFERED) => Value::Bool(attrs.mysql_buffered),
             (DriverName::Mysql, MYSQL_LOCAL_INFILE) => Value::Bool(false),
             (DriverName::Mysql, MYSQL_LOCAL_INFILE_DIRECTORY) => Value::Null,
             (DriverName::Postgres, PGSQL_DISABLE_PREPARES) => {

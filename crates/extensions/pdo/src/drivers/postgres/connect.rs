@@ -128,9 +128,7 @@ pub(super) fn tls_failure(host: &str, port: u16, error: io::Error) -> DbError {
                 format!("server certificate does not match host name \"{host}\""),
             );
         }
-        Some(Error::InvalidCertificate(CertificateError::UnknownIssuer)) => {
-            "SSL error: certificate verify failed".to_owned()
-        }
+        Some(Error::InvalidCertificate(_)) => "SSL error: certificate verify failed".to_owned(),
         _ => format!("SSL error: {error}"),
     };
     failed(host, port, reason)

@@ -1,6 +1,7 @@
 //! Executing bound parameters releases all statement borrows before awaiting I/O.
 
-use crate::drivers::{Prepared, Rows};
+use crate::drivers::{Execution, Prepared, Rows};
+use crate::dsn::DriverName;
 use crate::errors::{DbError, ErrorState};
 use crate::parameters;
 use crate::statement::{Statement, state};
@@ -69,7 +70,23 @@ pub fn execute_named<'a>(
             Ok(values) => values,
             Err(error) => return fail(&state, context, error, method),
         };
+        let stream_owner = state.borrow_mut().stream_owner.take();
+        let execution = {
+            let attrs = connection.attributes.borrow();
+            let mysql_stream = (connection.name == DriverName::Mysql && !attrs.mysql_buffered)
+                .then(|| stream_owner.clone().unwrap_or_default());
+            Execution {
+                national_strings: attrs.national_strings,
+                mysql_stream,
+            }
+        };
+        let new_owner = execution.mysql_stream.clone();
         let mut driver = connection.driver.lock().await;
+        if let Some(owner) = stream_owner
+            && let Err(error) = driver.close_mysql_stream(owner).await
+        {
+            return fail(&state, context, error, method);
+        }
         let prepared = if let Prepared::PostgresDeferred { number } = prepared {
             match driver.prepare(&sql, number).await {
                 Ok(prepared) => {
@@ -81,7 +98,7 @@ pub fn execute_named<'a>(
         } else {
             prepared
         };
-        let result = driver.execute(&sql, &prepared, &values).await;
+        let result = driver.execute(&sql, &prepared, &values, execution).await;
         if let Some(active) = driver.observed_transaction_state() {
             connection.transaction.set(active);
         }
@@ -89,6 +106,9 @@ pub fn execute_named<'a>(
         match result {
             Ok(rows) => {
                 let mut statement = state.borrow_mut();
+                if !rows.columns.is_empty() {
+                    statement.stream_owner = new_owner;
+                }
                 statement.rows = rows;
                 statement.cursor = 0;
                 statement.error = ErrorState::Success;

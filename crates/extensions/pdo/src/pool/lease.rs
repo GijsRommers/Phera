@@ -6,11 +6,12 @@ use phera_extension_api::PhpArray;
 use phera_io_pool::Operation;
 
 use crate::constants::ATTR_SERVER_INFO;
-use crate::drivers::{Column, Driver, Prepared, Rows, connection_error};
+use crate::drivers::{Column, Driver, Execution, Prepared, Rows, connection_error};
 use crate::errors::DbError;
 use crate::metadata::Metadata;
 use crate::parameters::BoundValue;
 use crate::placeholders::Sql;
+use std::sync::Arc;
 
 pub struct Lease {
     connection: phera_io_pool::Lease<Driver>,
@@ -82,13 +83,46 @@ impl Lease {
         sql: &Sql,
         prepared: &Prepared,
         values: &[BoundValue],
+        options: Execution,
     ) -> Result<Rows, DbError> {
         let (sql, prepared, values) = (sql.clone(), prepared.clone(), values.to_vec());
         self.run(move |driver| {
-            Box::pin(async move { driver.execute(&sql, &prepared, &values).await })
+            Box::pin(async move { driver.execute(&sql, &prepared, &values, &options).await })
         })
         .await?
         .into_php()
+    }
+
+    pub async fn read_mysql_stream(
+        &mut self,
+        owner: Arc<()>,
+        all: bool,
+    ) -> Result<Option<(Rows, bool)>, DbError> {
+        let result = self
+            .run(move |driver| {
+                Box::pin(async move {
+                    match driver {
+                        Driver::Mysql(mysql) => mysql.read_stream(&owner, all).await,
+                        _ => Ok(None),
+                    }
+                })
+            })
+            .await?;
+        result
+            .map(|(rows, done)| rows.into_php().map(|rows| (rows, done)))
+            .transpose()
+    }
+
+    pub async fn close_mysql_stream(&mut self, owner: Arc<()>) -> Result<(), DbError> {
+        self.run(move |driver| {
+            Box::pin(async move {
+                if let Driver::Mysql(mysql) = driver {
+                    mysql.close_stream(&owner).await;
+                }
+                Ok(())
+            })
+        })
+        .await
     }
 
     pub async fn exec(&mut self, sql: &str) -> Result<Rows, DbError> {

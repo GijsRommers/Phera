@@ -19,6 +19,11 @@ rustls-native-certs.workspace = true
 rustls-rustcrypto.workspace = true
 tokio-rustls.workspace = true
 webpki-roots.workspace = true
+futures-core.workspace = true
+
+[dev-dependencies]
+rcgen.workspace = true
+tempfile.workspace = true
 
 [lints]
 workspace = true

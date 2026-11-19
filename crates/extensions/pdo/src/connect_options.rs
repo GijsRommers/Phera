@@ -20,6 +20,7 @@ pub struct MysqlOptions {
     pub compress: bool,
     pub found_rows: bool,
     pub ignore_space: bool,
+    pub multiple: bool,
     pub ssl: Option<MysqlTls>,
 }
 
@@ -31,6 +32,7 @@ impl Default for MysqlOptions {
             compress: false,
             found_rows: false,
             ignore_space: false,
+            multiple: true,
             ssl: None,
         }
     }
@@ -85,9 +87,6 @@ impl ConnectOptions {
                 0,
             ));
         }
-        if !multiple {
-            return Err(unsupported("Disabling MySQL multi-statements"));
-        }
         if options
             .get(&ArrayKey::Int(MYSQL_SERVER_PUBLIC_KEY))
             .is_some()
@@ -128,6 +127,7 @@ impl ConnectOptions {
                 compress,
                 found_rows,
                 ignore_space,
+                multiple,
                 ssl,
             },
         })

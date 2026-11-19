@@ -8,6 +8,8 @@ use crate::connect_options::ConnectOptions;
 use crate::drivers::connection_error;
 use crate::errors::DbError;
 
+mod postgres;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DriverName {
     Postgres,
@@ -63,9 +65,20 @@ impl Dsn {
                 options: ConnectOptions::default(),
             });
         }
-        for field in rest.split(';').filter(|field| !field.trim().is_empty()) {
-            if let Some((key, value)) = field.split_once('=') {
-                fields.insert(key.trim().to_owned(), value.trim().to_owned());
+        if driver == DriverName::Postgres {
+            fields = postgres::fields(rest).map_err(|detail| {
+                let error = connection_error(detail);
+                crate::errors::exception(
+                    format!("SQLSTATE[08006] [7] {}", error.detail),
+                    Some(&error),
+                    7,
+                )
+            })?;
+        } else {
+            for field in rest.split(';').filter(|field| !field.trim().is_empty()) {
+                if let Some((key, value)) = field.split_once('=') {
+                    fields.insert(key.trim().to_owned(), value.trim().to_owned());
+                }
             }
         }
         Ok(Self {

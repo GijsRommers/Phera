@@ -19,6 +19,7 @@ mod registration;
 mod statement;
 mod statement_class;
 mod statement_execute;
+mod stream_fetch;
 mod transactions;
 
 use phera_extension_api::{Extension, Registry};

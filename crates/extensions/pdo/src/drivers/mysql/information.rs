@@ -17,9 +17,9 @@ impl Mysql {
     }
 
     pub async fn server_info(&mut self) -> Result<String, DbError> {
-        self.check_pending()?;
+        self.check_pending().await?;
         let rows: Vec<(String, u64)> = self
-            .connection
+            .connection()?
             .query(
                 "SHOW GLOBAL STATUS WHERE Variable_name IN ('Uptime', 'Threads_connected', \
             'Questions', 'Slow_queries', 'Opened_tables', 'Flush_commands', 'Open_tables')",

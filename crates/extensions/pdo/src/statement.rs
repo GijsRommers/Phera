@@ -3,6 +3,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use phera_extension_api::{
     ArrayKey, Context, LocalFuture, NativeError, NativeResult, Object, PhpArray, Value, args,
@@ -21,6 +22,7 @@ pub struct Statement {
     // Rust drops fields in declaration order. Queue statement cleanup before
     // releasing the session, whose final drop may immediately start pool reset.
     pub prepared: Prepared,
+    pub stream_owner: Option<Arc<()>>,
     pub connection: Rc<Session>,
     pub sql: Sql,
     pub bindings: HashMap<String, Binding>,
@@ -134,6 +136,8 @@ async fn create(
     };
     let prepared = if attributes.emulate {
         Prepared::Emulated
+    } else if attributes.pgsql_disable_prepares {
+        Prepared::PostgresUnnamed
     } else if connection.name == crate::dsn::DriverName::Postgres {
         let number = connection.statement_sequence.get() + 1;
         connection.statement_sequence.set(number);
@@ -167,6 +171,7 @@ async fn create(
         connection,
         sql,
         prepared,
+        stream_owner: None,
         bindings: HashMap::new(),
         rows: Rows::default(),
         cursor: 0,

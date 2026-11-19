@@ -1,15 +1,17 @@
 //! MySQL uses binary prepared statements, or text queries for `ATTR_EMULATE_PREPARES`.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use mysql_async::prelude::Queryable;
 use mysql_async::{Conn, OptsBuilder, Params, Row, Statement};
 
 mod information;
+mod stream;
 mod tls;
 pub mod values;
 
-use super::{Prepared, RawRows};
+use super::{Execution, Prepared, RawRows};
 use crate::connect_options::MysqlOptions;
 use crate::dsn::Dsn;
 use crate::errors::DbError;
@@ -18,7 +20,8 @@ use crate::placeholders::Sql;
 use values::parameter;
 
 pub struct Mysql {
-    connection: Conn,
+    connection: Option<Conn>,
+    active: Option<stream::Active>,
     pub version: String,
     last_insert_id: u64,
     pending_exec_rows: bool,
@@ -45,6 +48,9 @@ impl Mysql {
                 .client_found_rows(settings.found_rows);
             if settings.compress {
                 options = options.compression(mysql_async::Compression::default());
+            }
+            if !settings.multiple {
+                options = options.stmt_cache_size(0);
             }
             if let Some(tls) = &settings.ssl {
                 options = options.ssl_opts(tls::options(tls).await?);
@@ -92,7 +98,8 @@ impl Mysql {
             .map_err(error)?;
         configure(&mut connection, settings).await?;
         Ok(Self {
-            connection,
+            connection: Some(connection),
+            active: None,
             version: version.unwrap_or_default(),
             last_insert_id: 0,
             pending_exec_rows: false,
@@ -104,13 +111,17 @@ impl Mysql {
         })
     }
 
-    pub async fn close(self) {
-        let _ = self.connection.disconnect().await;
+    pub async fn close(mut self) {
+        if let Some(connection) = self.connection.take() {
+            let _ = connection.disconnect().await;
+        }
     }
 
     pub async fn reset(&mut self) -> Result<(), DbError> {
-        if !self.connection.reset().await.map_err(error)? {
-            self.connection
+        self.finish_stream().await;
+        let connection = self.connection.as_mut().ok_or_else(Self::closed)?;
+        if !connection.reset().await.map_err(error)? {
+            connection
                 .change_user(Default::default())
                 .await
                 .map_err(error)?;
@@ -118,34 +129,34 @@ impl Mysql {
         // COM_RESET_CONNECTION does not restore the database selected with USE.
         if !self.database.is_empty() {
             let database = self.database.replace('`', "``");
-            self.connection
+            connection
                 .query_drop(format!("USE `{database}`"))
                 .await
                 .map_err(error)?;
         }
         if let Some(charset) = &self.charset {
-            self.connection
+            connection
                 .query_drop(format!("SET NAMES {charset}"))
                 .await
                 .map_err(error)?;
         }
-        configure(&mut self.connection, &self.options).await?;
+        configure(connection, &self.options).await?;
         self.last_insert_id = 0;
         self.pending_exec_rows = false;
         Ok(())
     }
 
     pub fn is_broken(&self) -> bool {
-        self.connection.is_disconnected()
+        self.active.is_none() && self.connection.as_ref().is_none_or(Conn::is_disconnected)
     }
 
     pub async fn health(&mut self) -> Result<(), DbError> {
-        self.connection.ping().await.map_err(error)
+        self.connection()?.ping().await.map_err(error)
     }
 
     pub async fn set_autocommit(&mut self, enabled: bool) -> Result<(), DbError> {
-        self.check_pending()?;
-        self.connection
+        self.check_pending().await?;
+        self.connection()?
             .query_drop(if enabled {
                 "SET autocommit=1"
             } else {
@@ -156,8 +167,8 @@ impl Mysql {
     }
 
     pub async fn prepare(&mut self, sql: &Sql) -> Result<Statement, DbError> {
-        self.check_pending()?;
-        self.connection
+        self.check_pending().await?;
+        self.connection()?
             .prep(sql.render(|_| "?".into()))
             .await
             .map_err(error)
@@ -168,35 +179,51 @@ impl Mysql {
         sql: &Sql,
         prepared: &Prepared,
         values: &[BoundValue],
+        options: &Execution,
     ) -> Result<RawRows, DbError> {
-        self.check_pending()?;
+        self.check_pending().await?;
         match prepared {
             Prepared::Mysql(statement) => {
                 let params = Params::Positional(values.iter().map(parameter).collect());
+                if let Some(owner) = &options.mysql_stream {
+                    return self
+                        .stream(stream::Query::Binary(statement.clone(), params), owner)
+                        .await;
+                }
                 let mut result = self
-                    .connection
+                    .connection()?
                     .exec_iter(statement, params)
                     .await
                     .map_err(error)?;
                 let columns = result.columns_ref().to_vec();
                 let rows: Vec<Row> = result.collect().await.map_err(error)?;
                 let affected = result.affected_rows();
-                self.last_insert_id = result.last_insert_id().unwrap_or(0);
+                let insert_id = result.last_insert_id().unwrap_or(0);
                 result.drop_result().await.map_err(error)?;
+                self.last_insert_id = insert_id;
                 Ok(RawRows::Mysql {
                     columns,
                     rows,
                     affected,
                 })
             }
-            Prepared::Emulated if values.is_empty() => self.run_unprepared(&sql.source).await,
+            Prepared::Emulated if values.is_empty() => {
+                self.text(&sql.source, options.mysql_stream.as_ref()).await
+            }
             Prepared::Emulated => {
                 let mode = self.backslash_escapes().await?;
                 let query = sql.render(|i| match &values[i] {
-                    BoundValue::String(bytes) => quote(bytes, mode),
+                    BoundValue::String(bytes) => {
+                        let quoted = quote(bytes, mode);
+                        if options.national_strings {
+                            format!("N{quoted}")
+                        } else {
+                            quoted
+                        }
+                    }
                     value => literal(value, true),
                 });
-                self.run_unprepared(&query).await
+                self.text(&query, options.mysql_stream.as_ref()).await
             }
             _ => Err(DbError {
                 state: "HY000".into(),
@@ -207,13 +234,26 @@ impl Mysql {
     }
 
     pub async fn run_unprepared(&mut self, sql: &str) -> Result<RawRows, DbError> {
-        self.check_pending()?;
-        let mut result = self.connection.query_iter(sql).await.map_err(error)?;
+        self.text(sql, None).await
+    }
+
+    async fn text(&mut self, sql: &str, owner: Option<&Arc<()>>) -> Result<RawRows, DbError> {
+        self.check_pending().await?;
+        if !self.options.multiple {
+            require_single_statement(self.connection()?, sql).await?;
+        }
+        if let Some(owner) = owner {
+            return self
+                .stream(stream::Query::Text(sql.to_owned()), owner)
+                .await;
+        }
+        let mut result = self.connection()?.query_iter(sql).await.map_err(error)?;
         let columns = result.columns_ref().to_vec();
         let rows: Vec<Row> = result.collect().await.map_err(error)?;
         let affected = result.affected_rows();
-        self.last_insert_id = result.last_insert_id().unwrap_or(0);
+        let insert_id = result.last_insert_id().unwrap_or(0);
         result.drop_result().await.map_err(error)?;
+        self.last_insert_id = insert_id;
         Ok(RawRows::Mysql {
             columns,
             rows,
@@ -228,8 +268,11 @@ impl Mysql {
         Ok(rows)
     }
 
-    fn check_pending(&self) -> Result<(), DbError> {
-        if !self.pending_exec_rows {
+    async fn check_pending(&mut self) -> Result<(), DbError> {
+        if self.active.as_ref().is_some_and(stream::Active::abandoned) {
+            self.finish_stream().await;
+        }
+        if !self.pending_exec_rows && self.active.is_none() {
             return Ok(());
         }
         Err(DbError {
@@ -244,8 +287,9 @@ impl Mysql {
     }
 
     async fn backslash_escapes(&mut self) -> Result<bool, DbError> {
+        self.check_pending().await?;
         let mode: Option<String> = self
-            .connection
+            .connection()?
             .query_first("SELECT @@SESSION.sql_mode")
             .await
             .map_err(error)?;
@@ -262,7 +306,7 @@ impl Mysql {
 
     pub fn transaction_state(&self) -> Option<bool> {
         // Like mysqlnd, retain PDO's last observed status after an error packet.
-        self.connection.last_ok_packet().map(|packet| {
+        self.connection.as_ref()?.last_ok_packet().map(|packet| {
             packet
                 .status_flags()
                 .contains(mysql_async::consts::StatusFlags::SERVER_STATUS_IN_TRANS)
@@ -271,6 +315,18 @@ impl Mysql {
 
     pub fn last_id(&self) -> String {
         self.last_insert_id.to_string()
+    }
+
+    fn closed() -> DbError {
+        DbError {
+            state: "HY000".into(),
+            code: Some(2006),
+            detail: "MySQL server has gone away".into(),
+        }
+    }
+
+    fn connection(&mut self) -> Result<&mut Conn, DbError> {
+        self.connection.as_mut().ok_or_else(Self::closed)
     }
 }
 
@@ -282,6 +338,9 @@ async fn configure(connection: &mut Conn, settings: &MysqlOptions) -> Result<(),
             .map_err(error)?;
     }
     if let Some(init) = &settings.init {
+        if !settings.multiple {
+            require_single_statement(connection, init).await?;
+        }
         connection.query_drop(init).await.map_err(error)?;
     }
     if !settings.autocommit {
@@ -291,6 +350,13 @@ async fn configure(connection: &mut Conn, settings: &MysqlOptions) -> Result<(),
             .map_err(error)?;
     }
     Ok(())
+}
+
+/// The client library always advertises multi-statements. A fresh server parse
+/// through the prepared protocol allows at most one statement before a text query.
+async fn require_single_statement(connection: &mut Conn, sql: &str) -> Result<(), DbError> {
+    let statement = connection.prep(sql).await.map_err(error)?;
+    connection.close(statement).await.map_err(error)
 }
 
 pub fn error(error: mysql_async::Error) -> DbError {

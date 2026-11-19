@@ -14,8 +14,12 @@ mod protocol;
 mod stream;
 mod text;
 mod tls;
+mod unnamed;
 pub mod values;
 mod verify;
+
+#[cfg(test)]
+mod tls_tests;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -171,6 +175,7 @@ impl Postgres {
         let statement = match prepared {
             Prepared::Postgres { statement, .. } => statement.clone(),
             Prepared::PostgresDeferred { .. } => self.prepare(sql).await?,
+            Prepared::PostgresUnnamed => return self.execute_unnamed(sql, values).await,
             Prepared::Emulated => {
                 let mut literals = Vec::new();
                 for value in values {

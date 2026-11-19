@@ -10,7 +10,8 @@ use tokio::sync::Mutex;
 
 use crate::attributes::{self, AttributeCall, Attributes};
 use crate::constants::{
-    ATTR_ERRMODE, ATTR_PERSISTENT, PARAM_BOOL, PARAM_INT, PARAM_NULL, PARAM_STR,
+    ATTR_ERRMODE, ATTR_PERSISTENT, PARAM_BOOL, PARAM_INT, PARAM_LOB, PARAM_NULL, PARAM_STR,
+    STR_CHAR, STR_NATL,
 };
 use crate::dsn::{DriverName, Dsn};
 use crate::errors::{DbError, ErrorMode, ErrorState, unsupported};
@@ -253,7 +254,10 @@ pub fn quote<'a>(
             return Ok(Value::from(crate::drivers::sqlite::quote(bytes)));
         }
         let kind = args::int(&arguments, 1).unwrap_or(PARAM_STR);
-        if !matches!(kind, PARAM_NULL | PARAM_INT | PARAM_STR | PARAM_BOOL) {
+        let base = kind & !(STR_CHAR | STR_NATL);
+        if !matches!(base, PARAM_NULL | PARAM_INT | PARAM_STR | PARAM_BOOL)
+            && !(base == PARAM_LOB && session.name == DriverName::Mysql)
+        {
             return Err(unsupported("LOB quoting"));
         }
         let bytes = args::string(&arguments, 0).map_or(&b""[..], |s| s.as_bytes());
@@ -265,7 +269,24 @@ pub fn quote<'a>(
         }
         let result = session.driver.lock().await.quote(bytes).await;
         match result {
-            Ok(quoted) => Ok(Value::from(quoted)),
+            Ok(quoted) => {
+                let prefix = if session.name != DriverName::Mysql {
+                    ""
+                } else if base == PARAM_LOB {
+                    "_binary"
+                } else if kind & STR_CHAR == 0
+                    && (kind & STR_NATL != 0 || session.attributes.borrow().national_strings)
+                {
+                    "N"
+                } else {
+                    ""
+                };
+                Ok(Value::from(if prefix.is_empty() {
+                    quoted
+                } else {
+                    format!("{prefix}{quoted}")
+                }))
+            }
             Err(error) => session.fail(context, error, "PDO::quote"),
         }
     })
