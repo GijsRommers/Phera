@@ -81,6 +81,26 @@ async fn unavailable_builtin_names_keep_user_function_binding() {
     assert_eq!(vm.run(unit).await, 0);
     assert_eq!(vm.output, expected.stdout);
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn shared_native_classes_use_request_local_method_names() {
+    let runtime = Runtime::new();
+    let tables = NativeTables::new(runtime.registry.clone());
+    let php = oracle::find_php().expect("PHP oracle");
+    for snippet in [
+        "$r = new ReflectionClass(stdClass::class); var_dump($r->getName());",
+        "$r = new ReflectionClass(stdClass::class); var_dump($r->isInternal());",
+        "$r = new ReflectionClass(stdClass::class); var_dump($r->getName());",
+    ] {
+        let expected = std::process::Command::new(&php)
+            .args(["-n", "-r", snippet])
+            .output()
+            .unwrap();
+        assert!(expected.status.success());
+        let source = format!("<?php {snippet}");
+        assert_eq!(run(&runtime, &tables, &source).await.as_bytes(), expected.stdout);
+    }
+}
 echo constant('PHP_SAPI') === php_sapi_name() ? 'sapi' : 'wrong';
 echo '|', (int) function_exists('getallheaders'), '|', ini_get('default_charset'),
     '|', strlen("é"), '|', (int) defined('REQUEST_VALUE');
