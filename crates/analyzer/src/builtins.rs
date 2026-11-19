@@ -18,6 +18,18 @@ pub fn load() -> Index {
 
 pub(crate) fn load_supported() -> Index {
     let mut index = load();
+    // Optional extension APIs are available to static analysis. Keep them
+    // out of the sets that prove a runtime function_exists() guard true.
+    let extensions = decode::decode(include_str!("../data/optional-extensions.tsv"));
+    for (name, class) in extensions.classes {
+        index.classes.entry(name).or_insert(class);
+    }
+    for (name, function) in extensions.functions {
+        index.functions.entry(name).or_insert(function);
+    }
+    for (name, constant) in extensions.constants {
+        index.constants.entry(name).or_insert(constant);
+    }
     for item in items() {
         if item.since.is_empty()
             && let Some((class, _)) = item.name.split_once("::")

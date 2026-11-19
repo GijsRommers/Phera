@@ -41,6 +41,7 @@ pub fn add_members(info: &mut ClassInfo, class: &ClassDeclaration, names: &Names
                 optional: false,
                 variadic: false,
                 by_reference: false,
+                closure_receiver: None,
             });
             signature.returns = ValueType::Class(info.name.clone());
             if method == "tryfrom" {

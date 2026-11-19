@@ -55,10 +55,13 @@ impl Analyzer<'_> {
         self.context.unbound_this = None;
         self.context.function = self.context.names.declaration(&function.name.name);
         self.context.declared_return = function.return_type.is_some();
+        self.context.generator =
+            self.context.declared_return && generators::body_yields(&function.body);
         self.context.by_reference = function.by_reference;
         self.context.returns =
             ValueType::declared(function.return_type.as_ref(), &self.context.names);
         let mut scope = Scope::default();
+        self.check_attributes(&function.attributes, &mut scope);
         self.parameter_scope(&function.parameters, &mut scope);
         self.check_type(function.return_type.as_ref());
         let flow = self.block(&function.body, &mut scope);
@@ -81,16 +84,42 @@ impl Analyzer<'_> {
             || crate::collect::anonymous_name(&self.file.path, class.span.start),
             |n| self.context.names.declaration(&n.name),
         ));
+        self.check_attributes(&class.attributes, &mut Scope::default());
         for name in class.extends.iter().chain(&class.implements) {
             self.class_name(name, true);
         }
         if let Some(name) = &self.context.class.clone() {
             self.required_methods(name, class.span);
         }
+        let consumer_contexts = if class.kind == ClassKind::Trait {
+            self.context
+                .class
+                .as_deref()
+                .map_or_else(Vec::new, |name| self.index.trait_consumers(name))
+        } else {
+            Vec::new()
+        };
+        let declaring_class = self.context.class.clone();
         for member in &class.members {
             match &member.kind {
-                ClassMemberKind::Method(method) => self.method_declaration(method, member.span),
-                ClassMemberKind::Property { ty, items, .. } => {
+                ClassMemberKind::Method(method) => {
+                    if class.kind != ClassKind::Trait {
+                        self.method_declaration(method, member.span);
+                    } else {
+                        for consumer in &consumer_contexts {
+                            self.context.class = Some(consumer.clone());
+                            self.method_declaration(method, member.span);
+                        }
+                        self.context.class.clone_from(&declaring_class);
+                    }
+                }
+                ClassMemberKind::Property {
+                    ty,
+                    items,
+                    attributes,
+                    ..
+                } => {
+                    self.check_attributes(attributes, &mut Scope::default());
                     self.check_type(ty.as_ref());
                     for item in items {
                         if let Some(default) = &item.default {
@@ -98,7 +127,13 @@ impl Analyzer<'_> {
                         }
                     }
                 }
-                ClassMemberKind::Constant { ty, items, .. } => {
+                ClassMemberKind::Constant {
+                    ty,
+                    items,
+                    attributes,
+                    ..
+                } => {
+                    self.check_attributes(attributes, &mut Scope::default());
                     self.check_type(ty.as_ref());
                     for item in items {
                         self.expression(&item.value, &mut Scope::default(), false);
@@ -109,7 +144,14 @@ impl Analyzer<'_> {
                         self.class_name(name, true);
                     }
                 }
-                _ => {}
+                ClassMemberKind::EnumCase {
+                    value, attributes, ..
+                } => {
+                    self.check_attributes(attributes, &mut Scope::default());
+                    if let Some(value) = value {
+                        self.expression(value, &mut Scope::default(), false);
+                    }
+                }
             }
         }
         self.context = previous;
@@ -130,10 +172,16 @@ impl Analyzer<'_> {
         };
         self.context.function = method.name.name.clone();
         self.context.declared_return = method.return_type.is_some();
+        self.context.generator = self.context.declared_return
+            && method
+                .body
+                .as_ref()
+                .is_some_and(|body| generators::body_yields(body));
         self.context.by_reference = method.by_reference;
         self.context.returns =
             ValueType::declared(method.return_type.as_ref(), &self.context.names);
         let mut scope = Scope::default();
+        self.check_attributes(&method.attributes, &mut scope);
         self.parameter_scope(&method.parameters, &mut scope);
         self.check_type(method.return_type.as_ref());
         if let Some(body) = &method.body {
@@ -180,7 +228,8 @@ impl Analyzer<'_> {
         if self.context.incomplete
             || flow != Flow::Next
             || !self.context.declared_return
-            || self.context.returns == ValueType::Void
+            || self.context.generator
+            || (self.context.returns == ValueType::Never && self.level == 0)
         {
             return;
         }
@@ -193,21 +242,9 @@ impl Analyzer<'_> {
                     return;
                 }
                 blocks.extend(crate::collect::child_blocks(statement));
-                for e in crate::walk::statement_expressions(statement) {
-                    let mut expressions = vec![e];
-                    while let Some(e) = expressions.pop() {
-                        if matches!(
-                            e.kind,
-                            ExpressionKind::Yield { .. } | ExpressionKind::YieldFrom(_)
-                        ) {
-                            return;
-                        }
-                        expressions.extend(crate::walk::children(e));
-                    }
-                }
             }
         }
-        let span = body.first().map_or(span, |statement| statement.span);
+        let span = body.last().map_or(span, |statement| statement.span);
         self.report(Finding::MissingReturn(self.context.function.clone()), span);
     }
     fn void_returns(&mut self, body: &[Statement]) {

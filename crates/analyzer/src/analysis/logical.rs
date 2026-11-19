@@ -26,6 +26,19 @@ impl Analyzer<'_> {
                 ValueType::Bool
             }
             ExpressionKind::Binary {
+                operator: BinaryOperator::And | BinaryOperator::Or,
+                ..
+            } => {
+                let Some(after) = self
+                    .condition(expression, std::mem::take(scope), quiet)
+                    .after()
+                else {
+                    return ValueType::Never;
+                };
+                *scope = after;
+                ValueType::Bool
+            }
+            ExpressionKind::Binary {
                 operator,
                 left,
                 right,

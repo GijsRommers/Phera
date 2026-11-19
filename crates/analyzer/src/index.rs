@@ -18,6 +18,7 @@ pub struct ParameterInfo {
     pub optional: bool,
     pub variadic: bool,
     pub by_reference: bool,
+    pub closure_receiver: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -48,6 +49,7 @@ impl Signature {
                     optional: p.default.is_some(),
                     variadic: p.variadic,
                     by_reference: p.by_reference,
+                    closure_receiver: None,
                 })
                 .collect(),
             returns: ValueType::declared(returns, names),
@@ -57,6 +59,17 @@ impl Signature {
             accepts_extra: false,
             unbound_this: Vec::new(),
             global_effects: crate::global_effects::GlobalEffects::None,
+        }
+    }
+    pub fn apply_phpdoc(&mut self, doc: Option<&str>, names: &Names) {
+        if let Some(doc) = doc {
+            if crate::phpdoc::never_returns(doc) {
+                self.returns = ValueType::Never;
+            }
+            for parameter in &mut self.parameters {
+                parameter.closure_receiver =
+                    crate::phpdoc::closure_receiver(doc, &parameter.name, names);
+            }
         }
     }
 }
@@ -113,12 +126,14 @@ pub struct ClassInfo {
     pub constants: BTreeMap<String, ConstantInfo>,
     pub location: Location,
     pub open_properties: bool,
+    pub documented: crate::phpdoc::Members,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct Index {
     pub builtin_functions: BTreeSet<String>,
     pub builtin_classes: BTreeSet<String>,
+    pub trait_users: crate::trait_users::TraitUsers,
     pub classes: BTreeMap<String, ClassInfo>,
     pub functions: BTreeMap<String, Signature>,
     pub constants: BTreeMap<String, ConstantInfo>,
@@ -182,16 +197,64 @@ impl Index {
             .find_map(|c| c.properties.get(property))
     }
 
-    pub fn constant(&self, class: &str, constant: &str) -> bool {
+    pub fn constant(&self, class: &str, constant: &str) -> Option<&ConstantInfo> {
         self.ancestry(class)
             .iter()
-            .any(|c| c.constants.contains_key(constant))
+            .find_map(|c| c.constants.get(constant))
     }
 
     pub fn open_properties(&self, class: &str) -> bool {
         self.ancestry(class).iter().any(|c| {
             c.open_properties || c.methods.contains_key("__get") || c.methods.contains_key("__set")
         })
+    }
+
+    pub fn documented_method(&self, class: &str, method: &str, static_call: bool) -> bool {
+        let method = method.to_ascii_lowercase();
+        self.documents_member(class, |ancestor, origin| {
+            let docs = &ancestor.documented;
+            if static_call {
+                docs.static_methods.contains(&method)
+                    || (!origin
+                        && ancestor
+                            .methods
+                            .get(&method)
+                            .is_some_and(|method| method.modifiers.is_static))
+            } else {
+                docs.methods.contains(&method)
+                    || docs.static_methods.contains(&method)
+                    || (!origin && ancestor.methods.contains_key(&method))
+            }
+        })
+    }
+
+    pub fn documented_property(&self, class: &str, property: &str) -> bool {
+        self.documents_member(class, |ancestor, origin| {
+            ancestor.documented.properties.contains(property)
+                || (!origin && ancestor.properties.contains_key(property))
+        })
+    }
+
+    fn documents_member(&self, class: &str, has_member: impl Fn(&ClassInfo, bool) -> bool) -> bool {
+        let mut pending = vec![(class, true)];
+        let mut seen = BTreeSet::new();
+        while let Some((class, origin)) = pending.pop() {
+            for ancestor in self.ancestry(class) {
+                if seen.insert((&ancestor.name, origin)) {
+                    if has_member(ancestor, origin) {
+                        return true;
+                    }
+                    pending.extend(
+                        ancestor
+                            .documented
+                            .mixins
+                            .iter()
+                            .map(|name| (name.as_str(), false)),
+                    );
+                }
+            }
+        }
+        false
     }
 
     pub fn public_visibility() -> Visibility {
