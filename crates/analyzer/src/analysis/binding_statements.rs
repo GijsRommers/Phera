@@ -26,6 +26,13 @@ impl Analyzer<'_> {
                         .default
                         .as_ref()
                         .map_or(ValueType::Mixed, |e| self.expression(e, scope, false));
+                    // The initializer runs once. A later invocation can see
+                    // a value written by an earlier one.
+                    let ty = if self.level >= 4 {
+                        ValueType::Mixed
+                    } else {
+                        ty
+                    };
                     scope.define(&variable.name, ty);
                 }
             }

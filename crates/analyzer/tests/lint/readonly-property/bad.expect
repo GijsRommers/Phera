@@ -1,0 +1,1 @@
+2	readonly-property	Consider readonly for $n, assigned once in the constructor.

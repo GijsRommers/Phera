@@ -111,6 +111,7 @@ const DERIVED: &[(&str, &str)] = &[
     ("ArgumentCountError", "TypeError"),
     ("AssertionError", "Error"),
     ("UnhandledMatchError", "Error"),
+    ("RequestParseBodyException", "Exception"),
     ("RuntimeException", "Exception"),
     ("LogicException", "Exception"),
     ("BadFunctionCallException", "LogicException"),

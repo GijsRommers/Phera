@@ -121,13 +121,9 @@ impl Vm {
             };
             match loader.load(candidate).await {
                 Ok(unit) => return Ok(Ok(unit)),
-                Err(CodeLoadError::Read(message)) => result = Err(message),
+                Err(CodeLoadError::Unavailable(error)) => result = Err(error),
                 Err(CodeLoadError::Compile(error)) => {
-                    self.report_compile_error(&error);
-                    self.status = 255;
-                    return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
-                        (),
-                    ))));
+                    return Err(self.dynamic_compile_failure(error).await);
                 }
             }
         }
@@ -152,22 +148,17 @@ impl Vm {
                     let previous_line = self.code.function(previous).definition_line;
                     let previous_file = &self.code.unit(previous).file;
                     let message = format!(
-                        "Cannot redeclare function {}() (previously declared in {}:{previous_line})",
-                        function.name, previous_file,
+                        "Cannot redeclare function {}() (previously declared in {previous_file}:{previous_line})",
+                        function.name,
                     );
-                    self.report_diagnostic(
+                    return Err(self.fatal_error(
                         64,
-                        "Fatal error",
-                        message.into(),
+                        message,
                         SourceLocation {
                             file: unit.file.clone(),
                             line: function.definition_line as usize,
                         },
-                    );
-                    self.status = 255;
-                    return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
-                        (),
-                    ))));
+                    ));
                 }
                 let main = self.code.load(unit);
                 let index = self.code.declared(main, id.index());

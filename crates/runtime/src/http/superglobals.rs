@@ -22,7 +22,7 @@ use phera_value::{ArrayKey, PhpArray, Value};
 use phera_vm::Vm;
 
 use super::query::{Duplicates, parse_pairs};
-use super::{Form, HttpRequest};
+use super::{Form, HttpRequest, is_urlencoded};
 
 /// Defines the superglobals for one request before its script starts.
 pub(crate) fn define_superglobals(
@@ -52,7 +52,9 @@ pub(crate) fn define_superglobals(
     if let Some(form) = form {
         // A form with files: already read, the files already on disk.
         (post, files, temporary_files) = form.into_variables();
-    } else if request.method == "POST" && is_form(header(&headers, "content-type")) {
+    } else if request.method == "POST"
+        && header(&headers, "content-type").is_some_and(is_urlencoded)
+    {
         parse_pairs(&mut post, &request.body, b'&', Duplicates::Replace);
     }
 
@@ -84,22 +86,6 @@ pub(crate) fn define_superglobals(
     vm.set_global("_REQUEST", Value::from(merged));
     vm.set_global("_FILES", Value::from(files));
     temporary_files
-}
-
-/// Whether the body is an HTML form in the default encoding. File uploads
-/// (`multipart/form-data`) are not parsed yet.
-///
-/// PHP reads the media type up to the first `;`, `,` or space and ignores
-/// the rest, so `application/x-www-form-urlencoded, text/plain` is a form
-/// and `text/plain, application/x-www-form-urlencoded` is not.
-fn is_form(content_type: Option<&[u8]>) -> bool {
-    content_type.is_some_and(|value| {
-        let media_type = value
-            .split(|byte| matches!(byte, b';' | b',' | b' '))
-            .next()
-            .unwrap_or_default();
-        media_type.eq_ignore_ascii_case(b"application/x-www-form-urlencoded")
-    })
 }
 
 /// One request header as PHP sees it.

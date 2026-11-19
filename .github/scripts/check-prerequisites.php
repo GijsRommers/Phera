@@ -3,7 +3,7 @@
 if (PHP_MAJOR_VERSION !== 8 || PHP_MINOR_VERSION !== 5) {
     throw new RuntimeException('The oracle must be PHP 8.5; found ' . PHP_VERSION);
 }
-foreach (['json', 'pcre', 'ctype', 'pdo_pgsql', 'pdo_mysql', 'pdo_sqlite', 'sqlite3', 'mbstring', 'iconv', 'tokenizer', 'redis'] as $extension) {
+foreach (['json', 'pcre', 'ctype', 'pdo_pgsql', 'pdo_mysql', 'pdo_sqlite', 'sqlite3', 'mbstring', 'iconv', 'tokenizer', 'openssl', 'libxml', 'dom', 'redis'] as $extension) {
     if (!extension_loaded($extension)) {
         throw new RuntimeException('Missing PHP extension: ' . $extension);
     }

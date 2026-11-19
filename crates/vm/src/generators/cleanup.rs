@@ -102,6 +102,11 @@ impl Vm {
     ) -> LocalFuture<'_, NativeError> {
         Box::pin(async move {
             let previous = self.materialize_error(error);
+            if matches!(&previous, NativeError::Unwind(error)
+                if error.0.is::<crate::last_error::FatalDiagnostic>())
+            {
+                return previous;
+            }
             let caller = match &previous {
                 NativeError::Unwind(error) if self.current().is_none() => {
                     error.0.downcast_ref::<Thrown>().map(Thrown::location)

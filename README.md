@@ -78,6 +78,17 @@ cargo test
 
 The `phera` binary ends up in `target/debug/phera`.
 
+### Serving a site
+
+Run `phera serve public` to serve a document root. PHP diagnostics, including
+fatal backtraces, go to the server log by default. Use `phera serve --dev public`
+to display diagnostics in responses during local development.
+
+`--request-read-timeout SECONDS` sets the initial time budget for receiving
+headers and the body. It defaults to 60 seconds and gains one second for every
+16 KiB of body data received. If the budget runs out, the server returns HTTP 408
+and closes the connection.
+
 ## 🧪 Testing
 
 Phera runs the tests of PHP's own `.phpt` suite that it passes: those listed in

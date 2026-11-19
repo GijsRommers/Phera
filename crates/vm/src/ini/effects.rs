@@ -32,6 +32,8 @@ impl Vm {
                 self.ini_overrides.reporting_number = None;
                 self.ini_overrides.reporting_ini_modified = false;
             }
+            "fatal_error_backtraces" => self.error_handlers.fatal_error_backtraces = boolean(bytes),
+            "max_execution_time" => self.execution_time.restart(integer(bytes)),
             "zend.exception_ignore_args" => {
                 self.error_handlers.trace_ignore_args = boolean(bytes);
             }

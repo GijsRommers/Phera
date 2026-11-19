@@ -18,7 +18,8 @@ use std::time::{Duration, Instant};
 
 use phera_phpt::{Phpt, display_path, expectf_matches, filters_from_args, matches_filters};
 
-const TIMEOUT: Duration = Duration::from_secs(10);
+// A PHP CPU second can take several wall-clock seconds on a shared runner.
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Sections that don't affect how a test runs.
 const IGNORED_SECTIONS: &[&str] = &[
@@ -39,7 +40,19 @@ const SUPPORTED_SECTIONS: &[&str] = &[
     "ARGS",
     "SKIPIF",
     "EXTENSIONS",
+    "INI",
     "XFAIL",
+];
+
+/// Directives exercised by this runner. Other INI cases still need php-src's harness.
+const SUPPORTED_INI: &[&str] = &[
+    "display_errors",
+    "fatal_error_backtraces",
+    "hard_timeout",
+    "log_errors",
+    "max_execution_time",
+    "zend.exception_ignore_args",
+    "zend.exception_string_param_max_len",
 ];
 
 enum Outcome {
@@ -121,7 +134,11 @@ fn binary() -> Vec<String> {
         Ok(value) if !value.trim().is_empty() => {
             value.split_whitespace().map(String::from).collect()
         }
-        _ => vec![env!("CARGO_BIN_EXE_phera").to_string()],
+        _ => vec![
+            env!("CARGO_BIN_EXE_phera").to_string(),
+            "-d".into(),
+            "fatal_error_backtraces=0".into(),
+        ],
     }
 }
 
@@ -146,20 +163,24 @@ fn run_test(binary: &[String], path: &Path) -> Outcome {
         .section("ARGS")
         .map(|a| a.split_whitespace().collect())
         .unwrap_or_default();
+    let ini = phpt.section("INI").unwrap_or_default();
+    if let Some((name, _)) = ini_entries(ini).find(|(name, _)| !SUPPORTED_INI.contains(name)) {
+        return Outcome::Skip(format!("--INI-- setting {name} is not supported"));
+    }
 
     let probes = [
         phpt.section("EXTENSIONS").map(extension_probe),
         phpt.section("SKIPIF").map(str::to_owned),
     ];
     for probe in probes.into_iter().flatten() {
-        match skip_reason(binary, path, &probe) {
+        match skip_reason(binary, path, &probe, ini) {
             Ok(Some(reason)) => return Outcome::Skip(reason),
             Ok(None) => {}
             Err(error) => return Outcome::Fail(format!("skip check failed: {error}")),
         }
     }
 
-    let outcome = match run_php(binary, path, "php", file, &args) {
+    let outcome = match run_php(binary, path, "php", file, &args, ini) {
         Ok(run) => check_output(&phpt, &run),
         Err(error) => Outcome::Fail(error),
     };
@@ -174,8 +195,13 @@ fn run_test(binary: &[String], path: &Path) -> Outcome {
 
 /// Runs a script that decides whether the test applies. It says no by
 /// printing a line that starts with "skip", as in php-src's `run-tests.php`.
-fn skip_reason(binary: &[String], test: &Path, code: &str) -> Result<Option<String>, String> {
-    let run = run_php(binary, test, "skip.php", code.as_bytes(), &[])?;
+fn skip_reason(
+    binary: &[String],
+    test: &Path,
+    code: &str,
+    ini: &str,
+) -> Result<Option<String>, String> {
+    let run = run_php(binary, test, "skip.php", code.as_bytes(), &[], ini)?;
     let text = String::from_utf8_lossy(&run.stdout);
     let output = text.trim();
     let skips = output.to_ascii_lowercase().starts_with("skip");
@@ -256,6 +282,13 @@ fn trim_output(bytes: &[u8]) -> &[u8] {
     }
 }
 
+fn ini_entries(ini: &str) -> impl Iterator<Item = (&str, &str)> {
+    ini.lines().map(str::trim).filter_map(|line| {
+        let (name, value) = line.split_once('=')?;
+        (!name.starts_with(';')).then(|| (name.trim(), value.trim()))
+    })
+}
+
 fn indent(text: &str) -> String {
     if text.is_empty() {
         return "    <empty>".into();
@@ -282,6 +315,7 @@ fn run_php(
     extension: &str,
     code: &[u8],
     args: &[&str],
+    ini: &str,
 ) -> Result<Run, String> {
     let source_root = phera_phpt::tests_dir()
         .canonicalize()
@@ -296,9 +330,11 @@ fn run_php(
 
     let dir = script.0.parent().unwrap_or(Path::new("."));
     let executable = resolve_executable(&binary[0]);
+    let directives = ini_entries(ini).map(|(name, value)| format!("{name}={value}"));
 
     let mut child = Command::new(&binary[0])
         .args(&binary[1..])
+        .args(directives.flat_map(|setting| ["-d".into(), setting]))
         .arg(&script.0)
         .args(args)
         .current_dir(dir)
@@ -313,7 +349,12 @@ fn run_php(
     let stdout = read_in_background(child.stdout.take());
     let stderr = read_in_background(child.stderr.take());
 
-    let deadline = Instant::now() + TIMEOUT;
+    let timeout = std::env::var("TEST_TIMEOUT")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|seconds| (1..=3600).contains(seconds))
+        .map_or(DEFAULT_TIMEOUT, Duration::from_secs);
+    let deadline = Instant::now() + timeout;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
@@ -321,7 +362,7 @@ fn run_php(
             Ok(None) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(format!("timed out after {}s", TIMEOUT.as_secs()));
+                return Err(format!("timed out after {}s", timeout.as_secs()));
             }
             Err(e) => return Err(format!("cannot wait for process: {e}")),
         }

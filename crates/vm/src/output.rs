@@ -23,6 +23,7 @@ pub(crate) struct Output {
     pub(crate) buffers: Buffers,
     implicit_flush: bool,
     prepare_headers: Option<fn(&mut RequestState)>,
+    set_error_status: Option<fn(&mut RequestState)>,
     web: bool,
     pub(crate) web_diagnostics: Option<crate::diagnostic_output::WebDiagnostics>,
     pub(crate) origin: Option<SourceLocation>,
@@ -38,6 +39,7 @@ impl Output {
             buffers: Buffers::default(),
             implicit_flush: false,
             prepare_headers: None,
+            set_error_status: None,
             web: false,
             web_diagnostics: None,
             origin: None,
@@ -69,9 +71,28 @@ impl Output {
 
 impl Vm {
     /// Configures the response preparation step before the first web output.
-    pub fn prepare_web_headers_with(&mut self, prepare: fn(&mut RequestState)) {
+    pub fn prepare_web_headers_with(
+        &mut self,
+        prepare: fn(&mut RequestState),
+        set_error_status: fn(&mut RequestState),
+    ) {
         self.output_writer.prepare_headers = Some(prepare);
+        self.output_writer.set_error_status = Some(set_error_status);
         self.output_writer.web = true;
+    }
+
+    pub(crate) fn set_hidden_fatal_status(&mut self) {
+        if self.output_writer.web && !self.display_errors_enabled() {
+            self.set_unsent_error_status();
+        }
+    }
+
+    pub(super) fn set_unsent_error_status(&mut self) {
+        if self.output_writer.origin.is_none()
+            && let Some(set_status) = self.output_writer.set_error_status
+        {
+            set_status(&mut self.state);
+        }
     }
 
     fn prepare_response_headers(&mut self) {

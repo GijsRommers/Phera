@@ -67,6 +67,46 @@ fn baseline_ignores_exact_entries_and_preserves_new_errors() {
 }
 
 #[test]
+fn phpstan_baseline_suppresses_only_matching_messages_up_to_the_count() {
+    let project = Project::new();
+    let program = "<?php\nfunction number(int $value): int { return $value; }\n";
+    project.write(
+        "src.php",
+        &format!("{program}echo number('one');\necho number('two');\n"),
+    );
+    project.write(
+        "phpstan-baseline.neon",
+        r#"parameters:
+    ignoreErrors:
+        -
+            message: '#^Parameter \#1 \$value of function number expects int, string given\.$#'
+            identifier: argument.type
+            count: 2
+            path: src.php
+"#,
+    );
+    let args = [
+        "--level",
+        "max",
+        "--baseline",
+        "--format",
+        "json",
+        "src.php",
+    ];
+    assert!(project.run(&args).status.success());
+    project.write(
+        "src.php",
+        &format!("{program}echo number([]);\necho number('one');\necho number('two');\necho number('three');\n"),
+    );
+    let output = project.run(&args);
+    assert_eq!(output.status.code(), Some(1));
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(text.matches("argument.type").count(), 2);
+    assert!(text.contains("\"line\":3"), "{text}");
+    assert!(text.contains("\"line\":6"), "{text}");
+}
+
+#[test]
 fn namespace_imports_and_inherited_trait_methods_cross_files() {
     let project = Project::new();
     project.write(

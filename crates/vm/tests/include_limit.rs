@@ -19,7 +19,7 @@ impl CodeLoader for RecursiveLoader {
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
                 >= 32
             {
-                return Err(CodeLoadError::Read(
+                return Err(CodeLoadError::Unavailable(
                     "bounded regression loader stopped".into(),
                 ));
             }
@@ -48,7 +48,7 @@ struct PermissionLoader;
 impl CodeLoader for PermissionLoader {
     fn load(&self, _path: PathBuf) -> LocalFuture<'_, Result<Arc<CompiledUnit>, CodeLoadError>> {
         Box::pin(async {
-            Err(CodeLoadError::Read(
+            Err(CodeLoadError::Unavailable(
                 "Permission denied (os error 13)".into(),
             ))
         })
@@ -81,7 +81,11 @@ struct RecordingLoader {
 impl CodeLoader for RecordingLoader {
     fn load(&self, path: PathBuf) -> LocalFuture<'_, Result<Arc<CompiledUnit>, CodeLoadError>> {
         self.paths.lock().unwrap().push(path);
-        Box::pin(async { Err(CodeLoadError::Read("No such file or directory".into())) })
+        Box::pin(async {
+            Err(CodeLoadError::Unavailable(
+                "No such file or directory".into(),
+            ))
+        })
     }
 }
 

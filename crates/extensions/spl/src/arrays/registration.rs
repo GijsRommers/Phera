@@ -48,18 +48,20 @@ const COMMON: [Method; 20] = const {
         Method::public("offsetUnset", &[KEY], dimensions::offset_unset).tentative_return("void"),
         Method::public_async("append", &[VALUE], methods::append).tentative_return("void"),
         Method::public("getArrayCopy", &[], methods::get_array_copy).tentative_return("array"),
-        Method::public("count", &[], methods::count).tentative_return("int"),
+        Method::public("count", &[], methods::count)
+            .with_direct(methods::direct_count)
+            .tentative_return("int"),
         Method::public("getFlags", &[], methods::get_flags).tentative_return("int"),
         Method::public("setFlags", &[FLAGS], methods::set_flags).tentative_return("void"),
         Method::public_async(
             "asort",
-            const { &[FLAGS.with_default(ConstantValue::Int(0))] },
+            const { &[FLAGS.with_constant_default("SORT_REGULAR", ConstantValue::Int(0))] },
             sorting::asort,
         )
         .tentative_return("true"),
         Method::public_async(
             "ksort",
-            const { &[FLAGS.with_default(ConstantValue::Int(0))] },
+            const { &[FLAGS.with_constant_default("SORT_REGULAR", ConstantValue::Int(0))] },
             sorting::ksort,
         )
         .tentative_return("true"),

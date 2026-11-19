@@ -130,6 +130,7 @@ fn dirname_argument(expression: &Expression) -> Option<&Expression> {
     let ExpressionKind::Call {
         callee,
         arguments: Arguments::List(arguments),
+        ..
     } = &expression.kind
     else {
         return None;

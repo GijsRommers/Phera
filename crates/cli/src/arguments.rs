@@ -18,7 +18,7 @@ Usage:
                                           (default 60; 0: never)
     --request-read-timeout SECONDS        receive headers and body in this
                                           many seconds (default 60), plus
-                                          one second per 16 KiB received
+                                          one second per 16 KiB of body read
                                           so large uploads can keep going
     --dev                                 show PHP diagnostics in responses
                                           (off by default, logged to stderr)
@@ -38,8 +38,8 @@ Usage:
                                           laravel
     --no-install                          do not fetch packages
   phera --dump <file.php>                 print the compiled bytecode
-  phera check [--level 0|1|2|3] [--format text|json|github] [--no-progress]
-              [--generate-baseline FILE] <paths...>
+  phera check [OPTIONS] <paths...>        type-check PHP (see check --help)
+  phera lint [OPTIONS] [paths...]         lint PHP (see lint --help)
   phera --version
 
 ENV OPTIONS: --env-file PATH (repeatable) or --no-env-file";
@@ -56,10 +56,11 @@ pub(crate) enum Command {
         script: String,
     },
     Serve(ServeOptions),
+    Help(&'static str),
     Check(phera_analyzer::config::Options),
+    Lint(phera_analyzer::lint::Command),
     New(crate::new::NewOptions),
     Version,
-    Help,
 }
 
 pub(crate) struct ServeOptions {
@@ -89,11 +90,11 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
     let mut arguments = arguments.peekable();
     let mut files = FileSelection::Automatic;
     let mut ini = Vec::new();
-    startup_options(&mut arguments, &mut files, &mut ini)?;
+    leading_options(&mut arguments, &mut files, &mut ini)?;
     match arguments.peek().map(String::as_str) {
         None => Err("No script given.".to_string()),
         Some("--version") => Ok(Command::Version),
-        Some("--help" | "-h") => Ok(Command::Help),
+        Some("--help" | "-h") => Ok(Command::Help(USAGE)),
         Some("--dump") => {
             arguments.next();
             let script = arguments.next().ok_or("--dump needs a file.")?;
@@ -101,12 +102,20 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
         }
         Some("check") => {
             arguments.next();
-            phera_analyzer::config::Options::parse(arguments).map(Command::Check)
+            analyzer_command(arguments, crate::check::HELP, |args| {
+                phera_analyzer::config::Options::parse(args).map(Command::Check)
+            })
+        }
+        Some("lint") => {
+            arguments.next();
+            analyzer_command(arguments, crate::lint::HELP, |args| {
+                phera_analyzer::lint::Options::parse(args).map(Command::Lint)
+            })
         }
         Some("serve") => {
             arguments.next();
             if matches!(arguments.peek().map(String::as_str), Some("--help" | "-h")) {
-                return Ok(Command::Help);
+                return Ok(Command::Help(USAGE));
             }
             parse_serve(arguments, files, ini).map(Command::Serve)
         }
@@ -117,7 +126,7 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
         Some(_) => {
             // `phera run file.php` and `phera file.php` mean the same.
             arguments.next_if(|argument| argument == "run");
-            startup_options(&mut arguments, &mut files, &mut ini)?;
+            leading_options(&mut arguments, &mut files, &mut ini)?;
             let arguments: Vec<String> = arguments.collect();
             let script = arguments.first().cloned().ok_or("No script given.")?;
             Ok(Command::Run {
@@ -128,6 +137,22 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
             })
         }
     }
+}
+
+fn analyzer_command(
+    arguments: impl Iterator<Item = String>,
+    help: &'static str,
+    parse: impl FnOnce(std::vec::IntoIter<String>) -> Result<Command, String>,
+) -> Result<Command, String> {
+    let arguments: Vec<_> = arguments.collect();
+    if arguments
+        .iter()
+        .take_while(|arg| *arg != "--")
+        .any(|arg| matches!(arg.as_str(), "--help" | "-h"))
+    {
+        return Ok(Command::Help(help));
+    }
+    parse(arguments.into_iter())
 }
 
 fn parse_new(mut arguments: impl Iterator<Item = String>) -> Result<NewOptions, String> {
@@ -156,16 +181,16 @@ fn parse_new(mut arguments: impl Iterator<Item = String>) -> Result<NewOptions, 
     Ok(options)
 }
 
-fn startup_options(
+fn leading_options(
     arguments: &mut std::iter::Peekable<impl Iterator<Item = String>>,
     files: &mut FileSelection,
     ini: &mut Vec<(String, String)>,
 ) -> Result<(), String> {
     while let Some(option) =
-        arguments.next_if(|arg| matches!(arg.as_str(), "--env-file" | "--no-env-file" | "-d"))
+        arguments.next_if(|s| matches!(s.as_str(), "--env-file" | "--no-env-file" | "-d"))
     {
         if option == "-d" {
-            ini.push(ini_setting(arguments)?);
+            ini.push(ini_option(arguments)?);
         } else {
             file_option(&option, arguments, files)?;
         }
@@ -173,13 +198,14 @@ fn startup_options(
     Ok(())
 }
 
-fn ini_setting(arguments: &mut impl Iterator<Item = String>) -> Result<(String, String), String> {
-    let setting = arguments.next().ok_or("-d needs NAME=VALUE.")?;
+fn ini_option(arguments: &mut impl Iterator<Item = String>) -> Result<(String, String), String> {
+    let setting = arguments.next().ok_or("-d needs a name=value setting.")?;
     let (name, value) = setting.split_once('=').unwrap_or((&setting, "1"));
+    let name = name.trim();
     if name.is_empty() {
-        return Err("-d needs the name of a PHP INI directive.".into());
+        return Err("-d needs a setting name.".into());
     }
-    Ok((name.to_owned(), value.to_owned()))
+    Ok((name.to_owned(), value.trim().to_owned()))
 }
 
 fn file_option(
@@ -224,6 +250,7 @@ fn parse_serve(
     };
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
+            "-d" => options.ini.push(ini_option(&mut arguments)?),
             "--env-file" | "--no-env-file" => {
                 file_option(&argument, &mut arguments, &mut options.files)?
             }
@@ -245,7 +272,6 @@ fn parse_serve(
             }
             "--compress" => options.compress = true,
             "--dev" => options.dev = true,
-            "-d" => options.ini.push(ini_setting(&mut arguments)?),
             "--trusted-proxies" => {
                 let list = arguments
                     .next()

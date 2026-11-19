@@ -71,7 +71,12 @@ async fn direct(name: &str) -> Lease {
 
 async fn rows(driver: &mut Lease, sql: &str) -> Rows {
     driver
-        .execute(&Sql::parse(sql.into()).unwrap(), &Prepared::Emulated, &[])
+        .execute(
+            &Sql::parse(sql.into()).unwrap(),
+            &Prepared::Emulated,
+            &[],
+            Default::default(),
+        )
         .await
         .unwrap()
 }

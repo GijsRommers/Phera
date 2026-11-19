@@ -153,6 +153,14 @@ pub(super) fn exchange_array(
 }
 
 pub(super) fn native_count(_: &mut dyn Context, object: &Object) -> Result<i64, NativeError> {
+    stored_count(object)
+}
+
+pub(super) fn direct_count(object: &Object, _: &[Option<Value>]) -> Option<Value> {
+    stored_count(object).ok().map(Value::Int)
+}
+
+fn stored_count(object: &Object) -> Result<i64, NativeError> {
     let target = Target::of(object)?;
     target.read(|array| {
         if target.is_properties() {

@@ -72,7 +72,7 @@ run_all() {
 }
 
 run_all php "$php" -n -d fatal_error_backtraces=0 -d display_errors=1
-run_all phera "$work/capped.sh" "$root/target/release/phera"
+run_all phera "$work/capped.sh" "$root/target/release/phera" -d fatal_error_backtraces=0
 LC_ALL=C comm -12 "$work/php.pass" "$work/phera.pass" >"$work/both.pass"
 
 # Copy the tests, and every small file that is not a test: tests include

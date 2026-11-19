@@ -85,7 +85,9 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
     let workers = config.workers;
 
     let factory = SiteHandlerFactory {
-        runtime: Runtime::with_environment(loaded.environment).with_ini(options.ini, options.dev),
+        runtime: Runtime::with_environment(loaded.environment)
+            .with_startup_ini(options.ini)
+            .with_web_development(options.dev),
         site: site.clone(),
         compress: options.compress,
         trusted_proxies: Arc::new(trusted_proxies),

@@ -37,8 +37,24 @@ impl Analyzer<'_> {
             } else if matches == Compatibility::Accepts {
                 arm.clone()
             } else if matches == Compatibility::Uncertain
+                && matches!(
+                    (&against, arm),
+                    (
+                        ValueType::UnknownCallable,
+                        ValueType::String
+                            | ValueType::StringLiteral(_)
+                            | ValueType::Class(_)
+                            | ValueType::Generic(_)
+                            | ValueType::Object
+                    ) | (ValueType::Object, ValueType::UnknownCallable)
+                )
+            {
+                // A callable string still passes a string parameter, and an
+                // invokable object still has its original class members.
+                ValueType::intersection(arm, &against)
+            } else if matches == Compatibility::Uncertain
                 || arm.accepts(&against, self.index, TypePolicy::Documentation)
-                    == Compatibility::Accepts
+                    != Compatibility::Rejects
             {
                 against.clone()
             } else if let (Some(_), Some(_)) = (arm.class_name(), against.class_name()) {

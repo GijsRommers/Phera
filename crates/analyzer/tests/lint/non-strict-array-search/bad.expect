@@ -1,0 +1,1 @@
+2	non-strict-array-search	Pass true as the strict flag for in_array().

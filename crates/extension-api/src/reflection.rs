@@ -138,6 +138,9 @@ pub enum GeneratorQuery {
     Trace(i64),
 }
 
+/// Finish a Reflection reader with the initialized instance after PHP has run.
+pub type LazyReflectionRead = Box<dyn FnOnce(&mut dyn crate::Context, Rc<Object>) -> NativeResult>;
+
 /// Introspection and privileged operations requested by PHP's Reflection extension.
 pub trait ReflectionContext {
     /// Reads a generator's declaration even after its activation closes.
@@ -204,6 +207,16 @@ pub trait ReflectionContext {
 
     /// Lists visible reflection members in declaration order, including non-public members.
     fn reflect_members(&mut self, class: ClassSelector<'_>, kind: MemberKind) -> Members;
+
+    /// Reads a reflected object's stored properties, which initializes lazy objects.
+    fn reflect_after_initialization(
+        &mut self,
+        object: Rc<Object>,
+        read: LazyReflectionRead,
+    ) -> NativeResult;
+
+    /// Checks for an instance property using the engine's property-existence rules.
+    fn reflect_instance_has_property(&mut self, object: Rc<Object>, name: String) -> NativeResult;
 
     /// Reads a constant using its declaring scope rather than the caller's scope.
     fn reflect_class_constant(&mut self, class: &str, name: &str) -> NativeResult;

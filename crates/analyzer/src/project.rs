@@ -100,50 +100,63 @@ pub fn glob(pattern: &str, path: &str) -> bool {
 }
 
 pub fn parse_files(paths: &[PathBuf]) -> Result<(Vec<ParsedFile>, Vec<Diagnostic>), String> {
-    let next = AtomicUsize::new(0);
-    let workers = std::thread::available_parallelism()
-        .map_or(1, usize::from)
-        .min(paths.len());
-    std::thread::scope(|scope| {
-        let mut handles = Vec::new();
-        for _ in 0..workers {
-            let next = &next;
-            handles.push(
-                std::thread::Builder::new()
-                    .stack_size(phera_parser::PARSER_STACK_BYTES)
-                    .spawn_scoped(scope, move || parse_worker(paths, next))
-                    .map_err(|e| e.to_string())?,
-            );
-        }
-        let (mut files, mut diagnostics) = (Vec::new(), Vec::new());
-        for handle in handles {
-            let (parsed, errors) = handle.join().map_err(|_| "Parser worker panicked")??;
-            files.extend(parsed);
-            diagnostics.extend(errors);
-        }
-        files.sort_by(|a, b| a.path.cmp(&b.path));
-        Ok((files, diagnostics))
-    })
-}
-
-fn parse_worker(
-    paths: &[PathBuf],
-    next: &AtomicUsize,
-) -> Result<(Vec<ParsedFile>, Vec<Diagnostic>), String> {
+    let parsed = parallel_files(paths, default_workers(), parse_file)?;
     let (mut files, mut diagnostics) = (Vec::new(), Vec::new());
-    while let Some(path) = paths.get(next.fetch_add(1, Ordering::Relaxed)) {
-        match parse_file(path)? {
+    for result in parsed {
+        match result {
             Ok(file) => files.push(file),
             Err(error) => diagnostics.push(error),
         }
     }
+    files.sort_by(|a, b| a.path.cmp(&b.path));
     Ok((files, diagnostics))
+}
+
+/// Default to one worker per core when checking or linting a directory.
+pub(crate) fn default_workers() -> usize {
+    std::thread::available_parallelism().map_or(1, usize::from)
+}
+
+/// Each worker owns the stack budget required to parse and drop PHP syntax trees.
+pub(crate) fn parallel_files<T: Send>(
+    paths: &[PathBuf],
+    workers: usize,
+    visit: impl Fn(&Path) -> Result<T, String> + Sync,
+) -> Result<Vec<T>, String> {
+    let next = AtomicUsize::new(0);
+    std::thread::scope(|scope| {
+        let mut handles = Vec::new();
+        for _ in 0..workers.max(1).min(paths.len()) {
+            let (next, visit) = (&next, &visit);
+            handles.push(
+                std::thread::Builder::new()
+                    .stack_size(phera_parser::PARSER_STACK_BYTES)
+                    .spawn_scoped(scope, move || {
+                        let mut results = Vec::new();
+                        while let Some(path) = paths.get(next.fetch_add(1, Ordering::Relaxed)) {
+                            results.push(visit(path)?);
+                        }
+                        Ok::<_, String>(results)
+                    })
+                    .map_err(|e| e.to_string())?,
+            );
+        }
+        let mut results = Vec::new();
+        for handle in handles {
+            results.extend(handle.join().map_err(|_| "Analyzer worker panicked")??);
+        }
+        Ok(results)
+    })
+}
+
+pub(crate) fn read_source(path: &Path) -> Result<Vec<u8>, String> {
+    std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 pub fn parse_file(path: &Path) -> Result<Result<ParsedFile, Diagnostic>, String> {
     // PHP source is bytes. Keep every line in files with non-UTF-8 literals,
     // even though the parser currently takes text.
-    let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let bytes = read_source(path)?;
     let source = String::from_utf8_lossy(&bytes).into_owned();
     let lines = LineTable::new(&source);
     let path = display_path(path);
@@ -155,6 +168,7 @@ pub fn parse_file(path: &Path) -> Result<Result<ParsedFile, Diagnostic>, String>
             program,
         }),
         Err(error) => Err(Diagnostic {
+            severity: crate::diagnostic::Severity::Error,
             file: path,
             line: lines.line(error.span.start),
             identifier: "phpstan.parse".into(),

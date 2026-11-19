@@ -1,0 +1,1 @@
+2	str-contains	Use str_contains() for this strpos() comparison.

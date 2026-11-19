@@ -63,7 +63,7 @@ impl Vm {
             return Err(super::declaration_errors::link_failure(
                 &unit,
                 index,
-                NativeError::error(format!("Cannot redeclare class {}", existing.name)),
+                NativeError::error(self.class_redeclaration_message(existing, &existing.name)),
             ));
         }
         self.link_new_class(&unit, unit_first, index, key)
@@ -220,6 +220,7 @@ impl Vm {
             .as_ref()
             .map(|class| class.methods.clone())
             .unwrap_or_default();
+        let mut pending = Vec::new();
         for method in &declaration.methods {
             let method_name = &unit.names[method.name.index()];
             let linked = Rc::new(Method {
@@ -262,14 +263,43 @@ impl Vm {
             if let Some(inherited) = methods.get(&key) {
                 super::inheritance_checks::check_override(name, inherited, &linked)
                     .map_err(|error| self.magic_override_error(&linked, error))?;
-                self.check_method_contract(inherited, &linked, unit)?;
+                if let Some(miss) = self.check_method_contract(inherited, &linked, unit)?
+                    && let Some(parent) = &parent
+                {
+                    pending.push((
+                        (0, Some(self.method_listing_order(parent, inherited))),
+                        miss,
+                    ));
+                }
             }
             methods.insert(key, linked);
         }
         let mut enum_info = self.install_enum_methods(declaration, &mut methods)?;
         let traits = self.resolve_traits(declaration)?;
         if !traits.is_empty() {
-            self.compose_trait_methods(declaration, unit, &traits, &mut methods)?;
+            let trait_variance =
+                self.compose_trait_methods(declaration, unit, &traits, &mut methods)?;
+            // PHP checks concrete trait imports in the same parent-method order
+            // as methods written on the class, then checks the trait requirements.
+            if let Some(parent) = &parent {
+                pending.extend(
+                    trait_variance
+                        .overrides
+                        .into_iter()
+                        .map(|(inherited, miss)| {
+                            (
+                                (0, Some(self.method_listing_order(parent, &inherited))),
+                                miss,
+                            )
+                        }),
+                );
+            }
+            pending.extend(
+                trait_variance
+                    .requirements
+                    .into_iter()
+                    .map(|miss| ((1, None), miss)),
+            );
         }
         if enum_info.is_some() {
             super::enums::check_magic_methods(name, &methods)?;
@@ -306,7 +336,7 @@ impl Vm {
                 interfaces.push(stringable);
             }
         }
-        for interface in &interfaces {
+        for (index, interface) in interfaces.iter().enumerate() {
             for (method_name, method) in &interface.methods {
                 if let Some(implementation) = methods.get(method_name) {
                     let native = matches!(method.body, MethodBody::Native(entry) if entry.return_type.is_some());
@@ -331,12 +361,26 @@ impl Vm {
                             }
                         })?;
                     }
-                    self.check_method_contract(method, implementation, unit)?;
+                    if let Some(miss) = self.check_method_contract(method, implementation, unit)? {
+                        pending.push((
+                            (
+                                index + 2,
+                                Some(self.method_listing_order(interface, method)),
+                            ),
+                            miss,
+                        ));
+                    }
                 }
                 methods
                     .entry(method_name.clone())
                     .or_insert_with(|| method.clone());
             }
+        }
+        if !pending.is_empty() {
+            pending.sort_by(|(left, _), (right, _)| left.cmp(right));
+            return Err(crate::autoload::ClassMiss::method_signatures(
+                pending.into_iter().map(|(_, miss)| miss).collect(),
+            ));
         }
         super::inheritance_checks::check_abstract(
             name,

@@ -252,30 +252,44 @@ fn read(
     if member.dynamic
         && let Some(object) = object
     {
-        if let Some(actual) = declared_property(context, &object, &member.name)? {
-            if matches!(mode, PropertyRead::Raw) && actual.modifiers & 16 != 0 {
-                return Err(crate::exception(
-                    "May not use getRawValue on static properties",
-                ));
-            }
-            return engine(context)?.reflect_property_read(&actual, Some(object), mode);
+        if matches!(mode, PropertyRead::Value) {
+            return crate::class_members::with_instance(context, object, move |context, object| {
+                read_dynamic(context, &member, object, mode)
+            });
         }
-        let value = object.get(&ArrayKey::str(member.name.as_str()));
-        return if matches!(mode, PropertyRead::Initialized) {
-            Ok(Value::Bool(value.is_some()))
-        } else if let Some(value) = value {
-            Ok(value.deref().clone())
-        } else {
-            let class = object
-                .class
-                .name()
-                .split_once('\0')
-                .map_or(object.class.name(), |(name, _)| name);
-            context.warning(format!("Undefined property: {class}::${}", member.name));
-            Ok(Value::Null)
-        };
+        return read_dynamic(context, &member, object, mode);
     }
     engine(context)?.reflect_property_read(&member, object, mode)
+}
+
+fn read_dynamic(
+    context: &mut dyn Context,
+    member: &MemberInfo,
+    object: Rc<Object>,
+    mode: PropertyRead,
+) -> NativeResult {
+    if let Some(actual) = declared_property(context, &object, &member.name)? {
+        if matches!(mode, PropertyRead::Raw) && actual.modifiers & 16 != 0 {
+            return Err(crate::exception(
+                "May not use getRawValue on static properties",
+            ));
+        }
+        return engine(context)?.reflect_property_read(&actual, Some(object), mode);
+    }
+    let value = object.get(&ArrayKey::str(member.name.as_str()));
+    if matches!(mode, PropertyRead::Initialized) {
+        Ok(Value::Bool(value.is_some()))
+    } else if let Some(value) = value {
+        Ok(value.deref().clone())
+    } else {
+        let class = object
+            .class
+            .name()
+            .split_once('\0')
+            .map_or(object.class.name(), |(name, _)| name);
+        context.warning(format!("Undefined property: {class}::${}", member.name));
+        Ok(Value::Null)
+    }
 }
 
 fn default_value(

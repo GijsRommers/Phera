@@ -151,7 +151,7 @@ impl Vm {
     }
 
     async fn start_buffer(&mut self, arguments: &[Value]) -> NativeResult {
-        self.check_output_handler("ob_start")?;
+        self.check_output_handler("ob_start", arguments)?;
         let callable = args::value(arguments, 0);
         let (name, callback) = if callable.is_null() {
             (DEFAULT_NAME.to_string(), None)

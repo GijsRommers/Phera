@@ -18,6 +18,11 @@ function fail($message) { throw new RuntimeException($message); }
 fail('uncaught < & " >');
 "#;
 
+const FATAL: &str = r#"<?php
+function fail($message) { trigger_error($message, E_USER_ERROR); }
+fail('fatal < & " >');
+"#;
+
 #[test]
 fn cli_display_destinations_and_format_match_php() {
     let php = oracle::find_php().expect("PHP 8.5 required");
@@ -72,6 +77,70 @@ fn cli_display_destinations_and_format_match_php() {
             }
         }
     }
+}
+
+#[test]
+fn optional_fatal_trace_follows_cli_diagnostic_destinations() {
+    let php = oracle::find_php().expect("PHP 8.5 required");
+    let site = Served::start("fatal-trace-oracle", &[("fatal.php", FATAL)]);
+    let script = site.root.join("fatal.php");
+    for trace in ["0", "1"] {
+        for display in ["0", "1", "stderr", "stdout"] {
+            for html in ["0", "1"] {
+                for log in ["0", "1"] {
+                    let settings = [
+                        "-d",
+                        &format!("fatal_error_backtraces={trace}"),
+                        "-d",
+                        &format!("display_errors={display}"),
+                        "-d",
+                        &format!("html_errors={html}"),
+                        "-d",
+                        &format!("log_errors={log}"),
+                    ];
+                    let expected = Command::new(&php)
+                        .arg("-n")
+                        .args(settings)
+                        .arg(&script)
+                        .output()
+                        .expect("run PHP");
+                    let actual = Command::new(env!("CARGO_BIN_EXE_phera"))
+                        .args(settings)
+                        .arg(&script)
+                        .output()
+                        .expect("run Phera");
+                    assert_eq!(actual.status.code(), expected.status.code(), "{settings:?}");
+                    assert_eq!(
+                        String::from_utf8_lossy(&actual.stdout),
+                        String::from_utf8_lossy(&expected.stdout),
+                        "{settings:?}"
+                    );
+                    assert_eq!(
+                        String::from_utf8_lossy(&actual.stderr),
+                        String::from_utf8_lossy(&expected.stderr),
+                        "{settings:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn server_logs_optional_fatal_trace_with_display_disabled() {
+    let site = Served::start_in(
+        "fatal-trace-server",
+        1,
+        &[("fatal.php", FATAL)],
+        ".",
+        &["-d", "fatal_error_backtraces=1", "-d", "error_log=php.log"],
+    );
+    assert_eq!(site.get("/fatal.php"), (500, String::new()));
+    let log = std::fs::read_to_string(site.root.join("php.log")).expect("read fatal error log");
+    assert!(log.contains("PHP Fatal error:  fatal < & \" > in "));
+    assert!(log.contains("Stack trace:\n#0 "));
+    assert!(log.contains("trigger_error("));
+    assert!(log.contains("#2 {main}"));
 }
 
 #[test]

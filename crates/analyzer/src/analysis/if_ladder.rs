@@ -18,7 +18,7 @@
 //! nested analysis combines them on its way out of each `if`.
 
 use super::*;
-use crate::analysis::statements::{Flow, contains_label};
+use crate::analysis::statements::{Flow, contains_label, is_throw};
 
 /// What a rung leaves for the combination on the way up: how its own branch
 /// ended, and the scope it left if it falls through.
@@ -62,7 +62,23 @@ impl Analyzer<'_> {
                     }
                     self.context.known.extend(entry.known.iter().cloned());
                 }
+                let last_condition = self.last_condition;
+                if self.level >= 4
+                    && index > 0
+                    && index + 1 == branches.len()
+                    && otherwise
+                        .is_none_or(|body| matches!(body, [statement] if is_throw(statement)))
+                {
+                    self.last_condition = Some(condition.span);
+                }
                 let outcome = self.condition(condition, entry.clone(), false);
+                let (kind, label) = if index == 0 {
+                    ("if", "If condition")
+                } else {
+                    ("elseif", "Elseif condition")
+                };
+                self.constant_condition(kind, label, condition, &outcome);
+                self.last_condition = last_condition;
                 let (flow, taken) = self.statement_branch(body, outcome.yes, &entry);
                 rungs.push(Rung { flow, taken });
                 if index + 1 == branches.len() {

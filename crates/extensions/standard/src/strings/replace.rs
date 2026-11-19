@@ -10,6 +10,58 @@ use crate::arguments::stringify;
 
 pub(super) const FUNCTIONS: &[FunctionEntry] = &[STR_REPLACE, STR_IREPLACE];
 
+pub(super) fn register_sync_selectors(registry: &mut phera_extension_api::Registry) {
+    registry.register_sync_selector("str_replace", |slots| {
+        string_window(slots).then_some(replace_strings)
+    });
+    registry.register_sync_selector("str_ireplace", |slots| {
+        string_window(slots).then_some(ireplace_strings)
+    });
+}
+
+fn string_window(slots: &[Option<Value>]) -> bool {
+    matches!(
+        slots,
+        [
+            Some(Value::String(_)),
+            Some(Value::String(_)),
+            Some(Value::String(_))
+        ]
+    )
+}
+
+fn replace_strings(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    replace_string_subject(arguments, CaseSensitivity::Sensitive)
+}
+
+fn ireplace_strings(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    replace_string_subject(arguments, CaseSensitivity::Insensitive)
+}
+
+fn replace_string_subject(arguments: &[Value], case: CaseSensitivity) -> NativeResult {
+    let [
+        search @ Value::String(needle),
+        replace @ Value::String(replacement),
+        Value::String(subject),
+    ] = arguments
+    else {
+        return Err(NativeError::error("Invalid string replacement arguments"));
+    };
+    if needle.is_empty() || subject.is_empty() {
+        return Ok(Value::String(subject.clone()));
+    }
+    let mut replacer = Replacer {
+        search,
+        replace,
+        case,
+        count: 0,
+    };
+    let replaced = replacer.replace_all(subject.as_bytes(), needle, replacement.as_bytes())?;
+    Ok(Value::String(
+        replaced.map_or_else(|| subject.clone(), PhpString::from),
+    ))
+}
+
 /// `str_replace(array|string $search, array|string $replace,
 /// string|array $subject, &$count = null): string|array`
 ///
@@ -180,6 +232,22 @@ impl Replacer<'_> {
         needle: &[u8],
         replacement: &[u8],
     ) -> Result<Option<Vec<u8>>, NativeError> {
+        if let (CaseSensitivity::Sensitive, [needle], [replacement]) =
+            (self.case, needle, replacement)
+        {
+            let Some(first) = subject.iter().position(|byte| byte == needle) else {
+                return Ok(None);
+            };
+            let mut result = super::buffer(subject.len())?;
+            result.extend_from_slice(subject);
+            for byte in &mut result[first..] {
+                if byte == needle {
+                    *byte = *replacement;
+                    self.count += 1;
+                }
+            }
+            return Ok(Some(result));
+        }
         let mut result = Vec::new();
         let mut rest = subject;
         while let Some(position) = self.case.find(rest, needle) {

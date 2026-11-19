@@ -23,7 +23,22 @@ impl Compiler<'_> {
             ast::CastKind::Object => Unary::Object,
             _ => return Err(self.error("Cast not supported yet", line)),
         };
+        let start = self.position();
         let src = self.compile_expression(operand)?;
+        if operator == Unary::Int
+            && let [
+                Instruction::Load {
+                    destination,
+                    constant,
+                },
+            ] = &self.function.instructions[start..]
+            && *destination == src
+            && let Some(value) = self.function.constants.get_mut(*constant)
+            && let Constant::Bool(boolean) = value
+        {
+            *value = Constant::Int(i64::from(*boolean));
+            return Ok(src);
+        }
         let dst = self.allocate_register()?;
         self.emit(
             Instruction::Unary {

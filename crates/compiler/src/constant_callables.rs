@@ -19,6 +19,7 @@ pub(crate) fn callable_constant_error(expression: &Expression) -> Option<&'stati
             ExpressionKind::Call {
                 callee,
                 arguments: Arguments::FirstClassCallable,
+                ..
             } => match &callee.kind {
                 ExpressionKind::Name(name) if callee.span == name.span => {}
                 ExpressionKind::Literal(Literal::String(_)) => {}

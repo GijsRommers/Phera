@@ -27,27 +27,37 @@ use phera_extension_api::{
 #[derive(Default)]
 pub struct UploadedFiles {
     waiting: Vec<TempPath>,
+    first_active: usize,
 }
 
 impl UploadedFiles {
     pub fn new(waiting: Vec<TempPath>) -> UploadedFiles {
-        UploadedFiles { waiting }
+        UploadedFiles {
+            waiting,
+            first_active: 0,
+        }
+    }
+
+    /// Only the latest parse is active. All unclaimed files live until request teardown.
+    pub fn replace_active(&mut self, files: Vec<TempPath>) {
+        self.first_active = self.waiting.len();
+        self.waiting.extend(files);
     }
 
     fn holds(&self, path: &Path) -> bool {
-        self.waiting.iter().any(|waiting| &**waiting == path)
+        self.waiting[self.first_active..]
+            .iter()
+            .any(|waiting| &**waiting == path)
     }
 
     fn forget(&mut self, path: &Path) {
-        self.waiting.retain_mut(|waiting| {
-            if &**waiting == path {
-                // The move succeeded. Drop must leave the original path alone.
-                waiting.disable_cleanup(true);
-                false
-            } else {
-                true
-            }
-        });
+        if let Some(index) = self.waiting[self.first_active..]
+            .iter()
+            .position(|file| &**file == path)
+        {
+            let mut file = self.waiting.remove(self.first_active + index);
+            file.disable_cleanup(true);
+        }
     }
 }
 

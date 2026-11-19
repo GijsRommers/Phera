@@ -1,6 +1,7 @@
 //! Composer resolution: "Vendor\\Package\\Client" can live in vendor/pkg/src/Client.php.
 //! Generated maps describe where to look; dependencies are read only as needed.
 
+pub(crate) mod manifest;
 mod metadata;
 
 use std::collections::BTreeMap;

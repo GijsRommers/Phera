@@ -110,6 +110,11 @@ pub trait Context {
         self.script_path()
     }
 
+    /// Files executed by this request, in first-include order.
+    fn included_files(&self) -> crate::PhpArray {
+        crate::PhpArray::new()
+    }
+
     /// The request's include path, used by the VM and by the file wrappers.
     fn include_path(&self) -> phera_value::PhpString {
         ".".into()

@@ -33,9 +33,8 @@ impl ResponseHead {
         }
     }
 
-    /// PHP chooses 500 for a fatal diagnostic when display is off and the
-    /// script has not chosen another response status.
-    pub fn fail_if_ok(state: &mut RequestState) {
+    /// PHP replaces the default status for a hidden fatal error.
+    pub fn set_error_status(state: &mut RequestState) {
         let head = state.get_or_default::<Self>();
         if head.status == 200 {
             head.status = 500;

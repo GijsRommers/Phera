@@ -30,7 +30,7 @@ pub use class::{
 pub use context::{Context, GeneratorOperation, LocalFuture, PropertyView, RequestCallback};
 mod property_view_request;
 pub use error::{NativeError, NativeResult, Unwind};
-pub use function::{AsyncFn, FunctionEntry, NativeFn, Param, ParamType, SyncFn};
+pub use function::{AsyncFn, FunctionEntry, NativeFn, Param, ParamType, SyncFn, SyncSelector};
 pub use object_handlers::{
     ClassHooks, DimensionReferenceMode, DirectDimensions, IteratorFactory, NativeClone,
     NativeCompare, NativeComparison, NativeCount, NativeDimensions, NativeIterator,
@@ -42,7 +42,7 @@ pub use state::RequestState;
 pub use working_directory::WorkingDirectory;
 
 /// The PHP version exposed by the engine and its built-in modules.
-pub const PHP_VERSION: &str = "8.5.12";
+pub const PHP_VERSION: &str = "8.5.13";
 
 /// A compile-time linked bundle of PHP functions and constants.
 pub trait Extension {

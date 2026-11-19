@@ -46,6 +46,8 @@ pub(crate) struct ErrorHandlers {
     pub(crate) pending: Vec<DiagnosticEvent>,
     pub(crate) reporting: i64,
     pub(crate) last_error: Option<crate::last_error::LastError>,
+    pub(crate) fatal_trace: Option<Value>,
+    pub(crate) fatal_error_backtraces: bool,
     pub(crate) trace_ignore_args: bool,
     /// PHP formats saved trace strings using the current request limit, not creation-time text.
     pub(crate) trace_string_limit: usize,
@@ -64,6 +66,8 @@ impl Default for ErrorHandlers {
             pending: Vec::new(),
             reporting: 30719,
             last_error: None,
+            fatal_trace: None,
+            fatal_error_backtraces: true,
             trace_ignore_args: false,
             trace_string_limit: 15,
         }
@@ -205,6 +209,7 @@ impl Vm {
                 let level = event.level;
                 self.report_event(event);
                 if level == 256 {
+                    self.fiber_bailout = true;
                     self.status = 255;
                     return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
                         (),
@@ -216,6 +221,9 @@ impl Vm {
     }
 
     pub(crate) fn enqueue_diagnostic(&mut self, event: DiagnosticEvent) {
+        if event.level != 256 {
+            self.error_handlers.fatal_trace = None;
+        }
         self.error_handlers.pending.push(event);
         self.pending_callbacks = true;
     }
@@ -254,7 +262,7 @@ impl Vm {
 
     /// Respect the reporting mask separately from whether a user callback was invoked.
     pub(crate) fn report_event(&mut self, event: DiagnosticEvent) {
-        self.report_diagnostic(event.level, &event.kind, event.message, event.location);
+        self.report_current_diagnostic(event.level, &event.kind, event.message, event.location);
     }
 }
 

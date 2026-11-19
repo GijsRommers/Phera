@@ -185,7 +185,7 @@ async fn failures_become_error_responses() {
     assert_eq!(body(&response), "before");
 
     let settings = vec![("display_errors".into(), "1".into())];
-    let runtime = Runtime::new().with_ini(settings, false);
+    let runtime = Runtime::new().with_startup_ini(settings);
     let response = runtime
         .handle_request(&broken, &site.root, request("GET", "/broken.php"))
         .await;
