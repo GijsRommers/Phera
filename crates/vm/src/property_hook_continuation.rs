@@ -89,6 +89,7 @@ pub(crate) enum HookContinuation {
         getter: ReferenceGetter,
     },
     Iteration(IterationGetter),
+    ReflectedCall(Reg, crate::error_traces::NativeTrace),
     Clone(Reg, crate::classes::cloning::CloneUpdates),
     ObjectVars(
         crate::hooked_property_views::ObjectVars,
@@ -105,6 +106,7 @@ impl HookContinuation {
         match self {
             Self::ObjectVars(view, _) => Some(&view.native),
             Self::NativeView(view, _) => Some(&view.native),
+            Self::ReflectedCall(_, native) => Some(native),
             _ => None,
         }
     }
@@ -191,6 +193,10 @@ impl Vm {
             }
             HookContinuation::ObjectVars(view, key) => {
                 self.resume_object_vars(view, key, returned.value).await
+            }
+            HookContinuation::ReflectedCall(destination, _) => {
+                self.set(destination, returned.value.deref().clone());
+                Ok(())
             }
             HookContinuation::NativeView(view, key) => {
                 self.resume_native_view(view, key, returned.value).await

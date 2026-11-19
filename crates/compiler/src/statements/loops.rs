@@ -159,7 +159,7 @@ impl Compiler<'_> {
             let message = match (return_type.as_str(), expression.is_some()) {
                 ("never", _) => Some("A never-returning function must not return"),
                 ("void", true)
-                    if expression.as_ref().is_some_and(|expression| {
+                    if expression.is_some_and(|expression| {
                         matches!(
                             expression.kind,
                             ast::ExpressionKind::Literal(ast::Literal::Null)

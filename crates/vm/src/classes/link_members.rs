@@ -1,19 +1,20 @@
 //! Class member declarations keep lazy defaults: \`class C { public int $n = self::N; }\`.
 
-use std::{collections::HashMap, rc::Rc, sync::Arc};
+use std::{collections::HashMap, rc::Rc};
 
 use phera_bytecode::{ClassDeclaration, CompiledUnit, Visibility};
 use phera_extension_api::NativeError;
 use phera_value::{ArrayKey, Object};
 
 use super::{Class, LinkedConstant, class::PropertyDefault};
-use crate::Vm;
+use crate::{Vm, code_table::FunctionIndex};
 
 impl Vm {
     pub(super) fn link_class_constants(
         &self,
         declaration: &ClassDeclaration,
-        unit: &Arc<CompiledUnit>,
+        unit: &CompiledUnit,
+        unit_first: FunctionIndex,
         parent: Option<&Rc<Class>>,
         interfaces: &[Rc<Class>],
     ) -> Result<HashMap<String, Rc<LinkedConstant>>, NativeError> {
@@ -77,15 +78,26 @@ impl Vm {
                     )));
                 }
             }
+            let deprecated = if unit.has_link_attributes {
+                crate::attribute_diagnostics::attribute(&constant.metadata.attributes, "Deprecated")
+                    .map(|attribute| {
+                        crate::attribute_diagnostics::deprecation_message(
+                            attribute,
+                            &format!("Constant {name}::{constant_name}"),
+                        )
+                    })
+            } else {
+                None
+            };
             constants.insert(
                 constant_name,
                 Rc::new(LinkedConstant {
-                    deprecated: None,
+                    deprecated,
                     declaring: name.clone(),
                     visibility: constant.visibility,
                     is_final: constant.is_final,
                     initializer: super::class::ConstantInitializer::Compiled {
-                        function: self.code.index_in(unit, Some(constant.initializer.index())),
+                        function: self.code.declared(unit_first, constant.initializer.index()),
                         state: std::cell::RefCell::new(super::ConstantState::Uninitialized),
                     },
                     ty: constant.ty.map(|index| unit.types[index.index()].clone()),
@@ -98,8 +110,10 @@ impl Vm {
     pub(super) fn link_class_properties(
         &mut self,
         declaration: &ClassDeclaration,
-        unit: &Arc<CompiledUnit>,
+        unit: &CompiledUnit,
+        unit_first: FunctionIndex,
         parent: Option<&Rc<Class>>,
+        interfaces: &[Rc<Class>],
     ) -> Result<(Vec<PropertyDefault>, Vec<PropertyDefault>), NativeError> {
         let name = &declaration.name;
         let mut defaults = parent
@@ -124,7 +138,7 @@ impl Vm {
             };
             let hooks = property.hooks.as_ref().map(|hooks| {
                 Rc::new(super::property_hooks::LinkedPropertyHooks::link(
-                    hooks, name, self, unit,
+                    hooks, name, self, unit_first,
                 ))
             });
             let initialized = property.default.is_some()
@@ -133,6 +147,7 @@ impl Vm {
             let mut linked = PropertyDefault {
                 hooks,
                 is_final: property.is_final,
+                set_visibility: property.set_visibility,
                 key: key.clone(),
                 static_storage: property
                     .is_static
@@ -144,7 +159,7 @@ impl Vm {
                 initialized,
                 initializer: match property.default {
                     Some(phera_bytecode::Initializer::Function(index)) => {
-                        Some(self.code.index_in(unit, Some(index.index())))
+                        Some(self.code.declared(unit_first, index.index()))
                     }
                     _ => None,
                 },
@@ -175,12 +190,34 @@ impl Vm {
             } else {
                 &defaults
             };
-            super::declaration_errors::check_property_visibility(
-                name,
-                property.visibility,
-                property_name,
-                inherited,
-            )?;
+            if declaration.kind != phera_bytecode::ClassKind::Trait
+                && unit.has_link_attributes
+                && crate::attribute_diagnostics::attribute(
+                    &property.metadata.attributes,
+                    "Override",
+                )
+                .is_some()
+                && !overrides_property(property_name, name, inherited, interfaces)
+            {
+                return Err(property_override_error(
+                    declaration,
+                    unit,
+                    property_name,
+                    property.metadata.span.start,
+                ));
+            }
+            let other_storage = if property.is_static {
+                &defaults
+            } else {
+                &static_properties
+            };
+            if parent.is_some()
+                && let Some(inherited) = inherited.iter().chain(other_storage).find(|candidate| {
+                    candidate.name == *property_name && candidate.visibility != Visibility::Private
+                })
+            {
+                self.check_property_override(&linked, inherited, unit)?;
+            }
             let target = if property.is_static {
                 &mut static_properties
             } else {
@@ -200,4 +237,41 @@ impl Vm {
         }
         Ok((defaults, static_properties))
     }
+}
+
+pub(super) fn overrides_property(
+    name: &str,
+    child: &str,
+    properties: &[PropertyDefault],
+    interfaces: &[Rc<Class>],
+) -> bool {
+    properties
+        .iter()
+        .chain(interfaces.iter().flat_map(|interface| &interface.defaults))
+        .any(|candidate| {
+            candidate.name == name
+                && candidate.declaring != child
+                && candidate.visibility != Visibility::Private
+        })
+}
+
+pub(super) fn property_override_error(
+    class: &ClassDeclaration,
+    unit: &CompiledUnit,
+    property_name: &str,
+    offset: usize,
+) -> NativeError {
+    let name = phera_value::class_display_name(&class.name);
+    NativeError::Unwind(phera_extension_api::Unwind(Box::new(
+        crate::error_traces::DeclarationFailure {
+            message: format!(
+                r"{name}::${property_name} has #[\Override] attribute, but no matching parent property exists"
+            ),
+            file: unit.file.clone(),
+            line: unit
+                .reflection_lines
+                .as_ref()
+                .map_or(class.line as usize, |lines| lines.line(offset)),
+        },
+    )))
 }

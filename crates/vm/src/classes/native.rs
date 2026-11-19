@@ -39,6 +39,7 @@ impl ClassTable {
                 allows_dynamic_properties: true,
                 methods: HashMap::new(),
                 method_table: std::cell::OnceCell::new(),
+                serialized_fields: std::cell::OnceCell::new(),
                 constructor: None,
                 magic: None,
                 property_template: Some(phera_value::PhpArray::new()),
@@ -57,9 +58,15 @@ impl ClassTable {
             .map(|_| &crate::internal_iterator::ENTRY);
         for entry in registry
             .classes()
+            .filter(|entry| !matches!(entry.kind, NativeKind::UnitEnum(_)))
             .chain(std::iter::once(&closure))
             .chain(internal_iterator)
             .chain(super::enums::INTERFACES)
+            .chain(
+                registry
+                    .classes()
+                    .filter(|entry| matches!(entry.kind, NativeKind::UnitEnum(_))),
+            )
         {
             let parent = entry.parent.and_then(|name| table.get(name));
             let mut methods = parent
@@ -89,7 +96,13 @@ impl ClassTable {
                             signature: std::cell::OnceCell::new(),
                             name: name.into(),
                             declaring: "Closure".into(),
-                            visibility: Visibility::Public,
+                            visibility: if operation
+                                == crate::closure_methods::ClosureMethod::Construct
+                            {
+                                Visibility::Private
+                            } else {
+                                Visibility::Public
+                            },
                             is_static: matches!(
                                 operation,
                                 crate::closure_methods::ClosureMethod::Bind
@@ -117,6 +130,8 @@ impl ClassTable {
                     Visibility::Public => ArrayKey::str(property.name),
                 };
                 defaults.push(PropertyDefault {
+                    set_visibility: None,
+                    is_final: false,
                     static_storage: None,
                     key,
                     value: property
@@ -133,13 +148,12 @@ impl ClassTable {
                     static_initialized: Rc::new(std::cell::Cell::new(true)),
                     value_initialized: Rc::new(std::cell::Cell::new(property.default.is_some())),
                     hooks: None,
-                    is_final: false,
                 });
             }
             if table.get(entry.name).is_none() {
                 table.order.push(entry.name.into());
             }
-            let interfaces: Vec<Rc<Class>> = entry
+            let mut interfaces: Vec<Rc<Class>> = entry
                 .interfaces
                 .iter()
                 .filter_map(|name| table.get(name))
@@ -159,7 +173,7 @@ impl ClassTable {
                             .deprecated_constants
                             .iter()
                             .find(|(key, _)| key == name)
-                            .map(|(_, message)| *message),
+                            .map(|(_, message)| (*message).to_owned()),
                         declaring: entry.name.into(),
                         visibility: Visibility::Public,
                         is_final: false,
@@ -168,6 +182,18 @@ impl ClassTable {
                     }),
                 );
             }
+            let enum_info = if let NativeKind::UnitEnum(cases) = entry.kind {
+                interfaces.extend(table.get("UnitEnum"));
+                Some(super::enums::native_unit_enum(
+                    entry.name,
+                    cases,
+                    &mut methods,
+                    &mut defaults,
+                    &mut constants,
+                ))
+            } else {
+                None
+            };
             let is_throwable = entry.name == "Throwable"
                 || parent.as_ref().is_some_and(|parent| parent.is_throwable)
                 || interfaces
@@ -199,22 +225,26 @@ impl ClassTable {
                     parent,
                     interfaces,
                     traits: Vec::new(),
-                    enum_info: None,
-                    kind: if entry.kind == NativeKind::Interface {
-                        ClassKind::Interface
-                    } else {
-                        ClassKind::Class
+                    enum_info,
+                    kind: match entry.kind {
+                        NativeKind::Interface => ClassKind::Interface,
+                        NativeKind::UnitEnum(_) => ClassKind::Enum,
+                        _ => ClassKind::Class,
                     },
                     is_abstract: entry.kind == NativeKind::AbstractClass,
                     is_throwable,
                     has_native_layout: true,
-                    is_final: entry.kind == NativeKind::FinalClass,
+                    is_final: matches!(
+                        entry.kind,
+                        NativeKind::FinalClass | NativeKind::UnitEnum(_)
+                    ),
                     is_readonly: false,
                     allows_dynamic_properties: false,
                     constructor: methods.get("__construct").cloned(),
                     magic: super::magic::MagicMethods::link(&methods),
                     methods,
                     method_table: std::cell::OnceCell::new(),
+                    serialized_fields: std::cell::OnceCell::new(),
                     property_template: super::class::property_template(&defaults),
                     defaults,
                     static_properties: Vec::new(),
@@ -262,6 +292,7 @@ fn property_type(ty: phera_extension_api::PropertyType) -> Type {
         PropertyType::Int => (TypeMask::INT, "int"),
         PropertyType::Float => (TypeMask::FLOAT, "float"),
         PropertyType::String => (TypeMask::STRING, "string"),
+        PropertyType::NullableString => (TypeMask::STRING.union(TypeMask::NULL), "?string"),
         PropertyType::Array => (TypeMask::ARRAY, "array"),
         PropertyType::Object => (TypeMask::OBJECT, "object"),
         PropertyType::Mixed => (TypeMask::MIXED, "mixed"),

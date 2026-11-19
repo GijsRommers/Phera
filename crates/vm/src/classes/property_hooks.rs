@@ -3,7 +3,7 @@
 
 use std::rc::Rc;
 
-use phera_bytecode::{CompiledUnit, FunctionId, PropertyHook, PropertyHooks, Visibility};
+use phera_bytecode::{FunctionId, PropertyHook, PropertyHooks};
 use phera_extension_api::{NativeError, NativeResult};
 use phera_value::{ArrayKey, Object, Value};
 
@@ -25,20 +25,18 @@ impl LinkedPropertyHooks {
         hooks: &PropertyHooks<FunctionId>,
         declaring: &str,
         vm: &Vm,
-        unit: &std::sync::Arc<CompiledUnit>,
+        unit_first: FunctionIndex,
     ) -> Self {
         let link = |hook: &PropertyHook<FunctionId>| PropertyHook {
-            function: vm.code.index_in(unit, Some(hook.function.index())),
+            function: vm.code.declared(unit_first, hook.function.index()),
             is_abstract: hook.is_abstract,
             is_final: hook.is_final,
-            attributes: hook.attributes.clone(),
         };
         Self {
             hooks: PropertyHooks {
                 get: hooks.get.as_ref().map(link),
                 set: hooks.set.as_ref().map(link),
                 is_virtual: hooks.is_virtual,
-                set_visibility: hooks.set_visibility,
             },
             prototype: Rc::from(declaring),
         }
@@ -48,7 +46,7 @@ impl LinkedPropertyHooks {
         self.hooks.get.is_some() || self.hooks.set.is_some()
     }
 
-    pub(super) fn methods(&self) -> impl Iterator<Item = &PropertyHook<FunctionIndex>> {
+    pub(crate) fn methods(&self) -> impl Iterator<Item = &PropertyHook<FunctionIndex>> {
         self.hooks.get.iter().chain(&self.hooks.set)
     }
 }
@@ -129,45 +127,6 @@ impl Vm {
         self.finish_callback(routed, base, depth, ArgumentOrigin::Php)
             .await
     }
-
-    pub(crate) fn hook_set_access(
-        &self,
-        property: &PropertyDefault,
-        hooks: &LinkedPropertyHooks,
-        operation: &str,
-    ) -> Result<(), NativeError> {
-        let Some(visibility) = hooks.hooks.set_visibility else {
-            return Ok(());
-        };
-        let scope = self.current().and_then(|frame| frame.scope());
-        let allowed = match visibility {
-            Visibility::Public => true,
-            Visibility::Private => scope.is_some_and(|scope| scope.name == property.declaring),
-            Visibility::Protected => scope.is_some_and(|scope| {
-                scope.is_a(&hooks.prototype)
-                    || self
-                        .classes
-                        .get(&hooks.prototype)
-                        .is_some_and(|declaring| declaring.is_a(&scope.name))
-            }),
-        };
-        if allowed {
-            return Ok(());
-        }
-        let visibility = match visibility {
-            Visibility::Public => "public",
-            Visibility::Protected => "protected",
-            Visibility::Private => "private",
-        };
-        let scope = scope.map_or("global scope".into(), |class| {
-            format!("scope {}", class.name)
-        });
-        Err(NativeError::error(format!(
-            "Cannot {operation} {visibility}(set) property {}::${} from {scope}",
-            phera_value::class_display_name(&property.declaring),
-            property.name
-        )))
-    }
 }
 
 pub(crate) fn indirect_error(object: &Object, name: &str) -> NativeError {
@@ -224,7 +183,10 @@ impl Vm {
                 return Ok(HookRead::Value(value));
             }
             if indirect {
-                self.hook_set_access(property, hooks, "indirectly modify")?;
+                self.check_set_visibility(
+                    property,
+                    crate::property_set_visibility::PropertyChange::Indirect,
+                )?;
             }
             return Ok(HookRead::Storage);
         };
@@ -240,7 +202,10 @@ impl Vm {
             return Ok(HookRead::Storage);
         }
         if indirect {
-            self.hook_set_access(property, hooks, "indirectly modify")?;
+            self.check_set_visibility(
+                property,
+                crate::property_set_visibility::PropertyChange::Indirect,
+            )?;
         }
         Ok(HookRead::Getter(getter.function))
     }
@@ -260,7 +225,10 @@ impl Vm {
                     " is read-only",
                 ));
             }
-            self.hook_set_access(property, hooks, "modify")?;
+            self.check_set_visibility(
+                property,
+                crate::property_set_visibility::PropertyChange::Direct,
+            )?;
             return Ok(HookWrite::Storage);
         };
         if self.uses_property_backing(object, property, hooks) {
@@ -274,7 +242,10 @@ impl Vm {
             }
             return Ok(HookWrite::Storage);
         }
-        self.hook_set_access(property, hooks, "modify")?;
+        self.check_set_visibility(
+            property,
+            crate::property_set_visibility::PropertyChange::Direct,
+        )?;
         Ok(HookWrite::Setter(setter.function))
     }
 }

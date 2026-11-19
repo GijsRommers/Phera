@@ -115,7 +115,11 @@ impl Vm {
         let invokes_getter = dispatched
             .is_some_and(|(_, hooks, _)| hooks.hooks.is_virtual || hooks.hooks.get.is_some());
         let write_rule = match property {
-            Some((_, property)) if !property.is_readonly && dispatched.is_none() => {
+            Some((_, property))
+                if !property.is_readonly
+                    && property.set_visibility.is_none()
+                    && dispatched.is_none() =>
+            {
                 match &property.ty {
                     None => WriteRule::Untyped,
                     Some(declared) => WriteRule::Typed(declared.mask),
@@ -136,9 +140,12 @@ impl Vm {
                             .then_some(getter.function)
                     }),
                     setter: hooks.hooks.set.as_ref().and_then(|setter| {
-                        self.hook_set_access(property, hooks, "modify")
-                            .is_ok()
-                            .then_some(setter.function)
+                        self.check_set_visibility(
+                            property,
+                            crate::property_set_visibility::PropertyChange::Direct,
+                        )
+                        .is_ok()
+                        .then_some(setter.function)
                     }),
                     guard_receiver,
                 })

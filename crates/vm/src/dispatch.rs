@@ -73,8 +73,16 @@ impl Vm {
                 self.set(dst, value);
             }
             Instruction::AssignOp { op, local, src } => {
-                let left = self.read_local(local);
+                // PHP reads the right side first, so when both are
+                // undefined its warning comes first.
                 let right = self.read_local(src);
+                let left = self.read_local(local);
+                // An "Undefined variable" warning reaches the script's error
+                // handler before the result is stored. The handler may unset
+                // or assign the variable; the result still replaces it.
+                if !self.error_handlers.pending.is_empty() {
+                    self.drain_error_handlers().await?;
+                }
                 let value = self.binary_with_strings(op, left, right).await?;
                 self.assign_local(local, value)?;
             }

@@ -32,7 +32,7 @@ pub enum Token<'a> {
     ObjectReference(usize),
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Diagnostic {
     UnexpectedEnd,
     NumberOutOfRange,

@@ -2,32 +2,23 @@
 
 use std::rc::Rc;
 
-use phera_extension_api::serialization::{EnumCaseLookup, INCOMPLETE_CLASS, INCOMPLETE_CLASS_NAME};
+use phera_extension_api::serialization::{
+    EnumCaseLookup, INCOMPLETE_CLASS, INCOMPLETE_CLASS_NAME, SerializationClass,
+};
 use phera_extension_api::{ArrayKey, Context, NativeError, Object, Value};
 
 use super::{BuildResult, Container, Decoder, Failure, emit_diagnostic, graph::Place};
 use crate::wire::ObjectFormat;
 
-impl Decoder<'_> {
+impl<'a> Decoder<'a> {
     pub(super) async fn object(
         &mut self,
         context: &mut dyn Context,
         place: Place,
-        class: &[u8],
+        class: &'a [u8],
         format: ObjectFormat,
     ) -> BuildResult<()> {
-        let info = if self.options.allows(class) {
-            if let Ok(name) = std::str::from_utf8(class) {
-                match context.serialization_class(name).await? {
-                    Some(class) => Some(class),
-                    None => context.unserialize_class_callback(name).await?,
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+        let info = self.class_info(context, class).await?;
         if let Some(info) = &info
             && info.forbidden
         {
@@ -72,6 +63,16 @@ impl Decoder<'_> {
                     context.warning(format!("Erroneous data format for unserializing '{name}'"));
                     return Err(Failure::Parse);
                 }
+                let limit = self.options.max_depth;
+                if !self.tracks_references
+                    && (limit == 0 || self.frames.len() < limit)
+                    && let Some(layout) = info.as_ref().and_then(|info| info.plain.as_ref())
+                    && let Some(object) =
+                        super::plain_object::read(context, &mut self.reader, layout, count)
+                {
+                    self.graph.value(place, Value::Object(object));
+                    return Ok(());
+                }
                 let object = allocate(context, name)?;
                 if info.is_none() {
                     object.set(ArrayKey::str(INCOMPLETE_CLASS_NAME), Value::from(class));
@@ -86,6 +87,33 @@ impl Decoder<'_> {
             }
         }
         Ok(())
+    }
+
+    async fn class_info(
+        &mut self,
+        context: &mut dyn Context,
+        spelling: &'a [u8],
+    ) -> BuildResult<Option<Rc<SerializationClass>>> {
+        if let Some((key, class)) = &self.last_class
+            && *key == spelling
+        {
+            return Ok(Some(class.clone()));
+        }
+        if !self.options.allows(spelling) {
+            return Ok(None);
+        }
+        let Ok(name) = std::str::from_utf8(spelling) else {
+            return Ok(None);
+        };
+        let resolved = match context.serialization_class(name).await? {
+            Some(class) => Some(class),
+            None => context.unserialize_class_callback(name).await?,
+        };
+        let resolved = resolved.map(Rc::new);
+        if let Some(class) = &resolved {
+            self.last_class = Some((spelling, class.clone()));
+        }
+        Ok(resolved)
     }
 
     pub(super) async fn enum_case(

@@ -281,12 +281,22 @@ pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
         ..Tables::default()
     };
     tables.unit.file = source.file;
+    tables.unit.reflection_initializers = source.reflection_initializers;
+    tables.unit.reflection_source = source.reflection_source;
+    tables.unit.constant_metadata = source.constant_metadata;
+    tables.unit.has_link_attributes = source.has_link_attributes;
     tables.unit.declaration_warnings = source.declaration_warnings;
     tables.unit.main = tables.function(source.main);
     tables.unit.functions = source
         .functions
         .into_iter()
-        .map(|function| tables.function(function))
+        .map(|mut function| {
+            tables
+                .unit
+                .function_metadata
+                .push(std::mem::take(&mut function.metadata));
+            tables.function(function)
+        })
         .collect();
     tables.unit.hoisted = source
         .hoisted
@@ -297,6 +307,7 @@ pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
         .classes
         .into_iter()
         .map(|declaration| phera_bytecode::ClassDeclaration {
+            metadata: declaration.metadata,
             line: declaration.line,
             name: declaration.name,
             parent: declaration
@@ -317,7 +328,8 @@ pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
             enum_cases: declaration
                 .enum_cases
                 .into_iter()
-                .map(|(name, backing)| phera_bytecode::EnumCase {
+                .map(|(name, backing, metadata)| phera_bytecode::EnumCase {
+                    metadata,
                     name: tables.name(&name),
                     backing: backing.map(|index| FunctionId(index as u32)),
                 })
@@ -326,6 +338,7 @@ pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
                 .constants
                 .into_iter()
                 .map(|constant| phera_bytecode::ClassConstant {
+                    metadata: constant.metadata,
                     name: tables.name(&constant.name),
                     visibility: constant.visibility,
                     is_final: constant.is_final,
@@ -337,11 +350,14 @@ pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
                 .properties
                 .into_iter()
                 .map(|property| phera_bytecode::PropertyDeclaration {
+                    metadata: property.metadata,
+                    promoted: property.promoted,
+                    set_visibility: property.set_visibility,
+                    is_final: property.is_final,
                     name: tables.name(&property.name),
                     visibility: property.visibility,
                     is_static: property.is_static,
                     is_readonly: property.is_readonly,
-                    is_final: property.is_final,
                     ty: property.ty.map(|name| tables.ty(&name)),
                     hooks: property.hooks.map(|hooks| {
                         let lower_hook = |hook: phera_bytecode::PropertyHook<usize>| {
@@ -349,14 +365,12 @@ pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
                                 function: FunctionId(hook.function as u32),
                                 is_abstract: hook.is_abstract,
                                 is_final: hook.is_final,
-                                attributes: hook.attributes,
                             }
                         };
                         Box::new(phera_bytecode::PropertyHooks {
                             get: hooks.get.map(lower_hook),
                             set: hooks.set.map(lower_hook),
                             is_virtual: hooks.is_virtual,
-                            set_visibility: hooks.set_visibility,
                         })
                     }),
                     default: property.default.map(|index| {

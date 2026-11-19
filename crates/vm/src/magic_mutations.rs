@@ -166,7 +166,10 @@ impl Vm {
                             "",
                         ));
                     } else if last && matches!(operation, PropertyMutation::Unset) {
-                        self.hook_set_access(property, hooks, "unset")?;
+                        self.check_set_visibility(
+                            property,
+                            crate::property_set_visibility::PropertyChange::Unset,
+                        )?;
                     } else {
                         let indirect = !last || hooks.hooks.get.is_none();
                         match self.declared_hook_read(object, property, hooks, indirect)? {

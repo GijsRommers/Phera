@@ -200,12 +200,28 @@ impl Vm {
                     unresolved.or_else(|| self.unresolved_contract_type(source, target, unit));
             }
         }
-        if base.returns.is_some() && (!base.tentative || child.returns.is_some()) {
+        if base.returns.is_some() {
             let source = child.returns.as_deref();
             let target = base.returns.as_deref();
-            if !self.type_subset(source, &method.declaring, target, inherited_scope, unit) {
+            if (base.tentative && source.is_none())
+                || !self.type_subset(source, &method.declaring, target, inherited_scope, unit)
+            {
                 if base.tentative && compatible {
-                    if let MethodBody::User(reference) = method.body {
+                    if let MethodBody::User(reference) = method.body
+                        && !self
+                            .code
+                            .local(reference)
+                            .and_then(|index| {
+                                self.code.unit(reference).function_metadata.get(index)
+                            })
+                            .is_some_and(|metadata| {
+                                crate::attribute_diagnostics::attribute(
+                                    &metadata.declaration.attributes,
+                                    "ReturnTypeWillChange",
+                                )
+                                .is_some()
+                            })
+                    {
                         let location = crate::diagnostics::SourceLocation {
                             file: self.code.unit(reference).file.clone(),
                             line: self.code.function(reference).definition_line as usize,

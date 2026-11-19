@@ -1,6 +1,7 @@
 //! Resolve constant symbols once, invalidating fallbacks when PHP defines names.
 
-use std::{collections::HashMap, sync::Arc};
+use crate::code_table::FunctionIndex;
+use std::{collections::HashMap, rc::Rc, sync::Arc};
 
 use phera_bytecode::{CompiledUnit, SymbolId};
 use phera_extension_api::NativeError;
@@ -22,13 +23,14 @@ struct ResolvedConstant {
 #[derive(Clone)]
 pub(crate) struct GlobalConstant {
     pub(crate) value: Value,
-    pub(crate) deprecated: Option<&'static str>,
+    pub(crate) deprecated: Option<Rc<str>>,
 }
 
 /// Request constants and the resolved values of bytecode symbols.
 pub(crate) struct ConstantTable {
     values: HashMap<String, GlobalConstant>,
     user_order: Vec<String>,
+    origins: HashMap<String, ConstantOrigin>,
     resolved: HashMap<ConstantSite, ResolvedConstant>,
 }
 
@@ -55,6 +57,7 @@ impl ConstantTable {
         Self {
             values,
             user_order: Vec::new(),
+            origins: HashMap::new(),
             resolved: HashMap::new(),
         }
     }
@@ -72,16 +75,29 @@ impl ConstantTable {
     }
 
     /// A new namespace constant can replace an earlier global fallback.
-    pub(crate) fn insert(&mut self, name: String, value: Value) {
+    pub(crate) fn insert(
+        &mut self,
+        name: String,
+        value: Value,
+        origin: Option<ConstantOrigin>,
+        deprecated: Option<String>,
+    ) {
         self.resolved.clear();
         self.user_order.push(name.clone());
+        if let Some(origin) = origin {
+            self.origins.insert(name.clone(), origin);
+        }
         self.values.insert(
             name,
             GlobalConstant {
                 value,
-                deprecated: None,
+                deprecated: deprecated.map(Rc::from),
             },
         );
+    }
+
+    pub(crate) fn origin(&self, name: &str) -> Option<ConstantOrigin> {
+        self.origins.get(name).copied()
     }
 
     /// Failed fetches are never cached: a later define must remain observable.
@@ -135,4 +151,11 @@ impl ConstantTable {
         }
         Ok(value)
     }
+}
+
+/// Constants introduced by `define()` have a file but no declaration attributes.
+#[derive(Clone, Copy)]
+pub(crate) enum ConstantOrigin {
+    Declaration(FunctionIndex),
+    Define(FunctionIndex),
 }

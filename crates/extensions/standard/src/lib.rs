@@ -9,6 +9,8 @@ pub mod environment;
 mod math;
 mod natural;
 mod offsets;
+mod packing;
+mod process;
 mod strings;
 mod time;
 mod version_compare;
@@ -26,14 +28,17 @@ impl Extension for Standard {
     fn register(&self, registry: &mut Registry) {
         registry.function(version_compare::ENTRY);
         strings::register(registry);
+        registry.describe_function("strlen", "int", Some("Core"));
         url::register(registry);
         math::register(registry);
         arrays::register(registry);
+        packing::register(registry);
         constants::register(registry);
         for entry in natural::FUNCTIONS.iter().chain(time::FUNCTIONS) {
             registry.function(*entry);
         }
         environment::register(registry);
+        process::register(registry);
     }
 }
 

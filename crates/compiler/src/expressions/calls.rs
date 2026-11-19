@@ -63,7 +63,13 @@ impl Compiler<'_> {
             line,
         );
         let destination = self.allocate_register()?;
-        self.emit(Instruction::FinishCall { destination }, line);
+        self.emit(
+            Instruction::FinishCall {
+                destination,
+                result: phera_bytecode::CallResult::Used,
+            },
+            line,
+        );
         Ok(destination)
     }
 
@@ -90,7 +96,11 @@ impl Compiler<'_> {
             Some(named) if named.name == "assertion" => Some("description".to_string()),
             Some(_) => return None,
         };
-        let written = self.source.get(condition.span.start..condition.span.end)?;
+        let formatted =
+            super::assertion_text::format(self.source, condition.span, &condition.value);
+        let written = formatted
+            .as_deref()
+            .or_else(|| self.source.get(condition.span.start..condition.span.end))?;
         let text = [b"assert(", written.trim_ascii(), b")"].concat();
         Some((text, description_name))
     }
@@ -110,7 +120,13 @@ impl Compiler<'_> {
             self.send_argument(argument, line)?;
         }
         let dst = self.allocate_register()?;
-        self.emit(Instruction::FinishCall { destination: dst }, line);
+        self.emit(
+            Instruction::FinishCall {
+                destination: dst,
+                result: phera_bytecode::CallResult::Used,
+            },
+            line,
+        );
         Ok(dst)
     }
 

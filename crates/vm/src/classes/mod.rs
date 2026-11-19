@@ -30,6 +30,7 @@ mod trait_adaptations;
 mod trait_defaults;
 mod trait_members;
 pub(crate) mod trait_methods;
+mod trait_property_overrides;
 
 pub(crate) use class::{
     Class, ConstantState, Invocation, LinkedConstant, Method, MethodBody, MethodContext,

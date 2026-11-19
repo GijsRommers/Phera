@@ -10,6 +10,7 @@ use std::{
 
 use phera_ast as ast;
 use phera_bytecode::Reg;
+use phera_bytecode::reflection::{Imports, InitializerSource};
 use phera_source::{CompileDiagnostic, LineTable};
 
 use crate::CompileError;
@@ -23,10 +24,18 @@ pub(super) struct Loop {
     pub(super) breaks: Vec<usize>,
     pub(super) continues: Vec<usize>,
 }
+/// Source retained only for comments and initializer expressions that reflection may read.
+#[derive(Default)]
+pub(crate) struct ReflectionInputs {
+    pub(crate) initializers: RefCell<Vec<InitializerSource>>,
+    pub(crate) has_doc_comments: Cell<bool>,
+    pub(crate) has_link_attributes: Cell<bool>,
+}
+
 /// Mutable AST-to-IR state for one PHP function, sharing source locations.
 pub(super) struct Compiler<'ast> {
     pub(super) file: &'ast str,
-    /// The text being compiled. `assert()` quotes its condition from it.
+    /// Source bytes for quoted assertions, declaration metadata and deferred expressions.
     pub(super) source: &'ast [u8],
     pub(super) declaration_warnings: Vec<phera_bytecode::DeclarationWarning>,
     pub(super) compile_diagnostics: &'ast RefCell<Vec<CompileDiagnostic>>,
@@ -34,6 +43,7 @@ pub(super) struct Compiler<'ast> {
     pub(super) function: Function,
     pub(super) functions: Vec<Function>,
     pub(super) hoisted: Vec<usize>,
+    pub(super) constant_metadata: HashMap<String, phera_bytecode::reflection::DeclarationMetadata>,
     pub(super) classes: Vec<crate::ir::ClassDeclaration>,
     pub(super) hoisted_classes: Vec<usize>,
     pub(super) anonymous_classes: Rc<Cell<u64>>,
@@ -50,7 +60,8 @@ pub(super) struct Compiler<'ast> {
     pub(super) trait_scope: Option<String>,
     pub(super) hooked_property: Option<String>,
     pub(super) uses_hook_backing: bool,
-    pub(super) imports: HashMap<(NameKind, String), String>,
+    pub(super) imports: Option<Imports>,
+    pub(super) reflection: &'ast ReflectionInputs,
 }
 impl<'ast> Compiler<'ast> {
     /// Start an independent function builder in the current namespace.
@@ -61,6 +72,7 @@ impl<'ast> Compiler<'ast> {
         name: &str,
         namespace: &str,
         compile_diagnostics: &'ast RefCell<Vec<CompileDiagnostic>>,
+        reflection: &'ast ReflectionInputs,
     ) -> Self {
         Self {
             file,
@@ -74,6 +86,7 @@ impl<'ast> Compiler<'ast> {
             },
             functions: vec![],
             hoisted: vec![],
+            constant_metadata: HashMap::new(),
             classes: vec![],
             hoisted_classes: vec![],
             anonymous_classes: Rc::default(),
@@ -88,7 +101,8 @@ impl<'ast> Compiler<'ast> {
             trait_scope: None,
             hooked_property: None,
             uses_hook_backing: false,
-            imports: HashMap::new(),
+            imports: None,
+            reflection,
         }
     }
 
@@ -221,9 +235,11 @@ impl<'ast> Compiler<'ast> {
         if index.kind == ast::NameKind::FullyQualified {
             return (index.text.clone(), None);
         }
-        if index.kind != ast::NameKind::Relative {
+        if index.kind != ast::NameKind::Relative
+            && let Some(imports) = &self.imports
+        {
             let (first, rest) = index.text.split_once('\\').unwrap_or((&index.text, ""));
-            if let Some(value) = self.imports.get(&(
+            if let Some(value) = imports.get(&(
                 if rest.is_empty() {
                     kind
                 } else {

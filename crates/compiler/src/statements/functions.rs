@@ -1,10 +1,29 @@
 //! Function declarations, parameter prologues, and nested declarations.
 
+use super::builtin_attributes::AttributePlacement;
 use phera_ast as ast;
+use phera_source::attributes::AttributeTarget;
 
 use crate::ir::{Constant, Instruction, Parameter};
 use crate::policies::DeclarationTiming;
 use crate::{CompileError, Compiler};
+
+/// Borrow AST nodes while lowering so long expression trees are never cloned.
+pub(crate) struct FunctionSource<'a> {
+    pub(crate) span: phera_source::Span,
+    pub(crate) doc_comment: Option<phera_source::Span>,
+    pub(crate) attributes: &'a [ast::Attribute],
+    pub(crate) name: &'a str,
+    pub(crate) by_reference: bool,
+    pub(crate) parameters: &'a [ast::Parameter],
+    pub(crate) return_type: Option<&'a ast::Type>,
+    pub(crate) body: FunctionBody<'a>,
+}
+
+pub(crate) enum FunctionBody<'a> {
+    Statements(&'a [ast::Statement]),
+    Arrow(&'a ast::Expression),
+}
 
 impl<'ast> Compiler<'ast> {
     /// Build a separate frame, then relocate declarations nested within its body.
@@ -14,25 +33,39 @@ impl<'ast> Compiler<'ast> {
         timing: DeclarationTiming,
         line: usize,
     ) -> Result<(), CompileError> {
-        self.compile_captured_function(declaration, timing, line, &[])
+        self.compile_captured_function(
+            &FunctionSource {
+                span: declaration.span,
+                doc_comment: declaration.doc_comment,
+                attributes: &declaration.attributes,
+                name: &declaration.name.name,
+                by_reference: declaration.by_reference,
+                parameters: &declaration.parameters,
+                return_type: declaration.return_type.as_ref(),
+                body: FunctionBody::Statements(&declaration.body),
+            },
+            timing,
+            line,
+            &[],
+        )
     }
 
     /// Captures must be allocated before default expressions introduce other locals.
     pub(crate) fn compile_captured_function(
         &mut self,
-        declaration: &ast::FunctionDeclaration,
+        declaration: &FunctionSource<'_>,
         timing: DeclarationTiming,
         line: usize,
         captures: &[String],
     ) -> Result<(), CompileError> {
-        self.validate_function_attributes(declaration, line)?;
+        self.validate_parameter_features(declaration)?;
         let name = if self.namespace.is_empty()
-            || declaration.name.name.contains("::")
-            || declaration.name.name.starts_with("{closure:")
+            || declaration.name.contains("::")
+            || declaration.name.starts_with("{closure:")
         {
-            declaration.name.name.clone()
+            declaration.name.to_owned()
         } else {
-            format!("{}\\{}", self.namespace, declaration.name.name)
+            format!("{}\\{}", self.namespace, declaration.name)
         };
         if timing == DeclarationTiming::Hoisted
             && self
@@ -43,22 +76,50 @@ impl<'ast> Compiler<'ast> {
         {
             return Err(self.error(format!("Cannot redeclare function {name}()"), line));
         }
-        let mut builder = self.function_builder(
-            &declaration.parameters,
-            declaration.by_reference,
-            &name,
-            captures,
-            line,
+        let mut builder = self.function_builder(declaration, &name, captures, line)?;
+        if builder.has_builtin(declaration.attributes, "Deprecated")
+            || builder.has_builtin(declaration.attributes, "NoDiscard")
+        {
+            builder.emit(Instruction::AttributeDiagnostics, line);
+        }
+        builder.compile_parameter_defaults(declaration.parameters, line)?;
+        let scope = builder.class_scope.clone();
+        builder.function.metadata.declaration = builder.declaration_metadata(
+            declaration.attributes,
+            declaration.span,
+            declaration.doc_comment,
+            scope.as_deref(),
+            AttributePlacement::Declaration(
+                if declaration.name.contains("::") && !declaration.name.starts_with("{closure:") {
+                    AttributeTarget::Method
+                } else {
+                    AttributeTarget::Function
+                },
+            ),
         )?;
-        builder.compile_parameter_defaults(&declaration.parameters, line)?;
-        builder.compile_promoted_properties(&declaration.parameters, line)?;
+        builder.validate_nodiscard(declaration, line)?;
+        if declaration.parameters.iter().any(|parameter| {
+            parameter.default.is_some()
+                || !parameter.attributes.is_empty()
+                || parameter.is_promoted()
+        }) {
+            builder.function.metadata.parameters = declaration
+                .parameters
+                .iter()
+                .map(|parameter| builder.reflected_parameter(parameter))
+                .collect::<Result<_, _>>()?;
+        }
+        builder.compile_promoted_properties(declaration.parameters, line)?;
         builder.function.return_type = declaration
             .return_type
-            .as_ref()
             .map(|declared_type| self.declaration_type(declared_type));
-        builder.block(&declaration.body, DeclarationTiming::AtExecution)?;
+        match declaration.body {
+            FunctionBody::Statements(body) => {
+                builder.block(body, DeclarationTiming::AtExecution)?
+            }
+            FunctionBody::Arrow(body) => builder.compile_return(Some(body), line)?,
+        }
         let implicit_return = if declaration
-            .name
             .name
             .rsplit_once("::")
             .is_some_and(|(_, method)| method.eq_ignore_ascii_case("__toString"))
@@ -77,7 +138,7 @@ impl<'ast> Compiler<'ast> {
     }
 
     /// Nested declarations use indices relative to their builder until attached to the unit.
-    fn append_function(
+    pub(super) fn append_function(
         &mut self,
         mut builder: Compiler<'_>,
         timing: DeclarationTiming,
@@ -86,7 +147,7 @@ impl<'ast> Compiler<'ast> {
         let id = self.append_function_body(&mut builder)?;
         if timing == DeclarationTiming::Hoisted {
             self.hoisted.push(id)
-        } else {
+        } else if timing == DeclarationTiming::AtExecution {
             self.emit(Instruction::Declare(id), line);
         }
         Ok(())
@@ -134,7 +195,7 @@ impl<'ast> Compiler<'ast> {
                     *default += id + 1;
                 }
             }
-            for (_, backing) in &mut class.enum_cases {
+            for (_, backing, _) in &mut class.enum_cases {
                 if let Some(initializer) = backing {
                     *initializer += id + 1;
                 }
@@ -151,8 +212,7 @@ impl<'ast> Compiler<'ast> {
     /// Independent builders keep captured locals ahead of ordinary body temporaries.
     pub(super) fn function_builder(
         &self,
-        parameters: &[ast::Parameter],
-        returns_reference: bool,
+        declaration: &FunctionSource<'_>,
         name: &str,
         captures: &[String],
         line: usize,
@@ -164,6 +224,7 @@ impl<'ast> Compiler<'ast> {
             name,
             &self.namespace,
             self.compile_diagnostics,
+            self.reflection,
         );
         builder.anonymous_classes = self.anonymous_classes.clone();
         if name.starts_with("{closure:") || name.contains("::") {
@@ -177,10 +238,10 @@ impl<'ast> Compiler<'ast> {
             self.class_scope.clone()
         };
         builder.function.definition_line = line;
-        builder.function.returns_reference = returns_reference;
+        builder.function.returns_reference = declaration.by_reference;
         builder.imports = self.imports.clone();
         builder.function.strict_types = self.function.strict_types;
-        for parameter in parameters {
+        for parameter in declaration.parameters {
             builder.local(&parameter.name)?;
             builder.function.parameters.push(Parameter {
                 default_display: parameter

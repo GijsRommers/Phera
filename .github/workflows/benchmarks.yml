@@ -45,6 +45,7 @@ jobs:
           python3 .github/scripts/benchmark.py
           --base .benchmark-base/target/release/phera
           --head target/release/phera
+          --base-benchmarks .benchmark-base/benchmarks
           --runs 5
           --base-sha '${{ github.event.pull_request.base.sha }}'
           --head-sha '${{ github.event.pull_request.head.sha }}'

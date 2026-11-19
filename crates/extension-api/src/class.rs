@@ -14,7 +14,7 @@
 
 use std::rc::Rc;
 
-use phera_value::{Object, Value};
+use phera_value::{Object, PhpString, Value};
 
 use crate::{ClassHooks, ConstantValue, Context, LocalFuture, NativeError, NativeResult, Param};
 
@@ -41,10 +41,19 @@ pub type AsyncMethod = for<'a> fn(
     Vec<Value>,
 ) -> LocalFuture<'a, NativeResult>;
 
+/// An async method that forwards names from its variadic arguments into a PHP call.
+pub type AsyncNamedMethod = for<'a> fn(
+    &'a mut dyn Context,
+    Option<Rc<Object>>,
+    Vec<Value>,
+    &'a [(usize, PhpString)],
+) -> LocalFuture<'a, NativeResult>;
+
 #[derive(Clone, Copy)]
 pub enum NativeMethod {
     Sync(SyncMethod),
     Async(AsyncMethod),
+    AsyncNamed(AsyncNamedMethod),
     /// Declared but without a body: an interface method, or an abstract one.
     Abstract,
 }
@@ -64,6 +73,8 @@ pub enum ClassKind {
     /// A class that cannot be extended.
     FinalClass,
     Interface,
+    /// An internal, unbacked enum with its cases in declaration order.
+    UnitEnum(&'static [&'static str]),
 }
 
 /// Internal signatures can require a return type or give a tentative compatibility warning.
@@ -115,6 +126,23 @@ impl MethodEntry {
             name,
             params,
             handler: NativeMethod::Async(handler),
+            preparation: None,
+            visibility: Visibility::Public,
+            is_static: false,
+            is_final: false,
+            return_type: None,
+        }
+    }
+
+    pub const fn public_async_named(
+        name: &'static str,
+        params: &'static [Param],
+        handler: AsyncNamedMethod,
+    ) -> Self {
+        MethodEntry {
+            name,
+            params,
+            handler: NativeMethod::AsyncNamed(handler),
             preparation: None,
             visibility: Visibility::Public,
             is_static: false,
@@ -178,6 +206,7 @@ pub enum PropertyType {
     Array,
     Object,
     Mixed,
+    NullableString,
     NullableClass(&'static str),
 }
 
@@ -230,6 +259,7 @@ impl PropertyEntry {
 /// Instance access for native properties whose values live outside ordinary storage.
 pub enum NativePropertyRead {
     Read,
+    Update,
     Quiet,
     Isset,
     Exists,

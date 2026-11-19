@@ -105,6 +105,7 @@ pub struct Parameter {
 /// One function of IR plus its constants, locals, source lines and scope requirements.
 #[derive(Debug, Clone, Default)]
 pub struct Function {
+    pub metadata: phera_bytecode::reflection::FunctionMetadata,
     pub name: String,
     pub definition_line: usize,
     pub instructions: Vec<Instruction>,
@@ -124,6 +125,11 @@ pub struct Function {
 /// The top-level function and declarations awaiting final bytecode emission.
 #[derive(Debug, Clone)]
 pub struct CompiledUnit {
+    pub reflection_initializers: Vec<phera_bytecode::reflection::InitializerSource>,
+    pub reflection_source: Option<Box<[u8]>>,
+    pub has_link_attributes: bool,
+    pub constant_metadata:
+        std::collections::HashMap<String, phera_bytecode::reflection::DeclarationMetadata>,
     pub declaration_warnings: Vec<phera_bytecode::DeclarationWarning>,
     pub main: Function,
     pub functions: Vec<Function>,
@@ -136,6 +142,7 @@ pub struct CompiledUnit {
 /// Owned class names are interned only after method functions have their final indices.
 #[derive(Debug, Clone)]
 pub struct ClassDeclaration {
+    pub metadata: phera_bytecode::reflection::DeclarationMetadata,
     pub line: u32,
     pub name: String,
     pub parent: Option<String>,
@@ -150,7 +157,11 @@ pub struct ClassDeclaration {
     pub methods: Vec<ClassMethod>,
     pub traits: Vec<phera_bytecode::TraitUse>,
     pub enum_backing: Option<phera_bytecode::EnumBacking>,
-    pub enum_cases: Vec<(String, Option<usize>)>,
+    pub enum_cases: Vec<(
+        String,
+        Option<usize>,
+        phera_bytecode::reflection::DeclarationMetadata,
+    )>,
 }
 /// Method metadata travels beside ordinary function IR rather than entering global scope.
 #[derive(Debug, Clone)]
@@ -166,11 +177,15 @@ pub struct ClassMethod {
 /// Property metadata keeps source names until bytecode interning.
 #[derive(Debug, Clone)]
 pub struct ClassProperty {
+    pub set_visibility: Option<phera_bytecode::Visibility>,
+    pub is_final: bool,
+    pub promoted: bool,
+    pub metadata: phera_bytecode::reflection::DeclarationMetadata,
     pub name: String,
     pub visibility: phera_bytecode::Visibility,
     pub is_static: bool,
     pub is_readonly: bool,
-    pub is_final: bool,
+
     pub ty: Option<String>,
     pub default: Option<usize>,
     pub hooks: Option<Box<phera_bytecode::PropertyHooks<usize>>>,
@@ -179,6 +194,7 @@ pub struct ClassProperty {
 /// Constant initializers execute only when the linked class first needs their value.
 #[derive(Debug, Clone)]
 pub struct ClassConstant {
+    pub metadata: phera_bytecode::reflection::DeclarationMetadata,
     pub name: String,
     pub visibility: phera_bytecode::Visibility,
     pub is_final: bool,

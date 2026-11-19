@@ -234,9 +234,26 @@ pub trait Context {
         self.create_object(name, PhpArray::new())
     }
 
+    /// Publish a table of scalar properties verified against the class's linked layout.
+    fn create_plain_unserialized_object(
+        &mut self,
+        _class: &dyn crate::value::ClassHandle,
+        _properties: PhpArray,
+    ) -> Option<Rc<Object>> {
+        None
+    }
+
     /// Enumerate stored properties in declaration order, including mangled names.
     fn serialization_properties(&mut self, object: &Object) -> Result<PhpArray, NativeError> {
         self.object_properties(object, crate::PropertyPurpose::Serialize)
+    }
+
+    /// An immutable class layout that can be emitted without a property callback.
+    fn plain_serialization_fields(
+        &self,
+        _object: &Object,
+    ) -> Option<Rc<[crate::serialization::SerializedProperty]>> {
+        None
     }
 
     fn has_uninitialized_serialized_property(&self, _object: &Object, _key: &ArrayKey) -> bool {
@@ -363,6 +380,11 @@ pub trait Context {
         Err(NativeError::error(format!(
             "An object of class {class} cannot be created here"
         )))
+    }
+
+    /// Access to the runtime's cold reflection queries.
+    fn reflection(&mut self) -> Option<&mut dyn crate::reflection::ReflectionContext> {
+        None
     }
 
     /// Publishes scanner diagnostics with PHP's severity and location.

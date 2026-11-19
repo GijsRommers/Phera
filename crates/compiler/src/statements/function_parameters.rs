@@ -7,29 +7,27 @@ use crate::{CompileError, Compiler};
 
 impl Compiler<'_> {
     /// Unsupported declaration metadata must fail before any body is emitted.
-    pub(crate) fn validate_function_attributes(
+    pub(crate) fn validate_parameter_features(
         &self,
-        declaration: &ast::FunctionDeclaration,
-        line: usize,
+        declaration: &super::functions::FunctionSource<'_>,
     ) -> Result<(), CompileError> {
-        if !declaration.attributes.is_empty() {
-            return Err(self.error("Attributes not supported yet", line));
-        }
-        for parameter in &declaration.parameters {
+        for parameter in declaration.parameters {
+            if parameter.modifiers.is_static {
+                return Err(self.error(
+                    "Cannot use the static modifier on a parameter",
+                    self.lines.line(parameter.span.start),
+                ));
+            }
             if parameter.is_promoted()
                 && !declaration
                     .name
-                    .name
-                    .split_once("::")
-                    .is_some_and(|(_, name)| name.eq_ignore_ascii_case("__construct"))
+                    .rsplit_once("::")
+                    .is_some_and(|(_, method)| method.eq_ignore_ascii_case("__construct"))
             {
                 return Err(self.error(
                     "Cannot declare promoted property outside a constructor",
                     self.lines.line(parameter.span.start),
                 ));
-            }
-            if !parameter.attributes.is_empty() {
-                return Err(self.error("Attributes not supported yet", line));
             }
         }
         Ok(())

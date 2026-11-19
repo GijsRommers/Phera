@@ -5,13 +5,17 @@ use crate::{Argument, ConstantDeclaration, Expression, Identifier, Name, Stateme
 /// `#[Name(args)]`. Attribute groups are flattened: `#[A, B]` is two entries.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Attribute {
+    pub preceding_doc_comment: Option<Span>,
     pub name: Name,
     pub arguments: Vec<Argument>,
+    pub first_class_callable: bool,
     pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FunctionDeclaration {
+    pub span: Span,
+    pub doc_comment: Option<Span>,
     pub attributes: Vec<Attribute>,
     pub name: Identifier,
     /// `function &foo()`
@@ -23,6 +27,7 @@ pub struct FunctionDeclaration {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Parameter {
+    pub doc_comment: Option<Span>,
     pub attributes: Vec<Attribute>,
     /// Non-empty only for constructor property promotion.
     pub modifiers: Modifiers,
@@ -41,11 +46,7 @@ pub struct Parameter {
 impl Parameter {
     /// A readonly constructor parameter promotes even without explicit visibility.
     pub fn is_promoted(&self) -> bool {
-        self.modifiers.visibility.is_some()
-            || self.modifiers.set_visibility.is_some()
-            || self.modifiers.is_readonly
-            || self.modifiers.is_final
-            || self.has_hook_list
+        self.modifiers.promotes_property() || self.has_hook_list
     }
 }
 
@@ -67,6 +68,15 @@ pub struct Modifiers {
     pub is_readonly: bool,
 }
 
+impl Modifiers {
+    pub fn promotes_property(&self) -> bool {
+        self.visibility.is_some()
+            || self.set_visibility.is_some()
+            || self.is_readonly
+            || self.is_final
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClassKind {
     Class,
@@ -77,6 +87,7 @@ pub enum ClassKind {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClassDeclaration {
+    pub doc_comment: Option<Span>,
     pub attributes: Vec<Attribute>,
     pub kind: ClassKind,
     pub modifiers: Modifiers,
@@ -93,6 +104,7 @@ pub struct ClassDeclaration {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClassMember {
+    pub doc_comment: Option<Span>,
     pub kind: ClassMemberKind,
     pub span: Span,
 }
@@ -139,6 +151,7 @@ pub struct PropertyDeclaration {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Method {
+    pub span: Span,
     pub attributes: Vec<Attribute>,
     pub modifiers: Modifiers,
     pub name: Identifier,
@@ -172,6 +185,7 @@ pub enum TraitAdaptation {
 /// `get => expr;`, `set(string $value) { ... }`
 #[derive(Debug, Clone, PartialEq)]
 pub struct PropertyHook {
+    pub doc_comment: Option<Span>,
     pub attributes: Vec<Attribute>,
     pub is_final: bool,
     pub by_reference: bool,

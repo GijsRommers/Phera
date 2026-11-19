@@ -93,7 +93,6 @@ impl Vm {
                         get: None,
                         set: None,
                         is_virtual: false,
-                        set_visibility: None,
                     },
                     prototype: Rc::from(inherited.declaring.as_str()),
                 });
@@ -114,8 +113,7 @@ impl Vm {
                 }
             }
         }
-        if linked.has_hooks() || linked.hooks.set_visibility.is_some() || inherited.hooks.is_some()
-        {
+        if linked.has_hooks() || inherited.hooks.is_some() {
             property.hooks = Some(Rc::new(linked));
         }
         if !virtual_property && property.ty.is_none() {

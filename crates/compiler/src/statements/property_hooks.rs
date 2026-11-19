@@ -2,9 +2,12 @@
 //! compiles two ordinary class-scoped functions without publishing methods.
 
 use phera_ast as ast;
-use phera_bytecode::{PropertyHook, PropertyHooks, Visibility};
+use phera_bytecode::{PropertyHook, PropertyHooks};
+use phera_source::attributes::AttributeTarget;
 
-use crate::policies::NameKind;
+use super::builtin_attributes::AttributePlacement;
+use super::functions::{FunctionBody, FunctionSource};
+use crate::ir::Instruction;
 use crate::{CompileError, Compiler};
 
 pub(super) struct HookedDeclaration<'a> {
@@ -27,37 +30,28 @@ impl Compiler<'_> {
         &mut self,
         declaration: HookedDeclaration<'_>,
     ) -> Result<Option<Box<PropertyHooks<usize>>>, CompileError> {
-        let set_visibility = property_access(self, &declaration)?;
+        let modifiers = declaration.modifiers;
+        if modifiers.is_final && modifiers.is_abstract {
+            return Err(self.error(
+                "Cannot use the final modifier on an abstract property",
+                declaration.line,
+            ));
+        }
         if !declaration.has_hook_list {
-            if declaration.modifiers.is_static && set_visibility.is_some() {
-                return Err(self.error(
-                    "Asymmetric visibility on static properties not supported yet",
-                    declaration.line,
-                ));
-            }
             if declaration.kind == ast::ClassKind::Interface {
                 return Err(self.error(
                     "Interfaces may only include hooked properties",
                     declaration.line,
                 ));
             }
-            return Ok(set_visibility.map(|visibility| {
-                Box::new(PropertyHooks {
-                    get: None,
-                    set: None,
-                    is_virtual: false,
-                    set_visibility: Some(visibility),
-                })
-            }));
+            return Ok(None);
         }
-        self.compile_property_hooks(declaration, set_visibility)
-            .map(Some)
+        self.compile_property_hooks(declaration).map(Some)
     }
 
     fn compile_property_hooks(
         &mut self,
         declaration: HookedDeclaration<'_>,
-        set_visibility: Option<Visibility>,
     ) -> Result<Box<PropertyHooks<usize>>, CompileError> {
         let property = format!("{}::${}", declaration.class, declaration.property);
         let interface = declaration.kind == ast::ClassKind::Interface;
@@ -90,7 +84,6 @@ impl Compiler<'_> {
             get: None,
             set: None,
             is_virtual: true,
-            set_visibility,
         };
         for hook in declaration.hooks {
             let line = self.lines.line(hook.span.start);
@@ -135,6 +128,7 @@ impl Compiler<'_> {
             }
             let implicit = ast::Parameter {
                 attributes: Vec::new(),
+                doc_comment: None,
                 modifiers: ast::Modifiers::default(),
                 ty: declaration.ty.cloned(),
                 by_reference: false,
@@ -161,13 +155,42 @@ impl Compiler<'_> {
                 }
                 &[]
             };
-            let mut body = self.function_builder(
+            let hook_name = format!("{property}::{}", if setter { "set" } else { "get" });
+            let source = FunctionSource {
+                span: phera_source::Span {
+                    start: hook.name.span.start,
+                    end: hook.span.end,
+                },
+                doc_comment: hook.doc_comment,
+                attributes: &hook.attributes,
+                name: &hook_name,
+                by_reference: hook.by_reference,
                 parameters,
-                hook.by_reference,
-                &format!("{property}::{name}"),
-                &[],
-                line,
+                return_type: if setter { None } else { declaration.ty },
+                body: FunctionBody::Statements(&[]),
+            };
+            let mut body = self.function_builder(&source, &hook_name, &[], line)?;
+            body.function.metadata.declaration = body.declaration_metadata(
+                source.attributes,
+                source.span,
+                source.doc_comment,
+                Some(declaration.class),
+                AttributePlacement::Declaration(AttributeTarget::Method),
             )?;
+            if parameters
+                .iter()
+                .any(|parameter| !parameter.attributes.is_empty())
+            {
+                body.function.metadata.parameters = parameters
+                    .iter()
+                    .map(|parameter| body.reflected_parameter(parameter))
+                    .collect::<Result<_, _>>()?;
+            }
+            if body.has_builtin(source.attributes, "Deprecated")
+                || body.has_builtin(source.attributes, "NoDiscard")
+            {
+                body.emit(Instruction::AttributeDiagnostics, line);
+            }
             body.trait_scope = declaration.trait_scope.map(str::to_owned);
             body.hooked_property = Some(declaration.property.to_owned());
             body.function.return_type = if setter {
@@ -189,11 +212,6 @@ impl Compiler<'_> {
                 function,
                 is_abstract: abstract_hook,
                 is_final: hook.is_final,
-                attributes: hook
-                    .attributes
-                    .iter()
-                    .map(|attribute| self.resolve(&attribute.name, NameKind::Class).0)
-                    .collect(),
             });
         }
         if !declaration.has_parent {
@@ -264,48 +282,4 @@ impl Compiler<'_> {
         }
         Ok(())
     }
-}
-
-/// A set visibility also applies to backed properties without explicit hooks.
-pub(super) fn property_access(
-    compiler: &Compiler<'_>,
-    declaration: &HookedDeclaration<'_>,
-) -> Result<Option<Visibility>, CompileError> {
-    let modifiers = declaration.modifiers;
-    let class = declaration.class;
-    let name = declaration.property;
-    let line = declaration.line;
-    if modifiers.is_final && modifiers.visibility == Some(ast::Visibility::Private) {
-        return Err(compiler.error("Property cannot be both final and private", line));
-    }
-    if modifiers.is_final && modifiers.is_abstract {
-        return Err(compiler.error(
-            "Cannot use the final modifier on an abstract property",
-            line,
-        ));
-    }
-    let Some(set) = modifiers.set_visibility else {
-        return Ok(None);
-    };
-    if declaration.ty.is_none() {
-        return Err(compiler.error(
-            format!("Property with asymmetric visibility {class}::${name} must have type"),
-            line,
-        ));
-    }
-    let translate = |visibility| match visibility {
-        ast::Visibility::Public => Visibility::Public,
-        ast::Visibility::Protected => Visibility::Protected,
-        ast::Visibility::Private => Visibility::Private,
-    };
-    let get = modifiers.visibility.unwrap_or(ast::Visibility::Public);
-    if (translate(get) as u8) > (translate(set) as u8) {
-        return Err(compiler.error(
-            format!(
-                "Visibility of property {class}::${name} must not be weaker than set visibility"
-            ),
-            line,
-        ));
-    }
-    Ok((get != set).then(|| translate(set)))
 }

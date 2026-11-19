@@ -15,14 +15,20 @@ use crate::Vm;
 const VALUE_PARAMETER: Param = Param::new("value", ParamType::IntOrString);
 pub(super) const INTERFACES: &[ClassEntry] = &[
     ClassEntry {
-        methods: &[MethodEntry::required("cases", &[]).static_()],
+        methods: &[MethodEntry::required("cases", &[])
+            .static_()
+            .returning("array")],
         ..ClassEntry::interface("UnitEnum")
     },
     ClassEntry {
         interfaces: &["UnitEnum"],
         methods: &[
-            MethodEntry::required("from", &[VALUE_PARAMETER]).static_(),
-            MethodEntry::required("tryFrom", &[VALUE_PARAMETER]).static_(),
+            MethodEntry::required("from", &[VALUE_PARAMETER])
+                .static_()
+                .returning("static"),
+            MethodEntry::required("tryFrom", &[VALUE_PARAMETER])
+                .static_()
+                .returning("?static"),
         ],
         ..ClassEntry::interface("BackedEnum")
     },
@@ -54,7 +60,7 @@ impl EnumMethod {
 }
 
 pub(crate) struct EnumInfo {
-    pub(super) backing: Option<EnumBacking>,
+    pub(crate) backing: Option<EnumBacking>,
     pub(super) names: Vec<String>,
 }
 
@@ -188,10 +194,22 @@ impl Vm {
                 )));
             }
             info.names.push(name.clone());
+            let deprecated = unit
+                .has_link_attributes
+                .then(|| {
+                    crate::attribute_diagnostics::attribute(&case.metadata.attributes, "Deprecated")
+                        .map(|attribute| {
+                            crate::attribute_diagnostics::deprecation_message(
+                                attribute,
+                                &format!("Enum case {class}::{name}"),
+                            )
+                        })
+                })
+                .flatten();
             constants.insert(
                 name.clone(),
                 Rc::new(LinkedConstant {
-                    deprecated: None,
+                    deprecated,
                     declaring: class.clone(),
                     visibility: Visibility::Public,
                     is_final: false,
@@ -209,8 +227,54 @@ impl Vm {
     }
 }
 
-fn enum_property(class: &str, name: &str) -> PropertyDefault {
+/// Internal unit enums share the same case allocation and method dispatch as PHP enums.
+pub(super) fn native_unit_enum(
+    class: &str,
+    cases: &[&str],
+    methods: &mut HashMap<String, Rc<Method>>,
+    defaults: &mut Vec<PropertyDefault>,
+    constants: &mut HashMap<String, Rc<LinkedConstant>>,
+) -> EnumInfo {
+    methods.insert(
+        "cases".into(),
+        Rc::new(Method {
+            signature: std::cell::OnceCell::new(),
+            name: "cases".into(),
+            declaring: class.into(),
+            visibility: Visibility::Public,
+            is_static: true,
+            is_final: false,
+            is_abstract: false,
+            body: MethodBody::Enum(EnumMethod::Cases),
+        }),
+    );
+    defaults.push(enum_property(class, "name"));
+    for &name in cases {
+        constants.insert(
+            name.into(),
+            Rc::new(LinkedConstant {
+                deprecated: None,
+                declaring: class.into(),
+                visibility: Visibility::Public,
+                is_final: false,
+                initializer: ConstantInitializer::EnumCase {
+                    name: name.into(),
+                    backing: None,
+                },
+                ty: None,
+            }),
+        );
+    }
+    EnumInfo {
+        backing: None,
+        names: cases.iter().map(|name| (*name).to_owned()).collect(),
+    }
+}
+
+pub(super) fn enum_property(class: &str, name: &str) -> PropertyDefault {
     PropertyDefault {
+        set_visibility: None,
+        is_final: false,
         key: ArrayKey::str(name),
         value: Value::Null,
         static_storage: None,
@@ -224,7 +288,6 @@ fn enum_property(class: &str, name: &str) -> PropertyDefault {
         static_initialized: Rc::new(Cell::new(false)),
         value_initialized: Rc::new(Cell::new(true)),
         hooks: None,
-        is_final: false,
     }
 }
 

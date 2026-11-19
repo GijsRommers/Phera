@@ -131,7 +131,7 @@ impl Vm {
                 property.name,
             )));
         }
-        if hooks.is_virtual && hooks.set_visibility.is_some() {
+        if hooks.is_virtual && property.set_visibility.is_some() {
             let restriction = match (&hooks.get, &hooks.set) {
                 (None, Some(_)) => Some("Write-only"),
                 (Some(_), None) => Some("Read-only"),
@@ -158,10 +158,26 @@ impl Vm {
         };
         for (kind, hook) in [("get", &linked.hooks.get), ("set", &linked.hooks.set)] {
             let Some(hook) = hook else { continue };
-            if !hook
-                .attributes
-                .iter()
-                .any(|attr| attr.eq_ignore_ascii_case("Override"))
+            if self
+                .code
+                .facts(hook.function)
+                .class
+                .and_then(|index| self.classes.numbered(index.number()))
+                .is_some_and(|owner| owner.name != property.declaring)
+            {
+                continue;
+            }
+            if !self
+                .code
+                .local(hook.function)
+                .and_then(|index| self.code.unit(hook.function).function_metadata.get(index))
+                .is_some_and(|metadata| {
+                    crate::attribute_diagnostics::attribute(
+                        &metadata.declaration.attributes,
+                        "Override",
+                    )
+                    .is_some()
+                })
             {
                 continue;
             }
@@ -187,7 +203,7 @@ impl Vm {
                     hook.function,
                     format!(
                         "{}() has #[\\Override] attribute, but no matching parent method exists",
-                        self.code.function(hook.function).name
+                        self.code.function_name(hook.function)
                     ),
                 ));
             }

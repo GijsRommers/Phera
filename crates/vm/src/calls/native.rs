@@ -177,6 +177,26 @@ impl Vm {
         let callee = details
             .callee
             .ok_or_else(|| internal_error!("native target"))?;
+        if !details.extra_named.is_empty()
+            && let CallTarget::Native(mut entry) = callee.target
+            && let Some(handler) = self.registry.extra_named_handler(entry.name)
+        {
+            let mut arguments = self.call_stack.native_arguments();
+            let mut extra = details.extra_named.iter().map(|(slot, _)| *slot).peekable();
+            for index in 0..call.sent as usize {
+                if extra.peek() == Some(&index) {
+                    extra.next();
+                    continue;
+                }
+                if let Some(value) = self.registers.window_mut(slots.slot(index), 1)[0].take() {
+                    arguments.push(value);
+                }
+            }
+            self.registers.truncate(slots.base);
+            entry.handler = NativeFn::Sync(handler);
+            let origin = callee.argument_binding.origin(self.argument_origin);
+            return self.native_entry_origin(entry, arguments, origin).await.map(Some);
+        }
         let mut arguments = self.call_stack.native_arguments();
         arguments.reserve(call.sent as usize);
         let mut missing = None;
@@ -254,10 +274,15 @@ impl Vm {
                     .await
                     .map(Some)
             }
-            CallTarget::Method { method, context } => self
-                .native_method_window(method, context, arguments, named, origin)
-                .await
-                .map(Some),
+            CallTarget::Method { method, context } => {
+                let result = self
+                    .native_method_window(method, context, arguments, named, origin)
+                    .await;
+                match result {
+                    Ok(value) => Ok(Some(value)),
+                    Err(error) => self.finish_reflected_hook(error, method, destination).await,
+                }
+            }
             _ => Err(internal_error!("native target")),
         }
     }
@@ -370,6 +395,9 @@ impl Vm {
                     }
                     phera_extension_api::NativeMethod::Async(handler) => {
                         handler(self, context.receiver.clone(), arguments).await
+                    }
+                    phera_extension_api::NativeMethod::AsyncNamed(handler) => {
+                        handler(self, context.receiver.clone(), arguments, named).await
                     }
                     phera_extension_api::NativeMethod::Abstract => {
                         Err(NativeError::error("Cannot call abstract method"))
