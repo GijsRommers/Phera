@@ -3,8 +3,8 @@
 use std::rc::Rc;
 
 use phera_extension_api::{
-    ArrayKey, ConstantValue, Context, MethodEntry, NativeError, NativeResult, Object, Param,
-    ParamType, PhpArray, Value, args,
+    ArrayKey, ConstantValue, Context, MethodEntry, NativeError, NativeNumericParameter,
+    NativeResult, Object, Param, ParamType, PhpArray, Value, args,
 };
 
 use crate::arithmetic::{self, Argument, Operation, Result};
@@ -12,7 +12,13 @@ use crate::decimal::{Decimal, Rounding};
 
 use super::{NAME, create, pair, readonly, receiver, value};
 
-const OPERAND: ParamType = ParamType::ClassOrIntOrString(NAME, "BcMath\\Number|string|int");
+static NUMBER_PARAMETER: NativeNumericParameter = NativeNumericParameter {
+    class: NAME,
+    declaration: "BcMath\\Number|string|int",
+    type_error: "int, string, or BcMath\\Number",
+    string_error: None,
+};
+const OPERAND: ParamType = ParamType::NativeNumeric(&NUMBER_PARAMETER);
 const NUM: Param = Param::new("num", OPERAND);
 const SCALE: Param = Param::new("scale", ParamType::Int)
     .nullable()
@@ -158,6 +164,7 @@ fn pow(ctx: &mut dyn Context, this: Option<&Rc<Object>>, values: &[Value]) -> Na
 fn divmod(context: &mut dyn Context, this: Option<&Rc<Object>>, values: &[Value]) -> NativeResult {
     let (left, right, scale) = two(this, values, "BcMath\\Number::divmod", "num")?;
     arithmetic::nonzero(&right, "Division")?;
+    arithmetic::check_scale_storage(scale.unwrap_or(left.scale.max(right.scale)))?;
     let quotient = create(context, left.divide(&right, 0))?;
     let remainder = left.remainder(&right, scale.unwrap_or(left.scale.max(right.scale)));
     Ok(pair(quotient, create(context, remainder)?))
@@ -209,7 +216,10 @@ fn round(context: &mut dyn Context, this: Option<&Rc<Object>>, values: &[Value])
     let precision =
         Argument(function, 1, "precision").precision(args::int(values, 0).unwrap_or(0))?;
     let rounding = arithmetic::rounding(values.get(1), Argument(function, 2, "mode"))?;
-    create(context, receiver(this)?.round(precision, rounding))
+    create(
+        context,
+        arithmetic::round(&receiver(this)?, precision, rounding)?,
+    )
 }
 
 fn to_string(_: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {

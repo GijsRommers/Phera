@@ -71,6 +71,9 @@ BCMath provides arbitrary-precision decimal functions and the immutable
 `BcMath\Number` class. Set the default procedural scale with `bcmath.scale`
 or `bcscale()`.
 
+GMP provides arbitrary-precision integer functions, binary import and export,
+and the `GMP` class with arithmetic, bitwise operators, and scalar casts.
+
 ## 🛠️ Building
 
 You'll need a recent stable Rust toolchain with 2024 edition support (1.85+).

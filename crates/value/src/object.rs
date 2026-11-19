@@ -7,6 +7,15 @@ use std::rc::Rc;
 use crate::array::{ArrayKey, PhpArray};
 use crate::value::Value;
 
+/// Scalar casts supported by PHP's native classes.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ObjectCast {
+    Bool,
+    Int,
+    Float,
+    String,
+}
+
 /// The VM's per-class data. Implemented by other crates; tests use a dummy.
 pub trait ClassHandle: Any {
     fn name(&self) -> &str;
@@ -30,6 +39,11 @@ pub trait ClassHandle: Any {
     /// Whether the object's property table is supplied by native code.
     fn has_native_properties(&self) -> bool {
         false
+    }
+
+    /// A native object may supply its own scalar conversion.
+    fn cast(&self, _object: &Object, _target: ObjectCast) -> Option<Value> {
+        None
     }
 
     fn as_any(&self) -> &dyn Any;

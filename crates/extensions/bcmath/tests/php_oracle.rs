@@ -13,7 +13,7 @@ fn bcmath_matches_php() {
     source.push_str(include_str!("matrix.php"));
     std::fs::write(&script, source).expect("write BCMath oracle program");
     let matched = comparison
-        .compare(&script, |_, _, _| {})
+        .compare(&script, |_, _| {})
         .expect("PHP and Phera agree");
     let calls = matched.stdout.lines().count();
     println!("{calls} BCMath calls matched");

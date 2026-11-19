@@ -126,6 +126,7 @@ fn modulo(context: &mut dyn Context, values: &[Value]) -> NativeResult {
 fn divmod(context: &mut dyn Context, values: &[Value]) -> NativeResult {
     let (left, right, scale) = two(context, values, "bcdivmod")?;
     arithmetic::nonzero(&right, "Division")?;
+    arithmetic::check_scale_storage(scale)?;
     Ok(crate::number::pair(
         Value::from(left.divide(&right, 0).render()),
         Value::from(left.remainder(&right, scale).render()),
@@ -199,5 +200,7 @@ fn round(_: &mut dyn Context, values: &[Value]) -> NativeResult {
         Argument("bcround", 2, "precision").precision(args::int(values, 1).unwrap_or(0))?;
     let mode = arithmetic::rounding(values.get(2), Argument("bcround", 3, "mode"))?;
     let number = Argument("bcround", 1, "num").parse(args::bytes(values, 0))?;
-    Ok(Value::from(number.round(precision, mode).render()))
+    Ok(Value::from(
+        arithmetic::round(&number, precision, mode)?.render(),
+    ))
 }

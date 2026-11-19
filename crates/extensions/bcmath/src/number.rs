@@ -2,8 +2,10 @@
 
 use std::rc::Rc;
 
+use num_traits::Zero;
+
 use phera_extension_api::{
-    ArrayKey, ClassEntry, ClassHooks, ClassKind, Context, NativeClone, NativeError,
+    ArrayKey, ClassEntry, ClassHooks, ClassKind, Context, NativeCastKind, NativeClone, NativeError,
     NativePropertyAccess, NativePropertyMutation, NativePropertyRead, NativeResult, Object,
     PhpArray, PropertyEntry, PropertyPurpose, PropertyType, Value, Visibility,
 };
@@ -28,6 +30,7 @@ pub(crate) const CLASS: ClassEntry = ClassEntry {
         clone: Some(NativeClone::copy::<Decimal>()),
         compare: Some(operators::compare_objects),
         binary: Some(operators::binary),
+        cast: Some(cast),
         properties: Some(properties),
         property_access: Some(&NativePropertyAccess { read, mutate }),
         ..ClassHooks::EMPTY
@@ -60,8 +63,8 @@ pub(super) fn create(context: &mut dyn Context, number: Decimal) -> NativeResult
 
 pub(crate) fn pair(left: Value, right: Value) -> Value {
     let mut values = PhpArray::new();
-    values.push(left);
-    values.push(right);
+    values.insert(ArrayKey::Int(0), left);
+    values.insert(ArrayKey::Int(1), right);
     Value::from(values)
 }
 
@@ -115,5 +118,12 @@ fn mutate(
             )))
         }
         _ => Err(readonly(name)),
+    }
+}
+
+fn cast(object: &Object, kind: NativeCastKind) -> Option<Value> {
+    match kind {
+        NativeCastKind::Bool => Some(Value::Bool(!value(object)?.coefficient.is_zero())),
+        _ => None,
     }
 }

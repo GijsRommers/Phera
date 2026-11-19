@@ -47,8 +47,8 @@ pub enum ParamType {
     Number,
     /// `int|string`
     IntOrString,
-    /// The class name and the declared class|string|int spelling.
-    ClassOrIntOrString(&'static str, &'static str),
+    /// A native numeric object or one of its scalar inputs.
+    NativeNumeric(&'static NativeNumericParameter),
     /// `array|int`
     ArrayOrInt,
     /// `array|string`
@@ -72,6 +72,24 @@ pub enum ParamType {
     /// `RecursiveIterator|IteratorAggregate`
     RecursiveOrAggregate,
 }
+
+/// Native numeric types can reject malformed strings while preparing a call.
+/// This preserves the order of validation and coercion for later arguments.
+#[derive(Debug)]
+pub struct NativeNumericParameter {
+    pub class: &'static str,
+    pub declaration: &'static str,
+    pub type_error: &'static str,
+    pub string_error: Option<fn(&[u8]) -> Option<&'static str>>,
+}
+
+impl PartialEq for NativeNumericParameter {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self, other)
+    }
+}
+
+impl Eq for NativeNumericParameter {}
 
 impl ParamType {
     pub fn name(self) -> &'static str {

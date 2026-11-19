@@ -137,11 +137,17 @@ pub type NativeBinary = fn(
     &Value,
 ) -> Result<Option<Value>, NativeError>;
 
+pub type NativeUnary =
+    fn(&mut dyn Context, crate::NativeUnaryOp, &Object) -> Result<Option<Value>, NativeError>;
+pub type NativeCast = fn(&Object, crate::NativeCastKind) -> Option<Value>;
+
 #[derive(Clone, Copy, Default)]
 pub struct ClassHooks {
     pub clone: Option<NativeClone>,
     pub compare: Option<NativeCompare>,
     pub binary: Option<NativeBinary>,
+    pub unary: Option<NativeUnary>,
+    pub cast: Option<NativeCast>,
     /// Whole-object enumeration, with the consuming operation supplied as a purpose.
     pub properties: Option<PropertyProjection>,
     /// Direct read, mutation or presence check for one virtual property.
@@ -162,6 +168,8 @@ impl ClassHooks {
         clone: None,
         compare: None,
         binary: None,
+        unary: None,
+        cast: None,
         properties: None,
         property_access: None,
         iterator: None,

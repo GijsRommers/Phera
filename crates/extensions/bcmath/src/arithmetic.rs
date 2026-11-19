@@ -88,6 +88,34 @@ pub(crate) fn rounding(mode: Option<&Value>, argument: Argument) -> Result<Round
     }
 }
 
+const MAX_ALLOCATION: u64 = 268_435_456;
+
+pub(crate) fn check_scale_storage(scale: u32) -> Result<()> {
+    if u64::from(scale) >= MAX_ALLOCATION {
+        Err(NativeError::error(
+            "BCMath result exceeds the PHP allocation limit",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+pub(crate) fn round(value: &Decimal, precision: i64, mode: Rounding) -> Result<Decimal> {
+    if precision >= 0 {
+        check_scale_storage(precision as u32)?;
+    } else if precision.unsigned_abs() >= MAX_ALLOCATION
+        && !value.coefficient.is_zero()
+        && (matches!(mode, Rounding::Away)
+            || matches!(mode, Rounding::Floor) && value.coefficient.is_negative()
+            || matches!(mode, Rounding::Ceiling) && value.coefficient.is_positive())
+    {
+        return Err(NativeError::error(
+            "BCMath result exceeds the PHP allocation limit",
+        ));
+    }
+    Ok(value.round(precision, mode))
+}
+
 pub(crate) fn expanded(scale: u32, extra: u32) -> Result<u32> {
     if scale <= i32::MAX as u32 && extra <= i32::MAX as u32 - scale {
         Ok(scale + extra)
@@ -108,6 +136,7 @@ pub(crate) fn calculate(
     exponent_argument: Option<Argument>,
 ) -> Result<Decimal> {
     let common = scale.unwrap_or(left.scale.max(right.scale));
+    check_scale_storage(common)?;
     Ok(match operation {
         Operation::Add | Operation::Sub => left
             .add(right, matches!(operation, Operation::Sub))
@@ -180,6 +209,7 @@ fn power(
             determined as u32
         }
     };
+    check_scale_storage(scale)?;
     let compact = base.resized(base.compact_scale());
     let value = if exponent == 0 {
         Decimal::integer(1).resized(scale)
@@ -205,6 +235,11 @@ fn power(
                 "exponent is too large, the number of digits overflowed",
             ));
         }
+        if magnitude.saturating_mul(digits) >= MAX_ALLOCATION {
+            return Err(NativeError::error(
+                "BCMath result exceeds the PHP allocation limit",
+            ));
+        }
         let power = Decimal {
             coefficient: compact.coefficient.pow(magnitude as u32),
             scale: compact.scale * magnitude as u32,
@@ -223,6 +258,7 @@ fn power(
 }
 
 pub(crate) fn sqrt(value: &Decimal, scale: Option<u32>, negative: NativeError) -> Result<Decimal> {
+    check_scale_storage(scale.unwrap_or(value.scale))?;
     if value.coefficient.is_negative() {
         return Err(negative);
     }
@@ -259,6 +295,7 @@ pub(crate) fn powmod(
         return Err(argument.invalid("cannot have a fractional part"));
     }
     nonzero(modulus, "Modulo")?;
+    check_scale_storage(scale)?;
     let exponent = exponent.at_scale(0);
     let base = base.at_scale(0);
     let modulus = modulus.at_scale(0).abs();

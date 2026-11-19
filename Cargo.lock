@@ -2079,6 +2079,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "phera-ext-gmp"
+version = "0.1.0"
+dependencies = [
+ "getrandom 0.3.4",
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+ "phera-extension-api",
+]
+
+[[package]]
 name = "phera-ext-hash"
 version = "0.1.0"
 dependencies = [
@@ -2315,6 +2326,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "phera-ext-zlib"
+version = "0.1.0"
+dependencies = [
+ "adler2",
+ "flate2",
+ "phera-ext-http",
+ "phera-ext-streams",
+ "phera-extension-api",
+]
+
+[[package]]
 name = "phera-extension-api"
 version = "0.1.0"
 dependencies = [
@@ -2369,6 +2391,7 @@ dependencies = [
  "phera-ext-date",
  "phera-ext-dom",
  "phera-ext-filter",
+ "phera-ext-gmp",
  "phera-ext-hash",
  "phera-ext-http",
  "phera-ext-json",
