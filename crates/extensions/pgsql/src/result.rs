@@ -205,10 +205,12 @@ fn cell<const OP: usize>(
     call: &str,
 ) -> NativeResult {
     let (row, field) = if a.len() < 3 {
-        c.deprecated(format!(
-            "Calling {call}() with 2 arguments is deprecated, use the 3-parameter signature \
-             with a null $row parameter instead"
-        ));
+        if call != "pg_result" {
+            c.deprecated(format!(
+                "Calling {call}() with 2 arguments is deprecated, use the 3-parameter signature \
+                 with a null $row parameter instead"
+            ));
+        }
         (None, args::value(a, 1))
     } else {
         (args::int(a, 1), args::value(a, 2))

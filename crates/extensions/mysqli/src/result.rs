@@ -168,6 +168,7 @@ async fn attach_pending(
             .map_err(|e| NativeError::error(e.detail))?
             .0
             .values;
+        stream.complete(rows.values.len() as u64);
     }
     attach(object, rows, unbuffered, pending.stream);
     Ok(())

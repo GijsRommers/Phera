@@ -97,7 +97,15 @@ pub fn get(context: &mut dyn Context, object: &Object, name: &str) -> NativeResu
         return Err(NativeError::error("Property access is not allowed yet"));
     }
     Ok(match name {
-        "affected_rows" if error.is_some() => Value::Int(-1),
+        "affected_rows"
+            if error.is_some()
+                || state
+                    .pending_stream
+                    .as_ref()
+                    .is_some_and(|stream| stream.strong_count() > 0) =>
+        {
+            Value::Int(-1)
+        }
         "affected_rows" => uint(state.reply.affected),
         "insert_id" => uint(state.reply.insert_id),
         "errno" => errors::errno(error),

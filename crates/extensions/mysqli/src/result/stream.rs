@@ -1,5 +1,7 @@
 //! `mysqli_query($db, $sql, MYSQLI_USE_RESULT)` reads rows on demand.
 
+use std::cell::RefCell;
+use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 use phera_db_drivers::drivers::{Driver, Rows};
@@ -12,14 +14,16 @@ use crate::connection;
 
 #[derive(Clone)]
 pub struct Stream {
+    connection: Weak<RefCell<connection::Connection>>,
     lease: Lease<Driver>,
     pub owner: Arc<()>,
     native: bool,
 }
 
 impl Stream {
-    pub fn new(lease: Lease<Driver>, native: bool) -> Self {
+    pub fn new(connection: &connection::Handle, lease: Lease<Driver>, native: bool) -> Self {
         Self {
+            connection: Rc::downgrade(connection),
             lease,
             owner: Arc::new(()),
             native,
@@ -27,6 +31,17 @@ impl Stream {
     }
 
     pub async fn read(&self, all: bool) -> Result<(Rows, bool), DbError> {
+        if self
+            .connection
+            .upgrade()
+            .is_some_and(|state| !state.borrow().connected())
+        {
+            return Err(DbError {
+                state: "HY000".into(),
+                code: Some(2014),
+                detail: "Commands out of sync; you can't run this command now".into(),
+            });
+        }
         let owner = self.owner.clone();
         let response = connection::run(&self.lease, move |driver| {
             Box::pin(async move { driver.read_stream(&owner, all).await })
@@ -37,14 +52,31 @@ impl Stream {
         }))
     }
 
+    pub fn complete(&self, affected: u64) {
+        if let Some(connection) = self.connection.upgrade() {
+            let mut state = connection.borrow_mut();
+            let matches = state
+                .pending_stream
+                .as_ref()
+                .is_some_and(|pending| pending.ptr_eq(&Arc::downgrade(&self.owner)));
+            if matches {
+                state.pending_stream = None;
+                state.reply.affected = affected;
+            }
+        }
+    }
+
     async fn close(self) -> Result<(), DbError> {
+        let owner = self.owner.clone();
         connection::run(&self.lease, move |driver| {
             Box::pin(async move {
-                driver.close_stream(&self.owner).await;
+                driver.close_stream(&owner).await;
                 Ok(())
             })
         })
-        .await
+        .await?;
+        self.complete(0);
+        Ok(())
     }
 }
 
@@ -79,6 +111,7 @@ pub async fn load(object: &Object, all: bool) -> Result<(), NativeError> {
     result.position = 0;
     result.last = None;
     if done {
+        stream.complete(0);
         result.stream = None;
     }
     Ok(())

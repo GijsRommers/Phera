@@ -1,5 +1,6 @@
 //! `mysqli_fetch_field($result)` returns the next column's protocol metadata.
 
+use mysql_async::consts::{ColumnFlags, ColumnType};
 use phera_db_drivers::metadata::Metadata;
 use phera_extension_api::{ArrayKey, Context, NativeError, NativeResult, PhpArray, Value};
 
@@ -64,6 +65,16 @@ pub fn execute<const OP: usize>(
 }
 
 fn describe(context: &mut dyn Context, column: &mysql_async::Column) -> NativeResult {
+    let mut flags = column.flags();
+    let kind = column.column_type();
+    // mysqlnd supplies NUM_FLAG for the historical protocol types.
+    if kind == ColumnType::MYSQL_TYPE_YEAR
+        || (kind as u8 <= ColumnType::MYSQL_TYPE_INT24 as u8
+            && (kind != ColumnType::MYSQL_TYPE_TIMESTAMP
+                || matches!(column.column_length(), 8 | 14)))
+    {
+        flags.insert(ColumnFlags::NUM_FLAG);
+    }
     let mut fields = PhpArray::new();
     for (name, value) in [
         ("name", Value::from(column.name_ref().to_vec())),
@@ -76,7 +87,7 @@ fn describe(context: &mut dyn Context, column: &mysql_async::Column) -> NativeRe
         ("max_length", Value::Int(0)),
         ("length", Value::Int(column.column_length().into())),
         ("charsetnr", Value::Int(column.character_set().into())),
-        ("flags", Value::Int(column.flags().bits().into())),
+        ("flags", Value::Int(flags.bits().into())),
         ("type", Value::Int(i64::from(column.column_type() as u8))),
         ("decimals", Value::Int(column.decimals().into())),
     ] {

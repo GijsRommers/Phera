@@ -310,6 +310,25 @@ fn mysqli_php_matrix() {
         $result->free();
         return [$before, $failure, $db->query('SELECT 9')->fetch_column()];
     });
+    foreach ([false, true] as $buffered) {
+        run('real-query-affected-' . (int)$buffered, function () use ($db, $buffered) {
+            $db->real_query('SELECT 1 AS n UNION ALL SELECT 2');
+            $before = $db->affected_rows;
+            $r = new mysqli_result($db, $buffered ? MYSQLI_STORE_RESULT : MYSQLI_USE_RESULT);
+            $opened = [$db->affected_rows, $r->num_rows];
+            $rows = [];
+            while (($value = $r->fetch_column()) !== false) {
+                $rows[] = [$value, $db->affected_rows, $r->num_rows];
+            }
+            return [$before, $opened, $rows, $db->affected_rows, $r->num_rows];
+        });
+    }
+    run('stream-after-connection-close', function () {
+        $db = matrix_connect(false);
+        $r = $db->query('SELECT 1 AS n UNION ALL SELECT 2', MYSQLI_USE_RESULT);
+        $db->close();
+        return $r->fetch_row();
+    });
     foreach ([0, 1, 2, 3, 4, 5, 6, 7, 255] as $report) {
         foreach (['SELECT FROM', 'SELECT missing_column FROM (SELECT 1) AS t', 'SELECT * FROM no_matrix_table'] as $i => $sql) {
             run("report-$report-$i", function () use ($db, $sql, $report) {
@@ -327,5 +346,5 @@ fn mysqli_php_matrix() {
     }
 "#,
     );
-    comparison.check_matrix(&script, COLUMNS.len() * 120 + 38);
+    comparison.check_matrix(&script, COLUMNS.len() * 120 + 41);
 }

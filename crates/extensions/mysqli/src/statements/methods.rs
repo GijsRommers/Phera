@@ -44,10 +44,12 @@ pub fn execute<const OP: usize>(
         BIND_RESULT => binding::bind_result(&mut state, arguments),
         FETCH => fetch(&mut state),
         STORE => {
-            state.stored = state
-                .rows
-                .as_ref()
-                .is_some_and(|rows| !rows.columns.is_empty());
+            if let Some(rows) = state.rows.as_ref().filter(|rows| !rows.columns.is_empty()) {
+                state.reply.affected = rows.values.len() as u64;
+                state.stored = true;
+            } else {
+                state.stored = false;
+            }
             Ok(Value::Bool(state.stored))
         }
         RESULT => {

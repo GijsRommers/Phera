@@ -1,5 +1,7 @@
 //! `mysqli_query($db, "SELECT 1")` returns a result, and DML returns true.
 
+use std::sync::Arc;
+
 use phera_db_drivers::drivers::{RawRows, mysql::Outcome};
 use phera_db_drivers::errors::DbError;
 use phera_extension_api::{Context, NativeError, NativeResult, Value, args};
@@ -79,7 +81,7 @@ pub async fn execute<const OP: usize>(
     }
     if OP == REAL_QUERY || (OP == QUERY && mode == 1) {
         let native = state.borrow().native_numbers;
-        let stream = Stream::new(lease.clone(), native);
+        let stream = Stream::new(&state, lease.clone(), native);
         let owner = stream.owner.clone();
         let output = run(&lease, move |driver| {
             Box::pin(async move {
@@ -102,6 +104,7 @@ pub async fn execute<const OP: usize>(
             }
         }
         if outcome.rows.has_columns() {
+            state.borrow_mut().pending_stream = Some(Arc::downgrade(&stream.owner));
             let pending = Pending {
                 rows: outcome.rows,
                 stream: Some(stream),
@@ -172,6 +175,7 @@ pub async fn result_operation<const OP: usize>(
 impl Connection {
     pub fn observe(&mut self, result: &Outcome) {
         self.error = None;
+        self.pending_stream = None;
         self.field_count = match &result.rows {
             RawRows::Mysql { columns, .. } => columns.len(),
             _ => 0,

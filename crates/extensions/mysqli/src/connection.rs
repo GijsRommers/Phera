@@ -7,6 +7,7 @@ pub mod query;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
+use std::sync::Weak;
 
 use phera_db_drivers::connect_options::ConnectOptions;
 use phera_db_drivers::drivers::mysql::{Mysql, Outcome, Reply};
@@ -37,6 +38,7 @@ pub struct Connection {
     pub host_info: String,
     pub backslashes: bool,
     pub pending: Option<query::Pending>,
+    pub pending_stream: Option<Weak<()>>,
     pub more: VecDeque<Result<Outcome, DbError>>,
 }
 
@@ -73,6 +75,7 @@ impl Connection {
     pub fn close(&mut self) -> Result<(), NativeError> {
         self.ensure_not_closed()?;
         self.pending = None;
+        self.pending_stream = None;
         self.more.clear();
         self.status = Status::Closed;
         Ok(())

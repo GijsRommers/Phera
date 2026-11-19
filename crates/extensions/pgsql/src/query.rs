@@ -158,13 +158,18 @@ pub(crate) fn execute_named<'a, const OP: usize, const SEND: bool>(
                 c.warning(format!("{call}(): There are results on this connection. Call pg_get_result() until it returns FALSE"));
                 return Ok(Value::Bool(false));
             }
+            state.last_error.clear();
             state.busy = Some(connection::start(&lease, |driver| {
                 Box::pin(command.run(driver))
             }));
             return Ok(Value::Bool(true));
         }
         finish(&state).await?;
-        state.borrow_mut().results.clear();
+        {
+            let mut state = state.borrow_mut();
+            state.results.clear();
+            state.last_error.clear();
+        }
         let response = connection::run(&lease, |driver| Box::pin(command.run(driver))).await;
         match response.and_then(|mut rows| rows.pop().ok_or_else(|| DbError::general("No result")))
         {
