@@ -6,7 +6,7 @@ use std::rc::Rc;
 use phera_extension_api::NativeResult;
 use phera_extension_api::reflection::lazy::{LazyClassQuery, LazyPropertyOperation};
 use phera_extension_api::reflection::{MemberInfo, PropertyWrite};
-use phera_value::{LazyObject, Object, Value};
+use phera_value::{LazyObject, LazyStrategy, Object, Value};
 
 use crate::Vm;
 use crate::lazy_continuation::{ReflectInitialize, ReflectedOperation};
@@ -45,6 +45,55 @@ impl Vm {
             }
             _ => Ok(Value::Object(object.lazy_instance().unwrap_or(object))),
         }
+    }
+
+    pub(super) async fn reflection_write_lazy_property(
+        &mut self,
+        member: Rc<MemberInfo>,
+        object: Rc<Object>,
+        mut value: Value,
+    ) -> NativeResult {
+        if !member.dynamic && Self::has_string_conversion(&value) {
+            let receiver = resolved_lazy_instance(object.clone());
+            let (class, slot) = self.reflected_property_slot(&member)?;
+            if let Some(property) = property_at(&class, slot) {
+                let (property, _) = Self::effective_property(property, slot, &receiver);
+                if property.static_storage.is_none()
+                    && !property
+                        .hooks
+                        .as_ref()
+                        .is_some_and(|hooks| hooks.hooks.is_virtual)
+                    && property.ty.as_ref().is_some_and(|ty| {
+                        self.needs_string_coercion(&value, ty, crate::types::TypeChecking::Coerce)
+                    })
+                {
+                    if property.is_readonly && receiver.has(&property.key) {
+                        return self.reflection_lazy_property(
+                            &member,
+                            object,
+                            LazyPropertyOperation::Write(value),
+                        );
+                    }
+                    let pending_proxy = matches!(
+                        receiver.lazy().as_deref(),
+                        Some(LazyObject::Pending {
+                            strategy: LazyStrategy::Proxy,
+                            ..
+                        })
+                    );
+                    let removed = receiver.set_lazy_property(&property.key, false);
+                    let converted = self.coerce_stringable(value).await;
+                    if removed {
+                        receiver.set_lazy_property(&property.key, true);
+                    }
+                    value = converted?;
+                    if pending_proxy && receiver.lazy_instance().is_some() {
+                        return Ok(Value::Null);
+                    }
+                }
+            }
+        }
+        self.reflection_lazy_property(&member, object, LazyPropertyOperation::Write(value))
     }
 
     pub(super) fn reflection_lazy_property(

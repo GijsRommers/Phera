@@ -123,29 +123,19 @@ pub(crate) fn register(registry: &mut Registry) {
                     },
                 )
                 .returning("void"),
-                MethodEntry::public(
+                MethodEntry::public_async(
                     "setRawValueWithoutLazyInitialization",
-                    const {
-                        &[
-                            Param::new("object", ParamType::Object),
-                            Param::new("value", ParamType::Mixed),
-                        ]
-                    },
-                    |c, o, a| {
-                        crate::lazy::property(
-                            c,
-                            o,
-                            a,
-                            LazyPropertyOperation::Write(a.get(1).cloned().unwrap_or_default()),
-                        )
-                    },
+                    const { &[crate::lazy::OBJECT, Param::new("value", ParamType::Mixed)] },
+                    crate::lazy::write_property,
                 )
                 .returning("void"),
-                MethodEntry::public("skipLazyInitialization", RAW_OBJECT, |c, o, a| {
-                    crate::lazy::property(c, o, a, LazyPropertyOperation::Skip)
-                })
+                MethodEntry::public(
+                    "skipLazyInitialization",
+                    const { &[crate::lazy::OBJECT] },
+                    |c, o, a| crate::lazy::property(c, o, a, LazyPropertyOperation::Skip),
+                )
                 .returning("void"),
-                MethodEntry::public("isLazy", RAW_OBJECT, |c, o, a| {
+                MethodEntry::public("isLazy", const { &[crate::lazy::OBJECT] }, |c, o, a| {
                     crate::lazy::property(c, o, a, LazyPropertyOperation::IsLazy)
                 })
                 .returning("bool"),

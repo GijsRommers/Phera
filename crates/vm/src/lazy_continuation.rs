@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use phera_bytecode::{BinaryOp, IterId, Reg};
 use phera_extension_api::reflection::{MemberInfo, PropertyRead, PropertyWrite};
-use phera_extension_api::{Context, NativeError, PropertyPurpose, Unwind};
+use phera_extension_api::{NativeError, PropertyPurpose, Unwind};
 use phera_value::{Object, Value};
 
 use crate::Vm;
@@ -27,12 +27,7 @@ pub(crate) enum LazyContinuation {
         Box<phera_extension_api::PropertyViewRequest>,
         NativeTrace,
     ),
-    ObjectVars(
-        Reg,
-        crate::class_function::ClassFunction,
-        Rc<Object>,
-        NativeTrace,
-    ),
+    ObjectVars(Reg, Rc<Object>, NativeTrace),
     Reflection(Reg, Box<ReflectedOperation>, NativeTrace),
 }
 
@@ -42,7 +37,7 @@ impl LazyContinuation {
             Self::Reflection(_, _, trace)
             | Self::PropertyExists(_, _, _, trace)
             | Self::NativeView(_, _, trace)
-            | Self::ObjectVars(_, _, _, trace) => Some(trace),
+            | Self::ObjectVars(_, _, trace) => Some(trace),
             _ => None,
         }
     }
@@ -145,26 +140,20 @@ impl Vm {
     pub(crate) async fn lazy_object_vars(
         &mut self,
         destination: Reg,
-        function: crate::class_function::ClassFunction,
         original: Rc<Object>,
     ) -> Result<(), NativeError> {
-        use crate::class_function::ClassFunction;
         let object = crate::lazy_objects::resolved_lazy_instance(original.clone());
         if object.is_uninitialized_lazy() {
-            let trace = NativeTrace::new(function.name(), &[Value::Object(original.clone())]);
-            let continuation = LazyContinuation::ObjectVars(destination, function, original, trace);
+            let trace = NativeTrace::new("get_object_vars", &[Value::Object(original.clone())]);
+            let continuation = LazyContinuation::ObjectVars(destination, original, trace);
             self.suspend_lazy_initialization(object, continuation)
                 .await?;
             return Ok(());
         }
-        let properties = if matches!(function, ClassFunction::GetObjectVars) {
-            if let Some(class) = self.hooked_property_class(&object) {
-                return self.suspend_object_vars(object, class, destination).await;
-            }
-            self.visible_properties(&object, PropertyPurpose::ObjectVars)?
-        } else {
-            self.object_properties(&object, PropertyPurpose::ArrayCast)?
-        };
+        if let Some(class) = self.hooked_property_class(&object) {
+            return self.suspend_object_vars(object, class, destination).await;
+        }
+        let properties = self.visible_properties(&object, PropertyPurpose::ObjectVars)?;
         self.set(destination, Value::from(properties));
         Ok(())
     }

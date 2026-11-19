@@ -234,6 +234,13 @@ pub trait ReflectionContext {
         operation: lazy::LazyPropertyOperation,
     ) -> NativeResult;
 
+    fn reflect_write_lazy_property(
+        &mut self,
+        member: Rc<MemberInfo>,
+        object: Rc<Object>,
+        value: Value,
+    ) -> LocalFuture<'_, NativeResult>;
+
     /// Attribute construction applies the declaration's scalar typing and location.
     fn reflect_construct_attribute(
         &mut self,

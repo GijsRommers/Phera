@@ -33,6 +33,12 @@ impl Initialization {
                         "Lazy object initializer must return NULL or no value",
                     ));
                 }
+                self.object.update(|storage| {
+                    *storage = self
+                        .object
+                        .class
+                        .order_lazy_properties(std::mem::take(storage));
+                });
                 self.object.replace_lazy(None);
                 self.pending = None;
                 Ok(Value::Object(self.object.clone()))
@@ -172,6 +178,7 @@ impl Vm {
         }
         check_lazy_class(&class)?;
         self.classes.has_property_views = true;
+        self.classes.has_lazy_objects = true;
         if !reset {
             Self::check_factory_class(&class)?;
         }

@@ -272,13 +272,12 @@ impl Vm {
                 Ok(None)
             }
             CallTarget::Intrinsic(crate::intrinsics::Intrinsic::Class(
-                function @ (crate::class_function::ClassFunction::GetObjectVars
-                | crate::class_function::ClassFunction::GetMangledObjectVars),
+                crate::class_function::ClassFunction::GetObjectVars,
             )) if let (Some(destination), [Value::Object(object)]) =
                 (destination, arguments.as_slice())
                 && object.lazy().is_some() =>
             {
-                Box::pin(self.lazy_object_vars(destination, *function, object.clone())).await?;
+                Box::pin(self.lazy_object_vars(destination, object.clone())).await?;
                 self.call_stack.recycle_native_arguments(arguments);
                 Ok(None)
             }

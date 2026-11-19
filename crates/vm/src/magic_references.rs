@@ -140,6 +140,19 @@ impl Vm {
                     return Ok(ReferenceStep::Lazy(effective));
                 }
                 if !Rc::ptr_eq(object, &effective) {
+                    if steps.peek().is_none()
+                        && self.property_guarded(&effective, name, PropertyHook::Get)
+                        && !effective.has(name)
+                    {
+                        let value = self.read_declared_property(
+                            &effective,
+                            &crate::path_update::property_name(name),
+                            Missing::Warn,
+                        )?;
+                        return Ok(ReferenceStep::Complete(Value::Reference(Rc::new(
+                            RefCell::new(value),
+                        ))));
+                    }
                     current = Value::Object(effective);
                     path.detached = Some(current.clone());
                     path.keys = InlineStack::new();
@@ -183,6 +196,22 @@ impl Vm {
                                     ));
                                 }
                             }
+                        }
+                        if object.is_uninitialized_lazy()
+                            && steps.peek().is_none()
+                            && stored.is_none()
+                            && let Some(key) = &slot
+                            && self.typed_property_uninitialized(&class, &object, key)
+                            && let Some(property) =
+                                class.defaults.iter().find(|property| property.key == *key)
+                            && property.ty.as_ref().is_some_and(|ty| {
+                                !ty.mask.intersects(phera_bytecode::TypeMask::NULL)
+                            })
+                        {
+                            return Err(NativeError::error(format!(
+                                "Cannot access uninitialized non-nullable property {}::${} by reference",
+                                property.declaring, property.name,
+                            )));
                         }
                         if stored.is_none()
                             && !slot.as_ref().is_some_and(|key| {

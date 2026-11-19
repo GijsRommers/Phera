@@ -163,7 +163,7 @@ pub(crate) fn type_text(ty: ParamType) -> &'static str {
         ParamType::Float => "float",
         ParamType::String => "string",
         ParamType::Array => "array",
-        ParamType::Object => "object",
+        ParamType::Object | ParamType::ReflectedObject => "object",
         // PHP reports array for invalid values passed to Z_PARAM_ARRAY_OR_OBJECT.
         ParamType::ObjectOrArray => "array",
         ParamType::ArrayOrInt => "array|int",
@@ -220,7 +220,7 @@ fn convert(
     let converted = match site.param.ty {
         // Whether a value is callable depends on which functions and classes
         // exist, which only the VM knows; `Context::call` reports it.
-        ParamType::Mixed | ParamType::Callable => return Ok(()),
+        ParamType::Mixed | ParamType::Callable | ParamType::ReflectedObject => return Ok(()),
         ParamType::Array => matches!(value, Value::Array(_)).then_some(None),
         ParamType::Class(name) => {
             matches!(value, Value::Object(obj) if obj.class.is_instance_of(name)).then_some(None)

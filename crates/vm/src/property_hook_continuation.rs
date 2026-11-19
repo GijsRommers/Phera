@@ -193,8 +193,8 @@ impl Vm {
                         }
                         Ok(())
                     }
-                    LazyContinuation::ObjectVars(destination, function, object, _) => {
-                        self.lazy_object_vars(destination, function, object).await
+                    LazyContinuation::ObjectVars(destination, object, _) => {
+                        self.lazy_object_vars(destination, object).await
                     }
                     LazyContinuation::Reflection(destination, operation, _) => {
                         let value = self.resume_reflected_lazy(*operation, value)?;

@@ -276,6 +276,15 @@ impl ReflectionContext for Vm {
         self.reflection_lazy_property(member, object, operation)
     }
 
+    fn reflect_write_lazy_property(
+        &mut self,
+        member: Rc<MemberInfo>,
+        object: Rc<Object>,
+        value: Value,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(self.reflection_write_lazy_property(member, object, value))
+    }
+
     fn reflect_construct_attribute(
         &mut self,
         class: &ClassInfo,

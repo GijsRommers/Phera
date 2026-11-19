@@ -112,6 +112,27 @@ impl Context for Vm {
         })
     }
 
+    fn lazy_object_for_iteration(
+        &mut self,
+        object: std::rc::Rc<phera_value::Object>,
+    ) -> LocalFuture<'_, Result<std::rc::Rc<phera_value::Object>, NativeError>> {
+        Box::pin(self.initialize_lazy_via_callback(object))
+    }
+
+    fn track_iterated_property(
+        &mut self,
+        object: &std::rc::Rc<phera_value::Object>,
+        key: &phera_value::ArrayKey,
+        reference: &std::rc::Rc<std::cell::RefCell<Value>>,
+    ) -> Result<(), NativeError> {
+        crate::reference_holders::ReferenceHolders::track_object(
+            &self.property_references,
+            object,
+            key,
+            reference,
+        )
+    }
+
     fn property_view_runs_code(
         &self,
         object: &phera_value::Object,

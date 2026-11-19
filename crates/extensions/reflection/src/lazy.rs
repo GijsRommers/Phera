@@ -10,9 +10,9 @@ use phera_extension_api::{
     ParamType, Value, args,
 };
 
-use crate::{class::reflected_class, engine, exception, member::reflected};
+use crate::{class::reflected_class, engine, member::reflected};
 
-const OBJECT: Param = Param::new("object", ParamType::Object);
+pub(crate) const OBJECT: Param = Param::new("object", ParamType::ReflectedObject);
 const INITIALIZER: Param = Param::new("initializer", ParamType::Callable);
 const FACTORY: Param = Param::new("factory", ParamType::Callable);
 const OPTIONS: Param = Param::new("options", ParamType::Int).with_default(ConstantValue::Int(0));
@@ -132,18 +132,41 @@ pub(crate) fn property(
     engine(context)?.reflect_lazy_property(&member, object, operation)
 }
 
+pub(crate) fn write_property(
+    context: &mut dyn Context,
+    this: Option<Rc<Object>>,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        let member = reflected(this.as_ref())?;
+        let object = receiver(
+            &arguments,
+            &member.class,
+            "ReflectionProperty",
+            "setRawValueWithoutLazyInitialization",
+        )?;
+        let value = arguments.get(1).cloned().unwrap_or_default();
+        engine(context)?
+            .reflect_write_lazy_property(member, object, value)
+            .await
+    })
+}
+
 fn receiver(
     arguments: &[Value],
     class: &str,
     reflector: &str,
     method: &str,
 ) -> Result<Rc<Object>, NativeError> {
-    let object = args::object(arguments, 0).ok_or_else(|| exception("Missing object"))?;
-    if object.class.is_instance_of(class) {
+    if let Some(object) = args::object(arguments, 0)
+        && object.class.is_instance_of(class)
+    {
         return Ok(object.clone());
     }
+    let given = arguments
+        .first()
+        .map_or_else(|| "null".into(), Value::type_name);
     Err(NativeError::type_error(format!(
-        "{reflector}::{method}(): Argument #1 ($object) must be of type {class}, {} given",
-        object.class.name()
+        "{reflector}::{method}(): Argument #1 ($object) must be of type {class}, {given} given",
     )))
 }

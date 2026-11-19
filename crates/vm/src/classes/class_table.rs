@@ -32,6 +32,7 @@ pub(crate) struct ClassTable {
     closure: Option<ClassIndex>,
     pub(crate) has_dimensions: bool,
     pub(crate) has_property_views: bool,
+    pub(crate) has_lazy_objects: bool,
     pub(crate) objects: Vec<Weak<Object>>,
     ids: Rc<ObjectIds>,
 }

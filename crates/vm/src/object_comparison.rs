@@ -52,6 +52,26 @@ pub(crate) fn compare_objects(
     })
 }
 
+#[cold]
+fn compare_lazy_objects(left: &Object, right: &Object) -> Option<ObjectComparison> {
+    let effective_left = left
+        .lazy_instance()
+        .map(crate::lazy_objects::resolved_lazy_instance);
+    let effective_right = right
+        .lazy_instance()
+        .map(crate::lazy_objects::resolved_lazy_instance);
+    let left = effective_left.as_deref().unwrap_or(left);
+    let right = effective_right.as_deref().unwrap_or(right);
+    if std::ptr::eq(left, right) {
+        return Some(ObjectComparison::Compared(0));
+    }
+    if left.is_uninitialized_lazy() || right.is_uninitialized_lazy() {
+        return Some(ObjectComparison::InitializeLazy);
+    }
+    (effective_left.is_some() || effective_right.is_some())
+        .then(|| ObjectComparison::Projected(left.to_array(), right.to_array()))
+}
+
 pub(crate) fn is_comparison(operator: BinaryOp) -> bool {
     matches!(
         operator,
@@ -102,29 +122,12 @@ impl Vm {
         let mut projection_error = None;
         let result = step(&mut diagnostics, &mut |left, right, diagnostics| {
             let result = compare_objects(left, right, diagnostics)?;
-            if matches!(result, ObjectComparison::Default)
+            if self.classes.has_lazy_objects
+                && matches!(result, ObjectComparison::Default)
                 && left.class.name() == right.class.name()
+                && let Some(result) = compare_lazy_objects(left, right)
             {
-                let effective_left = left
-                    .lazy_instance()
-                    .map(crate::lazy_objects::resolved_lazy_instance);
-                let effective_right = right
-                    .lazy_instance()
-                    .map(crate::lazy_objects::resolved_lazy_instance);
-                let left = effective_left.as_deref().unwrap_or(left);
-                let right = effective_right.as_deref().unwrap_or(right);
-                if std::ptr::eq(left, right) {
-                    return Ok(ObjectComparison::Compared(0));
-                }
-                if left.is_uninitialized_lazy() || right.is_uninitialized_lazy() {
-                    return Ok(ObjectComparison::InitializeLazy);
-                }
-                if effective_left.is_some() || effective_right.is_some() {
-                    return Ok(ObjectComparison::Projected(
-                        left.to_array(),
-                        right.to_array(),
-                    ));
-                }
+                return Ok(result);
             }
             if matches!(result, ObjectComparison::Default)
                 && left.class.name() == right.class.name()

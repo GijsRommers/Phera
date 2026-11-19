@@ -144,6 +144,25 @@ impl Object {
         .unwrap_or_else(|native| native))
     }
 
+    /// Temporarily bypass one slot while a reflected raw write coerces its value.
+    pub fn set_lazy_property(&self, key: &ArrayKey, lazy: bool) -> bool {
+        let Ok(mut native) = self.native.try_borrow_mut() else {
+            return false;
+        };
+        let Some(LazyObject::Pending { properties, .. }) = native
+            .as_mut()
+            .and_then(|data| data.downcast_mut::<LazyStorage>())
+            .and_then(|state| state.lazy.as_deref_mut())
+        else {
+            return false;
+        };
+        if lazy {
+            properties.insert(key.clone())
+        } else {
+            properties.remove(key)
+        }
+    }
+
     /// Raw property projections such as `(array) $proxy` follow an existing
     /// instance, without running a pending initializer.
     pub fn lazy_properties(&self) -> PhpArray {
@@ -153,7 +172,7 @@ impl Object {
         while let Some(instance) = object.lazy_instance() {
             object = instance;
         }
-        object.to_array()
+        object.class.order_lazy_properties(object.to_array())
     }
 
     pub fn lazy_instance(&self) -> Option<Rc<Object>> {
