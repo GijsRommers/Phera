@@ -96,15 +96,12 @@ pub(super) async fn negotiate(
 }
 
 async fn client_config(dsn: &Dsn, mode: Mode) -> Result<ClientConfig, String> {
-    let provider = Arc::new(rustls_rustcrypto::provider());
-    let algorithms = provider.signature_verification_algorithms;
-    let builder = ClientConfig::builder_with_provider(provider)
-        .with_safe_default_protocol_versions()
-        .map_err(|error| error.to_string())?;
+    let algorithms = phera_io_pool::tls::provider().signature_verification_algorithms;
+    let builder = phera_io_pool::tls::client_builder().map_err(|error| error.to_string())?;
     let root_file = dsn.get("sslrootcert", "");
     let roots = match root_file {
         "" if !matches!(mode, Mode::VerifyCa | Mode::VerifyFull) => None,
-        "" | "system" => Some(tls::system_store().await),
+        "" | "system" => Some(phera_io_pool::tls::system_store().await),
         file => Some(read_roots(file).await?),
     };
     let builder = match (mode, roots) {

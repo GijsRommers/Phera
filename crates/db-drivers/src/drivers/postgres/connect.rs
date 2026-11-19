@@ -134,7 +134,7 @@ pub(super) fn failed(host: &str, port: u16, detail: impl std::fmt::Display) -> D
 }
 
 pub(super) fn tls_failure(host: &str, port: u16, error: io::Error) -> DbError {
-    use rustls::{CertificateError, Error};
+    use rustls::{AlertDescription, CertificateError, Error};
 
     let problem = error
         .get_ref()
@@ -148,6 +148,9 @@ pub(super) fn tls_failure(host: &str, port: u16, error: io::Error) -> DbError {
             certificate_name_error(&[], host)
         }
         Some(Error::InvalidCertificate(_)) => "SSL error: certificate verify failed".to_owned(),
+        Some(Error::AlertReceived(AlertDescription::ProtocolVersion)) => {
+            "SSL error: tlsv1 alert protocol version".to_owned()
+        }
         _ => format!("SSL error: {error}"),
     };
     failed(host, port, reason)

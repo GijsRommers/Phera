@@ -1,8 +1,18 @@
-//! The pooled socket: where it connects, and what the pool may do with it.
-use redis::aio::MultiplexedConnection;
+//! `$redis->connect('tls://redis.example')` opens an encrypted pooled socket.
+
+use std::sync::Arc;
 use std::time::Duration;
 
-use redis::{Client, ConnectionAddr, IntoConnectionInfo, RedisError, RedisResult, Value};
+use futures_util::future::select_ok;
+use redis::aio::MultiplexedConnection;
+use redis::{
+    AsyncConnectionConfig, Client, ConnectionAddr, ErrorKind, IntoConnectionInfo,
+    RedisConnectionInfo, RedisError, RedisResult, Value,
+};
+use rustls::pki_types::ServerName;
+use tokio::net::{TcpStream, lookup_host};
+use tokio::task::AbortHandle;
+use tokio_rustls::TlsConnector;
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct Endpoint {
@@ -13,11 +23,7 @@ pub struct Endpoint {
 }
 
 impl Endpoint {
-    pub fn client(&self) -> RedisResult<Client> {
-        static CRYPTO: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-        CRYPTO.get_or_init(|| {
-            let _ = rustls_rustcrypto::provider().install_default();
-        });
+    fn client(&self, settings: RedisConnectionInfo) -> RedisResult<Client> {
         let addr = if self.host.starts_with('/')
             || self.host.starts_with("unix://")
             || self.host.starts_with("file://")
@@ -28,25 +34,90 @@ impl Endpoint {
                     .trim_start_matches("file://")
                     .into(),
             )
-        } else if let Some(host) = self.host.strip_prefix("tls://") {
-            ConnectionAddr::TcpTls {
-                host: host.to_owned(),
-                port: self.port,
-                insecure: false,
-                tls_params: None,
-            }
         } else {
             ConnectionAddr::Tcp(self.host.trim_start_matches("tcp://").to_owned(), self.port)
         };
-        Client::open(("127.0.0.1", 6379).into_connection_info()?.set_addr(addr))
+        let info = ("127.0.0.1", 6379).into_connection_info()?;
+        Client::open(info.set_addr(addr).set_redis_settings(settings))
+    }
+
+    pub async fn open(
+        &self,
+        settings: RedisConnectionInfo,
+        config: AsyncConnectionConfig,
+        timeout: Option<Duration>,
+    ) -> RedisResult<Socket> {
+        if let Some(host) = self.host.strip_prefix("tls://") {
+            let open = open_tls(host, self.port, &settings, config);
+            return match timeout {
+                Some(duration) => tokio::time::timeout(duration, open)
+                    .await
+                    .map_err(|_| std::io::Error::from(std::io::ErrorKind::TimedOut))?,
+                None => open.await,
+            };
+        }
+        let connection = self
+            .client(settings)?
+            .get_multiplexed_async_connection_with_config(&config.set_connection_timeout(timeout))
+            .await?;
+        Ok(Socket {
+            connection,
+            reusable: true,
+            _driver: None,
+        })
     }
 }
 
+async fn open_tls(
+    host: &str,
+    port: u16,
+    settings: &RedisConnectionInfo,
+    config: AsyncConnectionConfig,
+) -> RedisResult<Socket> {
+    let mut addresses = lookup_host((host, port)).await?.peekable();
+    if addresses.peek().is_none() {
+        return Err((ErrorKind::InvalidClientConfig, "No address found for host").into());
+    }
+    let tls = phera_io_pool::tls::webpki_client().map_err(super::error)?;
+    let name = ServerName::try_from(host.to_owned()).map_err(super::error)?;
+    let connector = TlsConnector::from(tls);
+    // As with redis-rs, try every address and keep the first completed TLS handshake.
+    let (stream, _) = select_ok(addresses.map(|address| {
+        let connector = connector.clone();
+        let name = name.clone();
+        Box::pin(async move {
+            connector
+                .connect(name, TcpStream::connect(address).await?)
+                .await
+        })
+    }))
+    .await?;
+    let (connection, driver) =
+        MultiplexedConnection::new_with_config(settings, stream, config).await?;
+    Ok(Socket {
+        connection,
+        reusable: true,
+        _driver: Some(Arc::new(Driver(tokio::spawn(driver).abort_handle()))),
+    })
+}
+
+// With a custom stream, redis-rs leaves task ownership to the caller. Abort on
+// the last drop even if an outstanding Redis command is waiting for a reply.
+struct Driver(AbortHandle);
+
+impl Drop for Driver {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+#[derive(Clone)]
 pub struct Socket {
     pub connection: MultiplexedConnection,
     /// Cleared after an I/O error, or by `Lease::retire`; the pool then
     /// closes the socket instead of lending it again.
     pub reusable: bool,
+    _driver: Option<Arc<Driver>>,
 }
 
 /// A failed handshake is tried this many more times, after a short pause.
@@ -55,25 +126,16 @@ const HANDSHAKE_PAUSE: Duration = Duration::from_millis(2);
 
 impl Socket {
     pub async fn connect(endpoint: Endpoint) -> RedisResult<Self> {
-        let config = redis::AsyncConnectionConfig::new()
-            .set_response_timeout(None)
-            .set_connection_timeout(
-                (endpoint.timeout_micros > 0)
-                    .then(|| Duration::from_micros(endpoint.timeout_micros)),
-            );
-        let client = endpoint.client()?;
+        let config = AsyncConnectionConfig::new().set_response_timeout(None);
+        let timeout =
+            (endpoint.timeout_micros > 0).then(|| Duration::from_micros(endpoint.timeout_micros));
         let mut retries = 0;
         loop {
-            match client
-                .get_multiplexed_async_connection_with_config(&config)
+            match endpoint
+                .open(RedisConnectionInfo::default(), config.clone(), timeout)
                 .await
             {
-                Ok(connection) => {
-                    return Ok(Self {
-                        connection,
-                        reusable: true,
-                    });
-                }
+                Ok(socket) => return Ok(socket),
                 // Only the handshake is retried: no PHP command was sent yet.
                 Err(error) if error.is_io_error() && retries < HANDSHAKE_RETRIES => {
                     retries += 1;

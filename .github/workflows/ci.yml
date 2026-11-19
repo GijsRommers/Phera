@@ -62,7 +62,7 @@ jobs:
           - name: all other crates
             key: rest
             packages: --workspace --exclude phera-ext-mbstring --exclude phera-cli
-    # A draft gets the three short checks only. Work in progress is pushed
+    # A draft gets the short checks only. Work in progress is pushed
     # often, and its long jobs kept finished pull requests waiting for a
     # free runner.
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
@@ -233,3 +233,34 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Scan tokens as a second guard beyond workspace unsafe_code = "forbid".
       - run: python3 .github/scripts/check-unsafe.py
+
+  advisories:
+    name: Advisories
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: '1.99.1'
+      - run: cargo install cargo-audit --version 0.23.0 --locked
+      - name: Audit the lockfile
+        run: |
+          python3 - <<'PY'
+          import json
+          import re
+          import subprocess
+          import sys
+
+          with open(".github/advisory-ignores.json", encoding="utf-8") as ignore_file:
+              ignored = json.load(ignore_file)
+
+          audit = ["cargo", "audit", "--deny", "warnings", "--no-yanked"]
+          for advisory, reason in ignored.items():
+              if not re.fullmatch(r"RUSTSEC-\d{4}-\d+", advisory):
+                  sys.exit(f"Invalid RustSec advisory ID: {advisory}")
+              if not isinstance(reason, str) or not reason.strip():
+                  sys.exit(f"Missing reason for ignoring {advisory}")
+              audit.extend(["--ignore", advisory])
+
+          subprocess.run(audit, check=True)
+          PY
