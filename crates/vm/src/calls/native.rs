@@ -127,10 +127,10 @@ impl Vm {
             if traced {
                 let trace = crate::error_traces::NativeTrace::new(entry.name, arguments);
                 self.native_callback_sites
-                    .push(crate::error_traces::NativeCallbackSite::saved(
-                        self.call_stack.depth(),
-                        trace,
-                    ));
+                    .push(crate::error_traces::NativeCallbackSite {
+                        boundary: self.call_stack.depth(),
+                        native: crate::error_traces::NativeCaller::Saved(trace),
+                    });
             }
             let converted = self
                 .coerce_native_strings(entry.name, entry.params, arguments, origin)
