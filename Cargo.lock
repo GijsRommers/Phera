@@ -1745,6 +1745,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "phera-ext-dom"
+version = "0.1.0"
+dependencies = [
+ "phera-extension-api",
+]
+
+[[package]]
 name = "phera-ext-filter"
 version = "0.1.0"
 dependencies = [
