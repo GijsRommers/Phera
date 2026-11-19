@@ -14,7 +14,7 @@ use std::rc::Rc;
 use super::{CLASS, List, Mode, dimensions::arg, range, read, update};
 use crate::{
     This,
-    legacy::{Reader, Writer},
+    legacy::{self, PayloadKind, Writer},
     receiver,
 };
 
@@ -247,28 +247,26 @@ pub(super) fn legacy_unserialize(
         let object = receiver(this.as_ref())?;
         let input = args::string(&args, 0)
             .ok_or_else(|| NativeError::error("Missing serialized list data"))?;
-        let mut reader = Reader::new(context, input.as_bytes(), "SplDoublyLinkedList");
-        if reader.is_empty() {
-            return Ok(Value::Null);
-        }
-        update(object, |list| list.entries.clear())?;
-        let Value::Int(flags) = reader.value(context)? else {
-            return Err(reader.error());
-        };
-        update(object, |list| {
-            list.mode = Some(Mode::parse(i64::from(flags as i32)))
-        })?;
-        while reader.take(b":") {
-            let value = reader.value(context)?;
-            update(object, |list| {
-                let entry = list.entry(value);
-                list.entries.push_back(entry);
-            })?;
-        }
-        if !reader.is_empty() {
-            return Err(reader.error());
-        }
-        reader.finish(context).await?;
-        Ok(Value::Null)
+        legacy::decode(
+            context,
+            object.clone(),
+            input.as_bytes(),
+            PayloadKind::LinkedList,
+        )
+        .await
     })
+}
+
+pub(crate) fn legacy_clear(object: &Object) -> Result<(), NativeError> {
+    update(object, |list| list.entries.clear())
+}
+
+pub(crate) fn legacy_set_mode(object: &Object, flags: i64) -> Result<(), NativeError> {
+    update(object, |list| {
+        list.mode = Some(Mode::parse(i64::from(flags as i32)))
+    })
+}
+
+pub(crate) fn legacy_push(object: &Object, value: Value) -> Result<(), NativeError> {
+    push_value(object, value).map(|_| ())
 }

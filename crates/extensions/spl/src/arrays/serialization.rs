@@ -17,7 +17,7 @@ use super::{
 };
 use crate::{
     This,
-    legacy::{Reader, Writer},
+    legacy::{self, PayloadKind, Writer},
     receiver,
 };
 
@@ -159,52 +159,37 @@ pub(super) fn legacy_unserialize(
     Box::pin(async move {
         let object = receiver(this.as_ref())?;
         let input = args::string(&arguments, 0).ok_or_else(invalid_serialization)?;
-        let mut reader = Reader::new(
-            context,
-            input.as_bytes(),
-            if object.class.is_instance_of("ArrayObject") {
-                "ArrayObject"
-            } else {
-                "ArrayIterator"
-            },
-        );
-        if reader.is_empty() {
-            return Ok(Value::Null);
-        }
-        state::check_mutable(object)?;
-        reader.expect(b"x:")?;
-        let Value::Int(flags) = reader.value(context)? else {
-            return Err(reader.error());
-        };
-        let storage = if flags & SELF_STORAGE_FLAG != 0 {
-            Storage::OwnProperties
+        let kind = if object.class.is_instance_of("ArrayObject") {
+            PayloadKind::ArrayObject
         } else {
-            let value = reader.value(context)?;
-            if !matches!(value, Value::Array(_) | Value::Object(_)) {
-                return Err(reader.error());
-            }
-            let storage = storage(context, object, &value, "unserialize")?;
-            reader.expect(b";")?;
-            storage
+            PayloadKind::ArrayIterator
         };
-        state::update(object, |state| {
-            state.storage = storage;
-            state.flags = Flags::new(flags);
-            state.position = Position::Initial;
-            Ok(())
-        })?;
-        reader.expect(b"m:")?;
-        let Value::Array(members) = reader.value(context)? else {
-            return Err(reader.error());
-        };
-        object
-            .update(|props| {
-                for (key, value) in members.iter() {
-                    props.insert(key, value.clone());
-                }
-            })
-            .ok_or_else(crate::busy)?;
-        reader.finish(context).await?;
-        Ok(Value::Null)
+        legacy::decode(context, object.clone(), input.as_bytes(), kind).await
+    })
+}
+
+pub(crate) fn legacy_check_mutable(object: &Object) -> Result<(), NativeError> {
+    state::check_mutable(object)
+}
+
+pub(crate) fn legacy_uses_properties(flags: i64) -> bool {
+    flags & SELF_STORAGE_FLAG != 0
+}
+
+pub(crate) fn legacy_set_storage(
+    context: &mut dyn Context,
+    object: &Rc<Object>,
+    flags: i64,
+    value: Option<Value>,
+) -> Result<(), NativeError> {
+    let storage = match value {
+        Some(value) => storage(context, object, &value, "unserialize")?,
+        None => Storage::OwnProperties,
+    };
+    state::update(object, |state| {
+        state.storage = storage;
+        state.flags = Flags::new(flags);
+        state.position = Position::Initial;
+        Ok(())
     })
 }

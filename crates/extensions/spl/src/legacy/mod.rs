@@ -4,9 +4,11 @@
 //! (new ArrayObject([7]))->serialize(); // x:i:0;a:1:{i:0;i:7;};m:a:0:{}
 //! ```
 
-mod hooks;
+mod custom;
+mod payload;
 mod read;
+mod token;
 mod write;
 
-pub(crate) use read::Reader;
+pub(crate) use payload::{PayloadKind, decode};
 pub(crate) use write::Writer;

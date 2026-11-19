@@ -10,7 +10,7 @@ pub(crate) mod sequence;
 use std::{borrow::Cow, rc::Rc};
 
 use phera_extension_api::serialization::{
-    ActiveUnserializePolicy, SerializationClass, UnserializePolicy,
+    ActiveUnserializePolicy, SerializationClass, UnserializeHook, UnserializePolicy,
 };
 use phera_extension_api::{
     ArrayKey, Context, NativeError, NativeResult, Object, PhpString, Value, args,
@@ -45,6 +45,7 @@ enum Container {
 enum Delayed {
     Wakeup(Rc<Object>),
     Unserialize(Rc<Object>, Members),
+    Legacy(UnserializeHook),
 }
 
 enum Failure {
@@ -246,6 +247,7 @@ impl Decoder<'_> {
             // PHP gives the delayed magic callbacks an independent decoder.
             let previous = ActiveUnserializePolicy::replace(context, None);
             let result = match hook {
+                Delayed::Legacy(hook) => hook.invoke(context).await,
                 Delayed::Wakeup(object) => {
                     context
                         .call_serialization_method(object, "__wakeup", Vec::new())

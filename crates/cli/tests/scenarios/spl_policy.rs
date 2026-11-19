@@ -50,6 +50,64 @@ $payload = serialize(new Sample());
 $wire = 'C:7:"Wrapper":' . strlen($payload) . ':{' . $payload . '}';
 var_dump(unserialize($wire, ['allowed_classes' => [Wrapper::class]]));
 
+function c(string $name, string $payload): string {
+    return 'C:' . strlen($name) . ':"' . $name . '":' . strlen($payload) . ':{' . $payload . '}';
+}
+function wrap(string $name, string $value): string {
+    $payload = match ($name) {
+        ArrayObject::class, ArrayIterator::class, RecursiveArrayIterator::class => 'x:i:0;a:1:{i:0;' . $value . '};m:a:0:{}',
+        SplDoublyLinkedList::class, SplQueue::class, SplStack::class => 'i:0;:' . $value,
+        SplObjectStorage::class => 'x:i:1;O:8:"stdClass":0:{},' . $value . ';m:a:0:{}',
+        Wrapper::class => $value,
+    };
+    return c($name, $payload);
+}
+$types = [ArrayObject::class, ArrayIterator::class, RecursiveArrayIterator::class, SplDoublyLinkedList::class, SplQueue::class, SplStack::class, SplObjectStorage::class];
+$leaf = serialize(new Sample());
+foreach ($types as $outer) {
+    foreach ([...$types, Wrapper::class] as $inner) {
+        for ($depth = 1, $wire = $leaf; $depth <= 3; $depth++) {
+            $wire = wrap($inner, $wire);
+            $data = wrap($outer, $wire);
+            foreach ([true, false, [$outer], [$inner], [$outer, $inner, stdClass::class], [$outer, $inner, stdClass::class, Sample::class]] as $allowed) {
+                foreach ([1, 2, 3] as $limit) {
+                    echo $outer, '|', $inner, '|', $depth, '|', json_encode($allowed), '|', $limit, "\n";
+                    try {
+                        var_dump(unserialize($data, ['allowed_classes' => $allowed, 'max_depth' => $limit]));
+                    } catch (Throwable $error) {
+                        echo $error::class, ': ', $error->getMessage(), "\n";
+                    }
+                }
+            }
+        }
+    }
+}
+
+$storage = c('SplDoublyLinkedList', 'i:0;:O:8:"stdClass":0:{}');
+$parent = c('ArrayObject', 'x:i:0;a:3:{i:0;' . $storage . 'i:1;r:6;i:2;r:4;};m:a:0:{}');
+function checkObjectIdentity($data, $asArray) {
+    try {
+        $items = unserialize($data, ['allowed_classes' => [ArrayObject::class, SplDoublyLinkedList::class, stdClass::class]]);
+        $parent = $asArray ? $items[0] : $items;
+        var_dump($parent[0] === $parent[2], $parent[0][0] === $parent[1]);
+        if ($asArray) { var_dump($parent[0][0] === $items[1]); }
+    } catch (Throwable $error) {
+        echo $error->getMessage(), "\n";
+    }
+}
+checkObjectIdentity($parent, false);
+$parent = c('ArrayObject', 'x:i:0;a:3:{i:0;' . $storage . 'i:1;r:7;i:2;r:5;};m:a:0:{}');
+checkObjectIdentity('a:2:{i:0;' . $parent . 'i:1;r:7;}', true);
+
+class WakeupOrder {
+    public function __wakeup(): void { echo "wakeup\n"; }
+}
+class LegacyOrder extends Wrapper {
+    public function unserialize(string $data): void { echo "legacy\n"; }
+}
+$nested = wrap(ArrayObject::class, wrap(SplDoublyLinkedList::class, serialize(new WakeupOrder())));
+unserialize('a:2:{i:0;' . $nested . 'i:1;' . c(LegacyOrder::class, '') . '}');
+
 "#,
     )
     .expect("write the oracle script");

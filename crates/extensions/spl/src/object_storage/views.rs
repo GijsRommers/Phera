@@ -15,7 +15,7 @@ use phera_extension_api::{
 use super::{CLASS, Key, attach, hash, read};
 use crate::{
     This,
-    legacy::{Reader, Writer},
+    legacy::{self, PayloadKind, Writer},
     receiver,
 };
 
@@ -167,42 +167,12 @@ pub(super) fn legacy_unserialize(
         let object = receiver(this.as_ref())?;
         let input = args::string(&arguments, 0)
             .ok_or_else(|| NativeError::error("Missing serialized storage data"))?;
-        let mut reader = Reader::new(context, input.as_bytes(), "SplObjectStorage");
-        if reader.is_empty() {
-            return Ok(Value::Null);
-        }
-        reader.expect(b"x:")?;
-        let Value::Int(count) = reader.value(context)? else {
-            return Err(reader.error());
-        };
-        if count < 0 {
-            return Err(reader.error());
-        }
-        for _ in 0..count {
-            let Value::Object(item) = reader.value(context)? else {
-                return Err(reader.error());
-            };
-            let info = if reader.take(b",") {
-                reader.value(context)?
-            } else {
-                Value::Null
-            };
-            reader.expect(b";")?;
-            let key = hash(context, object, &item).await?;
-            attach(object, key, item, info)?;
-        }
-        reader.expect(b"m:")?;
-        let Value::Array(members) = reader.value(context)? else {
-            return Err(reader.error());
-        };
-        object
-            .update(|props| {
-                for (key, value) in members.iter() {
-                    props.insert(key, value.clone());
-                }
-            })
-            .ok_or_else(crate::busy)?;
-        reader.finish(context).await?;
-        Ok(Value::Null)
+        legacy::decode(
+            context,
+            object.clone(),
+            input.as_bytes(),
+            PayloadKind::ObjectStorage,
+        )
+        .await
     })
 }

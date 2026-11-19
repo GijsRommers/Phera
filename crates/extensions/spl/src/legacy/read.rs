@@ -4,54 +4,61 @@
 //! $array->unserialize('x:i:0;a:1:{i:0;i:7;};m:a:0:{}');
 //! ```
 
-use std::{collections::HashMap, rc::Rc};
+use std::rc::Rc;
 
 use phera_extension_api::serialization::{
-    ActiveUnserializePolicy, INCOMPLETE_CLASS, INCOMPLETE_CLASS_NAME, UnserializePolicy,
+    LegacyUnserializeState, UnserializeHook, UnserializePolicy,
 };
 use phera_extension_api::{ArrayKey, Context, NativeError, Object, PhpArray, Value};
 
-use super::hooks::Hooks;
-
 pub(crate) struct Reader<'a> {
-    input: &'a [u8],
-    offset: usize,
-    sequence: usize,
-    objects: HashMap<usize, Rc<Object>>,
-    policy: UnserializePolicy,
-    function: String,
-    pub(super) hooks: Hooks,
+    pub(super) input: &'a [u8],
+    pub(super) offset: usize,
+    stack: Vec<Container>,
+    pub(super) policy: UnserializePolicy,
+    function: &'static str,
 }
 
-enum Layout {
+pub(super) enum Layout {
     Array,
     Object(Rc<Object>),
     Magic(Rc<Object>),
 }
 
-struct Container {
-    layout: Layout,
-    remaining: usize,
-    key: Option<ArrayKey>,
-    values: PhpArray,
+pub(super) struct Container {
+    pub(super) layout: Layout,
+    pub(super) remaining: usize,
+    pub(super) key: Option<ArrayKey>,
+    pub(super) values: PhpArray,
 }
 
-enum Token {
+pub(super) enum Token<'a> {
     Value(Value),
     Open(Container),
+    Custom(Custom<'a>),
+}
+
+pub(super) struct Custom<'a> {
+    pub class: &'a [u8],
+    pub payload: &'a [u8],
+    pub offset: usize,
+    pub slot: usize,
+    pub policy: UnserializePolicy,
+}
+
+pub(super) enum Step<'a> {
+    Value(Value),
+    Custom(Custom<'a>),
 }
 
 impl<'a> Reader<'a> {
-    pub fn new(context: &mut dyn Context, input: &'a [u8], class: &str) -> Self {
-        let policy = ActiveUnserializePolicy::current(context);
+    pub fn new(input: &'a [u8], function: &'static str, policy: UnserializePolicy) -> Self {
         Self {
             input,
             offset: 0,
-            sequence: 0,
-            objects: HashMap::new(),
+            stack: Vec::new(),
             policy,
-            function: format!("{class}::unserialize"),
-            hooks: Hooks::default(),
+            function,
         }
     }
 
@@ -60,13 +67,13 @@ impl<'a> Reader<'a> {
     }
 
     pub fn error(&self) -> NativeError {
+        self.error_at(self.offset)
+    }
+
+    pub fn error_at(&self, offset: usize) -> NativeError {
         NativeError::throw(
             "UnexpectedValueException",
-            format!(
-                "Error at offset {} of {} bytes",
-                self.offset,
-                self.input.len(),
-            ),
+            format!("Error at offset {} of {} bytes", offset, self.input.len(),),
         )
     }
 
@@ -91,212 +98,86 @@ impl<'a> Reader<'a> {
         }
     }
 
-    fn until(&mut self, delimiter: u8) -> Result<&'a [u8], NativeError> {
-        let rest = self.input.get(self.offset..).ok_or_else(|| self.error())?;
-        let end = rest
-            .iter()
-            .position(|byte| *byte == delimiter)
-            .ok_or_else(|| self.error())?;
-        self.offset += end + 1;
-        Ok(&rest[..end])
-    }
-
-    fn number<T: std::str::FromStr>(&mut self, delimiter: u8) -> Result<T, NativeError> {
-        let bytes = self.until(delimiter)?;
-        std::str::from_utf8(bytes)
-            .ok()
-            .and_then(|text| text.parse().ok())
-            .ok_or_else(|| self.error())
-    }
-
-    fn string(&mut self, close: &[u8]) -> Result<&'a [u8], NativeError> {
-        let len: usize = self.number(b':')?;
-        self.expect(b"\"")?;
-        let end = self.offset.checked_add(len).ok_or_else(|| self.error())?;
-        let bytes = self
-            .input
-            .get(self.offset..end)
-            .ok_or_else(|| self.error())?;
-        self.offset = end;
-        self.expect(close)?;
-        Ok(bytes)
-    }
-
-    fn key(&mut self, layout: &Layout) -> Result<ArrayKey, NativeError> {
-        if self.take(b"i:") {
-            let index: i64 = self.number(b';')?;
-            return Ok(match layout {
-                Layout::Array | Layout::Magic(_) => ArrayKey::Int(index),
-                Layout::Object(_) => ArrayKey::str(index.to_string()),
-            });
-        }
-        self.expect(b"s:")?;
-        let key = self.string(b"\";")?;
-        Ok(ArrayKey::str(key))
-    }
-
-    fn token(&mut self, context: &mut dyn Context) -> Result<Token, NativeError> {
-        self.sequence = self.sequence.saturating_add(1);
-        if self.take(b"N;") {
-            return Ok(Token::Value(Value::Null));
-        }
-        if self.take(b"b:") {
-            let value = if self.take(b"0;") {
-                false
-            } else {
-                self.expect(b"1;")?;
-                true
-            };
-            return Ok(Token::Value(Value::Bool(value)));
-        }
-        if self.take(b"i:") {
-            return Ok(Token::Value(Value::Int(self.number(b';')?)));
-        }
-        if self.take(b"d:") {
-            let value = if self.take(b"NAN;") {
-                f64::NAN
-            } else if self.take(b"INF;") {
-                f64::INFINITY
-            } else if self.take(b"-INF;") {
-                f64::NEG_INFINITY
-            } else {
-                self.number(b';')?
-            };
-            return Ok(Token::Value(Value::Float(value)));
-        }
-        if self.take(b"s:") {
-            return Ok(Token::Value(Value::from(self.string(b"\";")?.to_vec())));
-        }
-        if self.take(b"r:") {
-            let number = self.number(b';')?;
-            let object = self.objects.get(&number).ok_or_else(|| self.error())?;
-            return Ok(Token::Value(Value::Object(object.clone())));
-        }
-        let layout = if self.take(b"a:") {
-            Layout::Array
-        } else if self.take(b"O:") {
-            let class = self.string(b"\":")?;
-            let class = std::str::from_utf8(class).map_err(|_| self.error())?;
-            let allowed = self.policy.allows(class.as_bytes());
-            let name = if allowed { class } else { INCOMPLETE_CLASS };
-            let Value::Object(object) = context.create_unserialized_object(name)? else {
-                return Err(self.error());
-            };
-            if !allowed {
-                object.set(ArrayKey::str(INCOMPLETE_CLASS_NAME), Value::from(class));
-            }
-            let magic = allowed && context.has_serialization_method(&object, "__unserialize");
-            if !magic
-                && (object.class.has_native_properties()
-                    || context.serialization_forbidden(&object))
-            {
-                return Err(NativeError::throw(
-                    "UnexpectedValueException",
-                    format!("{} uses custom serialization", object.class.name()),
-                ));
-            }
-            self.objects.insert(self.sequence, object.clone());
-            if magic {
-                Layout::Magic(object)
-            } else {
-                Layout::Object(object)
-            }
-        } else if self.take(b"C:") {
-            return self.custom_object(context);
-        } else {
-            return Err(self.error());
-        };
-        let remaining = self.number(b':')?;
-        self.expect(b"{")?;
-        Ok(Token::Open(Container {
-            layout,
-            remaining,
-            key: None,
-            values: PhpArray::new(),
-        }))
-    }
-
-    fn custom_object(&mut self, context: &mut dyn Context) -> Result<Token, NativeError> {
-        let class = self.string(b"\":")?;
-        if self.policy.allows(class) {
-            return Err(self.error());
-        }
-        let length: usize = self.number(b':')?;
-        self.expect(b"{")?;
-        let end = self
-            .offset
-            .checked_add(length)
-            .ok_or_else(|| self.error())?;
-        if self.input.get(end) != Some(&b'}') {
-            return Err(self.error());
-        }
-        self.offset = end + 1;
-        context.warning("Class __PHP_Incomplete_Class has no unserializer".into());
-        let Value::Object(object) = context.create_unserialized_object(INCOMPLETE_CLASS)? else {
-            return Err(self.error());
-        };
-        object.set(ArrayKey::str(INCOMPLETE_CLASS_NAME), Value::from(class));
-        self.objects.insert(self.sequence, object.clone());
-        Ok(Token::Value(Value::Object(object)))
-    }
-
-    pub fn value(&mut self, context: &mut dyn Context) -> Result<Value, NativeError> {
-        let mut stack: Vec<Container> = Vec::new();
+    pub(super) async fn value(
+        &mut self,
+        context: &mut dyn Context,
+        references: &mut LegacyUnserializeState,
+        mut completed: Option<Value>,
+    ) -> Result<Step<'a>, NativeError> {
         loop {
-            let next = if stack.last().is_some_and(|frame| frame.remaining == 0) {
-                let frame = stack.pop().ok_or_else(|| self.error())?;
+            let next = if let Some(value) = completed.take() {
+                value
+            } else if self.stack.last().is_some_and(|frame| frame.remaining == 0) {
+                let frame = self.stack.pop().ok_or_else(|| self.error())?;
                 self.expect(b"}")?;
                 match frame.layout {
                     Layout::Array => Value::from(frame.values),
                     Layout::Object(object) => {
                         context.finish_unserialized_object(&object, frame.values)?;
                         if context.has_serialization_method(&object, "__wakeup") {
-                            self.hooks.wakeup(object.clone());
+                            references
+                                .hooks
+                                .push(UnserializeHook::Wakeup(object.clone()));
                         }
                         Value::Object(object)
                     }
                     Layout::Magic(object) => {
-                        self.hooks.unserialize(object.clone(), frame.values);
+                        references
+                            .hooks
+                            .push(UnserializeHook::Unserialize(object.clone(), frame.values));
                         Value::Object(object)
                     }
                 }
             } else {
-                if let Some(frame) = stack.last_mut() {
-                    let key = self.key(&frame.layout)?;
-                    let key = match &frame.layout {
-                        Layout::Object(object) => {
-                            let key = context
-                                .unserialized_property_key(object, key)?
-                                .ok_or_else(|| self.error())?;
-                            if !frame.values.contains_key(&key) && !object.has(&key) {
-                                context.unserialized_dynamic_property(object, &key)?;
-                            }
-                            key
-                        }
-                        _ => key,
-                    };
-                    frame.key = Some(key);
-                }
-                match self.token(context)? {
+                self.next_key(context)?;
+                let depth = self.stack.len();
+                match self.token(context, references, depth).await? {
                     Token::Value(value) => value,
                     Token::Open(frame) => {
                         if !(frame.remaining == 0 && matches!(frame.layout, Layout::Array))
-                            && self.policy.depth_exceeded(stack.len())
+                            && self.policy.depth_exceeded(depth)
                         {
-                            context.warning(self.policy.depth_warning(&self.function));
+                            context.warning(self.policy.depth_warning(self.function));
                             return Err(self.error());
                         }
-                        stack.push(frame);
+                        self.stack.push(frame);
                         continue;
                     }
+                    Token::Custom(custom) => return Ok(Step::Custom(custom)),
                 }
             };
-            let Some(parent) = stack.last_mut() else {
-                return Ok(next);
+            let Some(parent) = self.stack.last_mut() else {
+                return Ok(Step::Value(next));
             };
-            let key = parent.key.take().ok_or_else(|| self.error())?;
-            parent.values.insert(key, next);
-            parent.remaining -= 1;
+            if let Some(key) = parent.key.take() {
+                parent.values.insert(key, next);
+                parent.remaining -= 1;
+            } else {
+                return Err(self.error());
+            }
         }
+    }
+
+    fn next_key(&mut self, context: &mut dyn Context) -> Result<(), NativeError> {
+        // A key advances the reader, so own the frame while decoding it.
+        let Some(mut frame) = self.stack.pop() else {
+            return Ok(());
+        };
+        let key = self.key(&frame.layout)?;
+        let key = match &frame.layout {
+            Layout::Object(object) => {
+                let key = context
+                    .unserialized_property_key(object, key)?
+                    .ok_or_else(|| self.error())?;
+                if !frame.values.contains_key(&key) && !object.has(&key) {
+                    context.unserialized_dynamic_property(object, &key)?;
+                }
+                key
+            }
+            _ => key,
+        };
+        frame.key = Some(key);
+        self.stack.push(frame);
+        Ok(())
     }
 }

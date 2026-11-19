@@ -1,6 +1,9 @@
 //! `unserialize()` allocates objects without running their constructors.
 
-use std::{collections::HashSet, rc::Rc};
+use std::{
+    collections::{HashMap, HashSet},
+    rc::Rc,
+};
 
 use crate::ArrayKey;
 use crate::value::ClassHandle;
@@ -81,6 +84,68 @@ impl ActiveUnserializePolicy {
             context.state().get_or_default::<Self>().0 = Some(policy);
         }
         previous
+    }
+}
+
+/// Object identity slots span a C: payload and its enclosing wire stream.
+#[derive(Default)]
+pub struct LegacyUnserializeState {
+    pub count: usize,
+    pub objects: HashMap<usize, Rc<crate::Object>>,
+    pub hooks: Vec<UnserializeHook>,
+}
+
+/// Modern object hooks wait until the surrounding decoder finishes reading.
+pub enum UnserializeHook {
+    Wakeup(Rc<crate::Object>),
+    Unserialize(Rc<crate::Object>, crate::PhpArray),
+}
+
+impl UnserializeHook {
+    pub async fn invoke(self, context: &mut dyn crate::Context) -> crate::NativeResult {
+        let (object, method, arguments) = match self {
+            Self::Wakeup(object) => (object, "__wakeup", Vec::new()),
+            Self::Unserialize(object, arguments) => {
+                (object, "__unserialize", vec![crate::Value::from(arguments)])
+            }
+        };
+        context
+            .call_serialization_method(object, method, arguments)
+            .await
+    }
+}
+
+#[derive(Default)]
+pub struct ActiveLegacyUnserialize(pub Option<LegacyUnserializeState>);
+
+impl ActiveLegacyUnserialize {
+    pub fn replace(
+        context: &mut dyn crate::Context,
+        slots: Option<LegacyUnserializeState>,
+    ) -> Option<LegacyUnserializeState> {
+        let previous = context.state().take::<Self>().and_then(|active| active.0);
+        if let Some(slots) = slots {
+            context.state().get_or_default::<Self>().0 = Some(slots);
+        }
+        previous
+    }
+}
+
+/// Classes outside the allowlist are never passed to the autoloader.
+pub async fn resolve_unserialize_class(
+    context: &mut dyn crate::Context,
+    spelling: &[u8],
+    policy: &UnserializePolicy,
+) -> Result<Option<SerializationClass>, crate::NativeError> {
+    if !policy.allows(spelling) {
+        return Ok(None);
+    }
+    let Ok(name) = std::str::from_utf8(spelling) else {
+        return Ok(None);
+    };
+    match context.serialization_class(name).await? {
+        Some(class) => Ok(Some(class)),
+        None => context.unserialize_class_callback(name).await,
     }
 }
 
