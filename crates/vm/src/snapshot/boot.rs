@@ -31,7 +31,7 @@ pub struct Snapshot {
 /// How a boot run ended.
 pub enum BootOutcome {
     /// The script called `Phera\snapshot()`.
-    Snapshot(Snapshot),
+    Snapshot(Box<Snapshot>),
     /// The script ended without calling it, with this exit status; what it
     /// printed is in [`Vm::output`].
     Finished(i32),
@@ -77,7 +77,7 @@ impl Vm {
         self.snapshot.mode = SnapshotMode::Boot;
         let status = self.run(unit).await;
         match (self.snapshot.taken.take(), self.snapshot.refused.take()) {
-            (Some(snapshot), _) => BootOutcome::Snapshot(*snapshot),
+            (Some(snapshot), _) => BootOutcome::Snapshot(snapshot),
             (None, Some(message)) => BootOutcome::Refused(message),
             (None, None) => BootOutcome::Finished(status),
         }

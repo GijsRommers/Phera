@@ -271,23 +271,6 @@ pub(crate) fn body(unit: &CompiledUnit, local: Option<usize>) -> &Function {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::CodeTable;
-    use std::sync::Arc;
-
-    /// Loaded units stay alive for the request after every frame has returned.
-    #[test]
-    fn cached_units_stay_alive() {
-        let unit = Arc::new(phera_compiler::compile("<?php", "cache.php").unwrap());
-        let weak = Arc::downgrade(&unit);
-        let mut code = CodeTable::default();
-        code.load(&unit);
-        drop(unit);
-        assert!(weak.upgrade().is_some());
-    }
-}
-
 /// A fork has the snapshot's files with the same numbers, and its own
 /// copies of their caches (see `crate::snapshot`).
 impl crate::snapshot::ForkCopy for CodeTable {
@@ -308,5 +291,22 @@ impl crate::snapshot::ForkCopy for CodeTable {
             names: self.names.clone(),
             trait_method_names: self.trait_method_names.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CodeTable;
+    use std::sync::Arc;
+
+    /// Loaded units stay alive for the request after every frame has returned.
+    #[test]
+    fn cached_units_stay_alive() {
+        let unit = Arc::new(phera_compiler::compile("<?php", "cache.php").unwrap());
+        let weak = Arc::downgrade(&unit);
+        let mut code = CodeTable::default();
+        code.load(&unit);
+        drop(unit);
+        assert!(weak.upgrade().is_some());
     }
 }

@@ -106,7 +106,7 @@ impl Runtime {
                 let count = files.len();
                 let changes = crate::boot_changes::BootChanges::between(&initial, &snapshot);
                 (
-                    ScriptState::Ready(Rc::new(snapshot), FileStamps::of(files), Rc::new(changes)),
+                    ScriptState::Ready(Rc::from(snapshot), FileStamps::of(files), Rc::new(changes)),
                     BootReport::Snapshot {
                         elapsed: started.elapsed(),
                         files: count,

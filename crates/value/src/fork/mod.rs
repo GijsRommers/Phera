@@ -65,6 +65,9 @@ pub struct Refusal {
     pub address: usize,
 }
 
+/// A PHP reference cell.
+type Cell = Rc<RefCell<Value>>;
+
 /// One copy in progress. Make it with [`Fork::new`], map each root with
 /// [`Fork::value`], then call [`Fork::finish`].
 pub struct Fork<'n> {
@@ -80,7 +83,7 @@ pub struct Fork<'n> {
     pub(crate) arrays: HashMap<usize, Rc<crate::PhpArray>>,
     /// Copies made but not filled yet.
     pub(crate) unfilled_objects: Vec<(Rc<Object>, Rc<Object>)>,
-    unfilled_references: Vec<(Rc<RefCell<Value>>, Rc<RefCell<Value>>)>,
+    unfilled_references: Vec<(Cell, Cell)>,
     /// Copies whose originals carry `WeakMap` values; filled once every
     /// map has its copy.
     pub(crate) unfilled_attachments: Vec<(Rc<Object>, Rc<Object>)>,

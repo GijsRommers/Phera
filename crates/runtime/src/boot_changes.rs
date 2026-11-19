@@ -26,9 +26,12 @@ const REQUEST_SUPERGLOBALS: [&str; 6] =
 #[derive(Default)]
 pub(crate) struct BootChanges(Vec<(&'static str, Vec<ArrayKey>)>);
 
+/// A key's value in a fork: `None` for a key the boot removed.
+type KeyValue = (ArrayKey, Option<Value>);
+
 /// The values of those keys in one fork, read before its request's
-/// superglobals replace them: `None` for a key the boot removed.
-pub(crate) struct Carried(Vec<(&'static str, Vec<(ArrayKey, Option<Value>)>)>);
+/// superglobals replace them.
+pub(crate) struct Carried(Vec<(&'static str, Vec<KeyValue>)>);
 
 impl BootChanges {
     /// What the boot changed: `before` holds the superglobals it started with.
