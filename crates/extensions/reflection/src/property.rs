@@ -143,13 +143,13 @@ pub(crate) fn register(registry: &mut Registry) {
                     "setValue",
                     const {
                         &[
-                            Param::new("objectOrValue", ParamType::Mixed),
+                            Param::new("objectOrValue", ParamType::Mixed)
+                                .arity_checked_by_handler(),
                             Param::new("value", ParamType::Mixed).optional(),
                         ]
                     },
                     set_value,
-                )
-                .with_handler_arity(),
+                ),
                 MethodEntry::public("hasType", &[], |_, o, _| {
                     data(o, |m| Value::Bool(m.declared_type.is_some()))
                 }),

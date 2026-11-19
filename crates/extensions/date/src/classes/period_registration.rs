@@ -36,14 +36,13 @@ const METHODS: &[MethodEntry] = &[
     MethodEntry::public(
         "__construct",
         &[
-            Param::new("start", ParamType::Mixed),
+            Param::new("start", ParamType::Mixed).arity_checked_by_handler(),
             Param::new("interval", ParamType::Mixed).optional(),
             Param::new("end", ParamType::Mixed).optional(),
             Param::new("options", ParamType::Mixed).optional(),
         ],
         period::construct,
-    )
-    .with_handler_arity(),
+    ),
     MethodEntry::public(
         "createFromISO8601String",
         &[

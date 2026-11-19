@@ -96,7 +96,7 @@ impl Vm {
     pub(crate) fn prepare_native_method_arguments(
         &mut self,
         method: &crate::classes::Method,
-        entry: phera_extension_api::MethodEntry,
+        parameters: &[phera_extension_api::Param],
         arguments: &mut [Value],
     ) -> Result<(), NativeError> {
         let call_name = format!("{}::{}", method.declaring, method.name);
@@ -108,14 +108,7 @@ impl Vm {
         } else {
             None
         };
-        let prepared = match entry.arity {
-            phera_extension_api::ArgumentCount::Parameters => {
-                self.prepare_throwable_constructor(&call_name, entry.params, arguments)
-            }
-            phera_extension_api::ArgumentCount::Handler => {
-                phera_extension_api::prepare_call_values(&call_name, entry.params, arguments, self)
-            }
-        };
+        let prepared = self.prepare_throwable_constructor(&call_name, parameters, arguments);
         if tracking {
             self.error_handlers.native_site = previous;
         }

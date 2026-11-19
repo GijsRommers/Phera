@@ -86,6 +86,7 @@ pub struct Param {
     pub ty: ParamType,
     pub nullable: bool,
     null_coercion: NullCoercion,
+    arity: ArgumentCount,
     pub optional: bool,
     /// Fills a skipped position when a later named argument is supplied.
     pub default: Option<ConstantValue>,
@@ -103,6 +104,12 @@ enum NullCoercion {
     Scalar,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ArgumentCount {
+    Parameters,
+    Handler,
+}
+
 impl Param {
     pub const fn new(name: &'static str, ty: ParamType) -> Self {
         Self {
@@ -110,6 +117,7 @@ impl Param {
             ty,
             nullable: false,
             null_coercion: NullCoercion::Declared,
+            arity: ArgumentCount::Parameters,
             optional: false,
             default: None,
             default_name: None,
@@ -134,6 +142,19 @@ impl Param {
 
     pub const fn accepts_null(self) -> bool {
         self.nullable && matches!(self.null_coercion, NullCoercion::Declared)
+    }
+
+    /// On the first parameter, preserve a handler's own argument count checks.
+    ///
+    /// Some signatures have multiple call forms, such as `mt_rand()` and
+    /// `mt_rand($min, $max)`. The reflected parameters describe both forms.
+    pub const fn arity_checked_by_handler(mut self) -> Self {
+        self.arity = ArgumentCount::Handler;
+        self
+    }
+
+    pub(crate) const fn uses_parameter_arity(&self) -> bool {
+        matches!(self.arity, ArgumentCount::Parameters)
     }
 
     /// The parameter has a default; the function sees a shorter argument slice
@@ -184,15 +205,6 @@ pub struct FunctionEntry {
     pub name: &'static str,
     pub params: &'static [Param],
     pub handler: NativeFn,
-    pub arity: ArgumentCount,
-}
-
-/// Some signatures (for example `mt_rand()` or `mt_rand($min, $max)`)
-/// describe multiple argument forms. Their handlers check arity before types.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum ArgumentCount {
-    Parameters,
-    Handler,
 }
 
 impl FunctionEntry {
@@ -201,7 +213,6 @@ impl FunctionEntry {
             name,
             params,
             handler: NativeFn::Sync(handler),
-            arity: ArgumentCount::Parameters,
         }
     }
 
@@ -214,13 +225,7 @@ impl FunctionEntry {
             name,
             params,
             handler: NativeFn::Async(handler),
-            arity: ArgumentCount::Parameters,
         }
-    }
-
-    pub const fn with_handler_arity(mut self) -> Self {
-        self.arity = ArgumentCount::Handler;
-        self
     }
 
     /// How many arguments a call must pass at least.

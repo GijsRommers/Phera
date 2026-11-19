@@ -49,6 +49,16 @@ try {
 '''
 
 
+# UNKNOWN supplies no positional value. Exercise an explicit final argument
+# anyway, so an earlier skipped UNKNOWN is still tested against the oracle.
+UNKNOWN_LAST = {
+    'dateperiod::__construct': '0',
+    'mt_rand': '10',
+    'rand': '10',
+    'stream_context_set_option': '"probe"',
+}
+
+
 def catalog():
     for line in (HERE / 'native-parameters.tsv').read_text().split('\n'):
         if not line or line.startswith('#'):
@@ -177,8 +187,11 @@ def main():
                 report['skipped'][name] = sample or 'No deterministic isolated fixture'
                 continue
             if optional[-1][2] == 'UNKNOWN':
-                report['skipped'][name] = 'Last optional parameter has no value to pass'
-                continue
+                last = max(index for index, parameter in enumerate(parameters)
+                           if parameter[1].startswith('o-'))
+                parameter, flags, _, encoded = parameters[last]
+                parameters[last] = (parameter, flags, UNKNOWN_LAST[name], encoded)
+                counts[f'explicit last without default {kind}'] += 1
             named = build_call(name, names[name], parameters, sample, True)
             variants = {'named': named}
             if any(p[2] == 'UNKNOWN' for p in optional[:-1]):

@@ -78,16 +78,17 @@ fn seed(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
 }
 
 /// `mt_rand(): int` or `mt_rand(int $min, int $max): int`
-const MT_RAND: FunctionEntry =
-    FunctionEntry::sync("mt_rand", ZERO_OR_TWO, mt_rand).with_handler_arity();
+const MT_RAND: FunctionEntry = FunctionEntry::sync("mt_rand", ZERO_OR_TWO, mt_rand);
 
 /// `rand(): int` or `rand(int $min, int $max): int`
-const RAND: FunctionEntry = FunctionEntry::sync("rand", ZERO_OR_TWO, rand).with_handler_arity();
+const RAND: FunctionEntry = FunctionEntry::sync("rand", ZERO_OR_TWO, rand);
 
 /// PHP takes either no arguments or both bounds, and counts them before it
 /// converts them. [`bounds`] checks both forms before coercing either bound.
 const ZERO_OR_TWO: &[Param] = &[
-    Param::new("min", ParamType::Mixed).optional(),
+    Param::new("min", ParamType::Mixed)
+        .optional()
+        .arity_checked_by_handler(),
     Param::new("max", ParamType::Mixed).optional(),
 ];
 

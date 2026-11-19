@@ -22,7 +22,7 @@ use phera_value::{
     NumVal, PhpString, Value, cast_to_bool, float_repr, parse_numeric, to_php_string,
 };
 
-use crate::{ArgumentCount, Context, FunctionEntry, NativeError, Param, ParamType};
+use crate::{Context, FunctionEntry, NativeError, Param, ParamType};
 
 /// Validates `arguments` against the signature of `entry` and converts scalar
 /// arguments in place. On failure the error is the exception PHP would throw
@@ -32,10 +32,7 @@ pub fn prepare_arguments(
     arguments: &mut [Value],
     context: &mut dyn Context,
 ) -> Result<(), NativeError> {
-    match entry.arity {
-        ArgumentCount::Parameters => prepare_call(entry.name, entry.params, arguments, context),
-        ArgumentCount::Handler => prepare_call_values(entry.name, entry.params, arguments, context),
-    }
+    prepare_call(entry.name, entry.params, arguments, context)
 }
 
 /// [`prepare_arguments`] for anything with a parameter list. For a native
@@ -46,17 +43,11 @@ pub fn prepare_call(
     arguments: &mut [Value],
     context: &mut dyn Context,
 ) -> Result<(), NativeError> {
-    check_count(name, params, arguments.len())?;
-    prepare_call_values(name, params, arguments, context)
-}
-
-/// Coerce and dereference arguments for a handler that checks its own count.
-pub fn prepare_call_values(
-    name: &str,
-    params: &[Param],
-    arguments: &mut [Value],
-    context: &mut dyn Context,
-) -> Result<(), NativeError> {
+    if let Err(error) = check_count(name, params, arguments.len())
+        && params.first().is_none_or(Param::uses_parameter_arity)
+    {
+        return Err(error);
+    }
     let strict = context.strict_types();
     for (index, argument) in arguments.iter_mut().enumerate() {
         // Arguments past the declared list belong to the variadic parameter.

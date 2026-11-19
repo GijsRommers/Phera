@@ -22,9 +22,7 @@ pub use phera_source::{CompileDiagnostic, CompileDiagnosticKind, CompileDiagnost
 pub use phera_value as value;
 pub use phera_value::{ArrayKey, Diagnostics, Object, PhpArray, PhpString, Value};
 
-pub use arguments::{
-    args, prepare_arguments, prepare_call, prepare_call_values, prepare_single_argument,
-};
+pub use arguments::{args, prepare_arguments, prepare_call, prepare_single_argument};
 pub use class::{
     AsyncMethod, ClassEntry, ClassKind, MethodEntry, MethodPreparation, MethodReturn, NativeMethod,
     NativePropertyAccess, NativePropertyMutation, NativePropertyRead, PrepareMethod, PropertyEntry,
@@ -33,9 +31,7 @@ pub use class::{
 pub use context::{Context, GeneratorOperation, LocalFuture, PropertyView, RequestCallback};
 mod property_view_request;
 pub use error::{NativeError, NativeResult, Unwind};
-pub use function::{
-    ArgumentCount, AsyncFn, FunctionEntry, NativeFn, Param, ParamType, SyncFn, SyncSelector,
-};
+pub use function::{AsyncFn, FunctionEntry, NativeFn, Param, ParamType, SyncFn, SyncSelector};
 pub use object_handlers::{
     ClassHooks, DimensionReferenceMode, DirectDimensions, IteratorFactory, NativeClone,
     NativeCompare, NativeComparison, NativeCount, NativeDimensions, NativeIterator,
