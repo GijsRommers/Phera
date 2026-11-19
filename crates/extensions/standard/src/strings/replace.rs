@@ -232,6 +232,22 @@ impl Replacer<'_> {
         needle: &[u8],
         replacement: &[u8],
     ) -> Result<Option<Vec<u8>>, NativeError> {
+        if let (CaseSensitivity::Sensitive, [needle], [replacement]) =
+            (self.case, needle, replacement)
+        {
+            let Some(first) = subject.iter().position(|byte| byte == needle) else {
+                return Ok(None);
+            };
+            let mut result = super::buffer(subject.len())?;
+            result.extend_from_slice(subject);
+            for byte in &mut result[first..] {
+                if byte == needle {
+                    *byte = *replacement;
+                    self.count += 1;
+                }
+            }
+            return Ok(Some(result));
+        }
         let mut result = Vec::new();
         let mut rest = subject;
         while let Some(position) = self.case.find(rest, needle) {
