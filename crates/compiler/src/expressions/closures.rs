@@ -23,6 +23,7 @@ impl Compiler<'_> {
             attributes: &closure.attributes,
             name: &name,
             by_reference: closure.by_reference,
+            is_generator: closure.is_generator,
             parameters: &closure.parameters,
             return_type: closure.return_type.as_ref(),
             body: FunctionBody::Statements(&closure.body),

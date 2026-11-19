@@ -30,6 +30,23 @@ impl Instruction {
             }
         }
         match self {
+            Instruction::GeneratorStart => {}
+            Instruction::Yield {
+                destination,
+                key,
+                value,
+            } => {
+                *destination = map(*destination);
+                *key = key.map(&mut map);
+                *value = value.map(&mut map);
+            }
+            Instruction::YieldFrom {
+                destination,
+                source,
+            } => {
+                *destination = map(*destination);
+                *source = map(*source);
+            }
             Instruction::AttributeDiagnostics => {}
             Instruction::ThisOrNull { destination } => *destination = map(*destination),
             Instruction::Capture { source, .. } => *source = map(*source),

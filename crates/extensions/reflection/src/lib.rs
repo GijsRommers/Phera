@@ -17,6 +17,7 @@ mod constant;
 mod enum_reflection;
 mod extension;
 mod function;
+mod generator;
 mod member;
 mod method;
 mod modifiers;
@@ -47,6 +48,7 @@ impl Extension for Reflection {
         member::register(registry);
         enum_reflection::register(registry);
         function::register(registry);
+        generator::register(registry);
         parameter::register(registry);
         types::register(registry);
         extension::register(registry);

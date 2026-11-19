@@ -48,10 +48,14 @@ pub(crate) enum BatchExit {
     Compare(crate::string_comparison::PendingComparison),
     /// The frame that native code called has returned this value.
     Returned(Value),
+    /// A PHP yield published a suspension for the generator driver.
+    GeneratorSuspended,
     /// The work budget is spent; other tasks get a turn.
     Yield,
     /// Output or diagnostics queued a callback, which must run now.
     Handlers,
+    /// The first generator changed which deferred work this request can queue.
+    GeneratorTracking,
 }
 
 /// Why the loop stopped. Small enough to be returned in registers.
@@ -88,8 +92,20 @@ pub(super) struct Position {
 impl Vm {
     /// Run frames until an instruction needs the async shell, the work budget
     /// is spent, or the frame at depth `stop` has returned.
-    #[inline(never)]
     pub(crate) fn run_batch(
+        &mut self,
+        stop: usize,
+        work: &mut usize,
+    ) -> Result<BatchExit, NativeError> {
+        if self.generator_releases.is_some() {
+            self.run_batch_loop::<true>(stop, work)
+        } else {
+            self.run_batch_loop::<false>(stop, work)
+        }
+    }
+
+    #[inline(never)]
+    fn run_batch_loop<const TRACK_GENERATORS: bool>(
         &mut self,
         stop: usize,
         work: &mut usize,
@@ -113,10 +129,10 @@ impl Vm {
                 LoopExit::Yield => return Ok(BatchExit::Yield),
                 LoopExit::Invalid => return Err(internal_error!("invalid IP")),
             };
-            if let Some(exit) = self.execute(instruction, stop, work)? {
+            if let Some(exit) = self.execute::<TRACK_GENERATORS>(instruction, stop, work)? {
                 return Ok(exit);
             }
-            if self.pending_callbacks {
+            if self.pending_callbacks || (TRACK_GENERATORS && self.generator_releases_pending()) {
                 return Ok(BatchExit::Handlers);
             }
             if *work >= YIELD_AFTER_STEPS {

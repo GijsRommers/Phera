@@ -56,31 +56,29 @@ def main():
                 'echo "\\nPHERA_CI_BENCH_NS:", hrtime(true) - $__phera_ci_started, "\\n";\n'
             )
             try:
-                if args.base_benchmarks is not None and not (args.base_benchmarks / script.name).is_file():
-                    expected = measure(binaries['head'], wrapper)[1]
-                    samples = []
-                    for _ in range(args.runs):
-                        elapsed, output = measure(binaries['head'], wrapper)
-                        if output != expected:
-                            raise RuntimeError('head stdout changed')
-                        samples.append(elapsed)
-                    report.append(f'| {script.name} | new script | {statistics.median(samples):.3f} | — |')
-                    continue
-                expected = measure(binaries['base'], wrapper)[1]
-                if measure(binaries['head'], wrapper)[1] != expected:
+                has_base = args.base_benchmarks is None or (
+                    args.base_benchmarks / script.name
+                ).is_file()
+                labels = ['base', 'head'] if has_base else ['head']
+                expected = measure(binaries[labels[0]], wrapper)[1]
+                if has_base and measure(binaries['head'], wrapper)[1] != expected:
                     raise RuntimeError('base/head stdout differs during warm-up')
-                samples = {'base': [], 'head': []}
+                samples = {label: [] for label in labels}
                 for round_number in range(args.runs):
                     # Alternate order too, so neither binary always runs first.
-                    order = ['base', 'head'] if round_number % 2 == 0 else ['head', 'base']
+                    order = labels if round_number % 2 == 0 else labels[::-1]
                     for label in order:
                         elapsed, output = measure(binaries[label], wrapper)
                         if output != expected:
                             raise RuntimeError(f'{label} stdout changed')
                         samples[label].append(elapsed)
-                base, head = (statistics.median(samples[label]) for label in ['base', 'head'])
-                change = (head / base - 1) * 100
-                report.append(f'| {script.name} | {base:.3f} | {head:.3f} | {change:+.1f}% |')
+                head = statistics.median(samples['head'])
+                if has_base:
+                    base = statistics.median(samples['base'])
+                    change = (head / base - 1) * 100
+                    report.append(f'| {script.name} | {base:.3f} | {head:.3f} | {change:+.1f}% |')
+                else:
+                    report.append(f'| {script.name} | new benchmark | {head:.3f} | — |')
             except (RuntimeError, subprocess.SubprocessError) as error:
                 # Keep the remaining observations visible even when one script fails.
                 report.append(f'| {script.name} | error | error | unavailable |')

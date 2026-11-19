@@ -33,6 +33,8 @@ pub(crate) struct Parser<'src> {
     /// End offset of the last consumed token, for building spans.
     pub(crate) prev_end: usize,
     depth: u32,
+    /// A yield marks only the innermost function body.
+    pub(crate) saw_yield: bool,
     /// Set after `__halt_compiler();`: the rest of the file is raw data, so
     /// every open block is implicitly closed.
     pub(crate) halted: bool,
@@ -77,9 +79,21 @@ impl<'src> Parser<'src> {
             lex_error,
             prev_end: 0,
             depth: 0,
+            saw_yield: false,
             halted: false,
         };
         (parser, lexer.into_diagnostics())
+    }
+
+    /// A nested function's yields never make its lexical parent a generator.
+    pub(crate) fn generator_body<T>(
+        &mut self,
+        parse: impl FnOnce(&mut Self) -> Result<T, ParseError>,
+    ) -> Result<(T, bool), ParseError> {
+        let enclosing = std::mem::replace(&mut self.saw_yield, false);
+        let body = parse(self);
+        let is_generator = std::mem::replace(&mut self.saw_yield, enclosing);
+        body.map(|body| (body, is_generator))
     }
 
     pub(crate) fn parse_program(mut self) -> Result<Program, ParseError> {

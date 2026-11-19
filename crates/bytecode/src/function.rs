@@ -26,6 +26,8 @@ pub struct Function {
     pub return_type: Option<TypeId>,
     /// Return aliases are part of an inherited method contract.
     pub returns_reference: bool,
+    /// The declared result type describes the Generator object, not its final return value.
+    pub is_generator: bool,
     /// The access paths used by the path instructions.
     pub paths: Vec<Path>,
     /// The names of the function's `static` variables.
