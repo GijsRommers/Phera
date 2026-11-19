@@ -84,14 +84,10 @@ async fn parameter_matrix() {
         }
     }
     for algo in ["xxh3", "xxh128"] {
-        for length in [0, 1, 135, 136, 192, 256, 257, 512] {
+        // Short secrets use the bounded oracle in xxhash_secrets.rs.
+        for length in [136, 192, 256, 257, 512] {
             let options = options("secret", Value::from("s".repeat(length)));
             for data_length in [0, 1, 17, 240, 241, 1024] {
-                // PHP hangs on a short secret with long data; xxhash_secrets.rs
-                // covers these cases with a time limit.
-                if length < 136 && data_length == 1024 {
-                    continue;
-                }
                 let data = Value::from("x".repeat(data_length));
                 let arguments = vec![Value::from(algo), data, Value::Bool(false), options.clone()];
                 case("hash", arguments);
