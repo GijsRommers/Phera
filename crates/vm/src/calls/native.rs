@@ -6,6 +6,7 @@ use crate::calls::call_view::CallView;
 use crate::calls::callback_binding::{ArgumentBinding, ArgumentOrigin};
 use crate::calls::prepared_call::PreparedCallee;
 use crate::classes::MethodBody;
+use phera_bytecode::Reg;
 use phera_extension_api::{NativeError, NativeFn, NativeResult};
 use phera_value::Value;
 
@@ -121,8 +122,23 @@ impl Vm {
             if !self.native_strings_needed(entry.params, arguments, origin) {
                 return Err(original_error);
             }
-            self.coerce_native_strings(entry.name, entry.params, arguments, origin)
-                .await?;
+            // A conversion can enter PHP and suspend before the native body runs.
+            let traced = binding.has_native_frame();
+            if traced {
+                let trace = crate::error_traces::NativeTrace::new(entry.name, arguments);
+                self.native_callback_sites
+                    .push(crate::error_traces::NativeCallbackSite::saved(
+                        self.call_stack.depth(),
+                        trace,
+                    ));
+            }
+            let converted = self
+                .coerce_native_strings(entry.name, entry.params, arguments, origin)
+                .await;
+            if traced {
+                self.native_callback_sites.pop();
+            }
+            converted?;
             self.with_argument_origin(origin, |vm| {
                 vm.prepare_call_recording(entry.name, entry.params, arguments, binding)
             })
@@ -170,7 +186,7 @@ impl Vm {
     /// An intrinsic with a PHP caller can retain its destination on a suspended hook.
     pub(crate) async fn finish_native_window_at(
         &mut self,
-        destination: Option<phera_bytecode::Reg>,
+        destination: Option<Reg>,
     ) -> Result<Option<Value>, NativeError> {
         let slots = CallView::top(&self.code, &self.call_stack)?.slots();
         let (call, details) = self.call_stack.pop_call()?;
