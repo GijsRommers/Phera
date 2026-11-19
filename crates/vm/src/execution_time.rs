@@ -16,6 +16,7 @@ use crate::Vm;
 pub(crate) struct ExecutionTime {
     seconds: Cell<i64>,
     charged: Cell<Duration>,
+    process_waits: Cell<Duration>,
     started: Cell<Option<Duration>>,
     polling: Cell<bool>,
     timed_out: Cell<bool>,
@@ -25,8 +26,13 @@ impl ExecutionTime {
     pub(crate) fn restart(&self, seconds: i64) {
         self.seconds.set(seconds.max(0));
         self.charged.set(Duration::ZERO);
+        self.process_waits.set(Duration::ZERO);
         self.started
             .set((seconds > 0 && self.polling.get()).then(thread_cpu_time));
+    }
+
+    fn elapsed(&self) -> Duration {
+        self.charged.get().saturating_add(self.process_waits.get())
     }
 
     fn charge(&self) {
@@ -67,7 +73,7 @@ impl Vm {
             return Ok(());
         }
         self.execution_time.charge();
-        if self.execution_time.charged.get().as_secs() < seconds as u64 {
+        if self.execution_time.elapsed().as_secs() < seconds as u64 {
             return Ok(());
         }
         Err(self.execution_time_error(seconds))
@@ -79,7 +85,12 @@ impl Vm {
             return None;
         }
         self.execution_time.charge();
-        Some(Duration::from_secs(seconds as u64).saturating_sub(self.execution_time.charged.get()))
+        Some(Duration::from_secs(seconds as u64).saturating_sub(self.execution_time.elapsed()))
+    }
+
+    pub(crate) fn process_wait_elapsed(&self, elapsed: Duration) {
+        let waits = &self.execution_time.process_waits;
+        waits.set(waits.get().saturating_add(elapsed));
     }
 
     pub(crate) fn process_wait_expired(&mut self) -> NativeError {

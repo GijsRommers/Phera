@@ -6,6 +6,7 @@ use std::process::Stdio;
 
 use phera_ext_streams::{
     ChildStreamKind, CloseAttachment, child_stream, close_child_stream, set_attachment,
+    wait_with_execution_limit,
 };
 use phera_extension_api::{
     Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, Registry,
@@ -13,7 +14,7 @@ use phera_extension_api::{
 };
 
 use super::super::child::{ManagedChild, exit_code};
-use super::super::command::{bounded, configure, reason, shell, spawn};
+use super::super::command::{configure, reason, shell, spawn};
 
 pub(crate) fn register(registry: &mut Registry) {
     registry.function(FunctionEntry::asynchronous(
@@ -95,7 +96,9 @@ fn close(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
 impl CloseAttachment for ManagedChild {
     fn close(mut self: Box<Self>, context: &mut dyn Context) -> LocalFuture<'_, NativeResult> {
         Box::pin(async move {
-            let code = bounded(context, self.wait()).await?.map_or(-1, exit_code);
+            let code = wait_with_execution_limit(context, self.wait())
+                .await?
+                .map_or(-1, exit_code);
             Ok(Value::Int(code))
         })
     }

@@ -2,9 +2,9 @@
 
 pub(crate) mod popen;
 
-use std::io;
 use std::process::Stdio;
 
+use phera_ext_streams::wait_with_execution_limit;
 use phera_extension_api::{
     ConstantValue, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param,
     ParamType, PhpArray, Registry, Value, args,
@@ -128,16 +128,13 @@ async fn run(context: &mut dyn Context, arguments: Vec<Value>, mode: Mode) -> Na
         .take()
         .ok_or_else(|| NativeError::error("Child stdout is unavailable"))?;
     let mut stdout = BufReader::new(stdout);
-    let end = context
-        .process_wait_budget()
-        .and_then(|budget| tokio::time::Instant::now().checked_add(budget));
     let value = match mode {
-        Mode::Shell | Mode::Passthru => raw(context, &mut stdout, mode, end).await?,
+        Mode::Shell | Mode::Passthru => raw(context, &mut stdout, mode).await?,
         Mode::Exec | Mode::System => {
-            text(context, &mut stdout, mode, end, output.map(|_| &mut lines)).await?
+            text(context, &mut stdout, mode, output.map(|_| &mut lines)).await?
         }
     };
-    let code = within(context, end, child.wait())
+    let code = wait_with_execution_limit(context, child.wait())
         .await?
         .map_or(-1, exit_code);
     if let Some(reference) = output {
@@ -153,11 +150,10 @@ async fn raw(
     context: &mut dyn Context,
     stdout: &mut BufReader<ChildStdout>,
     mode: Mode,
-    end: Option<tokio::time::Instant>,
 ) -> NativeResult {
     if mode == Mode::Shell {
         let mut bytes = Vec::new();
-        let _ = within(context, end, stdout.read_to_end(&mut bytes)).await?;
+        let _ = wait_with_execution_limit(context, stdout.read_to_end(&mut bytes)).await?;
         return Ok(if bytes.is_empty() {
             Value::Null
         } else {
@@ -165,7 +161,8 @@ async fn raw(
         });
     }
     let mut buffer = [0; 8192];
-    while let Ok(count @ 1..) = within(context, end, stdout.read(&mut buffer)).await? {
+    while let Ok(count @ 1..) = wait_with_execution_limit(context, stdout.read(&mut buffer)).await?
+    {
         context.write(&buffer[..count]);
     }
     Ok(Value::Null)
@@ -175,12 +172,13 @@ async fn text(
     context: &mut dyn Context,
     stdout: &mut BufReader<ChildStdout>,
     mode: Mode,
-    end: Option<tokio::time::Instant>,
     mut lines: Option<&mut PhpArray>,
 ) -> NativeResult {
     let mut line = Vec::new();
     let mut last = Vec::new();
-    while let Ok(1..) = within(context, end, stdout.read_until(b'\n', &mut line)).await? {
+    while let Ok(1..) =
+        wait_with_execution_limit(context, stdout.read_until(b'\n', &mut line)).await?
+    {
         if mode == Mode::System {
             context.write(&line);
         }
@@ -196,18 +194,4 @@ async fn text(
         line.clear();
     }
     Ok(Value::from(last))
-}
-
-async fn within<T>(
-    context: &mut dyn Context,
-    end: Option<tokio::time::Instant>,
-    future: impl std::future::Future<Output = io::Result<T>>,
-) -> Result<io::Result<T>, NativeError> {
-    if let Some(end) = end {
-        tokio::time::timeout_at(end, future)
-            .await
-            .map_err(|_| context.process_wait_expired())
-    } else {
-        Ok(future.await)
-    }
 }

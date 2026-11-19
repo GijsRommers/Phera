@@ -48,11 +48,11 @@ mod wrapper;
 
 pub use child_pipe::{
     ChildStreamKind, CloseAttachment, child_stream, close_child_stream, duplicate_descriptor,
-    open_descriptor, set_attachment,
+    open_descriptor, set_attachment, wait_with_execution_limit,
 };
 pub use input::RequestInput;
 pub use path_text::parent as dirname_parent;
-pub use request::new_resource;
+pub use request::{creation_mask, new_resource};
 pub use request::{request_input, set_request, track_standard};
 pub use terminal::{stream_kind, with_descriptor};
 pub use whole_write::append_log;

@@ -190,6 +190,9 @@ async fn posix_queries_match_php() {
             ));
         }
     }
+    for overflow in ["PHP_INT_MAX", "PHP_INT_MIN"] {
+        cases.result(format!("posix_kill({overflow}, 15)"));
+    }
     for mode in ["0600", "0666", "0777", "0000", "null", "[]"] {
         cases.check(format!(
             "$path = tempnam(sys_get_temp_dir(), 'phera-fifo'); unlink($path);              try {{ $value = posix_mkfifo($path, {mode});                 return [$value, posix_mkfifo($path, {mode}), posix_get_last_error()];              }} finally {{ if (file_exists($path)) unlink($path); }}"

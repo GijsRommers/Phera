@@ -44,7 +44,10 @@ fn cwd(context: &mut dyn Context, _: &[Value]) -> NativeResult {
 fn fifo(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
         let path = path(context, &arguments);
-        let mode = Mode::from_bits_truncate(args::int(&arguments, 1).unwrap_or_default() as _);
+        let permissions = args::int(&arguments, 1).unwrap_or_default() as u32;
+        let mode = Mode::from_bits_truncate(
+            (permissions & !phera_ext_streams::creation_mask(context)) as _,
+        );
         filesystem(context, move || mkfifo(&path.ok_or(Errno::ENOENT)?, mode)).await
     })
 }

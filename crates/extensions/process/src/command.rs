@@ -1,7 +1,6 @@
 //! `proc_open(['printf', '%s', 'one argument'], ...)` bypasses the shell.
 
 use std::ffi::{OsStr, OsString};
-use std::future::Future;
 use std::io;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::process::CommandExt;
@@ -9,6 +8,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use phera_ext_standard::environment::RequestEnvironment;
+use phera_ext_streams::wait_with_execution_limit;
 use phera_extension_api::{
     ArrayKey, Context, NativeError, ProcessCancellation, Value, WorkingDirectory,
 };
@@ -138,7 +138,7 @@ pub(crate) async fn spawn(
         .state()
         .get_or_default::<ProcessCancellation>()
         .clone();
-    bounded(context, async move {
+    wait_with_execution_limit(context, async move {
         tokio::task::spawn_blocking(move || {
             let _reactor = runtime.enter();
             let child = tokio::process::Command::from(command).spawn()?;
@@ -148,19 +148,6 @@ pub(crate) async fn spawn(
         .map_err(io::Error::other)?
     })
     .await
-}
-
-pub(crate) async fn bounded<T>(
-    context: &mut dyn Context,
-    future: impl Future<Output = T>,
-) -> Result<T, NativeError> {
-    if let Some(budget) = context.process_wait_budget() {
-        tokio::time::timeout(budget, future)
-            .await
-            .map_err(|_| context.process_wait_expired())
-    } else {
-        Ok(future.await)
-    }
 }
 
 pub(crate) fn reason(error: &io::Error) -> String {

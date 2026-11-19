@@ -3,14 +3,14 @@
 use std::os::unix::process::ExitStatusExt;
 use std::rc::Rc;
 
-use phera_ext_streams::{child_stream, new_resource};
+use phera_ext_streams::{child_stream, new_resource, wait_with_execution_limit};
 use phera_extension_api::{
     ArrayKey, ConstantValue, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param,
     ParamType, PhpArray, Registry, Value, args, value::Resource,
 };
 
 use super::child::{ManagedChild, exit_code, send_signal};
-use super::command::{bounded, configure, from_value, reason, spawn};
+use super::command::{configure, from_value, reason, spawn};
 
 const PROCESS: Param = Param::new("process", ParamType::Mixed);
 const SIGTERM: i64 = 15;
@@ -170,7 +170,7 @@ fn close(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
         let result = if let Some(code) = handle.exit {
             code
         } else if handle.running {
-            bounded(context, handle.child.wait())
+            wait_with_execution_limit(context, handle.child.wait())
                 .await?
                 .map_or(-1, exit_code)
         } else {

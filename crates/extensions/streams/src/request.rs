@@ -52,6 +52,10 @@ pub fn files(context: &mut dyn Context) -> &mut Files {
     context.state().get_or_default()
 }
 
+pub fn creation_mask(context: &mut dyn Context) -> u32 {
+    files(context).mask
+}
+
 pub fn set_request(state: &mut RequestState, cwd: Option<PathBuf>, input: Arc<[u8]>) {
     if let Some(cwd) = cwd {
         state.get_or_default::<WorkingDirectory>().set(cwd);

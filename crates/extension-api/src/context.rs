@@ -81,6 +81,9 @@ pub trait Context {
         None
     }
 
+    /// Include elapsed child I/O waits in the request execution budget.
+    fn process_wait_elapsed(&mut self, _elapsed: std::time::Duration) {}
+
     /// End PHP execution after a child I/O wait uses the remaining budget.
     fn process_wait_expired(&mut self) -> NativeError {
         NativeError::error("Process wait exceeded the execution time limit")

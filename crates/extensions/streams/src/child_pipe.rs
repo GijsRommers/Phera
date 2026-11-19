@@ -125,11 +125,22 @@ pub(crate) async fn bounded<T>(
     resource: &Resource,
     future: impl Future<Output = T>,
 ) -> Result<T, NativeError> {
-    let budget = of(resource)?.and_then(|_| context.process_wait_budget());
-    if let Some(duration) = budget {
-        tokio::time::timeout(duration, future)
-            .await
-            .map_err(|_| context.process_wait_expired())
+    if of(resource)?.is_some() {
+        wait_with_execution_limit(context, future).await
+    } else {
+        Ok(future.await)
+    }
+}
+
+pub async fn wait_with_execution_limit<T>(
+    context: &mut dyn Context,
+    future: impl Future<Output = T>,
+) -> Result<T, NativeError> {
+    if let Some(duration) = context.process_wait_budget() {
+        let start = tokio::time::Instant::now();
+        let result = tokio::time::timeout(duration, future).await;
+        context.process_wait_elapsed(start.elapsed());
+        result.map_err(|_| context.process_wait_expired())
     } else {
         Ok(future.await)
     }

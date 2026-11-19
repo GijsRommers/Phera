@@ -108,10 +108,8 @@ fn select(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, N
             return Ok(select_error(context, rustix::io::Errno::INVAL, max_fd));
         }
         let polling = wait(&candidates, timeout);
-        let result = if let Some(budget) = child.then(|| context.process_wait_budget()).flatten() {
-            tokio::time::timeout(budget, polling)
-                .await
-                .map_err(|_| context.process_wait_expired())?
+        let result = if child {
+            crate::child_pipe::wait_with_execution_limit(context, polling).await?
         } else {
             polling.await
         };

@@ -177,6 +177,10 @@ impl Context for Vm {
         Vm::process_wait_budget(self)
     }
 
+    fn process_wait_elapsed(&mut self, elapsed: std::time::Duration) {
+        Vm::process_wait_elapsed(self, elapsed);
+    }
+
     fn process_wait_expired(&mut self) -> NativeError {
         Vm::process_wait_expired(self)
     }
