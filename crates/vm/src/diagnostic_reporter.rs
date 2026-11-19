@@ -75,7 +75,7 @@ impl DiagnosticReporter {
         file: &str,
         line: usize,
     ) -> Option<Vec<u8>> {
-        if !self.is_visible() {
+        if !self.is_visible() && kind != "Fatal error" {
             return None;
         }
         let mut bytes = format!("\n{kind}: ").into_bytes();

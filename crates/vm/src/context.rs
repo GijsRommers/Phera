@@ -9,6 +9,10 @@ use phera_value::{Diagnostics, Value};
 use crate::Vm;
 
 impl Diagnostics for Vm {
+    fn float_precision(&self) -> i32 {
+        Vm::float_precision(self)
+    }
+
     fn warning(&mut self, message: String) {
         self.diagnostic("Warning", message)
     }
@@ -33,6 +37,18 @@ impl Context for Vm {
         self.out(bytes)
     }
 
+    fn backtrace(&mut self, objects: bool, arguments: bool, limit: i32) -> Value {
+        Value::from(self.capture_trace(phera_value::PhpArray::new(), objects, arguments, limit))
+    }
+
+    fn print_backtrace(&mut self, trace: &Value) {
+        let text = crate::exception_rendering::render_backtrace(
+            trace,
+            self.error_handlers.trace_string_limit,
+        );
+        self.out(text.as_bytes());
+    }
+
     fn output_origin(&self) -> Option<(&str, usize)> {
         let origin = self.output_writer.origin.as_ref()?;
         Some((&origin.file, origin.line))
@@ -46,16 +62,117 @@ impl Context for Vm {
         Box::pin(self.register_callback(phase, arguments))
     }
 
+    fn current_fiber(&self) -> Option<std::rc::Rc<phera_value::Object>> {
+        Vm::current_fiber(self)
+    }
+
+    fn fiber_operation(
+        &mut self,
+        object: std::rc::Rc<phera_value::Object>,
+        operation: phera_extension_api::fiber::FiberOperation,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(Vm::fiber_operation(self, object, operation))
+    }
+
+    fn suspend_fiber(&mut self, value: Option<Value>) -> LocalFuture<'_, NativeResult> {
+        Box::pin(self.fiber_suspend(value))
+    }
+
+    fn inspect_fiber(
+        &mut self,
+        object: std::rc::Rc<phera_value::Object>,
+        inspection: phera_extension_api::fiber::FiberInspection,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(self.fiber_inspect(object, inspection))
+    }
+
+    fn ini_get(&self, name: &[u8]) -> Option<phera_value::PhpString> {
+        Vm::ini_get(self, name)
+    }
+
+    fn serialization_precision(&self) -> i32 {
+        Vm::serialization_precision(self)
+    }
+
+    fn ini_set(
+        &mut self,
+        function: &str,
+        name: &[u8],
+        value: phera_value::PhpString,
+    ) -> Result<Option<phera_value::PhpString>, phera_extension_api::NativeError> {
+        Vm::ini_set(self, function, name, value)
+    }
+
+    fn ini_restore(&mut self, name: &[u8]) -> Result<(), phera_extension_api::NativeError> {
+        Vm::ini_restore(self, name)
+    }
+
+    fn ini_list(&mut self, module: Option<&phera_value::PhpString>, details: bool) -> NativeResult {
+        Vm::ini_list(self, module, details)
+    }
+
     fn include_path(&self) -> phera_value::PhpString {
         Vm::include_path(self)
+    }
+
+    fn source_location(&self) -> Option<(String, usize)> {
+        let location = self.location();
+        Some((location.file, location.line))
+    }
+
+    fn request_global(&self, name: &str) -> Option<Value> {
+        self.globals.get(name).cloned()
+    }
+
+    fn replace_request_global(&mut self, name: &str, value: Value) {
+        self.publish_global(name.into(), value);
+    }
+
+    fn register_request_finalizer(&mut self, callback: phera_extension_api::AsyncFn) {
+        self.request_callbacks.output.set_finalizer(callback);
     }
 
     fn script_path(&self) -> Option<std::path::PathBuf> {
         Some(self.location().file.into())
     }
 
+    fn last_error(&self) -> Value {
+        self.error_handlers
+            .last_error
+            .as_ref()
+            .map_or(Value::Null, crate::last_error::LastError::to_value)
+    }
+
+    fn clear_last_error(&mut self) {
+        self.error_handlers.last_error = None;
+    }
+
+    fn named_constant(&mut self, name: &str) -> Option<Value> {
+        let constant = self.constants.get(name)?.clone();
+        Some(self.report_global_constant(constant))
+    }
+
+    fn entry_script_path(&self) -> Option<std::path::PathBuf> {
+        let main = self.include_state.entry_script()?;
+        Some(self.code.known_unit(main)?.file.as_str().into())
+    }
+
     fn diagnostics(&mut self) -> &mut dyn Diagnostics {
         self
+    }
+
+    fn named_shutdown(
+        &mut self,
+        key: &'static str,
+        callback: Option<&'static str>,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(self.register_named_shutdown(key, callback))
+    }
+
+    fn has_method(&self, object: &phera_value::Object, name: &str) -> bool {
+        self.classes
+            .for_object(object)
+            .is_some_and(|class| class.methods.contains_key(&name.to_ascii_lowercase()))
     }
 
     fn warning_bytes(&mut self, message: &[u8]) {
@@ -112,6 +229,27 @@ impl Context for Vm {
         })
     }
 
+    fn lazy_object_for_iteration(
+        &mut self,
+        object: std::rc::Rc<phera_value::Object>,
+    ) -> LocalFuture<'_, Result<std::rc::Rc<phera_value::Object>, NativeError>> {
+        Box::pin(self.initialize_lazy_via_callback(object))
+    }
+
+    fn track_iterated_property(
+        &mut self,
+        object: &std::rc::Rc<phera_value::Object>,
+        key: &phera_value::ArrayKey,
+        reference: &std::rc::Rc<std::cell::RefCell<Value>>,
+    ) -> Result<(), NativeError> {
+        crate::reference_holders::ReferenceHolders::track_object(
+            &self.property_references,
+            object,
+            key,
+            reference,
+        )
+    }
+
     fn property_view_runs_code(
         &self,
         object: &phera_value::Object,
@@ -120,8 +258,9 @@ impl Context for Vm {
         match purpose {
             phera_extension_api::PropertyPurpose::Debug => self.has_debug_info(object),
             phera_extension_api::PropertyPurpose::Json => {
-                self.hooked_property_class(object).is_some()
+                object.lazy().is_some() || self.hooked_property_class(object).is_some()
             }
+            phera_extension_api::PropertyPurpose::Serialize => lazy_serialization_view(object),
             _ => false,
         }
     }
@@ -132,12 +271,14 @@ impl Context for Vm {
         purpose: phera_extension_api::PropertyPurpose,
     ) -> bool {
         self.native_view_depth == Some(self.call_stack.depth())
-            && matches!(
-                purpose,
+            && match purpose {
                 phera_extension_api::PropertyPurpose::Json
-                    | phera_extension_api::PropertyPurpose::Export
-            )
-            && self.hooked_property_class(object).is_some()
+                | phera_extension_api::PropertyPurpose::Export => {
+                    object.lazy().is_some() || self.hooked_property_class(object).is_some()
+                }
+                phera_extension_api::PropertyPurpose::Serialize => lazy_serialization_view(object),
+                _ => false,
+            }
     }
 
     fn has_visible_property(&self, object: &phera_value::Object, name: &str) -> bool {
@@ -152,6 +293,37 @@ impl Context for Vm {
         function: &'static str,
         arguments: &[Value],
     ) -> LocalFuture<'_, Result<phera_extension_api::PropertyView, NativeError>> {
+        use phera_extension_api::{PropertyPurpose, PropertyView};
+        if (matches!(purpose, PropertyPurpose::Json | PropertyPurpose::Export)
+            && object.lazy().is_some())
+            || (purpose == PropertyPurpose::Serialize && lazy_serialization_view(&object))
+        {
+            let native = crate::error_traces::NativeTrace::new(function, arguments);
+            return Box::pin(async move {
+                let object = self.initialize_lazy_via_callback(object).await?;
+                let properties = if purpose == PropertyPurpose::Serialize {
+                    self.ordered_serialization_properties(&object)?
+                } else if let Some(class) = self.hooked_property_class(&object) {
+                    self.enumerate_hooked_native(object, class, purpose, native)
+                        .await?
+                } else {
+                    self.object_properties(&object, purpose)?
+                };
+                Ok(PropertyView::Snapshot(std::rc::Rc::new(properties)))
+            });
+        }
+        if purpose == phera_extension_api::PropertyPurpose::Debug
+            && let Some(instance) = object.lazy_instance()
+        {
+            let mut properties = phera_value::PhpArray::new();
+            properties.insert(
+                phera_value::ArrayKey::str("instance"),
+                Value::Object(instance),
+            );
+            return Box::pin(std::future::ready(Ok(
+                phera_extension_api::PropertyView::Snapshot(std::rc::Rc::new(properties)),
+            )));
+        }
         if purpose == phera_extension_api::PropertyPurpose::Debug && self.has_debug_info(&object) {
             return self.debug_properties(object, function, arguments);
         }
@@ -172,7 +344,12 @@ impl Context for Vm {
             });
         }
         if function == "var_dump"
-            && let Some(class) = self.hooked_property_class(&object)
+            && let Some(class) = self.hooked_property_class(&object).or_else(|| {
+                self.classes.for_object(&object).filter(|class| {
+                    class.has_only_php_ancestors()
+                        && class.defaults.iter().any(|property| property.ty.is_some())
+                })
+            })
         {
             let view = self.dump_hooked_slots(&object, &class);
             return Box::pin(std::future::ready(Ok(view)));
@@ -213,7 +390,7 @@ impl Context for Vm {
         {
             self.enqueue_diagnostic(event);
         } else {
-            self.report_event(&event);
+            self.report_event(event);
         }
     }
 
@@ -293,6 +470,29 @@ impl Context for Vm {
         }
     }
 
+    fn push_callback_frame(
+        &mut self,
+        name: &'static str,
+        object: Option<std::rc::Rc<phera_value::Object>>,
+        arguments: Vec<Value>,
+    ) {
+        use crate::error_traces::{NativeCaller, NativeTrace};
+        let native = match object {
+            Some(object) => NativeCaller::Method {
+                name,
+                object,
+                arguments,
+                declaration: None,
+            },
+            None => NativeCaller::Saved(NativeTrace::new(name, &arguments)),
+        };
+        self.push_native_callback(native);
+    }
+
+    fn pop_callback_frame(&mut self) {
+        self.native_callback_sites.pop();
+    }
+
     fn call_protected_method(
         &mut self,
         object: std::rc::Rc<phera_value::Object>,
@@ -353,6 +553,7 @@ impl Context for Vm {
                 .push(crate::generators::trace::Site::new(
                     self.call_stack.depth(),
                     &operation,
+                    &object,
                 ));
             let result = self.operate_generator(object, operation).await;
             if let Some(site) = self.generator_traces.pop() {
@@ -448,6 +649,9 @@ impl Context for Vm {
         &self,
         object: &phera_value::Object,
     ) -> Option<std::rc::Rc<[phera_extension_api::serialization::SerializedProperty]>> {
+        if object.lazy().is_some() {
+            return None;
+        }
         let class = object
             .class
             .as_any()
@@ -503,6 +707,11 @@ impl Context for Vm {
         object: &phera_value::Object,
         purpose: phera_extension_api::PropertyPurpose,
     ) -> Result<phera_value::PhpArray, phera_extension_api::NativeError> {
+        if purpose == phera_extension_api::PropertyPurpose::ArrayCast
+            && object.lazy_instance().is_some()
+        {
+            return Ok(object.lazy_properties());
+        }
         if purpose == phera_extension_api::PropertyPurpose::ArrayCast
             && let Some(class) = self.hooked_property_class(object)
         {
@@ -667,12 +876,11 @@ impl Vm {
         class: std::rc::Rc<crate::classes::Class>,
         properties: phera_value::PhpArray,
     ) -> NativeResult {
-        let object = self.classes.allocate(class.clone());
-        if let Some(template) = &class.property_template {
-            if !template.is_empty() {
-                object.update(|storage| *storage = template.clone());
-            }
+        let object = if let Some(template) = &class.property_template {
+            self.classes
+                .allocate_with_properties(class.clone(), template.clone())
         } else {
+            let object = self.classes.allocate(class.clone());
             for property in &class.defaults {
                 if property.initialized {
                     let value = if let Some(initializer) = &property.initializer {
@@ -683,7 +891,8 @@ impl Vm {
                     object.set(property.key.clone(), value);
                 }
             }
-        }
+            object
+        };
         if !properties.is_empty() {
             object.update(|storage| {
                 if storage.is_empty() {
@@ -716,4 +925,16 @@ impl Vm {
             crate::calls::callback_binding::ArgumentOrigin::Callback,
         )
     }
+}
+
+fn lazy_serialization_view(object: &phera_value::Object) -> bool {
+    matches!(
+        object.lazy().as_deref(),
+        Some(
+            phera_value::LazyObject::Pending {
+                skip_serialization: false,
+                ..
+            } | phera_value::LazyObject::Proxy(_)
+        )
+    )
 }

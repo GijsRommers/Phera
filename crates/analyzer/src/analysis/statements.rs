@@ -41,7 +41,13 @@ impl Analyzer<'_> {
     fn statement(&mut self, statement: &Statement, scope: &mut Scope) -> Flow {
         let previous = self.context.known.clone();
         self.context.known.extend(scope.known.iter().cloned());
+        let annotations = self.statement_var_annotations(statement, scope);
         let flow = self.statement_kind(statement, scope);
+        for (name, ty) in annotations {
+            if scope.get(&name).definition == Definition::Definite {
+                scope.define(&name, ty);
+            }
+        }
         self.context.known = previous;
         flow
     }
@@ -89,8 +95,11 @@ impl Analyzer<'_> {
             StatementKind::If {
                 condition,
                 then,
+                elseifs,
                 otherwise,
-            } => return self.if_statement(condition, then, otherwise.as_deref(), scope),
+            } => {
+                return self.if_statement(condition, then, elseifs, otherwise.as_deref(), scope);
+            }
             StatementKind::Switch { subject, cases } => {
                 return self.switch(subject, cases, scope);
             }
@@ -151,44 +160,35 @@ impl Analyzer<'_> {
             if self.context.by_reference && matches!(value.kind, ExpressionKind::Variable(_)) {
                 self.ensure_reference(value, scope);
             }
-            self.expression(value, scope, false);
+            let given = self.expression(value, scope, false);
+            if let Some(inferred) = &mut self.context.inferred_return {
+                *inferred = inferred.join(&given);
+            }
+            self.check_return_value(Some(value), &given, scope, span);
             if self.context.returns == ValueType::Void {
                 self.report(Finding::VoidReturn, span);
             }
-        } else if self.level == 1
+        } else if self.level >= 3 {
+            self.check_return_value(None, &ValueType::Null, scope, span);
+        } else if self.level >= 1
             && self.context.declared_return
             && !self.context.generator
             && self.context.returns != ValueType::Void
         {
             self.report(Finding::MissingReturn(self.context.function.clone()), span);
         }
+        if value.is_none()
+            && let Some(inferred) = &mut self.context.inferred_return
+        {
+            *inferred = inferred.join(&ValueType::Null);
+        }
         self.record_return(scope);
         Flow::Terminal
     }
 
-    fn if_statement(
-        &mut self,
-        condition: &Expression,
-        then: &[Statement],
-        otherwise: Option<&[Statement]>,
-        scope: &mut Scope,
-    ) -> Flow {
-        let branches = self.condition(condition, scope.clone(), false);
-        let (a, left) = self.statement_branch(then, branches.yes, scope);
-        let (b, right) = self.statement_branch(otherwise.unwrap_or_default(), branches.no, scope);
-        if let Some(after) = condition::Condition::merge(left, right) {
-            *scope = after;
-            return Flow::Next;
-        }
-        if a == Flow::Terminal && b == Flow::Terminal {
-            Flow::Terminal
-        } else if a == Flow::Break || b == Flow::Break {
-            Flow::Break
-        } else {
-            Flow::Continue
-        }
-    }
-    fn statement_branch(
+    /// Runs one branch of a conditional on the scope its outcome leaves, or,
+    /// when that outcome cannot happen, only if a label inside can be jumped to.
+    pub(super) fn statement_branch(
         &mut self,
         body: &[Statement],
         branch: Option<Scope>,
@@ -209,7 +209,7 @@ impl Analyzer<'_> {
 }
 
 /// A label can re-enter a block after an otherwise terminal statement.
-fn contains_label(statement: &Statement) -> bool {
+pub(super) fn contains_label(statement: &Statement) -> bool {
     let mut pending = vec![statement];
     while let Some(statement) = pending.pop() {
         if matches!(statement.kind, StatementKind::Label(_)) {

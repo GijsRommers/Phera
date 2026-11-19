@@ -74,6 +74,7 @@ rusqlite = { version = "=0.43.0", default-features = false, features = ["bundled
 phera-ext-pdo = { path = "crates/extensions/pdo" }
 phera-ext-random = { path = "crates/extensions/random" }
 phera-ext-serialize = { path = "crates/extensions/serialize" }
+phera-ext-session = { path = "crates/extensions/session" }
 phera-ext-spl = { path = "crates/extensions/spl" }
 phera-ext-standard = { path = "crates/extensions/standard" }
 phera-ext-streams = { path = "crates/extensions/streams" }
@@ -96,8 +97,9 @@ pwhash = "1"
 getrandom = "0.3"
 bytes = "1"
 percent-encoding = "2"
-nix = { version = "0.31", default-features = false, features = ["user"] }
-rustix = { version = "1", features = ["fs", "process", "termios", "time"] }
+nix = { version = "0.31", default-features = false, features = ["user", "resource", "feature", "net"] }
+rustix = { version = "1", features = ["fs", "param", "process", "system", "termios", "time"] }
+sysinfo = { version = "0.39.3", default-features = false, features = ["system"] }
 tempfile = "3"
 http-body-util = "0.1"
 hyper = { version = "1", default-features = false, features = ["http1", "server"] }

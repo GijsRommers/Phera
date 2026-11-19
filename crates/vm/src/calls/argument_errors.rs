@@ -123,66 +123,8 @@ impl Vm {
             self.error_handlers.reporting & 4437
         };
         if let Some(Value::Int(level)) = arguments.first() {
-            self.error_handlers.reporting = *level;
+            self.set_error_reporting(*level);
         }
         Ok(Value::Int(previous))
-    }
-}
-
-impl Vm {
-    /// This trace-only INI setting changes string rendering without altering stored arguments.
-    pub(crate) fn exception_ini_setting(
-        &mut self,
-        intrinsic: crate::intrinsics::Intrinsic,
-        arguments: &[Value],
-    ) -> NativeResult {
-        let Some(Value::String(name)) = arguments.first() else {
-            return Ok(Value::from("1"));
-        };
-        if name.as_bytes() == b"arg_separator.output" {
-            let separator = self
-                .state
-                .get_or_default::<phera_extension_api::QuerySeparator>();
-            let previous = Value::String(separator.0.clone());
-            if matches!(intrinsic, crate::intrinsics::Intrinsic::IniSet) {
-                let value = arguments.get(1).cloned().unwrap_or_default();
-                let text = phera_value::to_php_string(&value, &mut phera_value::NoDiagnostics)?;
-                if text.as_bytes().is_empty() {
-                    return Ok(Value::Bool(false));
-                }
-                separator.0 = text;
-            }
-            return Ok(previous);
-        }
-        if name.as_bytes() == b"include_path" {
-            let previous = if matches!(intrinsic, crate::intrinsics::Intrinsic::IniSet) {
-                let value = arguments.get(1).cloned().unwrap_or_default();
-                let text = phera_value::to_php_string(&value, &mut phera_value::NoDiagnostics)?;
-                self.set_include_path(text)
-            } else {
-                self.include_path()
-            };
-            return Ok(Value::from(previous));
-        }
-        if let Some(result) = self.serialization_ini_setting(name.as_bytes(), intrinsic, arguments)
-        {
-            return result;
-        }
-        if name.as_bytes() != b"zend.exception_string_param_max_len" {
-            return Ok(Value::from("1"));
-        }
-        let previous = self.error_handlers.trace_string_limit;
-        if matches!(intrinsic, crate::intrinsics::Intrinsic::IniSet) {
-            let value = arguments.get(1).cloned().unwrap_or_default();
-            let text = phera_value::to_php_string(&value, &mut phera_value::NoDiagnostics)?;
-            let Ok(limit) = text.to_string_lossy().parse::<usize>() else {
-                return Ok(Value::Bool(false));
-            };
-            if limit > 1_000_000 {
-                return Ok(Value::Bool(false));
-            }
-            self.error_handlers.trace_string_limit = limit;
-        }
-        Ok(Value::from(previous.to_string()))
     }
 }

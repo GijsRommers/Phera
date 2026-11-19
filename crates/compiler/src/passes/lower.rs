@@ -10,6 +10,8 @@ use phera_bytecode::{
     Symbol, SymbolId, Type, TypeId, TypeMask,
 };
 
+use std::collections::{HashMap, HashSet};
+
 use crate::ir;
 
 /// Final table builder. No compiler-only paths escape in instructions.
@@ -18,25 +20,53 @@ pub(crate) struct Tables {
     unit: CompiledUnit,
     /// The file's top-level functions, which calls reach with `CallDirect`.
     callees: crate::passes::direct_calls::DirectCallees,
+    /// Where each name, constant and symbol already sits in its table. A
+    /// generated file has tens of thousands of each; searching the tables
+    /// would make lowering quadratic.
+    name_ids: HashMap<String, u32>,
+    constant_ids: HashMap<ConstantValue, u32>,
+    symbol_ids: HashMap<Symbol, u32>,
+    /// The registers of the function being lowered that append in place.
+    pub(crate) appending: HashSet<Reg>,
+}
+
+/// A literal as a hashable key: floats by their bits, so `-0.0` and `0.0`
+/// stay two constants and a NaN is found again.
+#[derive(PartialEq, Eq, Hash)]
+enum ConstantValue {
+    EmptyArray,
+    Null,
+    Bool(bool),
+    Int(i64),
+    Float(u64),
+    Bytes(Vec<u8>),
 }
 
 impl Tables {
     /// Intern names in first-use order to keep table indices deterministic.
     pub(crate) fn name(&mut self, name: &str) -> NameId {
-        let index = self
-            .unit
-            .names
-            .iter()
-            .position(|entry| entry == name)
-            .unwrap_or_else(|| {
-                self.unit.names.push(name.to_owned());
-                self.unit.names.len() - 1
-            });
-        NameId(index as u32)
+        if let Some(&index) = self.name_ids.get(name) {
+            return NameId(index);
+        }
+        let index = self.unit.names.len() as u32;
+        self.unit.names.push(name.to_owned());
+        self.name_ids.insert(name.to_owned(), index);
+        NameId(index)
     }
 
     /// Recognize literal values without evaluating arbitrary PHP expressions.
     pub(crate) fn constant(&mut self, constant: &ir::Constant) -> ConstId {
+        let key = match constant {
+            ir::Constant::EmptyArray => ConstantValue::EmptyArray,
+            ir::Constant::Null => ConstantValue::Null,
+            ir::Constant::Bool(value) => ConstantValue::Bool(*value),
+            ir::Constant::Int(value) => ConstantValue::Int(*value),
+            ir::Constant::Float(value) => ConstantValue::Float(value.to_bits()),
+            ir::Constant::Bytes(value) => ConstantValue::Bytes(value.clone()),
+        };
+        if let Some(&index) = self.constant_ids.get(&key) {
+            return ConstId(index);
+        }
         let value = match constant {
             ir::Constant::EmptyArray => Constant::Array(vec![]),
             ir::Constant::Null => Constant::Null,
@@ -45,16 +75,10 @@ impl Tables {
             ir::Constant::Float(value) => Constant::Float(*value),
             ir::Constant::Bytes(value) => Constant::String(value.clone()),
         };
-        let index = self
-            .unit
-            .constants
-            .iter()
-            .position(|entry| entry == &value)
-            .unwrap_or_else(|| {
-                self.unit.constants.push(value);
-                self.unit.constants.len() - 1
-            });
-        ConstId(index as u32)
+        let index = self.unit.constants.len() as u32;
+        self.unit.constants.push(value);
+        self.constant_ids.insert(key, index);
+        ConstId(index)
     }
 
     /// Intern a resolved symbol, folding function names but preserving constant spelling.
@@ -79,16 +103,13 @@ impl Tables {
             }),
             written: name.to_owned(),
         };
-        let index = self
-            .unit
-            .symbols
-            .iter()
-            .position(|entry| entry == &symbol)
-            .unwrap_or_else(|| {
-                self.unit.symbols.push(symbol);
-                self.unit.symbols.len() - 1
-            });
-        SymbolId(index as u32)
+        if let Some(&index) = self.symbol_ids.get(&symbol) {
+            return SymbolId(index);
+        }
+        let index = self.unit.symbols.len() as u32;
+        self.symbol_ids.insert(symbol.clone(), index);
+        self.unit.symbols.push(symbol);
+        SymbolId(index)
     }
 
     /// Translate a written type to its mask and class-name table entries.
@@ -168,6 +189,7 @@ impl Tables {
             ..Function::default()
         };
         let scratch = Reg(source.registers as u16);
+        self.appending = crate::passes::lowering::appending_registers(&source.instructions);
         let mut offsets = Vec::new();
         for (index, instruction) in source.instructions.into_iter().enumerate() {
             offsets.push(function.instructions.len() as u32);

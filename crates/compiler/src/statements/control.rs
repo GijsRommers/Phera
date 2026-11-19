@@ -1,7 +1,6 @@
 //! Compile statement constructs into ordered IR and patch their control-flow exits.
 
 use phera_ast as ast;
-use phera_bytecode::Reg;
 
 use crate::ir::{Constant, Instruction, Target};
 use crate::policies::DeclarationTiming;
@@ -14,15 +13,16 @@ impl Compiler<'_> {
         expression: &ast::Expression,
         line: usize,
     ) -> Result<(), CompileError> {
-        let first = self.next;
-        if let ast::ExpressionKind::Cast {
-            kind: ast::CastKind::Void,
-            operand,
-        } = &expression.kind
-        {
-            self.compile_expression(operand)?;
-        } else {
-            let result = self.compile_expression(expression)?;
+        self.clear_temporaries_after(line, |compiler| {
+            // `(void) f();` evaluates the operand and discards it outright.
+            if let ast::ExpressionKind::Cast {
+                kind: ast::CastKind::Void,
+                operand,
+            } = &expression.kind
+            {
+                return compiler.compile_expression(operand).map(drop);
+            }
+            let result = compiler.compile_expression(expression)?;
             if let Some(
                 Instruction::FinishCall {
                     destination,
@@ -33,25 +33,13 @@ impl Compiler<'_> {
                     result: use_of_result,
                     ..
                 },
-            ) = self.function.instructions.last_mut()
+            ) = compiler.function.instructions.last_mut()
                 && *destination == result
             {
                 *use_of_result = phera_bytecode::CallResult::Discarded;
             }
-        }
-        self.clear_expression_temporaries(first, line);
-        Ok(())
-    }
-
-    fn clear_expression_temporaries(&mut self, first: usize, line: usize) {
-        let temporaries: Vec<_> = (first..self.next)
-            .map(|index| Reg(index as u16))
-            .filter(|register| !self.locals.values().any(|local| local == register))
-            .filter(|register| !self.released.contains(&register.0))
-            .collect();
-        for register in temporaries {
-            self.emit(Instruction::Clear { register }, line);
-        }
+            Ok(())
+        })
     }
 
     /// Evaluate and print each argument in source order.
@@ -61,10 +49,12 @@ impl Compiler<'_> {
         line: usize,
     ) -> Result<(), CompileError> {
         for expression in expressions {
-            let first = self.next;
-            let register = self.compile_expression(expression)?;
-            self.emit(Instruction::Echo(register), line);
-            self.clear_expression_temporaries(first, line);
+            // Each item's temporaries are freed once it is printed, as in PHP.
+            self.clear_temporaries_after(line, |compiler| {
+                let register = compiler.compile_expression(expression)?;
+                compiler.emit(Instruction::Echo(register), line);
+                Ok(())
+            })?;
         }
 
         Ok(())
@@ -82,34 +72,53 @@ impl Compiler<'_> {
         Ok(())
     }
 
-    /// Patch both branch exits after their bodies are emitted.
+    /// Test each condition in turn and run the first branch that holds;
+    /// every branch then jumps past the rest of the ladder.
     pub(crate) fn compile_if(
         &mut self,
         condition: &ast::Expression,
         then: &[ast::Statement],
+        elseifs: &[ast::ElseIf],
         otherwise: &Option<Vec<ast::Statement>>,
         line: usize,
     ) -> Result<(), CompileError> {
-        let start = self.temporaries_start();
-        let register = self.compile_expression(condition)?;
-        let condition = self.temporaries_since(start);
-        let jump = self.emit(
-            Instruction::Branch {
-                value: register,
-                target: Target(0),
-                when: false,
-            },
-            line,
-        );
-        self.release_temporaries(&condition, line);
-        self.block(then, DeclarationTiming::AtExecution)?;
-        let end = self.emit(Instruction::Jump(Target(0)), line);
-        self.patch(jump, self.position());
-        self.release_temporaries(&condition, line);
+        let branches =
+            std::iter::once((condition, then, line)).chain(elseifs.iter().map(|elseif| {
+                (
+                    &elseif.condition,
+                    &elseif.body[..],
+                    self.lines.line(elseif.span.start),
+                )
+            }));
+        let mut ends = Vec::new();
+        for (condition, body, line) in branches {
+            let mark = self.mark_temporaries();
+            let start = self.temporaries_start();
+            let register = self.compile_expression(condition)?;
+            let temporaries = self.temporaries_since(start);
+            let skip = self.emit(
+                Instruction::Branch {
+                    value: register,
+                    target: Target(0),
+                    when: false,
+                },
+                line,
+            );
+            // The condition's values are freed on both ways out, as in PHP.
+            self.clear_owning_temporaries(&temporaries, line);
+            self.release_temporaries(mark);
+            self.block(body, DeclarationTiming::AtExecution)?;
+            ends.push(self.emit(Instruction::Jump(Target(0)), line));
+            self.patch(skip, self.position());
+            self.clear_owning_temporaries(&temporaries, line);
+        }
         if let Some(body) = otherwise {
             self.block(body, DeclarationTiming::AtExecution)?
         }
-        self.patch(end, self.position());
+        let end = self.position();
+        for jump in ends {
+            self.patch(jump, end);
+        }
 
         Ok(())
     }
@@ -133,7 +142,7 @@ impl Compiler<'_> {
             },
             line,
         );
-        self.release_temporaries(&condition, line);
+        self.clear_owning_temporaries(&condition, line);
         self.loops.push(Loop {
             start: self.position(),
             cleanup: None,
@@ -143,7 +152,7 @@ impl Compiler<'_> {
         self.block(body, DeclarationTiming::AtExecution)?;
         self.emit(Instruction::Jump(Target(start)), line);
         self.patch(end, self.position());
-        self.release_temporaries(&condition, line);
+        self.clear_owning_temporaries(&condition, line);
         self.loop_end(start);
 
         Ok(())

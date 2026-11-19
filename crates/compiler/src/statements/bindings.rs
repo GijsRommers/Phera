@@ -136,7 +136,7 @@ impl Compiler<'_> {
         // PHP frees the loop's own copy of the subject and of the last
         // value when the loop ends (FE_FREE), so an object that only they
         // held is destroyed here.
-        self.release_temporaries(&owned, line);
+        self.clear_owning_temporaries(&owned, line);
 
         Ok(())
     }

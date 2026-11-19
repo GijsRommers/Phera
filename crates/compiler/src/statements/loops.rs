@@ -24,6 +24,7 @@ impl Compiler<'_> {
         });
         self.block(body, DeclarationTiming::AtExecution)?;
         let continue_at = self.position();
+        self.fresh_temporaries();
         let mark = self.temporaries_start();
         let register = self.compile_expression(condition)?;
         let condition = self.temporaries_since(mark);
@@ -35,7 +36,7 @@ impl Compiler<'_> {
             },
             line,
         );
-        self.release_temporaries(&condition, line);
+        self.clear_owning_temporaries(&condition, line);
         self.loop_end(continue_at);
 
         Ok(())
@@ -54,7 +55,7 @@ impl Compiler<'_> {
             let mark = self.temporaries_start();
             self.compile_expression(expression)?;
             let temporaries = self.temporaries_since(mark);
-            self.release_temporaries(&temporaries, line);
+            self.clear_owning_temporaries(&temporaries, line);
         }
         let start = self.position();
         let mark = self.temporaries_start();
@@ -73,7 +74,7 @@ impl Compiler<'_> {
                 line,
             )
         });
-        self.release_temporaries(&conditions, line);
+        self.clear_owning_temporaries(&conditions, line);
         self.loops.push(Loop {
             start: self.position(),
             cleanup: None,
@@ -82,16 +83,17 @@ impl Compiler<'_> {
         });
         self.block(body, DeclarationTiming::AtExecution)?;
         let continue_at = self.position();
+        self.fresh_temporaries();
         for expression in step {
             let mark = self.temporaries_start();
             self.compile_expression(expression)?;
             let temporaries = self.temporaries_since(mark);
-            self.release_temporaries(&temporaries, line);
+            self.clear_owning_temporaries(&temporaries, line);
         }
         self.emit(Instruction::Jump(Target(start)), line);
         if let Some(jump) = end {
             self.patch(jump, self.position());
-            self.release_temporaries(&conditions, line);
+            self.clear_owning_temporaries(&conditions, line);
         }
         self.loop_end(continue_at);
 

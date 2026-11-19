@@ -41,7 +41,33 @@ impl Analyzer<'_> {
                 ExpressionKind::Call {
                     callee,
                     arguments: Arguments::List(arguments),
-                } => self.refine_predicate(callee, arguments, scope, truth),
+                } => self.refine_predicate(callee, arguments, scope, truth, expression.span),
+                ExpressionKind::Binary {
+                    operator: operator @ (BinaryOperator::Identical | BinaryOperator::NotIdentical),
+                    left,
+                    right,
+                } if self.level >= 2 => {
+                    self.refine_identical(
+                        left,
+                        right,
+                        scope,
+                        truth == (*operator == BinaryOperator::Identical),
+                        expression.span,
+                    );
+                }
+                ExpressionKind::InstanceOf { value, class } if self.level >= 2 => {
+                    if let ExpressionKind::Name(class) = &class.kind
+                        && let Some(class) = self.class_name(class, false)
+                    {
+                        self.refine_type(
+                            value,
+                            ValueType::Class(class),
+                            scope,
+                            truth,
+                            expression.span,
+                        );
+                    }
+                }
                 ExpressionKind::InstanceOf { value, class } if truth => {
                     if let ExpressionKind::Variable(Variable::Named(name)) = &value.kind
                         && let ExpressionKind::Name(class) = &class.kind
@@ -56,15 +82,35 @@ impl Analyzer<'_> {
     }
 
     pub fn refine_defined(&self, expression: &Expression, scope: &mut Scope) {
+        if self.level >= 2 {
+            self.refine_type(expression, ValueType::Null, scope, false, expression.span);
+        }
         let mut root = expression;
         while let ExpressionKind::Index { target, .. } | ExpressionKind::Property { target, .. } =
             &root.kind
         {
+            if self.level >= 2
+                && let ExpressionKind::Property {
+                    name: MemberName::Identifier(name),
+                    ..
+                } = &root.kind
+                && let Some(receiver) = crate::scope::Place::of(target)
+            {
+                scope
+                    .known
+                    .insert(Symbol::Property(receiver, name.name.clone()));
+            }
             root = target;
         }
         if let ExpressionKind::Variable(Variable::Named(name)) = &root.kind {
             let ty = scope.get(name).ty.without_null();
-            scope.define(name, ty);
+            if self.level >= 2
+                && let Some(variable) = scope.variables.get_mut(name)
+            {
+                variable.definition = Definition::Definite;
+            } else {
+                scope.define(name, ty);
+            }
         }
     }
 
@@ -74,13 +120,21 @@ impl Analyzer<'_> {
         arguments: &[Argument],
         scope: &mut Scope,
         truth: bool,
+        span: Span,
     ) {
         let (ExpressionKind::Name(name), Some(argument)) = (&callee.kind, arguments.first()) else {
             return;
         };
-        let Some(function) = self.existence_function(name) else {
+        let Some(function) = self.builtin_predicate(name) else {
             return;
         };
+        if self.level >= 2 {
+            if let Some(against) = super::refine_types::predicate_type(&function) {
+                self.refine_type(&argument.value, against, scope, truth, span);
+            } else if function == "in_array" {
+                self.refine_in_array(arguments, scope, truth, span);
+            }
+        }
         if function == "is_null" && !truth {
             if let ExpressionKind::Assign { target, .. } = &argument.value.kind {
                 self.refine_defined(target, scope);
@@ -94,7 +148,7 @@ impl Analyzer<'_> {
         if !truth {
             return;
         }
-        let symbol = match function {
+        let symbol = match function.as_str() {
             "class_exists" | "interface_exists" | "trait_exists" | "enum_exists" => {
                 self.class_probe(&argument.value)
             }
@@ -102,18 +156,25 @@ impl Analyzer<'_> {
                 let member = arguments
                     .get(1)
                     .and_then(|argument| literal_name(&argument.value));
-                match (&argument.value.kind, member) {
-                    (ExpressionKind::Variable(Variable::Named(receiver)), Some(member)) => {
-                        Some(if function == "property_exists" {
-                            Symbol::Property(receiver.clone(), member.into())
-                        } else {
-                            Symbol::Method(receiver.clone(), member.to_ascii_lowercase())
-                        })
-                    }
+                let receiver = if self.level >= 2
+                    || matches!(
+                        argument.value.kind,
+                        ExpressionKind::Variable(Variable::Named(_))
+                    ) {
+                    crate::scope::Place::of(&argument.value)
+                } else {
+                    None
+                };
+                match (receiver, member) {
+                    (Some(receiver), Some(member)) => Some(if function == "property_exists" {
+                        Symbol::Property(receiver, member.into())
+                    } else {
+                        Symbol::Method(receiver, member.to_ascii_lowercase())
+                    }),
                     _ => None,
                 }
             }
-            _ => literal_name(&argument.value).and_then(|value| match function {
+            _ => literal_name(&argument.value).and_then(|value| match function.as_str() {
                 "function_exists" => Some(Symbol::Function(value.to_ascii_lowercase())),
                 "defined" => {
                     if let Some((class, _)) = value.split_once("::") {
@@ -178,7 +239,7 @@ impl Analyzer<'_> {
             arguments: Arguments::List(arguments),
         } = &expression.kind
             && let ExpressionKind::Name(name) = &callee.kind
-            && let Some(function) = self.existence_function(name)
+            && let Some(function) = self.builtin_predicate(name)
             && let Some(argument) = arguments.first()
             && function == "is_null"
         {
@@ -191,19 +252,19 @@ impl Analyzer<'_> {
             arguments: Arguments::List(arguments),
         } = &expression.kind
             && let ExpressionKind::Name(name) = &callee.kind
-            && let Some(function) = self.existence_function(name)
+            && let Some(function) = self.builtin_predicate(name)
             && let Some(argument) = arguments.first()
             && let ExpressionKind::Literal(Literal::String(bytes)) = &argument.value.kind
             && let Ok(value) = std::str::from_utf8(bytes)
         {
             let value = value.trim_start_matches('\\').to_ascii_lowercase();
-            let known = match function {
+            let known = match function.as_str() {
                 "function_exists" => self.index.builtin_functions.contains(&value),
                 "class_exists" | "interface_exists" | "trait_exists" | "enum_exists" => {
                     self.index.builtin_classes.contains(&value)
                         && self.index.class(&value).is_some_and(|c| {
                             !c.location.file.starts_with("phpstorm-stubs/")
-                                && match function {
+                                && match function.as_str() {
                                     "interface_exists" => c.kind == ClassKind::Interface,
                                     "trait_exists" => c.kind == ClassKind::Trait,
                                     "enum_exists" => c.kind == ClassKind::Enum,
@@ -239,30 +300,16 @@ impl Analyzer<'_> {
         None
     }
 
-    fn existence_function(&self, name: &Name) -> Option<&'static str> {
+    fn builtin_predicate(&self, name: &Name) -> Option<String> {
         let candidates = self.context.names.resolve(name, UseKind::Function);
         let actual = candidates
             .iter()
             .find(|n| self.index.functions.contains_key(&n.to_ascii_lowercase()))?;
-        if !self
-            .index
+        let actual = actual.to_ascii_lowercase();
+        self.index
             .builtin_functions
-            .contains(&actual.to_ascii_lowercase())
-        {
-            return None;
-        }
-        match actual.to_ascii_lowercase().as_str() {
-            "function_exists" => Some("function_exists"),
-            "defined" => Some("defined"),
-            "class_exists" => Some("class_exists"),
-            "interface_exists" => Some("interface_exists"),
-            "trait_exists" => Some("trait_exists"),
-            "enum_exists" => Some("enum_exists"),
-            "is_null" => Some("is_null"),
-            "method_exists" => Some("method_exists"),
-            "property_exists" => Some("property_exists"),
-            _ => None,
-        }
+            .contains(&actual)
+            .then_some(actual)
     }
 }
 

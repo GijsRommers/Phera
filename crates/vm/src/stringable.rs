@@ -110,7 +110,7 @@ impl Vm {
             })?;
             let order = match step {
                 StringComparisonStep::Complete(order) => order,
-                StringComparisonStep::Cast(cast) => self.finish_string_comparison(cast).await?,
+                work => self.finish_comparison_in_callback(work).await?,
             };
             return Ok(comparison_value(op, order));
         }

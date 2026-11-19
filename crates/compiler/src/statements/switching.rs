@@ -28,6 +28,7 @@ impl Compiler<'_> {
         let mut default = None;
         for (i, case) in cases.iter().enumerate() {
             if let Some(expression) = &case.condition {
+                let mark = self.mark_temporaries();
                 let rhs = self.compile_expression(expression)?;
                 let dst = self.allocate_register()?;
                 self.emit(
@@ -50,6 +51,7 @@ impl Compiler<'_> {
                         line,
                     ),
                 });
+                self.release_temporaries(mark);
             } else {
                 default = Some(i)
             }
@@ -62,20 +64,22 @@ impl Compiler<'_> {
             breaks: vec![],
             continues: vec![],
         });
+        // `jumps` is in case order, so one pass over it patches every case.
+        let mut pending = jumps.iter().peekable();
         for (i, case) in cases.iter().enumerate() {
-            for jump in jumps.iter().filter(|jump| jump.case_index == i) {
+            while let Some(jump) = pending.next_if(|jump| jump.case_index == i) {
                 self.patch(jump.instruction, self.position())
             }
             if default == Some(i) {
                 self.patch(miss, self.position())
             }
             // The subject and the case values are dead in every body.
-            self.release_temporaries(&comparisons, line);
+            self.clear_owning_temporaries(&comparisons, line);
             self.block(&case.body, DeclarationTiming::AtExecution)?
         }
         if default.is_none() {
             self.patch(miss, self.position());
-            self.release_temporaries(&comparisons, line);
+            self.clear_owning_temporaries(&comparisons, line);
         }
         self.loop_end(self.position());
         Ok(())

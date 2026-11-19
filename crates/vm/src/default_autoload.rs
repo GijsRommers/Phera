@@ -29,7 +29,7 @@ impl Vm {
             self.include_state.record(unit.file.clone());
             self.enter_scoped_unit(unit, None)?;
             self.interpret(stop).await?;
-            if self.classes.entries.contains_key(&base) {
+            if self.classes.get_lowercase(&base).is_some() {
                 break;
             }
         }
@@ -38,44 +38,7 @@ impl Vm {
 }
 
 impl Vm {
-    pub(crate) fn include_path_intrinsic(
-        &mut self,
-        intrinsic: crate::intrinsics::Intrinsic,
-        mut arguments: Vec<phera_value::Value>,
-        origin: crate::calls::callback_binding::ArgumentOrigin,
-    ) -> phera_extension_api::NativeResult {
-        use phera_extension_api::{Param, ParamType};
-        use phera_value::Value;
-        let set = matches!(intrinsic, crate::intrinsics::Intrinsic::SetIncludePath);
-        let (name, parameters): (_, &[Param]) = if set {
-            (
-                "set_include_path",
-                &[Param::new("include_path", ParamType::String)],
-            )
-        } else {
-            ("get_include_path", &[])
-        };
-        self.with_argument_origin(origin, |vm| {
-            phera_extension_api::prepare_call(name, parameters, &mut arguments, vm)
-        })?;
-        if let Some(Value::String(path)) = arguments.first() {
-            return Ok(Value::from(self.set_include_path(path.clone())));
-        }
-        Ok(Value::from(self.include_path()))
-    }
-}
-
-impl Vm {
     pub(crate) fn include_path(&self) -> phera_value::PhpString {
-        self.include_path.clone().unwrap_or_else(|| ".".into())
-    }
-
-    pub(crate) fn set_include_path(
-        &mut self,
-        path: phera_value::PhpString,
-    ) -> phera_value::PhpString {
-        self.include_path
-            .replace(path)
-            .unwrap_or_else(|| ".".into())
+        self.ini_get(b"include_path").unwrap_or_else(|| ".".into())
     }
 }

@@ -41,7 +41,11 @@ impl Object {
 
     /// Changes the value attached for `owner` in place; `None` if there is
     /// none.
-    pub fn update_attachment<R>(&self, owner: u64, change: impl FnOnce(&mut Value) -> R) -> Option<R> {
+    pub fn update_attachment<R>(
+        &self,
+        owner: u64,
+        change: impl FnOnce(&mut Value) -> R,
+    ) -> Option<R> {
         self.with_attachments(|attached| {
             attached
                 .iter_mut()
@@ -54,7 +58,10 @@ impl Object {
     /// caller to drop.
     pub fn attach(&self, owner: u64, value: Value) -> Option<Value> {
         self.with_attachments(|attached| {
-            match attached.iter_mut().find(|(candidate, _)| *candidate == owner) {
+            match attached
+                .iter_mut()
+                .find(|(candidate, _)| *candidate == owner)
+            {
                 Some((_, slot)) => Some(std::mem::replace(slot, value)),
                 None => {
                     attached.push((owner, value));
@@ -68,7 +75,9 @@ impl Object {
     /// to drop.
     pub fn detach(&self, owner: u64) -> Option<Value> {
         self.with_attachments(|attached| {
-            let index = attached.iter().position(|(candidate, _)| *candidate == owner)?;
+            let index = attached
+                .iter()
+                .position(|(candidate, _)| *candidate == owner)?;
             Some(attached.swap_remove(index).1)
         })
     }

@@ -1,6 +1,6 @@
 use std::future::Future;
 use std::pin::Pin;
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
 use phera_value::{ArrayKey, Diagnostics, Object, PhpArray, PhpString, Value};
 
@@ -52,6 +52,27 @@ pub trait Context {
     /// Appends to the request's output, as `echo` does.
     fn write(&mut self, bytes: &[u8]);
 
+    /// Snapshot PHP callers without retaining references to live parameter slots.
+    fn backtrace(&mut self, _objects: bool, _arguments: bool, _limit: i32) -> Value {
+        Value::from(PhpArray::new())
+    }
+
+    /// Print a trace using the request's exception string parameter limit.
+    fn print_backtrace(&mut self, _trace: &Value) {}
+
+    /// The most recent diagnostic that reached PHP's default error handler.
+    fn last_error(&self) -> Value {
+        Value::Null
+    }
+
+    /// Reset the request's last diagnostic.
+    fn clear_last_error(&mut self) {}
+
+    /// Look up a global constant by its exact name, as the INI scanner does.
+    fn named_constant(&mut self, _name: &str) -> Option<Value> {
+        None
+    }
+
     /// Where warnings, notices and deprecations go.
     fn diagnostics(&mut self) -> &mut dyn Diagnostics;
 
@@ -63,14 +84,66 @@ pub trait Context {
     /// Per-request storage for extensions; see [`RequestState`].
     fn state(&mut self) -> &mut RequestState;
 
+    /// The PHP source location of the current operation.
+    fn source_location(&self) -> Option<(String, usize)> {
+        None
+    }
+
+    /// Looks up a request global such as `$_COOKIE`.
+    fn request_global(&self, _name: &str) -> Option<Value> {
+        None
+    }
+
+    /// Replaces the symbol, retaining aliases to the old variable.
+    fn replace_request_global(&mut self, _name: &str, _value: Value) {}
+
+    /// Flushes an extension after user shutdown callbacks and output finalization.
+    fn register_request_finalizer(&mut self, _callback: crate::AsyncFn) {}
+
     /// The PHP file making this call, for include-path lookups.
     fn script_path(&self) -> Option<std::path::PathBuf> {
         None
     }
 
+    /// The script selected by the SAPI, independent of the current included file.
+    fn entry_script_path(&self) -> Option<std::path::PathBuf> {
+        self.script_path()
+    }
+
     /// The request's include path, used by the VM and by the file wrappers.
     fn include_path(&self) -> phera_value::PhpString {
         ".".into()
+    }
+
+    /// Return the current string value of a registered INI directive.
+    fn ini_get(&self, _name: &[u8]) -> Option<PhpString> {
+        None
+    }
+
+    /// Decimal precision for serialization and PHP variable dumps.
+    fn serialization_precision(&self) -> i32 {
+        self.ini_get(b"serialize_precision")
+            .map_or(-1, |setting| crate::ini::integer(setting.as_bytes()) as i32)
+    }
+
+    /// Change a user-modifiable setting, returning its previous value.
+    fn ini_set(
+        &mut self,
+        _function: &str,
+        _name: &[u8],
+        _value: PhpString,
+    ) -> Result<Option<PhpString>, NativeError> {
+        Ok(None)
+    }
+
+    /// Restore a directive to its startup value.
+    fn ini_restore(&mut self, _name: &[u8]) -> Result<(), NativeError> {
+        Ok(())
+    }
+
+    /// List the INI settings for a module, or every loaded module.
+    fn ini_list(&mut self, _module: Option<&PhpString>, _details: bool) -> NativeResult {
+        Ok(Value::Bool(false))
     }
 
     /// Whether the PHP file making this call declared `strict_types=1`, which
@@ -100,6 +173,32 @@ pub trait Context {
         arguments: Vec<Value>,
     ) -> LocalFuture<'a, NativeResult>;
 
+    /// The fiber on this PHP stack, or none on the request's main stack.
+    fn current_fiber(&self) -> Option<Rc<Object>> {
+        None
+    }
+
+    fn fiber_operation(
+        &mut self,
+        _object: Rc<Object>,
+        _operation: crate::fiber::FiberOperation,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(std::future::ready(crate::fiber::unavailable()))
+    }
+
+    fn suspend_fiber(&mut self, _value: Option<Value>) -> LocalFuture<'_, NativeResult> {
+        let error = crate::fiber::fiber_error("Cannot suspend outside of a fiber");
+        Box::pin(std::future::ready(Err(error)))
+    }
+
+    fn inspect_fiber(
+        &mut self,
+        _object: Rc<Object>,
+        _inspection: crate::fiber::FiberInspection,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(std::future::ready(crate::fiber::unavailable()))
+    }
+
     /// The location of the first write that committed the response headers.
     fn output_origin(&self) -> Option<(&str, usize)> {
         None
@@ -112,6 +211,20 @@ pub trait Context {
         _arguments: Vec<Value>,
     ) -> LocalFuture<'_, NativeResult> {
         Box::pin(async { Err(NativeError::error("This context has no request lifecycle")) })
+    }
+
+    /// Registers or removes a named slot without changing its order among shutdown callbacks.
+    fn named_shutdown(
+        &mut self,
+        _key: &'static str,
+        _callback: Option<&'static str>,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(async { Err(NativeError::error("This context has no request lifecycle")) })
+    }
+
+    /// Whether an object declares this method, including inherited methods.
+    fn has_method(&self, _object: &Object, _name: &str) -> bool {
+        false
     }
 
     /// Convert a value to a PHP string. A VM context may run __toString.
@@ -182,6 +295,18 @@ pub trait Context {
         );
         Box::pin(std::future::ready(Err(NativeError::error(message))))
     }
+
+    /// Expose a native operation in the trace for the duration of its PHP callback.
+    fn push_callback_frame(
+        &mut self,
+        _name: &'static str,
+        _object: Option<Rc<Object>>,
+        _args: Vec<Value>,
+    ) {
+    }
+
+    /// Restore the previous trace boundary after an opted-in native operation.
+    fn pop_callback_frame(&mut self) {}
 
     /// Invokes an overridable method in a native class's own inheritance scope.
     fn call_protected_method(
@@ -355,6 +480,23 @@ pub trait Context {
     }
 
     /// Whether the requesting operation will need to run a PHP property hook.
+    /// An object walk observes PHP state, and aliases the resulting property slots.
+    fn lazy_object_for_iteration(
+        &mut self,
+        object: Rc<Object>,
+    ) -> LocalFuture<'_, Result<Rc<Object>, crate::NativeError>> {
+        Box::pin(std::future::ready(Ok(object)))
+    }
+
+    fn track_iterated_property(
+        &mut self,
+        _object: &Rc<Object>,
+        _key: &crate::ArrayKey,
+        _reference: &Rc<RefCell<Value>>,
+    ) -> Result<(), crate::NativeError> {
+        Ok(())
+    }
+
     fn property_view_runs_code(&self, _object: &Object, _purpose: crate::PropertyPurpose) -> bool {
         false
     }

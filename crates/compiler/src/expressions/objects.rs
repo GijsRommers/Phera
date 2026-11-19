@@ -8,6 +8,17 @@ use crate::policies::{DeclarationTiming, NameKind};
 use crate::{CompileError, Compiler};
 
 impl Compiler<'_> {
+    /// PHP reports a method call, and errors about it, on the line of the
+    /// method's name. In a chain written over several lines that is not the
+    /// line the expression starts on.
+    pub(super) fn member_line(&self, name: &ast::MemberName) -> usize {
+        let start = match name {
+            ast::MemberName::Identifier(name) => name.span.start,
+            ast::MemberName::Expression(name) => name.span.start,
+        };
+        self.lines.line(start)
+    }
+
     /// Resolve class identifiers at compile time; computed targets remain explicitly unsupported.
     pub(crate) fn compile_object_expression(
         &mut self,
@@ -95,6 +106,7 @@ impl Compiler<'_> {
                 nullsafe: false,
             } => {
                 let receiver = self.compile_receiver(target)?;
+                let line = self.member_line(name);
                 match name {
                     ast::MemberName::Identifier(name) => self.emit(
                         Instruction::MethodCall {
@@ -132,6 +144,7 @@ impl Compiler<'_> {
                 name,
                 arguments,
             } => {
+                let line = self.member_line(name);
                 if let Some(result) = self.compile_parent_hook(class, name, arguments, line)? {
                     return Ok(result);
                 }
@@ -247,8 +260,11 @@ impl Compiler<'_> {
     /// the same warning for an undefined variable), so a plain local is
     /// used as it is, without a copy that would then have to be released.
     fn compile_receiver(&mut self, target: &ast::Expression) -> Result<Reg, CompileError> {
+        // In a long chain the receiver may be compiled already (see
+        // `expressions::chains`): it is taken from there.
         if let ast::ExpressionKind::Variable(ast::Variable::Named(name)) = &target.kind
             && name != "this"
+            && !self.is_compiled_operand(target)
         {
             let place = self.readable_place(target)?;
             if place.scope == crate::ir::PlaceScope::Local && place.path.is_empty() {

@@ -248,6 +248,40 @@ an existing nginx `fastcgi_pass`. A proxy reaches Phera over HTTP like any
 other upstream. This can be revisited if someone needs to keep an nginx
 configuration unchanged.
 
+### 5.3 PHP file sessions
+
+`session_start()` keeps its settings, handler, original payload and live
+`$_SESSION` reference in the request. The VM runs a registered session finalizer
+after user shutdown callbacks and output finalization. The output dispatcher adds
+that callback only when a session opens for writing. An object registered with
+`session_set_save_handler($handler)` normally closes earlier through PHP's shutdown
+callback queue. The VM still needs request-end destructor dispatch to reproduce
+the ordering of implicit session close around PHP destructors.
+
+The process shares the extension registry. Each worker links built-in classes
+and constants once, outside request handling. Requests keep their classes,
+aliases, constant definitions, and object instances in request-local tables.
+
+The files handler reads and writes `sess_<id>` in the configured directory or the
+system temporary directory. It uses PHP's wire formats and defaults new files to
+mode `0600`. It validates the complete ID before resolving the file and rejects
+symlinks at the last path component. A process-wide table of weak async mutexes
+queues requests to the same canonical path across workers. While holding its
+mutex, a request opens and exclusively locks the file through the streams blocking
+pool. If PHP-FPM or another Phera process already holds the advisory lock, it
+retries after an asynchronous delay, leaving the worker and the blocking pool free
+between attempts.
+
+The descriptor and mutex guard stay with the request through read, script
+execution, and write. Early close, read-and-close, abort, and request cancellation
+release them. A cancelled request waiting for the lock or running PHP code does
+not write its changes. When a close has already handed a complete payload to the
+blocking pool, that operation keeps the lock until it completes. The file stays
+on the same inode so PHP processes opening it can coordinate using the same
+advisory lock. Like PHP's files handler, garbage collection can unlink a stale
+name while a request locks its descriptor. A request opening that name after
+collection may create a new inode.
+
 ## 6. Scope
 
 In: the PHP that Symfony and Laravel and their dependencies run in production.
@@ -266,16 +300,27 @@ ASP tags, `goto`, `declare(ticks)` and `__halt_compiler` data access.
 `AssertionError` with the condition as written. A setting that compiles
 assertions out, as PHP's production configuration does, comes with the
 configuration file.
-Fibers come after everything else works.
+Fiber switching and request-local state are described in section 9.5.
 
 **Runtime, left out:** opcache and JIT settings, FFI, phar, pcntl, posix, the C
-extension ABI, `dl()`, most of `php.ini` (a small fixed set of settings is
-honoured), and functions removed or deprecated before PHP 8.
+extension ABI, `dl()`, startup configuration from an INI file, and functions
+removed or deprecated before PHP 8.
 
 **Extensions, first wave:** standard (strings, arrays, math, output, variables,
 files, `sprintf`, `serialize`), spl, json, pcre (bound to PCRE2), ctype, mbstring,
 date, hash, filter, random, tokenizer, reflection, session, pdo with async
 drivers. **Later:** openssl, curl, dom and xml, intl, fileinfo, iconv.
+
+Locale names are remembered per request, C/POSIX behavior is implemented,
+and localized data is missing.
+
+**The system log:** `syslog()` writes its message to standard error, one
+line per message, where `error_log()` also writes; PHP hands it to the
+machine's system logger. The facility is accepted and has no effect.
+
+**Session cookie IDs:** Phera rejects an entire ID containing a NUL before it
+touches storage. PHP currently truncates the ID and uses the prefix as a file
+name. Rejecting the entire ID prevents an invalid cookie from opening that file.
 
 Functions are added on demand, driven by what failing tests and real framework
 boots call, not by walking PHP's function list.
@@ -342,8 +387,10 @@ silence:
 - **Legacy package layouts** (PSR-0 autoloading, `target-dir`,
   `include-path`, PEAR-style trees): `phera install` stops and names the
   package and the field. Nothing is installed half.
-- **`php.ini` settings** outside the honoured set: `ini_set()` returns false,
-  as PHP does for an unknown setting.
+- **INI directives.** The runtime recognizes PHP directives from its loaded
+  modules and its INI registry enforces their runtime access modes. The
+  settings with no engine consumer are enumerated in
+  [the generated catalog notes](../crates/extension-api/data/ini-storage-only.md).
 
 Something merely not built yet is different: it keeps PHP's own error
 ("Call to undefined function ...") until it exists.
@@ -375,6 +422,106 @@ Each falls in one of three groups:
    the data it happens to meet.
 
 An item moves from group 2 to group 1 when a later scan no longer finds it.
+
+### 6.3 PHP versions: 8.5 and 8.6
+
+> **Status, 2026-11-19: parked.** Phera targets PHP 8.5 only for now. What
+> follows is the design for carrying a second version when that is wanted;
+> none of it is on `main`. The first implementation is kept on branch
+> `php86/level-and-library` (pull request #74, draft). Until this changes,
+> PHP 8.6 syntax and functions do not exist in Phera, the tools (`phera
+> check`, `phera lint`) assume PHP 8.5, and "the same output as PHP" means
+> PHP 8.5.
+
+PHP releases a minor version every November and maintains the two newest.
+Phera does the same: it knows the two newest minor versions, and one
+project runs at one of them, its **language level**.
+
+```
+phera --php 8.6 run script.php       # for one command
+[runtime] php = "8.6"                # in phera.toml, for the project
+```
+
+Without either, the level is the lower bound of `require.php` in the
+project's `composer.json` when that names one of the two versions, and
+otherwise the default. The default stays 8.5 until PHP 8.6.0 is released and
+the fixtures of this section pass against it; then it becomes 8.6. When PHP
+8.7 appears, 8.5 is dropped.
+
+Why a level and not simply "the newest": a minor version of PHP is almost
+all additions, but code tests for them. Frameworks compare
+`PHP_VERSION_ID`, and polyfill packages define `clamp()` only when
+`function_exists('clamp')` says no. A runtime that reports 8.5 while it
+has 8.6's functions, or reports 8.6 while a project's lock file was resolved
+for 8.5, behaves like neither. And "the same output as PHP" needs one
+definite PHP to compare with.
+
+**What the level decides**, and nothing else:
+
+| | Example in 8.6 | How it is expressed in the code |
+| --- | --- | --- |
+| The version constants | `PHP_VERSION`, `PHP_VERSION_ID`, `PHP_MINOR_VERSION` | read from the level |
+| Which functions, classes and constants exist | `clamp()`, `Time\Duration`, `stream_last_errors()` | each registry entry may carry "since 8.6"; below that it is not registered, so `function_exists()` is false |
+| Which syntax is accepted | `f(1, ?, 3)` | the parser is given the level; below it, PHP 8.5's own parse error |
+| Deprecations that are new | `return` inside `finally`, `spl_object_hash()` | a named change, asked as `level.has(Change::ReturnInFinallyDeprecated)` |
+| Behaviour that changed | `trim()` also strips form feed; `session.use_strict_mode` defaults to 1 | the same: a named change |
+
+A named change is one variant of one enum, with the sentence from PHP's
+`UPGRADING` file as its documentation. Code never compares version numbers.
+When a version is dropped, the variants that every remaining level has are
+deleted and the compiler points at each place to simplify.
+
+**What PHP 8.6 changes**, from the `UPGRADING` file of the `PHP-8.6.0`
+branch (release candidate 7 on 2026-11-19), for the parts Phera ships:
+
+*Language.* Partial function application (`f(?, 2)`, `f(1, ...)`); default
+values on readonly properties; `__debugInfo()` on enums; `#[\Override]` on
+class constants and enum cases; writing to a property of an object held in
+a constant (`CONFIG->debug = true`); reference assignment into a `WeakMap`
+for a key that is not there yet.
+
+*Functions and classes.* `clamp()`; `<` and `>` byte-order modifiers in
+`pack()` and `unpack()`; the position of the error in JSON error messages;
+`Time\Duration`; the stream errors API (`stream_last_errors()`,
+`stream_clear_errors()`, the `error_mode` context option); the polling API;
+`ReflectionProperty::isReadable()` and `isWritable()`,
+`ReflectionParameter::getDocComment()`, the namespace methods of
+`ReflectionAttribute` and `ReflectionConstant`; `builtin_default_value` in
+`ini_get_all()`; `SessionHandler::validateId()`.
+
+*Changed behaviour.* By-reference `foreach` after an array was compacted;
+`??` and `empty()` on a magic property that `__isset()` created; `trim()`
+and its relatives strip form feed; `preg_grep()` returns false on an
+execution error; `fclose()`, `file_put_contents()` and `copy()` return false
+when the final flush fails; a group of functions throw `ValueError` for
+arguments they used to accept (`array_filter()` mode,
+`array_change_key_case()` case, NUL bytes in `getenv()`, `putenv()`,
+`parse_str()`, `setlocale()`); `array_intersect()` converts values earlier;
+`SplFileObject` line caching; the three session defaults
+(`use_strict_mode`, `cookie_httponly`, `cookie_samesite`);
+`session_encode()` on an empty session; boolean constants in reflection
+dumps; Unicode 18 tables in mbstring.
+
+*Newly deprecated.* `return` in a `finally` block; a value returned from
+`__construct()` or `__destruct()`, and either of them being a generator;
+`namespace` as a class constant name; a function named `readonly`; `let`,
+`is` and `_` as names; a third argument to `define()`; `is_a()` with a
+string and `$allow_string` false; `spl_object_hash()` and `spl_classes()`;
+ten `ArrayIterator` methods; the CSV methods of `SplFileObject`;
+`metaphone()`; `ReflectionProperty::setValue()` with an object of another
+class; a session handler without `create_sid()` and `validateId()`; mbregex.
+
+The rule of 6.2 applies to the new deprecations as it does to the old: a
+named item that the scan of 6.1 finds in use stays, with PHP's deprecation
+message at level 8.6 (`spl_object_hash()` is called all over current
+libraries); one that nothing uses is not registered at level 8.6.
+
+**Testing two versions.** Fixtures in `tests/fixtures/` state what PHP
+prints. A fixture whose output differs between the versions exists twice,
+under `tests/fixtures/php85/` and `tests/fixtures/php86/`; all others run at
+both levels and must print the same. CI runs the suite once per level, each
+against that PHP. The php-src sweep of 7.1 is taken from the matching
+branch.
 
 ## 7. Testing
 
@@ -524,7 +671,51 @@ each with its own fixtures checked against real PHP.
   blocks through a request-local release queue, which the VM drains with
   the destructors (section 9.6), at the same instruction boundaries.
 
-### 9.5 Order of work
+### 9.5 Fibers
+
+`Fiber::start()` runs a callable on a second heap frame stack.
+`Fiber::suspend($value)` hands that value back to the caller.
+`resume($reply)` returns the reply from the suspended call, and
+`throw($exception)` raises the supplied object in the same place.
+
+The fiber owns an interpreter future and its frames, registers, pending
+calls, and unwind continuations. A native callback can leave the same owned
+future pending, so suspension inside `array_map()` preserves both the native
+callback and the PHP frames above it. The caller polls that future until the
+fiber yields a value, completes, or throws. Ordinary I/O pending keeps
+control with Tokio. Backtraces read parked caller frames only when needed.
+
+Only the active stack owns the request data during a switch. At an explicit
+suspension the fiber lends that data back through a shared slot. The caller
+returns it before polling again. Globals, class and function declarations,
+output, and extension state all retain their identity. The slots are
+borrowed only for the transfer itself. Normal PHP calls and returns use
+the same bytecode and dispatch without consulting fiber state.
+
+The caller's stack and generator state remain live while a fiber runs.
+A fiber started in a generator can suspend back to it, and a generator
+resumed in a fiber can suspend the whole fiber through a native or PHP
+call. PHP recursion within either stack still occupies heap frames.
+Native callback depth is bounded across fiber switches because the Rust
+futures from both sides still occupy native stack space during a poll.
+`getCurrent()` returns the fiber associated with the active stack, including
+inside a native callback. On the request's main stack it returns null.
+
+A switch records the calling method and source location below the fiber's
+root frame. Runtime traces use that boundary. Reflection can inspect a
+suspended stack's trace and current executing location without resuming it.
+Exceptions thrown within the fiber cross back to its caller, and an injected
+exception follows the fiber's own catch and finally tables. A started fiber
+keeps its state through suspension, return, or termination by an exception.
+
+Shutdown closes outstanding suspended stacks with a graceful unwind. Their
+finally blocks run with the closing fiber current, and a new suspension from
+that stack raises `FiberError`. Switching during engine phases that forbid
+it raises the same class. Object destructors and cycle collection follow
+the request's object lifecycle, including its rules for when references
+are released.
+
+### 9.6 Order of work
 
 1. Native classes in the extension API; the object model; classes with
    properties, methods, constants, statics, inheritance, interfaces and
@@ -965,10 +1156,44 @@ What PHPStan and Psalm do: find errors without running the code.
   into one index for the project; then analyse each function body: track the
   type of every variable through the control flow, infer the type of every
   expression, and let rules report what cannot be right.
-- **Types.** A small lattice: the scalar types, literal values, `null`,
-  unions, class names with their ancestry, `list<T>` and `array<K, V>`,
-  array shapes, `callable` signatures, `mixed`, `never`. Declared native
-  types are facts; everything else is inferred.
+- **Type model.** Keep scalar facts inline and share immutable compound types
+  across scopes and declarations. A literal such as `3` is narrower than
+  `int`, and `never` is the empty set of values. A join records the values
+  possible on either branch. An intersection such as `Readable&Seekable`
+  retains members from both bounds. Class ancestry comes from the lazy
+  declaration index. Arrays keep key and value types, lists keep sequential
+  integer keys, and shapes also record named and optional keys. Callable
+  types carry their parameter and return signatures. Iterables retain key
+  and value types even when supplied by a class.
+- **Declaration types.** Keep a declaration's native type and its PHPDoc
+  refinement separately. For example, `@param list<User> $users` refines
+  `array $users`, and an incompatible doc type is a diagnostic on the tag.
+  Parse the PHPDoc grammar independently of PHP syntax, with bounded
+  nesting, namespace imports, tag precedence, and source locations. Use
+  declared template bounds and infer simple template arguments at calls.
+  Resolve `self` against the declaring class, `static` against the receiver,
+  and `$this` against the receiver identity. A class-string carries its
+  class bound. Preserve literal ranges and other refinements when the
+  checker knows what they mean. Erase an unsupported pseudo-type to the
+  nearest type that can be justified by its syntax.
+- **Flow and compatibility.** Expression evaluation supplies a type and
+  sends facts to the true and false scopes. A join keeps facts supported
+  by both paths and can retain an implication tied to an unchanged
+  variable, such as `$ok === true` implying that `$value` was assigned.
+  Narrowing records the condition's location so diagnostics can identify
+  where a fact came from. Native acceptance considers the operation and
+  the relevant `strict_types` setting. PHPDoc acceptance compares the
+  refined types. Keep unknown acceptance distinct from a proven mismatch
+  so that these levels can analyse untyped code.
+  For example, a known `string` returned from an `int` function is a
+  level 3 mismatch. A weak return context permits a `Stringable` object
+  when the function returns `string`. A callback that can write a captured
+  property invalidates earlier facts about that property.
+- **Analysis concurrency.** Composer resolution and declaration linking
+  precede each analysis pass. Workers analyse independent files against a
+  shared index and return unresolved class requests alongside their
+  results. A subsequent pass resolves new requests and revisits affected
+  files. Diagnostic ordering is independent of worker completion order.
 - **Composer projects.** Check paths such as `src` or `app routes` from a
   directory with `composer.json` and `vendor/composer`, or pass paths
   inside that project from elsewhere. Phera parses Composer's generated
@@ -987,22 +1212,25 @@ What PHPStan and Psalm do: find errors without running the code.
   parsed by Phera's parser at build time into a compact table. So the checker
   knows every built-in function and class of PHP, not only those the runtime
   implements so far.
-- **Levels**, as in PHPStan, so a project can adopt it gradually. Level 0:
-  unknown classes, functions, methods on `$this`, constants; wrong argument
-  counts; variables that are certainly undefined. Then: possibly undefined
-  variables; methods and properties on any expression whose type is known;
-  return and property types; dead code and comparisons that are always true
-  or false; argument types; and from there PHPDoc types (`@param`,
-  `@return`, `@var`, generics, shapes).
+- **Levels.** Checks accumulate. Levels 0 and 1 cover basic symbol checks,
+  count checks, and variable definition. Level 2 reads and validates
+  PHPDoc and checks members of known receiver types. Level 3 checks
+  returned values and typed property writes. Level 4 checks provably
+  constant predicates and unreachable code. Level 5 checks argument types
+  against resolved signatures. A call to `strlen(...)` has the same
+  parameter type as a direct call to `strlen`.
 - **Output**: a readable report, JSON, and annotations for CI; a baseline
   file to adopt it on an existing code base; `@phpstan-ignore` and
   `@psalm-suppress` comments are honoured so existing code needs no edits.
+  Native union names use PHP's display order through the bytecode crate,
+  so `int|string` is displayed as `string|int` in both runtime and checker
+  diagnostics.
 - **How it is verified**: differentially. A corpus of small PHP files, each
   with one deliberate error or none, is run through PHPStan at the matching
   level and through `phera check`; both must flag the same lines. Then real
   open-source projects, comparing the reports.
-- **Not in the first versions**: a plugin interface, and full parity with
-  PHPStan's generics inference.
+- **Extension points.** PHPStan plugins and inference beyond declared
+  templates with simple call-site substitutions require separate work.
 
 ### 11.2 `phera test`: a test runner
 

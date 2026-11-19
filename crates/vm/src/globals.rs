@@ -16,6 +16,10 @@ impl Globals {
         }
     }
 
+    pub(crate) fn get(&self, name: &str) -> Option<&Value> {
+        self.values.get(name)
+    }
+
     pub(crate) fn insert(&mut self, name: String, value: Value) {
         self.values.insert(name, value);
     }

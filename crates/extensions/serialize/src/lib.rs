@@ -5,6 +5,9 @@ mod encode;
 mod incomplete;
 pub mod wire;
 
+pub use decode::sequence::{Decoded, decode_entries, decode_value};
+pub use encode::sequence::SequenceEncoder;
+
 use phera_extension_api::{ClassEntry, Extension, MethodEntry, Param, ParamType, Registry};
 
 pub struct Serialize;

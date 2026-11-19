@@ -153,6 +153,14 @@ impl Vm {
         if let Some(arguments) = arguments {
             self.call_stack.current_extras_mut().arguments = arguments;
         }
+        let body = self.code.function(function);
+        if body.argument_layout == phera_bytecode::ArgumentLayout::Variadic
+            && let Some(index) = body.parameters.len().checked_sub(1)
+            && let Some(Some(Value::Array(variadic))) =
+                self.registers.window(slots.base + index, 1).first()
+        {
+            self.call_stack.current_extras_mut().variadic = Some(variadic.clone());
+        }
         result
     }
 

@@ -6,6 +6,8 @@ use crate::calls::frame::Frame;
 use crate::calls::frame_extras::FrameExtras;
 use crate::calls::prepared_call::{CallDetails, CallFlags, PreparedCall};
 
+pub(crate) const MAX_CALLBACK_DEPTH: usize = 32;
+
 /// The running PHP functions of a request, innermost last, and the calls
 /// whose arguments are being evaluated.
 pub(crate) struct CallStack {
@@ -272,7 +274,7 @@ impl CallStack {
 
     /// Native callbacks use Rust futures, so bound this nesting independently of PHP calls.
     pub(crate) fn enter_callback(&mut self) -> Result<(), NativeError> {
-        if self.callback_depth >= 32 {
+        if self.callback_depth >= MAX_CALLBACK_DEPTH {
             return Err(NativeError::error("Maximum native callback depth exceeded"));
         }
         self.callback_depth += 1;
@@ -282,6 +284,15 @@ impl CallStack {
     /// Restore the native recursion budget after either callback outcome.
     pub(crate) fn leave_callback(&mut self) {
         self.callback_depth -= 1;
+    }
+
+    /// Include the native futures from a caller that is polling a fiber.
+    pub(crate) fn callback_depth(&self) -> usize {
+        self.callback_depth
+    }
+
+    pub(crate) fn set_callback_depth(&mut self, depth: usize) {
+        self.callback_depth = depth;
     }
 }
 

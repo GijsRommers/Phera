@@ -305,7 +305,7 @@ impl Vm {
             &entry.key,
             entry.slot(),
             value,
-            || !has_magic_properties(&object),
+            || !has_magic_properties(&object) && object.lazy().is_none(),
         ) {
             return Ok(false);
         }

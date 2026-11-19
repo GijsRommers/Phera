@@ -12,8 +12,7 @@ impl Vm {
                 "trigger_error() expects at least 1 argument, 0 given",
             )
         })?;
-        let message =
-            phera_value::to_php_string(message, &mut phera_value::NoDiagnostics)?.to_string_lossy();
+        let message = phera_value::to_php_string(message, &mut phera_value::NoDiagnostics)?;
         let level = arguments
             .get(1)
             .map(|value| phera_value::to_int(value, &mut phera_value::NoDiagnostics))
@@ -37,7 +36,7 @@ impl Vm {
         let event = DiagnosticEvent {
             level,
             kind: kind.into(),
-            message: message.into(),
+            message,
             location: self.location(),
             trace_location: None,
             native: Some(crate::error_traces::NativeTrace::new(
@@ -55,7 +54,7 @@ impl Vm {
             self.enqueue_diagnostic(event);
             self.drain_error_handlers().await?;
         } else {
-            self.report_event(&event);
+            self.report_event(event);
             if level == 256 {
                 self.status = 255;
                 return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(

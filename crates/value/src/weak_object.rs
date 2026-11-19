@@ -56,7 +56,12 @@ impl WeakObject {
             return Some(object);
         }
         let pool = self.pool.upgrade()?;
-        let current = pool.incarnations.try_borrow().ok()?.get(&self.id)?.upgrade()?;
+        let current = pool
+            .incarnations
+            .try_borrow()
+            .ok()?
+            .get(&self.id)?
+            .upgrade()?;
         (current.serial() == self.serial).then_some(current)
     }
 

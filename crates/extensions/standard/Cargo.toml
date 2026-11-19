@@ -9,6 +9,9 @@ license.workspace = true
 phera-dotenv.workspace = true
 indexmap.workspace = true
 phera-extension-api.workspace = true
+nix.workspace = true
+rustix.workspace = true
+sysinfo.workspace = true
 # Only for timers: `sleep` and `usleep` wait without blocking the thread.
 tokio.workspace = true
 

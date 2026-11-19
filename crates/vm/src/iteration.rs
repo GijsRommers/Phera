@@ -15,6 +15,18 @@ impl Vm {
         place: Option<AccessPath>,
     ) -> Result<bool, NativeError> {
         let element = self.get(source);
+        if matches!(&element, Value::Object(object) if object.lazy().is_some()) {
+            return Ok(false);
+        }
+        self.iter_start_value(iterator, element, place)
+    }
+
+    pub(crate) fn iter_start_value(
+        &mut self,
+        iterator: IterId,
+        element: Value,
+        place: Option<AccessPath>,
+    ) -> Result<bool, NativeError> {
         if let Value::Object(object) = &element
             && object.class.is_traversable()
         {

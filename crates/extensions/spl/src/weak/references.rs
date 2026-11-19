@@ -20,8 +20,8 @@ fn modify(
     change: impl FnOnce(&mut Value) -> Value,
 ) -> NativeResult {
     crate::native_state::update_present_state(map, |state: &mut Map| state.update(key, change))?
-    .flatten()
-    .ok_or_else(|| missing_key(key))
+        .flatten()
+        .ok_or_else(|| missing_key(key))
 }
 
 pub(super) fn current_reference(map: &Object, key: &Rc<Object>) -> NativeResult {

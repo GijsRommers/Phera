@@ -35,6 +35,11 @@ pub trait ClassHandle: Any {
     }
 
     fn as_any(&self) -> &dyn Any;
+
+    /// A lazy backing table still exposes declared properties in class order.
+    fn order_lazy_properties(&self, properties: PhpArray) -> PhpArray {
+        properties
+    }
     fn is_enum(&self) -> bool {
         false
     }

@@ -51,7 +51,7 @@ impl Vm {
         self.native_callback_sites
             .push(crate::error_traces::NativeCallbackSite {
                 boundary: self.call_stack.depth(),
-                native,
+                native: crate::error_traces::NativeCaller::Saved(native),
             });
         let result = self.invoke_magic_method(method, class, object, []).await;
         self.native_callback_sites.pop();

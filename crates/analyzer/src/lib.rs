@@ -15,11 +15,14 @@ pub mod diagnostic;
 mod enums;
 pub mod global_effects;
 pub mod index;
+#[cfg(test)]
+mod ladder_equivalence;
 pub mod names;
 mod phpdoc;
 pub mod project;
 pub mod rules;
 pub mod scope;
+mod signature_types;
 pub mod stubs;
 mod suppress;
 mod trait_users;
@@ -54,15 +57,36 @@ fn check_project(options: &Options) -> Result<Report, String> {
     let start = std::time::Instant::now();
     let paths = project::discover(&options.paths, &options.exclude)?;
     let (files, mut diagnostics) = project::parse_files(&paths)?;
+    let (found, vendor_files) = analyze_files(&files, &paths, options)?;
+    diagnostics.extend(found);
+    diagnostics.sort();
+    diagnostics.dedup();
+    Ok(Report {
+        diagnostics,
+        files: paths.len(),
+        vendor_files,
+        elapsed: start.elapsed(),
+    })
+}
+
+/// Collects the declarations of parsed files, resolves their dependencies and
+/// analyses each one; returns the findings and the number of vendor files read.
+pub(crate) fn analyze_files(
+    files: &[project::ParsedFile],
+    paths: &[std::path::PathBuf],
+    options: &Options,
+) -> Result<(Vec<Diagnostic>, usize), String> {
+    let mut diagnostics = Vec::new();
     let mut index = builtins::load_supported();
-    for file in &files {
+    index.read_type_docs = options.level >= 2;
+    for file in files {
         collect::collect(&mut index, &file.path, &file.source, &file.program);
     }
     for class in index.classes.values() {
         index.trait_users.record(class);
     }
     let scan = project::discover(&options.scan, &options.exclude)?;
-    let mut dependencies = dependencies::Dependencies::load(&mut index, &options.paths, &paths)?;
+    let mut dependencies = dependencies::Dependencies::load(&mut index, &options.paths, paths)?;
     for path in &scan {
         dependencies.load_file(&mut index, path)?;
     }
@@ -73,18 +97,11 @@ fn check_project(options: &Options) -> Result<Report, String> {
         .collect();
     dependencies.resolve_classes(&mut index, classes);
     traits::link(&mut index);
-    for file in &files {
+    for file in files {
         let mut found =
             analysis::Analyzer::new(&mut index, &mut dependencies, file, options.level).run();
         suppress::filter(file, &mut found);
         diagnostics.extend(found);
     }
-    diagnostics.sort();
-    diagnostics.dedup();
-    Ok(Report {
-        diagnostics,
-        files: paths.len(),
-        vendor_files: dependencies.vendor_files,
-        elapsed: start.elapsed(),
-    })
+    Ok((diagnostics, dependencies.vendor_files))
 }

@@ -7,7 +7,7 @@ use crate::index::Signature;
 impl Analyzer<'_> {
     pub fn callable_signature(&mut self, ty: ValueType) -> Option<Signature> {
         match ty {
-            ValueType::Callable(signature) => Some(*signature),
+            ValueType::Callable(signature) => Some((*signature).clone()),
             // A generic Closure type has no known engine-generated parameter list.
             ValueType::Class(class) if class.eq_ignore_ascii_case("Closure") => None,
             ValueType::Class(class) => {
@@ -28,7 +28,7 @@ impl Analyzer<'_> {
         span: Span,
     ) -> ValueType {
         if matches!(arguments, Arguments::FirstClassCallable) {
-            return ValueType::Callable(Box::new(signature.clone()));
+            return ValueType::Callable(std::sync::Arc::new(signature.clone()));
         }
         if self.arguments(
             arguments,

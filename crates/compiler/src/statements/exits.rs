@@ -81,7 +81,7 @@ impl Compiler<'_> {
         match cleanup {
             LoopCleanup::Foreach { iterator, owned } => {
                 self.emit(Instruction::IterEnd(iterator), line);
-                self.release_temporaries(&owned, line);
+                self.clear_owning_temporaries(&owned, line);
             }
             LoopCleanup::Switch(register) => {
                 self.emit(Instruction::Clear { register }, line);

@@ -2,6 +2,7 @@
 
 use std::rc::{Rc, Weak};
 
+use phera_extension_api::reflection::lazy::{SKIP_DESTRUCTOR, SKIP_INITIALIZATION_ON_SERIALIZE};
 use phera_extension_api::reflection::{ClassInfo, ReflectedClassKind};
 use phera_extension_api::{
     ArrayKey, ClassEntry, ConstantValue, Context, LocalFuture, MethodEntry, NativeResult, Object,
@@ -30,8 +31,11 @@ pub(crate) fn register(registry: &mut Registry) {
                 ("IS_EXPLICIT_ABSTRACT", Int(64)),
                 ("IS_FINAL", Int(32)),
                 ("IS_READONLY", Int(65536)),
-                ("SKIP_INITIALIZATION_ON_SERIALIZE", Int(8)),
-                ("SKIP_DESTRUCTOR", Int(16)),
+                (
+                    "SKIP_INITIALIZATION_ON_SERIALIZE",
+                    Int(SKIP_INITIALIZATION_ON_SERIALIZE),
+                ),
+                ("SKIP_DESTRUCTOR", Int(SKIP_DESTRUCTOR)),
             ]
         },
         methods: &METHODS,
@@ -185,8 +189,14 @@ const IDENTITY_METHODS: &[MethodEntry] = const {
             const { &[Param::new("args", ParamType::Mixed).variadic()] },
             |c, o, a, names| {
                 Box::pin(async move {
-                    let arguments = crate::function::forwarded_arguments(a, 0, names)?;
-                    instantiate(c, o, Some(arguments)).await
+                    let arguments = crate::function::forwarded_arguments(a.clone(), 0, names)?;
+                    instantiate(
+                        c,
+                        o,
+                        Some(arguments),
+                        Some(("ReflectionClass->newInstance", a)),
+                    )
+                    .await
                 })
             },
         ),
@@ -197,11 +207,16 @@ const IDENTITY_METHODS: &[MethodEntry] = const {
                 let arguments = args::array(&a, 0)
                     .map(|a| (**a).clone())
                     .unwrap_or_default();
-                instantiate(c, o, Some(arguments))
+                instantiate(
+                    c,
+                    o,
+                    Some(arguments),
+                    Some(("ReflectionClass->newInstanceArgs", a)),
+                )
             },
         ),
         MethodEntry::public_async("newInstanceWithoutConstructor", &[], |c, o, _| {
-            instantiate(c, o, None)
+            instantiate(c, o, None, None)
         }),
         MethodEntry::public_async("getAttributes", crate::attribute::FILTER, |c, o, a| {
             Box::pin(async move {
@@ -227,9 +242,11 @@ const IDENTITY_METHODS: &[MethodEntry] = const {
     ]
 };
 
-const METHODS: [MethodEntry; IDENTITY_METHODS.len() + crate::class_members::METHODS.len()] = {
-    let mut methods =
-        [IDENTITY_METHODS[0]; IDENTITY_METHODS.len() + crate::class_members::METHODS.len()];
+const METHOD_COUNT: usize =
+    IDENTITY_METHODS.len() + crate::class_members::METHODS.len() + crate::lazy::CLASS_METHODS.len();
+
+const METHODS: [MethodEntry; METHOD_COUNT] = {
+    let mut methods = [IDENTITY_METHODS[0]; METHOD_COUNT];
     let mut index = 0;
     while index < IDENTITY_METHODS.len() {
         methods[index] = IDENTITY_METHODS[index];
@@ -240,6 +257,12 @@ const METHODS: [MethodEntry; IDENTITY_METHODS.len() + crate::class_members::METH
         methods[index] = crate::class_members::METHODS[member];
         index += 1;
         member += 1;
+    }
+    let mut lazy = 0;
+    while lazy < crate::lazy::CLASS_METHODS.len() {
+        methods[index] = crate::lazy::CLASS_METHODS[lazy];
+        index += 1;
+        lazy += 1;
     }
     methods
 };
@@ -444,15 +467,25 @@ fn relationship(
     })
 }
 
-fn instantiate(
-    context: &mut dyn Context,
+fn instantiate<'a>(
+    context: &'a mut dyn Context,
     this: Option<Rc<Object>>,
     arguments: Option<PhpArray>,
-) -> LocalFuture<'_, NativeResult> {
+    trace: Option<(&'static str, Vec<Value>)>,
+) -> LocalFuture<'a, NativeResult> {
     Box::pin(async move {
         let class = reflected_class(this.as_ref())?;
-        engine(context)?
-            .reflect_construct(&class.info, arguments)
-            .await
+        let traced = trace.is_some();
+        if let Some((method, args)) = trace {
+            context.push_callback_frame(method, this, args);
+        }
+        let result = match engine(context) {
+            Ok(engine) => engine.reflect_construct(&class.info, arguments).await,
+            Err(error) => Err(error),
+        };
+        if traced {
+            context.pop_callback_frame();
+        }
+        result
     })
 }

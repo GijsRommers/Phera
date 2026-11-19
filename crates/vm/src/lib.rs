@@ -6,6 +6,8 @@ use phera_bytecode::{CompiledUnit, Reg};
 use phera_extension_api::{LocalFuture, Registry, RequestState};
 use phera_value::{PhpArray, Value};
 
+pub use native_tables::NativeTables;
+
 use crate::calls::frame::{Frame, FrameView};
 use crate::path::AccessPath;
 
@@ -78,6 +80,7 @@ mod exceptions;
 mod extract;
 mod failed_construction;
 mod fast;
+mod fibers;
 mod finally;
 mod function_facts;
 mod function_introspection;
@@ -92,6 +95,7 @@ mod hooked_property_views;
 mod include_scope;
 mod include_state;
 mod includes;
+mod ini;
 mod initializer_tasks;
 mod initializers;
 mod inline_stack;
@@ -104,6 +108,11 @@ mod intrinsics;
 mod iteration;
 mod iterator_instructions;
 mod iterators;
+mod last_error;
+mod lazy_continuation;
+mod lazy_defaults;
+mod lazy_objects;
+mod lazy_property_access;
 mod locals;
 mod magic_method;
 mod magic_mutations;
@@ -114,6 +123,7 @@ mod magic_property_write;
 mod magic_references;
 mod native_diagnostics;
 mod native_property_views;
+mod native_tables;
 mod object_comparison;
 mod object_iteration;
 mod operators;
@@ -234,38 +244,43 @@ pub struct Vm {
     failed_native: Option<error_traces::NativeTrace>,
     /// What extensions remember during this request (response headers, ...).
     state: RequestState,
+    reflection_cache: Option<Box<reflection::ReflectionCache>>,
     property_references: std::rc::Rc<std::cell::RefCell<reference_holders::ReferenceHolders>>,
     autoload: autoload::Autoloaders,
-    include_path: Option<phera_value::PhpString>,
     request_end: request_end::RequestEnd,
     cycles: cycles::CycleCollector,
+    ini_overrides: ini::IniOverrides,
+    active_fiber: Option<Box<fibers::Active>>,
+    fiber_bailout: bool,
+    suspended_fibers: fibers::SuspendedFibers,
 }
 
 impl Vm {
     /// Create isolated request state from an immutable native registry.
     pub fn new(registry: Arc<Registry>) -> Self {
-        let constants = registry
-            .constant_entries()
-            .map(|(name, value, deprecated)| {
-                (
-                    name.to_owned(),
-                    constant_table::GlobalConstant {
-                        value: value.to_value(),
-                        deprecated: deprecated.map(std::rc::Rc::from),
-                    },
-                )
-            })
-            .collect();
-        let classes = classes::ClassTable::native(&registry);
+        Self::with_native_tables(&NativeTables::new(registry))
+    }
+
+    /// Register VM-owned fiber classes after Core and Reflection.
+    pub fn register_fiber_classes(registry: &mut Registry) {
+        fibers::register(registry);
+    }
+
+    /// Start a fresh request with the worker's already linked built-ins.
+    pub fn with_native_tables(native: &NativeTables) -> Self {
+        let classes = classes::ClassTable::new(native.classes.clone());
         let object_ids = classes.ids_handle();
         Self {
             enum_cases: classes::enums::EnumCases::default(),
             object_ids,
             classes,
-            autoload: Default::default(),
-            include_path: None,
             request_end: Default::default(),
             cycles: Default::default(),
+            autoload: Default::default(),
+            ini_overrides: Default::default(),
+            active_fiber: None,
+            fiber_bailout: false,
+            suspended_fibers: Default::default(),
             native_callback_sites: Vec::new(),
             debug_objects: Vec::new(),
             property_guards: Vec::new(),
@@ -296,18 +311,19 @@ impl Vm {
             draining_generators: false,
             closing_generator: None,
             executed_instructions: 0,
-            registry,
+            registry: native.registry.clone(),
             output: vec![],
             output_writer: output::Output::new(),
             request_callbacks: Default::default(),
             registers: calls::registers::Registers::new(),
-            constants: constant_table::ConstantTable::new(constants),
+            constants: constant_table::ConstantTable::new(native.constants.clone()),
             frame_limit: DEFAULT_FRAME_LIMIT,
             status: 0,
             error_handlers: error_handlers::ErrorHandlers::default(),
             pending_callbacks: false,
             failed_native: None,
             state: RequestState::default(),
+            reflection_cache: None,
         }
     }
 
@@ -359,7 +375,7 @@ impl Vm {
                     .insert(function.name.to_ascii_lowercase(), index);
             }
         }
-        self.include_state.record(unit.file.clone());
+        self.include_state.record_entry(main, unit.file.clone());
         let registers = unit.main.registers as usize;
         self.registers.grow_to(registers);
         self.call_stack.push(Frame::new(main, 0, None));
@@ -399,9 +415,7 @@ impl Vm {
             self.unwind(error);
         }
         self.finish_request(end).await;
-        if let Err(error) = self.finish_headers().await {
-            self.unwind(error);
-        }
+        self.finish_request_headers().await;
         self.status
     }
 

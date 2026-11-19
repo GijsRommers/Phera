@@ -84,13 +84,13 @@ async fn iteration_line(
     let (flags, controls, stream, path) = get(object, |file| {
         (
             file.flags,
-            file.csv.clone(),
+            file.csv,
             file.stream.clone(),
             file.location.pathname.clone(),
         )
     })?;
     if flags & READ_CSV != 0 {
-        let row = csv::read(object, controls).await?;
+        let row = csv::read(object, controls.bytes.dialect(context)).await?;
         if require_line && matches!(row, Value::Bool(false)) {
             return Err(unreadable(&path));
         }

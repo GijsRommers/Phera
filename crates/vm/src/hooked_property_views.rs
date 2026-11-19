@@ -82,7 +82,7 @@ impl Vm {
         self.native_callback_sites
             .push(crate::error_traces::NativeCallbackSite {
                 boundary: self.call_stack.depth(),
-                native,
+                native: crate::error_traces::NativeCaller::Saved(native),
             });
         let result = self
             .enumerate_hooked_properties(object, class, purpose)

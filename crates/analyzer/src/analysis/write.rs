@@ -5,7 +5,7 @@ use super::*;
 
 enum Binding<'a> {
     Target(&'a Expression, ValueType),
-    Key(&'a Expression),
+    Element(&'a ArrayItem, usize, ValueType),
 }
 
 impl Analyzer<'_> {
@@ -30,11 +30,22 @@ impl Analyzer<'_> {
         let mut pending = vec![Binding::Target(target, ty)];
         while let Some(binding) = pending.pop() {
             let (target, ty) = match binding {
-                Binding::Key(key) => {
-                    if self.expression(key, scope, false) == ValueType::Never {
+                Binding::Element(item, index, array) => {
+                    let key = item
+                        .key
+                        .as_ref()
+                        .map_or(ValueType::IntLiteral(index as i64), |key| {
+                            self.expression(key, scope, false)
+                        });
+                    if key == ValueType::Never {
                         return Evaluation::Never;
                     }
-                    continue;
+                    let ty = if self.level >= 2 && !item.by_reference {
+                        super::arrays::offset_type(&array, &key)
+                    } else {
+                        ValueType::Mixed
+                    };
+                    (&item.value, ty)
                 }
                 Binding::Target(target, ty) => (target, ty),
             };
@@ -47,25 +58,24 @@ impl Analyzer<'_> {
                     scope.unknown_writes();
                 }
                 ExpressionKind::List(items) => {
-                    for item in items.iter().rev().flatten() {
+                    for (index, item) in items
+                        .iter()
+                        .enumerate()
+                        .rev()
+                        .filter_map(|(index, item)| item.as_ref().map(|item| (index, item)))
+                    {
                         if item.by_reference {
                             self.external_reference(&item.value, scope);
                         }
-                        pending.push(Binding::Target(&item.value, ValueType::Mixed));
-                        if let Some(key) = &item.key {
-                            pending.push(Binding::Key(key));
-                        }
+                        pending.push(Binding::Element(item, index, ty.clone()));
                     }
                 }
                 ExpressionKind::Array(items) => {
-                    for item in items.iter().rev() {
+                    for (index, item) in items.iter().enumerate().rev() {
                         if item.by_reference {
                             self.external_reference(&item.value, scope);
                         }
-                        pending.push(Binding::Target(&item.value, ValueType::Mixed));
-                        if let Some(key) = &item.key {
-                            pending.push(Binding::Key(key));
-                        }
+                        pending.push(Binding::Element(item, index, ty.clone()));
                     }
                 }
                 ExpressionKind::Index { .. } => {
@@ -74,8 +84,28 @@ impl Analyzer<'_> {
                     }
                 }
                 _ => {
-                    if self.expression(target, scope, false) == ValueType::Never {
+                    let given_property = matches!(
+                        target.kind,
+                        ExpressionKind::Property { .. } | ExpressionKind::StaticProperty { .. }
+                    );
+                    let expected = if self.level >= 3 && given_property {
+                        self.member_expressions(target, scope, false)
+                    } else {
+                        self.expression(target, scope, false)
+                    };
+                    if expected == ValueType::Never {
                         return Evaluation::Never;
+                    }
+                    if given_property {
+                        self.check_property_assignment(target, &expected, &ty);
+                    }
+                    if self.level >= 2 {
+                        scope.forget_member_write(target);
+                        if matches!(target.kind, ExpressionKind::Property { .. })
+                            && let Some(place) = crate::scope::Place::of(target)
+                        {
+                            scope.facts.record(place, ty, None);
+                        }
                     }
                 }
             }
@@ -119,7 +149,13 @@ impl Analyzer<'_> {
             let ty = if old.definition == Definition::Absent {
                 ValueType::Array
             } else if old.ty == scope.get(name).ty {
-                old.ty
+                match old.ty {
+                    ValueType::Shape(_) | ValueType::Collection(_) => ValueType::Array,
+                    ValueType::StringLiteral(_) | ValueType::StringRefinement(_) => {
+                        ValueType::String
+                    }
+                    ty => ty,
+                }
             } else {
                 ValueType::Mixed
             };

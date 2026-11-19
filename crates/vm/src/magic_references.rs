@@ -19,6 +19,7 @@ pub(crate) struct ReferencePath {
     place: AccessPath,
     register: Reg,
     next: usize,
+    retry: Option<PathKey>,
     cursor: Value,
     detached: Option<Value>,
     keys: InlineStack<PathKey>,
@@ -33,6 +34,7 @@ pub(crate) enum ReferenceUse {
 
 pub(crate) enum ReferenceStep {
     Complete(Value),
+    Lazy(Rc<Object>),
     Hook(FunctionIndex, ReferenceGetter),
 }
 
@@ -85,6 +87,7 @@ impl Vm {
             place,
             register,
             next: 0,
+            retry: None,
             cursor: self.raw_local(register),
             detached: None,
             keys: InlineStack::new(),
@@ -100,7 +103,7 @@ impl Vm {
         let mut steps = place.steps()?.skip(path.next).peekable();
         while let Some(step) = steps.next() {
             path.next += 1;
-            let current = path.cursor.deref().clone();
+            let mut current = path.cursor.deref().clone();
             if let Step::Index(index) = step
                 && let Value::Object(object) = &current
                 && crate::dimensions::has_dimension(object)
@@ -114,11 +117,48 @@ impl Vm {
                     .await
                     .map(ReferenceStep::Complete);
             }
-            let key = if let Step::Index(index) = step {
+            let key = if let Some(key) = path.retry.take() {
+                key
+            } else if let Step::Index(index) = step {
                 PathKey::Index(Some(self.write_index_key(&current, index)?))
             } else {
                 self.magic_path_key(step).await?
             };
+            if let (PathKey::Property(name), Value::Object(object)) = (&key, &current) {
+                let effective = self.lazy_property_receiver(
+                    object,
+                    name,
+                    crate::lazy_property_access::LazyAccess::Reference,
+                );
+                if self.property_requires_initialization(
+                    &effective,
+                    name,
+                    crate::lazy_property_access::LazyAccess::Reference,
+                ) {
+                    path.retry = Some(key);
+                    path.next -= 1;
+                    return Ok(ReferenceStep::Lazy(effective));
+                }
+                if !Rc::ptr_eq(object, &effective) {
+                    if steps.peek().is_none()
+                        && self.property_guarded(&effective, name, PropertyHook::Get)
+                        && !self.property_guarded_locally(object, name, PropertyHook::Get)
+                        && !effective.has(name)
+                    {
+                        let value = self.read_declared_property(
+                            &effective,
+                            &crate::path_update::property_name(name),
+                            Missing::Warn,
+                        )?;
+                        return Ok(ReferenceStep::Complete(Value::Reference(Rc::new(
+                            RefCell::new(value),
+                        ))));
+                    }
+                    current = Value::Object(effective);
+                    path.detached = Some(current.clone());
+                    path.keys = InlineStack::new();
+                }
+            }
             let (key, next) = match (current, key) {
                 (Value::Object(object), PathKey::Property(name)) => {
                     let display = crate::path_update::property_name(&name);
@@ -157,6 +197,22 @@ impl Vm {
                                     ));
                                 }
                             }
+                        }
+                        if self.classes.has_lazy_objects
+                            && steps.peek().is_none()
+                            && stored.is_none()
+                            && let Some(key) = &slot
+                            && self.typed_property_uninitialized(&class, &object, key)
+                            && let Some(property) =
+                                class.defaults.iter().find(|property| property.key == *key)
+                            && property.ty.as_ref().is_some_and(|ty| {
+                                !ty.mask.intersects(phera_bytecode::TypeMask::NULL)
+                            })
+                        {
+                            return Err(NativeError::error(format!(
+                                "Cannot access uninitialized non-nullable property {}::${} by reference",
+                                property.declaring, property.name,
+                            )));
                         }
                         if stored.is_none()
                             && !slot.as_ref().is_some_and(|key| {

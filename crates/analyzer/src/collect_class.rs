@@ -11,6 +11,7 @@ pub fn class_info(
     names: &Names,
     source: &str,
     location: &impl Fn(usize) -> Location,
+    read_docs: bool,
 ) -> ClassInfo {
     let resolve = |n: &Name| names.resolve(n, UseKind::Class)[0].clone();
     let mut info = ClassInfo {
@@ -29,8 +30,34 @@ pub fn class_info(
         documented: crate::phpdoc::text(source, class.doc_comment)
             .map_or_else(Default::default, |doc| crate::phpdoc::members(doc, names)),
     };
+    if read_docs && class.doc_comment.is_some() {
+        let doc = crate::phpdoc::read(source, class.doc_comment, names, &Default::default());
+        info.documented.templates = doc.templates;
+        info.documented.template_names = doc.template_names;
+        info.documented.method_types = doc
+            .methods
+            .into_iter()
+            .filter_map(|(name, annotation)| {
+                if let ValueType::Callable(signature) = annotation.ty {
+                    Some((name, signature))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        info.documented.property_types = doc
+            .properties
+            .into_iter()
+            .map(|(name, annotation)| (name, annotation.ty))
+            .collect();
+        info.documented.generic_bases = doc
+            .bases
+            .into_iter()
+            .map(|annotation| annotation.ty)
+            .collect();
+    }
     for member in &class.members {
-        add_member(&mut info, member, names, source, location);
+        add_member(&mut info, member, names, source, location, read_docs);
     }
     crate::enums::add_members(&mut info, class, names);
     info.open_properties = class
@@ -46,11 +73,26 @@ fn add_member(
     names: &Names,
     source: &str,
     location: &impl Fn(usize) -> Location,
+    read_docs: bool,
 ) {
     match &member.kind {
         ClassMemberKind::Method(method) => {
             let doc = crate::phpdoc::text(source, member.doc_comment);
+            let documentation = (read_docs && member.doc_comment.is_some()).then(|| {
+                crate::phpdoc::read(
+                    source,
+                    member.doc_comment,
+                    names,
+                    &info.documented.templates,
+                )
+            });
             add_method(info, method, names, doc, member.span.start, location);
+            if let Some(documentation) = documentation
+                && let Some(signature) =
+                    info.methods.get_mut(&method.name.name.to_ascii_lowercase())
+            {
+                signature.documentation = Some(std::sync::Arc::new(documentation));
+            }
         }
         ClassMemberKind::Property {
             modifiers,
@@ -58,11 +100,28 @@ fn add_member(
             items,
             ..
         } => {
+            let documented = (read_docs && member.doc_comment.is_some()).then(|| {
+                crate::phpdoc::read(
+                    source,
+                    member.doc_comment,
+                    names,
+                    &info.documented.templates,
+                )
+            });
             for p in items {
                 info.properties.insert(
                     p.name.clone(),
                     PropertyInfo {
                         ty: ValueType::declared(ty.as_ref(), names),
+                        documented_type: documented.as_ref().and_then(|doc| {
+                            doc.variables
+                                .get(&Some(p.name.clone()))
+                                .or_else(|| doc.variables.get(&None))
+                                .map(|annotation| annotation.ty.clone())
+                        }),
+                        null_default: p.default.as_ref().is_some_and(|value| {
+                            matches!(value.kind, ExpressionKind::Literal(Literal::Null))
+                        }),
                         modifiers: *modifiers,
                         location: location(p.span.start),
                     },
@@ -127,6 +186,8 @@ fn add_method(
                 p.name.clone(),
                 PropertyInfo {
                     ty: ValueType::declared(p.ty.as_ref(), names),
+                    documented_type: None,
+                    null_default: false,
                     modifiers: p.modifiers,
                     location: location(p.span.start),
                 },

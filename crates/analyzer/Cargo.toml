@@ -8,6 +8,7 @@ license.workspace = true
 phera-source.workspace = true
 phera-lexer.workspace = true
 phera-ast.workspace = true
+phera-bytecode.workspace = true
 phera-parser.workspace = true
 
 [lints]

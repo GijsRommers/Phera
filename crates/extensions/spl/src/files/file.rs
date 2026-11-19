@@ -44,12 +44,13 @@ pub(super) struct File {
 
 impl File {
     pub(super) fn debug(&self, props: &mut PhpArray) {
+        let [separator, enclosure, _] = self.csv.bytes.strings();
         for (key, value) in [
-            ("openMode", &self.mode),
-            ("delimiter", &self.csv.separator),
-            ("enclosure", &self.csv.enclosure),
+            ("openMode", self.mode.clone()),
+            ("delimiter", separator),
+            ("enclosure", enclosure),
         ] {
-            information::private(props, FILE, key, Value::String(value.clone()));
+            information::private(props, FILE, key, Value::String(value));
         }
     }
 }

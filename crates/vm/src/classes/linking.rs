@@ -25,7 +25,7 @@ impl Vm {
                 })
             {
                 let key = declaration.name.to_ascii_lowercase();
-                if self.classes.entries.contains_key(&key) {
+                if self.classes.get_lowercase(&key).is_some() {
                     continue;
                 }
                 if let Err(error) = self.link_new_class(unit, unit_first, index, key) {
@@ -56,7 +56,7 @@ impl Vm {
         }
         let declaration = &unit.classes[index.index()];
         let key = declaration.name.to_ascii_lowercase();
-        if let Some(existing) = self.classes.entries.get(&key) {
+        if let Some(existing) = self.classes.get_lowercase(&key) {
             if declaration.kind == ClassKind::Anonymous {
                 return Ok(());
             }
@@ -398,7 +398,6 @@ impl Vm {
                 .is_some_and(|parent| parent.allows_dynamic_properties);
         let is_throwable = parent.as_ref().is_some_and(|parent| parent.is_throwable)
             || interfaces.iter().any(|interface| interface.is_throwable);
-        self.classes.order.push(name.clone());
         let index = self.classes.next_index();
         for method in &declaration.methods {
             let function = self.code.declared(unit_first, method.function.index());

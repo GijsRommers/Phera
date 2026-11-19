@@ -1,13 +1,14 @@
 //! Native classes enter the same root-first property layout and inherited method tables as PHP classes.
 
 use super::class::PropertyDefault;
-use super::{Class, ClassTable, Method, MethodBody};
+use super::class_table::ClassDefinitions;
+use super::{Class, Method, MethodBody};
 use phera_bytecode::{ClassKind, Type, TypeMask, Visibility};
 use phera_extension_api::{ClassKind as NativeKind, ConstantValue, NativeMethod};
 use phera_value::{ArrayKey, Object};
 use std::{collections::HashMap, rc::Rc};
 
-impl ClassTable {
+impl ClassDefinitions {
     /// Registries guarantee parents-first order, allowing native classes to use ordinary inheritance.
     pub(crate) fn native(registry: &phera_extension_api::Registry) -> Self {
         let mut table = Self::default();
@@ -275,6 +276,10 @@ impl ClassTable {
             );
         }
         table
+    }
+
+    fn get(&self, name: &str) -> Option<Rc<Class>> {
+        self.entries.get(&name.to_ascii_lowercase()).cloned()
     }
 }
 

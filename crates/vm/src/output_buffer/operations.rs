@@ -114,7 +114,7 @@ impl Vm {
         let stack = &self.output_writer.buffers.stack;
         let Some((index, buffer)) = stack.iter().enumerate().next_back() else {
             if let Some(message) = operation.empty_notice() {
-                self.notice(format!("{}(): {message}", function.name()));
+                self.buffer_notice(function, format!("{}(): {message}", function.name()));
             }
             return Ok(Value::Bool(false));
         };
@@ -125,21 +125,38 @@ impl Vm {
         if !permitted {
             let action = operation.denied();
             let name = buffer.name.clone();
-            self.notice(format!(
-                "{}(): Failed to {action} buffer of {name} ({index})",
-                function.name()
-            ));
-            if matches!(operation, Operation::GetClean | Operation::GetFlush) {
-                self.notice(format!(
-                    "{}(): Failed to delete buffer of {name} ({index})",
+            self.buffer_notice(
+                function,
+                format!(
+                    "{}(): Failed to {action} buffer of {name} ({index})",
                     function.name()
-                ));
+                ),
+            );
+            if matches!(operation, Operation::GetClean | Operation::GetFlush) {
+                self.buffer_notice(
+                    function,
+                    format!(
+                        "{}(): Failed to delete buffer of {name} ({index})",
+                        function.name()
+                    ),
+                );
             }
             return Ok(captured.unwrap_or(Value::Bool(false)));
         }
         self.apply_buffer(index, operation).await?;
         self.drain_output_from(Some(function.name())).await?;
         Ok(captured.unwrap_or(Value::Bool(true)))
+    }
+
+    fn buffer_notice(&mut self, function: OutputFunction, message: String) {
+        if self.handles_diagnostic(8) {
+            let native = crate::error_traces::NativeTrace::new(function.name(), &[]);
+            let previous = self.error_handlers.native_site.replace(native);
+            self.notice(message);
+            self.error_handlers.native_site = previous;
+        } else {
+            self.notice(message);
+        }
     }
 
     pub(crate) async fn drain_output(&mut self) -> Result<(), NativeError> {
@@ -210,7 +227,15 @@ impl Vm {
                 .buffers
                 .running
                 .replace(Running { index });
+            use crate::error_traces::{NativeCaller, NativeTrace};
+            let native = operation
+                .caller()
+                .map_or(NativeCaller::Internal(None), |name| {
+                    NativeCaller::Saved(NativeTrace::new(name, &[]))
+                });
+            self.push_native_callback(native);
             let result = self.invoke_resolved_callable(callback, arguments).await;
+            self.native_callback_sites.pop();
             let buffers = &mut self.output_writer.buffers;
             if buffers.lock_broken {
                 if previous.is_none() {

@@ -43,12 +43,21 @@ pub(super) struct Compiler<'ast> {
     pub(super) function: Function,
     pub(super) functions: Vec<Function>,
     pub(super) hoisted: Vec<usize>,
+    /// The lowercased names of the functions in `hoisted`, to find a
+    /// redeclaration without searching every earlier one.
+    pub(super) hoisted_names: std::collections::HashSet<String>,
     pub(super) constant_metadata: HashMap<String, phera_bytecode::reflection::DeclarationMetadata>,
     pub(super) classes: Vec<crate::ir::ClassDeclaration>,
     pub(super) hoisted_classes: Vec<usize>,
     pub(super) anonymous_classes: Rc<Cell<u64>>,
     pub(super) next: usize,
     pub(super) peak: usize,
+    /// The highest `next` since the current expression statement began; see
+    /// [`Compiler::clear_temporaries_after`].
+    pub(super) reach: usize,
+    /// The operand of the long-chain step being compiled; see
+    /// [`crate::expressions::chains`].
+    pub(super) compiled_operand: Option<crate::expressions::chains::CompiledOperand>,
     pub(super) locals: HashMap<String, Reg>,
     pub(super) loops: Vec<Loop>,
     /// Lexical cleanup scopes decide which finally blocks a structured exit crosses.
@@ -90,12 +99,15 @@ impl<'ast> Compiler<'ast> {
             },
             functions: vec![],
             hoisted: vec![],
+            hoisted_names: std::collections::HashSet::new(),
             constant_metadata: HashMap::new(),
             classes: vec![],
             hoisted_classes: vec![],
             anonymous_classes: Rc::default(),
             next: 0,
             peak: 0,
+            reach: 0,
+            compiled_operand: None,
             locals: HashMap::new(),
             loops: vec![],
             finalies: vec![],
@@ -131,6 +143,7 @@ impl<'ast> Compiler<'ast> {
             u16::try_from(self.next).map_err(|_| self.error("Phera register limit exceeded", 1))?;
         self.next += 1;
         self.peak = self.peak.max(self.next);
+        self.reach = self.reach.max(self.next);
         self.released.remove(&index);
         Ok(Reg(index))
     }

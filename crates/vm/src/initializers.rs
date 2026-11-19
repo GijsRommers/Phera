@@ -167,6 +167,20 @@ impl Vm {
                         diagnostics,
                     )?,
                 ),
+                // `'a' . self::B . 'c'` appends to its own left operand.
+                Instruction::AssignOp {
+                    op: operator,
+                    local,
+                    src,
+                } => (
+                    local,
+                    crate::ops::binary(
+                        operator,
+                        &slot(slots, local),
+                        &slot(slots, src),
+                        diagnostics,
+                    )?,
+                ),
                 Instruction::BinaryInt {
                     dst,
                     op: operator,

@@ -111,7 +111,9 @@ fn missing_key(key: &Object) -> NativeError {
 fn exists(_: &mut dyn Context, map: &Object, offset: Value) -> Result<bool, NativeError> {
     let key = key(offset, false)?;
     read_state(map, |state: &Map| {
-        state.get(&key).is_some_and(|value| !value.deref().is_null())
+        state
+            .get(&key)
+            .is_some_and(|value| !value.deref().is_null())
     })
 }
 
@@ -168,7 +170,10 @@ fn count(context: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult
 
 fn clone_map(original: &Rc<Object>, copy: &Object) -> Result<(), NativeError> {
     let owner = copy.serial();
-    store(copy, read_state(original, |state: &Map| state.copy_for(owner))?)
+    store(
+        copy,
+        read_state(original, |state: &Map| state.copy_for(owner))?,
+    )
 }
 
 fn view(

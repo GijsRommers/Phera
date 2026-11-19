@@ -12,7 +12,6 @@ impl Compiler<'_> {
         &mut self,
         expression: &ast::Expression,
     ) -> Result<Reg, CompileError> {
-        use ast::ExpressionKind;
         let line = self.lines.line(expression.span.start);
         if nullsafe::contains_nullsafe(expression) {
             return self.compile_nullsafe_chain(expression, line);
@@ -20,6 +19,18 @@ impl Compiler<'_> {
         if let Some(condition) = constant(expression) {
             return self.literal(condition, line);
         }
+        self.compile_expression_kind(expression, line)
+    }
+
+    /// Compile a node by its kind alone, without the checks of
+    /// [`Compiler::compile_expression_node`]. Steps of a long chain come here
+    /// directly; the chain was checked for `?->` as a whole.
+    pub(crate) fn compile_expression_kind(
+        &mut self,
+        expression: &ast::Expression,
+        line: usize,
+    ) -> Result<Reg, CompileError> {
+        use ast::ExpressionKind;
         match &expression.kind {
             ExpressionKind::Yield { key, value } => {
                 self.compile_yield(key.as_deref(), value.as_deref(), line)
@@ -96,7 +107,7 @@ impl Compiler<'_> {
                 then,
                 otherwise,
             } => self.compile_ternary(condition, then, otherwise, line),
-            ExpressionKind::Eval(code) => self.compile_eval(code, line),
+            ExpressionKind::Eval(code) => self.compile_eval(code),
             ExpressionKind::Include { kind, path } => self.compile_include(kind, path, line),
             ExpressionKind::Print(expression) => self.compile_print(expression, line),
             ExpressionKind::Exit(expression) => self.compile_exit(expression, line),
@@ -192,7 +203,8 @@ impl Compiler<'_> {
 pub(crate) mod arrays;
 pub(crate) mod assertion_text;
 pub(crate) mod assignments;
-mod calls;
+pub(crate) mod calls;
+pub(crate) mod chains;
 pub(crate) mod conditionals;
 mod generators;
 pub(crate) mod matching;

@@ -19,7 +19,7 @@ impl Analyzer<'_> {
                 &name.name,
                 span,
                 quiet
-                    || !access.reports_missing()
+                    || !access.reports_missing(self.level)
                     || self
                         .index
                         .class(class)
@@ -27,6 +27,16 @@ impl Analyzer<'_> {
                 PropertyAccess::Instance,
             )
         } else {
+            if self.level >= 2
+                && let MemberName::Identifier(name) = name
+            {
+                return self.property_receiver(
+                    ty,
+                    &name.name,
+                    span,
+                    quiet || !access.reports_missing(self.level),
+                );
+            }
             if let MemberName::Expression(e) = name
                 && self.expression(e, scope, false) == ValueType::Never
             {
@@ -46,18 +56,13 @@ impl Analyzer<'_> {
     ) -> ValueType {
         self.dependencies.resolve(self.index, class);
         if let Some(property) = self.index.property(class, name) {
-            self.relative_type(property.ty.clone(), class)
+            self.relative_type(property.effective_type(self.index), class)
+        } else if let Some(documented) = self.index.doc_property_type(class, name)
+            && matches!(access, PropertyAccess::Instance)
+        {
+            self.relative_type(documented.clone(), class)
         } else {
-            if !quiet
-                && self.index.complete(class)
-                && self
-                    .index
-                    .class(class)
-                    .is_some_and(|c| c.kind != ClassKind::Trait)
-                && (matches!(access, PropertyAccess::Static)
-                    || !self.index.open_properties(class)
-                        && !self.index.documented_property(class, name))
-            {
+            if !quiet && self.can_report_missing_property(class, name, access) {
                 let finding = match access {
                     PropertyAccess::Instance => Finding::UnknownProperty(class.into(), name.into()),
                     PropertyAccess::Static => {
@@ -70,8 +75,25 @@ impl Analyzer<'_> {
         }
     }
 
+    pub fn can_report_missing_property(
+        &self,
+        class: &str,
+        name: &str,
+        access: PropertyAccess,
+    ) -> bool {
+        self.index.complete(class)
+            && self
+                .index
+                .class(class)
+                .is_some_and(|c| c.kind != ClassKind::Trait)
+            && (matches!(access, PropertyAccess::Static)
+                || !self.index.open_properties(class)
+                    && !self.index.documented_property(class, name))
+    }
+
     pub fn relative_type(&self, ty: ValueType, class: &str) -> ValueType {
         match &ty {
+            ValueType::This => ValueType::Class(class.into()),
             ValueType::Class(name)
                 if matches!(name.to_ascii_lowercase().as_str(), "self" | "static") =>
             {
@@ -82,6 +104,27 @@ impl Analyzer<'_> {
                 .class(class)
                 .and_then(|c| c.parents.first())
                 .map_or(ValueType::Mixed, |p| ValueType::Class(p.clone())),
+            ValueType::Union(_)
+            | ValueType::Intersection(_)
+            | ValueType::Collection(_)
+            | ValueType::Shape(_)
+            | ValueType::Conditional(_)
+            | ValueType::Generic(_)
+            | ValueType::ClassString(_)
+                if self.level >= 2 =>
+            {
+                ty.substitute(
+                    &Default::default(),
+                    Some(crate::types::RelativeTypes {
+                        receiver: &ValueType::Class(class.into()),
+                        owner: class,
+                        parent: self
+                            .index
+                            .class(class)
+                            .and_then(|class| class.parents.first().map(String::as_str)),
+                    }),
+                )
+            }
             _ => ty,
         }
     }

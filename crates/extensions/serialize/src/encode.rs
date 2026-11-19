@@ -1,12 +1,16 @@
 //! `serialize([$object, $object])` emits `r:2;` for the second object occurrence.
 
 mod objects;
+pub(crate) mod sequence;
 
 use std::{collections::HashMap, rc::Rc};
 
 use phera_extension_api::serialization::precision;
 use phera_extension_api::value::with_float_repr;
-use phera_extension_api::{ArrayKey, Context, NativeError, NativeResult, Object, PhpArray, Value};
+use phera_extension_api::{
+    ArrayKey, Context, LocalFuture, NativeError, NativeResult, Object, PhpArray, PropertyPurpose,
+    PropertyView, PropertyViewContinuation, PropertyViewRequest, Value,
+};
 
 use crate::wire::Writer;
 
@@ -34,6 +38,7 @@ struct Encoder {
     frames: Vec<Frame>,
     slots: SerializationSlots,
     precision: Option<i32>,
+    restore_slots: bool,
 }
 
 /// Serializable methods may call serialize() with the parent's slot table.
@@ -49,41 +54,157 @@ pub async fn serialize(context: &mut dyn Context, arguments: &[Value]) -> Native
             "serialize() expects exactly 1 argument, 0 given",
         ));
     };
+    let value = value.try_deref()?.clone();
     let inherited = context.state().take::<SerializationSlots>();
-    let restore = inherited.is_some();
-    let mut encoder = Encoder {
+    let encoder = Encoder {
+        restore_slots: inherited.is_some(),
         slots: inherited.unwrap_or_default(),
         ..Encoder::default()
     };
-    let result = encoder.write_value(context, value).await;
-    if restore {
-        *context.state().get_or_default::<SerializationSlots>() =
-            std::mem::take(&mut encoder.slots);
+    encoder.write_value(context, Some(value)).await
+}
+
+struct PendingProperties {
+    encoder: Encoder,
+    object: Rc<Object>,
+    names: Option<Rc<PhpArray>>,
+}
+
+impl PropertyViewContinuation for PendingProperties {
+    fn resume(
+        self: Box<Self>,
+        context: &mut dyn Context,
+        properties: Rc<PhpArray>,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(async move {
+            let Self {
+                mut encoder,
+                object,
+                names,
+            } = *self;
+            let result = encoder
+                .write_object_properties(context, &object, properties, names)
+                .await;
+            encoder.finish_step(context, result)?;
+            encoder.precision = None;
+            encoder.write_value(context, None).await
+        })
     }
-    result?;
-    Ok(Value::from(encoder.output.finish()))
+
+    fn abandon(mut self: Box<Self>, context: &mut dyn Context) {
+        self.encoder.restore_slots(context);
+    }
+}
+
+struct PendingView {
+    object: Rc<Object>,
+    names: Option<Rc<PhpArray>>,
+}
+
+#[derive(Clone, Copy)]
+enum Views {
+    Inline,
+    Defer,
 }
 
 impl Encoder {
     async fn write_value(
+        mut self,
+        context: &mut dyn Context,
+        value: Option<Value>,
+    ) -> NativeResult {
+        let Some(value) = value.or_else(|| self.next_value(context)) else {
+            return Ok(self.finish(context));
+        };
+        let result = self.write_values(context, value, Views::Defer).await;
+        let Some(PendingView { object, names }) = self.finish_step(context, result)? else {
+            return Ok(self.finish(context));
+        };
+        Err(PropertyViewRequest {
+            object: object.clone(),
+            purpose: PropertyPurpose::Serialize,
+            function: "serialize",
+            arguments: Vec::new(),
+            continuation: Box::new(PendingProperties {
+                encoder: self,
+                object,
+                names,
+            }),
+        }
+        .suspend())
+    }
+
+    async fn write_values(
         &mut self,
         context: &mut dyn Context,
-        value: &Value,
-    ) -> Result<(), NativeError> {
-        let mut value = value.try_deref()?.clone();
+        mut value: Value,
+        views: Views,
+    ) -> Result<Option<PendingView>, NativeError> {
         loop {
             if let Some(object) = self.value(context, value)?
                 && !self.write_plain_object(context, &object)?
             {
-                self.object(context, object).await?;
+                if let Some(names) = self.object(context, &object).await? {
+                    if matches!(views, Views::Defer)
+                        && context.property_view_can_suspend(&object, PropertyPurpose::Serialize)
+                    {
+                        return Ok(Some(PendingView { object, names }));
+                    }
+                    let properties =
+                        if context.property_view_runs_code(&object, PropertyPurpose::Serialize) {
+                            match context
+                                .property_view(
+                                    object.clone(),
+                                    PropertyPurpose::Serialize,
+                                    "serialize",
+                                    &[],
+                                )
+                                .await?
+                            {
+                                PropertyView::Snapshot(properties)
+                                | PropertyView::DebugInfo(properties)
+                                | PropertyView::DebugSlots {
+                                    slots: properties, ..
+                                } => properties,
+                                PropertyView::Recursive => Rc::new(PhpArray::new()),
+                            }
+                        } else {
+                            Rc::new(context.serialization_properties(&object)?)
+                        };
+                    self.write_object_properties(context, &object, properties, names)
+                        .await?;
+                }
                 // A hook can change the request's serialization precision.
                 self.precision = None;
             }
             let Some(next) = self.next_value(context) else {
-                return Ok(());
+                return Ok(None);
             };
             value = next;
         }
+    }
+
+    fn finish(mut self, context: &mut dyn Context) -> Value {
+        self.restore_slots(context);
+        Value::from(self.output.finish())
+    }
+
+    fn restore_slots(&mut self, context: &mut dyn Context) {
+        if self.restore_slots {
+            *context.state().get_or_default::<SerializationSlots>() =
+                std::mem::take(&mut self.slots);
+        }
+    }
+
+    fn finish_step<T>(
+        &mut self,
+        context: &mut dyn Context,
+        result: Result<T, NativeError>,
+    ) -> Result<T, NativeError> {
+        if result.is_err() {
+            self.restore_slots(context);
+        }
+        result
     }
 
     fn next_value(&mut self, context: &mut dyn Context) -> Option<Value> {

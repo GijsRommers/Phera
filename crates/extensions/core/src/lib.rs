@@ -3,6 +3,7 @@
 //! and the exception classes.
 
 mod assertions;
+mod backtrace;
 mod constants;
 mod count;
 mod dump;
@@ -23,6 +24,7 @@ impl Extension for Core {
     fn register(&self, registry: &mut Registry) {
         interfaces::register(registry);
         constants::register(registry);
+        backtrace::register(registry);
         count::register(registry);
         iterator_functions::register(registry);
         dump::register(registry);

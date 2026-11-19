@@ -38,7 +38,7 @@ pub use object_handlers::{
 };
 pub use property_view_request::{PropertyViewContinuation, PropertyViewRequest};
 pub use registry::{ConstantValue, Registry};
-pub use state::{QuerySeparator, RequestState};
+pub use state::RequestState;
 pub use working_directory::WorkingDirectory;
 
 /// The PHP version exposed by the engine and its built-in modules.
@@ -63,4 +63,6 @@ pub trait Extension {
     fn register(&self, registry: &mut Registry);
 }
 
+pub mod fiber;
+pub mod ini;
 pub mod reflection;

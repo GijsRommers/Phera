@@ -15,7 +15,10 @@ use std::{
 use phera_extension_api::{LocalFuture, NativeError, Unwind};
 use phera_value::{Object, Value};
 
-use crate::{Vm, exception_unwind::append_previous, exceptions::Thrown, finally::Continuation};
+use crate::{
+    Vm, diagnostics::SourceLocation, error_traces::NativeCaller, exception_unwind::append_previous,
+    exceptions::Thrown, finally::Continuation,
+};
 
 use super::{Generator, Item, State, activation::Activation};
 
@@ -71,12 +74,21 @@ impl Vm {
     /// The queue keeps destruction iterative, including a chain of abandoned delegates.
     #[cold]
     pub(crate) fn drain_generator_releases(&mut self) -> LocalFuture<'_, Result<(), NativeError>> {
+        self.drain_generator_releases_at(None)
+    }
+
+    fn drain_generator_releases_at(
+        &mut self,
+        caller: Option<SourceLocation>,
+    ) -> LocalFuture<'_, Result<(), NativeError>> {
         Box::pin(async move {
             let Some(releases) = self.generator_releases.clone() else {
                 return Ok(());
             };
             self.draining_generators = true;
-            let result = self.run_generator_releases(&releases).await;
+            let result = self
+                .run_generator_releases(&releases, caller.as_ref())
+                .await;
             self.draining_generators = false;
             result
         })
@@ -90,7 +102,13 @@ impl Vm {
     ) -> LocalFuture<'_, NativeError> {
         Box::pin(async move {
             let previous = self.materialize_error(error);
-            match self.drain_generator_releases().await {
+            let caller = match &previous {
+                NativeError::Unwind(error) if self.current().is_none() => {
+                    error.0.downcast_ref::<Thrown>().map(Thrown::location)
+                }
+                _ => None,
+            };
+            match self.drain_generator_releases_at(caller).await {
                 Ok(()) => previous,
                 Err(error) => {
                     let replacement = self.materialize_error(error);
@@ -109,7 +127,11 @@ impl Vm {
         })
     }
 
-    async fn run_generator_releases(&mut self, queue: &Releases) -> Result<(), NativeError> {
+    async fn run_generator_releases(
+        &mut self,
+        queue: &Releases,
+        caller: Option<&SourceLocation>,
+    ) -> Result<(), NativeError> {
         loop {
             let released = queue.0.borrow_mut().pop();
             match released {
@@ -131,13 +153,19 @@ impl Vm {
                     drop(item);
                     drop(closure);
                 }
-                Some(Released::Close(activation)) => self.close_generator(activation).await?,
+                Some(Released::Close(activation)) => {
+                    self.close_generator(activation, caller).await?
+                }
                 None => return Ok(()),
             }
         }
     }
 
-    async fn close_generator(&mut self, activation: Activation) -> Result<(), NativeError> {
+    async fn close_generator(
+        &mut self,
+        activation: Activation,
+        caller: Option<&SourceLocation>,
+    ) -> Result<(), NativeError> {
         let position = activation.frame.ip().saturating_sub(1);
         let handlers: Vec<_> = self
             .code
@@ -153,6 +181,9 @@ impl Vm {
         let stop = self.call_stack.depth();
         let caller_silence = self.diagnostic_reporter.silence();
         let previous = self.closing_generator.replace(stop + 1);
+        if let Some(caller) = caller {
+            self.push_native_callback(NativeCaller::Internal(Some(caller.clone())));
+        }
         self.restore_generator_frame(activation);
         // The suspended expression's unfinished arguments cannot enter the cleanup.
         if let Some(frame) = self.current() {
@@ -161,6 +192,9 @@ impl Vm {
             self.registers.truncate(end);
         }
         let result = self.run_closing_finally(handlers, stop).await;
+        if caller.is_some() {
+            self.native_callback_sites.pop();
+        }
         self.closing_generator = previous;
         self.diagnostic_reporter.restore_silence(caller_silence);
         if self.call_stack.depth() > stop {

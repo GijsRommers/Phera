@@ -45,7 +45,11 @@ impl Analyzer<'_> {
                 }
                 let matches = subject.as_ref().zip(value.as_ref()).map(|(a, b)| a == b);
                 if matches != Some(false) {
-                    selected.push(branch.clone());
+                    let mut selected_scope = branch.clone();
+                    if self.level >= 2 {
+                        self.match_class_arm(&expression.subject, condition, &mut selected_scope);
+                    }
+                    selected.push(selected_scope);
                 }
                 if matches != Some(true) {
                     remaining = Some(branch);
@@ -66,6 +70,37 @@ impl Analyzer<'_> {
             *scope = Scope::join(&paths);
         }
         result
+    }
+
+    fn match_class_arm(&mut self, subject: &Expression, condition: &Expression, scope: &mut Scope) {
+        let (
+            ExpressionKind::ClassConstant {
+                class: variable,
+                name: MemberName::Identifier(subject_member),
+            },
+            ExpressionKind::ClassConstant {
+                class,
+                name: MemberName::Identifier(case_member),
+            },
+        ) = (&subject.kind, &condition.kind)
+        else {
+            return;
+        };
+        // `match ($node::class) { EnumNode::class => $node->choices() }`
+        // is a strict class match even when $node has an interface type.
+        if subject_member.name.eq_ignore_ascii_case("class")
+            && case_member.name.eq_ignore_ascii_case("class")
+            && let ExpressionKind::Name(name) = &class.kind
+            && let Some(class) = self.class_name(name, false)
+        {
+            self.refine_type(
+                variable,
+                ValueType::Class(class),
+                scope,
+                true,
+                condition.span,
+            );
+        }
     }
 
     fn match_arm(

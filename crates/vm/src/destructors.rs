@@ -130,6 +130,9 @@ impl Vm {
 
     /// Calls one object's destructor, after the visibility check PHP makes.
     pub(crate) async fn destruct(&mut self, object: Rc<Object>) -> Result<(), NativeError> {
+        if object.skips_destructor() {
+            return Ok(());
+        }
         let Some(class) = self.classes.for_object(&object) else {
             return Ok(());
         };

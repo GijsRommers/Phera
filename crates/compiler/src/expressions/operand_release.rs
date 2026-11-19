@@ -50,17 +50,38 @@ impl Temporaries {
     }
 }
 
+/// Where an expression's temporaries begin; see
+/// [`Compiler::temporaries_start`].
+#[derive(Clone, Copy)]
+pub(crate) struct TemporariesStart {
+    next: usize,
+    position: usize,
+    /// The highest register the enclosing code had reached.
+    outer_reach: usize,
+}
+
 impl Compiler<'_> {
-    /// Where the next expression's temporaries begin.
-    pub(crate) fn temporaries_start(&self) -> (usize, usize) {
-        (self.next, self.position())
+    /// Where the next expression's temporaries begin. Registers are handed
+    /// back and allocated again within an expression (see
+    /// `crate::temporaries`), so the expression's registers are those from
+    /// here up to the highest one it reaches.
+    pub(crate) fn temporaries_start(&mut self) -> TemporariesStart {
+        let start = TemporariesStart {
+            next: self.next,
+            position: self.position(),
+            outer_reach: self.reach,
+        };
+        self.reach = self.next;
+        start
     }
 
     /// The temporaries of the expression compiled since `start`.
-    pub(crate) fn temporaries_since(&self, (first, start): (usize, usize)) -> Temporaries {
+    pub(crate) fn temporaries_since(&mut self, start: TemporariesStart) -> Temporaries {
+        let end = self.reach.max(self.next);
+        self.reach = start.outer_reach.max(end);
         Temporaries {
-            registers: (first, self.next),
-            instructions: (start, self.position()),
+            registers: (start.next, end),
+            instructions: (start.position, self.position()),
         }
     }
 
@@ -68,7 +89,7 @@ impl Compiler<'_> {
     /// `result` is the call's own result and stays.
     pub(crate) fn release_call_operands(
         &mut self,
-        start: (usize, usize),
+        start: TemporariesStart,
         result: Reg,
         line: usize,
     ) {
@@ -81,7 +102,7 @@ impl Compiler<'_> {
 
     /// Clears the temporaries of an expression that has been used (a
     /// condition, a loop subject). A branch calls this on each way out.
-    pub(crate) fn release_temporaries(&mut self, temporaries: &Temporaries, line: usize) {
+    pub(crate) fn clear_owning_temporaries(&mut self, temporaries: &Temporaries, line: usize) {
         for register in self.owning(temporaries, None) {
             self.emit(Instruction::Clear { register }, line);
         }

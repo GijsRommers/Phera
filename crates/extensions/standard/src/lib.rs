@@ -5,12 +5,19 @@ use phera_extension_api::{Extension, Registry};
 mod arguments;
 mod arrays;
 mod constants;
+pub mod csv;
 pub mod environment;
+pub mod ini;
+mod last_error;
+mod locale;
 mod math;
 mod natural;
+mod network;
 mod offsets;
 mod packing;
 mod process;
+mod process_info;
+mod sleep;
 mod strings;
 mod time;
 mod version_compare;
@@ -34,11 +41,18 @@ impl Extension for Standard {
         arrays::register(registry);
         packing::register(registry);
         constants::register(registry);
+        csv::register(registry);
+        ini::register(registry);
         for entry in natural::FUNCTIONS.iter().chain(time::FUNCTIONS) {
             registry.function(*entry);
         }
         environment::register(registry);
         process::register(registry);
+        last_error::register(registry);
+        locale::register(registry);
+        process_info::register(registry);
+        sleep::register(registry);
+        network::register(registry);
     }
 }
 

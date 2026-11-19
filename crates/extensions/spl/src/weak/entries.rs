@@ -46,7 +46,11 @@ impl Entries {
     }
 
     /// Changes the value stored for `key` in place.
-    pub(super) fn update<R>(&self, key: &Rc<Object>, change: impl FnOnce(&mut Value) -> R) -> Option<R> {
+    pub(super) fn update<R>(
+        &self,
+        key: &Rc<Object>,
+        change: impl FnOnce(&mut Value) -> R,
+    ) -> Option<R> {
         self.contains(key)
             .then(|| key.update_attachment(self.owner, change))
             .flatten()
@@ -56,7 +60,11 @@ impl Entries {
     /// returns the value it replaces, for the caller to drop.
     pub(super) fn set(&mut self, owner: u64, key: &Rc<Object>, value: Value) -> Option<Value> {
         self.owner = owner;
-        if self.keys.get(&key.id).is_some_and(|weak| !weak.refers_to(key)) {
+        if self
+            .keys
+            .get(&key.id)
+            .is_some_and(|weak| !weak.refers_to(key))
+        {
             // A key that is gone left its id to this object.
             self.keys.shift_remove(&key.id);
         }
@@ -66,7 +74,11 @@ impl Entries {
 
     /// Removes `key`; returns its value, for the caller to drop.
     pub(super) fn unset(&mut self, key: &Rc<Object>) -> Option<Value> {
-        if !self.keys.get(&key.id).is_some_and(|weak| weak.refers_to(key)) {
+        if !self
+            .keys
+            .get(&key.id)
+            .is_some_and(|weak| weak.refers_to(key))
+        {
             return None;
         }
         self.keys.shift_remove(&key.id);

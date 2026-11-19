@@ -26,9 +26,10 @@
 //!
 //! A destructor that throws in phase 2 or 3 ends the request with "Fatal
 //! error: Uncaught ...", and no other destructor runs; `exit` in one ends it
-//! silently. A fatal error (as opposed to an uncaught exception) ends the
-//! request without any destructor. Whatever is still alive afterwards is
-//! freed without its destructor: the id pool is closed.
+//! silently. After a fatal error (as opposed to an uncaught exception) no
+//! object alive at that moment gets its destructor, but the objects that
+//! shutdown functions create do, as in any request. Whatever is still alive
+//! afterwards is freed without its destructor: the id pool is closed.
 //!
 //! The variables of the main script are its frame's registers. They are not
 //! released when the script's code ends, so that phase 2 can visit them; the
@@ -96,6 +97,21 @@ impl Vm {
         self.registers.release_frame(frame.start(), frame.base());
     }
 
+    /// An exception leaves the main script: its temporaries are released
+    /// on the way out, as PHP frees an unwound frame's live temporaries,
+    /// before the uncaught exception is reported. Its variables stay.
+    ///
+    /// ```php
+    /// Missing::$property = new Owner;   // Owner goes before "Fatal error"
+    /// ```
+    pub(crate) fn release_main_temporaries(&mut self, frame: &Frame) {
+        if frame.start() != 0 || Some(frame.function) != self.request_end.main {
+            return;
+        }
+        let variables = self.code.function(frame.function).locals.len();
+        self.registers.truncate(frame.base() + variables);
+    }
+
     /// The main script's variable in `register` was unset while it shared a
     /// cell with the globals table: the global goes too.
     pub(crate) fn forget_global_cell(
@@ -135,12 +151,18 @@ impl Vm {
     /// Ends the request in PHP's order; `end` says how the script's code
     /// ended.
     pub(crate) async fn finish_request(&mut self, end: ScriptEnd) {
+        if end == ScriptEnd::Fatal {
+            self.forget_destructors();
+        }
         // 1. Shutdown functions; they run after a fatal error too.
         self.run_shutdown_callbacks().await;
-        // 2. Destructors.
-        if end == ScriptEnd::Destructible {
-            self.run_request_destructors().await;
+        // Fibers still suspended are destroyed; what their stacks held is
+        // released, and its destructors run in the phases below.
+        if !self.suspended_fibers.is_empty() {
+            Box::pin(self.close_fibers()).await;
         }
+        // 2. Destructors.
+        self.run_request_destructors().await;
         // 3. Output buffers. Objects their callbacks create still get
         //    destructors, since the pool is not closed yet.
         self.finish_buffers().await;
@@ -148,6 +170,25 @@ impl Vm {
         drop(self.classes.ids().close());
         self.call_stack.clear();
         self.registers.truncate(0);
+    }
+
+    /// A fatal error: PHP marks every object alive as destructed, and those
+    /// already released wait for no destructor either.
+    ///
+    /// ```php
+    /// $alive = new D;                  // never destructed
+    /// register_shutdown_function(fn () => $GLOBALS['late'] = new D);
+    /// eval('function f() {}'); eval('function f() {}');   // fatal
+    /// // the shutdown function runs; $late is destructed at the end
+    /// ```
+    fn forget_destructors(&mut self) {
+        for object in self.classes.live_objects() {
+            if object.destruction() == Destruction::Due {
+                object.mark_destructed();
+            }
+        }
+        // Marked first, so that nothing these free is queued again.
+        drop(self.object_ids.take_doomed());
     }
 
     /// The destructor phases, with the main script's frame back on the

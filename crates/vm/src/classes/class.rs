@@ -149,12 +149,41 @@ impl ClassHandle for Class {
     fn as_any(&self) -> &dyn Any {
         self
     }
+    fn order_lazy_properties(&self, properties: phera_value::PhpArray) -> phera_value::PhpArray {
+        let mut ordered = phera_value::PhpArray::with_capacity(properties.len());
+        for property in &self.defaults {
+            if let Some(value) = properties.get(&property.key) {
+                ordered.insert(property.key.clone(), value.clone());
+            }
+        }
+        for (key, value) in properties.iter() {
+            if !ordered.contains_key(&key) {
+                ordered.insert(key, value.clone());
+            }
+        }
+        ordered
+    }
+
     fn is_enum(&self) -> bool {
         self.kind == ClassKind::Enum
     }
 }
 
 impl Class {
+    /// Whether the class and every ancestor is written in PHP. A class that
+    /// extends a built-in one keeps that parent's own view of an object: the
+    /// elements of an `SplFixedArray`, the date of a `DateTime`.
+    pub(crate) fn has_only_php_ancestors(&self) -> bool {
+        let mut current = Some(self);
+        while let Some(class) = current {
+            if class.origin != ClassOrigin::User {
+                return false;
+            }
+            current = class.parent.as_deref();
+        }
+        true
+    }
+
     /// Traverse ancestry iteratively so user inheritance never grows the Rust stack.
     pub(crate) fn is_a(&self, name: &str) -> bool {
         if self.name.eq_ignore_ascii_case(name) {
@@ -290,9 +319,11 @@ impl Class {
             return *result;
         }
         let result = self.is_a(name);
-        self.declaration_matches
-            .borrow_mut()
-            .insert(name.to_owned(), result);
+        let mut declarations = self.declaration_matches.borrow_mut();
+        // Native definitions outlive requests. Cache only bounded, canonical ancestry matches.
+        if self.declaration.is_some() || (result && declarations.len() < 64) {
+            declarations.insert(name.to_owned(), result);
+        }
         result
     }
 }

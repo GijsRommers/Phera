@@ -26,14 +26,18 @@ pub fn register(registry: &mut Registry) {
     });
     registry.class(ClassEntry {
         constants: constants::CONSTANTS,
-        deprecated_constants: constants::SQLITE_DEPRECATED,
+        deprecated_constants: constants::DRIVER_DEPRECATED,
         methods: PDO_METHODS,
         hooks: Some(&UNCOPYABLE_CONNECTION),
         ..ClassEntry::class("PDO")
     });
-    for name in ["Pdo\\Pgsql", "Pdo\\Mysql"] {
+    for (name, constants) in [
+        ("Pdo\\Pgsql", constants::PGSQL),
+        ("Pdo\\Mysql", constants::MYSQL),
+    ] {
         registry.class(ClassEntry {
             parent: Some("PDO"),
+            constants,
             methods: PDO_METHODS,
             ..ClassEntry::class(name)
         });
