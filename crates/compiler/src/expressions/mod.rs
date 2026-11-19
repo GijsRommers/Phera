@@ -1,5 +1,7 @@
 //! Bytecode lowering for expressions.
 
+mod builtin_calls;
+
 use phera_ast as ast;
 use phera_bytecode::Reg;
 

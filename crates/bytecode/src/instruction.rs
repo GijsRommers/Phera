@@ -278,6 +278,11 @@ pub enum Instruction {
         dst: Reg,
         src: Reg,
     },
+    BuiltinUnary {
+        op: crate::BuiltinUnary,
+        dst: Reg,
+        src: Reg,
+    },
     Cast {
         to: CastKind,
         dst: Reg,

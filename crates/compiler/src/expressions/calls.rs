@@ -34,9 +34,20 @@ impl Compiler<'_> {
         if let ExpressionKind::Name(name) = &callee.kind
             && callee.span == name.span
         {
+            let (resolved, fallback) = self.resolve(name, NameKind::Function);
+            if fallback.is_none()
+                && let Some(result) = self.compile_builtin_call(&resolved, arguments, line)?
+            {
+                return Ok(result);
+            }
             quoted_condition = self.assertion_text(name, arguments);
-            let (name, fallback) = self.resolve(name, NameKind::Function);
-            self.emit(Instruction::StartCall { name, fallback }, line);
+            self.emit(
+                Instruction::StartCall {
+                    name: resolved,
+                    fallback,
+                },
+                line,
+            );
         } else {
             let callee = self.compile_expression(callee)?;
             self.emit(Instruction::StartDynamicCall { callee }, line);

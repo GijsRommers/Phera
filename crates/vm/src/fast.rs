@@ -108,6 +108,16 @@ pub(crate) fn scalar_step(
         Instruction::LoadInt { dst, value } => store_integer(slots, dst, i64::from(value)),
         Instruction::LoadNull { dst } => store(slots, dst, Value::Null),
         Instruction::LoadBool { dst, value } => store(slots, dst, Value::Bool(value)),
+        Instruction::BuiltinUnary { op, dst, src } => {
+            let Some(Some(value)) = slots.get(src.index()) else {
+                return ScalarStep::Fallback;
+            };
+            match crate::builtin_calls::builtin_value(op, value) {
+                Some(Value::Int(value)) => store_integer(slots, dst, value),
+                Some(value) => store(slots, dst, value),
+                None => ScalarStep::Fallback,
+            }
+        }
         Instruction::Cast {
             to: phera_bytecode::CastKind::Bool,
             dst,

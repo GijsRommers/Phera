@@ -186,6 +186,11 @@ impl Instruction {
                 destination: dst,
                 source: src,
                 ..
+            }
+            | Instruction::BuiltinUnary {
+                destination: dst,
+                source: src,
+                ..
             } => {
                 *dst = map(*dst);
                 *src = map(*src)

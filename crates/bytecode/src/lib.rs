@@ -34,6 +34,7 @@
 //!
 //! See `docs/architecture.md`, sections 4 and 9.3.
 
+mod builtin;
 mod class;
 mod display;
 mod function;
@@ -42,6 +43,7 @@ mod instruction;
 pub mod reflection;
 mod unit;
 
+pub use builtin::BuiltinUnary;
 pub use class::{
     ClassConstant, ClassDeclaration, ClassKind, EnumBacking, EnumCase, Initializer,
     MethodDeclaration, PropertyDeclaration, PropertyHook, PropertyHooks, TRAIT_CLASS_NAME,

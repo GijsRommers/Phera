@@ -11,13 +11,21 @@ use crate::RuntimeError;
 /// Each PHP file is compiled once and then shared, read-only, by every
 /// request on every thread. This is what makes "a fresh VM per request"
 /// cheap: only the code's state is fresh, never the code.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub(crate) struct CodeCache {
     /// Keyed by canonical path, so `./a.php` and `/srv/a.php` share an entry.
     units: Arc<Mutex<HashMap<PathBuf, Arc<CompiledUnit>>>>,
+    registry: Arc<phera_extension_api::Registry>,
 }
 
 impl CodeCache {
+    pub(crate) fn new(registry: Arc<phera_extension_api::Registry>) -> Self {
+        Self {
+            units: Arc::default(),
+            registry,
+        }
+    }
+
     /// Returns the compiled unit for `path`, compiling it on first use.
     ///
     /// Reads the file and compiles, both of which block, so async callers
@@ -35,9 +43,10 @@ impl CodeCache {
         // Compile without holding the lock, so other files load meanwhile.
         // Two threads may compile the same file once; the result is the same.
         let source = std::fs::read(&canonical).map_err(read_error)?;
-        let unit = Arc::new(phera_compiler::compile_bytes(
+        let unit = Arc::new(phera_compiler::compile_bytes_with_natives(
             &source,
             &canonical.to_string_lossy(),
+            &|name| self.registry.get_function(name).is_some(),
         )?);
         self.lock().insert(canonical, unit.clone());
         Ok(unit)

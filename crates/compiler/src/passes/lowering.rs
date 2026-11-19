@@ -301,6 +301,11 @@ impl Tables {
                     },
                 },
             },
+            Old::BuiltinUnary {
+                destination: dst,
+                operator: op,
+                source: src,
+            } => Instruction::BuiltinUnary { op, dst, src },
             Old::Echo(src) => Instruction::Echo { src },
             Old::Jump(target) => Instruction::Jump {
                 target: Target(target.0 as u32),

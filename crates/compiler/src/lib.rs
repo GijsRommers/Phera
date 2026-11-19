@@ -34,8 +34,25 @@ pub fn compile_bytes(
     source: &[u8],
     file: &str,
 ) -> Result<phera_bytecode::CompiledUnit, CompileError> {
-    compile_source(source, file, pipeline::SourceKind::File)
+    compile_source(source, file, pipeline::SourceKind::File, None)
 }
+
+/// Optimize calls to standard native functions enabled for this runtime.
+pub fn compile_bytes_with_natives(
+    source: &[u8],
+    file: &str,
+    native_functions: &NativeFunctions<'_>,
+) -> Result<phera_bytecode::CompiledUnit, CompileError> {
+    compile_source(
+        source,
+        file,
+        pipeline::SourceKind::File,
+        Some(native_functions),
+    )
+}
+
+/// A read-only inventory shared with the compiler thread.
+pub type NativeFunctions<'a> = dyn Fn(&str) -> bool + Sync + 'a;
 
 /// Compile the code passed to `eval()` without requiring an opening tag.
 pub fn compile_eval(
@@ -52,15 +69,23 @@ pub fn compile_eval_with_seed(
     anonymous_seed: u64,
 ) -> Result<phera_bytecode::CompiledUnit, CompileError> {
     let code = [b"<?php ".as_slice(), source].concat();
-    compile_source(&code, file, pipeline::SourceKind::Eval { anonymous_seed })
+    compile_source(
+        &code,
+        file,
+        pipeline::SourceKind::Eval { anonymous_seed },
+        None,
+    )
 }
 
 fn compile_source(
     source: &[u8],
     file: &str,
     kind: pipeline::SourceKind,
+    native_functions: Option<&NativeFunctions<'_>>,
 ) -> Result<phera_bytecode::CompiledUnit, CompileError> {
-    on_compile_stack(file, || pipeline::compile_on_stack(source, file, kind))
+    on_compile_stack(file, || {
+        pipeline::compile_on_stack(source, file, kind, native_functions)
+    })
 }
 
 fn on_compile_stack<T: Send>(

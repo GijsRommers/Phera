@@ -124,6 +124,7 @@ impl Vm {
             I::BinaryInt { op, dst, lhs, rhs } => self.execute_binary_int(op, dst, lhs, rhs)?,
             I::Binary { dst, op, lhs, rhs } => return self.execute_binary(op, dst, lhs, rhs),
             I::Unary { dst, op, src } => self.execute_unary(dst, op, src)?,
+            I::BuiltinUnary { op, dst, src } => return self.execute_builtin_unary(op, src, dst),
             I::Cast { to, dst, src } => {
                 if to == phera_bytecode::CastKind::String && self.operand(src).is_object() {
                     return Ok(Some(BatchExit::Instruction(instruction)));

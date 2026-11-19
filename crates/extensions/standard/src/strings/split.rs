@@ -106,7 +106,7 @@ fn explode(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let limit = args::int(arguments, 2).unwrap_or(i64::MAX);
     if separator.is_empty() {
         return Err(NativeError::value_error(
-            "explode(): Argument #1 ($separator) cannot be empty",
+            "explode(): Argument #1 ($separator) must not be empty",
         ));
     }
     let most_parts = if limit < 0 {

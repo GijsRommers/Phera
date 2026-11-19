@@ -62,6 +62,7 @@ pub(super) struct Compiler<'ast> {
     pub(super) uses_hook_backing: bool,
     pub(super) imports: Option<Imports>,
     pub(super) reflection: &'ast ReflectionInputs,
+    pub(super) native_functions: Option<&'ast crate::NativeFunctions<'ast>>,
 }
 impl<'ast> Compiler<'ast> {
     /// Start an independent function builder in the current namespace.
@@ -103,6 +104,7 @@ impl<'ast> Compiler<'ast> {
             uses_hook_backing: false,
             imports: None,
             reflection,
+            native_functions: None,
         }
     }
 

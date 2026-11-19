@@ -27,6 +27,8 @@ use crate::{AccessPath, Vm};
 pub(crate) enum LinkedFunction {
     Php(FunctionIndex),
     Other(Callee),
+    /// An unqualified name in a namespace links separately at each instruction.
+    NamespaceFallback,
 }
 
 impl Vm {
@@ -45,23 +47,68 @@ impl Vm {
             Some(linked) => linked,
             None => self.link_function_symbol(symbol)?,
         };
+        let linked = match linked {
+            LinkedFunction::NamespaceFallback => self.link_namespace_call_site(symbol)?,
+            linked => linked,
+        };
         match linked {
             LinkedFunction::Php(function) => {
                 self.prepare_php_call(function);
                 Ok(())
             }
             LinkedFunction::Other(callee) => self.prepare_call(callee),
+            LinkedFunction::NamespaceFallback => Err(internal_error!("namespace site target")),
         }
     }
 
     /// Find what a function symbol names, with PHP's namespace fallback, and
     /// remember it for the file: a declared function cannot go away.
     fn link_function_symbol(&mut self, symbol: SymbolId) -> Result<LinkedFunction, NativeError> {
-        let definition = self
-            .current()
+        let definition = self.function_symbol(symbol)?;
+        let linked = if definition.fallback.is_some() {
+            LinkedFunction::NamespaceFallback
+        } else {
+            self.resolve_function_symbol(&definition)?
+        };
+        if let Some(frame) = self.current()
+            && let Some(slot) = frame.cache().symbols.borrow_mut().get_mut(symbol.index())
+        {
+            *slot = Some(linked.clone());
+        }
+        Ok(linked)
+    }
+
+    fn function_symbol(&self, symbol: SymbolId) -> Result<phera_bytecode::Symbol, NativeError> {
+        self.current()
             .and_then(|frame| frame.unit().symbols.get(symbol.index()))
             .cloned()
-            .ok_or_else(|| internal_error!("invalid symbol"))?;
+            .ok_or_else(|| internal_error!("invalid symbol"))
+    }
+
+    /// Zend remembers the first successful target at an INIT_NS_FCALL site.
+    /// A different site can see a declaration that happened in the meantime.
+    #[inline(never)]
+    fn link_namespace_call_site(&self, symbol: SymbolId) -> Result<LinkedFunction, NativeError> {
+        use crate::unit_caches::CachedSite;
+        let frame = self
+            .current()
+            .ok_or_else(|| internal_error!("namespace call frame"))?;
+        let site = frame
+            .cache()
+            .site(frame.function_id(), frame.ip())
+            .ok_or_else(|| internal_error!("namespace call site"))?;
+        if let CachedSite::Function(callee) = &*site.borrow() {
+            return Ok((**callee).clone());
+        }
+        let linked = self.resolve_function_symbol(&self.function_symbol(symbol)?)?;
+        *site.borrow_mut() = CachedSite::Function(Box::new(linked.clone()));
+        Ok(linked)
+    }
+
+    fn resolve_function_symbol(
+        &self,
+        definition: &phera_bytecode::Symbol,
+    ) -> Result<LinkedFunction, NativeError> {
         let name = if self.exists(&definition.name) {
             &definition.name
         } else if let Some(fallback) = definition
@@ -78,16 +125,10 @@ impl Vm {
             &definition.written,
             definition.fallback.as_deref().unwrap_or(&definition.name),
         )?;
-        let linked = match callee.target {
+        Ok(match callee.target {
             CallTarget::User(function) => LinkedFunction::Php(function),
             _ => LinkedFunction::Other(callee),
-        };
-        if let Some(frame) = self.current()
-            && let Some(slot) = frame.cache().symbols.borrow_mut().get_mut(symbol.index())
-        {
-            *slot = Some(linked.clone());
-        }
-        Ok(linked)
+        })
     }
 
     /// Resolve a computed callable after publishing its conversion diagnostics.

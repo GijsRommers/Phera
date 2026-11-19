@@ -266,6 +266,11 @@ pub enum Instruction {
         operator: Unary,
         source: Reg,
     },
+    BuiltinUnary {
+        destination: Reg,
+        operator: phera_bytecode::BuiltinUnary,
+        source: Reg,
+    },
     /// Write a PHP string conversion to output; emits Echo.
     Echo(Reg),
     /// Transfer control to an IR target; emits Jump with a relocated target.

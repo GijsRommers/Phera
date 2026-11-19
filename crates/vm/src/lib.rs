@@ -25,6 +25,7 @@ mod array_slots;
 mod arrays;
 mod attribute_diagnostics;
 mod autoload;
+mod builtin_calls;
 mod callable_classes;
 mod callable_introspection;
 mod callables;
