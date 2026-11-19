@@ -137,6 +137,12 @@ pub fn import_simplexml(context: &mut dyn Context, arguments: &[Value]) -> Nativ
             "dom_import_simplexml(): Argument #1 ($node) is not a valid node type",
         ));
     };
+    if node.document(|document| document.settings.modern) {
+        return Err(NativeError::type_error(concat!(
+            "dom_import_simplexml(): Argument #1 ($node) ",
+            "must not be already imported as a Dom\\Node",
+        )));
+    }
     node.export_dom(context)
 }
 
