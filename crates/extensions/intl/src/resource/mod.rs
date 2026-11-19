@@ -1,13 +1,15 @@
 //! ResourceBundle holds locale data in ordered PHP-accessible tables.
 
+mod binary;
 mod data;
+mod files;
 mod registration;
 
 use std::rc::Rc;
 
 use phera_extension_api::{
-    ArrayKey, Context, NativeError, NativeIterator, NativeResult, Object, PhpArray, Registry,
-    Value, args,
+    ArrayKey, Context, LocalFuture, NativeError, NativeIterator, NativeResult, Object, PhpArray,
+    Registry, Value, args,
 };
 
 use self::data::{Node, Table};
@@ -18,6 +20,7 @@ const CLASS: &str = "ResourceBundle";
 #[derive(Clone)]
 struct State {
     table: Table,
+    inheritance: Vec<Table>,
     error: (i32, Option<String>),
 }
 
@@ -25,46 +28,67 @@ pub fn register(registry: &mut Registry) {
     registration::register(registry);
 }
 
-fn create(
-    context: &mut dyn Context,
-    object: Option<&Rc<Object>>,
-    values: &[Value],
-    site: &str,
-) -> NativeResult {
-    error::clear(context);
-    let name = args::string(values, 1).map(|name| String::from_utf8_lossy(name.as_bytes()));
-    let name = name.as_deref().unwrap_or("ICUDATA");
-    let locale = locale::effective(context, args::bytes(values, 0));
-    let modern = locale_id::cldr(&locale);
-    let fallback = args::bool(values, 2).unwrap_or(true);
-    if !data::known(name) || (!fallback && !number::known_language(modern.id.language.as_str())) {
-        let detail = "Cannot load libICU resource bundle";
-        if object.is_some() {
-            return Err(NativeError::throw(
-                "IntlException",
-                format!("{site}(): {detail}"),
+fn create<'a>(
+    context: &'a mut dyn Context,
+    object: Option<Rc<Object>>,
+    values: Vec<Value>,
+    site: &'static str,
+) -> LocalFuture<'a, NativeResult> {
+    Box::pin(async move {
+        error::clear(context);
+        if let Some(object) = &object
+            && object.native_payload().map_err(|_| missing())?.is_some()
+        {
+            return Err(NativeError::error(
+                "ResourceBundle object is already constructed",
             ));
         }
-        return error::fail(context, site, 2, detail, Value::Null);
-    }
-    let table = data::open(&modern, name);
-    if let Some(object) = object {
-        *object.native_payload_mut().map_err(|_| missing())? = Some(Box::new(State {
-            table,
-            error: (0, None),
-        }));
-        return Ok(Value::Null);
-    }
-    make(context, table)
+        let name = args::string(&values, 1).map(|name| String::from_utf8_lossy(name.as_bytes()));
+        let name = name.as_deref().unwrap_or("ICUDATA");
+        let locale = locale::effective(context, args::bytes(&values, 0));
+        let fallback = args::bool(&values, 2).unwrap_or(true);
+        let loaded = if data::known(name) {
+            let modern = locale_id::cldr(&locale);
+            (fallback || number::known_language(modern.id.language.as_str())).then(|| {
+                files::Loaded {
+                    direct: data::open(&modern, name),
+                    inheritance: Vec::new(),
+                    status: 0,
+                }
+            })
+        } else if name.is_empty() {
+            None
+        } else {
+            files::open(&files::path(context, name)?, &locale, fallback).await
+        };
+        let Some(loaded) = loaded else {
+            let detail = "Cannot load libICU resource bundle";
+            if object.is_some() {
+                return Err(NativeError::throw(
+                    "IntlException",
+                    format!("{site}(): {detail}"),
+                ));
+            }
+            return error::fail(context, site, 2, detail, Value::Null);
+        };
+        error::warning_code(context, loaded.status);
+        let state = State {
+            table: loaded.direct,
+            inheritance: loaded.inheritance,
+            error: (loaded.status, None),
+        };
+        if let Some(object) = object {
+            *object.native_payload_mut().map_err(|_| missing())? = Some(Box::new(state));
+            return Ok(Value::Null);
+        }
+        make(context, state)
+    })
 }
 
-fn make(context: &mut dyn Context, table: Table) -> NativeResult {
+fn make(context: &mut dyn Context, state: State) -> NativeResult {
     let object = context.create_object(CLASS, PhpArray::new())?;
     if let Value::Object(object) = &object {
-        *object.native_payload_mut().map_err(|_| missing())? = Some(Box::new(State {
-            table,
-            error: (0, None),
-        }));
+        *object.native_payload_mut().map_err(|_| missing())? = Some(Box::new(state));
     }
     Ok(object)
 }
@@ -83,17 +107,49 @@ fn lookup(table: &Table, key: &Value) -> Option<Node> {
         Value::Int(index) => table.get(usize::try_from(*index).ok()?),
         Value::String(key) => table
             .iter()
-            .find(|(name, _)| name.as_bytes() == key.as_bytes()),
+            .find(|(name, _)| matches!(name, ArrayKey::String(name) if name == key)),
         _ => None,
     }?;
     Some(row.1.clone())
 }
 
-fn get(context: &mut dyn Context, object: &Object, index: &Value, site: &str) -> NativeResult {
+fn get(
+    context: &mut dyn Context,
+    object: &Object,
+    index: &Value,
+    fallback: bool,
+    site: &str,
+) -> NativeResult {
     error::clear(context);
+    match &*index.deref() {
+        Value::Int(index) if i32::try_from(*index).is_err() => {
+            return Err(NativeError::value_error(
+                "Index must be between -2147483648 and 2147483647",
+            ));
+        }
+        Value::String(index) if index.as_bytes().is_empty() => {
+            return Err(NativeError::value_error("Offset must not be empty"));
+        }
+        Value::Int(_) | Value::String(_) => {}
+        value => {
+            return Err(NativeError::type_error(format!(
+                "Cannot access offset of type {} on ResourceBundle",
+                value.type_name(),
+            )));
+        }
+    }
     let value = update(object, |state| {
         state.error = (0, None);
-        lookup(&state.table, index)
+        lookup(&state.table, index).or_else(|| {
+            fallback
+                .then(|| {
+                    state
+                        .inheritance
+                        .iter()
+                        .find_map(|table| lookup(table, index))
+                })
+                .flatten()
+        })
     })?;
     if let Some(value) = value {
         return wrap(context, value);
@@ -114,7 +170,14 @@ fn get(context: &mut dyn Context, object: &Object, index: &Value, site: &str) ->
 
 fn wrap(context: &mut dyn Context, value: Node) -> NativeResult {
     match value {
-        Node::Table(table) => make(context, table),
+        Node::Table(table) => make(
+            context,
+            State {
+                table,
+                inheritance: Vec::new(),
+                error: (0, None),
+            },
+        ),
         Node::Scalar(value) => Ok(value),
     }
 }
@@ -123,23 +186,35 @@ fn count(_: &mut dyn Context, object: &Object) -> Result<i64, NativeError> {
     update(object, |state| state.table.len() as i64)
 }
 
-fn locales(context: &mut dyn Context, values: &[Value], site: &str) -> NativeResult {
-    error::clear(context);
-    let name = String::from_utf8_lossy(args::bytes(values, 0));
-    if !name.is_empty() && !data::known(&name) {
-        return error::fail(
-            context,
-            site,
-            2,
-            "Cannot get locales list",
-            Value::Bool(false),
-        );
-    }
-    let result: PhpArray = data::available()
-        .enumerate()
-        .map(|(index, name)| (ArrayKey::Int(index as i64), Value::from(name)))
-        .collect();
-    Ok(Value::from(result))
+fn locales<'a>(
+    context: &'a mut dyn Context,
+    values: Vec<Value>,
+    site: &'static str,
+) -> LocalFuture<'a, NativeResult> {
+    Box::pin(async move {
+        error::clear(context);
+        let name = String::from_utf8_lossy(args::bytes(&values, 0));
+        let names = if name.is_empty() || data::known(&name) {
+            data::available().map(str::to_owned).collect()
+        } else {
+            let Some(names) = files::index(&files::path(context, &name)?).await else {
+                return error::fail(
+                    context,
+                    site,
+                    2,
+                    "Cannot get locales list",
+                    Value::Bool(false),
+                );
+            };
+            names
+        };
+        let result: PhpArray = names
+            .into_iter()
+            .enumerate()
+            .map(|(index, name)| (ArrayKey::Int(index as i64), Value::from(name)))
+            .collect();
+        Ok(Value::from(result))
+    })
 }
 
 fn last_error(object: &Object, text: bool) -> NativeResult {
@@ -192,7 +267,10 @@ impl NativeIterator for Cursor {
         Ok(self
             .table
             .get(self.index)
-            .map_or(Value::Null, |(key, _)| Value::from(key.as_str())))
+            .map_or(Value::Null, |(key, _)| match key {
+                ArrayKey::Int(index) => Value::Int(*index),
+                ArrayKey::String(name) => Value::String(name.clone()),
+            }))
     }
 }
 

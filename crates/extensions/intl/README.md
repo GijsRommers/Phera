@@ -25,7 +25,7 @@ when it is a shared module.
 | `Transliterator`, `transliterator_*` | Compound named transforms, Latin-ASCII, normalization, case mapping, and selected script and BGN romanizations. User rules, inverse IDs and full ICU transform coverage are partial. |
 | `IntlTimeZone`, `intltz_*` | Zone construction, offsets, aliases, Windows mappings and conversion to PHP date zones. ICU-specific enumeration, rule comparisons and localized zone names are partial. |
 | `IntlCalendar`, `IntlGregorianCalendar`, `intlcal_*`, `intlgregcal_*` | Millisecond instants, field access and mutation, conversion to PHP dates, Gregorian cutover and locale week data. Field limits, non-Gregorian mutation and ICU wall time settings are partial. |
-| `ResourceBundle`, `resourcebundle_*` | Selected compiled locale tables, read-only indexing and iteration. External binary ICU bundles, locale inheritance and many built-in keys are incomplete. |
+| `ResourceBundle`, `resourcebundle_*` | Selected compiled locale tables and native-endian standalone ResB directories with read-only indexing and iteration. Shared pools, aliases, complete locale inheritance and many built-in keys remain incomplete. |
 | `IntlBreakIterator`, `IntlIterator`, `IntlPartsIterator` | Character, code point, word, line and sentence iteration, with PHP byte offsets and parts. Title and custom ICU break rules are unsupported. |
 | `IntlListFormatter` | PHP 8.5 conjunction, disjunction and unit patterns in wide, short and narrow widths. |
 | `IntlChar` | Code points, case mapping, combining classes, digit conversion and common Unicode categories and predicates. The full ICU property and name APIs are unsupported. |

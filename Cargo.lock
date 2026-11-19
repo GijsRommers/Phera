@@ -2492,6 +2492,7 @@ dependencies = [
  "phera-ext-standard",
  "phera-extension-api",
  "phera-value",
+ "tokio",
  "writeable",
 ]
 

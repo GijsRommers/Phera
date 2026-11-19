@@ -25,7 +25,7 @@ const HOOKS: ClassHooks = ClassHooks {
     iterator: Some(make_cursor),
     count: Some(count),
     dimensions: Some(NativeDimensions {
-        get: |cx, object, index| get(cx, object, &index, "ResourceBundle::get"),
+        get: |cx, object, index| get(cx, object, &index, true, "ResourceBundle::get"),
         exists: |_, object, index| update(object, |state| lookup(&state.table, &index).is_some()),
         set: |_, _, _, _| Err(read_only()),
         unset: |_, _, _| Err(read_only()),
@@ -43,10 +43,10 @@ pub fn register(registry: &mut Registry) {
         interfaces: &["IteratorAggregate", "Countable"],
         methods: const {
             &[
-                MethodEntry::public("__construct", CREATE, |cx, object, values| {
+                MethodEntry::public_async("__construct", CREATE, |cx, object, values| {
                     create(cx, object, values, "ResourceBundle::__construct")
                 }),
-                MethodEntry::public("create", CREATE, |cx, _, values| {
+                MethodEntry::public_async("create", CREATE, |cx, _, values| {
                     create(cx, None, values, "ResourceBundle::create")
                 })
                 .static_()
@@ -56,6 +56,7 @@ pub fn register(registry: &mut Registry) {
                         cx,
                         object.ok_or_else(missing)?,
                         args::value(values, 0),
+                        args::bool(values, 1).unwrap_or(true),
                         "ResourceBundle::get",
                     )
                 })
@@ -64,7 +65,7 @@ pub fn register(registry: &mut Registry) {
                     count(cx, object.ok_or_else(missing)?).map(Value::Int)
                 })
                 .returning("int"),
-                MethodEntry::public("getLocales", LOCALES, |cx, _, values| {
+                MethodEntry::public_async("getLocales", LOCALES, |cx, _, values| {
                     locales(cx, values, "ResourceBundle::getLocales")
                 })
                 .static_()
@@ -88,7 +89,7 @@ pub fn register(registry: &mut Registry) {
     });
     for (entry, result) in [
         (
-            FunctionEntry::sync("resourcebundle_create", CREATE, |cx, values| {
+            FunctionEntry::asynchronous("resourcebundle_create", CREATE, |cx, values| {
                 create(cx, None, values, "resourcebundle_create")
             }),
             "?ResourceBundle",
@@ -99,6 +100,7 @@ pub fn register(registry: &mut Registry) {
                     cx,
                     args::object(values, 0).ok_or_else(missing)?,
                     args::value(values, 1),
+                    args::bool(values, 2).unwrap_or(true),
                     "resourcebundle_get",
                 )
             }),
@@ -111,7 +113,7 @@ pub fn register(registry: &mut Registry) {
             "int",
         ),
         (
-            FunctionEntry::sync("resourcebundle_locales", LOCALES, |cx, values| {
+            FunctionEntry::asynchronous("resourcebundle_locales", LOCALES, |cx, values| {
                 locales(cx, values, "resourcebundle_locales")
             }),
             "array|false",

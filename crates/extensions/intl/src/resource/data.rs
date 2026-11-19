@@ -7,11 +7,11 @@ use icu_experimental::displaynames::{
     multi::{LanguageDisplayNames, RegionDisplayNames, ScriptDisplayNames, VariantDisplayNames},
 };
 use icu_locale::Locale;
-use phera_extension_api::Value;
+use phera_extension_api::{ArrayKey, Value};
 
 use crate::number_data;
 
-pub type Table = Rc<Vec<(String, Node)>>;
+pub type Table = Rc<Vec<(ArrayKey, Node)>>;
 
 #[derive(Clone)]
 pub enum Node {
@@ -39,7 +39,7 @@ pub fn table(values: impl IntoIterator<Item = (&'static str, Node)>) -> Table {
     Rc::new(
         values
             .into_iter()
-            .map(|(key, value)| (key.to_owned(), value))
+            .map(|(key, value)| (ArrayKey::str(key), value))
             .collect(),
     )
 }
@@ -94,7 +94,11 @@ fn names(locale: &Locale, kind: &str) -> Table {
             }
         }
     }
-    Rc::new(rows.into_iter().collect())
+    Rc::new(
+        rows.into_iter()
+            .map(|(key, value)| (ArrayKey::str(key), value))
+            .collect(),
+    )
 }
 
 pub fn open(locale: &Locale, bundle: &str) -> Table {
