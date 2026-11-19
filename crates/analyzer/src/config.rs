@@ -3,9 +3,16 @@
 //! For example, `new Missing` is checked at the configured level for these paths.
 
 use crate::diagnostic::Format;
+use phera_source::LanguageLevel;
+use std::path::Path;
+
+mod project_config;
+pub use project_config::ProjectConfig;
+use project_config::string;
 
 #[derive(Clone)]
 pub struct Options {
+    pub php: LanguageLevel,
     pub level: u8,
     pub paths: Vec<String>,
     pub scan: Vec<String>,
@@ -19,6 +26,7 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
+            php: LanguageLevel::default(),
             level: 1,
             paths: Vec::new(),
             exclude: Vec::new(),
@@ -33,11 +41,19 @@ impl Default for Options {
 
 impl Options {
     pub fn parse(arguments: impl Iterator<Item = String>) -> Result<Self, String> {
+        let config = ProjectConfig::find(Path::new("."))?;
+        Self::parse_with_config(arguments, config.as_ref())
+    }
+
+    pub fn parse_with_config(
+        arguments: impl Iterator<Item = String>,
+        config: Option<&ProjectConfig>,
+    ) -> Result<Self, String> {
         let mut options = Self::default();
-        match std::fs::read_to_string("phera.toml") {
-            Ok(source) => options.read_config(&source)?,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(format!("phera.toml: {e}")),
+        if let Some(config) = config {
+            for setting in config.settings("check") {
+                options.setting(&setting.key, &setting.values, setting.array)?;
+            }
         }
         let mut arguments = arguments.peekable();
         let mut paths = Vec::new();
@@ -78,55 +94,7 @@ impl Options {
         Ok(options)
     }
 
-    fn read_config(&mut self, source: &str) -> Result<(), String> {
-        let tokens = tokenize(source)?;
-        let mut inside = false;
-        let mut cursor = 0;
-        while cursor < tokens.len() {
-            if tokens[cursor] == "[" {
-                cursor += 1;
-                inside = tokens.get(cursor).is_some_and(|s| s == "check");
-                while cursor < tokens.len() && tokens[cursor] != "]" {
-                    cursor += 1;
-                }
-                cursor += 1;
-                continue;
-            }
-            let key = tokens[cursor].clone();
-            cursor += 1;
-            if tokens.get(cursor).is_none_or(|s| s != "=") {
-                if inside {
-                    return Err(format!("phera.toml: expected '=' after {key}"));
-                }
-                continue;
-            }
-            cursor += 1;
-            let mut values = Vec::new();
-            let array = tokens.get(cursor).is_some_and(|s| s == "[");
-            if array {
-                cursor += 1;
-                while cursor < tokens.len() && tokens[cursor] != "]" {
-                    if tokens[cursor] != "," {
-                        values.push(tokens[cursor].clone());
-                    }
-                    cursor += 1;
-                }
-                if cursor == tokens.len() {
-                    return Err("phera.toml: unclosed array".into());
-                }
-                cursor += 1;
-            } else if let Some(value) = tokens.get(cursor) {
-                values.push(value.clone());
-                cursor += 1;
-            }
-            if !inside {
-                continue;
-            }
-            self.setting(&key, values, array)?;
-        }
-        Ok(())
-    }
-    fn setting(&mut self, key: &str, values: Vec<String>, array: bool) -> Result<(), String> {
+    fn setting(&mut self, key: &str, values: &[String], array: bool) -> Result<(), String> {
         let scalar = || {
             values
                 .first()
@@ -175,65 +143,4 @@ fn level(value: &str) -> Result<u8, String> {
         "1" => Ok(1),
         _ => Err("Supported check levels are 0 and 1".into()),
     }
-}
-
-fn string(value: &str) -> Result<String, String> {
-    value
-        .strip_prefix('"')
-        .map(String::from)
-        .ok_or("phera.toml: expected a string".into())
-}
-
-fn tokenize(source: &str) -> Result<Vec<String>, String> {
-    let mut input = source.chars().peekable();
-    let mut tokens = Vec::new();
-    while let Some(c) = input.next() {
-        match c {
-            c if c.is_whitespace() => {}
-            '#' => {
-                while input.peek().is_some_and(|c| *c != '\n') {
-                    input.next();
-                }
-            }
-            '[' | ']' | '=' | ',' => tokens.push(c.to_string()),
-            '"' | '\'' => {
-                let mut value = String::from("\"");
-                let mut closed = false;
-                while let Some(next) = input.next() {
-                    if next == c {
-                        closed = true;
-                        break;
-                    }
-                    if next == '\\' && c == '"' {
-                        value.push(match input.next().ok_or("phera.toml: unfinished escape")? {
-                            'n' => '\n',
-                            'r' => '\r',
-                            't' => '\t',
-                            '\\' => '\\',
-                            '"' => '"',
-                            _ => return Err("phera.toml: unsupported string escape".into()),
-                        });
-                    } else {
-                        value.push(next);
-                    }
-                }
-                if !closed {
-                    return Err("phera.toml: unclosed string".into());
-                }
-                tokens.push(value);
-            }
-            _ => {
-                let mut value = c.to_string();
-                while input.peek().is_some_and(|c| {
-                    !c.is_whitespace() && !matches!(c, '#' | '[' | ']' | '=' | ',')
-                }) {
-                    if let Some(c) = input.next() {
-                        value.push(c);
-                    }
-                }
-                tokens.push(value);
-            }
-        }
-    }
-    Ok(tokens)
 }

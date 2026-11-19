@@ -4,7 +4,7 @@ use std::cell::RefCell;
 
 use phera_ast::{ExpressionKind, MemberName, StatementKind};
 use phera_bytecode::{CompiledUnit, reflection::InitializerSource};
-use phera_source::LineTable;
+use phera_source::{LanguageLevel, LineTable};
 
 use crate::{CompileError, Compiler, ir::Instruction};
 
@@ -20,9 +20,10 @@ pub fn compile_reflection_initializer(
     file: &str,
     initializer: &InitializerSource,
     in_trait: bool,
+    level: LanguageLevel,
 ) -> Result<CompiledInitializer, CompileError> {
     crate::on_compile_stack(file, || {
-        compile_on_stack(source, file, initializer, in_trait)
+        compile_on_stack(source, file, initializer, in_trait, level)
     })
 }
 
@@ -31,6 +32,7 @@ fn compile_on_stack(
     file: &str,
     initializer: &InitializerSource,
     in_trait: bool,
+    level: LanguageLevel,
 ) -> Result<CompiledInitializer, CompileError> {
     let error = || CompileError {
         message: "Invalid source for reflection initializer".into(),
@@ -45,12 +47,14 @@ fn compile_on_stack(
     let fragment = [b"<?php return ", expression, b"\n;"].concat();
     let lines = LineTable::fragment(&fragment, initializer.first_line);
     let parsed =
-        phera_parser::parse_bytes_on_current_stack(&fragment).map_err(|error| CompileError {
-            message: error.message,
-            file: file.into(),
-            line: lines.line(error.span.start),
-            parse: true,
-            scanner_diagnostics: Vec::new(),
+        phera_parser::parse_bytes_at_on_current_stack(&fragment, level).map_err(|error| {
+            CompileError {
+                message: error.message,
+                file: file.into(),
+                line: lines.line(error.span.start),
+                parse: true,
+                scanner_diagnostics: Vec::new(),
+            }
         })?;
     let [statement] = parsed.statements.as_slice() else {
         return Err(error());
@@ -68,7 +72,8 @@ fn compile_on_stack(
         &initializer.namespace,
         &diagnostics,
         &reflection,
-    );
+    )
+    .with_level(level);
     compiler.class_scope.clone_from(&initializer.scope);
     if in_trait {
         compiler.trait_scope.clone_from(&initializer.scope);

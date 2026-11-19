@@ -1,9 +1,11 @@
 //! Parse commands and startup options, preserving everything after a script name as PHP argv.
 
 use crate::new::{NewOptions, Template, template_keys};
+use phera_analyzer::config::{Options, ProjectConfig};
 use phera_dotenv::FileSelection;
+use phera_source::LanguageLevel;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 pub(crate) const USAGE: &str = "\
@@ -35,17 +37,20 @@ Usage:
               [--generate-baseline FILE] <paths...>
   phera --version
 
+PHP OPTION: --php 8.5|8.6 (run, serve, check and --dump)
 ENV OPTIONS: --env-file PATH (repeatable) or --no-env-file";
 
 pub(crate) enum Command {
     Run {
         files: FileSelection,
+        php: Option<LanguageLevel>,
         script: String,
         /// What the script sees as `$argv`: its own name first.
         arguments: Vec<String>,
     },
     Dump {
         script: String,
+        php: Option<LanguageLevel>,
     },
     Serve(ServeOptions),
     Check(phera_analyzer::config::Options),
@@ -54,6 +59,7 @@ pub(crate) enum Command {
 }
 
 pub(crate) struct ServeOptions {
+    pub php: Option<LanguageLevel>,
     pub files: FileSelection,
     /// `None`: `0.0.0.0:$PORT` when a platform sets `PORT`, else
     /// `127.0.0.1:8080`.
@@ -76,22 +82,26 @@ pub(crate) struct ServeOptions {
 pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, String> {
     let mut arguments = arguments.peekable();
     let mut files = FileSelection::Automatic;
-    leading_files(&mut arguments, &mut files)?;
+    let mut php = None;
+    leading_options(&mut arguments, &mut files, &mut php)?;
     match arguments.peek().map(String::as_str) {
         None => Err("No script given.".to_string()),
         Some("--version") => Ok(Command::Version),
         Some("--dump") => {
             arguments.next();
+            if arguments.next_if_eq(&"--php".into()).is_some() {
+                php = Some(php_option(&mut arguments)?);
+            }
             let script = arguments.next().ok_or("--dump needs a file.")?;
-            Ok(Command::Dump { script })
+            Ok(Command::Dump { script, php })
         }
         Some("check") => {
             arguments.next();
-            phera_analyzer::config::Options::parse(arguments).map(Command::Check)
+            parse_check(arguments, php).map(Command::Check)
         }
         Some("serve") => {
             arguments.next();
-            parse_serve(arguments, files).map(Command::Serve)
+            parse_serve(arguments, files, php).map(Command::Serve)
         }
         Some("new") => {
             arguments.next();
@@ -100,13 +110,14 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
         Some(_) => {
             // `phera run file.php` and `phera file.php` mean the same.
             arguments.next_if(|argument| argument == "run");
-            leading_files(&mut arguments, &mut files)?;
+            leading_options(&mut arguments, &mut files, &mut php)?;
             let arguments: Vec<String> = arguments.collect();
             let script = arguments.first().cloned().ok_or("No script given.")?;
             Ok(Command::Run {
                 script,
                 arguments,
                 files,
+                php,
             })
         }
     }
@@ -138,14 +149,19 @@ fn parse_new(mut arguments: impl Iterator<Item = String>) -> Result<NewOptions, 
     Ok(options)
 }
 
-fn leading_files(
+fn leading_options(
     arguments: &mut std::iter::Peekable<impl Iterator<Item = String>>,
     files: &mut FileSelection,
+    php: &mut Option<LanguageLevel>,
 ) -> Result<(), String> {
     while let Some(option) =
-        arguments.next_if(|s| matches!(s.as_str(), "--env-file" | "--no-env-file"))
+        arguments.next_if(|s| matches!(s.as_str(), "--env-file" | "--no-env-file" | "--php"))
     {
-        file_option(&option, arguments, files)?;
+        if option == "--php" {
+            *php = Some(php_option(arguments)?);
+        } else {
+            file_option(&option, arguments, files)?;
+        }
     }
     Ok(())
 }
@@ -175,9 +191,11 @@ fn file_option(
 fn parse_serve(
     mut arguments: impl Iterator<Item = String>,
     files: FileSelection,
+    php: Option<LanguageLevel>,
 ) -> Result<ServeOptions, String> {
     let mut options = ServeOptions {
         files,
+        php,
         listen: None,
         workers: None,
         compress: false,
@@ -191,6 +209,7 @@ fn parse_serve(
             "--env-file" | "--no-env-file" => {
                 file_option(&argument, &mut arguments, &mut options.files)?
             }
+            "--php" => options.php = Some(php_option(&mut arguments)?),
             "--listen" => {
                 let value = arguments.next().ok_or("--listen needs an address.")?;
                 let address = value
@@ -236,5 +255,46 @@ fn parse_serve(
             path => options.path = PathBuf::from(path),
         }
     }
+    Ok(options)
+}
+
+fn php_option(arguments: &mut impl Iterator<Item = String>) -> Result<LanguageLevel, String> {
+    arguments.next().ok_or("--php needs 8.5 or 8.6.")?.parse()
+}
+
+fn parse_check(
+    mut arguments: impl Iterator<Item = String>,
+    mut php: Option<LanguageLevel>,
+) -> Result<Options, String> {
+    let mut checked = Vec::new();
+    while let Some(argument) = arguments.next() {
+        match argument.as_str() {
+            "--php" => php = Some(php_option(&mut arguments)?),
+            "--" => {
+                checked.push(argument);
+                checked.extend(arguments);
+                break;
+            }
+            _ => checked.push(argument),
+        }
+    }
+    let cwd = Path::new(".");
+    let config = ProjectConfig::find(cwd)?;
+    let mut options = Options::parse_with_config(checked.into_iter(), config.as_ref())?;
+    let directory = options.paths.first().map(Path::new).map_or(cwd, |path| {
+        if path.is_dir() {
+            path
+        } else {
+            crate::project_level::script_directory(path)
+        }
+    });
+    let nested = if config.is_none() && php.is_none() && directory.is_dir() {
+        ProjectConfig::find(directory)?
+    } else {
+        None
+    };
+    let directory = if directory.is_dir() { directory } else { cwd };
+    options.php =
+        crate::project_level::with_config(php, config.as_ref().or(nested.as_ref()), directory)?;
     Ok(options)
 }

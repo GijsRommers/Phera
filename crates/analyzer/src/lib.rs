@@ -53,8 +53,8 @@ pub fn check(options: &Options) -> Result<Report, String> {
 fn check_project(options: &Options) -> Result<Report, String> {
     let start = std::time::Instant::now();
     let paths = project::discover(&options.paths, &options.exclude)?;
-    let (files, mut diagnostics) = project::parse_files(&paths)?;
-    let mut index = builtins::load_supported();
+    let (files, mut diagnostics) = project::parse_files(&paths, options.php)?;
+    let mut index = builtins::load_supported(options.php);
     for file in &files {
         collect::collect(&mut index, &file.path, &file.source, &file.program);
     }
@@ -62,7 +62,8 @@ fn check_project(options: &Options) -> Result<Report, String> {
         index.trait_users.record(class);
     }
     let scan = project::discover(&options.scan, &options.exclude)?;
-    let mut dependencies = dependencies::Dependencies::load(&mut index, &options.paths, &paths)?;
+    let mut dependencies =
+        dependencies::Dependencies::load(&mut index, &options.paths, &paths, options.php)?;
     for path in &scan {
         dependencies.load_file(&mut index, path)?;
     }

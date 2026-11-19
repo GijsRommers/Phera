@@ -155,7 +155,7 @@ impl ReflectionContext for Vm {
             version: self
                 .registry
                 .module_version(name)
-                .unwrap_or(phera_extension_api::PHP_VERSION)
+                .unwrap_or(self.registry.level().version())
                 .into(),
             classes: self
                 .registry

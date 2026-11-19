@@ -111,11 +111,11 @@ impl Vm {
                 // A module that ships with PHP reports PHP's version; one
                 // with a release of its own (phpredis) reports that.
                 match &extension {
-                    None => Value::from(phera_extension_api::PHP_VERSION),
+                    None => Value::from(self.registry.level().version()),
                     Some(name) if loaded => Value::from(
                         self.registry
                             .module_version(name)
-                            .unwrap_or(phera_extension_api::PHP_VERSION),
+                            .unwrap_or(self.registry.level().version()),
                     ),
                     Some(_) => Value::Bool(false),
                 }

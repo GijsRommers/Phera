@@ -1664,6 +1664,8 @@ dependencies = [
  "phera-phpt",
  "phera-runtime",
  "phera-server",
+ "phera-source",
+ "serde_json",
  "tokio",
 ]
 

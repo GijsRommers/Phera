@@ -15,6 +15,7 @@ mod statement;
 mod strings;
 
 pub use error::ParseError;
+use phera_source::LanguageLevel;
 
 /// The stack the parser runs on. Only the part that is actually used gets
 /// backed by memory, so the size costs address space, not RAM.
@@ -55,12 +56,27 @@ pub fn parse_bytes(source: &[u8]) -> Result<phera_ast::Program, ParseError> {
 /// run on a stack of at least [`PARSER_STACK_BYTES`], such as a compiler
 /// thread that parses and compiles in one go.
 pub fn parse_on_current_stack(source: &str) -> Result<phera_ast::Program, ParseError> {
-    parse_bytes_on_current_stack(source.as_bytes())
+    parse_at_on_current_stack(source, LanguageLevel::default())
+}
+
+/// Parses a file at the project language level on the caller's parser stack.
+pub fn parse_at_on_current_stack(
+    source: &str,
+    level: LanguageLevel,
+) -> Result<phera_ast::Program, ParseError> {
+    parse_bytes_at_on_current_stack(source.as_bytes(), level)
 }
 
 /// Parses source bytes on an existing compiler stack.
 pub fn parse_bytes_on_current_stack(source: &[u8]) -> Result<phera_ast::Program, ParseError> {
-    let (parser, _) = parser::Parser::new(source, false);
+    parse_bytes_at_on_current_stack(source, LanguageLevel::default())
+}
+
+pub fn parse_bytes_at_on_current_stack(
+    source: &[u8],
+    level: LanguageLevel,
+) -> Result<phera_ast::Program, ParseError> {
+    let (parser, _) = parser::Parser::new(source, false, level);
     parser.parse_program()
 }
 
@@ -71,7 +87,17 @@ pub fn parse_file_on_current_stack(
     Result<phera_ast::Program, ParseError>,
     Vec<phera_source::CompileDiagnostic>,
 ) {
-    let (parser, report) = parser::Parser::new(source, true);
+    parse_file_at_on_current_stack(source, LanguageLevel::default())
+}
+
+pub fn parse_file_at_on_current_stack(
+    source: &[u8],
+    level: LanguageLevel,
+) -> (
+    Result<phera_ast::Program, ParseError>,
+    Vec<phera_source::CompileDiagnostic>,
+) {
+    let (parser, report) = parser::Parser::new(source, true, level);
     let parsed = parser.parse_program();
     let parsed = if let Some(error) = report.nesting_error
         && parsed

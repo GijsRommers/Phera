@@ -14,8 +14,9 @@ pub use extensions::generate as generate_extensions;
 pub fn generate(root: &Path, reference: &str) -> Result<String, String> {
     let source = source::StubSource::open(root, reference)?;
     let mut report = format!(
-        "PHP 8.5 stubs; php-src commit: {}\nReference: {reference}\n",
-        source.commit
+        "PHP {} stubs; php-src: {}\nReference: {reference}\n",
+        source.level.name(),
+        source.provenance
     );
     let (mut index, mut parsed, mut skipped, mut aliases) = (Index::default(), 0, 0, 0);
     for file in source.files()? {
@@ -61,9 +62,17 @@ pub fn generate(root: &Path, reference: &str) -> Result<String, String> {
         return Err(report);
     }
     report.push_str("Skipped declarations: 0. Parser changes: none.\n");
-    let data = format!("# php-src {}\n{}", source.commit, builtins::encode(&index));
+    let data = format!(
+        "# php-src {}\n{}",
+        source.provenance,
+        builtins::encode(&index)
+    );
     let destination = Path::new(env!("CARGO_MANIFEST_DIR")).join("data");
-    std::fs::write(destination.join("php85.tsv"), data).map_err(|e| e.to_string())?;
-    std::fs::write(destination.join("generation.txt"), &report).map_err(|e| e.to_string())?;
+    let (table, log) = match source.level {
+        phera_source::LanguageLevel::Php85 => ("php85.tsv", "generation.txt"),
+        phera_source::LanguageLevel::Php86 => ("php86.tsv", "generation-php86.txt"),
+    };
+    std::fs::write(destination.join(table), data).map_err(|e| e.to_string())?;
+    std::fs::write(destination.join(log), &report).map_err(|e| e.to_string())?;
     Ok(report)
 }

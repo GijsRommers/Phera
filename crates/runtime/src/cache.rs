@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use phera_bytecode::CompiledUnit;
+use phera_extension_api::LanguageLevel;
 
 use crate::RuntimeError;
 
@@ -13,11 +14,19 @@ use crate::RuntimeError;
 /// cheap: only the code's state is fresh, never the code.
 #[derive(Clone, Default)]
 pub(crate) struct CodeCache {
+    level: LanguageLevel,
     /// Keyed by canonical path, so `./a.php` and `/srv/a.php` share an entry.
     units: Arc<Mutex<HashMap<PathBuf, Arc<CompiledUnit>>>>,
 }
 
 impl CodeCache {
+    pub(crate) fn for_level(level: LanguageLevel) -> Self {
+        Self {
+            level,
+            ..Self::default()
+        }
+    }
+
     /// Returns the compiled unit for `path`, compiling it on first use.
     ///
     /// Reads the file and compiles, both of which block, so async callers
@@ -35,9 +44,10 @@ impl CodeCache {
         // Compile without holding the lock, so other files load meanwhile.
         // Two threads may compile the same file once; the result is the same.
         let source = std::fs::read(&canonical).map_err(read_error)?;
-        let unit = Arc::new(phera_compiler::compile_bytes(
+        let unit = Arc::new(phera_compiler::compile_bytes_at(
             &source,
             &canonical.to_string_lossy(),
+            self.level,
         )?);
         self.lock().insert(canonical, unit.clone());
         Ok(unit)

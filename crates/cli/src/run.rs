@@ -6,6 +6,7 @@ use std::process::ExitCode;
 
 use phera_dotenv::{Environment, FileSelection};
 use phera_runtime::{OutputSink, Runtime};
+use phera_source::LanguageLevel;
 
 /// Writes a script's output to the terminal as it is produced, so a long
 /// running script shows progress.
@@ -25,13 +26,21 @@ impl OutputSink for Stdout {
     }
 }
 
-pub(crate) fn script(script: &str, arguments: &[String], files: FileSelection) -> ExitCode {
+pub(crate) fn script(
+    script: &str,
+    arguments: &[String],
+    files: FileSelection,
+    php: Option<LanguageLevel>,
+) -> ExitCode {
     if !Path::new(script).is_file() {
         // PHP's own wording, on standard output as PHP prints it.
         println!("Could not open input file: {script}");
         return ExitCode::FAILURE;
     }
     let root = Path::new(script).parent().unwrap_or_else(|| Path::new("."));
+    let Some(level) = resolve_level(php, script) else {
+        return ExitCode::from(2);
+    };
     let loaded = match files.load(root, Environment::process()) {
         Ok(loaded) => loaded,
         Err(error) => {
@@ -39,7 +48,7 @@ pub(crate) fn script(script: &str, arguments: &[String], files: FileSelection) -
             return ExitCode::FAILURE;
         }
     };
-    match Runtime::with_environment(loaded.environment).run_file_blocking(
+    match Runtime::with_level_and_environment(level, loaded.environment).run_file_blocking(
         script,
         arguments,
         Some(Box::new(Stdout)),
@@ -58,8 +67,11 @@ pub(crate) fn script(script: &str, arguments: &[String], files: FileSelection) -
     }
 }
 
-pub(crate) fn dump(script: &str) -> ExitCode {
-    match Runtime::new().dump_file_blocking(script) {
+pub(crate) fn dump(script: &str, php: Option<LanguageLevel>) -> ExitCode {
+    let Some(level) = resolve_level(php, script) else {
+        return ExitCode::from(2);
+    };
+    match Runtime::for_level(level).dump_file_blocking(script) {
         Ok(listing) => {
             print!("{listing}");
             ExitCode::SUCCESS
@@ -67,6 +79,17 @@ pub(crate) fn dump(script: &str) -> ExitCode {
         Err(error) => {
             print!("{error}");
             ExitCode::from(255)
+        }
+    }
+}
+
+fn resolve_level(php: Option<LanguageLevel>, script: &str) -> Option<LanguageLevel> {
+    let directory = crate::project_level::script_directory(Path::new(script));
+    match crate::project_level::resolve(php, directory) {
+        Ok(level) => Some(level),
+        Err(error) => {
+            eprintln!("{error}");
+            None
         }
     }
 }

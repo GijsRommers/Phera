@@ -83,7 +83,7 @@ impl ClassTable {
                 .as_ref()
                 .map(|class| class.methods.clone())
                 .unwrap_or_default();
-            for method in entry.methods {
+            for method in registry.methods(entry) {
                 methods.insert(
                     method.name.to_ascii_lowercase(),
                     Rc::new(Method {

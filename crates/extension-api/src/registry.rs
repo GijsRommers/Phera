@@ -1,5 +1,7 @@
 //! `extension_loaded('Core')` reflects PHP modules registered for this runtime.
 
+mod ini;
+
 use std::collections::{HashMap, HashSet};
 
 use phera_value::Value;
@@ -60,6 +62,10 @@ impl From<&'static str> for ConstantValue {
 /// Built once at startup and then shared, read-only, by every worker thread.
 #[derive(Clone, Default)]
 pub struct Registry {
+    ini_defaults: HashMap<&'static str, &'static str>,
+    unavailable_ini: HashSet<&'static str>,
+    level: crate::LanguageLevel,
+    additional_methods: HashMap<&'static str, Vec<crate::MethodEntry>>,
     /// Keyed by lowercase name: PHP function names are case-insensitive.
     functions: HashMap<String, FunctionEntry>,
     /// Only calls already holding a first-argument object need to check this table.
@@ -91,6 +97,17 @@ struct NativeConstant {
 impl Registry {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn for_level(level: crate::LanguageLevel) -> Self {
+        Self {
+            level,
+            ..Self::default()
+        }
+    }
+
+    pub fn level(&self) -> crate::LanguageLevel {
+        self.level
     }
 
     /// Runs the extension's registration against this registry.
@@ -144,9 +161,28 @@ impl Registry {
         self.functions.insert(key, entry);
     }
 
+    /// Registers a function only at the levels where PHP exposes it.
+    pub fn function_at(&mut self, availability: crate::Availability, entry: FunctionEntry) {
+        if self.level.supports(availability) {
+            self.function(entry);
+        }
+    }
+
     /// Panics on a duplicate name, like [`Registry::function`].
     pub fn constant(&mut self, name: &str, value: impl Into<ConstantValue>) {
         self.register_constant(name, value.into(), None);
+    }
+
+    /// Registers a constant only at the levels where PHP defines it.
+    pub fn constant_at(
+        &mut self,
+        availability: crate::Availability,
+        name: &str,
+        value: impl Into<ConstantValue>,
+    ) {
+        if self.level.supports(availability) {
+            self.constant(name, value);
+        }
     }
 
     /// A retained PHP constant reports its stub deprecation only when read.
@@ -199,6 +235,41 @@ impl Registry {
             self.class_modules.insert(entry.name, module);
         }
         self.classes.push(entry);
+    }
+
+    /// Registers a class only at the levels where PHP declares it.
+    pub fn class_at(&mut self, availability: crate::Availability, entry: ClassEntry) {
+        if self.level.supports(availability) {
+            self.class(entry);
+        }
+    }
+
+    /// Adds a level-specific method to an already registered class.
+    pub fn method_at(
+        &mut self,
+        availability: crate::Availability,
+        class: &'static str,
+        method: crate::MethodEntry,
+    ) {
+        if self.level.supports(availability) {
+            self.additional_methods
+                .entry(class)
+                .or_default()
+                .push(method);
+        }
+    }
+
+    /// Methods to link for a native class at this registry's level.
+    pub fn methods<'a>(
+        &'a self,
+        entry: &'a ClassEntry,
+    ) -> impl Iterator<Item = &'a crate::MethodEntry> {
+        entry.methods.iter().chain(
+            self.additional_methods
+                .get(entry.name)
+                .into_iter()
+                .flatten(),
+        )
     }
 
     /// Registers a class implemented by a bundle on behalf of a PHP module.

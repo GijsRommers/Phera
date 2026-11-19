@@ -31,7 +31,8 @@ impl Compiler<'_> {
             &self.namespace,
             self.compile_diagnostics,
             self.reflection,
-        );
+        )
+        .with_level(self.level);
         builder.anonymous_classes = self.anonymous_classes.clone();
         builder.class_scope = Some(class.to_owned());
         builder.trait_scope = trait_scope.map(str::to_owned);

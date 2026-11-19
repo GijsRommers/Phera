@@ -4,7 +4,7 @@
 
 use crate::diagnostic::Diagnostic;
 use phera_ast::Program;
-use phera_source::LineTable;
+use phera_source::{LanguageLevel, LineTable};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -99,7 +99,10 @@ pub fn glob(pattern: &str, path: &str) -> bool {
     p == pattern.len()
 }
 
-pub fn parse_files(paths: &[PathBuf]) -> Result<(Vec<ParsedFile>, Vec<Diagnostic>), String> {
+pub fn parse_files(
+    paths: &[PathBuf],
+    level: LanguageLevel,
+) -> Result<(Vec<ParsedFile>, Vec<Diagnostic>), String> {
     let next = AtomicUsize::new(0);
     let workers = std::thread::available_parallelism()
         .map_or(1, usize::from)
@@ -111,7 +114,7 @@ pub fn parse_files(paths: &[PathBuf]) -> Result<(Vec<ParsedFile>, Vec<Diagnostic
             handles.push(
                 std::thread::Builder::new()
                     .stack_size(phera_parser::PARSER_STACK_BYTES)
-                    .spawn_scoped(scope, move || parse_worker(paths, next))
+                    .spawn_scoped(scope, move || parse_worker(paths, next, level))
                     .map_err(|e| e.to_string())?,
             );
         }
@@ -129,10 +132,11 @@ pub fn parse_files(paths: &[PathBuf]) -> Result<(Vec<ParsedFile>, Vec<Diagnostic
 fn parse_worker(
     paths: &[PathBuf],
     next: &AtomicUsize,
+    level: LanguageLevel,
 ) -> Result<(Vec<ParsedFile>, Vec<Diagnostic>), String> {
     let (mut files, mut diagnostics) = (Vec::new(), Vec::new());
     while let Some(path) = paths.get(next.fetch_add(1, Ordering::Relaxed)) {
-        match parse_file(path)? {
+        match parse_file_at(path, level)? {
             Ok(file) => files.push(file),
             Err(error) => diagnostics.push(error),
         }
@@ -141,24 +145,33 @@ fn parse_worker(
 }
 
 pub fn parse_file(path: &Path) -> Result<Result<ParsedFile, Diagnostic>, String> {
+    parse_file_at(path, LanguageLevel::default())
+}
+
+pub(crate) fn parse_file_at(
+    path: &Path,
+    level: LanguageLevel,
+) -> Result<Result<ParsedFile, Diagnostic>, String> {
     // PHP source is bytes. Keep every line in files with non-UTF-8 literals,
     // even though the parser currently takes text.
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let source = String::from_utf8_lossy(&bytes).into_owned();
     let lines = LineTable::new(&source);
     let path = display_path(path);
-    Ok(match phera_parser::parse_on_current_stack(&source) {
-        Ok(program) => Ok(ParsedFile {
-            path,
-            source,
-            lines,
-            program,
-        }),
-        Err(error) => Err(Diagnostic {
-            file: path,
-            line: lines.line(error.span.start),
-            identifier: "phpstan.parse".into(),
-            message: error.message,
-        }),
-    })
+    Ok(
+        match phera_parser::parse_at_on_current_stack(&source, level) {
+            Ok(program) => Ok(ParsedFile {
+                path,
+                source,
+                lines,
+                program,
+            }),
+            Err(error) => Err(Diagnostic {
+                file: path,
+                line: lines.line(error.span.start),
+                identifier: "phpstan.parse".into(),
+                message: error.message,
+            }),
+        },
+    )
 }

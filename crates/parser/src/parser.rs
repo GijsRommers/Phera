@@ -24,6 +24,7 @@ const MAX_DEPTH: u32 = 1000;
 
 pub(crate) struct Parser<'src> {
     pub(crate) source: &'src [u8],
+    _level: phera_source::LanguageLevel,
     tokens: Vec<Token>,
     doc_comments: Vec<(usize, Span)>,
     pos: usize,
@@ -41,7 +42,11 @@ pub(crate) struct Parser<'src> {
 }
 
 impl<'src> Parser<'src> {
-    pub(crate) fn new(source: &'src [u8], collect_diagnostics: bool) -> (Self, ScanReport) {
+    pub(crate) fn new(
+        source: &'src [u8],
+        collect_diagnostics: bool,
+        level: phera_source::LanguageLevel,
+    ) -> (Self, ScanReport) {
         let lexer = Lexer::new_bytes(source).with_doc_comments();
         let mut lexer = if collect_diagnostics {
             lexer.with_diagnostics(ScanMode::Parsed)
@@ -73,6 +78,7 @@ impl<'src> Parser<'src> {
 
         let parser = Self {
             source,
+            _level: level,
             tokens,
             doc_comments: lexer.take_doc_comments(),
             pos: 0,

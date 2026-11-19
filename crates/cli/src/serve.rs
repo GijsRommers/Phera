@@ -37,6 +37,13 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
         }
     };
     let root = site.document_root();
+    let level = match crate::project_level::resolve(options.php, root) {
+        Ok(level) => level,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::from(2);
+        }
+    };
     let project = if root.join("composer.json").is_file() {
         root
     } else {
@@ -82,7 +89,7 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
     let workers = config.workers;
 
     let factory = SiteHandlerFactory {
-        runtime: Runtime::with_environment(loaded.environment),
+        runtime: Runtime::with_level_and_environment(level, loaded.environment),
         site: site.clone(),
         compress: options.compress,
         trusted_proxies: Arc::new(trusted_proxies),

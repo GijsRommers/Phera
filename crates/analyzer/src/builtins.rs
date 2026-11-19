@@ -7,17 +7,26 @@ mod fields;
 
 use crate::index::Index;
 pub use encode::encode;
+use phera_source::LanguageLevel;
 use phera_source::deprecations::{ItemKind, Policy, items};
 
 pub fn load() -> Index {
-    let mut index = decode::decode(include_str!("../data/php85.tsv"));
+    load_at(LanguageLevel::default())
+}
+
+pub fn load_at(level: LanguageLevel) -> Index {
+    let table = match level {
+        LanguageLevel::Php85 => include_str!("../data/php85.tsv"),
+        LanguageLevel::Php86 => include_str!("../data/php86.tsv"),
+    };
+    let mut index = decode::decode(table);
     index.builtin_functions = index.functions.keys().cloned().collect();
     index.builtin_classes = index.classes.keys().cloned().collect();
     index
 }
 
-pub(crate) fn load_supported() -> Index {
-    let mut index = load();
+pub(crate) fn load_supported(level: LanguageLevel) -> Index {
+    let mut index = load_at(level);
     // Optional extension APIs are available to static analysis. Keep them
     // out of the sets that prove a runtime function_exists() guard true.
     let extensions = decode::decode(include_str!("../data/optional-extensions.tsv"));
