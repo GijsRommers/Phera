@@ -35,6 +35,10 @@ pub fn clear(context: &mut dyn Context) {
     *context.state().get_or_default::<ErrorState>() = ErrorState::default();
 }
 
+pub fn warning_code(context: &mut dyn Context, code: i32) {
+    *context.state().get_or_default::<ErrorState>() = ErrorState { code, detail: None };
+}
+
 pub fn fail(
     context: &mut dyn Context,
     function: &str,

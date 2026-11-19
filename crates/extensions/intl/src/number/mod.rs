@@ -142,15 +142,39 @@ fn init(
             "error converting pattern to UTF-16",
         );
     };
-    let locale_name = resolve_locale(locale);
-    let code = number_data::currency(&modern);
-    let data = number_data::for_locale(&modern);
-    let (Ok(decimal), Ok(ungrouped)) = (
-        DecimalFormatter::try_new(modern.clone().into(), GroupingStrategy::Auto.into()),
-        DecimalFormatter::try_new(modern.clone().into(), GroupingStrategy::Never.into()),
-    ) else {
+    let Some(state) = make_formatter(modern, resolve_locale(locale), style, pattern) else {
         return creation_error(context, this, site, 2, "number formatter creation failed");
     };
+    if let Some(object) = this {
+        let mut payload = object.native_payload_mut().map_err(|_| borrowed())?;
+        if payload.is_some() {
+            return Err(NativeError::error(
+                "NumberFormatter object is already constructed",
+            ));
+        }
+        *payload = Some(Box::new(state));
+        Ok(Value::Null)
+    } else {
+        let value = context.create_object("NumberFormatter", PhpArray::new())?;
+        if let Value::Object(object) = &value {
+            *object.native_payload_mut().map_err(|_| borrowed())? = Some(Box::new(state));
+        }
+        Ok(value)
+    }
+}
+
+fn make_formatter(
+    modern: Locale,
+    locale_name: String,
+    style: Style,
+    pattern: &str,
+) -> Option<Formatter> {
+    let code = number_data::currency(&modern);
+    let data = number_data::for_locale(&modern);
+    let decimal =
+        DecimalFormatter::try_new(modern.clone().into(), GroupingStrategy::Auto.into()).ok()?;
+    let ungrouped =
+        DecimalFormatter::try_new(modern.clone().into(), GroupingStrategy::Never.into()).ok()?;
     let custom_pattern = !pattern.is_empty() && style == Style::Pattern;
     let base = if custom_pattern {
         pattern.to_owned()
@@ -191,22 +215,19 @@ fn init(
             }
         }
     }
-    if let Some(object) = this {
-        let mut payload = object.native_payload_mut().map_err(|_| borrowed())?;
-        if payload.is_some() {
-            return Err(NativeError::error(
-                "NumberFormatter object is already constructed",
-            ));
-        }
-        *payload = Some(Box::new(state));
-        Ok(Value::Null)
-    } else {
-        let value = context.create_object("NumberFormatter", PhpArray::new())?;
-        if let Value::Object(object) = &value {
-            *object.native_payload_mut().map_err(|_| borrowed())? = Some(Box::new(state));
-        }
-        Ok(value)
-    }
+    Some(state)
+}
+
+pub fn format_message(locale: &Locale, amount: &Decimal, style: &str) -> Option<String> {
+    let (style, pattern) = match style {
+        "" => (Style::Decimal, ""),
+        "integer" => (Style::Pattern, "#,##0"),
+        "currency" => (Style::Currency, ""),
+        "percent" => (Style::Percent, ""),
+        pattern => (Style::Pattern, pattern),
+    };
+    let mut formatter = make_formatter(locale.clone(), locale.id.to_string(), style, pattern)?;
+    render::render(&mut formatter, amount, None)
 }
 
 pub(crate) fn known_language(language: &str) -> bool {

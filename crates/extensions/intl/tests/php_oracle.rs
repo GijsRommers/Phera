@@ -5,6 +5,7 @@ use phera_extension_api::{PhpArray, Value};
 mod cases;
 
 mod matrix;
+mod stage_two;
 use matrix::Matrix;
 
 #[test]

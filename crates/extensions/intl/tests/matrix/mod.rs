@@ -19,6 +19,9 @@ impl Matrix {
     pub fn new() -> Self {
         let mut registry = Registry::new();
         registry.class(ClassEntry::class("Exception"));
+        for interface in ["Iterator", "IteratorAggregate", "Countable"] {
+            registry.class(ClassEntry::interface(interface));
+        }
 
         registry.load(&Intl);
         let script = format!("<?php\n{}\n", oracle::PHP_PREAMBLE);

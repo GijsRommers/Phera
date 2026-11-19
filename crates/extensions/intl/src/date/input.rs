@@ -36,7 +36,7 @@ pub fn timezone(
             read_timezone(object).map(Some)
         }
         Value::Object(object) if object.class.is_instance_of("IntlTimeZone") => {
-            Err(crate::unsupported::item("IntlTimeZone"))
+            crate::timezone::read_zone(object).map(Some)
         }
         other => Err(type_error(
             site,
@@ -54,7 +54,7 @@ pub fn calendar(value: &Value, site: &str, index: usize) -> Result<Option<i64>, 
         Value::Int(value) => Ok(matches!(value, 0 | 1).then_some(*value)),
         Value::Bool(value) => Ok(Some(i64::from(*value))),
         Value::Object(object) if object.class.is_instance_of("IntlCalendar") => {
-            Err(crate::unsupported::item("IntlCalendar"))
+            crate::calendar::calendar_type(object).map(Some)
         }
         other => Err(type_error(
             site,
@@ -73,7 +73,7 @@ fn type_error(site: &str, index: usize, name: &str, expected: &str, value: &Valu
     ))
 }
 
-pub fn format(
+pub(super) fn format(
     context: &mut dyn Context,
     state: &mut Formatter,
     value: &Value,
@@ -102,7 +102,7 @@ pub fn format(
             (date.timestamp, date.micros)
         }
         Value::Object(value) if value.class.is_instance_of("IntlCalendar") => {
-            return Err(crate::unsupported::item("IntlCalendar"));
+            crate::calendar::timestamp(value)?
         }
         Value::Object(_) => {
             return fail(

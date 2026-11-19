@@ -1450,6 +1450,7 @@ dependencies = [
  "icu_locale_fallback",
  "icu_provider",
  "regex-automata",
+ "serde",
  "writeable",
  "zerovec",
 ]
@@ -2474,18 +2475,23 @@ version = "0.1.0"
 dependencies = [
  "fixed_decimal",
  "icu_calendar",
+ "icu_casemap",
  "icu_collator",
  "icu_datetime",
  "icu_decimal",
  "icu_experimental",
+ "icu_list",
  "icu_locale",
  "icu_normalizer",
+ "icu_plurals",
  "icu_properties",
  "icu_segmenter",
  "icu_time",
  "idna",
  "phera-ext-date",
+ "phera-ext-standard",
  "phera-extension-api",
+ "phera-value",
  "writeable",
 ]
 

@@ -17,6 +17,14 @@ pub fn register(registry: &mut Registry) {
     const ARGUMENTS: &[Param] = &[Param::new("arguments", ParamType::Mixed).variadic()];
     registry.class(ClassEntry {
         methods: const {
+            &[MethodEntry::public("__construct", &[], |_, _, _| {
+                Err(item("Spoofchecker"))
+            })]
+        },
+        ..ClassEntry::class("Spoofchecker")
+    });
+    registry.class(ClassEntry {
+        methods: const {
             &[
                 MethodEntry::public("__construct", ARGUMENTS, |_, _, _| Err(item("UConverter"))),
                 MethodEntry::public("getAliases", ARGUMENTS, |_, _, _| {
@@ -59,13 +67,5 @@ pub fn register(registry: &mut Registry) {
             ]
         },
         ..ClassEntry::class("IntlDatePatternGenerator")
-    });
-    registry.class(ClassEntry {
-        methods: const {
-            &[MethodEntry::public("__construct", ARGUMENTS, |_, _, _| {
-                Err(item("IntlPartsIterator"))
-            })]
-        },
-        ..ClassEntry::class("IntlPartsIterator")
     });
 }

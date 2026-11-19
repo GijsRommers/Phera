@@ -6,7 +6,7 @@
 //! ```
 
 mod historical;
-mod input;
+pub(super) mod input;
 mod parse;
 mod pattern;
 mod registration;
@@ -27,6 +27,37 @@ const CLASS: &str = "IntlDateFormatter";
 
 pub fn register(registry: &mut Registry) {
     registration::register(registry);
+}
+
+pub fn render_pattern(
+    locale: &Locale,
+    pattern: &str,
+    seconds: i64,
+    zone: &ZoneKind,
+) -> Option<String> {
+    Renderer::new(locale, pattern, 1)?.format(seconds, 0, zone)
+}
+
+pub fn format_message(
+    context: &mut dyn Context,
+    locale: &Locale,
+    timestamp: i64,
+    style: &str,
+    time: bool,
+) -> Option<String> {
+    let style_kind = match style {
+        "full" => Some(Style::Full),
+        "long" => Some(Style::Long),
+        "" | "medium" => Some(Style::Medium),
+        "short" => Some(Style::Short),
+        _ => None,
+    };
+    let pattern = match style_kind {
+        Some(style) if time => pattern::select(locale, Style::None, style),
+        Some(style) => pattern::select(locale, style, Style::None),
+        None => style.to_owned(),
+    };
+    Renderer::new(locale, &pattern, 1)?.format(timestamp, 0, &current_zone(context))
 }
 
 #[derive(Clone)]
@@ -65,10 +96,23 @@ fn init(
     else {
         return fail_creation(context, object, site, 1, "date formatter creation failed");
     };
-    let Some(zone) = input::timezone(context, args::value(values, 3), site, 4)? else {
+    let calendar_input = args::value(values, 4);
+    let timezone_input = args::value(values, 3);
+    let implicit_zone = match (&*timezone_input.deref(), &*calendar_input.deref()) {
+        (Value::Null, Value::Object(calendar)) if calendar.class.is_instance_of("IntlCalendar") => {
+            Some(crate::calendar::calendar_zone(calendar)?)
+        }
+        _ => None,
+    };
+    let zone = if let Some(zone) = implicit_zone {
+        Some(zone)
+    } else {
+        input::timezone(context, timezone_input, site, 4)?
+    };
+    let Some(zone) = zone else {
         return fail_creation(context, object, site, 1, "No such time zone");
     };
-    let Some(calendar) = input::calendar(args::value(values, 4), site, 5)? else {
+    let Some(calendar) = input::calendar(calendar_input, site, 5)? else {
         return fail_creation(context, object, site, 1, input::CALENDAR_ERROR);
     };
     let text = match std::str::from_utf8(args::bytes(values, 5)) {
@@ -223,7 +267,8 @@ fn dispatch(
             Value::Bool(true)
         }
         Operation::SetCalendar => {
-            let Some(calendar) = input::calendar(args::value(arguments, 0), site, argument)? else {
+            let input = args::value(arguments, 0);
+            let Some(calendar) = input::calendar(input, site, argument)? else {
                 return fail(context, state, site, 1, input::CALENDAR_ERROR);
             };
             let Some(render) = Renderer::new(&state.locale, &state.pattern, calendar) else {
@@ -231,6 +276,11 @@ fn dispatch(
             };
             state.render = render;
             state.calendar = calendar;
+            if let Value::Object(object) = &*input.deref()
+                && object.class.is_instance_of("IntlCalendar")
+            {
+                state.zone = crate::calendar::calendar_zone(object)?;
+            }
             Value::Bool(true)
         }
         Operation::SetPattern => {
@@ -258,9 +308,16 @@ fn dispatch(
         Operation::Format => return input::format(context, state, args::value(arguments, 0), site),
         Operation::Parse => return parse::parse(context, state, arguments, site, false),
         Operation::Localtime => return parse::parse(context, state, arguments, site, true),
-        Operation::CalendarObject | Operation::TimeZone | Operation::ParseToCalendar => {
-            return Err(crate::unsupported::item(site));
+        Operation::TimeZone => return crate::timezone::wrap_zone(context, state.zone.clone()),
+        Operation::CalendarObject => {
+            return crate::calendar::for_formatter(
+                context,
+                state.locale_name.clone(),
+                state.zone.clone(),
+                state.calendar,
+            );
         }
+        Operation::ParseToCalendar => return parse::parse(context, state, arguments, site, false),
         Operation::ErrorCode | Operation::ErrorMessage => Value::Null,
     };
     Ok(value)

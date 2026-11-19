@@ -75,14 +75,17 @@ phera-ext-hash = { path = "crates/extensions/hash" }
 icu_collator = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
 icu_experimental = { version = "=0.7.0", default-features = false, features = ["compiled_data"] }
 icu_calendar = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
+icu_casemap = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
 icu_datetime = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
 icu_time = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
 writeable = "=0.6.4"
 icu_decimal = { version = "=2.4.0", default-features = false, features = ["alloc", "compiled_data", "unstable"] }
 fixed_decimal = { version = "=0.7.3", features = ["ryu"] }
+icu_list = { version = "=2.4.0", default-features = false, features = ["alloc", "compiled_data"] }
 icu_locale = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
 icu_normalizer = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
 icu_properties = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
+icu_plurals = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
 idna = "=1.1.0"
 icu_segmenter = { version = "=2.4.0", default-features = false, features = ["compiled_data", "unstable"] }
 phera-ext-intl = { path = "crates/extensions/intl" }

@@ -59,7 +59,10 @@ In progress: bcmath, curl, gmp, [intl](crates/extensions/intl/README.md), mysqli
 zlib. Not started: gd, fileinfo, SimpleXML, XMLReader, XMLWriter, zip, sockets.
 
 The intl extension includes ICU4X normalization, grapheme operations, IDNA,
-locale queries and the first number and date formatting APIs.
+locale queries, number and date formatting, collation, list and message
+formatting, transliteration, break iteration, and calendar and timezone
+objects. See the [intl coverage notes](crates/extensions/intl/README.md) for
+the APIs that still differ from PHP.
 
 ## ✨ Goals
 
