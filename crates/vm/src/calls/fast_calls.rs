@@ -46,19 +46,25 @@ impl Machine<'_> {
             return Step::Slow;
         }
         let from = caller.frame.base() + args.index();
-        let arguments = self.registers.window(from, count);
-        let acceptable = arguments.iter().enumerate().all(|(index, argument)| {
-            argument.as_ref().is_some_and(|value| {
-                !value.is_reference()
-                    && (!facts.is_typed(index)
-                        || facts.parameter_masks[index].intersects(crate::types::own_type(value)))
-            })
-        });
-        if !acceptable {
+        let base = self.registers.len();
+        let size = facts.registers as usize;
+        if from + count > base || count > size {
             return Step::Slow;
         }
-        let base = self.registers.len();
-        self.registers.grow_to(base + facts.registers as usize);
+        let arguments = self.registers.window(from, count);
+        let mut typed = facts.typed_parameters();
+        for (argument, mask) in arguments.iter().zip(facts.parameter_masks.iter()) {
+            let Some(value) = argument else {
+                return Step::Slow;
+            };
+            if value.is_reference()
+                || (typed & 1 != 0 && !mask.intersects(crate::types::own_type(value)))
+            {
+                return Step::Slow;
+            }
+            typed >>= 1;
+        }
+        self.registers.grow_to(base + size);
         for index in 0..count {
             self.registers.move_slot(from + index, base + index);
         }
@@ -263,7 +269,9 @@ impl Machine<'_> {
         let function = match call.callee {
             PreparedCallee::Php(function) => function,
             PreparedCallee::Constructed => return self.finish_construction(position, destination),
-            PreparedCallee::General => return Step::Slow,
+            PreparedCallee::General => {
+                return self.finish_direct_method(position, destination, call);
+            }
         };
         let facts = self.code.facts(function);
         let sent = call.sent as usize;

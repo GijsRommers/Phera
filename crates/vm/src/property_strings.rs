@@ -73,7 +73,9 @@ impl Vm {
                 .map_or(class.name.as_str(), |method| method.declaring.as_str());
             NativeError::type_error(format!(
                 "Value of type {actual} returned from {declaring}::__get() must be compatible with unset property {}::${} of type {}",
-                property.declaring, property.name, ty.display
+                property.declaring,
+                property.name,
+                crate::types::php_type_display(ty)
             ))
         })?;
         if let Value::Reference(reference) = &result {

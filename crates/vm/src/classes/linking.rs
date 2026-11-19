@@ -412,6 +412,7 @@ impl Vm {
             }
         }
         let declaration_location = Some((unit_first, declaration_index));
+        let operations = operations.with_native_dimensions(hooks.as_deref(), &methods);
         let class = Rc::new_cyclic(|identity| Class {
             index,
             property_access: hooks.as_ref().and_then(|hooks| hooks.property_access),

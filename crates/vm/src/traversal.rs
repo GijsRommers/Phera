@@ -20,6 +20,24 @@ enum Cursor {
 }
 
 impl Traversal for Cursor {
+    fn next_entry(&mut self, with_key: bool) -> Option<(Value, Option<Value>)> {
+        match self {
+            Self::Native(iterator) => iterator.next_entry(with_key),
+            Self::Php(_) => None,
+        }
+    }
+
+    fn step_native(
+        &mut self,
+        context: &mut dyn Context,
+        operation: IteratorStep,
+    ) -> Option<NativeResult> {
+        match self {
+            Self::Native(iterator) => Some(native_step(iterator.as_mut(), context, operation)),
+            Self::Php(_) => None,
+        }
+    }
+
     fn step<'a>(
         &'a mut self,
         context: &'a mut dyn Context,
@@ -80,11 +98,14 @@ impl Vm {
                     by_reference,
                 )?));
             }
-            let factory = class.hooks.as_ref().and_then(|hooks| hooks.iterator);
-            if let Some(factory) = factory {
+            let factory = class.hooks.as_ref().and_then(|hooks| {
                 if by_reference {
-                    return Err(reference_error());
+                    hooks.iterator_by_reference
+                } else {
+                    hooks.iterator
                 }
+            });
+            if let Some(factory) = factory {
                 let cursor = factory(self, object)?;
                 return Ok(Box::new(Cursor::Native(cursor)));
             }

@@ -93,6 +93,45 @@ pub struct Type {
     pub display: String,
 }
 
+/// The built-in types in the order PHP prints them in a union. Class names
+/// come before all of them, in the order they were written.
+const UNION_ORDER: &[&str] = &[
+    "static", "callable", "object", "array", "string", "int", "float", "bool", "false", "true",
+    "void", "never", "null",
+];
+
+/// A declared type as PHP prints it: the members of a union in PHP's own
+/// order, whatever order the source has them in, and `T|null` as `?T`.
+///
+/// ```text
+/// int|string            string|int
+/// null|float|Countable  Countable|float|null
+/// null|int              ?int
+/// ```
+///
+/// Intersection types (`A&B`, `(A&B)|null`) are printed as written.
+pub fn union_in_php_order(written: &str) -> String {
+    if written.contains('&') {
+        return written.to_owned();
+    }
+    let mut members: Vec<&str> = written.trim_start_matches('?').split('|').collect();
+    if written.starts_with('?') {
+        members.push("null");
+    }
+    // A stable sort: class names share rank 0 and keep their written order.
+    members.sort_by_key(|member| {
+        UNION_ORDER
+            .iter()
+            .position(|builtin| builtin == member)
+            .map_or(0, |position| position + 1)
+    });
+    members.dedup();
+    match members.as_slice() {
+        [single, "null"] => format!("?{single}"),
+        _ => members.join("|"),
+    }
+}
+
 /// A set of built-in types, one bit each, so a type check is a bit test.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct TypeMask(pub u16);
@@ -149,4 +188,33 @@ const _: fn() = || {
 pub struct DeclarationWarning {
     pub message: String,
     pub line: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::union_in_php_order;
+
+    #[test]
+    fn built_in_types_follow_php_order_and_class_names_stay_first() {
+        assert_eq!(union_in_php_order("int|string"), "string|int");
+        assert_eq!(
+            union_in_php_order("null|float|bool|int|array|string|Countable|Stringable"),
+            "Countable|Stringable|array|string|int|float|bool|null"
+        );
+        assert_eq!(union_in_php_order("B|A|false"), "B|A|false");
+    }
+
+    #[test]
+    fn one_type_or_null_is_written_with_a_question_mark() {
+        assert_eq!(union_in_php_order("null|int"), "?int");
+        assert_eq!(union_in_php_order("?int"), "?int");
+        assert_eq!(union_in_php_order("int"), "int");
+        assert_eq!(union_in_php_order("int|string|null"), "string|int|null");
+    }
+
+    #[test]
+    fn intersections_are_left_as_written() {
+        assert_eq!(union_in_php_order("B&A"), "B&A");
+        assert_eq!(union_in_php_order("(B&A)|null"), "(B&A)|null");
+    }
 }

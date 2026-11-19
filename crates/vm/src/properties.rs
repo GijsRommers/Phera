@@ -22,7 +22,7 @@ impl Vm {
                 "Cannot assign {actual} to property {}::${} of type {}",
                 phera_value::class_display_name(&property.declaring),
                 property.name,
-                ty.display,
+                crate::types::php_type_display(ty),
             ))
         })
     }

@@ -143,7 +143,8 @@ impl Vm {
         {
             return Err(NativeError::type_error(format!(
                 "Cannot auto-initialize an array inside property {}::${name} of type {}",
-                property.declaring, ty.display
+                property.declaring,
+                crate::types::php_type_display(ty)
             )));
         }
         if let Some(value) = stored {

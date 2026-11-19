@@ -8,6 +8,7 @@ use std::{
 use phera_value::{Object, ObjectIds, PhpArray};
 
 use super::Class;
+use super::operations::ClassOperations;
 
 /// A class's position in the request's class table: a method frame's class
 /// scope and called class are kept as these numbers.
@@ -29,7 +30,6 @@ pub(crate) struct ClassDefinitions {
     /// Every class, by number.
     numbered: Vec<Rc<Class>>,
     closure: Option<ClassIndex>,
-    pub(crate) has_dimensions: bool,
     pub(crate) has_property_views: bool,
 }
 
@@ -42,16 +42,6 @@ impl ClassDefinitions {
     /// Register a class made with [`ClassTable::next_index`] under its
     /// lowercased name.
     pub(crate) fn insert(&mut self, lowercase_name: String, class: Rc<Class>) {
-        self.has_dimensions |= (!matches!(
-            class.kind,
-            phera_bytecode::ClassKind::Interface | phera_bytecode::ClassKind::Trait
-        ) && class
-            .operations
-            .has(super::operations::ClassOperations::ARRAY_ACCESS))
-            || class
-                .hooks
-                .as_ref()
-                .is_some_and(|hooks| hooks.dimensions.is_some());
         self.has_property_views |= class
             .hooks
             .as_ref()
@@ -77,7 +67,7 @@ pub(crate) struct ClassTable {
 impl ClassTable {
     pub(crate) fn new(native: Rc<ClassDefinitions>) -> Self {
         Self {
-            has_dimensions: native.has_dimensions,
+            has_dimensions: false,
             has_property_views: native.has_property_views,
             native,
             local: ClassDefinitions::default(),
@@ -94,7 +84,6 @@ impl ClassTable {
         debug_assert_eq!(class.index, self.next_index());
         self.local.order.push(class.name.clone());
         self.local.insert(lowercase_name, class);
-        self.has_dimensions |= self.local.has_dimensions;
         self.has_property_views |= self.local.has_property_views;
     }
 
@@ -170,6 +159,7 @@ impl ClassTable {
         class: Rc<Class>,
         properties: PhpArray,
     ) -> Rc<Object> {
+        self.has_dimensions |= class.operations.has(ClassOperations::DIMENSIONS);
         let object = Rc::new(Object::allocate_with_properties(
             &self.ids, class, properties,
         ));

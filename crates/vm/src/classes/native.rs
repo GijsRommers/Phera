@@ -169,6 +169,15 @@ impl ClassDefinitions {
                 .iter()
                 .filter_map(|name| table.get(name))
                 .collect();
+            if entry.kind == NativeKind::Interface {
+                for interface in &interfaces {
+                    for (name, method) in &interface.methods {
+                        methods
+                            .entry(name.clone())
+                            .or_insert_with(|| method.clone());
+                    }
+                }
+            }
             let mut constants = parent
                 .as_ref()
                 .map(|class| class.constants.clone())
@@ -211,6 +220,12 @@ impl ClassDefinitions {
                     .iter()
                     .any(|interface: &Rc<Class>| interface.is_throwable);
             let hooks = super::operations::inherit_hooks(entry.hooks, parent.as_deref());
+            let operations = super::operations::ClassOperations::link(
+                entry.name,
+                parent.as_deref(),
+                &interfaces,
+            )
+            .with_native_dimensions(hooks.as_deref(), &methods);
             let index = table.next_index();
             table.insert(
                 entry.name.to_ascii_lowercase(),
@@ -218,11 +233,7 @@ impl ClassDefinitions {
                     index,
                     property_access: hooks.as_ref().and_then(|hooks| hooks.property_access),
                     hooks,
-                    operations: super::operations::ClassOperations::link(
-                        entry.name,
-                        parent.as_deref(),
-                        &interfaces,
-                    ),
+                    operations,
                     origin: if entry.name == "Closure" {
                         super::class::ClassOrigin::Closure
                     } else {

@@ -136,6 +136,16 @@ impl ClassHandle for Class {
     fn name(&self) -> &str {
         &self.name
     }
+    fn has_property(&self, name: &str) -> bool {
+        self.defaults.iter().any(|property| property.name == name)
+    }
+
+    fn has_native_properties(&self) -> bool {
+        self.hooks
+            .as_ref()
+            .is_some_and(|hooks| hooks.properties.is_some())
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }
