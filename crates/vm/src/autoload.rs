@@ -191,8 +191,8 @@ impl Vm {
                 .await?;
             if self
                 .classes
-                .entries
-                .contains_key(&name.to_ascii_lowercase())
+                .get_lowercase(&name.to_ascii_lowercase())
+                .is_some()
             {
                 break;
             }

@@ -21,7 +21,7 @@ use phera_ext_http::{RequestHeaders, ResponseHead, Sapi, UploadedFiles};
 use phera_ext_standard::environment::{RequestEnvironment, php_array};
 use phera_extension_api::{LocalFuture, Registry};
 use phera_value::Value;
-use phera_vm::{CodeLoader, Vm};
+use phera_vm::{CodeLoader, NativeTables, Vm};
 
 use cache::CodeCache;
 
@@ -35,6 +35,25 @@ pub struct Runtime {
     web_registry: Arc<Registry>,
     cache: CodeCache,
     environment: Arc<Environment>,
+}
+
+/// A web worker links the process's native definitions once on its own thread.
+pub struct WebWorker {
+    runtime: Runtime,
+    native: NativeTables,
+}
+
+impl WebWorker {
+    pub async fn handle_request(
+        &self,
+        script: &Path,
+        document_root: &Path,
+        request: HttpRequest,
+    ) -> HttpResponse {
+        self.runtime
+            .handle_web_request(&self.native, script, document_root, request)
+            .await
+    }
 }
 
 /// What a command-line script did.
@@ -118,7 +137,7 @@ impl Runtime {
         sink: Option<Box<dyn OutputSink>>,
     ) -> Result<RunResult, RuntimeError> {
         let unit = self.compile_file(path.as_ref()).await?;
-        let mut vm = self.new_vm(Sapi::Cli);
+        let mut vm = self.new_vm(&NativeTables::new(self.registry.clone()), Sapi::Cli);
         vm.set_args(arguments);
         let server =
             environment::cli_server(php_array(self.environment.iter()), path.as_ref(), arguments);
@@ -138,13 +157,29 @@ impl Runtime {
         })
     }
 
-    /// Runs `script` for one web request and builds the response from what
-    /// it printed and from its `header()` calls.
-    ///
-    /// Every request gets a new VM, so nothing a request does to globals,
-    /// statics or constants is visible to the next one.
+    /// Create this on the thread that will run the web requests.
+    pub fn web_worker(&self) -> WebWorker {
+        WebWorker {
+            runtime: self.clone(),
+            native: NativeTables::new(self.web_registry.clone()),
+        }
+    }
+
+    /// Run one standalone web request. Use [`Self::web_worker`] to serve successive requests.
     pub async fn handle_request(
         &self,
+        script: &Path,
+        document_root: &Path,
+        request: HttpRequest,
+    ) -> HttpResponse {
+        self.web_worker()
+            .handle_request(script, document_root, request)
+            .await
+    }
+
+    async fn handle_web_request(
+        &self,
+        native: &NativeTables,
         script: &Path,
         document_root: &Path,
         request: HttpRequest,
@@ -171,7 +206,7 @@ impl Runtime {
             None => None,
         };
 
-        let mut vm = self.new_vm(Sapi::Web);
+        let mut vm = self.new_vm(native, Sapi::Web);
         let uploads = http::define_superglobals(
             &mut vm,
             &request,
@@ -239,12 +274,8 @@ impl Runtime {
         Ok(unit.to_string())
     }
 
-    fn new_vm(&self, sapi: Sapi) -> Vm {
-        let registry = match sapi {
-            Sapi::Cli => &self.registry,
-            Sapi::Web => &self.web_registry,
-        };
-        let mut vm = Vm::new(registry.clone());
+    fn new_vm(&self, native: &NativeTables, sapi: Sapi) -> Vm {
+        let mut vm = Vm::with_native_tables(native);
         *vm.state_mut().get_or_default::<Sapi>() = sapi;
         vm.set_global("_ENV", Value::from(php_array(self.environment.iter())));
         *vm.state_mut().get_or_default::<RequestEnvironment>() =

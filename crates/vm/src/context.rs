@@ -64,7 +64,7 @@ impl Context for Vm {
     }
 
     fn register_request_finalizer(&mut self, callback: phera_extension_api::AsyncFn) {
-        self.request_callbacks.finalizer = Some(callback);
+        self.request_callbacks.output.set_finalizer(callback);
     }
 
     fn script_path(&self) -> Option<std::path::PathBuf> {

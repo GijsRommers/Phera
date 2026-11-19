@@ -20,7 +20,7 @@ use std::process::ExitCode;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use phera_runtime::{HttpRequest, HttpResponse, Runtime};
+use phera_runtime::{HttpRequest, HttpResponse, Runtime, WebWorker};
 use phera_server::{Handler, HandlerFactory, HttpVersion, Request, Response, Server, ServerConfig};
 
 use crate::arguments::ServeOptions;
@@ -137,7 +137,7 @@ struct SiteHandlerFactory {
 impl HandlerFactory for SiteHandlerFactory {
     fn create(&self, _worker_index: usize) -> Rc<dyn Handler> {
         Rc::new(SiteHandler {
-            runtime: self.runtime.clone(),
+            runtime: self.runtime.web_worker(),
             site: self.site.clone(),
             compress: self.compress,
             trusted_proxies: self.trusted_proxies.clone(),
@@ -147,7 +147,7 @@ impl HandlerFactory for SiteHandlerFactory {
 }
 
 struct SiteHandler {
-    runtime: Runtime,
+    runtime: WebWorker,
     site: Arc<Site>,
     /// `--compress`: compress responses for clients that accept it.
     compress: bool,

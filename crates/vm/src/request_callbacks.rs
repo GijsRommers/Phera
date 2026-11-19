@@ -3,16 +3,57 @@
 
 use std::collections::VecDeque;
 
-use phera_extension_api::{NativeError, NativeResult, RequestCallback};
+use phera_extension_api::{AsyncFn, NativeError, NativeResult, RequestCallback};
 use phera_value::Value;
 
 use crate::{Vm, calls::call_state::Callee};
 
 #[derive(Default)]
 pub(crate) struct RequestCallbacks {
-    pub(crate) headers: Option<Callee>,
-    pub(crate) finalizer: Option<phera_extension_api::AsyncFn>,
+    pub(crate) output: OutputCallbacks,
     shutdown: VecDeque<Shutdown>,
+}
+
+/// The output dispatcher already has to distinguish between a request with
+/// `header_register_callback()` and one with no work to run around output.
+#[derive(Default)]
+pub(crate) enum OutputCallbacks {
+    #[default]
+    None,
+    Headers(Callee),
+    AfterOutput(AsyncFn),
+    Both(Callee, AsyncFn),
+}
+
+impl OutputCallbacks {
+    pub(crate) fn has_headers(&self) -> bool {
+        matches!(self, Self::Headers(_) | Self::Both(..))
+    }
+
+    pub(crate) fn set_finalizer(&mut self, finalizer: AsyncFn) {
+        *self = match std::mem::take(self) {
+            Self::Headers(headers) | Self::Both(headers, _) => Self::Both(headers, finalizer),
+            Self::None | Self::AfterOutput(_) => Self::AfterOutput(finalizer),
+        };
+    }
+
+    fn set_headers(&mut self, headers: Callee) {
+        *self = match std::mem::take(self) {
+            Self::AfterOutput(finalizer) | Self::Both(_, finalizer) => {
+                Self::Both(headers, finalizer)
+            }
+            Self::None | Self::Headers(_) => Self::Headers(headers),
+        };
+    }
+
+    pub(crate) fn into_callbacks(self) -> (Option<Callee>, Option<AsyncFn>) {
+        match self {
+            Self::None => (None, None),
+            Self::Headers(headers) => (Some(headers), None),
+            Self::AfterOutput(finalizer) => (None, Some(finalizer)),
+            Self::Both(headers, finalizer) => (Some(headers), Some(finalizer)),
+        }
+    }
 }
 
 struct Shutdown {
@@ -39,7 +80,7 @@ impl Vm {
         match phase {
             RequestCallback::Headers => {
                 if self.output_writer.origin.is_none() {
-                    self.request_callbacks.headers = Some(callee);
+                    self.request_callbacks.output.set_headers(callee);
                 }
                 Ok(Value::Bool(true))
             }

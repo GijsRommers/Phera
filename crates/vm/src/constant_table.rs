@@ -28,34 +28,54 @@ pub(crate) struct GlobalConstant {
 
 /// Request constants and the resolved values of bytecode symbols.
 pub(crate) struct ConstantTable {
+    native: Rc<NativeConstants>,
     values: HashMap<String, GlobalConstant>,
     user_order: Vec<String>,
     origins: HashMap<String, ConstantOrigin>,
     resolved: HashMap<ConstantSite, ResolvedConstant>,
 }
 
+pub(crate) type NativeConstants = HashMap<String, GlobalConstant>;
+
+pub(crate) fn native_constants(registry: &phera_extension_api::Registry) -> NativeConstants {
+    let mut values: NativeConstants = registry
+        .constant_entries()
+        .map(|(name, value, deprecated)| {
+            (
+                name.to_owned(),
+                GlobalConstant {
+                    value: value.to_value(),
+                    deprecated: deprecated.map(Rc::from),
+                },
+            )
+        })
+        .collect();
+    for (name, number) in [
+        ("EXTR_OVERWRITE", 0),
+        ("EXTR_SKIP", 1),
+        ("EXTR_PREFIX_SAME", 2),
+        ("EXTR_PREFIX_ALL", 3),
+        ("EXTR_PREFIX_INVALID", 4),
+        ("EXTR_PREFIX_IF_EXISTS", 5),
+        ("EXTR_IF_EXISTS", 6),
+        ("EXTR_REFS", 256),
+    ]
+    .into_iter()
+    .chain(crate::output_buffer::CONSTANTS.iter().copied())
+    {
+        values.entry(name.into()).or_insert(GlobalConstant {
+            value: Value::Int(number),
+            deprecated: None,
+        });
+    }
+    values
+}
+
 impl ConstantTable {
-    pub(crate) fn new(mut values: HashMap<String, GlobalConstant>) -> Self {
-        for (name, number) in [
-            ("EXTR_OVERWRITE", 0),
-            ("EXTR_SKIP", 1),
-            ("EXTR_PREFIX_SAME", 2),
-            ("EXTR_PREFIX_ALL", 3),
-            ("EXTR_PREFIX_INVALID", 4),
-            ("EXTR_PREFIX_IF_EXISTS", 5),
-            ("EXTR_IF_EXISTS", 6),
-            ("EXTR_REFS", 256),
-        ]
-        .into_iter()
-        .chain(crate::output_buffer::CONSTANTS.iter().copied())
-        {
-            values.entry(name.into()).or_insert(GlobalConstant {
-                value: Value::Int(number),
-                deprecated: None,
-            });
-        }
+    pub(crate) fn new(native: Rc<NativeConstants>) -> Self {
         Self {
-            values,
+            native,
+            values: HashMap::new(),
             user_order: Vec::new(),
             origins: HashMap::new(),
             resolved: HashMap::new(),
@@ -63,7 +83,7 @@ impl ConstantTable {
     }
 
     pub(crate) fn get(&self, name: &str) -> Option<&GlobalConstant> {
-        self.values.get(name)
+        self.values.get(name).or_else(|| self.native.get(name))
     }
 
     pub(crate) fn user_names(&self) -> impl Iterator<Item = &str> {
@@ -71,7 +91,7 @@ impl ConstantTable {
     }
 
     pub(crate) fn contains_key(&self, name: &str) -> bool {
-        self.values.contains_key(name)
+        self.get(name).is_some()
     }
 
     /// A new namespace constant can replace an earlier global fallback.
@@ -121,14 +141,8 @@ impl ConstantTable {
             .get(symbol.index())
             .ok_or_else(|| internal_error!("constant symbol"))?;
         let value = self
-            .values
             .get(&definition.name)
-            .or_else(|| {
-                definition
-                    .fallback
-                    .as_ref()
-                    .and_then(|name| self.values.get(name))
-            })
+            .or_else(|| definition.fallback.as_ref().and_then(|name| self.get(name)))
             .cloned()
             .ok_or_else(|| {
                 crate::unsupported_items::omitted_item(

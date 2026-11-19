@@ -6,6 +6,8 @@ use phera_bytecode::{CompiledUnit, Reg};
 use phera_extension_api::{LocalFuture, Registry, RequestState};
 use phera_value::{PhpArray, Value};
 
+pub use native_tables::NativeTables;
+
 use crate::calls::frame::{Frame, FrameView};
 use crate::path::AccessPath;
 
@@ -109,6 +111,7 @@ mod magic_property_write;
 mod magic_references;
 mod native_diagnostics;
 mod native_property_views;
+mod native_tables;
 mod object_comparison;
 mod object_iteration;
 mod operators;
@@ -233,21 +236,14 @@ pub struct Vm {
 impl Vm {
     /// Create isolated request state from an immutable native registry.
     pub fn new(registry: Arc<Registry>) -> Self {
-        let constants = registry
-            .constant_entries()
-            .map(|(name, value, deprecated)| {
-                (
-                    name.to_owned(),
-                    constant_table::GlobalConstant {
-                        value: value.to_value(),
-                        deprecated: deprecated.map(std::rc::Rc::from),
-                    },
-                )
-            })
-            .collect();
+        Self::with_native_tables(&NativeTables::new(registry))
+    }
+
+    /// Start a fresh request with the worker's already linked built-ins.
+    pub fn with_native_tables(native: &NativeTables) -> Self {
         Self {
             enum_cases: classes::enums::EnumCases::default(),
-            classes: classes::ClassTable::native(&registry),
+            classes: classes::ClassTable::new(native.classes.clone()),
             autoload: Default::default(),
             include_path: None,
             native_callback_sites: Vec::new(),
@@ -280,12 +276,12 @@ impl Vm {
             draining_generators: false,
             closing_generator: None,
             executed_instructions: 0,
-            registry,
+            registry: native.registry.clone(),
             output: vec![],
             output_writer: output::Output::new(),
             request_callbacks: Default::default(),
             registers: calls::registers::Registers::new(),
-            constants: constant_table::ConstantTable::new(constants),
+            constants: constant_table::ConstantTable::new(native.constants.clone()),
             frame_limit: DEFAULT_FRAME_LIMIT,
             status: 0,
             error_handlers: error_handlers::ErrorHandlers::default(),
@@ -370,14 +366,7 @@ impl Vm {
         }
         self.run_shutdown_callbacks().await;
         self.finish_buffers().await;
-        if let Err(error) = self.finish_headers().await {
-            self.unwind(error);
-        }
-        if let Some(finalizer) = self.request_callbacks.finalizer.take()
-            && let Err(error) = finalizer(self, Vec::new()).await
-        {
-            self.report_uncaught(error).await;
-        }
+        self.finish_request_headers().await;
         self.status
     }
 
