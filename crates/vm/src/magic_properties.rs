@@ -170,6 +170,19 @@ impl Vm {
             .any(|guard| guard.hook == hook && guard.name == *name && guard.matches(object))
     }
 
+    pub(crate) fn property_guarded_locally(
+        &self,
+        object: &Rc<Object>,
+        name: &ArrayKey,
+        hook: PropertyHook,
+    ) -> bool {
+        self.property_guards.iter().any(|guard| {
+            guard.hook == hook
+                && guard.name == *name
+                && std::ptr::eq(guard.object.as_ptr(), Rc::as_ptr(object))
+        })
+    }
+
     pub(crate) fn property_hook(
         &self,
         class: &Class,

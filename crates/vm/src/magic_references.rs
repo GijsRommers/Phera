@@ -142,6 +142,7 @@ impl Vm {
                 if !Rc::ptr_eq(object, &effective) {
                     if steps.peek().is_none()
                         && self.property_guarded(&effective, name, PropertyHook::Get)
+                        && !self.property_guarded_locally(object, name, PropertyHook::Get)
                         && !effective.has(name)
                     {
                         let value = self.read_declared_property(
@@ -197,7 +198,7 @@ impl Vm {
                                 }
                             }
                         }
-                        if object.is_uninitialized_lazy()
+                        if self.classes.has_lazy_objects
                             && steps.peek().is_none()
                             && stored.is_none()
                             && let Some(key) = &slot
