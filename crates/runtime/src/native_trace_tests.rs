@@ -40,6 +40,14 @@ const BODY_ERRORS: &[(&str, &str)] = &[
         "(new PDO('sqlite::memory:'))->query('select nope from nowhere')",
     ),
     (
+        "pdo constructor redacts password",
+        "new PDO('invalid:', 'probe', 'trace-marker')",
+    ),
+    (
+        "pdo factory redacts password",
+        "PDO::connect('invalid:', 'probe', 'trace-marker')",
+    ),
+    (
         "inherited mysql connect",
         r"class_exists(Pdo\Mysql::class) ? Pdo\Mysql::connect() : null",
     ),

@@ -72,7 +72,8 @@ const PDO_METHODS: &[MethodEntry] = &[
                 .with_default(ConstantValue::Null),
             Param::new("password", ParamType::String)
                 .nullable()
-                .with_default(ConstantValue::Null),
+                .with_default(ConstantValue::Null)
+                .sensitive(),
             Param::new("options", ParamType::Array)
                 .nullable()
                 .with_default(ConstantValue::Null),
@@ -88,7 +89,8 @@ const PDO_METHODS: &[MethodEntry] = &[
                 .with_default(ConstantValue::Null),
             Param::new("password", ParamType::String)
                 .nullable()
-                .with_default(ConstantValue::Null),
+                .with_default(ConstantValue::Null)
+                .sensitive(),
             Param::new("options", ParamType::Array)
                 .nullable()
                 .with_default(ConstantValue::Null),
