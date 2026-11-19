@@ -11,7 +11,10 @@ use phera_extension_api::{
 };
 use phera_value::{Value, to_bool};
 
-use crate::{Vm, calls::frame::IteratorState};
+use crate::{
+    Vm,
+    calls::frame::{IteratorState, TraversalMode},
+};
 
 impl Vm {
     /// A resumed generator either yields its next element here or enters the
@@ -27,7 +30,7 @@ impl Vm {
             .current_extras_mut()
             .iterators
             .get_mut(iterator.0)
-            .filter(|state| state.started && !state.traversal_by_reference)
+            .filter(|state| state.started && state.traversal_mode == TraversalMode::Generator)
             .and_then(|state| state.traversal.as_deref()?.generator())
             .cloned();
         let Some(generator) = generator else {
@@ -56,13 +59,20 @@ impl Vm {
         let mut cursor = self.make_traversal(object, by_reference).await?;
         traversal::step(cursor.as_mut(), self, IteratorStep::Rewind).await?;
         let valid = to_bool(&traversal::step(cursor.as_mut(), self, IteratorStep::Valid).await?);
+        let traversal_mode = if by_reference {
+            TraversalMode::Reference
+        } else if cursor.generator().is_some() {
+            TraversalMode::Generator
+        } else {
+            TraversalMode::Value
+        };
         self.call_stack.current_extras_mut().iterators.insert(
             iterator.0,
             IteratorState {
                 snapshot: None,
                 source: None,
                 traversal: valid.then_some(cursor),
-                traversal_by_reference: by_reference,
+                traversal_mode,
                 position: None,
                 started: false,
             },
@@ -97,7 +107,7 @@ impl Vm {
         if let Some((key, index)) = key.zip(index) {
             self.set(key, index.deref().clone());
         }
-        if state.traversal_by_reference {
+        if state.traversal_mode == TraversalMode::Reference {
             if !value.is_reference() {
                 return Err(crate::traversal::reference_error());
             }

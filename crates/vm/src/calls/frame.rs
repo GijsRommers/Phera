@@ -27,14 +27,21 @@ use crate::code_table::FunctionIndex;
 
 pub(crate) use crate::calls::frame_view::FrameView;
 
+/// Object cursors use different entry paths for values, references, and generators.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TraversalMode {
+    Value,
+    Reference,
+    Generator,
+}
+
 /// Foreach either owns a value snapshot or follows a live reference path.
 pub(crate) struct IteratorState {
     /// By-value foreach keeps this owner to separate subsequent array writes.
     pub(crate) snapshot: Option<Rc<PhpArray>>,
     /// Objects keep an independent cursor for each active traversal.
     pub(crate) traversal: Option<Box<dyn phera_extension_api::traversal::Traversal>>,
-    /// A reference-capable cursor can expose the backing cell.
-    pub(crate) traversal_by_reference: bool,
+    pub(crate) traversal_mode: TraversalMode,
     /// By-reference foreach resolves this place again as the array changes.
     pub(crate) source: Option<AccessPath>,
     /// The array storage position, distinct from a PHP integer key.

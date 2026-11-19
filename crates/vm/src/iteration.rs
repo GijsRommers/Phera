@@ -53,7 +53,7 @@ impl Vm {
                     None
                 },
                 traversal: None,
-                traversal_by_reference: false,
+                traversal_mode: frame::TraversalMode::Value,
                 source: if object_iteration { None } else { place },
                 position: None,
                 started: false,
@@ -85,7 +85,7 @@ impl Vm {
             frame::IteratorState {
                 snapshot: None,
                 traversal: None,
-                traversal_by_reference: false,
+                traversal_mode: frame::TraversalMode::Value,
                 source: Some(place),
                 position: None,
                 started: false,
@@ -257,7 +257,8 @@ pub(crate) fn snapshot_step(
         return false;
     }
     let Some(array) = &state.snapshot else {
-        return native_step(state, None, destination, slots);
+        return state.traversal_mode == frame::TraversalMode::Value
+            && native_step(state, None, destination, slots);
     };
     let position = if state.started {
         state
@@ -282,15 +283,13 @@ pub(crate) fn snapshot_step(
     true
 }
 
+/// Consume a combined entry from a by-value cursor on the ordinary path.
 pub(crate) fn native_step(
     state: &mut frame::IteratorState,
     key: Option<Reg>,
     destination: Reg,
     slots: &mut [Option<Value>],
 ) -> bool {
-    if state.traversal_by_reference {
-        return false;
-    }
     let Some((value, index)) = state
         .traversal
         .as_mut()

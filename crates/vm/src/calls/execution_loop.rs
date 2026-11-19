@@ -20,7 +20,7 @@ use phera_value::Value;
 
 use crate::Vm;
 use crate::calls::call_stack::CallStack;
-use crate::calls::frame::Frame;
+use crate::calls::frame::{Frame, TraversalMode};
 use crate::calls::registers::Registers;
 use crate::classes::ClassTable;
 use crate::code_table::CodeTable;
@@ -247,7 +247,8 @@ impl Machine<'_> {
                 let iterators = &mut self.stack.current_extras_mut().iterators;
                 let slots = self.registers.tail_mut(base);
                 if iterators.get_mut(iter.0).is_some_and(|state| {
-                    crate::iteration::native_step(state, Some(key), value, slots)
+                    state.traversal_mode == TraversalMode::Value
+                        && crate::iteration::native_step(state, Some(key), value, slots)
                 }) {
                     Step::Done(ip)
                 } else {
