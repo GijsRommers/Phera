@@ -31,6 +31,13 @@ impl Analyzer<'_> {
                 if ty == ValueType::Never {
                     ty
                 } else {
+                    if self.level >= 4 && *operator == UnaryOperator::Not {
+                        let truth = dead_code::truth(&ty);
+                        self.constant_negation(expression, operand, truth);
+                        if let Some(truth) = truth {
+                            return ValueType::BoolLiteral(!truth);
+                        }
+                    }
                     super::operators::unary_type(*operator, ty)
                 }
             }
@@ -55,7 +62,7 @@ impl Analyzer<'_> {
                     CastKind::Void => ValueType::Void,
                 }
             }
-            ExpressionKind::Match(expression) => self.match_expression(expression, scope),
+            ExpressionKind::Match(value) => self.match_expression(value, scope, expression.span),
             ExpressionKind::Clone { object, with } if self.level >= 2 => {
                 let object = self.expression(object, scope, quiet);
                 if object == ValueType::Never

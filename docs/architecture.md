@@ -1157,12 +1157,30 @@ What PHPStan and Psalm do: find errors without running the code.
   count checks, and variable definition. Level 2 reads and validates
   PHPDoc and checks members of known receiver types. Level 3 checks
   returned values and typed property writes. Level 4 checks provably
-  constant predicates and unreachable code. Level 5 checks argument types
-  against resolved signatures. A call to `strlen(...)` has the same
-  parameter type as a direct call to `strlen`.
+  constant predicates, unreachable code, discarded pure results and unused
+  private members. The PHPStan version used for the differential tests
+  defines which rules run by default. A predicate gets a diagnostic only
+  when every possible input agrees on the outcome. For example, PHP can
+  narrow `object` after `$value instanceof User`, while doing the same
+  test on a value declared as `User` always succeeds. The flow walk knows
+  where a statement stops execution, so it can report the start of an
+  unreachable run of statements.
+  Level 5 checks argument types and reference passing against resolved
+  signatures. A call to `strlen(...)` has the same parameter type as a
+  direct call to `strlen`. Level 6 requires declaration types and their
+  iterable and generic arguments. Level 7 checks members of unions
+  independently. Level 8 also checks the null possibility. Level 9 checks
+  operations on explicit `mixed`, and level 10 includes implicit `mixed`.
+  The `max` level follows the highest supported level.
+- **Shared tooling.** The declaration index, scopes, source locations and
+  diagnostics form the data model for other tools. Checks that depend on
+  inferred types or resolved declarations belong in the checker. A style
+  check that needs only the AST can use the linter's own walk.
 - **Output**: a readable report, JSON, and annotations for CI; a baseline
   file to adopt it on an existing code base; `@phpstan-ignore` and
   `@psalm-suppress` comments are honoured so existing code needs no edits.
+  `phera check --baseline src` reads `phpstan-baseline.neon`. It uses
+  the generated baseline's paths, identifiers, messages and counts.
   Native union names use PHP's display order through the bytecode crate,
   so `int|string` is displayed as `string|int` in both runtime and checker
   diagnostics.

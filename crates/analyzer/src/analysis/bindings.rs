@@ -131,6 +131,7 @@ impl Analyzer<'_> {
         }
         signature.unbound_this = self.context.unbound_this.take().unwrap_or_default();
         signature.global_effects = crate::global_effects::of(&closure.body);
+        signature.returns_reference = closure.by_reference;
         if self.level >= 2 {
             signature.captured_writes = super::closure_effects::captured_writes(closure);
         }
@@ -183,6 +184,7 @@ impl Analyzer<'_> {
         }
         signature.unbound_this = self.context.unbound_this.take().unwrap_or_default();
         signature.global_effects = crate::global_effects::expression(&arrow.body);
+        signature.returns_reference = arrow.by_reference;
         self.context = previous;
         self.exception_scopes = exceptions;
         self.controls = controls;

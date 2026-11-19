@@ -97,13 +97,12 @@ impl Signature {
             let Some(subject) = subject else {
                 break;
             };
-            let relation = conditional
-                .tested
-                .accepts(subject, index, TypePolicy::Documentation);
+            let relation = conditional_relation(&conditional.tested, subject, index);
             let matches = match relation {
                 Compatibility::Accepts => true,
                 Compatibility::Rejects
                     if (conditional.tested == ValueType::Null && subject.excludes_null())
+                        || empty_array_type(&conditional.tested)
                         || matches!(
                             subject,
                             ValueType::Null
@@ -288,8 +287,58 @@ impl PropertyInfo {
 
 fn refine(native: &ValueType, documented: &ValueType, index: &Index) -> ValueType {
     if native.accepts(documented, index, TypePolicy::Documentation) == Compatibility::Accepts {
-        documented.clone()
+        declaration_refinement(native, documented.clone())
     } else {
         native.clone()
     }
+}
+
+pub fn declaration_refinement(native: &ValueType, documented: ValueType) -> ValueType {
+    use crate::types::CollectionKind;
+    let documented = if native.without_null() == ValueType::Iterable
+        && let ValueType::Collection(collection) = &documented
+        && collection.kind == CollectionKind::Array
+        && collection.key == ValueType::Int.join(&ValueType::String)
+    {
+        // `@param Row[] $rows` on `iterable $rows` describes the value
+        // yielded by either an array or a Traversable.
+        let mut iterable = (**collection).clone();
+        iterable.kind = CollectionKind::Iterable;
+        ValueType::Collection(std::sync::Arc::new(iterable))
+    } else {
+        documented
+    };
+    // A doc type refines a nullable declaration without removing null from
+    // the native contract. For example, `@param list<int> $p` on `?array $p`.
+    if !matches!(
+        &documented,
+        ValueType::Template(_) | ValueType::Conditional(_)
+    ) && matches!(native, ValueType::Union(types) if types.contains(&ValueType::Null))
+    {
+        documented.join(&ValueType::Null)
+    } else {
+        documented
+    }
+}
+
+fn empty_array_type(ty: &ValueType) -> bool {
+    matches!(ty, ValueType::Shape(shape) if shape.kind != crate::types::ShapeKind::Object
+        && shape.fields.is_empty() && shape.remainder.is_none())
+}
+
+fn conditional_relation(tested: &ValueType, subject: &ValueType, index: &Index) -> Compatibility {
+    if empty_array_type(tested) {
+        // Acceptance of an array shape permits extra keys, but an
+        // `is array{}` test is true only for an empty array.
+        if empty_array_type(subject) {
+            return Compatibility::Accepts;
+        }
+        if matches!(subject, ValueType::Shape(shape) if shape.fields.iter().any(|field| !field.optional))
+            || matches!(subject, ValueType::Collection(collection) if collection.non_empty)
+        {
+            return Compatibility::Rejects;
+        }
+        return Compatibility::Uncertain;
+    }
+    tested.accepts(subject, index, TypePolicy::Documentation)
 }

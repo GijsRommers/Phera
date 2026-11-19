@@ -70,6 +70,7 @@ impl Analyzer<'_> {
         right: &Expression,
         scope: &mut Scope,
         quiet: bool,
+        operation: &Expression,
     ) -> ValueType {
         if operator == BinaryOperator::NullCoalesce {
             return self.coalesce(left, right, scope, quiet);
@@ -87,6 +88,26 @@ impl Analyzer<'_> {
             BinaryOperator::Divide | BinaryOperator::Modulo | BinaryOperator::Power
         ) {
             self.record_exception(scope);
+        }
+        if self.level >= 4
+            && let Some(ty) = self.constant_comparison(
+                operator,
+                (left, &left_ty),
+                (right, &right_ty),
+                scope,
+                operation.span,
+            )
+        {
+            return ty;
+        }
+        if self.level >= 4 && operator == BinaryOperator::Xor {
+            let left_truth = dead_code::truth(&left_ty);
+            let right_truth = dead_code::truth(&right_ty);
+            self.constant_logical_operand(operation, left, left_truth, dead_code::Side::Left);
+            self.constant_logical_operand(operation, right, right_truth, dead_code::Side::Right);
+            if let (Some(left), Some(right)) = (left_truth, right_truth) {
+                return ValueType::BoolLiteral(left != right);
+            }
         }
         if self.level >= 3 {
             return super::operators::binary_type(operator, &left_ty, &right_ty);
@@ -113,6 +134,12 @@ impl Analyzer<'_> {
         scope: &mut Scope,
     ) -> ValueType {
         let branches = self.condition(condition, std::mem::take(scope), false);
+        self.constant_condition(
+            "ternary",
+            "Ternary operator condition",
+            condition,
+            &branches,
+        );
         let (yes, yes_ty) = self.expression_branch(branches.yes, then, branches.ty);
         let (no, no_ty) = self.expression_branch(branches.no, Some(otherwise), ValueType::Mixed);
         if let Some(after) = super::condition::Condition::merge(yes, no) {

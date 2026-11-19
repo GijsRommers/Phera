@@ -65,7 +65,7 @@ impl Parser<'_, '_> {
         })))
     }
 
-    pub fn callable(&mut self, depth: usize) -> Result<ValueType> {
+    pub fn callable(&mut self, depth: usize, closure_object: bool) -> Result<ValueType> {
         let mut signature = Signature::new(
             &[],
             None,
@@ -75,6 +75,7 @@ impl Parser<'_, '_> {
                 line: 0,
             },
         );
+        signature.closure_object = closure_object;
         while !self.eat(')') {
             let untyped_variadic = self.peek() == Some(Token::Dots)
                 && matches!(self.peek_at(1), Some(Token::Variable(_)));
@@ -105,7 +106,11 @@ impl Parser<'_, '_> {
             }
             signature.parameters.push(ParameterInfo {
                 name,
-                ty,
+                ty: if default_is_null {
+                    ty.join(&ValueType::Null)
+                } else {
+                    ty
+                },
                 optional,
                 default_is_null,
                 variadic: untyped_variadic || trailing_variadic,
@@ -118,7 +123,12 @@ impl Parser<'_, '_> {
             self.need(',', "',' between callable parameters")?;
         }
         if self.eat(':') {
-            signature.returns = self.ty(depth)?;
+            // A return union belongs in parentheses. In
+            // `Closure(): User|string`, string is an alternative to Closure.
+            if depth >= super::MAX_NESTING {
+                return Err(self.error("a less deeply nested callable return type"));
+            }
+            signature.returns = self.primary(depth)?;
         }
         Ok(ValueType::Callable(Arc::new(signature)))
     }

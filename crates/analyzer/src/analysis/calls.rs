@@ -119,10 +119,11 @@ impl Analyzer<'_> {
             return ValueType::Never;
         }
         if matches!(arguments, Arguments::FirstClassCallable) {
-            signature.map_or(ValueType::Mixed, |s| {
-                ValueType::Callable(std::sync::Arc::new(s))
-            })
+            signature.map_or(ValueType::Mixed, crate::index::Signature::as_closure)
         } else {
+            if let Some(signature) = &signature {
+                self.discarded_method_result(span, class, &method.name, signature, access);
+            }
             let returns = if let Some(signature) = signature {
                 signature.infer_return(arguments, &facts.types, self.index)
             } else if self.level >= 2 && !matches!(access, Access::Guarded | Access::GuardedStatic)
@@ -199,15 +200,19 @@ impl Analyzer<'_> {
         target: &NewTarget,
         arguments: &Arguments,
         scope: &mut Scope,
+        span: Span,
     ) -> ValueType {
         let NewTarget::Class(expression) = target else {
             if let NewTarget::Anonymous(class) = target {
                 let name = crate::collect::anonymous_name(&self.file.path, class.span.start);
-                let signature = self.index.method(&name, "__construct").cloned();
+                let signature = self
+                    .index
+                    .method(&name, "__construct")
+                    .map(|signature| signature.clone().typed(self.index));
                 let evaluation = self.arguments(
                     arguments,
                     signature.as_ref(),
-                    "anonymous class",
+                    "new anonymous class",
                     scope,
                     class.span,
                     CallKind::Direct,
@@ -225,10 +230,14 @@ impl Analyzer<'_> {
             return ValueType::Never;
         }
         let class = class.name();
-        let signature = class
-            .as_ref()
-            .and_then(|c| self.index.method(c, "__construct"))
-            .cloned();
+        let signature = class.as_ref().and_then(|class| {
+            let (owner, signature) = self.index.method_owner(class, "__construct")?;
+            Some(signature.clone().typed(self.index).for_receiver(
+                self.index,
+                owner,
+                &ValueType::Class(class.clone()),
+            ))
+        });
         let late_static = matches!(&expression.kind, ExpressionKind::Name(n)
             if n.text.eq_ignore_ascii_case("static"));
         if !late_static
@@ -253,6 +262,11 @@ impl Analyzer<'_> {
         );
         if evaluation == Evaluation::Never {
             return ValueType::Never;
+        }
+        if let Some(class) = &class
+            && !late_static
+        {
+            self.discarded_constructor_result(span, class);
         }
         self.apply_global_effects(signature.as_ref(), scope);
         class.map_or(ValueType::Mixed, ValueType::Class)

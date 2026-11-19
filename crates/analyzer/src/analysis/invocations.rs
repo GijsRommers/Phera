@@ -14,8 +14,10 @@ impl Analyzer<'_> {
         match &expression.kind {
             ExpressionKind::Call {
                 callee, arguments, ..
-            } => self.call(callee, arguments, scope),
-            ExpressionKind::New { class, arguments } => self.new_object(class, arguments, scope),
+            } => self.call(callee, arguments, scope, expression.span),
+            ExpressionKind::New { class, arguments } => {
+                self.new_object(class, arguments, scope, expression.span)
+            }
             ExpressionKind::MethodCall {
                 target,
                 name,
@@ -61,6 +63,9 @@ impl Analyzer<'_> {
                 } else {
                     Access::object(target)
                 };
+                if *nullsafe {
+                    self.check_nullsafe("method call", target, name, &ty, scope, expression.span);
+                }
                 let result = self.method_call(&ty, name, arguments, scope, expression.span, access);
                 if self.level >= 2
                     && result == ValueType::Void
@@ -69,7 +74,11 @@ impl Analyzer<'_> {
                 {
                     scope.facts.forget_receiver(&receiver);
                 }
-                result
+                if self.level >= 4 && *nullsafe && !ty.excludes_null() {
+                    result.join(&ValueType::Null)
+                } else {
+                    result
+                }
             }
             ExpressionKind::StaticCall {
                 class,

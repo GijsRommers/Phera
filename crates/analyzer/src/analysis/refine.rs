@@ -134,6 +134,14 @@ impl Analyzer<'_> {
                 self.refine_type(&argument.value, against, scope, truth, span);
             } else if function == "in_array" {
                 self.refine_in_array(arguments, scope, truth, span);
+            } else if self.level >= 5 && truth && function == "is_numeric" {
+                let numeric =
+                    ValueType::Int
+                        .join(&ValueType::Float)
+                        .join(&ValueType::StringRefinement(
+                            crate::types::StringKind::Numeric,
+                        ));
+                self.refine_type(&argument.value, numeric, scope, true, span);
             }
         }
         if function == "is_null" && !truth {
@@ -277,7 +285,9 @@ impl Analyzer<'_> {
                 }
                 _ => false,
             };
-            if known {
+            // Availability checks deliberately leave both branches reachable
+            // in type analysis. The stub table describes several platforms.
+            if known && self.level < 4 {
                 return Some(!inverted);
             }
         }
@@ -303,7 +313,7 @@ impl Analyzer<'_> {
         None
     }
 
-    fn builtin_predicate(&self, name: &Name) -> Option<String> {
+    pub fn builtin_predicate(&self, name: &Name) -> Option<String> {
         let candidates = self.context.names.resolve(name, UseKind::Function);
         let actual = candidates
             .iter()
