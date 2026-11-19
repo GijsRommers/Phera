@@ -37,6 +37,11 @@ pub(crate) struct FoundMethod<'a> {
 pub(crate) struct MethodTable {
     /// A power-of-two number of slots, at most half of them in use.
     slots: Box<[Option<MethodSlot>]>,
+    /// Whether any method in the table is private. A call made from inside
+    /// a class must first ask whether that class has a private method of
+    /// the name (PHP calls it then, not an inherited one); for a class with
+    /// none, which is most, this answers without a lookup.
+    has_private: bool,
 }
 
 impl MethodTable {
@@ -52,10 +57,12 @@ impl MethodTable {
         if class.kind == phera_bytecode::ClassKind::Trait {
             return Self {
                 slots: Box::new([None]),
+                has_private: false,
             };
         }
         let size = (class.methods.len() * 2).next_power_of_two().max(4);
         let mut slots: Box<[Option<MethodSlot>]> = (0..size).map(|_| None).collect();
+        let mut has_private = false;
         for (name, method) in &class.methods {
             let Some(key) = code.name_key(name) else {
                 continue;
@@ -65,13 +72,24 @@ impl MethodTable {
             while slots[index].is_some() {
                 index = (index + 1) & (size - 1);
             }
+            has_private |= method.visibility == phera_bytecode::Visibility::Private;
             slots[index] = Some(MethodSlot {
                 key,
                 method: method.clone(),
                 scope,
             });
         }
-        Self { slots }
+        Self { slots, has_private }
+    }
+
+    /// The private method with this name key, if the class has one.
+    #[inline]
+    pub(crate) fn private(&self, key: NameKey) -> Option<FoundMethod<'_>> {
+        if !self.has_private {
+            return None;
+        }
+        self.get(key)
+            .filter(|found| found.method.visibility == phera_bytecode::Visibility::Private)
     }
 
     /// The method with this name key, if the class has one.
