@@ -286,8 +286,11 @@ impl Vm {
             }
             crate::classes::MethodBody::Native(_) => self
                 .registry
-                .classes()
-                .find(|class| class.name == method.declaring)
+                .get_class(&method.declaring)
+                .or_else(|| {
+                    let generator = &crate::generators::class::ENTRY;
+                    (method.declaring == generator.name).then_some(generator)
+                })
                 .and_then(|class| {
                     class
                         .methods

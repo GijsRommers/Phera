@@ -33,6 +33,7 @@ pub(crate) struct IteratorState {
     pub(crate) snapshot: Option<Rc<PhpArray>>,
     /// Objects keep an independent cursor for each active traversal.
     pub(crate) traversal: Option<Box<dyn phera_extension_api::traversal::Traversal>>,
+    /// A reference-capable cursor can expose the backing cell.
     pub(crate) traversal_by_reference: bool,
     /// By-reference foreach resolves this place again as the array changes.
     pub(crate) source: Option<AccessPath>,
@@ -170,6 +171,12 @@ impl Frame {
             base: base as u32,
             ..self
         }
+    }
+
+    /// A resumed frame returns to the generator driver.
+    pub(crate) fn as_callback(mut self) -> Self {
+        self.flags.0 |= FrameFlags::CALLBACK;
+        self
     }
 
     /// The caller's register for the result; `None` when native code called.

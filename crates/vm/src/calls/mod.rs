@@ -35,6 +35,7 @@ pub(crate) mod frame_extras;
 pub(crate) mod frame_view;
 pub(crate) mod magic_dispatch;
 mod native;
+mod native_ready;
 pub(crate) mod parameter_binding;
 pub(crate) mod pending;
 pub(crate) mod php_windows;

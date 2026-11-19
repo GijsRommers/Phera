@@ -94,6 +94,19 @@ impl CallStack {
         Some(frame)
     }
 
+    /// Detach a generator without releasing the owners in its side table.
+    pub(crate) fn detach_frame(&mut self) -> Option<(Frame, Option<FrameExtras>)> {
+        let frame = self.frames.pop()?;
+        let extras = if frame.has_extras() {
+            self.extras
+                .get_mut(self.frames.len())
+                .map(|entry| std::mem::replace(entry, FrameExtras::new()))
+        } else {
+            None
+        };
+        Some((frame, extras))
+    }
+
     /// Exit discards preparations and all active activations.
     pub(crate) fn clear(&mut self) {
         self.truncate_calls(0);

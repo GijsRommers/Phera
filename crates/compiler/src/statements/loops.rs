@@ -155,7 +155,10 @@ impl Compiler<'_> {
         expression: Option<&ast::Expression>,
         line: usize,
     ) -> Result<(), CompileError> {
-        if let Some(return_type) = &self.function.return_type {
+        let returns_reference = self.function.returns_reference && !self.function.is_generator;
+        if !self.function.is_generator
+            && let Some(return_type) = &self.function.return_type
+        {
             let message = match (return_type.as_str(), expression.is_some()) {
                 ("never", _) => Some("A never-returning function must not return"),
                 ("void", true)
@@ -195,15 +198,13 @@ impl Compiler<'_> {
             }
         }
         let source = if let Some(expression) = expression {
-            if !self.function.returns_reference
+            if !returns_reference
                 && self.finalies.is_empty()
                 && let ast::ExpressionKind::Variable(ast::Variable::Named(name)) = &expression.kind
                 && name != "this"
             {
                 self.local(name)?
-            } else if self.function.returns_reference
-                && crate::helpers::reference_capable(expression)
-            {
+            } else if returns_reference && crate::helpers::reference_capable(expression) {
                 let place = self.readable_place(expression)?;
                 let dst = self.allocate_register()?;
                 self.emit(
@@ -220,7 +221,7 @@ impl Compiler<'_> {
         } else {
             self.literal(Constant::Null, line)?
         };
-        let source = if !self.finalies.is_empty() && !self.function.returns_reference {
+        let source = if !self.finalies.is_empty() && !returns_reference {
             let destination = self.allocate_register()?;
             self.emit(
                 Instruction::Move {
@@ -248,7 +249,7 @@ impl Compiler<'_> {
         self.emit(
             if !self.finalies.is_empty() {
                 Instruction::ReturnChecked { source }
-            } else if self.function.returns_reference {
+            } else if returns_reference {
                 Instruction::ReturnReference(source)
             } else {
                 Instruction::Return(source)

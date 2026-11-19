@@ -41,6 +41,10 @@ impl DiagnosticReporter {
     }
 
     /// PHP @ suppresses ordinary diagnostics within its nested expression.
+    pub(crate) fn silence(&self) -> usize {
+        self.suppression
+    }
+
     pub(crate) fn begin_silence(&mut self) {
         self.suppression += 1;
     }

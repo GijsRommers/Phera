@@ -7,8 +7,8 @@
 use std::rc::Rc;
 
 use phera_extension_api::{
-    Context, LocalFuture, NativeError, NativeIterator, NativeResult,
-    traversal::{IteratorStep, Traversal, TraversalResult},
+    Context, NativeError, NativeIterator, NativeResult,
+    traversal::{IteratorStep, StepFuture, Traversal, TraversalResult},
 };
 use phera_value::{Object, Value};
 
@@ -42,9 +42,9 @@ impl Traversal for Cursor {
         &'a mut self,
         context: &'a mut dyn Context,
         operation: IteratorStep,
-    ) -> LocalFuture<'a, NativeResult> {
+    ) -> StepFuture<'a> {
         match self {
-            Self::Php(object) => context.call_protocol_method(
+            Self::Php(object) => StepFuture::Pending(context.call_protocol_method(
                 object.clone(),
                 match operation {
                     IteratorStep::Rewind => "rewind",
@@ -54,12 +54,10 @@ impl Traversal for Cursor {
                     IteratorStep::Key => "key",
                 },
                 Vec::new(),
-            ),
-            Self::Native(iterator) => Box::pin(std::future::ready(native_step(
-                iterator.as_mut(),
-                context,
-                operation,
-            ))),
+            )),
+            Self::Native(iterator) => {
+                StepFuture::ready(native_step(iterator.as_mut(), context, operation))
+            }
         }
     }
 }
@@ -94,6 +92,12 @@ impl Vm {
                 .classes
                 .for_object(&object)
                 .ok_or_else(|| internal_error!("traversal class"))?;
+            if crate::generators::generator_object(&object) {
+                return Ok(Box::new(crate::generators::class::Cursor::open(
+                    object,
+                    by_reference,
+                )?));
+            }
             let factory = class.hooks.as_ref().and_then(|hooks| {
                 if by_reference {
                     hooks.iterator_by_reference

@@ -103,8 +103,10 @@ impl CallFlags {
     pub(crate) const STRING_ARGUMENT: Self = Self(1 << 4);
     /// The general callee is a trampoline for __call or __callStatic.
     pub(crate) const MAGIC: Self = Self(1 << 5);
+    /// A native window accepts one positional mixed argument by value.
+    pub(crate) const WINDOW_ARGUMENT: Self = Self(1 << 6);
     /// A legal simple native call may return straight from its argument window.
-    pub(crate) const DIRECT_NATIVE: Self = Self(1 << 6);
+    pub(crate) const DIRECT_NATIVE: Self = Self(1 << 7);
 
     pub(crate) fn contains(self, flag: Self) -> bool {
         self.0 & flag.0 != 0
@@ -151,6 +153,12 @@ impl PreparedCall {
     #[inline]
     pub(crate) fn start(&self) -> usize {
         self.base() - self.kind.prefix()
+    }
+
+    /// A suspended caller moved this prepared argument window with its own.
+    pub(crate) fn moved_to(mut self, base: usize) -> Self {
+        self.base = base as u32;
+        self
     }
 
     /// The register stack moved up by one below this call's window (a

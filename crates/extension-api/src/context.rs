@@ -13,6 +13,18 @@ use crate::{
 /// reference counted with `Rc`, so nothing that holds one can be `Send`.
 pub type LocalFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
 
+/// Generator operations that can resume PHP code, through a method or iterator cursor.
+pub enum GeneratorOperation {
+    Method(crate::traversal::IteratorStep),
+    Cursor {
+        step: crate::traversal::IteratorStep,
+        by_reference: bool,
+    },
+    Send(Value),
+    Throw(Value),
+    GetReturn,
+}
+
 /// When a callback registered by PHP runs.
 #[derive(Clone, Copy)]
 pub enum RequestCallback {
@@ -368,6 +380,26 @@ pub trait Context {
     ) -> LocalFuture<'_, crate::traversal::TraversalResult> {
         let message = format!("Cannot iterate {} without a runtime", object.class.name());
         Box::pin(std::future::ready(Err(NativeError::error(message))))
+    }
+
+    /// Performs a generator operation that can finish now.
+    fn generator_ready(
+        &mut self,
+        _object: &Object,
+        _operation: &GeneratorOperation,
+    ) -> Option<NativeResult> {
+        None
+    }
+
+    /// Runs a generator method or iteration step on the VM.
+    fn generator_operation(
+        &mut self,
+        _object: Rc<Object>,
+        _operation: GeneratorOperation,
+    ) -> crate::traversal::StepFuture<'_> {
+        crate::traversal::StepFuture::ready(Err(NativeError::error(
+            "Cannot resume a Generator without a runtime",
+        )))
     }
 
     /// Wraps a native cursor in PHP's InternalIterator class.

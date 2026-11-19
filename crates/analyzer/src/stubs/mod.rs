@@ -1,12 +1,15 @@
 //! Reproducible builtin generation from PHP's own stubs, e.g. `DateTime::format()`.
 //! A committed table keeps php-src and PHP out of Phera's normal build dependency graph.
 
+mod extensions;
 mod normalize;
 mod source;
 mod supplement;
 
 use crate::{builtins, collect, index::Index};
 use std::path::Path;
+
+pub use extensions::generate as generate_extensions;
 
 pub fn generate(root: &Path, reference: &str) -> Result<String, String> {
     let source = source::StubSource::open(root, reference)?;

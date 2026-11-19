@@ -1,5 +1,5 @@
 //! Declared value returns must cover every reachable path.
-//! Identifier: `return.missing`; level 1. PHP example: `function f(): int {}`.
+//! Identifier: `return.missing`; fallthrough is reported at level 0. PHP example: `function f(): int {}`.
 
 use super::{Finding, Rule};
 
@@ -10,7 +10,7 @@ impl Rule for MissingReturn {
         "return.missing"
     }
     fn level(&self) -> u8 {
-        1
+        0
     }
     fn description(&self) -> &'static str {
         "Declared value returns must cover every reachable path."
