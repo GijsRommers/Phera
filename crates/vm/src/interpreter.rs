@@ -131,6 +131,15 @@ impl Vm {
                         self.set(destination, value);
                     }
                 }
+                BatchExit::NativeMethodHook(destination, hook) => {
+                    let (error, method) = *hook;
+                    if let Some(value) = self
+                        .finish_reflected_hook(error, &method, Some(destination))
+                        .await?
+                    {
+                        self.set(destination, value);
+                    }
+                }
                 BatchExit::Instruction(instruction) => {
                     if let DispatchResult::Returned(value) =
                         Box::pin(self.dispatch(instruction, stop)).await?

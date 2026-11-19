@@ -45,6 +45,7 @@ pub(crate) mod returns;
 mod scope;
 pub(crate) mod sends;
 mod sync_native;
+mod sync_native_method;
 #[cfg(test)]
 mod tests;
 pub(crate) mod window_context;

@@ -95,7 +95,11 @@ impl Vm {
             return Ok(Some(BatchExit::NativeCall(destination)));
         };
         let CallTarget::Native(entry) = callee.target else {
-            return Ok(Some(BatchExit::NativeCall(destination)));
+            return if matches!(callee.target, CallTarget::Method { .. }) {
+                self.call_sync_native_method(call, destination)
+            } else {
+                Ok(Some(BatchExit::NativeCall(destination)))
+            };
         };
         let NativeFn::Sync(handler) = entry.handler else {
             return Ok(Some(BatchExit::NativeCall(destination)));
@@ -179,7 +183,7 @@ impl Vm {
 
 /// These argument types are accepted as supplied. A zero mask reserves class,
 /// callable and by-reference checks for the normal binder.
-fn accepts(parameters: &[Param], slots: &[Option<Value>]) -> bool {
+pub(super) fn accepts(parameters: &[Param], slots: &[Option<Value>]) -> bool {
     slots.len() <= parameters.len()
         && parameters[slots.len()..]
             .iter()
