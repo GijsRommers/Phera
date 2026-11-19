@@ -73,6 +73,10 @@ const CASES: &[(&str, usize, Expect)] = &[
     ("match-arms", 50_000, SameAsPhp),
     ("switch-cases", 50_000, SameAsPhp),
     ("elseif-ladder", 100_000, SameAsPhp),
+    // goto: labels and jumps resolve through hash tables, in one pass.
+    ("labels-wide", 100_000, SameAsPhp),
+    ("gotos-wide", 100_000, SameAsPhp),
+    ("elseif-goto-ladder", 100_000, SameAsPhp),
     ("statements", 100_000, SameAsPhp),
     ("echo-list", 100_000, SameAsPhp),
     ("isset-list", 100_000, SameAsPhp),

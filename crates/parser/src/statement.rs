@@ -10,6 +10,8 @@ use phera_lexer::TokenKind;
 use crate::error::ParseError;
 use crate::parser::Parser;
 
+mod labels;
+
 impl Parser<'_> {
     /// A top-level statement: an attributed declaration, a `use`, or a plain
     /// statement.
@@ -42,7 +44,7 @@ impl Parser<'_> {
             return Ok(statement);
         }
 
-        if self.at(TokenKind::Use) {
+        if self.at(TokenKind::Use) && !self.at2(TokenKind::Colon) {
             return self.parse_use_statement();
         }
 
@@ -60,6 +62,14 @@ impl Parser<'_> {
 
     fn parse_statement_inner(&mut self, top: bool) -> Result<Statement, ParseError> {
         let start = self.peek_span();
+
+        if self.at2(TokenKind::Colon) && crate::parser::is_word_token(self.kind()) {
+            let kind = self.parse_label(top)?;
+            return Ok(Statement {
+                kind,
+                span: self.span_since(start),
+            });
+        }
 
         let kind = match self.kind() {
             TokenKind::LeftBrace => {
@@ -164,12 +174,7 @@ impl Parser<'_> {
                 self.expect_end()?;
                 StatementKind::Unset(variables)
             }
-            TokenKind::Goto => {
-                self.bump()?;
-                let name = self.parse_strict_identifier()?;
-                self.expect_end()?;
-                StatementKind::Goto(name)
-            }
+            TokenKind::Goto => self.parse_goto()?,
             TokenKind::AttributeStart => {
                 let attributes = self.parse_attributes()?;
                 if matches!(self.kind(), TokenKind::Fn)
@@ -195,11 +200,6 @@ impl Parser<'_> {
                 }
             }
             TokenKind::HaltCompiler => return self.parse_halt_compiler(),
-            TokenKind::Identifier if self.at2(TokenKind::Colon) => {
-                let name = self.parse_strict_identifier()?;
-                self.bump()?; // `:`
-                StatementKind::Label(name)
-            }
             TokenKind::Function
                 if matches!(self.kind2(), TokenKind::LeftParen)
                     || (self.at2(TokenKind::Ampersand) && self.kind3() == TokenKind::LeftParen) =>

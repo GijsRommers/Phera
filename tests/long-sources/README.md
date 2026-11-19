@@ -6,7 +6,7 @@ far larger than anything written by hand. These tools check that Phera
 compiles and runs such sources as PHP does, and never overflows the Rust
 stack on them.
 
-- `generate.php` builds one of 73 shapes at a given size and prints the
+- `generate.php` builds one of 76 shapes at a given size and prints the
   source. Every source prints a short result, so outputs can be compared.
 
       php -n tests/long-sources/generate.php --list
@@ -19,7 +19,7 @@ stack on them.
       tests/long-sources/table.py --phera target/release/phera
       tests/long-sources/table.py --phera target/debug/phera --sizes 1000,10000 --only add,concat
 
-- `crates/cli/tests/long_sources.rs` runs 75 cases of the generator in the
+- `crates/cli/tests/long_sources.rs` runs 78 cases of the generator in the
   test suite, against real PHP; `tests/fixtures/long-sources/` holds `.phpt`
   files for behaviours with a fixed small output.
 

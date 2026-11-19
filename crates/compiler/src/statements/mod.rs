@@ -42,6 +42,8 @@ impl Compiler<'_> {
             StatementKind::Break(name) | StatementKind::Continue(name) => {
                 self.compile_loop_jump(statement, name, line)?
             }
+            StatementKind::Goto(label) => self.compile_goto(label),
+            StatementKind::Label(label) => self.compile_label(label)?,
             StatementKind::Try {
                 body,
                 catches,
@@ -105,6 +107,8 @@ pub(crate) mod switching;
 mod traits;
 
 pub(crate) mod exceptions;
+pub(crate) mod exits;
+pub(crate) mod gotos;
 
 pub(crate) mod class_default_types;
 mod class_errors;

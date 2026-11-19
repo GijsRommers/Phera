@@ -112,6 +112,8 @@ impl Compiler<'_> {
             line,
         );
         self.loops.push(Loop {
+            start: self.position(),
+            cleanup: None,
             breaks: vec![],
             continues: vec![],
         });

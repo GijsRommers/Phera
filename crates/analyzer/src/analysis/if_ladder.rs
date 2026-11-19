@@ -16,7 +16,7 @@
 //! would combine them on its way out.
 
 use super::*;
-use crate::analysis::statements::Flow;
+use crate::analysis::statements::{Flow, contains_label};
 
 /// A rung whose condition was not known: its branch ran on `taken`, and the
 /// rest of the ladder on the scope refined by the condition being false. A
@@ -54,7 +54,19 @@ impl Analyzer<'_> {
                 bottom = Some(Flow::Terminal);
                 break;
             }
-            match truth {
+            // A branch known not to run is still analysed when it holds a
+            // label: a `goto` can jump into it.
+            let skipped_holds_label = match truth {
+                Some(true) => {
+                    elseifs[index..]
+                        .iter()
+                        .any(|elseif| elseif.body.iter().any(contains_label))
+                        || otherwise.is_some_and(|body| body.iter().any(contains_label))
+                }
+                Some(false) => body.iter().any(contains_label),
+                None => false,
+            };
+            match truth.filter(|_| !skipped_holds_label) {
                 Some(true) => {
                     bottom = Some(self.block(body, &mut current));
                     break;
