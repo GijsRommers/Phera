@@ -5,10 +5,11 @@ use std::sync::Arc;
 
 use phera_ext_http::Sapi;
 use phera_extension_api::testing::oracle;
+use phera_vm::NativeTables;
 
-async fn run(runtime: &super::Runtime, source: &str) -> String {
+async fn run(runtime: &super::Runtime, tables: &NativeTables, source: &str) -> String {
     let unit = phera_compiler::compile(source, "ini-probe.php").unwrap();
-    let mut vm = runtime.new_vm(Sapi::Cli);
+    let mut vm = runtime.new_vm(tables, Sapi::Cli);
     assert_eq!(vm.run(Arc::new(unit)).await, 0);
     String::from_utf8(vm.output).unwrap()
 }
@@ -16,6 +17,7 @@ async fn run(runtime: &super::Runtime, source: &str) -> String {
 #[tokio::test(flavor = "current_thread")]
 async fn requests_on_one_worker_keep_their_own_ini_changes() {
     let runtime = super::Runtime::new();
+    let tables = NativeTables::new(runtime.registry.clone());
     let source =
         "<?php echo ini_get('default_charset'), '|', get_include_path(), '|', error_reporting();";
     let change = r#"<?php
@@ -24,7 +26,7 @@ set_include_path('/tmp');
 error_reporting(1);
 echo ini_get('default_charset'), '|', get_include_path(), '|', error_reporting();
 "#;
-    assert_eq!(run(&runtime, change).await, "ASCII|/tmp|1");
+    assert_eq!(run(&runtime, &tables, change).await, "ASCII|/tmp|1");
     let php = oracle::find_php().expect("PHP oracle");
     let pristine = std::process::Command::new(php)
         .args([
@@ -35,9 +37,9 @@ echo ini_get('default_charset'), '|', get_include_path(), '|', error_reporting()
         .output()
         .unwrap();
     assert!(pristine.status.success());
-    let start = run(&runtime, source).await;
+    let start = run(&runtime, &tables, source).await;
     assert_eq!(start.replace("|.|", "|").as_bytes(), pristine.stdout);
-    assert_eq!(run(&runtime, source).await, start);
+    assert_eq!(run(&runtime, &tables, source).await, start);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -97,7 +99,9 @@ async fn quantity_conversions_match_php() {
     let Some(expected) = oracle::run_php("ini-quantities", &source) else {
         return;
     };
-    let actual = run(&super::Runtime::new(), &source).await;
+    let runtime = super::Runtime::new();
+    let tables = NativeTables::new(runtime.registry.clone());
+    let actual = run(&runtime, &tables, &source).await;
     assert_eq!(expected.len(), case);
     let actual: Vec<_> = actual.lines().collect();
     assert_eq!(actual.len(), case);

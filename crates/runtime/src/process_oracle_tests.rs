@@ -3,7 +3,6 @@
 
 use std::{fmt::Write, sync::Arc};
 
-use phera_ext_http::Sapi;
 use phera_extension_api::testing::oracle;
 
 struct Cases {
@@ -41,7 +40,7 @@ impl Cases {
         };
         let runtime = super::Runtime::new();
         let unit = phera_compiler::compile(&self.script, "process-oracle.php").unwrap();
-        let mut vm = runtime.new_vm(Sapi::Cli);
+        let mut vm = runtime.new_cli_vm();
         assert_eq!(vm.run(Arc::new(unit)).await, 0);
         let actual = String::from_utf8_lossy(&vm.output)
             .lines()
