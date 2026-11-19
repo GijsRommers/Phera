@@ -106,11 +106,6 @@ fn file_section(phpt: &[u8]) -> Option<&[u8]> {
     (start < end).then(|| &phpt[start..end])
 }
 
-/// `tests/security/` holds scripts that reproduce engine defects which are
-/// still open (see `docs/security/engine-findings.md`). Crashing the parser
-/// is what some of them are for, so they are not part of this corpus.
-const OPEN_DEFECT_REPRODUCERS: &str = "security";
-
 fn php_files(root: &Path) -> Vec<std::path::PathBuf> {
     let mut files = Vec::new();
     let mut pending = vec![root.to_path_buf()];
@@ -120,9 +115,7 @@ fn php_files(root: &Path) -> Vec<std::path::PathBuf> {
             let path = entry.path();
             let kind = entry.file_type().unwrap();
             if kind.is_dir() {
-                if path != root.join(OPEN_DEFECT_REPRODUCERS) {
-                    pending.push(path);
-                }
+                pending.push(path);
             } else if kind.is_file() && path.extension().is_some_and(|ext| ext == "php") {
                 files.push(path);
             }

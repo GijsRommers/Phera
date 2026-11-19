@@ -1,6 +1,6 @@
 file golden.php
 
-function {main} (6 registers, dynamic scope)
+function {main} (5 registers, dynamic scope)
   r0 = $index
   0000  line 1    LoadInt { dst: r1, value: 0 }
   0001  line 1    Assign { local: r0, src: r1 }
@@ -8,5 +8,5 @@ function {main} (6 registers, dynamic scope)
   0003  line 1    IncDecLocal { mode: PostIncrement, dst: r3, local: r0 }
   0004  line 1    Clear { reg: r3 }
   0005  line 1    Jump { target: @2 }
-  0006  line 1    LoadInt { dst: r4, value: 1 }
-  0007  line 1    Return { src: r4 }
+  0006  line 1    LoadInt { dst: r3, value: 1 }
+  0007  line 1    Return { src: r3 }

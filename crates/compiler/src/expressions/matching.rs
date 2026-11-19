@@ -21,6 +21,7 @@ impl Compiler<'_> {
             if let Some(conditions) = &arm.conditions {
                 let mut jumps = vec![];
                 for condition in conditions {
+                    let mark = self.mark_temporaries();
                     let rhs = self.compile_expression(condition)?;
                     let test = self.allocate_register()?;
                     self.emit(
@@ -40,11 +41,13 @@ impl Compiler<'_> {
                         },
                         line,
                     ));
+                    self.release_temporaries(mark);
                 }
                 let skip = self.emit(Instruction::Jump(Target(0)), line);
                 for jump in jumps {
                     self.patch(jump, self.position())
                 }
+                let mark = self.mark_temporaries();
                 let src = self.compile_expression(&arm.body)?;
                 self.emit(
                     Instruction::Move {
@@ -53,6 +56,7 @@ impl Compiler<'_> {
                     },
                     line,
                 );
+                self.release_temporaries(mark);
                 done.push(self.emit(Instruction::Jump(Target(0)), line));
                 self.patch(skip, self.position());
             } else {

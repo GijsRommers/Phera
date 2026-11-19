@@ -118,8 +118,13 @@ impl Compiler<'_> {
     ) -> Result<Vec<Reg>, CompileError> {
         let mut temporary_objects = Vec::new();
         for argument in arguments {
-            if let Some(register) = self.send_argument(argument, line)? {
-                temporary_objects.push(register);
+            let mark = self.mark_temporaries();
+            // An object created for the call (`f(new A)`) keeps its register
+            // until `finish_call` clears it after the call; any other
+            // argument's temporaries are free once it has been sent.
+            match self.send_argument(argument, line)? {
+                Some(register) => temporary_objects.push(register),
+                None => self.release_temporaries(mark),
             }
         }
         Ok(temporary_objects)

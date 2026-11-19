@@ -95,8 +95,11 @@ impl Analyzer<'_> {
             StatementKind::If {
                 condition,
                 then,
+                elseifs,
                 otherwise,
-            } => return self.if_statement(condition, then, otherwise.as_deref(), scope),
+            } => {
+                return self.if_statement(condition, then, elseifs, otherwise.as_deref(), scope);
+            }
             StatementKind::Switch { subject, cases } => {
                 return self.switch(subject, cases, scope);
             }
@@ -183,29 +186,9 @@ impl Analyzer<'_> {
         Flow::Terminal
     }
 
-    fn if_statement(
-        &mut self,
-        condition: &Expression,
-        then: &[Statement],
-        otherwise: Option<&[Statement]>,
-        scope: &mut Scope,
-    ) -> Flow {
-        let branches = self.condition(condition, scope.clone(), false);
-        let (a, left) = self.statement_branch(then, branches.yes, scope);
-        let (b, right) = self.statement_branch(otherwise.unwrap_or_default(), branches.no, scope);
-        if let Some(after) = condition::Condition::merge(left, right) {
-            *scope = after;
-            return Flow::Next;
-        }
-        if a == Flow::Terminal && b == Flow::Terminal {
-            Flow::Terminal
-        } else if a == Flow::Break || b == Flow::Break {
-            Flow::Break
-        } else {
-            Flow::Continue
-        }
-    }
-    fn statement_branch(
+    /// Runs one branch of a conditional on the scope its outcome leaves, or,
+    /// when that outcome cannot happen, only if a label inside can be jumped to.
+    pub(super) fn statement_branch(
         &mut self,
         body: &[Statement],
         branch: Option<Scope>,
@@ -226,7 +209,7 @@ impl Analyzer<'_> {
 }
 
 /// A label can re-enter a block after an otherwise terminal statement.
-fn contains_label(statement: &Statement) -> bool {
+pub(super) fn contains_label(statement: &Statement) -> bool {
     let mut pending = vec![statement];
     while let Some(statement) = pending.pop() {
         if matches!(statement.kind, StatementKind::Label(_)) {

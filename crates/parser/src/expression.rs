@@ -167,9 +167,10 @@ impl Parser<'_> {
                     self.bump()?;
                     Rhs::Ref(self.parse_assign_ref_rhs()?)
                 } else {
-                    Rhs::Value(self.parse_expr(prec::ASSIGN)?)
+                    // PHP's stack holds the target and the `=`.
+                    Rhs::Value(self.with_php_slots(1, |parser| parser.parse_expr(prec::ASSIGN))?)
                 };
-                left = reassociate_assign(left, &rhs, compound, assign_token.span, self)?;
+                left = reassociate_assign(left, rhs, compound, assign_token.span, self)?;
                 banned = None;
                 continue;
             }
@@ -221,7 +222,8 @@ impl Parser<'_> {
                 Assoc::Left | Assoc::Nonassoc => level + 1,
                 Assoc::Right => level,
             };
-            let right = self.parse_expr(next_min)?;
+            // PHP's stack holds the left operand and the operator.
+            let right = self.with_php_slots(1, |parser| parser.parse_expr(next_min))?;
             let span = self.span_since(left.span);
             left = Expression {
                 kind: ExpressionKind::Binary {
@@ -252,10 +254,14 @@ impl Parser<'_> {
         let then = if self.at(TokenKind::Colon) {
             None
         } else {
-            Some(Box::new(self.parse_expr(0)?))
+            // PHP's stack holds the condition and the `?`.
+            Some(Box::new(
+                self.with_php_slots(1, |parser| parser.parse_expr(0))?,
+            ))
         };
         self.expect(TokenKind::Colon, "':'")?;
-        let otherwise = self.parse_expr(prec::TERNARY + 1)?;
+        // ... and then the middle operand and the `:` too.
+        let otherwise = self.with_php_slots(3, |parser| parser.parse_expr(prec::TERNARY + 1))?;
         Ok(Expression {
             kind: ExpressionKind::Ternary {
                 condition: Box::new(condition),
@@ -1121,7 +1127,8 @@ impl Parser<'_> {
         }
 
         let arguments = if self.at(TokenKind::LeftParen) {
-            self.parse_argument_list()?
+            // `new` and the class name are one symbol more than a call's callee.
+            self.with_php_slots(1, Self::parse_argument_list)?
         } else {
             Arguments::List(vec![])
         };
@@ -1286,7 +1293,11 @@ impl Parser<'_> {
             };
             let return_type = self.parse_return_type()?;
             self.expect(TokenKind::LeftBrace, "'{'")?;
-            let (body, is_generator) = self.generator_body(Self::parse_inner_statements)?;
+            // A closure's header is ten symbols on PHP's stack (`static` one more).
+            let (body, is_generator) = self
+                .with_php_slots(10 + u32::from(is_static), |parser| {
+                    parser.generator_body(Self::parse_inner_statements)
+                })?;
             self.close_brace()?;
             Ok(Expression {
                 kind: ExpressionKind::Closure(Box::new(Closure {
@@ -1309,7 +1320,10 @@ impl Parser<'_> {
             let parameters = self.parse_parameter_list()?;
             let return_type = self.parse_return_type()?;
             self.expect(TokenKind::FatArrow, "'=>'")?;
-            let (body, is_generator) = self.generator_body(|parser| parser.parse_expr(0))?;
+            // An arrow function's header is nine symbols on PHP's stack.
+            let (body, is_generator) = self.with_php_slots(9 + u32::from(is_static), |parser| {
+                parser.generator_body(|parser| parser.parse_expr(0))
+            })?;
             Ok(Expression {
                 kind: ExpressionKind::ArrowFunction(Box::new(ArrowFunction {
                     declaration_span: self.span_since(declaration_start),
@@ -1393,12 +1407,13 @@ impl Parser<'_> {
             return Ok(Arguments::FirstClassCallable);
         }
 
-        let mut arguments = vec![self.parse_argument()?];
+        // PHP's stack holds the callee and the `(` while an argument is parsed.
+        let mut arguments = vec![self.with_php_slots(1, Self::parse_argument)?];
         while self.eat(TokenKind::Comma)? {
             if self.at(TokenKind::RightParen) {
                 break;
             }
-            arguments.push(self.parse_argument()?);
+            arguments.push(self.with_php_slots(1, Self::parse_argument)?);
         }
         self.expect(TokenKind::RightParen, "')'")?;
 
@@ -1522,116 +1537,87 @@ enum Rhs {
 /// `(bool) ($a = 1)`. This re-associates
 /// `left` accordingly: the assignment attaches to the rightmost assignable
 /// operand along the right spine.
+///
+/// The spine is walked in a loop (`!!!!$a = 1` is as deep as it is long), and
+/// the right side is moved into place, never copied.
 fn reassociate_assign(
     left: Expression,
-    rhs: &Rhs,
+    rhs: Rhs,
     compound: Option<BinaryOperator>,
     err_span: Span,
     parser: &Parser,
 ) -> Result<Expression, ParseError> {
-    let compound_target_ok =
-        |kind: &ExpressionKind| is_assignable(kind) && !matches!(kind, ExpressionKind::List(_));
-    let attach = |target: Expression| -> Expression {
-        let span = target.span;
-        let kind = match (compound, rhs) {
-            (None, Rhs::Value(value)) => ExpressionKind::Assign {
-                target: Box::new(target),
-                value: Box::new(value.clone()),
-            },
-            (None, Rhs::Ref(value)) => ExpressionKind::AssignReference {
-                target: Box::new(target),
-                value: Box::new(value.clone()),
-            },
-            (Some(operator), Rhs::Value(value)) => ExpressionKind::CompoundAssign {
-                operator,
-                target: Box::new(target),
-                value: Box::new(value.clone()),
-            },
-            (Some(_), Rhs::Ref(_)) => ExpressionKind::Assign {
-                target: Box::new(target),
-                value: Box::new(Expression {
-                    kind: ExpressionKind::Literal(Literal::Null),
-                    span,
-                }),
-            },
-        };
-        Expression { kind, span }
+    let takes_assignment = |kind: &ExpressionKind| match compound {
+        Some(_) => is_assignable(kind) && !matches!(kind, ExpressionKind::List(_)),
+        None => is_assignable(kind),
     };
 
-    if compound.is_some() {
-        if compound_target_ok(&left.kind) {
-            return Ok(attach(left));
-        }
-    } else if is_assignable(&left.kind) {
-        return Ok(attach(left));
+    // The operators passed on the way down, each with its right operand
+    // taken out; they are put back together around the assignment below.
+    let mut outer: Vec<(ExpressionKind, Span)> = Vec::new();
+    let mut target = left;
+    while !takes_assignment(&target.kind) {
+        let span = target.span;
+        let mut kind = target.into_kind();
+        let Some(operand) = right_operand(&mut kind) else {
+            return Err(parser.error_at(
+                err_span,
+                "syntax error: unexpected assignment operator, cannot assign to this expression",
+            ));
+        };
+        let placeholder = Expression {
+            kind: ExpressionKind::Literal(Literal::Null),
+            span,
+        };
+        target = std::mem::replace(&mut **operand, placeholder);
+        outer.push((kind, span));
     }
 
-    let left_span = left.span;
-    match left.into_kind() {
-        ExpressionKind::Binary {
+    let span = target.span;
+    let target = Box::new(target);
+    let kind = match (compound, rhs) {
+        (None, Rhs::Value(value)) => ExpressionKind::Assign {
+            target,
+            value: Box::new(value),
+        },
+        (None, Rhs::Ref(value)) => ExpressionKind::AssignReference {
+            target,
+            value: Box::new(value),
+        },
+        (Some(operator), Rhs::Value(value)) => ExpressionKind::CompoundAssign {
             operator,
-            left: l,
-            right,
-        } => {
-            let right = reassociate_assign(*right, rhs, compound, err_span, parser)?;
-            Ok(Expression {
-                kind: ExpressionKind::Binary {
-                    operator,
-                    left: l,
-                    right: Box::new(right),
-                },
-                span: left_span,
-            })
+            target,
+            value: Box::new(value),
+        },
+        (Some(_), Rhs::Ref(_)) => ExpressionKind::Assign {
+            target,
+            value: Box::new(Expression {
+                kind: ExpressionKind::Literal(Literal::Null),
+                span,
+            }),
+        },
+    };
+    let mut assignment = Expression { kind, span };
+    while let Some((mut kind, span)) = outer.pop() {
+        if let Some(operand) = right_operand(&mut kind) {
+            **operand = assignment;
         }
-        ExpressionKind::Ternary {
-            condition,
-            then,
-            otherwise,
-        } => {
-            let otherwise = reassociate_assign(*otherwise, rhs, compound, err_span, parser)?;
-            Ok(Expression {
-                kind: ExpressionKind::Ternary {
-                    condition,
-                    then,
-                    otherwise: Box::new(otherwise),
-                },
-                span: left_span,
-            })
+        assignment = Expression { kind, span };
+    }
+    Ok(assignment)
+}
+
+/// The operand an assignment re-associates into: the right side of a binary
+/// operator or of a ternary, the operand of a prefix operator, a cast or `clone`.
+fn right_operand(kind: &mut ExpressionKind) -> Option<&mut Box<Expression>> {
+    match kind {
+        ExpressionKind::Binary { right, .. } => Some(right),
+        ExpressionKind::Ternary { otherwise, .. } => Some(otherwise),
+        ExpressionKind::Unary { operand, .. } | ExpressionKind::Cast { operand, .. } => {
+            Some(operand)
         }
-        ExpressionKind::Unary { operator, operand } => {
-            let operand = reassociate_assign(*operand, rhs, compound, err_span, parser)?;
-            Ok(Expression {
-                kind: ExpressionKind::Unary {
-                    operator,
-                    operand: Box::new(operand),
-                },
-                span: left_span,
-            })
-        }
-        ExpressionKind::Cast { kind, operand } => {
-            let operand = reassociate_assign(*operand, rhs, compound, err_span, parser)?;
-            Ok(Expression {
-                kind: ExpressionKind::Cast {
-                    kind,
-                    operand: Box::new(operand),
-                },
-                span: left_span,
-            })
-        }
-        ExpressionKind::Clone { object, with } => {
-            let object = reassociate_assign(*object, rhs, compound, err_span, parser)?;
-            Ok(Expression {
-                kind: ExpressionKind::Clone {
-                    object: Box::new(object),
-                    with,
-                },
-                span: left_span,
-            })
-        }
-        _ => Err(parser.error_at(
-            err_span,
-            "syntax error: unexpected assignment operator, cannot assign to this expression",
-        )),
+        ExpressionKind::Clone { object, .. } => Some(object),
+        _ => None,
     }
 }
 

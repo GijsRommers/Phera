@@ -156,13 +156,26 @@ fn sexp_stmt_kind(kind: &StatementKind) -> String {
         StatementKind::If {
             condition,
             then,
+            elseifs,
             otherwise,
-        } => format!(
-            "(if {} {} {})",
-            sexp_expr(condition),
-            sexp_stmts(then),
-            otherwise.as_ref().map_or("none".into(), |b| sexp_stmts(b))
-        ),
+        } => {
+            // Printed as PHP runs it: each `elseif` an `if` inside the `else`.
+            let mut tail = otherwise.as_ref().map_or("none".into(), |b| sexp_stmts(b));
+            for elseif in elseifs.iter().rev() {
+                tail = format!(
+                    "((if {} {} {}))",
+                    sexp_expr(&elseif.condition),
+                    sexp_stmts(&elseif.body),
+                    tail
+                );
+            }
+            format!(
+                "(if {} {} {})",
+                sexp_expr(condition),
+                sexp_stmts(then),
+                tail
+            )
+        }
         StatementKind::While { condition, body } => {
             format!("(while {} {})", sexp_expr(condition), sexp_stmts(body))
         }
