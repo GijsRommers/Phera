@@ -12,7 +12,9 @@ impl Analyzer<'_> {
         quiet: bool,
     ) -> ValueType {
         match &expression.kind {
-            ExpressionKind::Call { callee, arguments } => self.call(callee, arguments, scope),
+            ExpressionKind::Call {
+                callee, arguments, ..
+            } => self.call(callee, arguments, scope),
             ExpressionKind::New { class, arguments } => self.new_object(class, arguments, scope),
             ExpressionKind::MethodCall {
                 target,

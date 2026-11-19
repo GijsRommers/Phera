@@ -1,9 +1,16 @@
 //! Mixed array and property paths preserve evaluation order and shared object identity.
 
 use crate::ir::PathStep as Step;
-use crate::ir::{Constant, Place, PlaceScope};
+use crate::ir::{Constant, Instruction, Place, PlaceScope};
 use crate::{CompileError, Compiler};
 use phera_ast as ast;
+use phera_bytecode::{FetchMode, Reg};
+
+#[derive(PartialEq, Eq)]
+enum Access {
+    Place,
+    Read,
+}
 
 impl Compiler<'_> {
     /// Lower every postfix access into one path, including object roots produced by calls.
@@ -57,6 +64,51 @@ impl Compiler<'_> {
         &mut self,
         expression: &ast::Expression,
     ) -> Result<Place, CompileError> {
+        self.access_path(expression, Access::Place)
+            .map(|(place, _)| place)
+    }
+
+    /// Keep one fetch for same-line paths and give each multiline segment its own line.
+    pub(crate) fn compile_read(
+        &mut self,
+        expression: &ast::Expression,
+    ) -> Result<Reg, CompileError> {
+        let (place, line) = self.access_path(expression, Access::Read)?;
+        self.emit_path_read(place, line)
+    }
+
+    fn emit_path_read(&mut self, place: Place, line: usize) -> Result<Reg, CompileError> {
+        if place.path.iter().any(|step| matches!(step, Step::Append)) {
+            return Err(self.error("Cannot use [] for reading", line));
+        }
+        let destination = self.allocate_register()?;
+        self.emit(
+            Instruction::Read {
+                destination,
+                place,
+                mode: FetchMode::Read,
+            },
+            line,
+        );
+        Ok(destination)
+    }
+
+    pub(super) fn access_line(&self, access: &ast::Expression) -> usize {
+        match &access.kind {
+            ast::ExpressionKind::Property { name, .. } => self.member_line(name),
+            ast::ExpressionKind::StaticProperty { name_start, .. } => self.lines.line(*name_start),
+            ast::ExpressionKind::Index {
+                index: Some(index), ..
+            } => self.lines.line(index.span.end.saturating_sub(1)),
+            _ => self.lines.line(access.span.start),
+        }
+    }
+
+    fn access_path(
+        &mut self,
+        expression: &ast::Expression,
+        usage: Access,
+    ) -> Result<(Place, usize), CompileError> {
         let line = self.lines.line(expression.span.start);
         let mut node = expression;
         let mut postfix = Vec::new();
@@ -71,12 +123,13 @@ impl Compiler<'_> {
             postfix.push(node);
             node = target;
         }
+        let mut fetch_line = self.access_line(node);
         let (base, scope) = match &node.kind {
             ast::ExpressionKind::Variable(ast::Variable::Named(name)) if name == "this" => {
                 (self.allocate_register()?, PlaceScope::This)
             }
 
-            ast::ExpressionKind::StaticProperty { class, name } => {
+            ast::ExpressionKind::StaticProperty { class, name, .. } => {
                 let class = if matches!(class.kind, ast::ExpressionKind::Name(_)) {
                     let class = self.object_class_name(class, line)?;
                     let destination = self.allocate_register()?;
@@ -139,6 +192,21 @@ impl Compiler<'_> {
             path: Vec::new(),
         };
         for access in postfix.into_iter().rev() {
+            if usage == Access::Read {
+                let access_line = self.access_line(access);
+                if fetch_line != access_line
+                    && (!place.path.is_empty()
+                        || matches!(place.scope, PlaceScope::StaticProperty { .. }))
+                {
+                    let base = self.emit_path_read(place, fetch_line)?;
+                    place = Place {
+                        base,
+                        scope: PlaceScope::Local,
+                        path: Vec::new(),
+                    };
+                }
+                fetch_line = access_line;
+            }
             let step = match &access.kind {
                 ast::ExpressionKind::Index { index, .. } => match index {
                     Some(index) => Step::Index(self.compile_expression(index)?),
@@ -162,6 +230,6 @@ impl Compiler<'_> {
                 place.path.push(step);
             }
         }
-        Ok(place)
+        Ok((place, fetch_line))
     }
 }

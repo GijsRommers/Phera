@@ -74,7 +74,7 @@ impl Analyzer<'_> {
         scope: &mut Scope,
         span: Span,
     ) -> Option<ValueType> {
-        let ExpressionKind::StaticProperty { class, name } = &target.kind else {
+        let ExpressionKind::StaticProperty { class, name, .. } = &target.kind else {
             return None;
         };
         let MemberName::Identifier(method) = method else {

@@ -536,6 +536,7 @@ impl Parser<'_> {
                                 kind: ExpressionKind::StaticProperty {
                                     class: Box::new(expr),
                                     name: variable,
+                                    name_start: var_expr.span.start,
                                 },
                                 span: self.span_since(start),
                             };
@@ -565,11 +566,13 @@ impl Parser<'_> {
                 }
                 TokenKind::LeftParen => {
                     let start = expr.span;
+                    let opening = self.peek_span().start;
                     let arguments = self.parse_argument_list()?;
                     expr = Expression {
                         kind: ExpressionKind::Call {
                             callee: Box::new(expr),
                             arguments,
+                            opening,
                         },
                         span: self.span_since(start),
                     };
@@ -984,12 +987,14 @@ impl Parser<'_> {
             });
         }
 
+        let opening = self.peek_span().start;
         let arguments = self.parse_argument_list()?;
         if matches!(arguments, Arguments::FirstClassCallable) {
             // `clone(...)` parses in PHP as a call to `\clone`.
             return Ok(Expression {
                 kind: ExpressionKind::Call {
                     callee: Box::new(clone_callee()),
+                    opening,
                     arguments,
                 },
                 span: self.span_since(start),
@@ -1004,6 +1009,7 @@ impl Parser<'_> {
         let kind = match items.as_slice() {
             [] => ExpressionKind::Call {
                 callee: Box::new(clone_callee()),
+                opening,
                 arguments: Arguments::List(vec![]),
             },
             [first] if unnamed(first) => ExpressionKind::Clone {
@@ -1016,6 +1022,7 @@ impl Parser<'_> {
             },
             _ => ExpressionKind::Call {
                 callee: Box::new(clone_callee()),
+                opening,
                 arguments,
             },
         };
@@ -1114,6 +1121,7 @@ impl Parser<'_> {
             let span = class.span;
             self.bump()?;
             let var_expr = self.parse_simple_variable()?;
+            let name_start = var_expr.span.start;
             let ExpressionKind::Variable(variable) = var_expr.into_kind() else {
                 return Err(self.error("expected a variable after '::'"));
             };
@@ -1121,6 +1129,7 @@ impl Parser<'_> {
                 kind: ExpressionKind::StaticProperty {
                     class: Box::new(class),
                     name: variable,
+                    name_start,
                 },
                 span: self.span_since(span),
             };
@@ -1194,6 +1203,7 @@ impl Parser<'_> {
                     let start = expr.span;
                     self.bump()?;
                     let var_expr = self.parse_simple_variable()?;
+                    let name_start = var_expr.span.start;
                     let ExpressionKind::Variable(variable) = var_expr.into_kind() else {
                         return Err(self.error("expected a variable after '::'"));
                     };
@@ -1201,6 +1211,7 @@ impl Parser<'_> {
                         kind: ExpressionKind::StaticProperty {
                             class: Box::new(expr),
                             name: variable,
+                            name_start,
                         },
                         span: self.span_since(start),
                     };

@@ -41,6 +41,7 @@ impl Analyzer<'_> {
                 ExpressionKind::Call {
                     callee,
                     arguments: Arguments::List(arguments),
+                    ..
                 } => self.refine_predicate(callee, arguments, scope, truth, expression.span),
                 ExpressionKind::Binary {
                     operator: operator @ (BinaryOperator::Identical | BinaryOperator::NotIdentical),
@@ -237,6 +238,7 @@ impl Analyzer<'_> {
         if let ExpressionKind::Call {
             callee,
             arguments: Arguments::List(arguments),
+            ..
         } = &expression.kind
             && let ExpressionKind::Name(name) = &callee.kind
             && let Some(function) = self.builtin_predicate(name)
@@ -250,6 +252,7 @@ impl Analyzer<'_> {
         if let ExpressionKind::Call {
             callee,
             arguments: Arguments::List(arguments),
+            ..
         } = &expression.kind
             && let ExpressionKind::Name(name) = &callee.kind
             && let Some(function) = self.builtin_predicate(name)

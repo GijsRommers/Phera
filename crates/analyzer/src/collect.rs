@@ -150,6 +150,7 @@ fn collect_expression_declarations<'a>(
         if let ExpressionKind::Call {
             callee,
             arguments: Arguments::List(arguments),
+            ..
         } = &expression.kind
             && let ExpressionKind::Name(name) = &callee.kind
             && name.text.eq_ignore_ascii_case("define")
