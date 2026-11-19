@@ -38,7 +38,11 @@ fn popen_reaps_live_and_discarded_streams_with_a_session_finalizer() {
             echo 'script done';
             "#,
         );
-        let output = Command::new(program)
+        let mut command = Command::new(program);
+        if program == php.as_os_str() {
+            command.arg("-n");
+        }
+        let output = command
             .args([
                 "-d",
                 "session.use_cookies=0",
