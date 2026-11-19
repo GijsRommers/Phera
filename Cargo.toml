@@ -72,6 +72,11 @@ html5ever = "0.40"
 phera-ext-date = { path = "crates/extensions/date" }
 phera-ext-filter = { path = "crates/extensions/filter" }
 phera-ext-hash = { path = "crates/extensions/hash" }
+icu_collator = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
+icu_locale = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
+icu_normalizer = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
+icu_segmenter = { version = "=2.4.0", default-features = false, features = ["compiled_data", "unstable"] }
+phera-ext-intl = { path = "crates/extensions/intl" }
 phera-ext-http = { path = "crates/extensions/http" }
 phera-ext-mbstring = { path = "crates/extensions/mbstring" }
 iconv-native = "0.1"

@@ -78,6 +78,12 @@ cargo test
 
 The `phera` binary ends up in `target/debug/phera`.
 
+## Internationalization
+
+Phera includes PHP's Normalizer, grapheme functions and intl error helpers
+using ICU4X compiled data. See the [intl documentation](crates/extensions/intl/README.md)
+for coverage and PHP oracle comparisons.
+
 ## 🧪 Testing
 
 Phera runs the tests of PHP's own `.phpt` suite that it passes: those listed in

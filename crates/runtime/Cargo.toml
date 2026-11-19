@@ -21,6 +21,7 @@ phera-ext-hash.workspace = true
 phera-ext-openssl.workspace = true
 phera-ext-http.workspace = true
 phera-ext-mbstring.workspace = true
+phera-ext-intl.workspace = true
 phera-ext-json.workspace = true
 phera-ext-pcre.workspace = true
 phera-ext-pdo.workspace = true

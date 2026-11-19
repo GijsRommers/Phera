@@ -1,0 +1,16 @@
+[package]
+name = "phera-ext-intl"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+icu_collator.workspace = true
+icu_locale.workspace = true
+icu_normalizer.workspace = true
+icu_segmenter.workspace = true
+phera-extension-api.workspace = true
+
+[lints]
+workspace = true
