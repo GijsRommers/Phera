@@ -4,9 +4,11 @@ mod graph;
 mod objects;
 mod options;
 mod plain;
+mod plain_object;
 
 use std::{borrow::Cow, rc::Rc};
 
+use phera_extension_api::serialization::SerializationClass;
 use phera_extension_api::{
     ArrayKey, Context, NativeError, NativeResult, Object, PhpString, Value, args,
 };
@@ -21,6 +23,8 @@ struct Decoder<'a> {
     frames: Vec<Frame>,
     delayed: Vec<Delayed>,
     options: Options,
+    last_class: Option<(&'a [u8], Rc<SerializationClass>)>,
+    tracks_references: bool,
 }
 
 struct Frame {
@@ -60,8 +64,8 @@ impl From<NativeError> for Failure {
 
 type BuildResult<T> = Result<T, Failure>;
 
-pub async fn unserialize(context: &mut dyn Context, arguments: Vec<Value>) -> NativeResult {
-    let Some(input) = args::string(&arguments, 0) else {
+pub async fn unserialize(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let Some(input) = args::string(arguments, 0) else {
         return Err(NativeError::type_error(
             "unserialize(): Argument #1 ($data) must be of type string",
         ));
@@ -69,7 +73,7 @@ pub async fn unserialize(context: &mut dyn Context, arguments: Vec<Value>) -> Na
     if input.is_empty() {
         return Ok(Value::Bool(false));
     }
-    let options = Options::read(context, args::array(&arguments, 1).map(Rc::as_ref)).await?;
+    let options = Options::read(context, args::array(arguments, 1).map(Rc::as_ref)).await?;
     if plain::applies(input.as_bytes()) {
         return plain::read(context, input.as_bytes(), options.max_depth);
     }
@@ -79,6 +83,8 @@ pub async fn unserialize(context: &mut dyn Context, arguments: Vec<Value>) -> Na
         frames: Vec::new(),
         delayed: Vec::new(),
         options,
+        last_class: None,
+        tracks_references: has_wire_tags(input.as_bytes(), &[b"R:", b"r:", b"C:"]),
     };
     let root = decoder.graph.new_place();
     let build = decoder.build(context, root).await;
@@ -101,6 +107,12 @@ pub async fn unserialize(context: &mut dyn Context, arguments: Vec<Value>) -> Na
     let value = decoder.graph.get(root);
     let result = value.try_deref()?.clone();
     Ok(result)
+}
+
+/// A tag inside a string may conservatively select the general graph builder.
+fn has_wire_tags(bytes: &[u8], tags: &[&[u8; 2]]) -> bool {
+    tags.iter()
+        .any(|tag| memchr::memmem::find(bytes, *tag).is_some())
 }
 
 impl Decoder<'_> {
@@ -144,8 +156,10 @@ impl Decoder<'_> {
         let token = self.reader.token(false);
         emit_diagnostic(context, &mut self.reader);
         let token = token?;
-        self.graph
-            .enter(place, !matches!(token, Token::Reference(_)));
+        self.graph.enter(
+            place,
+            self.tracks_references && !matches!(token, Token::Reference(_)),
+        );
         let scalar = match token {
             Token::Null => Value::Null,
             Token::Bool(value) => Value::Bool(value),

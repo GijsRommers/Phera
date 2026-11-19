@@ -267,7 +267,7 @@ impl Context for Vm {
             Ok(self
                 .lookup_class(name)
                 .await?
-                .as_deref()
+                .as_ref()
                 .map(Self::serialization_class_info))
         })
     }
@@ -317,11 +317,32 @@ impl Context for Vm {
         self.allocate_unserialized_object(class)
     }
 
+    fn create_plain_unserialized_object(
+        &mut self,
+        class: &dyn phera_value::ClassHandle,
+        properties: phera_value::PhpArray,
+    ) -> Option<std::rc::Rc<phera_value::Object>> {
+        let class = class.as_any().downcast_ref::<crate::classes::Class>()?;
+        let class = class.identity.upgrade()?;
+        Some(self.classes.allocate_with_properties(class, properties))
+    }
+
     fn serialization_properties(
         &mut self,
         object: &phera_value::Object,
     ) -> Result<phera_value::PhpArray, NativeError> {
         self.ordered_serialization_properties(object)
+    }
+
+    fn plain_serialization_fields(
+        &self,
+        object: &phera_value::Object,
+    ) -> Option<std::rc::Rc<[phera_extension_api::serialization::SerializedProperty]>> {
+        let class = object
+            .class
+            .as_any()
+            .downcast_ref::<crate::classes::Class>()?;
+        crate::serialization::layout::fields(class)
     }
 
     fn has_uninitialized_serialized_property(

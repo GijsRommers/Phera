@@ -1,11 +1,29 @@
 //! `unserialize()` allocates objects without running their constructors.
 
+use std::rc::Rc;
+
+use crate::ArrayKey;
+use crate::value::ClassHandle;
+
 /// A linked class examined before the serialized object body is read.
 pub struct SerializationClass {
     pub name: String,
     pub forbidden: bool,
     pub custom: bool,
     pub has_unserialize: bool,
+    pub plain: Option<PlainSerializedClass>,
+}
+
+/// A class whose scalar property table can be filled before publishing the object.
+pub struct PlainSerializedClass {
+    pub class: Rc<dyn ClassHandle>,
+    pub fields: Rc<[SerializedProperty]>,
+}
+
+/// A linked property's canonical storage key and its serialized spelling.
+pub struct SerializedProperty {
+    pub key: ArrayKey,
+    pub token: Vec<u8>,
 }
 
 /// The INI values used by PHP's serialization functions, local to a request.
