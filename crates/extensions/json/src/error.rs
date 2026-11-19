@@ -66,6 +66,10 @@ impl From<Error> for Details {
 }
 
 impl Details {
+    pub(crate) fn code(self) -> Error {
+        self.code
+    }
+
     pub(crate) fn at(code: Error, source: &[u8], offset: usize) -> Self {
         let prefix = source.get(..offset).unwrap_or(source);
         let line = 1 + prefix.iter().filter(|&&byte| byte == b'\n').count();
@@ -109,13 +113,13 @@ pub(crate) fn finish_details(
     value: Value,
 ) -> NativeResult {
     if throw {
-        if error.code != Error::None {
+        if error.code() != Error::None {
             // The exception's code is the same number json_last_error()
             // would report.
             return Err(NativeError::throw_with_code(
                 "JsonException",
                 error.message().into_owned(),
-                error.code as i64,
+                error.code() as i64,
             ));
         }
     } else {
@@ -127,7 +131,7 @@ pub(crate) fn finish_details(
 /// `json_last_error()`. Reading the error does not clear it.
 pub(crate) fn last(context: &mut dyn Context, _: &[Value]) -> NativeResult {
     Ok(Value::Int(
-        context.state().get_or_default::<Details>().code as i64,
+        context.state().get_or_default::<Details>().code() as i64,
     ))
 }
 
