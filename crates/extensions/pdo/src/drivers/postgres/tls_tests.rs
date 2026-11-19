@@ -63,6 +63,7 @@ impl Proxy {
         host: &str,
         mode: &str,
         root: Option<&std::path::Path>,
+        identity: Option<(&std::path::Path, &std::path::Path)>,
     ) -> Result<Postgres, crate::errors::DbError> {
         let mut dsn = format!(
             "pgsql:host={host};hostaddr=127.0.0.1;port={};\
@@ -72,23 +73,30 @@ impl Proxy {
         if let Some(root) = root {
             dsn.push_str(&format!(";sslrootcert={}", root.display()));
         }
+        if let Some((cert, key)) = identity {
+            dsn.push_str(&format!(
+                ";sslcert={};sslkey={}",
+                cert.display(),
+                key.display()
+            ));
+        }
         Postgres::connect(&Dsn::parse(&dsn).unwrap(), "phera", "phera").await
     }
 }
 
 #[tokio::test]
 async fn verify_full_rejects_wrong_hostname_and_untrusted_chain() {
-    let (pem, config) = certificates("localhost");
-    let proxy = Proxy::start(config).await;
+    let certs = certificates("localhost");
+    let proxy = Proxy::start(certs.server(false)).await;
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path().join("root.pem");
     let unrelated_root = directory.path().join("unrelated.pem");
-    tokio::fs::write(&root, pem).await.unwrap();
-    tokio::fs::write(&unrelated_root, certificates("localhost").0)
+    tokio::fs::write(&root, certs.root).await.unwrap();
+    tokio::fs::write(&unrelated_root, certificates("localhost").root)
         .await
         .unwrap();
     let wrong_host = proxy
-        .connect("wrong.example", "verify-full", Some(&root))
+        .connect("wrong.example", "verify-full", Some(&root), None)
         .await
         .err()
         .expect("verification must reject the name");
@@ -97,7 +105,7 @@ async fn verify_full_rejects_wrong_hostname_and_untrusted_chain() {
         "{wrong_host:?}"
     );
     let untrusted = proxy
-        .connect("localhost", "verify-full", Some(&unrelated_root))
+        .connect("localhost", "verify-full", Some(&unrelated_root), None)
         .await
         .err()
         .expect("verification must reject the chain");
@@ -106,7 +114,7 @@ async fn verify_full_rejects_wrong_hostname_and_untrusted_chain() {
         "{untrusted:?}"
     );
     let require = proxy
-        .connect("localhost", "require", Some(&unrelated_root))
+        .connect("localhost", "require", Some(&unrelated_root), None)
         .await
         .err()
         .expect("require with a CA must reject the chain");
@@ -122,11 +130,11 @@ async fn encrypted_queries_and_transaction_status_reach_the_database() {
         eprintln!("SKIP: PostgreSQL test database unavailable");
         return;
     }
-    let (pem, config) = certificates("localhost");
-    let proxy = Proxy::start(config).await;
+    let certs = certificates("localhost");
+    let proxy = Proxy::start(certs.server(false)).await;
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path().join("root.pem");
-    tokio::fs::write(&root, pem).await.unwrap();
+    tokio::fs::write(&root, &certs.root).await.unwrap();
     for (host, mode, ca) in [
         ("localhost", "verify-full", Some(root.as_path())),
         ("wrong.example", "verify-ca", Some(root.as_path())),
@@ -135,7 +143,7 @@ async fn encrypted_queries_and_transaction_status_reach_the_database() {
         ("wrong.example", "prefer", None),
         ("wrong.example", "allow", None),
     ] {
-        let driver = proxy.connect(host, mode, ca).await.unwrap();
+        let driver = proxy.connect(host, mode, ca, None).await.unwrap();
         driver.run_unprepared("BEGIN").await.unwrap();
         assert!(driver.transaction_state().await, "{mode}");
         let row = driver
@@ -147,4 +155,44 @@ async fn encrypted_queries_and_transaction_status_reach_the_database() {
         driver.run_unprepared("ROLLBACK").await.unwrap();
         assert!(!driver.transaction_state().await, "{mode}");
     }
+}
+
+#[tokio::test]
+async fn encrypted_connections_present_the_configured_client_certificate() {
+    if TcpStream::connect(("127.0.0.1", 54329)).await.is_err() {
+        eprintln!("SKIP: PostgreSQL test database unavailable");
+        return;
+    }
+    let certs = certificates("localhost");
+    let proxy = Proxy::start(certs.server(true)).await;
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("root.pem");
+    let cert = directory.path().join("client.pem");
+    let key = directory.path().join("client.key");
+    tokio::fs::write(&root, certs.root).await.unwrap();
+    tokio::fs::write(&cert, certs.client).await.unwrap();
+    let mut options = tokio::fs::OpenOptions::new();
+    let mut key_file = options
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&key)
+        .await
+        .unwrap();
+    key_file
+        .write_all(certs.client_key.as_bytes())
+        .await
+        .unwrap();
+    drop(key_file);
+
+    assert!(
+        proxy
+            .connect("localhost", "verify-full", Some(&root), None)
+            .await
+            .is_err(),
+    );
+    proxy
+        .connect("localhost", "verify-full", Some(&root), Some((&cert, &key)))
+        .await
+        .unwrap();
 }

@@ -3,10 +3,20 @@
 use std::sync::Arc;
 
 use rcgen::{BasicConstraints, CertificateParams, IsCa, Issuer, KeyPair};
-use rustls::ServerConfig;
-use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+use rustls::server::WebPkiClientVerifier;
+use rustls::{RootCertStore, ServerConfig};
 
-pub fn certificates(host: &str) -> (String, Arc<ServerConfig>) {
+pub struct TestCertificates {
+    pub root: String,
+    root_der: CertificateDer<'static>,
+    server_der: CertificateDer<'static>,
+    server_key: PrivateKeyDer<'static>,
+    pub client: String,
+    pub client_key: String,
+}
+
+pub fn certificates(host: &str) -> TestCertificates {
     let ca_key = KeyPair::generate().unwrap();
     let mut ca = CertificateParams::new(Vec::new()).unwrap();
     ca.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
@@ -17,13 +27,40 @@ pub fn certificates(host: &str) -> (String, Arc<ServerConfig>) {
         .unwrap()
         .signed_by(&leaf_key, &issuer)
         .unwrap();
-    let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(leaf_key.serialize_der()));
-    let provider = Arc::new(rustls_rustcrypto::provider());
-    let config = ServerConfig::builder_with_provider(provider)
-        .with_safe_default_protocol_versions()
-        .unwrap()
-        .with_no_client_auth()
-        .with_single_cert(vec![leaf.der().clone()], key)
+    let client_key = KeyPair::generate().unwrap();
+    let client = CertificateParams::default()
+        .signed_by(&client_key, &issuer)
         .unwrap();
-    (root.pem(), Arc::new(config))
+    TestCertificates {
+        root: root.pem(),
+        root_der: root.der().clone(),
+        server_der: leaf.der().clone(),
+        server_key: PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(leaf_key.serialize_der())),
+        client: client.pem(),
+        client_key: client_key.serialize_pem(),
+    }
+}
+
+impl TestCertificates {
+    pub fn server(&self, require_client: bool) -> Arc<ServerConfig> {
+        let provider = Arc::new(rustls_rustcrypto::provider());
+        let builder = ServerConfig::builder_with_provider(provider.clone())
+            .with_safe_default_protocol_versions()
+            .unwrap();
+        let builder = if require_client {
+            let mut store = RootCertStore::empty();
+            store.add(self.root_der.clone()).unwrap();
+            let verifier = WebPkiClientVerifier::builder_with_provider(Arc::new(store), provider)
+                .build()
+                .unwrap();
+            builder.with_client_cert_verifier(verifier)
+        } else {
+            builder.with_no_client_auth()
+        };
+        Arc::new(
+            builder
+                .with_single_cert(vec![self.server_der.clone()], self.server_key.clone_key())
+                .unwrap(),
+        )
+    }
 }

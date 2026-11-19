@@ -16,6 +16,7 @@
 //! to end job sets it. Both outputs of every run are kept in a directory of
 //! the system's temporary directory, named in the failure message.
 
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -158,16 +159,18 @@ impl Comparison {
         let mut matched = Vec::new();
         let mut failures = Vec::new();
         let mut skipped = 0;
+        let mut versioned = 0;
         for script in scripts {
             if let Some(minimum) = minimum_php(script) {
+                versioned += 1;
                 let version = php_version_id().expect("PHP oracle available");
                 if version < minimum {
-                    eprintln!(
+                    oracle_status(format_args!(
                         "SKIP {}: PHP behaviour since {}; oracle is {}",
                         stem(script),
                         display_version(minimum),
                         display_version(version),
-                    );
+                    ));
                     skipped += 1;
                     continue;
                 }
@@ -179,10 +182,15 @@ impl Comparison {
                 Err(failure) => failures.push(failure),
             }
         }
-        eprintln!(
-            "{} scripts match PHP, {skipped} skipped for an older oracle",
-            matched.len()
-        );
+        if versioned == 0 {
+            eprintln!("{} scripts match PHP", matched.len());
+        } else {
+            oracle_status(format_args!(
+                "{}: {} scripts match PHP, {skipped}/{versioned} versioned scripts skipped",
+                self.artifacts.display(),
+                matched.len()
+            ));
+        }
         assert!(
             failures.is_empty(),
             "{} of {} scripts differ from PHP; outputs in {}\n{}",
@@ -193,6 +201,11 @@ impl Comparison {
         );
         matched
     }
+}
+
+fn oracle_status(message: std::fmt::Arguments<'_>) {
+    // Direct writes keep version skips visible under cargo test's output capture.
+    writeln!(io::stderr().lock(), "{message}").expect("write oracle version status");
 }
 
 fn minimum_php(script: &Path) -> Option<u32> {

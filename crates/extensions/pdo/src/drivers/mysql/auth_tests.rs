@@ -20,11 +20,18 @@ const NONCE: &[u8; 20] = b"test-nonce-123456789";
 
 #[tokio::test]
 async fn caching_sha2_password_uses_verified_tls_or_rsa() {
-    let (pem, config) = certificates("127.0.0.1");
+    let certs = certificates("127.0.0.1");
+    let config = certs.server(true);
     let directory = tempfile::tempdir().unwrap();
-    let root = directory.path().join("root.pem");
-    tokio::fs::write(&root, pem).await.unwrap();
-    let root = root.to_str().unwrap().to_owned();
+    let roots = directory.path().join("roots");
+    tokio::fs::create_dir(&roots).await.unwrap();
+    tokio::fs::write(roots.join("root.pem"), certs.root)
+        .await
+        .unwrap();
+    let cert = directory.path().join("client.pem");
+    let key_file = directory.path().join("client.key");
+    tokio::fs::write(&cert, certs.client).await.unwrap();
+    tokio::fs::write(&key_file, certs.client_key).await.unwrap();
     let key = tokio::task::spawn_blocking(PrivateKey::try_generate)
         .await
         .unwrap()
@@ -48,10 +55,10 @@ async fn caching_sha2_password_uses_verified_tls_or_rsa() {
             .wait_timeout(Some(1));
         if encrypted {
             let settings = MysqlTls {
-                ca: Some(root.clone()),
-                capath: None,
-                cert: None,
-                key: None,
+                ca: None,
+                capath: Some(roots.to_str().unwrap().into()),
+                cert: Some(cert.to_str().unwrap().into()),
+                key: Some(key_file.to_str().unwrap().into()),
                 verify: true,
             };
             options = options.ssl_opts(tls::options(&settings).await.unwrap());
