@@ -53,6 +53,24 @@ fn store(slots: &mut [Option<Value>], register: Reg, value: Value) -> ScalarStep
     }
 }
 
+/// Builtins with no coercion can read the local directly.
+#[inline(never)]
+fn builtin_step(
+    operation: phera_bytecode::BuiltinUnary,
+    destination: Reg,
+    source: Reg,
+    slots: &mut [Option<Value>],
+) -> ScalarStep {
+    let Some(Some(value)) = slots.get(source.index()) else {
+        return ScalarStep::Fallback;
+    };
+    match crate::builtin_calls::builtin_value(operation, value) {
+        Some(Value::Int(value)) => store_integer(slots, destination, value),
+        Some(value) => store(slots, destination, value),
+        None => ScalarStep::Fallback,
+    }
+}
+
 /// `+`, `-`, `*` and `%` on two integers, when the result is an integer.
 ///
 /// `None` sends the instruction to the general handler: an overflow becomes a
@@ -108,16 +126,7 @@ pub(crate) fn scalar_step(
         Instruction::LoadInt { dst, value } => store_integer(slots, dst, i64::from(value)),
         Instruction::LoadNull { dst } => store(slots, dst, Value::Null),
         Instruction::LoadBool { dst, value } => store(slots, dst, Value::Bool(value)),
-        Instruction::BuiltinUnary { op, dst, src } => {
-            let Some(Some(value)) = slots.get(src.index()) else {
-                return ScalarStep::Fallback;
-            };
-            match crate::builtin_calls::builtin_value(op, value) {
-                Some(Value::Int(value)) => store_integer(slots, dst, value),
-                Some(value) => store(slots, dst, value),
-                None => ScalarStep::Fallback,
-            }
-        }
+        Instruction::BuiltinUnary { op, dst, src } => builtin_step(op, dst, src, slots),
         Instruction::Cast {
             to: phera_bytecode::CastKind::Bool,
             dst,

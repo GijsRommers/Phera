@@ -11,7 +11,7 @@ use crate::{
     passes::lowering_tables::{binary, path, static_id},
 };
 
-impl Tables {
+impl Tables<'_> {
     /// Translate one IR instruction, appending any required preparation instructions first.
     pub(crate) fn instruction(
         &mut self,

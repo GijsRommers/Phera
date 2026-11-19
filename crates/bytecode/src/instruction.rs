@@ -434,6 +434,14 @@ pub enum Instruction {
         dst: Reg,
         result: CallResult,
     },
+    /// Calls a statically known builtin with positional by-value arguments.
+    CallNativeDirect {
+        function: SymbolId,
+        args: Reg,
+        count: u16,
+        dst: Reg,
+        result: CallResult,
+    },
     /// `f(...)`: instead of calling, puts the prepared callee into `dst` as a
     /// callable value.
     MakeCallable {

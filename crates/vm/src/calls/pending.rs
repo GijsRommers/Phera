@@ -34,20 +34,7 @@ pub(crate) enum LinkedFunction {
 impl Vm {
     /// Resolve the callee before argument evaluation so reference parameters are known.
     pub(crate) fn init_call(&mut self, symbol: SymbolId) -> Result<(), NativeError> {
-        let linked = self.current().and_then(|frame| {
-            frame
-                .cache()
-                .symbols
-                .borrow()
-                .get(symbol.index())
-                .cloned()
-                .flatten()
-        });
-        let linked = match linked {
-            Some(linked) => linked,
-            None => self.link_function_symbol(symbol)?,
-        };
-        let linked = match linked {
+        let linked = match self.linked_function(symbol)? {
             LinkedFunction::NamespaceFallback => self.link_namespace_call_site(symbol)?,
             linked => linked,
         };
@@ -58,6 +45,25 @@ impl Vm {
             }
             LinkedFunction::Other(callee) => self.prepare_call(callee),
             LinkedFunction::NamespaceFallback => Err(internal_error!("namespace site target")),
+        }
+    }
+
+    pub(super) fn linked_function(
+        &mut self,
+        symbol: SymbolId,
+    ) -> Result<LinkedFunction, NativeError> {
+        let linked = self.current().and_then(|frame| {
+            frame
+                .cache()
+                .symbols
+                .borrow()
+                .get(symbol.index())
+                .cloned()
+                .flatten()
+        });
+        match linked {
+            Some(linked) => Ok(linked),
+            None => self.link_function_symbol(symbol),
         }
     }
 

@@ -46,7 +46,23 @@ impl CodeCache {
         let unit = Arc::new(phera_compiler::compile_bytes_with_natives(
             &source,
             &canonical.to_string_lossy(),
-            &|name| self.registry.get_function(name).is_some(),
+            &|name| {
+                let entry = self.registry.get_function(name)?;
+                Some(match entry.handler {
+                    phera_extension_api::NativeFn::Sync(_) => {
+                        phera_compiler::NativeFunction::Direct {
+                            positional_by_value: entry
+                                .params
+                                .iter()
+                                .take_while(|parameter| !parameter.by_ref)
+                                .count(),
+                        }
+                    }
+                    phera_extension_api::NativeFn::Async(_) => {
+                        phera_compiler::NativeFunction::General
+                    }
+                })
+            },
         )?);
         self.lock().insert(canonical, unit.clone());
         Ok(unit)

@@ -30,7 +30,7 @@ impl Compiler<'_> {
             return Ok(None);
         };
         let name = name.to_ascii_lowercase();
-        if !enabled(&name) {
+        if enabled(&name).is_none() {
             return Ok(None);
         }
         let argument = &argument.value;

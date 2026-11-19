@@ -52,7 +52,14 @@ pub fn compile_bytes_with_natives(
 }
 
 /// A read-only inventory shared with the compiler thread.
-pub type NativeFunctions<'a> = dyn Fn(&str) -> bool + Sync + 'a;
+pub type NativeFunctions<'a> = dyn Fn(&str) -> Option<NativeFunction> + Sync + 'a;
+
+/// Which call shape can bypass argument routing for an enabled function.
+#[derive(Clone, Copy)]
+pub enum NativeFunction {
+    General,
+    Direct { positional_by_value: usize },
+}
 
 /// Compile the code passed to `eval()` without requiring an opening tag.
 pub fn compile_eval(

@@ -166,7 +166,7 @@ pub(super) fn finish(
         file: compiler.file.into(),
     };
     validate_global_writes(&unit)?;
-    Ok(lower::lower(unit))
+    Ok(lower::lower(unit, compiler.native_functions))
 }
 
 /// PHP 8.1 makes the global table read-only except through an indexed symbol name.

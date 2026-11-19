@@ -16,10 +16,11 @@ use crate::ir;
 
 /// Final table builder. No compiler-only paths escape in instructions.
 #[derive(Default)]
-pub(crate) struct Tables {
+pub(crate) struct Tables<'a> {
     unit: CompiledUnit,
     /// The file's top-level functions, which calls reach with `CallDirect`.
     callees: crate::passes::direct_calls::DirectCallees,
+    native_functions: Option<&'a crate::NativeFunctions<'a>>,
     constant_ids: HashMap<ConstantValue, u32>,
 }
 
@@ -35,7 +36,7 @@ enum ConstantValue {
     Bytes(Vec<u8>),
 }
 
-impl Tables {
+impl Tables<'_> {
     /// Intern names in first-use order to keep table indices deterministic.
     pub(crate) fn name(&mut self, name: &str) -> NameId {
         let index = self
@@ -261,8 +262,12 @@ impl Tables {
                         }),
                     _ => false,
                 });
-        let areas =
-            crate::passes::direct_calls::rewrite(&mut function, &self.unit.symbols, &self.callees);
+        let areas = crate::passes::direct_calls::rewrite(
+            &mut function,
+            &self.unit.symbols,
+            &self.callees,
+            self.native_functions,
+        );
         crate::passes::optimize::optimize(&mut function);
         if let Some(areas) = areas
             && crate::passes::direct_calls::write_arguments_in_place(&mut function, areas)
@@ -296,9 +301,13 @@ fn direct_callees(source: &ir::CompiledUnit) -> crate::passes::direct_calls::Dir
 }
 
 /// Intern all file tables once compilation has completed.
-pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
+pub(crate) fn lower(
+    source: ir::CompiledUnit,
+    native_functions: Option<&crate::NativeFunctions<'_>>,
+) -> CompiledUnit {
     let mut tables = Tables {
         callees: direct_callees(&source),
+        native_functions,
         ..Tables::default()
     };
     tables.unit.file = source.file;

@@ -47,6 +47,16 @@ impl Vm {
                 dst,
                 ..
             } => return self.call_direct_general(function, args, count, dst, work),
+            I::CallNativeDirect {
+                function,
+                args,
+                count,
+                dst,
+                ..
+            } => {
+                *work += 1;
+                return self.call_native_direct(function, args, count, dst);
+            }
             I::GeneratorStart
             | I::Yield { .. }
             | I::YieldFrom { .. }
