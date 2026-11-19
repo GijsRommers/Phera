@@ -22,6 +22,7 @@ PHP source ─▶ lexer ─▶ parser ─▶ AST ─▶ compiler ─▶ bytecode
 | `phera-vm` | Executes bytecode: frames, classes, exceptions, generators | bytecode, value |
 | `phera-extension-api` | What native functions and classes see | value |
 | `phera-extensions/*` | Native functions grouped like PHP extensions | extension-api |
+| `phera-io-pool` | Shared PDO and Redis connection pools and TLS policy | tokio, rustls |
 | `phera-runtime` | Code cache, includes, autoload, superglobals, request lifecycle | compiler, vm, extensions |
 | `phera-server` | HTTP on Tokio, one worker thread per core | |
 | `phera-cli` | `phera run file.php`, `phera serve` | runtime, server |
@@ -46,6 +47,16 @@ to its input without a limit:
 
 Dependencies point one way. The VM never sees the AST, and the server never sees
 the VM: it talks to a `Handler` trait that the runtime implements.
+
+PDO and Redis share the client TLS policy in `phera-io-pool::tls`, where
+their pooled connections already share an I/O runtime abstraction. Rustls
+uses ring's default cipher suites with TLS 1.2 and 1.3. Ring builds its C and
+assembly with the platform toolchain. Phera's crates use the safe Rust API.
+PDO uses platform trust roots with WebPKI fallback and supports driver-specific
+trust and client certificate options. Redis uses the bundled WebPKI roots and
+verifies the server name. PostgreSQL and Redis receive the policy explicitly.
+`mysql_async` builds its own rustls configuration, so the runtime registers
+ring once at startup and PDO supplies the selected roots through its options.
 
 ## 2. Concurrency: M:N on Tokio, thread per core
 
@@ -290,7 +301,7 @@ explains at most a factor of 5 (section 10). The rest is work Phera repeats on
 every request and PHP with opcache does once per process: linking some 500
 classes, resolving includes, booting the framework.
 
-The work has four steps. Each is useful without the next.
+The work has five steps. Each is useful without the next.
 
 **Step 1: linked code is shared by all requests of a worker.** A class, function
 or constant that a file declares is linked once per worker thread and never
@@ -373,14 +384,74 @@ the request first writes to it. A fork then costs nothing up front. This is a
 larger change to the value representation and waits until the copy of step 2
 shows up in measurements.
 
-Not chosen: worker mode as in FrankenPHP, RoadRunner or Laravel Octane, where
-one long-lived application object answers request after request. It is faster
-still, but state leaks from one request into the next unless the application is
-written for it. A fork keeps PHP's contract: a request starts from a known
-state and nothing it does is seen by another.
+**Step 5: worker mode, for applications written for it.** Laravel Octane,
+Symfony's runtime packages and FrankenPHP applications keep one booted
+application alive and pass it request after request. They are written so that
+nothing leaks from one request into the next (Symfony resets its services,
+Octane flushes its container bindings). Phera runs them unchanged by offering
+the interface they already use, FrankenPHP's:
 
-Order: step 1 first, because it helps every application; then 2 and 3. They
-follow the destructors work (9.1), which changes the same object lifetime code.
+```php
+// a worker script, as FrankenPHP, Octane's FrankenPHP driver and
+// runtime/frankenphp-symfony write it
+$kernel->boot();
+while (frankenphp_handle_request(function () use ($kernel) {
+    $response = $kernel->handle(Request::createFromGlobals());
+    $response->send();
+    $kernel->terminate($request, $response);
+})) { gc_collect_cycles(); }
+```
+
+`frankenphp_handle_request()` waits for a request, fills the superglobals, runs
+the callback and sends the response; `$_SERVER['FRANKENPHP_WORKER']` is set, and
+`phera serve --worker public/index.php` (or `[server] worker` in `phera.toml`)
+names the script. PHP code cannot have two requests interleaved in one heap, so
+one running copy of the worker script answers one request at a time. Phera
+keeps many copies per worker thread instead of one: each copy is a task with
+its own VM, a request goes to an idle copy, and while that copy waits for the
+database another one runs. That keeps the many-requests-per-thread design. The
+number of copies grows with demand up to a limit and shrinks when idle; a copy
+is replaced after a configurable number of requests and when one of its files
+changes. Per request Phera resets what PHP resets: output buffers, the header
+list, the time limit, the last error; what the application keeps in memory is
+its own business, as on FrankenPHP.
+
+The three ways to run an application, side by side:
+
+| | Classic | Snapshot and fork | Worker mode |
+| --- | --- | --- | --- |
+| Boot work per request | all of it (step 1 removes the linking) | none after the first request of a worker | none |
+| Requests isolated from each other | yes | yes | no: the application must reset itself |
+| Works for | every application | an application with a boot phase and a snapshot point | an application written for long-running use |
+| Change to the application | none | none with an adapter, one line otherwise | none if it already supports FrankenPHP or Octane |
+
+Order: step 1 first, because it helps every application; then worker mode
+(step 5), which is the smallest change for the largest gain on Symfony and
+Laravel; then the snapshot (steps 2 and 3). They follow the destructors work
+(9.1), which changes the same object lifetime code.
+
+### 5.5 Child processes
+
+PHP can start programs through `proc_open()`, `popen()`, `exec()`,
+`shell_exec()`, backticks, `system()` and `passthru()`. The array form of
+`proc_open()` passes an argument vector directly to the program. String
+commands run through `/bin/sh -c`. Children inherit the request's working
+directory and effective environment unless a call supplies replacements.
+Process pipes, socket pairs and terminal streams share the stream API.
+Tokio waits for a child or work on its pipes without blocking the worker.
+
+`phera serve --no-process` makes program-starting functions throw `Error`.
+Program execution is enabled by default. The PHP execution time limit also
+counts waits on children and their streams toward the request budget. The HTTP
+request timeout covers the whole handler and cancels any pending wait.
+At CLI shutdown an open `proc_open()` handle closes its pipes and checks
+child status without waiting. An open `popen()` stream closes its pipe and
+reaps the child before the CLI returns. Explicit closure waits asynchronously
+and returns the child's exit status.
+
+Phera gives each web child its own process group and terminates abandoned
+children at request cleanup while their leader is still tracked. Programs
+that explicitly detach can keep running. [Process decisions](decisions.md)
 
 ## 6. Scope
 
@@ -392,9 +463,10 @@ classes, interfaces, traits, enums, readonly, attributes, anonymous classes, lat
 static binding, magic methods, exceptions with `finally`, generators, `match`,
 nullsafe, destructuring, alternative control syntax, heredoc and nowdoc,
 `declare(strict_types=1)` with parameter and return type checks, `include` and
-autoloading, `eval`, property hooks, asymmetric visibility, the pipe operator.
+autoloading, `eval`, property hooks, asymmetric visibility, and the pipe operator.
+Backticks are supported and emit PHP 8.5's compile-time deprecation.
 
-**Language, left out:** backticks, `(real)`, short and
+**Language, left out:** `(real)`, short and
 ASP tags, `goto`, `declare(ticks)` and `__halt_compiler` data access.
 `assert()` is checked, as under `php -n`: a failed assertion throws
 `AssertionError` with the condition as written. A setting that compiles
@@ -402,9 +474,14 @@ assertions out, as PHP's production configuration does, comes with the
 configuration file.
 Fiber switching and request-local state are described in section 9.5.
 
-**Runtime, left out:** opcache and JIT settings, FFI, phar, pcntl, posix, the C
-extension ABI, `dl()`, startup configuration from an INI file, and functions
-removed or deprecated before PHP 8.
+**Runtime, in scope:** Unix program execution, including `shell_exec()` and
+`popen()`, plus POSIX queries. The CLI exposes named `SIG*` constants and
+reports a `Phera\NotSupportedException` for `pcntl_fork()`, `pcntl_exec()`, and
+the `pcntl_wait*()` calls.
+
+**Runtime, left out:** opcache and JIT settings, FFI, phar, pcntl signal
+handlers and alarms, the C extension ABI, `dl()`, startup configuration from
+an INI file, and functions removed or deprecated before PHP 8.
 
 **Extensions, first wave:** standard (strings, arrays, math, output, variables,
 files, `sprintf`, `serialize`), spl, json, pcre (bound to PCRE2), ctype, mbstring,
@@ -487,8 +564,7 @@ silence:
   `function_exists()` and `class_exists()` answer false for these, so code
   that checks first takes its fallback. The list comes from the
   `#[\Deprecated]` attributes in PHP 8.5's own stub files, not from memory.
-- **Syntax** (the backtick operator): a compile error, "... is not
-  supported by Phera", with file and line.
+- **Removed syntax** such as `(real)` produces a compile error with file and line.
 - **Legacy package layouts** (PSR-0 autoloading, `target-dir`,
   `include-path`, PEAR-style trees): `phera install` stops and names the
   package and the field. Nothing is installed half.

@@ -436,9 +436,6 @@ impl<'src> Lexer<'src> {
             TokenKind::RightBrace
         } else if c == '`' {
             self.advance();
-            if !self.tokenizer {
-                return self.unsupported(start, crate::BACKTICK_OPERATOR_ERROR);
-            }
             self.begin(Mode::Backquotes);
             TokenKind::Backquote
         } else if let Some(&(operator, kind)) =
@@ -471,7 +468,7 @@ impl<'src> Lexer<'src> {
             return Ok(self.token(TokenKind::Eof, start));
         }
         let unterminated = self.modes.iter().rev().find_map(|mode| match mode {
-            Mode::DoubleQuotes => Some(LexErrorKind::UnterminatedString),
+            Mode::DoubleQuotes | Mode::Backquotes => Some(LexErrorKind::UnterminatedString),
             Mode::Heredoc { .. } | Mode::Nowdoc { .. } => Some(LexErrorKind::UnterminatedHeredoc),
             _ => None,
         });

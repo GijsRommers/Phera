@@ -52,9 +52,13 @@ pub fn parse(input: &[u8], options: Options) -> Parsed {
     parse_with_encoding(input, options, None)
 }
 
-/// Parse with an explicit encoding when a reader's factory supplies one.
-pub fn parse_with_encoding(input: &[u8], options: Options, encoding: Option<&str>) -> Parsed {
-    let decoded = match decode(input, encoding) {
+/// Parse with an explicit encoding when the caller supplies one.
+pub fn parse_with_encoding(
+    input: &[u8],
+    options: Options,
+    override_encoding: Option<&str>,
+) -> Parsed {
+    let decoded = match decode(input, override_encoding) {
         Ok(decoded) => decoded,
         Err(error) => {
             return Parsed {
@@ -104,10 +108,14 @@ fn invalid_character(input: &str) -> Option<(usize, char)> {
 
 type ScopeChanges = Vec<(String, Option<String>)>;
 
+// The macOS oracle's libxml 2.9.13 retains its older recovery behavior.
+const LEGACY_RECOVERY: bool = cfg!(target_os = "macos");
+
 struct OpenElement {
     id: NodeId,
     namespaces: ScopeChanges,
     preserve_space: bool,
+    saw_text: bool,
 }
 
 struct Parser<'a> {
@@ -301,11 +309,22 @@ impl<'a> Parser<'a> {
             };
             self.add(kind, name, text, self.position.line)?;
         }
+        if !LEGACY_RECOVERY
+            && !strip
+            && kind == Kind::Text
+            && let Some(frame) = self.open.last_mut()
+        {
+            frame.saw_text = true;
+        }
         Ok(())
     }
 
     fn ignorable_space(&self, parent: NodeId) -> bool {
-        if self.open.last().is_some_and(|frame| frame.preserve_space) {
+        if self
+            .open
+            .last()
+            .is_some_and(|frame| frame.preserve_space || (!LEGACY_RECOVERY && frame.saw_text))
+        {
             return false;
         }
         let arena = &self.document.arena;

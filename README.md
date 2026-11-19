@@ -32,7 +32,7 @@ Measured in November 2026 against PHP 8.5, the same script or request on both.
 | WordPress | Not yet: `mysqli` is being built |
 | PHP's own test suite (php-src, 13,388 tests) | 8,704 pass |
 | Speed of plain scripts | Between about the same CPU time as PHP's interpreter (arrays, arithmetic) and 5.5 times as much (method calls) |
-| Speed of a framework request | Roughly 10 times slower than PHP with opcache (one Laravel API request: about 150 ms against 9 to 17 ms). Phera links every class again for each request; sharing linked code between requests and forking a booted application are designed ([architecture, 5.4](docs/architecture.md)) and not built |
+| Speed of a framework request | Roughly 10 times slower than PHP with opcache (one Laravel API request: about 150 ms against 9 to 17 ms). Phera links every class again for each request; sharing linked code between requests, forking a booted application and a worker mode with FrankenPHP's interface are designed ([architecture, 5.4](docs/architecture.md)) and not built. Measured CPU per request for a Laravel route with two MySQL queries: 34 million cycles on PHP with opcache, 369 million on Phera |
 
 ## 🧰 The `phera` command
 
@@ -51,17 +51,33 @@ runner yet.
 ## 🧩 Extensions
 
 Built in, each checked call by call against real PHP: core, standard, ctype,
-date, dom (first stage), filter, hash, json, mbstring, openssl, pcre, PDO
+date, dom (`DOMDocument`, `DOMNode`, `DOMElement`, `DOMXPath`), filter,
+hash, json, mbstring, openssl, pcre, PDO
 (SQLite, MySQL, PostgreSQL, with TLS), random, redis, reflection, serialize,
-session, SPL, sqlite3, streams, tokenizer, and `XMLWriter` (`xmlwriter_*` and
-memory, local file URI, and PHP stream output).
+session, SPL, sqlite3, streams, tokenizer, Unix process functions, and POSIX queries.
 
-`SimpleXMLElement` and `SimpleXMLIterator` share XML documents with DOM.
-`XMLReader` reads XML from strings, local files and PHP streams.
-`XMLParser` supports the `xml_*` event and structure APIs.
+Modern DOM supports CSS selectors, live class tokens, and `innerHTML`.
 
-In progress: bcmath, curl, gmp, intl, mysqli, pgsql, process functions, sodium,
-zlib. Not started: gd, fileinfo, zip, sockets.
+- Documents and elements include `Dom\Document`, `Dom\HTMLDocument`,
+  `Dom\XMLDocument`, `Dom\Element`, `Dom\HTMLElement`, `Dom\Attr`.
+- Other nodes include `Dom\Node`, `Dom\CharacterData`, `Dom\Text`,
+  `Dom\CDATASection`, `Dom\Comment`, `Dom\ProcessingInstruction`,
+  `Dom\DocumentType`, `Dom\DocumentFragment`, `Dom\Entity`,
+  `Dom\EntityReference`, `Dom\Notation`.
+- Collections and queries include `Dom\NodeList`, `Dom\NamedNodeMap`,
+  `Dom\DtdNamedNodeMap`, `Dom\HTMLCollection`, `Dom\TokenList`, `Dom\XPath`.
+- `Dom\ParentNode` and `Dom\ChildNode` expose their shared operations.
+
+The XML extensions include `XMLWriter` for memory and URI output,
+`SimpleXMLElement` and `SimpleXMLIterator` for XML and DOM interoperability,
+`XMLReader` for forward traversal, and `XMLParser` for XML events.
+
+Unix scripts can launch programs with `shell_exec()`, backticks, and the process
+functions. Backticks emit PHP 8.5's compile-time deprecation. To disable program
+launching for web requests, run `phera serve --no-process public`.
+
+In progress: bcmath, curl, gmp, intl, mysqli, pgsql, sodium, zlib.
+Not started: gd, fileinfo, zip, sockets.
 
 ## ✨ Goals
 

@@ -229,7 +229,11 @@ fn load_from_file<'a>(
     })
 }
 
-pub(super) fn save_xml(_: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> NativeResult {
+pub(in crate::bindings) fn save_xml(
+    _: &mut dyn Context,
+    this: This<'_>,
+    arguments: &[Value],
+) -> NativeResult {
     Ok(Value::from(serialized(
         this,
         args::object(arguments, 0),
@@ -238,7 +242,11 @@ pub(super) fn save_xml(_: &mut dyn Context, this: This<'_>, arguments: &[Value])
     )?))
 }
 
-pub(super) fn save_html(_: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> NativeResult {
+pub(in crate::bindings) fn save_html(
+    _: &mut dyn Context,
+    this: This<'_>,
+    arguments: &[Value],
+) -> NativeResult {
     Ok(Value::from(serialized(
         this,
         args::object(arguments, 0),
@@ -272,7 +280,7 @@ fn serialized(
     ))
 }
 
-pub(super) fn save_file<'a>(
+pub(in crate::bindings) fn save_file<'a>(
     context: &'a mut dyn Context,
     this: Option<Rc<Object>>,
     args: Vec<Value>,
@@ -280,7 +288,7 @@ pub(super) fn save_file<'a>(
     save_to_file(context, this, args, Format::Xml, "DOMDocument::save")
 }
 
-pub(super) fn save_html_file<'a>(
+pub(in crate::bindings) fn save_html_file<'a>(
     context: &'a mut dyn Context,
     this: Option<Rc<Object>>,
     args: Vec<Value>,
@@ -305,7 +313,10 @@ fn save_to_file<'a>(
         let (name, path) = filename(context, &arguments, function)?;
         if format.html() {
             let target = this_node(this.as_ref())?;
-            super::html_file::ensure_content_type(&mut target.shared.borrow_mut().document.arena);
+            let mut state = target.shared.borrow_mut();
+            if !state.document.settings.modern {
+                super::html_file::ensure_content_type(&mut state.document.arena);
+            }
         }
         let bytes = serialized(
             this.as_ref(),

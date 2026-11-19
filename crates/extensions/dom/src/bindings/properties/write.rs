@@ -19,8 +19,11 @@ pub(super) fn mutate(
     name: &str,
     mutation: NativePropertyMutation<'_>,
 ) -> Result<bool, NativeError> {
-    let location = super::location(object)?;
-    let kind = location.shared.borrow().document.arena[location.id].kind;
+    let location = super::location(object);
+    let kind = location.as_ref().map_or_else(
+        |_| super::uninitialized_kind(object),
+        |node| node.shared.borrow().document.arena[node.id].kind,
+    );
     if !super::known(kind, name) {
         return Ok(false);
     }
@@ -42,6 +45,7 @@ pub(super) fn mutate(
             object.class.name(),
         )));
     }
+    let location = location?;
     match name {
         "strictErrorChecking"
         | "formatOutput"

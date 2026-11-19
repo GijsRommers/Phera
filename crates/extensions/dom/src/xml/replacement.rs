@@ -9,7 +9,7 @@ use std::fmt::Write;
 use crate::document::ParseError;
 use crate::tree::{Arena, Kind};
 
-use super::{Options, Parser, entities::predefined, parse};
+use super::{LEGACY_RECOVERY, Options, Parser, entities::predefined, parse};
 
 impl Parser<'_> {
     pub(super) fn reference(&mut self, name: &str, line: usize) -> Result<(), ParseError> {
@@ -20,6 +20,9 @@ impl Parser<'_> {
             Ok(result) => result,
             Err(error) if error.code == 26 => {
                 self.report(error);
+                if !LEGACY_RECOVERY && self.options.recover && !self.options.substitute_entities {
+                    self.add(Kind::EntityReference, name, "", line)?;
+                }
                 return Ok(());
             }
             Err(error) => return Err(error),

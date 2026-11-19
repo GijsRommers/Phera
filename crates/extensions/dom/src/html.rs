@@ -4,7 +4,11 @@
 //! $document->loadHTML('<p>hi</p>', LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
 //! ```
 
+mod modern;
 mod sink;
+
+pub use modern::{fragment, parse_modern};
+pub(crate) use sink::XHTML;
 
 use std::borrow::Cow;
 
@@ -36,7 +40,8 @@ pub fn parse(bytes: &[u8], options: Options) -> Document {
     } else {
         Cow::Owned(bytes.iter().copied().map(char::from).collect())
     };
-    let mut arena = parse_document(sink::Sink::default(), ParseOpts::default()).one(input.as_ref());
+    let (mut arena, _) =
+        parse_document(sink::Sink::default(), ParseOpts::default()).one(input.as_ref());
     let lower = input.to_ascii_lowercase();
     adjust_tree(&mut arena, &lower, options);
     if let Some((offset, _)) = lower.match_indices("<!doctype").next() {

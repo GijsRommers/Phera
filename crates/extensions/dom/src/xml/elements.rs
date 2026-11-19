@@ -158,6 +158,7 @@ impl Parser<'_> {
                 id,
                 namespaces: scope_changes,
                 preserve_space,
+                saw_text: false,
             });
         } else {
             self.restore(scope_changes);

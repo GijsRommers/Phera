@@ -12,6 +12,7 @@ mod detached;
 mod document;
 mod factory;
 mod libxml;
+mod modern;
 mod mutation;
 mod namespace;
 mod node;
@@ -64,6 +65,7 @@ impl Extension for Dom {
         factory::register(registry);
         collection::register(registry);
         xpath::register(registry);
+        modern::register(registry);
     }
 }
 
@@ -84,6 +86,7 @@ struct DomState {
     owned: bool,
     wrappers: HashMap<NodeId, Weak<Object>>,
     node_classes: HashMap<String, String>,
+    class_lists: HashMap<NodeId, Weak<Object>>,
     detached: detached::Detached,
 }
 
@@ -110,6 +113,7 @@ impl Location {
                 owned,
                 wrappers: HashMap::new(),
                 node_classes: HashMap::new(),
+                class_lists: HashMap::new(),
                 detached: detached::Detached::default(),
             })),
             id,
@@ -154,20 +158,25 @@ impl Location {
             if let Some(object) = state.wrappers.get(&self.id).and_then(Weak::upgrade) {
                 return Ok(Value::Object(object));
             }
-            let class = match state.document.arena[self.id].kind {
-                Kind::Element => "DOMElement",
-                Kind::Attribute => "DOMAttr",
-                Kind::Namespace => "DOMNameSpaceNode",
-                Kind::Text => "DOMText",
-                Kind::Cdata => "DOMCdataSection",
-                Kind::Comment => "DOMComment",
-                Kind::ProcessingInstruction => "DOMProcessingInstruction",
-                Kind::Document => "DOMDocument",
-                Kind::Doctype => "DOMDocumentType",
-                Kind::Fragment => "DOMDocumentFragment",
-                Kind::EntityReference => "DOMEntityReference",
-                Kind::Entity => "DOMEntity",
-                Kind::Notation => "DOMNotation",
+            let entry = &state.document.arena[self.id];
+            let class = if state.document.settings.modern {
+                modern::class(entry, state.document.settings.html)
+            } else {
+                match entry.kind {
+                    Kind::Element => "DOMElement",
+                    Kind::Attribute => "DOMAttr",
+                    Kind::Namespace => "DOMNameSpaceNode",
+                    Kind::Text => "DOMText",
+                    Kind::Cdata => "DOMCdataSection",
+                    Kind::Comment => "DOMComment",
+                    Kind::ProcessingInstruction => "DOMProcessingInstruction",
+                    Kind::Document => "DOMDocument",
+                    Kind::Doctype => "DOMDocumentType",
+                    Kind::Fragment => "DOMDocumentFragment",
+                    Kind::EntityReference => "DOMEntityReference",
+                    Kind::Entity => "DOMEntity",
+                    Kind::Notation => "DOMNotation",
+                }
             };
             state
                 .node_classes

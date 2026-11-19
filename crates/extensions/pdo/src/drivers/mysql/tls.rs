@@ -1,20 +1,13 @@
 //! `Pdo\Mysql::ATTR_SSL_CA` selects trusted roots for a MySQL TLS connection.
 
 use std::path::PathBuf;
-use std::sync::Once;
 
 use mysql_async::{ClientIdentity, SslOpts};
 
 use crate::connect_options::MysqlTls;
-use crate::drivers::tls;
 use crate::errors::DbError;
 
 pub(super) async fn options(settings: &MysqlTls) -> Result<SslOpts, DbError> {
-    static PROVIDER: Once = Once::new();
-    PROVIDER.call_once(|| {
-        let _ = rustls_rustcrypto::provider().install_default();
-    });
-
     let custom_roots = settings.ca.is_some() || settings.capath.is_some();
     let mut roots = Vec::new();
     if let Some(file) = &settings.ca {
@@ -37,12 +30,12 @@ pub(super) async fn options(settings: &MysqlTls) -> Result<SslOpts, DbError> {
         }
     }
     if !custom_roots {
-        let mut store = rustls::RootCertStore::empty();
-        for cert in tls::platform_roots().await {
-            if store.add(cert.clone()).is_ok() {
-                roots.push(cert.to_vec().into());
-            }
-        }
+        roots.extend(
+            phera_io_pool::tls::platform_roots()
+                .await
+                .iter()
+                .map(|cert| cert.to_vec().into()),
+        );
     }
     if custom_roots && roots.is_empty() {
         return Err(failure());

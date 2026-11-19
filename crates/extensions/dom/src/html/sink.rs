@@ -13,12 +13,14 @@ use html5ever::{Attribute, Namespace, QualName};
 
 use crate::tree::{Arena, Doctype, Kind, Name, Node, NodeId};
 
-const XHTML: &str = "http://www.w3.org/1999/xhtml";
+pub(crate) const XHTML: &str = "http://www.w3.org/1999/xhtml";
 
 #[derive(Default)]
 pub(super) struct Sink {
     arena: RefCell<Arena>,
     line: Cell<usize>,
+    quirks: Cell<bool>,
+    pub(super) modern: bool,
 }
 
 #[derive(Clone)]
@@ -71,11 +73,11 @@ impl Sink {
 
 impl TreeSink for Sink {
     type Handle = Handle;
-    type Output = Arena;
+    type Output = (Arena, bool);
     type ElemName<'a> = &'a QualName;
 
-    fn finish(self) -> Arena {
-        self.arena.into_inner()
+    fn finish(self) -> Self::Output {
+        (self.arena.into_inner(), self.quirks.into_inner())
     }
 
     fn parse_error(&self, _msg: Cow<'static, str>) {
@@ -92,7 +94,7 @@ impl TreeSink for Sink {
 
     fn create_element(&self, name: QualName, attrs: Vec<Attribute>, flags: ElementFlags) -> Handle {
         let mut arena = self.arena.borrow_mut();
-        let mut node = Node::new(Kind::Element, arena_name(&name), "");
+        let mut node = Node::new(Kind::Element, arena_name(&name, self.modern), "");
         node.line = self.line.get();
         let id = arena.allocate(node);
         let template = flags.template.then(|| {
@@ -166,7 +168,9 @@ impl TreeSink for Sink {
         x.id == y.id
     }
 
-    fn set_quirks_mode(&self, _mode: QuirksMode) {}
+    fn set_quirks_mode(&self, mode: QuirksMode) {
+        self.quirks.set(mode == QuirksMode::Quirks);
+    }
 
     fn append_before_sibling(&self, sibling: &Handle, child: NodeOrText<Handle>) {
         let parent = self.arena.borrow()[sibling.id].parent();
@@ -178,7 +182,7 @@ impl TreeSink for Sink {
     fn add_attrs_if_missing(&self, target: &Handle, attrs: Vec<Attribute>) {
         let mut arena = self.arena.borrow_mut();
         for attribute in attrs {
-            let name = arena_name(&attribute.name);
+            let name = arena_name(&attribute.name, self.modern);
             if !arena[target.id]
                 .attributes()
                 .iter()
@@ -210,18 +214,19 @@ impl TreeSink for Sink {
     }
 }
 
-fn arena_name(name: &QualName) -> Name {
+fn arena_name(name: &QualName, modern: bool) -> Name {
     Name {
         local: name.local.to_string(),
         prefix: name.prefix.as_ref().map(ToString::to_string),
-        namespace: (!matches!(&*name.ns, "" | XHTML)).then(|| name.ns.to_string()),
+        namespace: (!name.ns.is_empty() && (modern || &*name.ns != XHTML))
+            .then(|| name.ns.to_string()),
     }
 }
 
 fn add_attribute(arena: &mut Arena, element: NodeId, attribute: Attribute) {
     let mut node = Node::new(
         Kind::Attribute,
-        arena_name(&attribute.name),
+        arena_name(&attribute.name, true),
         attribute.value.to_string(),
     );
     node.is_id = node.name.namespace.is_none() && node.name.local == "id";

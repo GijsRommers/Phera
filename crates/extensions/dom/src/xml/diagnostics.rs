@@ -11,10 +11,18 @@ use quick_xml::errors::IllFormedError;
 
 use crate::document::ParseError;
 
-use super::Parser;
+use super::{LEGACY_RECOVERY, Parser};
 
 impl Parser<'_> {
     pub(super) fn finish(&self) -> Result<(), ParseError> {
+        if !LEGACY_RECOVERY
+            && self
+                .diagnostics
+                .last()
+                .is_some_and(|error| error.code == 76)
+        {
+            return Ok(());
+        }
         match self.open.last() {
             Some(frame) => {
                 let node = &self.document.arena[frame.id];
