@@ -89,6 +89,7 @@ pub fn all(
                     };
                     let key = row
                         .get(key_column)
+                        .cloned()
                         .ok_or_else(|| NativeError::value_error("Invalid column index"))?;
                     let value = convert(
                         context,
@@ -98,9 +99,11 @@ pub fn all(
                         value_column,
                         &attributes,
                     )?;
-                    (group_key(context, key)?, value)
+                    let key = stringify(context, key, &attributes)?;
+                    (group_key(context, &key)?, value)
                 } else {
-                    let key = group_key(context, first)?;
+                    let first = stringify(context, first.clone(), &attributes)?;
+                    let key = group_key(context, &first)?;
                     let value = convert(
                         context,
                         &row[1..],

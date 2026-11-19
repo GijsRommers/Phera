@@ -50,6 +50,7 @@ impl DbError {
             "23000" => "Integrity constraint violation",
             "23502" => "Not null violation",
             "23503" => "Foreign key violation",
+            "55000" => "Object not in prerequisite state",
             "22P02" => "Invalid text representation",
             "22012" => "Division by zero",
             "08006" => "Connection failure",
@@ -154,9 +155,14 @@ pub fn exception(message: impl Into<String>, error: Option<&DbError>, code: i64)
     } else {
         thrown.with_code(code)
     };
-    if error.state == "IM001" && error.detail == "driver does not support that attribute" {
+    if (error.state == "IM001" && error.detail == "driver does not support that attribute")
+        || (error.state == "HY000" && error.detail.starts_with("PDO::ATTR_STATEMENT_CLASS"))
+    {
         let mut information = PhpArray::new();
-        information.insert(phera_extension_api::ArrayKey::Int(0), Value::from("IM001"));
+        information.insert(
+            phera_extension_api::ArrayKey::Int(0),
+            Value::from(error.state.as_str()),
+        );
         information.insert(phera_extension_api::ArrayKey::Int(1), Value::Int(0));
         return thrown.with_property("errorInfo", Value::from(information));
     }

@@ -11,7 +11,9 @@ fn environment_snapshot_and_putenv_are_isolated_on_one_worker() {
             (".env", "PHERA_TEST_COLOR=green"),
             (
                 "put.php",
-                "<?php putenv('PHERA_TEST_COLOR=red'); echo getenv('PHERA_TEST_COLOR');",
+                "<?php putenv('PHERA_TEST_COLOR=red'); \
+         $_ENV['PHERA_TEST_COLOR'] = 'yellow'; $_SERVER['PHERA_TEST_COLOR'] = 'orange'; \
+         echo getenv('PHERA_TEST_COLOR');",
             ),
             (
                 "get.php",

@@ -2,7 +2,7 @@
 //! links and the per-instruction site caches.
 
 use std::{
-    cell::{OnceCell, RefCell},
+    cell::{Cell, OnceCell, RefCell},
     rc::Rc,
 };
 
@@ -19,6 +19,7 @@ pub(crate) struct UnitCache {
     /// What each function symbol of the file was linked to, once its first call
     /// resolved it.
     pub(crate) symbols: RefCell<Vec<Option<crate::calls::pending::LinkedFunction>>>,
+    pub(crate) direct_natives: OnceCell<Box<[Cell<Option<crate::calls::sync_native::NativeLink>>]>>,
     pub(crate) constants: Vec<phera_value::Value>,
     pub(crate) class_names: Vec<phera_value::Value>,
     pub(crate) classes: Vec<RefCell<Option<Rc<crate::classes::Class>>>>,
@@ -47,6 +48,7 @@ pub(crate) struct ClassTypeEntry {
 pub(crate) enum CachedSite {
     Empty,
     Property(Rc<crate::property_sites::PropertyEntry>),
+    Function(Box<crate::calls::pending::LinkedFunction>),
 }
 
 impl UnitCache {
@@ -81,6 +83,7 @@ impl UnitCache {
             trace_file: OnceCell::new(),
             names: unit.names.iter().map(|name| name.as_str().into()).collect(),
             symbols: RefCell::new(vec![None; unit.symbols.len()]),
+            direct_natives: OnceCell::new(),
             constants: unit
                 .constants
                 .iter()

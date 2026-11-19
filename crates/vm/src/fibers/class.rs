@@ -167,5 +167,5 @@ fn get_return(context: &mut dyn Context, object: Option<&Rc<Object>>, _: &[Value
             "Cannot get fiber return value: {message}"
         )))
     })?
-    .map_err(|error| context.native_call_error("Fiber::getReturn", &[], error))
+    .map_err(|error| context.native_call_error("Fiber->getReturn", &[], error))
 }

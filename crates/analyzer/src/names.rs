@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use phera_ast::{Name, NameKind, Statement, StatementKind, UseKind};
+use phera_ast::{Name, NameKind, Statement, StatementKind, UseItem, UseKind};
 
 #[derive(Clone, Debug, Default)]
 pub struct Names {
@@ -22,16 +22,12 @@ impl Names {
         for statement in statements {
             if let StatementKind::Use(items) = &statement.kind {
                 for item in items {
-                    let alias = item
-                        .alias
-                        .as_ref()
-                        .map(|a| a.name.as_str())
-                        .unwrap_or_else(|| item.name.text.rsplit('\\').next().unwrap_or(""));
-                    let (map, key) = match item.kind {
-                        UseKind::Class => (&mut names.classes, alias.to_ascii_lowercase()),
-                        UseKind::Function => (&mut names.functions, alias.to_ascii_lowercase()),
-                        UseKind::Constant => (&mut names.constants, alias.to_string()),
+                    let map = match item.kind {
+                        UseKind::Class => &mut names.classes,
+                        UseKind::Function => &mut names.functions,
+                        UseKind::Constant => &mut names.constants,
                     };
+                    let key = import_case(item.kind, alias(item));
                     map.insert(key, item.name.text.clone());
                 }
             }
@@ -48,22 +44,17 @@ impl Names {
     }
 
     pub fn resolve(&self, name: &Name, kind: UseKind) -> Vec<String> {
-        match name.kind {
-            NameKind::FullyQualified => return vec![name.text.clone()],
-            NameKind::Relative => return vec![self.declaration(&name.text)],
-            _ => {}
-        }
-        let (head, tail) = name.text.split_once('\\').unwrap_or((&name.text, ""));
-        let map = match kind {
-            UseKind::Class => &self.classes,
-            UseKind::Function if tail.is_empty() => &self.functions,
-            UseKind::Constant if tail.is_empty() => &self.constants,
-            _ => &self.classes,
+        let Some((import_kind, key)) = import_key(name, kind) else {
+            return vec![match name.kind {
+                NameKind::Relative => self.declaration(&name.text),
+                _ => name.text.clone(),
+            }];
         };
-        let key = if kind == UseKind::Constant && tail.is_empty() {
-            head.to_string()
-        } else {
-            head.to_ascii_lowercase()
+        let tail = name.text.split_once('\\').map_or("", |(_, tail)| tail);
+        let map = match import_kind {
+            UseKind::Class => &self.classes,
+            UseKind::Function => &self.functions,
+            UseKind::Constant => &self.constants,
         };
         if let Some(imported) = map.get(&key) {
             return vec![if tail.is_empty() {
@@ -80,5 +71,33 @@ impl Names {
             candidates.push(name.text.clone());
         }
         candidates
+    }
+}
+
+pub(crate) fn alias(item: &UseItem) -> &str {
+    item.alias
+        .as_ref()
+        .map(|alias| alias.name.as_str())
+        .unwrap_or_else(|| item.name.text.rsplit('\\').next().unwrap_or_default())
+}
+
+pub(crate) fn import_case(kind: UseKind, name: &str) -> String {
+    match kind {
+        UseKind::Constant => name.into(),
+        UseKind::Class | UseKind::Function => name.to_ascii_lowercase(),
+    }
+}
+
+pub(crate) fn import_key(name: &Name, kind: UseKind) -> Option<(UseKind, String)> {
+    match name.kind {
+        NameKind::FullyQualified | NameKind::Relative => None,
+        NameKind::Qualified => {
+            let head = name
+                .text
+                .split_once('\\')
+                .map_or(name.text.as_str(), |(head, _)| head);
+            Some((UseKind::Class, import_case(UseKind::Class, head)))
+        }
+        NameKind::Unqualified => Some((kind, import_case(kind, &name.text))),
     }
 }

@@ -79,7 +79,8 @@ impl ScriptEnd {
         match error {
             NativeError::Unwind(payload)
                 if payload.0.is::<FatalStop>()
-                    || payload.0.is::<crate::error_traces::DeclarationFailure>() =>
+                    || payload.0.is::<crate::error_traces::DeclarationFailure>()
+                    || payload.0.is::<crate::last_error::FatalDiagnostic>() =>
             {
                 ScriptEnd::Fatal
             }

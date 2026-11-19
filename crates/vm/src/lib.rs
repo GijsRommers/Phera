@@ -25,6 +25,7 @@ mod array_slots;
 mod arrays;
 mod attribute_diagnostics;
 mod autoload;
+mod builtin_calls;
 mod callable_classes;
 mod callable_introspection;
 mod callables;
@@ -47,6 +48,7 @@ mod closure_tests;
 mod closure_types;
 mod closures;
 mod code_table;
+mod compile_failures;
 mod constant_listings;
 mod constant_table;
 mod constants;
@@ -77,6 +79,7 @@ mod exception_tests;
 mod exception_traces;
 mod exception_unwind;
 mod exceptions;
+mod execution_time;
 mod extract;
 mod failed_construction;
 mod fast;
@@ -105,6 +108,11 @@ mod internal_iterator;
 mod interpreter;
 mod intrinsic_calls;
 mod intrinsics;
+
+/// Whether the engine supplies a function independently of extension registration.
+pub fn is_intrinsic_function(name: &str) -> bool {
+    intrinsics::Intrinsic::resolve(name).is_some()
+}
 mod iteration;
 mod iterator_instructions;
 mod iterators;
@@ -158,6 +166,7 @@ mod static_variables;
 mod string_comparison;
 mod string_offsets;
 mod stringable;
+mod timeout_shutdown;
 mod traversable_foreach;
 mod traversable_unpack;
 mod traversal;
@@ -170,7 +179,16 @@ mod unsupported_items;
 
 /// Resolves PHP includes through the embedding runtime code cache.
 pub trait CodeLoader: Send + Sync {
-    fn load(&self, path: std::path::PathBuf) -> LocalFuture<'_, Result<Arc<CompiledUnit>, String>>;
+    fn load(
+        &self,
+        path: std::path::PathBuf,
+    ) -> LocalFuture<'_, Result<Arc<CompiledUnit>, CodeLoadError>>;
+}
+
+/// PHP retries missing include paths, while compilation errors abort that lookup.
+pub enum CodeLoadError {
+    Unavailable(String),
+    Compile(phera_compiler::CompileError),
 }
 
 /// Receives each PHP output write while Vm also retains its output buffer.
@@ -250,6 +268,8 @@ pub struct Vm {
     request_end: request_end::RequestEnd,
     cycles: cycles::CycleCollector,
     ini_overrides: ini::IniOverrides,
+    execution_time: Rc<execution_time::ExecutionTime>,
+    timed_out_objects: Option<Vec<std::rc::Weak<phera_value::Object>>>,
     active_fiber: Option<Box<fibers::Active>>,
     fiber_bailout: bool,
     suspended_fibers: fibers::SuspendedFibers,
@@ -278,6 +298,8 @@ impl Vm {
             cycles: Default::default(),
             autoload: Default::default(),
             ini_overrides: Default::default(),
+            execution_time: Default::default(),
+            timed_out_objects: None,
             active_fiber: None,
             fiber_bailout: false,
             suspended_fibers: Default::default(),
@@ -366,6 +388,13 @@ impl Vm {
 
     /// Run a compiled top-level function on the request heap stack and report its exit status.
     pub async fn run(&mut self, unit: Arc<CompiledUnit>) -> i32 {
+        self.execution_time
+            .clone()
+            .track(self.run_request(unit))
+            .await
+    }
+
+    async fn run_request(&mut self, unit: Arc<CompiledUnit>) -> i32 {
         let main = self.code.load(&unit);
         self.request_end.main = Some(main);
         for id in &unit.hoisted {

@@ -4,19 +4,34 @@
 use super::statements::Flow;
 use super::*;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ConditionPosition {
+    BeforeBody,
+    AfterBody,
+}
+
 impl Analyzer<'_> {
     pub fn iteration(&mut self, statement: &Statement, scope: &mut Scope) -> Flow {
         match &statement.kind {
             StatementKind::While { condition, body } => {
+                self.widen_loop(body, [condition], scope);
                 let branches = self.condition(condition, std::mem::take(scope), false);
                 let Some(entered) = branches.yes else {
+                    self.constant_condition("while", "While loop condition", condition, &branches);
                     return Self::finish_paths(branches.no.into_iter().collect(), scope);
                 };
                 *scope = entered;
-                self.loop_body(body, condition, scope, branches.no)
+                self.loop_body(
+                    body,
+                    condition,
+                    scope,
+                    branches.no,
+                    ConditionPosition::BeforeBody,
+                )
             }
             StatementKind::DoWhile { body, condition } => {
-                self.loop_body(body, condition, scope, None)
+                self.widen_loop(body, [condition], scope);
+                self.loop_body(body, condition, scope, None, ConditionPosition::AfterBody)
             }
             StatementKind::For {
                 init,
@@ -33,12 +48,17 @@ impl Analyzer<'_> {
                     }
                 }
                 let Some(last) = last else {
+                    self.widen_loop(body, step, scope);
                     return self.for_loop(body, step, scope, None, true);
                 };
+                let definitely_enters = self.level >= 4
+                    && crate::constants::value(last, scope).is_some_and(|value| value.truth());
+                self.widen_loop(body, condition.iter().chain(step), scope);
                 let branches = self.condition(last, std::mem::take(scope), false);
                 if let Some(entered) = branches.yes {
                     *scope = entered;
-                    self.for_loop(body, step, scope, branches.no, always_true(last))
+                    let bypass = if definitely_enters { None } else { branches.no };
+                    self.for_loop(body, step, scope, bypass, always_true(last))
                 } else {
                     Self::finish_paths(branches.no.into_iter().collect(), scope)
                 }
@@ -67,7 +87,20 @@ impl Analyzer<'_> {
         if subject_type == ValueType::Never {
             return Flow::Terminal;
         }
+        if self.level >= 4
+            && matches!(&subject_type, ValueType::Shape(shape) if shape.fields.is_empty()
+                && shape.remainder.is_none()
+                && shape.kind != crate::types::ShapeKind::Object)
+        {
+            self.diagnose_dead_code(
+                "foreach.emptyArray",
+                subject.span,
+                "Empty array passed to foreach.".into(),
+            );
+            return Flow::Next;
+        }
         let before = scope.clone();
+        self.widen_loop(body, [], scope);
         let nonempty = matches!(&subject.kind, ExpressionKind::Array(items)
             if items.iter().any(|item| !item.spread));
         let (key_type, value_type) = if self.level >= 2 && !by_reference {
@@ -132,6 +165,7 @@ impl Analyzer<'_> {
         condition: &Expression,
         scope: &mut Scope,
         bypass: Option<Scope>,
+        position: ConditionPosition,
     ) -> Flow {
         let (flow, frame) = self.control_body(body, scope);
         let mut advancing = frame.continues;
@@ -139,9 +173,25 @@ impl Analyzer<'_> {
             advancing.push(scope.clone());
         }
         let mut paths = frame.breaks;
+        let has_break = !paths.is_empty();
         if !advancing.is_empty() {
             let next = Scope::join(&advancing);
             let branches = self.condition(condition, next, false);
+            if position == ConditionPosition::AfterBody
+                && (branches.truth() != Some(true) || !has_break && !self.context.generator)
+            {
+                self.constant_condition("doWhile", "Do-while loop condition", condition, &branches);
+            }
+            if position == ConditionPosition::BeforeBody
+                && !has_break
+                && bypass.is_none()
+                && branches.truth() == Some(true)
+                && self.context.returns != ValueType::Never
+                && !has_terminal_exit(body)
+                && !super::generators::body_yields(body)
+            {
+                self.constant_condition("while", "While loop condition", condition, &branches);
+            }
             paths.extend(branches.no);
             if !always_true(condition) {
                 // A later iteration can revisit the condition after changing
@@ -152,6 +202,34 @@ impl Analyzer<'_> {
         paths.extend(bypass);
         Self::finish_paths(paths, scope)
     }
+}
+
+fn has_terminal_exit(body: &[Statement]) -> bool {
+    let mut statements: Vec<_> = body.iter().collect();
+    while let Some(statement) = statements.pop() {
+        if matches!(
+            statement.kind,
+            StatementKind::Return(_) | StatementKind::Continue(2..)
+        ) {
+            return true;
+        }
+        let mut expressions = crate::walk::statement_expressions(statement);
+        while let Some(expression) = expressions.pop() {
+            if matches!(
+                expression.kind,
+                ExpressionKind::Throw(_) | ExpressionKind::Exit(_)
+            ) {
+                return true;
+            }
+            expressions.extend(crate::walk::children(expression));
+        }
+        statements.extend(
+            crate::collect::child_blocks(statement)
+                .into_iter()
+                .flatten(),
+        );
+    }
+    false
 }
 
 fn always_true(expression: &Expression) -> bool {

@@ -6,6 +6,7 @@
 //! and the same compiled code.
 
 mod cache;
+mod constant_calls;
 mod environment;
 mod error;
 #[cfg(test)]
@@ -16,7 +17,7 @@ mod ini_tests;
 #[cfg(test)]
 mod process_oracle_tests;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -24,11 +25,11 @@ use phera_bytecode::CompiledUnit;
 use phera_dotenv::Environment;
 use phera_ext_http::{RequestHeaders, ResponseHead, Sapi, UploadedFiles};
 use phera_ext_standard::environment::{RequestEnvironment, php_array};
-use phera_extension_api::{LocalFuture, Registry};
+use phera_extension_api::Registry;
 use phera_value::{PhpArray, Value};
-use phera_vm::{CodeLoader, NativeTables, Vm};
+use phera_vm::{NativeTables, Vm};
 
-use cache::CodeCache;
+use cache::{CodeCache, FileMode};
 
 pub use error::RuntimeError;
 pub use http::{HttpRequest, HttpResponse};
@@ -39,7 +40,9 @@ pub struct Runtime {
     registry: Arc<Registry>,
     web_registry: Arc<Registry>,
     cache: CodeCache,
+    web_cache: CodeCache,
     environment: Arc<Environment>,
+    startup_ini: Arc<[(String, String)]>,
 }
 
 /// A web worker links the process's native definitions once on its own thread.
@@ -95,6 +98,8 @@ impl Runtime {
         registry.load(&phera_ext_streams::Streams);
         registry.load(&phera_ext_ctype::Ctype);
         registry.load(&phera_ext_date::Date);
+        registry.load(&phera_ext_dom::Libxml);
+        registry.load(&phera_ext_dom::Dom);
         registry.load(&phera_ext_filter::Filter);
         registry.load(&phera_ext_json::Json);
         registry.load(&phera_ext_mbstring::Mbstring);
@@ -107,7 +112,9 @@ impl Runtime {
         registry.load(&phera_ext_sqlite3::Sqlite3);
         registry.load(&phera_ext_redis::Redis);
         registry.load(&phera_ext_http::Http);
+        http::register_request_parse_body(&mut registry);
         registry.load(&phera_ext_hash::Hash);
+        registry.load(&phera_ext_openssl::OpenSsl);
         registry.load(&phera_ext_random::Random);
         registry.load(&phera_ext_reflection::Reflection);
         registry.load(&phera_ext_serialize::Serialize);
@@ -117,12 +124,22 @@ impl Runtime {
         let mut web_registry = registry.clone();
         phera_ext_http::register_web(&mut web_registry);
         registry.constant("PHP_SAPI", Sapi::Cli.name());
+        let registry = Arc::new(registry);
+        let web_registry = Arc::new(web_registry);
         Runtime {
-            web_registry: Arc::new(web_registry),
-            registry: Arc::new(registry),
-            cache: CodeCache::default(),
+            web_cache: CodeCache::new(web_registry.clone(), FileMode::Web),
+            web_registry,
+            cache: CodeCache::new(registry.clone(), FileMode::Cli),
+            registry,
             environment: Arc::new(environment),
+            startup_ini: Arc::new([]),
         }
+    }
+
+    /// Settings supplied by the host before each request begins.
+    pub fn with_startup_ini(mut self, settings: Vec<(String, String)>) -> Self {
+        self.startup_ini = settings.into();
+        self
     }
 
     /// Compiles a file, or returns it from the cache.
@@ -130,13 +147,7 @@ impl Runtime {
         &self,
         path: impl AsRef<Path>,
     ) -> Result<Arc<CompiledUnit>, RuntimeError> {
-        let path = path.as_ref().to_path_buf();
-        let cache = self.cache.clone();
-        // Reading and compiling block, and a worker thread must never block:
-        // every request on it would wait.
-        tokio::task::spawn_blocking(move || cache.load(&path))
-            .await
-            .map_err(|error| RuntimeError::Internal(error.to_string()))?
+        self.web_cache.compile(path.as_ref().to_path_buf()).await
     }
 
     /// Runs a script as the command line does: `arguments` become `$argv`,
@@ -147,7 +158,7 @@ impl Runtime {
         arguments: &[String],
         sink: Option<Box<dyn OutputSink>>,
     ) -> Result<RunResult, RuntimeError> {
-        let unit = self.compile_file(path.as_ref()).await?;
+        let unit = self.cache.compile(path.as_ref().to_path_buf()).await?;
         let mut vm = self.new_cli_vm();
         vm.set_args(arguments);
         let server =
@@ -196,10 +207,17 @@ impl Runtime {
         document_root: &Path,
         request: HttpRequest,
     ) -> HttpResponse {
-        let unit = match self.compile_file(script).await {
+        let unit = match self.web_cache.compile(script.to_path_buf()).await {
             Ok(unit) => unit,
             Err(RuntimeError::Read { .. }) => {
                 return HttpResponse::plain(404, "File not found.\n");
+            }
+            Err(RuntimeError::Compile(error)) => {
+                let mut vm = self.new_vm(&worker.native, Sapi::Web, worker.environment.clone());
+                vm.report_entry_compile_failure(error);
+                let mut response = HttpResponse::plain(500, "");
+                response.body = vm.output;
+                return response;
             }
             Err(error) => return HttpResponse::plain(500, error.to_string()),
         };
@@ -224,33 +242,30 @@ impl Runtime {
             &request,
             script,
             document_root,
-            php_array(self.environment.iter()),
+            worker.environment.as_ref().clone(),
             form,
         );
+        let buffered_post = request.method == "POST"
+            && request
+                .header("Content-Type")
+                .is_some_and(|content_type| !http::is_multipart(content_type));
         *vm.state_mut().get_or_default::<RequestHeaders>() = RequestHeaders(request.headers);
-        vm.prepare_web_headers_with(ResponseHead::prepare);
+        vm.prepare_web_headers_with(ResponseHead::prepare, ResponseHead::set_error_status);
         *vm.state_mut().get_or_default::<UploadedFiles>() = UploadedFiles::new(uploads);
         phera_ext_streams::set_request(
             vm.state_mut(),
             script.parent().map(Path::to_path_buf),
             request.body.into(),
         );
+        if buffered_post && let Some(input) = phera_ext_streams::request_input(vm.state_mut()) {
+            input.mark_post_read();
+        }
         let exit_status = vm.run(unit).await;
         let head = vm.state_mut().take::<ResponseHead>().unwrap_or_default();
 
         // What the script did not move is deleted, as PHP does.
-        let unclaimed = vm
-            .state_mut()
-            .take::<UploadedFiles>()
-            .map(UploadedFiles::into_unclaimed)
-            .unwrap_or_default();
-        if !unclaimed.is_empty() {
-            let _ = tokio::task::spawn_blocking(move || {
-                for file in unclaimed {
-                    let _ = std::fs::remove_file(file);
-                }
-            })
-            .await;
+        if let Some(uploads) = vm.state_mut().take::<UploadedFiles>() {
+            uploads.cleanup().await;
         }
 
         let mut response = HttpResponse {
@@ -260,7 +275,7 @@ impl Runtime {
         };
         // An uncaught error is a server error, unless the script had already
         // chosen a status of its own.
-        if exit_status == 255 && response.status == 200 {
+        if exit_status == 255 && response.status == 200 && !vm.timed_out() {
             response.status = 500;
         }
         response
@@ -282,7 +297,8 @@ impl Runtime {
 
     /// The bytecode listing of a file, for `phera --dump`.
     pub fn dump_file_blocking(&self, path: impl AsRef<Path>) -> Result<String, RuntimeError> {
-        let unit = single_threaded_executor()?.block_on(self.compile_file(path))?;
+        let unit = single_threaded_executor()?
+            .block_on(self.cache.compile(path.as_ref().to_path_buf()))?;
         Ok(unit.to_string())
     }
 
@@ -294,6 +310,13 @@ impl Runtime {
         )
     }
 
+    /// Render compilation failure with the CLI request's startup settings.
+    pub fn cli_compile_output(&self, error: phera_compiler::CompileError) -> Vec<u8> {
+        let mut vm = self.new_cli_vm();
+        vm.report_entry_compile_failure(error);
+        vm.output
+    }
+
     fn inherited_environment(&self) -> Rc<PhpArray> {
         Rc::new(php_array(self.environment.iter()))
     }
@@ -301,11 +324,21 @@ impl Runtime {
     fn new_vm(&self, native: &NativeTables, sapi: Sapi, environment: Rc<PhpArray>) -> Vm {
         let mut vm = Vm::with_native_tables(native);
         *vm.state_mut().get_or_default::<Sapi>() = sapi;
+        if matches!(sapi, Sapi::Web) {
+            vm.use_web_execution_time();
+        }
+        for (name, value) in self.startup_ini.iter() {
+            vm.set_startup_ini(name, value);
+        }
         // A script's writes copy the inherited array before changing it.
         vm.set_global("_ENV", Value::Array(environment));
         *vm.state_mut().get_or_default::<RequestEnvironment>() =
             RequestEnvironment::new(self.environment.clone());
-        vm.set_loader(Arc::new(self.clone()));
+        let cache = match sapi {
+            Sapi::Cli => &self.cache,
+            Sapi::Web => &self.web_cache,
+        };
+        vm.set_loader(Arc::new(cache.clone()));
         vm
     }
 }
@@ -315,15 +348,4 @@ fn single_threaded_executor() -> Result<tokio::runtime::Runtime, RuntimeError> {
         .enable_all()
         .build()
         .map_err(|error| RuntimeError::Internal(error.to_string()))
-}
-
-/// `include` and `require` load code through the same cache.
-impl CodeLoader for Runtime {
-    fn load(&self, path: PathBuf) -> LocalFuture<'_, Result<Arc<CompiledUnit>, String>> {
-        Box::pin(async move {
-            self.compile_file(path)
-                .await
-                .map_err(|error| error.to_string())
-        })
-    }
 }

@@ -1,6 +1,8 @@
 //! Base64: `base64_encode("hi")` is `"aGk="`.
 
-use phera_extension_api::{Context, FunctionEntry, NativeResult, Param, ParamType, Value, args};
+use phera_extension_api::{
+    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Value, args,
+};
 
 use super::buffer;
 
@@ -21,7 +23,11 @@ const BASE64_ENCODE: FunctionEntry = FunctionEntry::sync(
 );
 
 fn base64_encode(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let string = args::bytes(arguments, 0);
+    Ok(Value::from(encode(args::bytes(arguments, 0))?))
+}
+
+/// Encodes bytes using the padded PHP Base64 alphabet.
+pub fn encode(string: &[u8]) -> Result<Vec<u8>, NativeError> {
     let mut result = buffer(string.len().div_ceil(3).saturating_mul(4))?;
     for chunk in string.chunks(3) {
         // Three bytes are four letters of six bits each; a short last chunk
@@ -43,7 +49,7 @@ fn base64_encode(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
             });
         }
     }
-    Ok(Value::from(result))
+    Ok(result)
 }
 
 /// `base64_decode(string $string, bool $strict = false): string|false`
@@ -70,6 +76,11 @@ const BASE64_DECODE: FunctionEntry = FunctionEntry::sync(
 fn base64_decode(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let string = args::bytes(arguments, 0);
     let strict = args::bool(arguments, 1).unwrap_or(false);
+    Ok(decode(string, strict)?.map_or(Value::Bool(false), Value::from))
+}
+
+/// Decodes PHP Base64, skipping all non-alphabet bytes in non-strict mode.
+pub fn decode(string: &[u8], strict: bool) -> Result<Option<Vec<u8>>, NativeError> {
     let mut result = buffer(string.len())?;
     let mut padding = 0;
     let mut letters = 0;
@@ -87,11 +98,11 @@ fn base64_decode(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
             b'+' => 62,
             b'/' => 63,
             b' ' | b'\t' | b'\r' | b'\n' => continue,
-            _ if strict => return Ok(Value::Bool(false)),
+            _ if strict => return Ok(None),
             _ => continue,
         };
         if strict && padding > 0 {
-            return Ok(Value::Bool(false));
+            return Ok(None);
         }
         match letters % 4 {
             0 => pending = value << 2,
@@ -110,7 +121,7 @@ fn base64_decode(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let impossible_length =
         letters % 4 == 1 || padding > 0 && (padding > 2 || (letters + padding) % 4 != 0);
     if strict && impossible_length {
-        return Ok(Value::Bool(false));
+        return Ok(None);
     }
-    Ok(Value::from(result))
+    Ok(Some(result))
 }

@@ -86,7 +86,7 @@ impl Site {
 impl Method {
     fn native_trace(&self) -> NativeTrace {
         NativeTrace::new(
-            &format!("Generator::{}", self.name),
+            &format!("Generator->{}", self.name),
             self.argument.as_slice(),
         )
     }

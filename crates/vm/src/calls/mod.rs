@@ -37,6 +37,7 @@ pub(crate) mod frame_view;
 pub(crate) mod magic_dispatch;
 mod native;
 mod native_ready;
+mod native_signature;
 pub(crate) mod parameter_binding;
 pub(crate) mod pending;
 pub(crate) mod php_windows;
@@ -45,8 +46,11 @@ pub(crate) mod registers;
 pub(crate) mod returns;
 mod scope;
 pub(crate) mod sends;
+pub(crate) mod sync_native;
+mod sync_native_method;
 #[cfg(test)]
 mod tests;
+mod user_callback;
 pub(crate) mod window_context;
 
 mod string_arguments;

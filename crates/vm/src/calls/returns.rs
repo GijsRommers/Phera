@@ -136,24 +136,34 @@ impl Vm {
             Value::Reference(reference) => Some(reference.clone()),
             _ => None,
         };
-        let checked = crate::types::coerce(value, declaration_type, strict.into(), self).map_err(
-            |error| match error {
-                NativeError::Throw { class, message, .. } => {
-                    let message = message
-                        .strip_suffix(" given")
-                        .map(|message| format!("{message} returned"))
-                        .unwrap_or(message);
-                    NativeError::throw(
-                        class,
-                        format!(
-                            "{}(): Return value {message}",
-                            self.return_function_name(function)
-                        ),
-                    )
-                }
-                other => other,
-            },
-        )?;
+        let scope = declaration_type
+            .mask
+            .intersects(phera_bytecode::TypeMask::CALLABLE)
+            .then(|| self.current().and_then(|frame| frame.method()))
+            .flatten();
+        let checked = crate::types::coerce_in_scope(
+            value,
+            declaration_type,
+            strict.into(),
+            self,
+            scope.as_ref(),
+        )
+        .map_err(|error| match error {
+            NativeError::Throw { class, message, .. } => {
+                let message = message
+                    .strip_suffix(" given")
+                    .map(|message| format!("{message} returned"))
+                    .unwrap_or(message);
+                NativeError::throw(
+                    class,
+                    format!(
+                        "{}(): Return value {message}",
+                        self.return_function_name(function)
+                    ),
+                )
+            }
+            other => other,
+        })?;
         if let Some(reference) = reference {
             *reference
                 .try_borrow_mut()

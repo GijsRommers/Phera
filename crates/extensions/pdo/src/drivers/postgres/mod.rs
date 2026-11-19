@@ -6,24 +6,31 @@
 //! $statement->execute([1, 'b' => 'two']); // sent as SELECT $1::int AS a, $2::text AS b
 //! ```
 
+mod connect;
+mod information;
+mod lazy;
 mod metadata;
 mod parameters;
 mod protocol;
 mod stream;
 mod text;
+mod tls;
+mod unnamed;
 pub mod values;
+mod verify;
+
+#[cfg(test)]
+mod tls_tests;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 
 use protocol::TextParameter;
 pub use protocol::error;
-use stream::ObservedStream;
 use tokio_postgres::types::ToSql;
-use tokio_postgres::{Client, Config, NoTls, SimpleQueryMessage, Statement};
+use tokio_postgres::{Client, SimpleQueryMessage, Statement};
 
-use super::{Column, Prepared, RawRows, connection_error};
-use crate::dsn::Dsn;
+use super::{Column, Execution, Prepared, RawRows, connection_error};
 use crate::errors::DbError;
 use crate::parameters::{BoundValue, literal, quote};
 use crate::placeholders::Sql;
@@ -49,6 +56,7 @@ pub struct Postgres {
     /// Set once the connection may hold type information that `DISCARD ALL`
     /// cannot clear; see `prepare_query`.
     retire: bool,
+    lazy: Option<lazy::Active>,
 }
 
 impl Drop for Postgres {
@@ -59,66 +67,13 @@ impl Drop for Postgres {
 }
 
 impl Postgres {
-    pub async fn connect(dsn: &Dsn, user: &str, password: &str) -> Result<Self, DbError> {
-        let host = dsn.get("host", "localhost");
-        let port = dsn.port()?;
-        let mut config = Config::new();
-        config
-            .host(host)
-            .port(port)
-            .dbname(dsn.get("dbname", user))
-            .user(user)
-            .password(password)
-            .ssl_mode(tokio_postgres::config::SslMode::Disable);
-        if let Some(options) = dsn.fields.get("options") {
-            config.options(options);
-        }
-        if let Some(name) = dsn.fields.get("application_name") {
-            config.application_name(name);
-        }
-        let transaction = Arc::new(AtomicU8::new(IDLE));
-        let stream = ObservedStream::connect(host, port, transaction.clone())
-            .await
-            .map_err(connection_error)?;
-        let (client, connection) = config.connect_raw(stream, NoTls).await.map_err(|error| {
-            let detail = match error.as_db_error() {
-                Some(database) => format!("{}:  {}", database.severity(), database.message()),
-                None => error.to_string(),
-            };
-            connection_error(format!(
-                "connection to server at \"{}\", port {} failed: {detail}",
-                dsn.get("host", "localhost"),
-                dsn.get("port", "5432")
-            ))
-        })?;
-        let task = tokio::spawn(async move {
-            let _ = connection.await;
-        });
-        let mut driver = Self {
-            client,
-            task,
-            version: String::new(),
-            transaction,
-            retire: false,
-        };
-        let messages = driver
-            .client
-            .simple_query("SHOW server_version")
-            .await
-            .map_err(|e| error(e, "SHOW server_version"))?;
-        for message in messages {
-            if let SimpleQueryMessage::Row(row) = message {
-                driver.version = row.get(0).unwrap_or_default().into();
-            }
-        }
-        Ok(driver)
-    }
-
     pub async fn transaction_state(&self) -> bool {
         // An error may be delivered before the connection task consumes its
         // ReadyForQuery. An empty query is valid even in a failed transaction
         // and acts as a protocol barrier when the PHP script asks for state.
-        let _ = self.client.simple_query("").await;
+        if self.lazy.is_none() {
+            let _ = self.client.simple_query("").await;
+        }
         !self.client.is_closed() && self.transaction.load(Ordering::Acquire) != IDLE
     }
 
@@ -131,7 +86,8 @@ impl Postgres {
         let _ = (&mut self.task).await;
     }
 
-    pub async fn reset(&self) -> Result<(), DbError> {
+    pub async fn reset(&mut self) -> Result<(), DbError> {
+        self.discard_lazy();
         // Separate protocol messages: DISCARD ALL cannot execute in a transaction.
         self.client
             .batch_execute("ROLLBACK")
@@ -156,6 +112,7 @@ impl Postgres {
     }
 
     pub async fn prepare(&mut self, sql: &Sql) -> Result<Statement, DbError> {
+        self.discard_lazy();
         let query = sql.render(|i| format!("${}", i + 1));
         self.prepare_query(&query).await
     }
@@ -193,10 +150,17 @@ impl Postgres {
         sql: &Sql,
         prepared: &Prepared,
         values: &[BoundValue],
+        options: &Execution,
     ) -> Result<RawRows, DbError> {
+        self.discard_lazy();
         let statement = match prepared {
             Prepared::Postgres { statement, .. } => statement.clone(),
             Prepared::PostgresDeferred { .. } => self.prepare(sql).await?,
+            Prepared::PostgresUnnamed => {
+                return self
+                    .execute_unnamed(sql, values, options.postgres_stream.as_ref())
+                    .await;
+            }
             Prepared::Emulated => {
                 let mut literals = Vec::new();
                 for value in values {
@@ -235,6 +199,21 @@ impl Postgres {
             .map(|p| p as &(dyn ToSql + Sync))
             .collect();
         let query = sql.render(|i| format!("${}", i + 1));
+        if let Some(owner) = &options.postgres_stream
+            && !statement.columns().is_empty()
+        {
+            let stream = self
+                .client
+                .query_raw(&statement, references.iter().copied())
+                .await
+                .map_err(|failure| error(failure, &query))?;
+            let columns = statement
+                .columns()
+                .iter()
+                .map(crate::metadata::postgres)
+                .collect();
+            return self.start_lazy(stream, columns, query, owner).await;
+        }
         let columns = statement
             .columns()
             .iter()

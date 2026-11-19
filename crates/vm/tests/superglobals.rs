@@ -5,17 +5,17 @@ use std::{path::PathBuf, sync::Arc};
 use phera_bytecode::CompiledUnit;
 use phera_extension_api::{LocalFuture, Registry};
 use phera_value::{ArrayKey, PhpArray, Value};
-use phera_vm::{CodeLoader, Vm};
+use phera_vm::{CodeLoadError, CodeLoader, Vm};
 
 /// An in-memory include exercises the public embedding API without filesystem dependencies.
 struct IncludeLoader;
 
 impl CodeLoader for IncludeLoader {
-    fn load(&self, _path: PathBuf) -> LocalFuture<'_, Result<Arc<CompiledUnit>, String>> {
+    fn load(&self, _path: PathBuf) -> LocalFuture<'_, Result<Arc<CompiledUnit>, CodeLoadError>> {
         Box::pin(async {
             phera_compiler::compile("<?php echo $_GET['x']; $_SESSION['k'] = 7;", "shared.php")
                 .map(Arc::new)
-                .map_err(|error| format!("{error:?}"))
+                .map_err(CodeLoadError::Compile)
         })
     }
 }

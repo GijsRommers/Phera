@@ -80,8 +80,8 @@ impl Compiler<'_> {
                 let class_line = self.lines.line(declaration.span.start);
                 let class =
                     self.compile_class(declaration, DeclarationTiming::AtExecution, class_line)?;
-                self.emit(Instruction::New { class }, line);
-                self.compile_arguments(arguments, line)
+                self.emit(Instruction::New { class }, class_line);
+                self.compile_arguments(arguments, class_line)
             }
             ast::ExpressionKind::New {
                 class: ast::NewTarget::Class(class),
@@ -90,6 +90,7 @@ impl Compiler<'_> {
                 if matches!(arguments, ast::Arguments::FirstClassCallable) {
                     return Err(self.error("Cannot create Closure for new expression", line));
                 }
+                let line = self.lines.line(class.span.end.saturating_sub(1));
                 if matches!(class.kind, ast::ExpressionKind::Name(_)) {
                     let class = self.object_class_name(class, line)?;
                     self.emit(Instruction::New { class }, line);

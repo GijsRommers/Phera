@@ -122,6 +122,23 @@ impl Vm {
                         self.set(destination, value);
                     }
                 }
+                BatchExit::NativeView(destination, error) => {
+                    if let Some(value) = self
+                        .complete_native_view_result(destination, Err(*error))
+                        .await?
+                    {
+                        self.set(destination, value);
+                    }
+                }
+                BatchExit::NativeMethodHook(destination, hook) => {
+                    let (error, method) = *hook;
+                    if let Some(value) = self
+                        .finish_native_method_continuation(error, &method, Some(destination))
+                        .await?
+                    {
+                        self.set(destination, value);
+                    }
+                }
                 BatchExit::Instruction(instruction) => {
                     if let DispatchResult::Returned(value) =
                         Box::pin(self.dispatch(instruction, stop)).await?

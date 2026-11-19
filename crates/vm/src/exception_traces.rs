@@ -18,6 +18,30 @@ pub(crate) struct TraceOptions {
 }
 
 impl Vm {
+    /// Capture before a user error handler runs, or before fatal unwinding releases frames.
+    pub(crate) fn fatal_trace(
+        &mut self,
+        native: Option<&crate::error_traces::NativeTrace>,
+        location: &crate::diagnostics::SourceLocation,
+    ) -> Option<Value> {
+        if self.error_handlers.fatal_error_backtraces {
+            let arguments = !self.error_handlers.trace_ignore_args;
+            let mut trace = PhpArray::new();
+            if let Some(native) = native {
+                append_native(
+                    &mut trace,
+                    &native.name,
+                    Some((&location.file, location.line)),
+                    arguments.then(|| native.arguments.clone()),
+                    None,
+                );
+            }
+            Some(Value::from(self.capture_trace(trace, false, arguments, 0)))
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn exception_location(&self) -> (Value, usize) {
         if let Some(location) = &self.diagnostic_location {
             (Value::from(location.file.as_str()), location.line)
@@ -39,15 +63,10 @@ impl Vm {
             let mut entry = PhpArray::new();
             entry.insert(ArrayKey::str("file"), file);
             entry.insert(ArrayKey::str("line"), Value::Int(line as i64));
-            if let Some((class, method)) = native.name.split_once("::") {
+            if let Some((class, method, operator)) = native_method(&native.name) {
                 entry.insert(ArrayKey::str("function"), Value::from(method));
                 entry.insert(ArrayKey::str("class"), Value::from(class));
-                let access = if native.name == "Fiber::suspend" {
-                    "::"
-                } else {
-                    "->"
-                };
-                entry.insert(ArrayKey::str("type"), Value::from(access));
+                entry.insert(ArrayKey::str("type"), Value::from(operator));
             } else {
                 entry.insert(ArrayKey::str("function"), Value::from(native.name));
             }
@@ -387,13 +406,13 @@ fn append_native(
     if let Some((file, line)) = location {
         add_source_location(&mut entry, file, line);
     }
-    if let Some((class, method)) = name.split_once("->") {
+    if let Some((class, method, operator)) = native_method(name) {
         entry.insert(ArrayKey::str("function"), Value::from(method));
         entry.insert(ArrayKey::str("class"), Value::from(class));
         if let Some(object) = object {
             entry.insert(ArrayKey::str("object"), Value::Object(object.clone()));
         }
-        entry.insert(ArrayKey::str("type"), Value::from("->"));
+        entry.insert(ArrayKey::str("type"), Value::from(operator));
     } else {
         entry.insert(ArrayKey::str("function"), Value::from(name));
     }
@@ -401,6 +420,15 @@ fn append_native(
         entry.insert(ArrayKey::str("args"), arguments);
     }
     let _ = trace.push(Value::from(entry));
+}
+
+fn native_method(name: &str) -> Option<(&str, &str, &str)> {
+    if let Some((class, method)) = name.split_once("->") {
+        Some((class, method, "->"))
+    } else {
+        name.split_once("::")
+            .map(|(class, method)| (class, method, "::"))
+    }
 }
 
 fn add_source_location(entry: &mut PhpArray, file: &str, line: usize) {

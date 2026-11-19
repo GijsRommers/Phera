@@ -19,7 +19,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use super::oracle::find_php;
+use super::oracle::{find_php, oracle_status, supports_php_since};
 
 /// Which side of a comparison a command runs on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -148,7 +148,8 @@ impl Comparison {
     }
 
     /// Compares every script and panics with the list of those that differ.
-    /// Returns what PHP printed for each, for tests that count cases.
+    /// Returns what PHP printed for each, for tests that count cases. A script
+    /// annotated `// PHERA_ORACLE_PHP_SINCE: 80513` requires PHP 8.5.13 or newer.
     pub fn compare_all(
         &self,
         scripts: &[PathBuf],
@@ -156,7 +157,16 @@ impl Comparison {
     ) -> Vec<Matched> {
         let mut matched = Vec::new();
         let mut failures = Vec::new();
+        let mut skipped = 0;
+        let mut versioned = 0;
         for script in scripts {
+            if let Some(minimum) = minimum_php(script) {
+                versioned += 1;
+                if !supports_php_since(&stem(script), minimum) {
+                    skipped += 1;
+                    continue;
+                }
+            }
             match self.compare(script, |runtime, command| {
                 configure(script, runtime, command)
             }) {
@@ -164,17 +174,38 @@ impl Comparison {
                 Err(failure) => failures.push(failure),
             }
         }
+        if versioned == 0 {
+            eprintln!("{} scripts match PHP", matched.len());
+        } else {
+            oracle_status(format_args!(
+                "{}: {} scripts match PHP, {skipped}/{versioned} versioned scripts skipped",
+                self.artifacts.display(),
+                matched.len()
+            ));
+        }
         assert!(
             failures.is_empty(),
             "{} of {} scripts differ from PHP; outputs in {}\n{}",
             failures.len(),
-            scripts.len(),
+            scripts.len() - skipped,
             self.artifacts.display(),
             failures.join("\n")
         );
-        eprintln!("{} scripts match PHP", scripts.len());
         matched
     }
+}
+
+fn minimum_php(script: &Path) -> Option<u32> {
+    let source = std::fs::read(script).expect("read oracle script");
+    String::from_utf8_lossy(&source).lines().find_map(|line| {
+        line.strip_prefix("// PHERA_ORACLE_PHP_SINCE:")
+            .map(|version| {
+                version
+                    .trim()
+                    .parse()
+                    .expect("numeric PHP version requirement")
+            })
+    })
 }
 
 /// The `.php` files in `directory` whose names start with `prefix`, sorted.

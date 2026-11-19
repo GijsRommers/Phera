@@ -22,16 +22,11 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use phera_value::{PhpArray, Value};
+use tempfile::TempPath;
 
-use super::multipart::{self, Part};
+use super::form_limits::FormLimits;
+use super::multipart::{Disposition, Multipart};
 use super::query::store_named;
-
-/// PHP's `upload_max_filesize`.
-const LARGEST_FILE: u64 = 2 * 1024 * 1024;
-/// PHP's `max_file_uploads`.
-const MOST_FILES: usize = 20;
-/// PHP's `max_input_vars`.
-const MOST_FIELDS: usize = 1000;
 
 /// The values of `$_FILES[...]['error']`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,6 +40,7 @@ enum UploadError {
     CutOff = 3,
     /// The form had the control, but no file was chosen.
     NoFile = 4,
+    NoTemporaryDirectory = 6,
     CannotWrite = 7,
 }
 
@@ -57,7 +53,7 @@ struct Upload {
     field: Vec<u8>,
     filename: Vec<u8>,
     content_type: Vec<u8>,
-    temporary: Option<PathBuf>,
+    temporary: Option<TempPath>,
     error: UploadError,
     size: u64,
 }
@@ -65,65 +61,186 @@ struct Upload {
 /// A received form, in plain data that may cross threads.
 pub(crate) struct Form {
     items: Vec<Item>,
+    pub(super) issue: Option<FormIssue>,
+    pub(super) consumed: usize,
+}
+
+pub(super) enum FormIssue {
+    TooManyFields(i64),
+    TooManyParts(i64),
+    TooManyFiles,
+    GarbledHeaders,
+    TemporaryFile,
+}
+
+impl FormIssue {
+    pub(super) fn message(self) -> String {
+        match self {
+            Self::TooManyFields(limit) => format!(
+                "Input variables exceeded {limit}. To increase the limit change \
+                 max_input_vars in php.ini."
+            ),
+            Self::TooManyParts(limit) => {
+                let limit = limit as i32;
+                format!(
+                    "Multipart body parts limit exceeded {limit}. To increase the limit change \
+                     max_multipart_body_parts in php.ini."
+                )
+            }
+            Self::TooManyFiles => {
+                "Maximum number of allowable file uploads has been exceeded".into()
+            }
+            Self::GarbledHeaders => "File Upload Mime headers garbled".into(),
+            Self::TemporaryFile => "File upload error - unable to create a temporary file".into(),
+        }
+    }
 }
 
 /// Reads a `multipart/form-data` body and writes every acceptable file to
 /// a temporary file. Blocks on the disk: call it from a blocking thread.
-pub(crate) fn receive(body: &[u8], boundary: &[u8]) -> Form {
+pub(super) fn receive(body: &[u8], boundary: &[u8], limits: FormLimits) -> Form {
     let mut items = Vec::new();
-    let mut form_limit: Option<u64> = None;
-    let mut files = 0;
+    let mut issue = None;
+    let mut form_limit = 0;
+    let mut files_left = limits.max_file_uploads;
+    let part_limit = limits.part_limit();
+    let mut parts = 0;
     let mut fields = 0;
     let mut unnamed = 0;
-    for part in multipart::parts(body, boundary) {
-        let Some(filename) = part.filename.clone() else {
-            let Some(name) = part.name else { continue };
-            if fields == MOST_FIELDS {
-                continue;
-            }
-            fields += 1;
-            // A hidden field by which a form limits its own uploads.
-            if name.eq_ignore_ascii_case(b"MAX_FILE_SIZE") {
-                form_limit = String::from_utf8_lossy(part.content).trim().parse().ok();
-            }
-            items.push(Item::Field {
-                name,
-                value: part.content.to_vec(),
-            });
+    let mut multipart = Multipart::new(body, boundary);
+    while let Some(headers) = multipart.next_headers() {
+        let Disposition::Form { name, filename } = headers.disposition else {
             continue;
         };
-        if files == MOST_FILES {
+        parts += 1;
+        if parts > part_limit {
+            issue = Some(FormIssue::TooManyParts(part_limit));
+            break;
+        }
+        let Some(filename) = filename else {
+            let Some(name) = name else {
+                issue = Some(FormIssue::GarbledHeaders);
+                break;
+            };
+            let (content, _) = multipart.content(None);
+            fields += 1;
+            if name.eq_ignore_ascii_case(b"MAX_FILE_SIZE") {
+                form_limit = phera_extension_api::ini::integer(content);
+            }
+            if fields <= limits.max_input_vars {
+                items.push(Item::Field {
+                    name,
+                    value: content.to_vec(),
+                });
+            } else if fields == limits.max_input_vars.saturating_add(1) {
+                issue = Some(FormIssue::TooManyFields(limits.max_input_vars));
+            }
+            continue;
+        };
+        if !limits.file_uploads {
             continue;
         }
-        files += 1;
+        if files_left <= 0 {
+            if files_left == 0 {
+                files_left = -1;
+                issue = Some(FormIssue::TooManyFiles);
+            }
+            continue;
+        }
         // PHP numbers the files of parts that give no control name.
-        let field = part.name.clone().unwrap_or_else(|| {
+        let field = name.unwrap_or_else(|| {
             unnamed += 1;
             (unnamed - 1).to_string().into_bytes()
         });
-        items.push(Item::File(store(field, filename, &part, form_limit)));
+        if !valid_file_field(&field) {
+            continue;
+        }
+        let size = FileSize {
+            ini: limits.upload_max_filesize,
+            form: form_limit,
+        };
+        let (content, complete) = if filename.is_empty() {
+            (&[][..], false)
+        } else {
+            files_left -= 1;
+            multipart.content(size.read_limit())
+        };
+        let upload = store(
+            field,
+            filename,
+            headers.content_type,
+            content,
+            complete,
+            size,
+        );
+        if upload.error == UploadError::NoTemporaryDirectory {
+            issue = Some(FormIssue::TemporaryFile);
+        }
+        items.push(Item::File(upload));
     }
-    Form { items }
+    Form {
+        items,
+        issue,
+        consumed: multipart.consumed(),
+    }
+}
+
+fn valid_file_field(name: &[u8]) -> bool {
+    let mut open = 0;
+    for (index, byte) in name.iter().enumerate() {
+        match byte {
+            b'[' => open += 1,
+            b']' if open > 0 && name.get(index + 1).is_none_or(|&byte| byte == b'[') => open -= 1,
+            b']' => return false,
+            _ => {}
+        }
+    }
+    open == 0
+}
+
+struct FileSize {
+    ini: i64,
+    form: i64,
+}
+
+impl FileSize {
+    fn read_limit(&self) -> Option<usize> {
+        [
+            (self.ini > 0).then_some(self.ini),
+            (self.form != 0).then_some(self.form.max(0)),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+        .and_then(|limit| usize::try_from(limit).ok())
+    }
 }
 
 /// Decides what becomes of one file part and writes it if it is accepted.
-fn store(field: Vec<u8>, filename: Vec<u8>, part: &Part<'_>, form_limit: Option<u64>) -> Upload {
-    let length = part.content.len() as u64;
+fn store(
+    field: Vec<u8>,
+    filename: Vec<u8>,
+    content_type: Vec<u8>,
+    content: &[u8],
+    complete: bool,
+    limits: FileSize,
+) -> Upload {
+    let length = content.len() as i64;
     let error = if filename.is_empty() {
         UploadError::NoFile
-    } else if !part.complete {
-        UploadError::CutOff
-    } else if length > LARGEST_FILE {
+    } else if limits.ini > 0 && length > limits.ini {
         UploadError::TooLarge
-    } else if form_limit.is_some_and(|limit| length > limit) {
+    } else if length > 0 && limits.form != 0 && length > limits.form {
         UploadError::TooLargeForForm
+    } else if !complete {
+        UploadError::CutOff
     } else {
         UploadError::Ok
     };
-    let written = (error == UploadError::Ok).then(|| write_temporary(part.content));
+    let written = (error == UploadError::Ok).then(|| write_temporary(content));
     let (temporary, error) = match written {
         Some(Ok(path)) => (Some(path), UploadError::Ok),
-        Some(Err(_)) => (None, UploadError::CannotWrite),
+        Some(Err(error)) => (None, error),
         None => (None, error),
     };
     // PHP reports no type and no size for a file it did not keep.
@@ -131,12 +248,8 @@ fn store(field: Vec<u8>, filename: Vec<u8>, part: &Part<'_>, form_limit: Option<
     Upload {
         field,
         filename,
-        content_type: if kept {
-            part.content_type.clone()
-        } else {
-            Vec::new()
-        },
-        size: if kept { length } else { 0 },
+        content_type: if kept { content_type } else { Vec::new() },
+        size: if kept { length as u64 } else { 0 },
         temporary,
         error,
     }
@@ -144,17 +257,16 @@ fn store(field: Vec<u8>, filename: Vec<u8>, part: &Part<'_>, form_limit: Option<
 
 /// Writes `content` to a new file `php??????` in the temporary directory,
 /// readable by this user only.
-fn write_temporary(content: &[u8]) -> std::io::Result<PathBuf> {
+fn write_temporary(content: &[u8]) -> Result<TempPath, UploadError> {
     let mut file = tempfile::Builder::new()
         .prefix("php")
         .rand_bytes(6)
-        .tempfile()?;
-    file.write_all(content)?;
-    file.flush()?;
-    // From here on the file stays until `move_uploaded_file()` takes it or
-    // the request ends.
-    let (_, path) = file.keep().map_err(|kept| kept.error)?;
-    Ok(path)
+        .tempfile()
+        .map_err(|_| UploadError::NoTemporaryDirectory)?;
+    file.write_all(content)
+        .map_err(|_| UploadError::CannotWrite)?;
+    file.flush().map_err(|_| UploadError::CannotWrite)?;
+    Ok(file.into_temp_path())
 }
 
 /// The name without the directories a client may have sent with it, with
@@ -193,7 +305,12 @@ impl Form {
                     for (key, value) in entries {
                         store_named(&mut files, &entry_name(&upload.field, key), value);
                     }
-                    temporary.extend(upload.temporary);
+                    if let Some(mut file) = upload.temporary {
+                        // The request now owns cleanup. Until here, dropping
+                        // a cancelled parse also removes its temporary files.
+                        file.disable_cleanup(true);
+                        temporary.push(file.to_path_buf());
+                    }
                 }
             }
         }

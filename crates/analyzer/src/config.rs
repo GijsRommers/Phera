@@ -41,6 +41,7 @@ impl Options {
         }
         let mut arguments = arguments.peekable();
         let mut paths = Vec::new();
+        let mut use_phpstan_baseline = false;
         while let Some(argument) = arguments.next() {
             match argument.as_str() {
                 "--" => {
@@ -48,7 +49,7 @@ impl Options {
                     break;
                 }
                 "--level" => {
-                    options.level = level(&arguments.next().ok_or("--level needs 0, 1 or 2")?)?
+                    options.level = level(&arguments.next().ok_or("--level needs a value")?)?
                 }
                 "--format" => {
                     options.format = match arguments.next().as_deref() {
@@ -59,6 +60,7 @@ impl Options {
                     }
                 }
                 "--no-progress" => options.no_progress = true,
+                "--baseline" => use_phpstan_baseline = true,
                 "--generate-baseline" => {
                     options.generate_baseline =
                         Some(arguments.next().ok_or("--generate-baseline needs a file")?)
@@ -75,57 +77,20 @@ impl Options {
         if options.paths.is_empty() {
             return Err("check needs paths or [check].paths in phera.toml".into());
         }
+        if use_phpstan_baseline && options.baseline.is_none() {
+            options.baseline = Some(default_baseline(&options.paths));
+        }
         Ok(options)
     }
 
     fn read_config(&mut self, source: &str) -> Result<(), String> {
-        let tokens = tokenize(source)?;
-        let mut inside = false;
-        let mut cursor = 0;
-        while cursor < tokens.len() {
-            if tokens[cursor] == "[" {
-                cursor += 1;
-                inside = tokens.get(cursor).is_some_and(|s| s == "check");
-                while cursor < tokens.len() && tokens[cursor] != "]" {
-                    cursor += 1;
-                }
-                cursor += 1;
-                continue;
-            }
-            let key = tokens[cursor].clone();
-            cursor += 1;
-            if tokens.get(cursor).is_none_or(|s| s != "=") {
-                if inside {
-                    return Err(format!("phera.toml: expected '=' after {key}"));
-                }
-                continue;
-            }
-            cursor += 1;
-            let mut values = Vec::new();
-            let array = tokens.get(cursor).is_some_and(|s| s == "[");
-            if array {
-                cursor += 1;
-                while cursor < tokens.len() && tokens[cursor] != "]" {
-                    if tokens[cursor] != "," {
-                        values.push(tokens[cursor].clone());
-                    }
-                    cursor += 1;
-                }
-                if cursor == tokens.len() {
-                    return Err("phera.toml: unclosed array".into());
-                }
-                cursor += 1;
-            } else if let Some(value) = tokens.get(cursor) {
-                values.push(value.clone());
-                cursor += 1;
-            }
-            if !inside {
-                continue;
-            }
-            self.setting(&key, values, array)?;
-        }
-        Ok(())
+        read_tables(
+            source,
+            |table| table == "check",
+            |_, key, values, array| self.setting(key, values, array),
+        )
     }
+
     fn setting(&mut self, key: &str, values: Vec<String>, array: bool) -> Result<(), String> {
         let scalar = || {
             values
@@ -169,17 +134,89 @@ impl Options {
     }
 }
 
+fn default_baseline(paths: &[String]) -> String {
+    const FILE: &str = "phpstan-baseline.neon";
+    if std::path::Path::new(FILE).is_file() {
+        return FILE.into();
+    }
+    paths
+        .iter()
+        .filter_map(|path| std::path::Path::new(path).canonicalize().ok())
+        .find_map(|path| {
+            path.ancestors()
+                .map(|directory| directory.join(FILE))
+                .find(|file| file.is_file())
+        })
+        .map_or_else(|| FILE.into(), |file| file.to_string_lossy().into_owned())
+}
+
+/// Read the requested tables from settings shared by the analyzer commands.
+pub(crate) fn read_tables(
+    source: &str,
+    interested: impl Fn(&str) -> bool,
+    mut setting: impl FnMut(&str, &str, Vec<String>, bool) -> Result<(), String>,
+) -> Result<(), String> {
+    let tokens = tokenize(source)?;
+    let mut table = String::new();
+    let mut cursor = 0;
+    while cursor < tokens.len() {
+        if tokens[cursor] == "[" {
+            cursor += 1;
+            table = tokens.get(cursor).cloned().unwrap_or_default();
+            while cursor < tokens.len() && tokens[cursor] != "]" {
+                cursor += 1;
+            }
+            cursor += 1;
+            continue;
+        }
+        let key = tokens[cursor].clone();
+        cursor += 1;
+        if tokens.get(cursor).is_none_or(|s| s != "=") {
+            if interested(&table) {
+                return Err(format!("phera.toml: expected '=' after {key}"));
+            }
+            continue;
+        }
+        cursor += 1;
+        let mut values = Vec::new();
+        let array = tokens.get(cursor).is_some_and(|s| s == "[");
+        if array {
+            cursor += 1;
+            while cursor < tokens.len() && tokens[cursor] != "]" {
+                if tokens[cursor] != "," {
+                    values.push(tokens[cursor].clone());
+                }
+                cursor += 1;
+            }
+            if cursor == tokens.len() {
+                return Err("phera.toml: unclosed array".into());
+            }
+            cursor += 1;
+        } else if let Some(value) = tokens.get(cursor) {
+            values.push(value.clone());
+            cursor += 1;
+        }
+        if !interested(&table) {
+            continue;
+        }
+        setting(&table, &key, values, array)?;
+    }
+    Ok(())
+}
+
 fn level(value: &str) -> Result<u8, String> {
     match value {
         "0" => Ok(0),
         "1" => Ok(1),
         "2" => Ok(2),
         "3" => Ok(3),
-        _ => Err("Supported check levels are 0 through 3".into()),
+        "4" => Ok(4),
+        "5" | "max" => Ok(5),
+        _ => Err("Supported check levels are 0 through 5, or max".into()),
     }
 }
 
-fn string(value: &str) -> Result<String, String> {
+pub(crate) fn string(value: &str) -> Result<String, String> {
     value
         .strip_prefix('"')
         .map(String::from)

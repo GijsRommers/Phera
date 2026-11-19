@@ -55,6 +55,7 @@ pub async fn clean(driver: &mut Lease, name: &str) {
             &Sql::parse("SELECT * FROM phera_pool_dirty".into()).unwrap(),
             &Prepared::Emulated,
             &[],
+            Default::default(),
         )
         .await;
     assert!(missing.is_err(), "temporary table survived reset");

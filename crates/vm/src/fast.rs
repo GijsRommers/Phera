@@ -181,6 +181,24 @@ fn frees_on_drop(slot: &Option<Value>) -> bool {
     }
 }
 
+/// Builtins with no coercion can read the local directly.
+#[inline(never)]
+fn builtin_step<const GUARDED: bool>(
+    operation: phera_bytecode::BuiltinUnary,
+    destination: Reg,
+    source: Reg,
+    slots: &mut [Option<Value>],
+) -> ScalarStep {
+    let Some(Some(value)) = slots.get(source.index()) else {
+        return ScalarStep::Fallback;
+    };
+    match crate::builtin_calls::builtin_value(operation, value) {
+        Some(Value::Int(value)) => store_integer::<GUARDED>(slots, destination, value),
+        Some(value) => store::<GUARDED>(slots, destination, value),
+        None => ScalarStep::Fallback,
+    }
+}
+
 /// `+`, `-`, `*` and `%` on two integers, when the result is an integer.
 ///
 /// `None` sends the instruction to the general handler: an overflow becomes a
@@ -227,17 +245,28 @@ fn integer_binary<const GUARDED: bool>(
 /// general handler for that instruction does it with full PHP semantics.
 #[inline(always)]
 pub(crate) fn scalar_step<const GUARDED: bool>(
-    instruction: Instruction,
+    instruction: &Instruction,
     slots: &mut [Option<Value>],
     ip: &mut usize,
 ) -> ScalarStep {
-    match instruction {
+    match *instruction {
         Instruction::Nop => ScalarStep::Complete,
         Instruction::LoadInt { dst, value } => {
             store_integer::<GUARDED>(slots, dst, i64::from(value))
         }
         Instruction::LoadNull { dst } => store::<GUARDED>(slots, dst, Value::Null),
         Instruction::LoadBool { dst, value } => store::<GUARDED>(slots, dst, Value::Bool(value)),
+        Instruction::BuiltinUnary { op, dst, src } => builtin_step::<GUARDED>(op, dst, src, slots),
+        Instruction::Unary {
+            op: phera_bytecode::UnaryOp::Negate,
+            dst,
+            src,
+        } => {
+            let Some(negative) = integer_at(slots, src).and_then(i64::checked_neg) else {
+                return ScalarStep::Fallback;
+            };
+            store_integer::<GUARDED>(slots, dst, negative)
+        }
         Instruction::Cast {
             to: phera_bytecode::CastKind::Bool,
             dst,

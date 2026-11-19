@@ -6,8 +6,10 @@
 //! here, which keeps every distinction PHP makes: int against float, `-0.0`
 //! against `0.0`, bytes that are not UTF-8, key order.
 
+use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::OnceLock;
 
 use phera_value::{ArrayKey, CollectDiagnostics, DiagnosticKind, Value, float_repr};
 
@@ -223,6 +225,48 @@ pub fn find_php() -> Option<PathBuf> {
     std::env::split_paths(&std::env::var_os("PATH")?)
         .map(|directory| directory.join("php"))
         .find(|candidate| candidate.is_file())
+}
+
+/// The oracle's `PHP_VERSION_ID`, queried once per test process.
+pub fn php_version_id() -> Option<u32> {
+    static VERSION_ID: OnceLock<Option<u32>> = OnceLock::new();
+    *VERSION_ID.get_or_init(|| {
+        let php = find_php()?;
+        let output = Command::new(php)
+            .args(["-n", "-r", "echo PHP_VERSION_ID;"])
+            .output()
+            .expect("query oracle PHP_VERSION_ID");
+        assert!(output.status.success(), "query oracle PHP_VERSION_ID");
+        Some(
+            String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .parse()
+                .expect("numeric oracle PHP_VERSION_ID"),
+        )
+    })
+}
+
+/// Whether the oracle can check behavior introduced in a given PHP patch.
+pub fn supports_php_since(case: &str, minimum: u32) -> bool {
+    let version = php_version_id().expect("PHP oracle available");
+    if version >= minimum {
+        return true;
+    }
+    oracle_status(format_args!(
+        "SKIP {case}: PHP behaviour since {}; oracle is {}",
+        display_version(minimum),
+        display_version(version)
+    ));
+    false
+}
+
+pub(super) fn oracle_status(message: std::fmt::Arguments<'_>) {
+    // Direct writes keep version skips visible under cargo test's output capture.
+    writeln!(io::stderr().lock(), "{message}").expect("write oracle version status");
+}
+
+fn display_version(id: u32) -> String {
+    format!("{}.{}.{}", id / 10_000, id / 100 % 100, id % 100)
 }
 
 /// Source path that PHP reports for a diagnostic raised in the oracle script.

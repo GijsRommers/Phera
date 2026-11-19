@@ -1,0 +1,1 @@
+2	compact-undefined-variable	compact() refers to unbound local $missing.

@@ -304,16 +304,9 @@ fn malformed_cookie_ids_do_not_name_files() {
             0
         );
     }
-    // Keep the full decoded byte string away from the file backend, even
-    // on systems where a NUL would make a C path use only its valid prefix.
     let mut nul = Client {
         cookie: Some("valid%00tail".into()),
     };
-    let php_nul = nul
-        .clone()
-        .request(&theirs.address, &target("php", "invalid", ""));
-    assert_eq!(php_nul.body, "[true,[],true]");
-    assert!(ours.root.join("stores/php/sess_valid").is_file());
     let answer = nul.request(&ours.address, &target("phera", "invalid", ""));
     assert!(answer.body.starts_with("[false,"));
     assert_eq!(
@@ -322,6 +315,14 @@ fn malformed_cookie_ids_do_not_name_files() {
             .count(),
         0
     );
+    if oracle::supports_php_since("session cookie ID containing NUL", 80_513) {
+        let expected = nul.request(&theirs.address, &target("php", "invalid", ""));
+        assert_eq!(answer, expected);
+        assert_eq!(
+            fs::read_dir(ours.root.join("stores/php")).unwrap().count(),
+            0
+        );
+    }
 }
 
 fn wait_for_lock(marker: &std::path::Path) {

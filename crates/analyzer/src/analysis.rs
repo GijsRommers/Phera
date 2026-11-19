@@ -14,6 +14,7 @@ use crate::{
 use phera_ast::*;
 use phera_source::Span;
 
+mod argument_contracts;
 mod arguments;
 mod arrays;
 mod assignments;
@@ -30,6 +31,7 @@ mod coalesce_assignment;
 mod composite;
 mod condition;
 mod control;
+mod dead_code;
 mod declarations;
 mod deferred_declarations;
 mod exceptions;
@@ -41,6 +43,7 @@ mod if_ladder;
 mod intrinsics;
 mod invocations;
 mod logical;
+mod loop_writes;
 mod loops;
 mod match_expression;
 mod member_expressions;
@@ -86,6 +89,7 @@ pub struct Analyzer<'a> {
     pub dependencies: &'a mut Dependencies,
     pub file: &'a ParsedFile,
     pub level: u8,
+    pub report_unused_traits: bool,
     pub strict_types: bool,
     pub diagnostics: Vec<Diagnostic>,
     pub context: Context,
@@ -96,6 +100,9 @@ pub struct Analyzer<'a> {
     pub controls: Vec<control::ControlFrame>,
     pub statement_docs: std::collections::BTreeMap<usize, Span>,
     pub pending_binding: Option<(usize, closure_binding::ClosureBinding)>,
+    pub last_condition: Option<Span>,
+    pub discarded_expression: Option<Span>,
+    pub trait_diagnostics: Option<Vec<(Span, Diagnostic)>>,
 }
 
 impl<'a> Analyzer<'a> {
@@ -104,12 +111,14 @@ impl<'a> Analyzer<'a> {
         dependencies: &'a mut Dependencies,
         file: &'a ParsedFile,
         level: u8,
+        report_unused_traits: bool,
     ) -> Self {
         Self {
             index,
             dependencies,
             file,
             level,
+            report_unused_traits,
             strict_types: file.program.statements.iter().any(|statement| {
                 matches!(&statement.kind, StatementKind::Declare { directives, .. }
                     if directives.iter().any(|directive| directive.name.name.eq_ignore_ascii_case("strict_types")
@@ -122,6 +131,9 @@ impl<'a> Analyzer<'a> {
             return_scopes: Vec::new(),
             controls: Vec::new(),
             pending_binding: None,
+            last_condition: None,
+            discarded_expression: None,
+            trait_diagnostics: None,
             statement_docs: if level >= 2 {
                 type_docs::statement_comments(&file.source)
             } else {

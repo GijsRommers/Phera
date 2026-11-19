@@ -28,7 +28,7 @@
 
 use std::collections::HashMap;
 
-use phera_bytecode::{FetchMode, Function, FunctionId, Instruction, Reg, Symbol};
+use phera_bytecode::{FetchMode, Function, FunctionId, Instruction, Reg, Symbol, SymbolId};
 
 /// What the pass needs to know about a function the file declares at its
 /// top level.
@@ -45,8 +45,7 @@ pub(crate) type DirectCallees = HashMap<String, DirectCallee>;
 
 /// A call whose arguments are being scanned.
 struct OpenCall {
-    /// `Some` for a call to a top-level function of this file.
-    callee: Option<DirectCallee>,
+    callee: Option<DirectTarget>,
     init: usize,
     /// How many enclosing calls to top-level functions are open.
     level: usize,
@@ -57,11 +56,20 @@ struct OpenCall {
 
 /// A call that will become `CallDirect`.
 struct DirectCall {
-    callee: DirectCallee,
+    callee: DirectTarget,
     init: usize,
     level: usize,
     sends: Vec<usize>,
     call: usize,
+}
+
+#[derive(Clone, Copy)]
+enum DirectTarget {
+    Php(DirectCallee),
+    Native {
+        symbol: SymbolId,
+        positional_by_value: usize,
+    },
 }
 
 /// Rewrite the eligible calls of one function. Returns where the argument
@@ -70,8 +78,9 @@ pub(crate) fn rewrite(
     function: &mut Function,
     symbols: &[Symbol],
     callees: &DirectCallees,
+    native_functions: Option<&crate::NativeFunctions<'_>>,
 ) -> Option<usize> {
-    let calls = find_direct_calls(function, symbols, callees);
+    let calls = find_direct_calls(function, symbols, callees, native_functions);
     if calls.is_empty() {
         return None;
     }
@@ -175,6 +184,19 @@ fn retarget(instruction: Instruction, from: Reg, to: Reg) -> Option<Instruction>
             dst: to,
             result,
         },
+        I::CallNativeDirect {
+            function,
+            args,
+            count,
+            dst,
+            result,
+        } if dst == from => I::CallNativeDirect {
+            function,
+            args,
+            count,
+            dst: to,
+            result,
+        },
         _ => return None,
     };
     Some(retargeted)
@@ -186,19 +208,34 @@ fn find_direct_calls(
     function: &Function,
     symbols: &[Symbol],
     callees: &DirectCallees,
+    native_functions: Option<&crate::NativeFunctions<'_>>,
 ) -> Vec<DirectCall> {
     let mut open: Vec<OpenCall> = Vec::new();
     let mut found = Vec::new();
     for (index, instruction) in function.instructions.iter().enumerate() {
         match instruction {
             Instruction::InitCall { function } => {
-                let callee = symbols
-                    .get(function.index())
-                    .and_then(|symbol| callees.get(&symbol.name))
-                    .copied();
+                let callee = symbols.get(function.index()).and_then(|symbol| {
+                    if let Some(callee) = callees.get(&symbol.name) {
+                        return Some(DirectTarget::Php(*callee));
+                    }
+                    if symbol.fallback.is_some() {
+                        return None;
+                    }
+                    match (native_functions?.lookup)(&symbol.name)? {
+                        crate::NativeFunction::Direct {
+                            positional_by_value,
+                        } => Some(DirectTarget::Native {
+                            symbol: *function,
+                            positional_by_value,
+                        }),
+                        crate::NativeFunction::General => None,
+                    }
+                });
                 open.push(open_call(&open, callee, index));
             }
             Instruction::InitDynamicCall { .. }
+            | Instruction::InitUserCallback { .. }
             | Instruction::InitMethodCall { .. }
             | Instruction::InitStaticCall { .. }
             | Instruction::DynamicMethodCall { .. }
@@ -233,7 +270,7 @@ fn find_direct_calls(
 
 /// Start tracking a call; its argument area is one deeper than the
 /// enclosing direct call's.
-fn open_call(open: &[OpenCall], callee: Option<DirectCallee>, init: usize) -> OpenCall {
+fn open_call(open: &[OpenCall], callee: Option<DirectTarget>, init: usize) -> OpenCall {
     OpenCall {
         callee,
         init,
@@ -246,7 +283,15 @@ fn open_call(open: &[OpenCall], callee: Option<DirectCallee>, init: usize) -> Op
 /// The finished call, if it can be a `CallDirect`.
 fn direct_call(call: OpenCall, index: usize) -> Option<DirectCall> {
     let callee = call.callee?;
-    let fits = !call.general && !callee.needs_general_call && call.sends.len() <= callee.parameters;
+    let count = call.sends.len();
+    let fits = !call.general
+        && match callee {
+            DirectTarget::Php(callee) => !callee.needs_general_call && count <= callee.parameters,
+            DirectTarget::Native {
+                positional_by_value,
+                ..
+            } => count <= positional_by_value,
+        };
     fits.then_some(DirectCall {
         callee,
         init: call.init,
@@ -274,12 +319,23 @@ fn rewrite_call(function: &mut Function, call: &DirectCall, area: usize) {
         };
     }
     if let Instruction::Call { dst, result } = function.instructions[call.call] {
-        function.instructions[call.call] = Instruction::CallDirect {
-            function: call.callee.function,
-            args: Reg(area as u16),
-            count: call.sends.len() as u16,
-            dst,
-            result,
+        let args = Reg(area as u16);
+        let count = call.sends.len() as u16;
+        function.instructions[call.call] = match call.callee {
+            DirectTarget::Php(callee) => Instruction::CallDirect {
+                function: callee.function,
+                args,
+                count,
+                dst,
+                result,
+            },
+            DirectTarget::Native { symbol, .. } => Instruction::CallNativeDirect {
+                function: symbol,
+                args,
+                count,
+                dst,
+                result,
+            },
         };
     }
 }

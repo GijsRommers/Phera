@@ -1,5 +1,10 @@
 //! Bytecode lowering for expressions.
 
+mod builtin_calls;
+mod builtin_format;
+mod builtin_literals;
+mod builtin_search;
+
 use phera_ast as ast;
 use phera_bytecode::Reg;
 
@@ -62,7 +67,7 @@ impl Compiler<'_> {
             ExpressionKind::Variable(_)
             | ExpressionKind::Index { .. }
             | ExpressionKind::Property { .. }
-            | ast::ExpressionKind::StaticProperty { .. } => self.compile_read(expression, line),
+            | ast::ExpressionKind::StaticProperty { .. } => self.compile_read(expression),
             ExpressionKind::Assign { target, value } => {
                 self.compile_assignment(target, value, line)
             }
@@ -112,9 +117,14 @@ impl Compiler<'_> {
             ExpressionKind::Print(expression) => self.compile_print(expression, line),
             ExpressionKind::Exit(expression) => self.compile_exit(expression, line),
             ExpressionKind::Name(name) => self.compile_constant(name, line),
-            ExpressionKind::Call { callee, arguments } => {
+            ExpressionKind::Call {
+                callee,
+                arguments,
+                opening,
+            } => {
                 let start = self.temporaries_start();
-                let result = self.compile_call(callee, arguments, line)?;
+                let result =
+                    self.compile_call(callee, arguments, line, self.lines.line(*opening))?;
                 self.release_call_operands(start, result, line);
                 Ok(result)
             }

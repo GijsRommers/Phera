@@ -7,8 +7,10 @@
 //! recursion.
 
 mod declaration;
+mod diagnostics;
 mod error;
 mod expression;
+pub mod magic_methods;
 mod names;
 mod nesting;
 mod parser;
@@ -61,18 +63,19 @@ pub fn parse_on_current_stack(source: &str) -> Result<phera_ast::Program, ParseE
 
 /// Parses source bytes on an existing compiler stack.
 pub fn parse_bytes_on_current_stack(source: &[u8]) -> Result<phera_ast::Program, ParseError> {
-    let (parser, _) = parser::Parser::new(source, false);
+    let (parser, _) = parser::Parser::new(source, false, false);
     parser.parse_program()
 }
 
 /// Parses a file and collects the diagnostics reached before its first parse error.
 pub fn parse_file_on_current_stack(
     source: &[u8],
+    skip_shebang: bool,
 ) -> (
     Result<phera_ast::Program, ParseError>,
     Vec<phera_source::CompileDiagnostic>,
 ) {
-    let (parser, report) = parser::Parser::new(source, true);
+    let (parser, report) = parser::Parser::new(source, true, skip_shebang);
     let parsed = parser.parse_program();
     let parsed = if let Some(error) = report.nesting_error
         && parsed

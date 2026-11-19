@@ -147,6 +147,7 @@ impl Vm {
         swap(&mut self.frame_limit, &mut other.frame_limit);
         swap(&mut self.status, &mut other.status);
         swap(&mut self.fiber_bailout, &mut other.fiber_bailout);
+        swap(&mut self.timed_out_objects, &mut other.timed_out_objects);
         swap(
             &mut self.error_handlers.exception,
             &mut other.error_handlers.exception,
@@ -174,6 +175,14 @@ impl Vm {
         swap(
             &mut self.error_handlers.last_error,
             &mut other.error_handlers.last_error,
+        );
+        swap(
+            &mut self.error_handlers.fatal_trace,
+            &mut other.error_handlers.fatal_trace,
+        );
+        swap(
+            &mut self.error_handlers.fatal_error_backtraces,
+            &mut other.error_handlers.fatal_error_backtraces,
         );
         swap(
             &mut self.error_handlers.trace_ignore_args,

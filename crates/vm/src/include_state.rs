@@ -1,13 +1,15 @@
 //! Runtime loading and include-once history belong to the current PHP request.
 
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
+
+use indexmap::IndexSet;
 
 use crate::{CodeLoader, code_table::FunctionIndex};
 
 /// The runtime supplies code; the VM remembers which files have executed.
 pub(crate) struct IncludeState {
     loader: Option<Arc<dyn CodeLoader>>,
-    included: HashSet<String>,
+    included: IndexSet<String>,
     entry_script: Option<FunctionIndex>,
 }
 
@@ -15,7 +17,7 @@ impl IncludeState {
     pub(crate) fn new() -> Self {
         Self {
             loader: None,
-            included: HashSet::new(),
+            included: IndexSet::new(),
             entry_script: None,
         }
     }
@@ -36,6 +38,10 @@ impl IncludeState {
     pub(crate) fn record_entry(&mut self, main: FunctionIndex, file: String) {
         self.entry_script = Some(main);
         self.record(file);
+    }
+
+    pub(crate) fn files(&self) -> impl Iterator<Item = &String> {
+        self.included.iter()
     }
 
     pub(crate) fn contains(&self, file: &str) -> bool {

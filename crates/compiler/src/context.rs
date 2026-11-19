@@ -75,6 +75,7 @@ pub(super) struct Compiler<'ast> {
     /// `expressions::operand_release`), which the statement's end need not
     /// clear again until they are allocated anew.
     pub(super) released: HashSet<u16>,
+    pub(super) native_functions: Option<&'ast crate::NativeFunctions<'ast>>,
 }
 impl<'ast> Compiler<'ast> {
     /// Start an independent function builder in the current namespace.
@@ -120,6 +121,7 @@ impl<'ast> Compiler<'ast> {
             imports: None,
             reflection,
             released: HashSet::new(),
+            native_functions: None,
         }
     }
 

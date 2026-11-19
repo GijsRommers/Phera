@@ -33,6 +33,14 @@ impl ResponseHead {
         }
     }
 
+    /// PHP replaces the default status for a hidden fatal error.
+    pub fn set_error_status(state: &mut RequestState) {
+        let head = state.get_or_default::<Self>();
+        if head.status == 200 {
+            head.status = 500;
+        }
+    }
+
     /// Applies one `header()` line.
     ///
     /// Two forms are special in PHP. `HTTP/1.1 404 Not Found` sets the status

@@ -3,7 +3,8 @@
 //! PHP runs shutdown functions, then request-end destructors, then finalizes
 //! buffers from the innermost out. The last buffer commits the response head
 //! when it delivers bytes. Phera runs shutdown functions immediately before
-//! finalizing the buffers. Destructor dispatch at shutdown is pending.
+//! finalizing the buffers, including live objects created during timeout
+//! shutdown. Ordinary object destructor dispatch is pending.
 //!
 //! A callback can call back into the VM, including reading the active buffer.
 //! The stack owns all buffer data and no reference into it crosses that call.

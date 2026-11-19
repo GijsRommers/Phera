@@ -100,22 +100,33 @@ impl Compiler<'_> {
                 ));
             }
             if let ast::ExpressionKind::MethodCall {
-                name: ast::MemberName::Identifier(name),
-                arguments,
-                ..
+                name, arguments, ..
             } = &access.kind
             {
-                let line = self.lines.line(name.span.start);
-                self.emit(
-                    Instruction::MethodCall {
-                        receiver: current,
-                        method: name.name.clone(),
-                    },
-                    line,
-                );
+                let line = self.member_line(name);
+                match name {
+                    ast::MemberName::Identifier(name) => self.emit(
+                        Instruction::MethodCall {
+                            receiver: current,
+                            method: name.name.clone(),
+                        },
+                        line,
+                    ),
+                    ast::MemberName::Expression(name) => {
+                        let method = self.compile_expression(name)?;
+                        self.emit(
+                            Instruction::DynamicMethodCall {
+                                receiver: current,
+                                method,
+                            },
+                            line,
+                        )
+                    }
+                };
                 current = self.compile_arguments(arguments, line)?;
                 continue;
             }
+            let line = self.access_line(access);
             let step = match &access.kind {
                 ast::ExpressionKind::Property { name, .. } => {
                     let name = match name {

@@ -83,7 +83,7 @@ impl Vm {
         let function = crate::code_table::body(&unit, self.code.local(*reference));
         while let Some(instruction) = function.instructions.get(*position).copied() {
             *position += 1;
-            if crate::fast::scalar_step::<false>(instruction, slots, position)
+            if crate::fast::scalar_step::<false>(&instruction, slots, position)
                 == crate::fast::ScalarStep::Complete
             {
                 continue;

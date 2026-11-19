@@ -1,6 +1,7 @@
 //! Request class lookup, leased object ids, and weak cycle-cleanup records.
 
 use std::{
+    cell::OnceCell,
     collections::HashMap,
     rc::{Rc, Weak},
 };
@@ -8,7 +9,11 @@ use std::{
 use phera_value::{Object, ObjectIds, PhpArray};
 
 use super::Class;
+use super::method_table::MethodTable;
 use super::operations::ClassOperations;
+use crate::code_table::CodeTable;
+
+type NativeMethodTables = Box<[OnceCell<MethodTable>]>;
 
 /// A class's position in the request's class table: a method frame's class
 /// scope and called class are kept as these numbers.
@@ -62,6 +67,7 @@ pub(crate) struct ClassTable {
     pub(crate) has_property_views: bool,
     pub(crate) has_lazy_objects: bool,
     native_count: u32,
+    native_methods: OnceCell<NativeMethodTables>,
     pub(crate) objects: Vec<Weak<Object>>,
     ids: Rc<ObjectIds>,
     /// Allocations left before the cycle collector should run (see
@@ -81,6 +87,7 @@ impl ClassTable {
             has_property_views: native.has_property_views,
             has_lazy_objects: false,
             native_count: native.numbered.len() as u32,
+            native_methods: OnceCell::new(),
             native,
             local: ClassDefinitions::default(),
             objects: Vec::new(),
@@ -92,6 +99,41 @@ impl ClassTable {
 
     pub(crate) fn next_index(&self) -> ClassIndex {
         ClassIndex((self.native_count as usize + self.local.numbered.len()) as u32)
+    }
+
+    /// `$reflection->getName()` uses this request's name numbers, even when
+    /// the class definition is shared with another request on this worker.
+    #[inline]
+    pub(crate) fn method_table<'c>(
+        &'c self,
+        class: &'c Class,
+        code: &CodeTable,
+    ) -> &'c MethodTable {
+        let index = class.index.0 as usize;
+        let cell = if index < self.native_count as usize {
+            &self
+                .native_methods
+                .get()
+                .unwrap_or_else(|| self.allocate_native_method_tables())[index]
+        } else {
+            &class.method_table
+        };
+        cell.get_or_init(|| MethodTable::build(class, code, |method| self.get(&method.declaring)))
+    }
+
+    #[cold]
+    fn allocate_native_method_tables(&self) -> &NativeMethodTables {
+        self.native_methods
+            .get_or_init(|| (0..self.native_count).map(|_| OnceCell::new()).collect())
+    }
+
+    pub(crate) fn cached_method_table<'c>(&'c self, class: &'c Class) -> Option<&'c MethodTable> {
+        let index = class.index.0 as usize;
+        if index < self.native_count as usize {
+            self.native_methods.get()?[index].get()
+        } else {
+            class.method_table.get()
+        }
     }
 
     pub(crate) fn insert(&mut self, lowercase_name: String, class: Rc<Class>) {

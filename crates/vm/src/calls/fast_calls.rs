@@ -76,7 +76,9 @@ impl Machine<'_> {
         }
         self.stack.push(frame);
 
-        self.spend_work();
+        if self.spend_work() {
+            return Step::Yield;
+        }
         Step::Switched(Position { frame, ip: 0 })
     }
 
@@ -378,7 +380,9 @@ impl Machine<'_> {
         if call.called.is_some() {
             self.stack.current_extras_mut().called = call.called;
         }
-        self.spend_work();
+        if self.spend_work() {
+            return Step::Yield;
+        }
         Step::Switched(Position { frame, ip: 0 })
     }
 }
