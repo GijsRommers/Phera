@@ -112,7 +112,7 @@ silently different answer:
 - The other items listed in [`crates/source/data/deprecations.tsv`](crates/source/data/deprecations.tsv)
 
 Why things are the way they are is written down in
-[`docs/decisions.md`](docs/decisions.md).
+[`docs/decisions/`](docs/decisions/README.md).
 
 ## 🏗️ Architecture
 
@@ -138,7 +138,7 @@ PHP source ─▶ lexer ─▶ parser ─▶ AST ─▶ compiler ─▶ bytecode
 
 The extensions live under `crates/extensions/`, behind `phera-extension-api`.
 See [`docs/architecture.md`](docs/architecture.md) for the design and
-[`docs/decisions.md`](docs/decisions.md) for the decisions behind it.
+[`docs/decisions/`](docs/decisions/README.md) for the decisions behind it.
 
 ## 🛠️ Building
 
