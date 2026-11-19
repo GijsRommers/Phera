@@ -251,10 +251,15 @@ configuration unchanged.
 
 `session_start()` keeps its settings, handler, original payload and live
 `$_SESSION` reference in the request. The VM runs a registered session finalizer
-after user shutdown callbacks and output finalization. An object registered with
+after user shutdown callbacks and output finalization. The output dispatcher adds
+that callback only when a session opens for writing. An object registered with
 `session_set_save_handler($handler)` normally closes earlier through PHP's shutdown
 callback queue. The VM still needs request-end destructor dispatch to reproduce
 the ordering of implicit session close around PHP destructors.
+
+The process shares the extension registry. Each worker links built-in classes
+and constants once, outside request handling. Requests keep their classes,
+aliases, constant definitions, and object instances in request-local tables.
 
 The files handler reads and writes `sess_<id>` in the configured directory or the
 system temporary directory. It uses PHP's wire formats and defaults new files to
@@ -272,7 +277,9 @@ release them. A cancelled request waiting for the lock or running PHP code does
 not write its changes. When a close has already handed a complete payload to the
 blocking pool, that operation keeps the lock until it completes. The file stays
 on the same inode so PHP processes opening it can coordinate using the same
-advisory lock.
+advisory lock. Like PHP's files handler, garbage collection can unlink a stale
+name while a request locks its descriptor. A request opening that name after
+collection may create a new inode.
 
 ## 6. Scope
 
@@ -302,6 +309,10 @@ honoured), and functions removed or deprecated before PHP 8.
 files, `sprintf`, `serialize`), spl, json, pcre (bound to PCRE2), ctype, mbstring,
 date, hash, filter, random, tokenizer, reflection, session, pdo with async
 drivers. **Later:** openssl, curl, dom and xml, intl, fileinfo, iconv.
+
+**Session cookie IDs:** Phera rejects an entire ID containing a NUL before it
+touches storage. PHP currently truncates the ID and uses the prefix as a file
+name. Rejecting the entire ID prevents an invalid cookie from opening that file.
 
 Functions are added on demand, driven by what failing tests and real framework
 boots call, not by walking PHP's function list.

@@ -6,35 +6,45 @@ use phera_extension_api::{Context, NativeError, NativeResult, PhpString, Value};
 use crate::{
     id::c_string,
     quantity,
-    state::{can_change, state, warning},
+    state::{SessionState, can_change, state, warning},
 };
 
-const DEFAULTS: &[(&str, &str)] = &[
-    ("name", "PHPSESSID"),
-    ("save_path", ""),
-    ("save_handler", "files"),
-    ("use_cookies", "1"),
-    ("use_only_cookies", "1"),
-    ("use_strict_mode", "0"),
-    ("cookie_lifetime", "0"),
-    ("cookie_path", "/"),
-    ("cookie_domain", ""),
-    ("cookie_secure", "0"),
-    ("cookie_partitioned", "0"),
-    ("cookie_httponly", "0"),
-    ("cookie_samesite", ""),
-    ("gc_probability", "1"),
-    ("gc_divisor", "100"),
-    ("gc_maxlifetime", "1440"),
-    ("serialize_handler", "php"),
-    ("cache_limiter", "nocache"),
-    ("cache_expire", "180"),
-    ("lazy_write", "1"),
-    ("sid_length", "32"),
-    ("sid_bits_per_character", "4"),
-    ("auto_start", "0"),
-    ("use_trans_sid", "0"),
-];
+#[derive(Clone, Copy)]
+enum ChangeWhen {
+    BeforeStartAndOutput,
+    Never,
+}
+
+// The request settings registry can consume these names, defaults and mutation guards.
+const SETTINGS: &[(&str, &str, ChangeWhen)] = &{
+    use ChangeWhen::{BeforeStartAndOutput, Never};
+    [
+        ("name", "PHPSESSID", BeforeStartAndOutput),
+        ("save_path", "", BeforeStartAndOutput),
+        ("save_handler", "files", BeforeStartAndOutput),
+        ("use_cookies", "1", BeforeStartAndOutput),
+        ("use_only_cookies", "1", BeforeStartAndOutput),
+        ("use_strict_mode", "0", BeforeStartAndOutput),
+        ("cookie_lifetime", "0", BeforeStartAndOutput),
+        ("cookie_path", "/", BeforeStartAndOutput),
+        ("cookie_domain", "", BeforeStartAndOutput),
+        ("cookie_secure", "0", BeforeStartAndOutput),
+        ("cookie_partitioned", "0", BeforeStartAndOutput),
+        ("cookie_httponly", "0", BeforeStartAndOutput),
+        ("cookie_samesite", "", BeforeStartAndOutput),
+        ("gc_probability", "1", BeforeStartAndOutput),
+        ("gc_divisor", "100", BeforeStartAndOutput),
+        ("gc_maxlifetime", "1440", BeforeStartAndOutput),
+        ("serialize_handler", "php", BeforeStartAndOutput),
+        ("cache_limiter", "nocache", BeforeStartAndOutput),
+        ("cache_expire", "180", BeforeStartAndOutput),
+        ("lazy_write", "1", BeforeStartAndOutput),
+        ("sid_length", "32", BeforeStartAndOutput),
+        ("sid_bits_per_character", "4", BeforeStartAndOutput),
+        ("auto_start", "0", Never),
+        ("use_trans_sid", "0", BeforeStartAndOutput),
+    ]
+};
 
 pub fn ini(context: &mut dyn Context, name: &[u8], value: Option<&Value>) -> NativeResult {
     let Some(name) = name
@@ -71,16 +81,20 @@ pub fn ini(context: &mut dyn Context, name: &[u8], value: Option<&Value>) -> Nat
     Ok(Value::String(previous))
 }
 
-fn default(setting: &str) -> Option<(&'static str, &'static str)> {
-    DEFAULTS.iter().find(|(name, _)| *name == setting).copied()
+fn definition(setting: &str) -> Option<(&'static str, &'static str, ChangeWhen)> {
+    SETTINGS
+        .iter()
+        .find(|(name, _, _)| *name == setting)
+        .copied()
 }
 
 pub fn get(context: &mut dyn Context, setting: &str) -> Option<PhpString> {
-    let (name, initial) = default(setting)?;
+    let (name, initial, _) = definition(setting)?;
     Some(
-        state(context)
-            .settings
-            .get(name)
+        context
+            .state()
+            .get::<SessionState>()
+            .and_then(|session| session.settings.get(name))
             .cloned()
             .unwrap_or_else(|| initial.into()),
     )
@@ -91,11 +105,15 @@ pub fn text(context: &mut dyn Context, setting: &str) -> PhpString {
 }
 
 pub fn integer(context: &mut dyn Context, setting: &str) -> i64 {
-    if let Some(number) = state(context).numbers.get(setting) {
+    if let Some(number) = context
+        .state()
+        .get::<SessionState>()
+        .and_then(|session| session.numbers.get(setting))
+    {
         return *number;
     }
-    default(setting)
-        .and_then(|(_, initial)| initial.parse().ok())
+    definition(setting)
+        .and_then(|(_, initial, _)| initial.parse().ok())
         .unwrap_or_default()
 }
 
@@ -134,13 +152,17 @@ pub fn update(
     value: PhpString,
     function: &str,
 ) -> Result<bool, NativeError> {
-    let Some((name, initial)) = default(setting) else {
+    let Some((name, initial, change)) = definition(setting) else {
         if setting.starts_with("trans_sid_") {
             return Err(unsupported(setting));
         }
         return Ok(false);
     };
-    if name == "auto_start" || !can_change(context, function, "ini settings", true) {
+    let changeable = match change {
+        ChangeWhen::BeforeStartAndOutput => can_change(context, function, "ini settings", true),
+        ChangeWhen::Never => false,
+    };
+    if !changeable {
         return Ok(false);
     }
     if matches!(

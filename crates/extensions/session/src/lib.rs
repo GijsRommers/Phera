@@ -1,6 +1,8 @@
 //! PHP session configuration and identifiers, for example `session_name('APPSESSID')`.
 //!
 //! Mutable settings, identifiers, handlers, and open files belong to a single request.
+//! A cookie ID with an embedded NUL is rejected in full before storage lookup.
+//! PHP truncates the ID at the NUL and can open the file named by the prefix.
 
 mod classes;
 mod codec;

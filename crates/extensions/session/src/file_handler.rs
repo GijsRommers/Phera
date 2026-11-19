@@ -157,14 +157,12 @@ impl Directory {
                 if !id::valid(id) {
                     continue;
                 }
-                // Take an advisory lock without waiting. An active session can have
-                // an old mtime while a different request is still processing it.
+                // PHP's collector unlinks stale entries even when a request holds
+                // the advisory lock. An open descriptor still points to the old inode.
                 let path = entry.path();
-                let attempt = open_private_file(&path, 0, false)
-                    .and_then(|file| file.try_lock().map(|()| file).map_err(io::Error::from));
-                if let Ok(file) = attempt
-                    && same_file(&file, &path)
-                    && let Ok(mtime) = file.metadata().and_then(|info| info.modified())
+                if let Ok(info) = fs::symlink_metadata(&path)
+                    && info.is_file()
+                    && let Ok(mtime) = info.modified()
                     && let Ok(age) = now.duration_since(mtime)
                     && (lifetime < 0 || age.as_secs() > lifetime as u64)
                     && fs::remove_file(path).is_ok()

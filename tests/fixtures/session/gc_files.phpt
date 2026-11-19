@@ -17,11 +17,16 @@ var_dump(file_exists($dir . "/sess_old"), file_exists($dir . "/sess_active"));
 file_put_contents($dir . "/sess_old", "count|i:1;");
 touch($dir . "/sess_old", time() - 120);
 var_dump(session_gc(), file_exists($dir . "/sess_old"));
-session_destroy();
+touch($dir . "/sess_active", time() - 120);
+clearstatcache(true, $dir . "/sess_active");
+var_dump(session_gc(), file_exists($dir . "/sess_active"));
+session_abort();
 rmdir($dir);
 ?>
 --EXPECT--
 bool(false)
 bool(true)
+int(1)
+bool(false)
 int(1)
 bool(false)

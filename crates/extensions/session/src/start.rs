@@ -69,9 +69,10 @@ fn start(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
             state(context).id = None;
             return Ok(Value::Bool(false));
         }
-        context.register_request_finalizer(lifecycle::finalize);
         if read_and_close {
             lifecycle::finish(context, lifecycle::Close::Discard, function).await?;
+        } else {
+            context.register_request_finalizer(lifecycle::finalize);
         }
         Ok(Value::Bool(true))
     })
