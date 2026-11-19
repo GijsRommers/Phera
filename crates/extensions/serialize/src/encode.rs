@@ -86,6 +86,7 @@ impl PropertyViewContinuation for PendingProperties {
                 .write_object_properties(context, &object, properties, names)
                 .await;
             encoder.finish_step(context, result)?;
+            encoder.precision = None;
             encoder.write_value(context, None).await
         })
     }
@@ -95,48 +96,71 @@ impl PropertyViewContinuation for PendingProperties {
     }
 }
 
+struct PendingView {
+    object: Rc<Object>,
+    names: Option<Rc<PhpArray>>,
+}
+
+#[derive(Clone, Copy)]
+enum Views {
+    Inline,
+    Defer,
+}
+
 impl Encoder {
     async fn write_value(
         mut self,
         context: &mut dyn Context,
         value: Option<Value>,
     ) -> NativeResult {
-        let Some(mut value) = value.or_else(|| self.next_value(context)) else {
+        let Some(value) = value.or_else(|| self.next_value(context)) else {
             return Ok(self.finish(context));
         };
+        let result = self.write_values(context, value, Views::Defer).await;
+        let Some(PendingView { object, names }) = self.finish_step(context, result)? else {
+            return Ok(self.finish(context));
+        };
+        Err(PropertyViewRequest {
+            object: object.clone(),
+            purpose: PropertyPurpose::Serialize,
+            function: "serialize",
+            arguments: Vec::new(),
+            continuation: Box::new(PendingProperties {
+                encoder: self,
+                object,
+                names,
+            }),
+        }
+        .suspend())
+    }
+
+    async fn write_values(
+        &mut self,
+        context: &mut dyn Context,
+        mut value: Value,
+        views: Views,
+    ) -> Result<Option<PendingView>, NativeError> {
         loop {
-            let object = self.value(context, value);
-            if let Some(object) = self.finish_step(context, object)? {
-                let written = self.write_plain_object(context, &object);
-                if !self.finish_step(context, written)? {
-                    let plan = self.object(context, object.clone()).await;
-                    if let Some(names) = self.finish_step(context, plan)? {
-                        if context.property_view_can_suspend(&object, PropertyPurpose::Serialize) {
-                            return Err(PropertyViewRequest {
-                                object: object.clone(),
-                                purpose: PropertyPurpose::Serialize,
-                                function: "serialize",
-                                arguments: Vec::new(),
-                                continuation: Box::new(PendingProperties {
-                                    encoder: self,
-                                    object,
-                                    names,
-                                }),
-                            }
-                            .suspend());
-                        }
-                        let properties = if context
-                            .property_view_runs_code(&object, PropertyPurpose::Serialize)
-                        {
-                            let viewed = context
+            if let Some(object) = self.value(context, value)?
+                && !self.write_plain_object(context, &object)?
+            {
+                if let Some(names) = self.object(context, object.clone()).await? {
+                    if matches!(views, Views::Defer)
+                        && context.property_view_can_suspend(&object, PropertyPurpose::Serialize)
+                    {
+                        return Ok(Some(PendingView { object, names }));
+                    }
+                    let properties =
+                        if context.property_view_runs_code(&object, PropertyPurpose::Serialize) {
+                            match context
                                 .property_view(
                                     object.clone(),
                                     PropertyPurpose::Serialize,
                                     "serialize",
                                     &[],
                                 )
-                                .await;
-                            match self.finish_step(context, viewed)? {
+                                .await?
+                            {
                                 PropertyView::Snapshot(properties)
                                 | PropertyView::DebugInfo(properties)
                                 | PropertyView::DebugSlots {
@@ -145,20 +169,16 @@ impl Encoder {
                                 PropertyView::Recursive => Rc::new(PhpArray::new()),
                             }
                         } else {
-                            let properties = context.serialization_properties(&object);
-                            Rc::new(self.finish_step(context, properties)?)
+                            Rc::new(context.serialization_properties(&object)?)
                         };
-                        let written = self
-                            .write_object_properties(context, &object, properties, names)
-                            .await;
-                        self.finish_step(context, written)?;
-                    }
-                    // A hook can change the request's serialization precision.
-                    self.precision = None;
+                    self.write_object_properties(context, &object, properties, names)
+                        .await?;
                 }
+                // A hook can change the request's serialization precision.
+                self.precision = None;
             }
             let Some(next) = self.next_value(context) else {
-                return Ok(self.finish(context));
+                return Ok(None);
             };
             value = next;
         }

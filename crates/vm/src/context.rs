@@ -9,6 +9,10 @@ use phera_value::{Diagnostics, Value};
 use crate::Vm;
 
 impl Diagnostics for Vm {
+    fn float_precision(&self) -> i32 {
+        Vm::float_precision(self)
+    }
+
     fn warning(&mut self, message: String) {
         self.diagnostic("Warning", message)
     }
@@ -58,6 +62,51 @@ impl Context for Vm {
         Box::pin(self.register_callback(phase, arguments))
     }
 
+    fn current_fiber(&self) -> Option<std::rc::Rc<phera_value::Object>> {
+        Vm::current_fiber(self)
+    }
+
+    fn fiber_operation(
+        &mut self,
+        object: std::rc::Rc<phera_value::Object>,
+        operation: phera_extension_api::fiber::FiberOperation,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(Vm::fiber_operation(self, object, operation))
+    }
+
+    fn suspend_fiber(&mut self, value: Option<Value>) -> LocalFuture<'_, NativeResult> {
+        Box::pin(self.fiber_suspend(value))
+    }
+
+    fn inspect_fiber(
+        &mut self,
+        object: std::rc::Rc<phera_value::Object>,
+        inspection: phera_extension_api::fiber::FiberInspection,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(self.fiber_inspect(object, inspection))
+    }
+
+    fn ini_get(&self, name: &[u8]) -> Option<phera_value::PhpString> {
+        Vm::ini_get(self, name)
+    }
+
+    fn ini_set(
+        &mut self,
+        function: &str,
+        name: &[u8],
+        value: phera_value::PhpString,
+    ) -> Result<Option<phera_value::PhpString>, phera_extension_api::NativeError> {
+        Vm::ini_set(self, function, name, value)
+    }
+
+    fn ini_restore(&mut self, name: &[u8]) -> Result<(), phera_extension_api::NativeError> {
+        Vm::ini_restore(self, name)
+    }
+
+    fn ini_list(&mut self, module: Option<&phera_value::PhpString>, details: bool) -> NativeResult {
+        Vm::ini_list(self, module, details)
+    }
+
     fn include_path(&self) -> phera_value::PhpString {
         Vm::include_path(self)
     }
@@ -100,8 +149,9 @@ impl Context for Vm {
     }
 
     fn entry_script_path(&self) -> Option<std::path::PathBuf> {
-        let main = self.code.known_unit(crate::code_table::FunctionIndex(0))?;
-        Some(main.file.as_str().into())
+        self.include_state
+            .entry_script()
+            .map(std::path::PathBuf::from)
     }
 
     fn diagnostics(&mut self) -> &mut dyn Diagnostics {

@@ -16,10 +16,6 @@ const CONNECTION_NORMAL: i64 = 0;
 const CONNECTION_ABORTED: i64 = 1;
 const CONNECTION_TIMEOUT: i64 = 2;
 
-/// `ignore_user_abort()` remembers its setting for the rest of the request.
-#[derive(Default)]
-struct IgnoreUserAbort(bool);
-
 pub(crate) fn register(registry: &mut Registry) {
     for entry in [
         GETMYPID,
@@ -70,8 +66,10 @@ const SET_TIME_LIMIT: FunctionEntry = FunctionEntry::sync(
     set_time_limit,
 );
 
-fn set_time_limit(_: &mut dyn Context, _: &[Value]) -> NativeResult {
-    Ok(Value::Bool(true))
+fn set_time_limit(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let seconds = args::int(arguments, 0).unwrap_or_default().to_string();
+    let accepted = context.ini_set("set_time_limit", b"max_execution_time", seconds.into())?;
+    Ok(Value::Bool(accepted.is_some()))
 }
 
 /// `connection_aborted(): int`, 1 when the client has gone away.
@@ -112,10 +110,12 @@ const IGNORE_USER_ABORT: FunctionEntry = FunctionEntry::sync(
 );
 
 fn ignore_user_abort(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let setting = context.state().get_or_default::<IgnoreUserAbort>();
-    let before = setting.0;
+    let before = context
+        .ini_get(b"ignore_user_abort")
+        .is_some_and(|value| phera_extension_api::ini::boolean(value.as_bytes()));
     if let Some(enable) = args::bool(arguments, 0) {
-        setting.0 = enable;
+        let value = if enable { "1" } else { "0" };
+        context.ini_set("ignore_user_abort", b"ignore_user_abort", value.into())?;
     }
     Ok(Value::Int(i64::from(before)))
 }

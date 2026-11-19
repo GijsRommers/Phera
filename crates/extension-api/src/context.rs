@@ -115,6 +115,31 @@ pub trait Context {
         ".".into()
     }
 
+    /// Return the current string value of a registered INI directive.
+    fn ini_get(&self, _name: &[u8]) -> Option<PhpString> {
+        None
+    }
+
+    /// Change a user-modifiable setting, returning its previous value.
+    fn ini_set(
+        &mut self,
+        _function: &str,
+        _name: &[u8],
+        _value: PhpString,
+    ) -> Result<Option<PhpString>, NativeError> {
+        Ok(None)
+    }
+
+    /// Restore a directive to its startup value.
+    fn ini_restore(&mut self, _name: &[u8]) -> Result<(), NativeError> {
+        Ok(())
+    }
+
+    /// List the INI settings for a module, or every loaded module.
+    fn ini_list(&mut self, _module: Option<&PhpString>, _details: bool) -> NativeResult {
+        Ok(Value::Bool(false))
+    }
+
     /// Whether the PHP file making this call declared `strict_types=1`, which
     /// turns off scalar coercion of arguments.
     fn strict_types(&self) -> bool;
@@ -141,6 +166,32 @@ pub trait Context {
         callable: &'a Value,
         arguments: Vec<Value>,
     ) -> LocalFuture<'a, NativeResult>;
+
+    /// The fiber on this PHP stack, or none on the request's main stack.
+    fn current_fiber(&self) -> Option<Rc<Object>> {
+        None
+    }
+
+    fn fiber_operation(
+        &mut self,
+        _object: Rc<Object>,
+        _operation: crate::fiber::FiberOperation,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(std::future::ready(crate::fiber::unavailable()))
+    }
+
+    fn suspend_fiber(&mut self, _value: Option<Value>) -> LocalFuture<'_, NativeResult> {
+        let error = crate::fiber::fiber_error("Cannot suspend outside of a fiber");
+        Box::pin(std::future::ready(Err(error)))
+    }
+
+    fn inspect_fiber(
+        &mut self,
+        _object: Rc<Object>,
+        _inspection: crate::fiber::FiberInspection,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(std::future::ready(crate::fiber::unavailable()))
+    }
 
     /// The location of the first write that committed the response headers.
     fn output_origin(&self) -> Option<(&str, usize)> {

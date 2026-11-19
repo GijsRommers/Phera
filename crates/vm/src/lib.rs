@@ -75,6 +75,7 @@ mod exception_unwind;
 mod exceptions;
 mod extract;
 mod fast;
+mod fibers;
 mod finally;
 mod function_facts;
 mod function_introspection;
@@ -89,6 +90,7 @@ mod hooked_property_views;
 mod include_scope;
 mod include_state;
 mod includes;
+mod ini;
 mod initializer_tasks;
 mod initializers;
 mod inline_stack;
@@ -235,7 +237,10 @@ pub struct Vm {
     state: RequestState,
     property_references: std::rc::Rc<std::cell::RefCell<reference_holders::ReferenceHolders>>,
     autoload: autoload::Autoloaders,
-    include_path: Option<phera_value::PhpString>,
+    ini_overrides: ini::IniOverrides,
+    active_fiber: Option<Box<fibers::Active>>,
+    fiber_bailout: bool,
+    suspended_fibers: fibers::SuspendedFibers,
 }
 
 impl Vm {
@@ -244,13 +249,21 @@ impl Vm {
         Self::with_native_tables(&NativeTables::new(registry))
     }
 
+    /// Register VM-owned fiber classes after Core and Reflection.
+    pub fn register_fiber_classes(registry: &mut Registry) {
+        fibers::register(registry);
+    }
+
     /// Start a fresh request with the worker's already linked built-ins.
     pub fn with_native_tables(native: &NativeTables) -> Self {
         Self {
             enum_cases: classes::enums::EnumCases::default(),
             classes: classes::ClassTable::new(native.classes.clone()),
             autoload: Default::default(),
-            include_path: None,
+            ini_overrides: Default::default(),
+            active_fiber: None,
+            fiber_bailout: false,
+            suspended_fibers: Default::default(),
             native_callback_sites: Vec::new(),
             debug_objects: Vec::new(),
             property_guards: Vec::new(),
@@ -343,7 +356,7 @@ impl Vm {
                     .insert(function.name.to_ascii_lowercase(), index);
             }
         }
-        self.include_state.record(unit.file.clone());
+        self.include_state.record_entry(unit.file.clone());
         let registers = unit.main.registers as usize;
         self.registers.grow_to(registers);
         self.call_stack.push(Frame::new(main, 0, None));
@@ -370,6 +383,7 @@ impl Vm {
             self.unwind(error);
         }
         self.run_shutdown_callbacks().await;
+        self.close_fibers().await;
         self.finish_buffers().await;
         self.finish_request_headers().await;
         self.status

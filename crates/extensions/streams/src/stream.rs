@@ -38,6 +38,7 @@ pub struct Stream {
     pub seekable: bool,
     pub blocked: bool,
     pub read_buffered: bool,
+    pub chunk_size: usize,
     pub spill_limit: Option<u64>,
     pub temporary_path: Option<TempPath>,
     pub data_header: Option<Vec<u8>>,
@@ -62,6 +63,7 @@ impl Stream {
             seekable,
             blocked: true,
             read_buffered: true,
+            chunk_size: CHUNK,
             spill_limit: None,
             temporary_path: None,
             data_header: None,
@@ -136,9 +138,10 @@ impl Stream {
         let limit = limit.unwrap_or(u64::MAX);
         let mut output = Vec::new();
         let mut buffer = [0; CHUNK];
+        let chunk_size = self.chunk_size.min(buffer.len());
         while (output.len() as u64) < limit {
             let remaining = limit - output.len() as u64;
-            let requested = remaining.min(CHUNK as u64) as usize;
+            let requested = remaining.min(chunk_size as u64) as usize;
             let count = match self.read_bytes(&mut buffer[..requested]) {
                 Ok(count) => count,
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,

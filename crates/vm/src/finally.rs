@@ -47,6 +47,7 @@ impl SavedFinally {
 /// PHP distinguishes a saved structured exit from a pending thrown object.
 pub(crate) enum Continuation {
     GeneratorClose,
+    FiberClose,
     Resume { target: usize, reason: FinallyEntry },
     Throw { object: Rc<Object> },
 }
@@ -80,6 +81,7 @@ impl Vm {
             .ok_or_else(|| internal_error!("missing finally continuation"))?;
         match continuation {
             Continuation::GeneratorClose => Err(crate::generators::cleanup::close_complete()),
+            Continuation::FiberClose => Err(crate::fibers::GracefulClose::error()),
             Continuation::Resume { target, reason } => {
                 // The reason documents the pending action; the compiler emitted that
                 // action at target, including all remaining outer finally calls.

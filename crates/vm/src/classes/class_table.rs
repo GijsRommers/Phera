@@ -66,6 +66,10 @@ pub(crate) struct ClassTable {
 }
 
 impl ClassTable {
+    pub(crate) fn native_definitions(&self) -> Rc<ClassDefinitions> {
+        self.native.clone()
+    }
+
     pub(crate) fn new(native: Rc<ClassDefinitions>) -> Self {
         Self {
             has_dimensions: false,
