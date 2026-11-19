@@ -2030,6 +2030,7 @@ dependencies = [
  "phera-ext-core",
  "phera-ext-ctype",
  "phera-ext-date",
+ "phera-ext-dom",
  "phera-ext-filter",
  "phera-ext-hash",
  "phera-ext-http",

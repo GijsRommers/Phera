@@ -9,6 +9,9 @@
 //! makes network requests. The same restriction applies when callers set
 //! entity substitution or DTD loading flags.
 
+mod bindings;
+pub use bindings::{Dom, Libxml};
+
 pub mod document;
 pub mod html;
 pub mod serialize;

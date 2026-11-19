@@ -62,9 +62,9 @@ impl Arena {
             return Err(LinkError::MissingReference);
         }
         let allows_child = match self[parent].kind {
-            Kind::Document => matches!(
+            Kind::Document => !matches!(
                 self[child].kind,
-                Kind::Element | Kind::Comment | Kind::ProcessingInstruction | Kind::Doctype
+                Kind::Document | Kind::Attribute | Kind::Fragment
             ),
             Kind::Element | Kind::Fragment => matches!(
                 self[child].kind,

@@ -15,6 +15,7 @@ phera-extension-api.workspace = true
 phera-ext-core.workspace = true
 phera-ext-ctype.workspace = true
 phera-ext-date.workspace = true
+phera-ext-dom.workspace = true
 phera-ext-filter.workspace = true
 phera-ext-hash.workspace = true
 phera-ext-http.workspace = true

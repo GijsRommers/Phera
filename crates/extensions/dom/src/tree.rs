@@ -54,7 +54,7 @@ impl Name {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Doctype {
     pub public_id: String,
     pub system_id: String,
@@ -160,25 +160,42 @@ impl Arena {
 
     /// Copy with destination indices, preserving attribute order.
     pub fn import(&mut self, source: &Self, node: NodeId, deep: bool) -> NodeId {
-        let copy = self.copy_one(source, node);
+        self.import_mapping(source, node, deep).0
+    }
+
+    pub(crate) fn import_mapping(
+        &mut self,
+        source: &Self,
+        node: NodeId,
+        deep: bool,
+    ) -> (NodeId, Vec<(NodeId, NodeId)>) {
+        let mut mapping = Vec::new();
+        let copy = self.copy_one(source, node, &mut mapping);
         if deep {
             let mut pending = vec![(node, copy)];
             while let Some((original, parent)) = pending.pop() {
                 for child in source.children(original) {
-                    let copy = self.copy_one(source, child);
+                    let copy = self.copy_one(source, child, &mut mapping);
                     self.link(parent, copy, None);
                     pending.push((child, copy));
                 }
             }
         }
-        copy
+        (copy, mapping)
     }
 
-    fn copy_one(&mut self, source: &Self, node: NodeId) -> NodeId {
+    fn copy_one(
+        &mut self,
+        source: &Self,
+        node: NodeId,
+        mapping: &mut Vec<(NodeId, NodeId)>,
+    ) -> NodeId {
         let copy = self.allocate(source[node].detached_copy());
+        mapping.push((node, copy));
         for &attribute in source[node].attributes() {
-            let attribute = self.allocate(source[attribute].detached_copy());
-            self.link_attribute(copy, attribute);
+            let destination = self.allocate(source[attribute].detached_copy());
+            self.link_attribute(copy, destination);
+            mapping.push((attribute, destination));
         }
         copy
     }
