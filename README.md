@@ -74,6 +74,11 @@ or `bcscale()`.
 GMP provides arbitrary-precision integer functions, binary import and export,
 and the `GMP` class with arithmetic, bitwise operators, and scalar casts.
 
+zlib provides string compression, incremental deflate and inflate contexts,
+gzip file functions, and the `compress.zlib://` wrapper. The
+`zlib.output_compression` directive stores its value. Use `ob_gzhandler` for
+PHP output-buffer compression or `phera serve --compress` for server compression.
+
 ## 🛠️ Building
 
 You'll need a recent stable Rust toolchain with 2024 edition support (1.85+).

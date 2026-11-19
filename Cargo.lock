@@ -2304,6 +2304,7 @@ name = "phera-ext-streams"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "flate2",
  "nix",
  "percent-encoding",
  "phera-ext-standard",
@@ -2409,6 +2410,7 @@ dependencies = [
  "phera-ext-standard",
  "phera-ext-streams",
  "phera-ext-tokenizer",
+ "phera-ext-zlib",
  "phera-extension-api",
  "phera-value",
  "phera-vm",

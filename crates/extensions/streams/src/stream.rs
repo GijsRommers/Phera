@@ -11,6 +11,7 @@ use crate::input::InputStream;
 use crate::io_policy::{CHUNK, IoPolicy};
 
 pub enum Backing {
+    Gzip(Box<crate::gzip::Gzip>),
     File(BufReader<File>),
     Memory(Cursor<Vec<u8>>),
     Input(InputStream),
@@ -20,12 +21,20 @@ pub enum Backing {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Wrapper {
     File,
+    Gzip,
+    GzipDirect,
     Standard,
     Memory,
     Temp,
     Data,
     Input,
     Output,
+}
+
+impl Wrapper {
+    pub fn is_gzip(self) -> bool {
+        matches!(self, Self::Gzip | Self::GzipDirect)
+    }
 }
 
 pub struct Stream {
@@ -104,11 +113,15 @@ impl Stream {
     pub fn unread(&self) -> usize {
         match &self.backing {
             Backing::File(file) => file.buffer().len(),
+            Backing::Gzip(gzip) => gzip.unread(),
             _ => 0,
         }
     }
 
     pub fn read_policy(&self, limit: Option<u64>) -> IoPolicy {
+        if matches!(&self.backing, Backing::Gzip(_)) {
+            return IoPolicy::Blocking;
+        }
         let length = limit.or_else(|| {
             self.metadata()
                 .ok()
@@ -124,6 +137,9 @@ impl Stream {
     }
 
     pub fn write_policy(&self, length: u64) -> IoPolicy {
+        if matches!(&self.backing, Backing::Gzip(_)) {
+            return IoPolicy::Blocking;
+        }
         let spills = self
             .spill_limit
             .is_some_and(|limit| self.position.saturating_add(length) >= limit);
@@ -170,6 +186,7 @@ impl Stream {
                 file.get_mut().read(buffer)
             }
             Backing::File(file) => file.read(buffer),
+            Backing::Gzip(gzip) => gzip.read(buffer),
             Backing::Memory(cursor) => cursor.read(buffer),
             Backing::Input(input) => Ok(input.read(buffer, self.chunk_size)),
             Backing::Output => Ok(0),
@@ -181,6 +198,7 @@ impl Stream {
         let limit = limit.unwrap_or(u64::MAX);
         match &mut self.backing {
             Backing::File(file) => file.take(limit).read_until(b'\n', &mut line)?,
+            Backing::Gzip(gzip) => gzip.line(limit, &mut line)?,
             Backing::Memory(cursor) => cursor.take(limit).read_until(b'\n', &mut line)?,
             Backing::Input(input) => {
                 line = input.line(
@@ -213,6 +231,7 @@ impl Stream {
                 }
                 file.get_mut().write(bytes)?
             }
+            Backing::Gzip(gzip) => gzip.write(bytes)?,
             Backing::Memory(cursor) if self.writable => {
                 if self.appending {
                     cursor.set_position(cursor.get_ref().len() as u64);
@@ -257,12 +276,21 @@ impl Stream {
         Ok(())
     }
 
+    pub fn seek_policy(&self) -> IoPolicy {
+        if self.wrapper.is_gzip() {
+            IoPolicy::Blocking
+        } else {
+            IoPolicy::Inline
+        }
+    }
+
     pub fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
         if !self.seekable {
             return Err(io::ErrorKind::Unsupported.into());
         }
         let position = match &mut self.backing {
             Backing::File(file) => file.seek(position)?,
+            Backing::Gzip(gzip) => gzip.seek(self.position, position)?,
             Backing::Memory(cursor) => cursor.seek(position)?,
             Backing::Input(cursor) => cursor.seek(position)?,
             Backing::Output => return Err(io::ErrorKind::Unsupported.into()),
@@ -270,6 +298,13 @@ impl Stream {
         self.position = position;
         self.eof = false;
         Ok(position)
+    }
+
+    pub fn finish(&mut self) -> io::Result<()> {
+        match &mut self.backing {
+            Backing::Gzip(gzip) => gzip.finish(),
+            _ => Ok(()),
+        }
     }
 
     pub fn truncate(&mut self, size: u64) -> io::Result<()> {

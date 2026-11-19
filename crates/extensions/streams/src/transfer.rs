@@ -31,48 +31,66 @@ pub fn register(registry: &mut Registry) {
 }
 
 fn fread(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(async move {
-        let resource = stream_arg(&arguments, "fread")?;
-        let length = positive("fread", args::int(&arguments, 1).unwrap_or(0))?;
-        match read(resource, Some(length)).await? {
-            Ok(bytes) => Ok(Value::from(bytes)),
-            Err(error) => {
-                read_notice(context, "fread", &error, read_amount(Some(length)));
-                Ok(Value::Bool(false))
-            }
+    Box::pin(fread_arguments(context, arguments, "fread"))
+}
+
+pub(crate) async fn fread_arguments(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+    function: &str,
+) -> NativeResult {
+    let resource = stream_arg(&arguments, function)?;
+    let length = positive(function, args::int(&arguments, 1).unwrap_or(0))?;
+    match read(resource, Some(length)).await? {
+        Ok(bytes) => Ok(Value::from(bytes)),
+        Err(error) => {
+            read_notice(context, function, &error, read_amount(Some(length)));
+            Ok(Value::Bool(false))
         }
-    })
+    }
 }
 
 fn fgetc(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(async move {
-        let resource = stream_arg(&arguments, "fgetc")?;
-        match read(resource, Some(1)).await? {
-            Ok(bytes) if !bytes.is_empty() => Ok(Value::from(bytes)),
-            Ok(_) => Ok(Value::Bool(false)),
-            Err(error) => {
-                read_notice(context, "fgetc", &error, read_amount(Some(1)));
-                Ok(Value::Bool(false))
-            }
+    Box::pin(fgetc_arguments(context, arguments, "fgetc"))
+}
+
+pub(crate) async fn fgetc_arguments(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+    function: &str,
+) -> NativeResult {
+    let resource = stream_arg(&arguments, function)?;
+    match read(resource, Some(1)).await? {
+        Ok(bytes) if !bytes.is_empty() => Ok(Value::from(bytes)),
+        Ok(_) => Ok(Value::Bool(false)),
+        Err(error) => {
+            read_notice(context, function, &error, read_amount(Some(1)));
+            Ok(Value::Bool(false))
         }
-    })
+    }
 }
 
 fn fgets(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(async move {
-        let resource = stream_arg(&arguments, "fgets")?;
-        let length = args::int(&arguments, 1)
-            .map(|length| positive("fgets", length).map(|length| length - 1))
-            .transpose()?;
-        match line(resource, length).await? {
-            Ok(bytes) if !bytes.is_empty() => Ok(Value::from(bytes)),
-            Ok(_) => Ok(Value::Bool(false)),
-            Err(error) => {
-                read_notice(context, "fgets", &error, read_amount(None));
-                Ok(Value::Bool(false))
-            }
+    Box::pin(fgets_arguments(context, arguments, "fgets"))
+}
+
+pub(crate) async fn fgets_arguments(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+    function: &str,
+) -> NativeResult {
+    let resource = stream_arg(&arguments, function)?;
+    let length = args::int(&arguments, 1)
+        .map(|length| positive(function, length).map(|length| length - 1))
+        .transpose()?;
+    match line(resource, length).await? {
+        Ok(bytes) if !bytes.is_empty() => Ok(Value::from(bytes)),
+        Ok(_) => Ok(Value::Bool(false)),
+        Err(error) => {
+            read_notice(context, function, &error, read_amount(None));
+            Ok(Value::Bool(false))
         }
-    })
+    }
 }
 
 pub async fn line(
@@ -99,7 +117,7 @@ fn fputs(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
     Box::pin(write_arguments(context, arguments, "fputs"))
 }
 
-async fn write_arguments(
+pub(crate) async fn write_arguments(
     context: &mut dyn Context,
     arguments: Vec<Value>,
     function: &str,
@@ -171,27 +189,33 @@ pub fn write_bytes(stream: &mut Stream, data: &[u8]) -> io::Result<usize> {
 }
 
 fn fpassthru(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(async move {
-        let stream = stream_arg(&arguments, "fpassthru")?;
-        let mut total = 0;
-        let policy = with_stream(stream, |stream| stream.read_policy(None))?;
-        loop {
-            let result = operate(stream, policy, |stream| {
-                stream.read(Some(crate::io_policy::CHUNK as u64))
-            })
-            .await?;
-            match result {
-                Ok(bytes) if bytes.is_empty() => break,
-                Ok(bytes) => {
-                    total += bytes.len();
-                    context.write(&bytes);
-                }
-                Err(error) => {
-                    read_notice(context, "fpassthru", &error, read_amount(None));
-                    return Ok(Value::Int(if total == 0 { -1 } else { total as i64 }));
-                }
+    Box::pin(fpassthru_arguments(context, arguments, "fpassthru"))
+}
+
+pub(crate) async fn fpassthru_arguments(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+    function: &str,
+) -> NativeResult {
+    let stream = stream_arg(&arguments, function)?;
+    let mut total = 0;
+    let policy = with_stream(stream, |stream| stream.read_policy(None))?;
+    loop {
+        let result = operate(stream, policy, |stream| {
+            stream.read(Some(crate::io_policy::CHUNK as u64))
+        })
+        .await?;
+        match result {
+            Ok(bytes) if bytes.is_empty() => break,
+            Ok(bytes) => {
+                total += bytes.len();
+                context.write(&bytes);
+            }
+            Err(error) => {
+                read_notice(context, function, &error, read_amount(None));
+                return Ok(Value::Int(if total == 0 { -1 } else { total as i64 }));
             }
         }
-        Ok(Value::Int(total as i64))
-    })
+    }
+    Ok(Value::Int(total as i64))
 }

@@ -96,6 +96,7 @@ impl Runtime {
         registry.load(&phera_ext_standard::Standard);
         registry.load(&phera_ext_tokenizer::Tokenizer);
         registry.load(&phera_ext_streams::Streams);
+        registry.load(&phera_ext_zlib::Zlib);
         registry.load(&phera_ext_bcmath::BcMath);
         registry.load(&phera_ext_gmp::Gmp);
         registry.load(&phera_ext_ctype::Ctype);

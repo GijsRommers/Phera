@@ -11,6 +11,7 @@ use rustix::io::fcntl_dupfd_cloexec;
 use crate::errors::{
     nonempty_path, open_failure_message, reason, wrapper_message, wrapper_warning,
 };
+use crate::gzip::open_gzip;
 use crate::io_policy::IoPolicy;
 use crate::mode::Mode;
 use crate::request::{directory, files, path, resource, search};
@@ -20,6 +21,7 @@ const TEMP_DEFAULT: u64 = 2 * 1024 * 1024;
 
 pub enum Target<'a> {
     File(&'a [u8]),
+    Gzip(&'a [u8]),
     RemoteFile,
     Php(&'a [u8]),
     Data(&'a [u8]),
@@ -51,6 +53,8 @@ impl<'a> Target<'a> {
             } else {
                 Self::RemoteFile
             }
+        } else if protocol.eq_ignore_ascii_case(b"compress.zlib") {
+            Self::Gzip(rest)
         } else if protocol.eq_ignore_ascii_case(b"php") {
             Self::Php(rest)
         } else {
@@ -121,6 +125,9 @@ pub(crate) async fn open_with_errors(
     // The PHP mode parser takes a C string and keeps at most 15 bytes in metadata.
     let mode = mode.split(|byte| *byte == 0).next().unwrap_or_default();
     let (result, warning) = match Target::parse(name) {
+        Target::Gzip(filename) => {
+            return open_gzip(context, function, filename, name, mode, include_path, false).await;
+        }
         Target::File(filename) => (
             open_file(context, filename, name, mode, include_path).await?,
             None,

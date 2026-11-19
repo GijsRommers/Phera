@@ -207,3 +207,6 @@ core	zend.script_encoding	string	7	-
 core	zend.signal_check	bool	4	30
 
 bcmath	bcmath.scale	int	7	30
+zlib	zlib.output_compression	bool	7	30
+zlib	zlib.output_compression_level	int	7	2d31
+zlib	zlib.output_handler	string	7	=

@@ -65,6 +65,7 @@ phera-server = { path = "crates/server" }
 phera-phpt = { path = "crates/phpt" }
 phera-extension-api = { path = "crates/extension-api" }
 phera-ext-core = { path = "crates/extensions/core" }
+phera-ext-zlib = { path = "crates/extensions/zlib" }
 phera-ext-gmp = { path = "crates/extensions/gmp" }
 phera-ext-bcmath = { path = "crates/extensions/bcmath" }
 phera-ext-ctype = { path = "crates/extensions/ctype" }
@@ -151,6 +152,7 @@ httpdate = "1"
 # Compressing responses in `phera serve`. Both are Rust all the way down:
 # flate2 with its default miniz_oxide backend, and Dropbox's brotli.
 flate2 = "1"
+adler2 = "2"
 num-bigint = "0.4"
 num-integer = "0.1"
 num-traits = "0.2"

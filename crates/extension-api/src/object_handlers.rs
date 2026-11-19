@@ -148,6 +148,8 @@ pub struct ClassHooks {
     pub binary: Option<NativeBinary>,
     pub unary: Option<NativeUnary>,
     pub cast: Option<NativeCast>,
+    /// Native state that cannot be represented by PHP's serialization format.
+    pub forbid_serialization: bool,
     /// Whole-object enumeration, with the consuming operation supplied as a purpose.
     pub properties: Option<PropertyProjection>,
     /// Direct read, mutation or presence check for one virtual property.
@@ -170,6 +172,7 @@ impl ClassHooks {
         binary: None,
         unary: None,
         cast: None,
+        forbid_serialization: false,
         properties: None,
         property_access: None,
         iterator: None,

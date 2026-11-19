@@ -13,6 +13,7 @@ phera-bytecode.workspace = true
 phera-compiler.workspace = true
 phera-extension-api.workspace = true
 phera-ext-core.workspace = true
+phera-ext-zlib.workspace = true
 phera-ext-gmp.workspace = true
 phera-ext-bcmath.workspace = true
 phera-ext-ctype.workspace = true
