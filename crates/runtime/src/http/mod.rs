@@ -11,16 +11,19 @@ mod uploads;
 
 use std::net::SocketAddr;
 
+pub(crate) use multipart::Boundary;
 pub(crate) use superglobals::define_superglobals;
 pub(crate) use uploads::{Form, receive as receive_form};
 
 /// The boundary of a `multipart/form-data` request that PHP would read as a
 /// form: only `POST` fills `$_POST` and `$_FILES`.
-pub(crate) fn form_boundary(request: &HttpRequest) -> Option<Vec<u8>> {
-    (request.method == "POST")
-        .then(|| request.header("Content-Type"))
-        .flatten()
-        .and_then(multipart::boundary)
+pub(crate) fn form_boundary(request: &HttpRequest) -> Boundary {
+    if request.method == "POST"
+        && let Some(value) = request.header("Content-Type")
+    {
+        return multipart::boundary(value);
+    }
+    Boundary::OtherMediaType
 }
 
 /// One HTTP request, already read in full.

@@ -20,6 +20,10 @@
 
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 use phera_value::{PhpArray, Value};
 
@@ -67,15 +71,34 @@ pub(crate) struct Form {
     items: Vec<Item>,
 }
 
-/// Reads a `multipart/form-data` body and writes every acceptable file to
-/// a temporary file. Blocks on the disk: call it from a blocking thread.
-pub(crate) fn receive(body: &[u8], boundary: &[u8]) -> Form {
+/// Dropping the request stops its blocking form reader at the next checkpoint.
+struct CancelForm(Arc<AtomicBool>);
+
+impl Drop for CancelForm {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
+
+pub(crate) async fn receive(body: Vec<u8>, boundary: Vec<u8>) -> Option<Form> {
+    let cancel = CancelForm(Arc::default());
+    let cancelled = cancel.0.clone();
+    tokio::task::spawn_blocking(move || read_form(&body, &boundary, &cancelled))
+        .await
+        .ok()
+}
+
+/// Reads the parts and writes acceptable uploads on a thread that may block.
+fn read_form(body: &[u8], boundary: &[u8], cancelled: &AtomicBool) -> Form {
     let mut items = Vec::new();
     let mut form_limit: Option<u64> = None;
     let mut files = 0;
     let mut fields = 0;
     let mut unnamed = 0;
-    for part in multipart::parts(body, boundary) {
+    for part in multipart::parts(body, boundary, cancelled) {
+        if cancelled.load(Ordering::Relaxed) {
+            break;
+        }
         let Some(filename) = part.filename.clone() else {
             let Some(name) = part.name else { continue };
             if fields == MOST_FIELDS {
@@ -101,13 +124,21 @@ pub(crate) fn receive(body: &[u8], boundary: &[u8]) -> Form {
             unnamed += 1;
             (unnamed - 1).to_string().into_bytes()
         });
-        items.push(Item::File(store(field, filename, &part, form_limit)));
+        items.push(Item::File(store(
+            field, filename, &part, form_limit, cancelled,
+        )));
     }
     Form { items }
 }
 
 /// Decides what becomes of one file part and writes it if it is accepted.
-fn store(field: Vec<u8>, filename: Vec<u8>, part: &Part<'_>, form_limit: Option<u64>) -> Upload {
+fn store(
+    field: Vec<u8>,
+    filename: Vec<u8>,
+    part: &Part<'_>,
+    form_limit: Option<u64>,
+    cancelled: &AtomicBool,
+) -> Upload {
     let length = part.content.len() as u64;
     let error = if filename.is_empty() {
         UploadError::NoFile
@@ -120,7 +151,7 @@ fn store(field: Vec<u8>, filename: Vec<u8>, part: &Part<'_>, form_limit: Option<
     } else {
         UploadError::Ok
     };
-    let written = (error == UploadError::Ok).then(|| write_temporary(part.content));
+    let written = (error == UploadError::Ok).then(|| write_temporary(part.content, cancelled));
     let (temporary, error) = match written {
         Some(Ok(path)) => (Some(path), UploadError::Ok),
         Some(Err(_)) => (None, UploadError::CannotWrite),
@@ -144,12 +175,17 @@ fn store(field: Vec<u8>, filename: Vec<u8>, part: &Part<'_>, form_limit: Option<
 
 /// Writes `content` to a new file `php??????` in the temporary directory,
 /// readable by this user only.
-fn write_temporary(content: &[u8]) -> std::io::Result<PathBuf> {
+fn write_temporary(content: &[u8], cancelled: &AtomicBool) -> std::io::Result<PathBuf> {
     let mut file = tempfile::Builder::new()
         .prefix("php")
         .rand_bytes(6)
         .tempfile()?;
-    file.write_all(content)?;
+    for chunk in content.chunks(64 * 1024) {
+        if cancelled.load(Ordering::Relaxed) {
+            return Err(std::io::ErrorKind::Interrupted.into());
+        }
+        file.write_all(chunk)?;
+    }
     file.flush()?;
     // From here on the file stays until `move_uploaded_file()` takes it or
     // the request ends.

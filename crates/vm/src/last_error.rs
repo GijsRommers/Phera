@@ -28,6 +28,19 @@ impl LastError {
 }
 
 impl Vm {
+    /// Reports a warning produced while PHP reads the request before running its script.
+    pub fn request_startup_warning(&mut self, message: &str) {
+        self.report_diagnostic(
+            2,
+            "Warning",
+            message.into(),
+            SourceLocation {
+                file: "Unknown".into(),
+                line: 0,
+            },
+        );
+    }
+
     /// A diagnostic reaches this path only when PHP's default handler owns it.
     pub(crate) fn report_diagnostic(
         &mut self,

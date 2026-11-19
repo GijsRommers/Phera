@@ -34,6 +34,7 @@ phera-value.workspace = true
 phera-vm.workspace = true
 tokio.workspace = true
 tempfile.workspace = true
+memchr.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }

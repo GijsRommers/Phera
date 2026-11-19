@@ -208,14 +208,14 @@ impl Runtime {
         // and its files are written on a thread that may block. PHP gives
         // such a request no raw body to read afterwards.
         let mut request = request;
-        let form = match http::form_boundary(&request) {
-            Some(boundary) => {
+        let boundary = http::form_boundary(&request);
+        let (form, form_warning) = match boundary {
+            http::Boundary::Valid(boundary) => {
                 let body = std::mem::take(&mut request.body);
-                tokio::task::spawn_blocking(move || http::receive_form(&body, &boundary))
-                    .await
-                    .ok()
+                (http::receive_form(body, boundary).await, None)
             }
-            None => None,
+            http::Boundary::Invalid(warning) => (None, Some(warning)),
+            http::Boundary::OtherMediaType => (None, None),
         };
 
         let mut vm = self.new_vm(&worker.native, Sapi::Web, worker.environment.clone());
@@ -235,6 +235,9 @@ impl Runtime {
             script.parent().map(Path::to_path_buf),
             request.body.into(),
         );
+        if let Some(warning) = form_warning {
+            vm.request_startup_warning(warning);
+        }
         let exit_status = vm.run(unit).await;
         let head = vm.state_mut().take::<ResponseHead>().unwrap_or_default();
 

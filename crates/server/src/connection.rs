@@ -64,6 +64,15 @@ fn is_ordinary_end(error: &hyper::Error) -> bool {
     error.is_timeout() || error.is_incomplete_message()
 }
 
+/// When the connection goes away, dropping its service also stops the request.
+struct AbortRequest(tokio::task::AbortHandle);
+
+impl Drop for AbortRequest {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 /// Runs the handler for one request, for at most `time_limit`.
 async fn answer(
     handler: Rc<dyn Handler>,
@@ -73,6 +82,7 @@ async fn answer(
     // The handler runs on its own task so that a panic becomes a 500
     // instead of tearing down the connection task or the worker.
     let mut task = tokio::task::spawn_local(async move { handler.handle(request).await });
+    let _request = AbortRequest(task.abort_handle());
     let finished = match time_limit {
         None => (&mut task).await,
         Some(limit) => match tokio::time::timeout(limit, &mut task).await {
@@ -82,6 +92,7 @@ async fn answer(
                 // takes effect the next time the handler waits or yields,
                 // which a running PHP script does regularly.
                 task.abort();
+                let _ = task.await;
                 return Response::text(504, "the request took too long\n");
             }
         },

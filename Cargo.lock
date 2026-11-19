@@ -1986,6 +1986,7 @@ dependencies = [
 name = "phera-runtime"
 version = "0.1.0"
 dependencies = [
+ "memchr",
  "phera-bytecode",
  "phera-compiler",
  "phera-dotenv",
