@@ -313,6 +313,10 @@ drivers. **Later:** openssl, curl, dom and xml, intl, fileinfo, iconv.
 Locale names are remembered per request, C/POSIX behavior is implemented,
 and localized data is missing.
 
+**The system log:** `syslog()` writes its message to standard error, one
+line per message, where `error_log()` also writes; PHP hands it to the
+machine's system logger. The facility is accepted and has no effect.
+
 **Session cookie IDs:** Phera rejects an entire ID containing a NUL before it
 touches storage. PHP currently truncates the ID and uses the prefix as a file
 name. Rejecting the entire ID prevents an invalid cookie from opening that file.
