@@ -220,6 +220,7 @@ impl Vm {
             .as_ref()
             .map(|class| class.methods.clone())
             .unwrap_or_default();
+        let mut pending = Vec::new();
         for method in &declaration.methods {
             let method_name = &unit.names[method.name.index()];
             let linked = Rc::new(Method {
@@ -262,7 +263,11 @@ impl Vm {
             if let Some(inherited) = methods.get(&key) {
                 super::inheritance_checks::check_override(name, inherited, &linked)
                     .map_err(|error| self.magic_override_error(&linked, error))?;
-                self.check_method_contract(inherited, &linked, unit)?;
+                if let Some(miss) = self.check_method_contract(inherited, &linked, unit)?
+                    && let Some(parent) = &parent
+                {
+                    pending.push(((0, self.method_listing_order(parent, inherited)), miss));
+                }
             }
             methods.insert(key, linked);
         }
@@ -306,7 +311,7 @@ impl Vm {
                 interfaces.push(stringable);
             }
         }
-        for interface in &interfaces {
+        for (index, interface) in interfaces.iter().enumerate() {
             for (method_name, method) in &interface.methods {
                 if let Some(implementation) = methods.get(method_name) {
                     let native = matches!(method.body, MethodBody::Native(entry) if entry.return_type.is_some());
@@ -331,12 +336,23 @@ impl Vm {
                             }
                         })?;
                     }
-                    self.check_method_contract(method, implementation, unit)?;
+                    if let Some(miss) = self.check_method_contract(method, implementation, unit)? {
+                        pending.push((
+                            (index + 1, self.method_listing_order(interface, method)),
+                            miss,
+                        ));
+                    }
                 }
                 methods
                     .entry(method_name.clone())
                     .or_insert_with(|| method.clone());
             }
+        }
+        if !pending.is_empty() {
+            pending.sort_by(|(left, _), (right, _)| left.cmp(right));
+            return Err(crate::autoload::ClassMiss::method_signatures(
+                pending.into_iter().map(|(_, miss)| miss).collect(),
+            ));
         }
         super::inheritance_checks::check_abstract(
             name,

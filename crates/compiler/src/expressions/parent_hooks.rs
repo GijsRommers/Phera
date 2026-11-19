@@ -14,7 +14,7 @@ impl Compiler<'_> {
         arguments: &Arguments,
         line: usize,
     ) -> Result<Option<Reg>, CompileError> {
-        let ExpressionKind::StaticProperty { class, name } = &target.kind else {
+        let ExpressionKind::StaticProperty { class, name, .. } = &target.kind else {
             return Ok(None);
         };
         let property = match name {

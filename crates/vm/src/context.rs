@@ -111,6 +111,19 @@ impl Context for Vm {
         Vm::ini_list(self, module, details)
     }
 
+    fn included_files(&self) -> phera_value::PhpArray {
+        self.include_state
+            .files()
+            .enumerate()
+            .map(|(index, file)| {
+                (
+                    phera_value::ArrayKey::Int(index as i64),
+                    Value::from(file.as_str()),
+                )
+            })
+            .collect()
+    }
+
     fn include_path(&self) -> phera_value::PhpString {
         Vm::include_path(self)
     }
@@ -346,7 +359,12 @@ impl Context for Vm {
         if function == "var_dump"
             && let Some(class) = self.hooked_property_class(&object).or_else(|| {
                 self.classes.for_object(&object).filter(|class| {
-                    class.has_only_php_ancestors()
+                    // A native dump projection (for example DateTime's) exposes its
+                    // own entries. Exception uses the ordinary declared property table.
+                    class
+                        .hooks
+                        .as_ref()
+                        .is_none_or(|hooks| hooks.properties.is_none())
                         && class.defaults.iter().any(|property| property.ty.is_some())
                 })
             })

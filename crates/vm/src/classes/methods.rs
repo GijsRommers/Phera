@@ -153,6 +153,15 @@ impl Vm {
         let scope = initializer_scope
             .as_ref()
             .or_else(|| self.current().and_then(|frame| frame.scope()));
+        self.check_visibility_in_scope(method, invocation, scope)
+    }
+
+    pub(super) fn check_visibility_in_scope(
+        &self,
+        method: &Method,
+        invocation: Invocation,
+        scope: Option<&Rc<Class>>,
+    ) -> Result<(), NativeError> {
         let allowed = match method.visibility {
             Visibility::Public => true,
             Visibility::Private => scope.is_some_and(|scope| scope.name == method.declaring),

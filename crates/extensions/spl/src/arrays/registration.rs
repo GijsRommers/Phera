@@ -53,13 +53,13 @@ const COMMON: [Method; 20] = const {
         Method::public("setFlags", &[FLAGS], methods::set_flags).tentative_return("void"),
         Method::public_async(
             "asort",
-            const { &[FLAGS.with_default(ConstantValue::Int(0))] },
+            const { &[FLAGS.with_constant_default("SORT_REGULAR", ConstantValue::Int(0))] },
             sorting::asort,
         )
         .tentative_return("true"),
         Method::public_async(
             "ksort",
-            const { &[FLAGS.with_default(ConstantValue::Int(0))] },
+            const { &[FLAGS.with_constant_default("SORT_REGULAR", ConstantValue::Int(0))] },
             sorting::ksort,
         )
         .tentative_return("true"),

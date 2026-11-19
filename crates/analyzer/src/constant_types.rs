@@ -46,6 +46,7 @@ pub fn infer(
         ExpressionKind::Call {
             callee,
             arguments: Arguments::FirstClassCallable,
+            ..
         } => {
             if let ExpressionKind::Name(name) = &callee.kind
                 && callee.span == name.span

@@ -7,32 +7,6 @@ use crate::ir::{Instruction, Target};
 use crate::{CompileError, Compiler, binary, writable};
 
 impl Compiler<'_> {
-    /// Read a variable or indexed value after evaluating its path.
-    pub(crate) fn compile_read(
-        &mut self,
-        expression: &ast::Expression,
-        line: usize,
-    ) -> Result<Reg, CompileError> {
-        let place = self.readable_place(expression)?;
-        if place
-            .path
-            .iter()
-            .any(|step| matches!(step, crate::ir::PathStep::Append))
-        {
-            return Err(self.error("Cannot use [] for reading", line));
-        }
-        let dst = self.allocate_register()?;
-        self.emit(
-            Instruction::Read {
-                destination: dst,
-                place,
-                mode: phera_bytecode::FetchMode::Read,
-            },
-            line,
-        );
-        Ok(dst)
-    }
-
     /// Evaluate property receivers and keys before the source. A simple local
     /// source is read only when the destination is ready to be written.
     pub(crate) fn compile_assignment(

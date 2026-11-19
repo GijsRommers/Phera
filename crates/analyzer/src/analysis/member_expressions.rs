@@ -46,7 +46,7 @@ impl Analyzer<'_> {
                     Access::object(target),
                 )
             }
-            ExpressionKind::StaticProperty { class, name } => {
+            ExpressionKind::StaticProperty { class, name, .. } => {
                 self.static_property(class, name, scope, expression.span, quiet)
             }
             ExpressionKind::ClassConstant { class, name } => {

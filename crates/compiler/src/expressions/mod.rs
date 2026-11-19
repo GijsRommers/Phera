@@ -57,7 +57,7 @@ impl Compiler<'_> {
             ExpressionKind::Variable(_)
             | ExpressionKind::Index { .. }
             | ExpressionKind::Property { .. }
-            | ast::ExpressionKind::StaticProperty { .. } => self.compile_read(expression, line),
+            | ast::ExpressionKind::StaticProperty { .. } => self.compile_read(expression),
             ExpressionKind::Assign { target, value } => {
                 self.compile_assignment(target, value, line)
             }
@@ -107,9 +107,11 @@ impl Compiler<'_> {
             ExpressionKind::Print(expression) => self.compile_print(expression, line),
             ExpressionKind::Exit(expression) => self.compile_exit(expression, line),
             ExpressionKind::Name(name) => self.compile_constant(name, line),
-            ExpressionKind::Call { callee, arguments } => {
-                self.compile_call(callee, arguments, line)
-            }
+            ExpressionKind::Call {
+                callee,
+                arguments,
+                opening,
+            } => self.compile_call(callee, arguments, line, self.lines.line(*opening)),
             ExpressionKind::Array(items) => self.compile_array(items, line),
             ExpressionKind::InterpolatedString(parts) => self.compile_interpolation(parts, line),
             ExpressionKind::Empty(value) => self.compile_empty(value, line),

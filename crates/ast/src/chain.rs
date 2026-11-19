@@ -115,11 +115,17 @@ impl Expression {
                 increment: *increment,
                 prefix: *prefix,
             },
-            ExpressionKind::Call { arguments, .. } => ExpressionKind::Call {
+            ExpressionKind::Call {
+                arguments, opening, ..
+            } => ExpressionKind::Call {
+                opening: *opening,
                 callee: hole(),
                 arguments: arguments.clone(),
             },
-            ExpressionKind::StaticProperty { name, .. } => ExpressionKind::StaticProperty {
+            ExpressionKind::StaticProperty {
+                name, name_start, ..
+            } => ExpressionKind::StaticProperty {
+                name_start: *name_start,
                 class: hole(),
                 name: name.clone(),
             },
