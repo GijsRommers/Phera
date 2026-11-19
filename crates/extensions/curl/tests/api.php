@@ -8,7 +8,12 @@ foreach (range(0, 255) as $i) {
     }
 }
 foreach (range(-1, 105) as $i) {
-    run("strerror/$i", fn() => curl_strerror($i));
+    // Some libcurl packages predate the codes beyond 99.
+    if ($i >= 100 && $i <= 101 && !in_array((string)$i, $knownNewErrors, true)) {
+        run("strerror/$i/older-backend", fn() => is_string(curl_strerror($i)));
+    } else {
+        run("strerror/$i", fn() => curl_strerror($i));
+    }
 }
 foreach (range(-1, 14) as $i) {
     run("multi_strerror/$i", fn() => curl_multi_strerror($i));

@@ -215,6 +215,17 @@ pub(crate) async fn client(
     dns: Option<SharedDns>,
 ) -> Result<(HttpClient, Option<Vec<u8>>), TransferError> {
     let proxy = if settings.transport.unix.is_some() {
+        if settings
+            .transport
+            .proxy
+            .as_ref()
+            .is_some_and(|proxy| !proxy.is_empty())
+        {
+            return Err(TransferError::new(
+                4,
+                "An HTTP proxy cannot use a Unix socket in Phera",
+            ));
+        }
         None
     } else {
         proxy::select(&settings.transport, url)?

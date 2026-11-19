@@ -50,6 +50,12 @@ pub(super) fn select(settings: &Transport, target: &Url) -> Result<Option<Proxy>
     } else {
         format!("http://{address}")
     };
+    // WHATWG URL parsing removes an explicit default port.
+    let supplied_port = address
+        .split_once("://")
+        .and_then(|(_, address)| address.split('/').next())
+        .and_then(|authority| authority.rsplit_once(':'))
+        .and_then(|(_, port)| port.parse::<u16>().ok());
     let valid = Url::parse(&address).ok();
     let Some(url) = valid.filter(|url| url.scheme() == "http") else {
         return Err(TransferError::new(
@@ -76,7 +82,11 @@ pub(super) fn select(settings: &Transport, target: &Url) -> Result<Option<Proxy>
         .flatten();
     Ok(Some(Proxy {
         host: host.trim_matches(['[', ']']).to_owned(),
-        port: settings.proxy_port.or(url.port()).unwrap_or(1080),
+        port: settings
+            .proxy_port
+            .or(url.port())
+            .or(supplied_port)
+            .unwrap_or(1080),
         credentials,
     }))
 }

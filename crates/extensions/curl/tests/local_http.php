@@ -29,7 +29,13 @@ run('gzip', fn() => transfer_result(load_url($base . '/gzip', [
     CURLOPT_ACCEPT_ENCODING => 'gzip',
 ])));
 run('chunks', fn() => transfer_result(load_url($base . '/chunks')));
-run('cut', fn() => transfer_result(load_url($base . '/cut')));
+run('cut', function () use ($base) {
+    $result = transfer_result(load_url($base . '/cut'));
+    // Older libcurl releases use another phrase for the same byte count.
+    $result[8] = preg_replace('/^transfer closed with (\d+) bytes remaining to read$/',
+        'end of response with $1 bytes missing', $result[8]);
+    return $result;
+});
 run('timeout', function () use ($base) {
     $handle = load_url($base . '/wait', [CURLOPT_TIMEOUT_MS => 40]);
     $result = curl_exec($handle);

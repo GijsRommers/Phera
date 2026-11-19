@@ -27,7 +27,8 @@ if ($body === false) {
 an unavailable option emits a warning, returns `false`, and leaves the transfer
 configuration unchanged. TLS peer and hostname verification are mandatory.
 An attempt to disable either fails with a warning. Proxy support covers HTTP
-forwarding and CONNECT; other types are refused.
+forwarding and CONNECT. Other proxy types and explicit proxies over a Unix
+socket are refused.
 
 The client permits only HTTP and HTTPS, including on redirects. Other schemes
 fail with `CURLE_UNSUPPORTED_PROTOCOL` before opening a file or a connection.

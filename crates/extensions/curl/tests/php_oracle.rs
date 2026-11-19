@@ -23,17 +23,24 @@ fn compare(name: &str, script: &str) {
 
 #[test]
 fn native_api() {
-    let fields = oracle::run_php(
+    let capabilities = oracle::run_php(
         "curl-library-fields",
-        "<?php echo implode(',', array_keys(curl_getinfo(curl_init())));",
+        concat!(
+            "<?php echo implode(',', array_keys(curl_getinfo(curl_init()))), PHP_EOL;",
+            "foreach (range(100, 105) as $code) {",
+            "if (curl_strerror($code) !== 'Unknown error') echo $code, ',';",
+            "}",
+        ),
     )
     .expect("PHP 8.5 oracle must be installed");
-    let keys = fields.first().expect("curl_getinfo keys");
-    let script = format!(
-        "<?php\n{}\n$oracleFields = explode(',', '{keys}');\n{}",
-        oracle::PHP_PREAMBLE,
-        include_str!("api.php")
+    let keys = capabilities.first().expect("curl_getinfo keys");
+    let codes = capabilities.get(1).map_or("", String::as_str);
+    let prefix = format!(
+        "<?php\n{}\n$oracleFields = explode(',', '{keys}');\n",
+        oracle::PHP_PREAMBLE
     );
+    let setup = format!("$knownNewErrors = explode(',', '{codes}');\n");
+    let script = format!("{prefix}{setup}{}", include_str!("api.php"));
     compare("curl-native-api", &script);
 }
 
@@ -55,7 +62,15 @@ fn constant_catalog() {
     for line in &php {
         let (name, number) = line.split_once(' ').expect("cURL constant record");
         let expected = ConstantValue::Int(number.parse::<i64>().expect("cURL constant number"));
-        assert_eq!(registry.get_constant(name), Some(&expected), "{name}");
+        if name == "CURLINFO_LASTONE" {
+            // This sentinel advances when libcurl adds a new selector.
+            let Some(ConstantValue::Int(registered)) = registry.get_constant(name) else {
+                panic!("missing CURLINFO_LASTONE");
+            };
+            assert!(*registered >= number.parse().unwrap());
+        } else {
+            assert_eq!(registry.get_constant(name), Some(&expected), "{name}");
+        }
     }
     println!(
         "curl constant catalog: {} PHP constants, zero mismatches",

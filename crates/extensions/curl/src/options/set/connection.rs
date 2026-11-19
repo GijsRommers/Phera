@@ -46,14 +46,20 @@ pub(super) fn change(
             let proxy = strings::text(text);
             if proxy
                 .as_deref()
-                .is_some_and(|v| v.contains("://") && !v.starts_with("http://"))
+                .and_then(|value| value.split_once("://"))
+                .is_some_and(|(scheme, _)| !scheme.eq_ignore_ascii_case("http"))
             {
                 return Ok(Change::Refused("only HTTP proxies are available"));
             }
             transport.proxy = proxy;
         }
         CURLOPT_PROXYTYPE if number == 0 => {}
-        CURLOPT_PROXYPORT => transport.proxy_port = u16::try_from(number).ok().filter(|p| *p != 0),
+        CURLOPT_PROXYPORT => {
+            let Ok(port) = u16::try_from(number) else {
+                return Ok(Change::Refused("proxy port must be between 0 and 65535"));
+            };
+            transport.proxy_port = (port != 0).then_some(port);
+        }
         CURLOPT_PROXYUSERPWD => transport.proxy_credentials = text,
         CURLOPT_PROXYAUTH if number == 1 || number == 0 => {
             transport.proxy_auth = number == 1;
