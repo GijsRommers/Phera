@@ -161,6 +161,7 @@ fn digest_and_kdf_calls_match_php() {
         "sha1\0suffix",
         "SHA224",
         "sha256",
+        "sha-256",
         "sha384",
         "sha512",
         "sha512-224",
@@ -210,4 +211,87 @@ fn digest_and_kdf_calls_match_php() {
     }
     matrix.case("openssl_error_string", vec![], None);
     matrix.check("openssl_digests");
+}
+
+#[test]
+fn all_gcm_nonce_lengths_match_php() {
+    let mut matrix = Matrix::new();
+    for (method, key_length) in [
+        ("aes-128-gcm", 16),
+        ("aes-192-gcm", 24),
+        ("aes-256-gcm", 32),
+    ] {
+        for length in 1..=128 {
+            let nonce = (0..length).map(|byte| byte as u8).collect::<Vec<_>>();
+            for tag_length in [4, 8, 12, 13, 14, 15, 16] {
+                let mut arguments = vec![
+                    Value::from("message"),
+                    Value::from(method),
+                    Value::from(vec![b'k'; key_length]),
+                    Value::Int(1),
+                    Value::from(nonce.clone()),
+                    Value::from("sentinel"),
+                    Value::from(b"\0\xff AAD".to_vec()),
+                    Value::Int(tag_length),
+                ];
+                let (ciphertext, tag) = matrix
+                    .case("openssl_encrypt", arguments.clone(), Some(5))
+                    .expect("encrypt returns a result");
+                assert!(matches!(ciphertext, Value::String(_)));
+                arguments[0] = ciphertext;
+                arguments[5] = tag;
+                arguments.pop();
+                matrix.case("openssl_decrypt", arguments, None);
+            }
+        }
+    }
+    matrix.check("openssl_gcm_nonces");
+}
+
+#[test]
+fn nist_aes_gcm_and_cbc_vectors() {
+    let mut matrix = Matrix::new();
+    let (ciphertext, tag) = matrix
+        .case(
+            "openssl_encrypt",
+            vec![
+                Value::from(vec![0; 16]),
+                Value::from("aes-128-gcm"),
+                Value::from(vec![0; 16]),
+                Value::Int(1),
+                Value::from(vec![0; 12]),
+                Value::Null,
+            ],
+            Some(5),
+        )
+        .unwrap();
+    // NIST GCM test data also used by the upstream PHP and RustCrypto tests.
+    assert_eq!(ciphertext, hex("0388dace60b6a392f328c2b971b2fe78"));
+    assert_eq!(tag, hex("ab6e47d42cec13bdf53a67b21257bddf"));
+
+    let (ciphertext, _) = matrix
+        .case(
+            "openssl_encrypt",
+            vec![
+                hex("6bc1bee22e409f96e93d7e117393172a"),
+                Value::from("aes-256-cbc"),
+                hex("603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4"),
+                Value::Int(3),
+                hex("000102030405060708090a0b0c0d0e0f"),
+            ],
+            None,
+        )
+        .unwrap();
+    // NIST SP 800-38A, F.2.5 AES-256-CBC encryption.
+    assert_eq!(ciphertext, hex("f58c4c04d6e5f1ba779eabfb5f7bfbd6"));
+    matrix.check("openssl_nist_vectors");
+}
+
+fn hex(encoded: &str) -> Value {
+    Value::from(
+        (0..encoded.len())
+            .step_by(2)
+            .map(|index| u8::from_str_radix(&encoded[index..index + 2], 16).unwrap())
+            .collect::<Vec<_>>(),
+    )
 }

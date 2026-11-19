@@ -1,8 +1,9 @@
 //! `openssl_pkey_get_private([$pem, $passphrase])` reads an encrypted private key.
 
+use std::borrow::Cow;
 use std::rc::Rc;
 
-use phera_extension_api::{ArrayKey, Context, NativeError, Value};
+use phera_extension_api::{ArrayKey, Context, NativeError, Value, WorkingDirectory};
 
 use crate::errors;
 use crate::key::{self, Key};
@@ -53,42 +54,68 @@ pub(crate) async fn load(
             (Key::Public(_), Role::Private) => Ok(None),
         };
     }
+    if let Value::Object(object) = &value
+        && let Some(certificate) = crate::certificate::stored(object)
+    {
+        return Ok(match role {
+            Role::Public => crate::certificate::public_key(&certificate)
+                .map(Key::Public)
+                .map(Rc::new),
+            Role::Private => None,
+        });
+    }
     let string = match value {
         Value::String(string) => string,
         Value::Object(_) => context.stringify(&value).await?,
         _ => return Ok(None),
     };
-    let bytes = string.as_bytes();
-    let file;
-    let bytes = if let Some(path) = bytes.strip_prefix(b"file://") {
-        let Some(path) = path_from_bytes(path) else {
-            return Ok(None);
-        };
-        match tokio::fs::read(path).await {
-            Ok(contents) => {
-                file = contents;
-                &file
-            }
-            Err(_) => {
-                errors::push(
-                    context,
-                    "error:FFFFFFFF80000002:system library::No such file or directory",
-                );
-                errors::push(context, "error:10000080:BIO routines::no such file");
-                return Ok(None);
-            }
-        }
-    } else {
-        bytes
+    let Some(bytes) = read_key_file(context, string.as_bytes()).await else {
+        return Ok(None);
     };
     let parsed = match role {
-        Role::Private => key_format::private(bytes, password).map(Key::Private),
-        Role::Public => key_format::public(bytes).map(Key::Public),
+        Role::Private => key_format::private(&bytes, password).map(Key::Private),
+        Role::Public => key_format::public(&bytes)
+            .or_else(|| {
+                crate::certificate::parse(&bytes)
+                    .and_then(|certificate| crate::certificate::public_key(&certificate))
+            })
+            .map(Key::Public),
     };
     if parsed.is_none() {
         errors::push(context, "error:1E08010C:DECODER routines::unsupported");
     }
     Ok(parsed.map(Rc::new))
+}
+
+pub(crate) async fn read_key_file<'a>(
+    context: &mut dyn Context,
+    bytes: &'a [u8],
+) -> Option<Cow<'a, [u8]>> {
+    let Some(path) = bytes.strip_prefix(b"file://") else {
+        return Some(Cow::Borrowed(bytes));
+    };
+    let path = working_path(context, path_from_bytes(path)?).ok()?;
+    match tokio::fs::read(path).await {
+        Ok(contents) => Some(Cow::Owned(contents)),
+        Err(_) => {
+            errors::push(
+                context,
+                "error:FFFFFFFF80000002:system library::No such file or directory",
+            );
+            errors::push(context, "error:10000080:BIO routines::no such file");
+            None
+        }
+    }
+}
+
+pub(crate) fn working_path(
+    context: &mut dyn Context,
+    path: &std::path::Path,
+) -> std::io::Result<std::path::PathBuf> {
+    context
+        .state()
+        .get_or_default::<WorkingDirectory>()
+        .resolve(path)
 }
 
 pub(crate) fn path_from_bytes(bytes: &[u8]) -> Option<&std::path::Path> {

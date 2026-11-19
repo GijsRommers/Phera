@@ -11,7 +11,7 @@ use super::{Matrix, fixtures, native, unhex};
 #[test]
 fn exchange_rsa_messages_and_password_protected_keys() {
     use std::fmt::Write;
-    let keys = fixtures();
+    let keys = fixtures("openssl_key_interop_fixtures");
     let (private, public) = &keys[0];
     let (registry, mut context) = native();
     let mut matrix = Matrix::new();

@@ -25,7 +25,7 @@ pub(crate) const FUNCTIONS: &[FunctionEntry] = &[
         &[
             DATA,
             Param::new("signature", ParamType::Mixed).by_ref(),
-            Param::new("private_key", ParamType::Mixed),
+            Param::new("private_key", ParamType::Mixed).sensitive(),
             ALGORITHM,
             PADDING,
         ],
@@ -247,6 +247,9 @@ fn verify_bytes(
     data: &[u8],
     signature: &[u8],
 ) -> Option<bool> {
+    if signature.is_empty() && matches!(key, Public::P256(_) | Public::P384(_) | Public::P521(_)) {
+        return Some(false);
+    }
     match key {
         Public::Rsa(key) => {
             match Operation::Verify(key, signature).apply(algorithm.digest(), padding, data)? {
@@ -287,4 +290,14 @@ fn verify_bytes(
         ),
         Public::X25519(_) => None,
     }
+}
+
+pub(crate) fn verify_certificate_bytes(
+    key: &Public,
+    algorithm: Option<Algorithm>,
+    data: &[u8],
+    signature: &[u8],
+) -> Option<bool> {
+    let algorithm = algorithm.map_or(AlgorithmSelection::Default, AlgorithmSelection::Digest);
+    verify_bytes(key, algorithm, Padding::Pkcs1, data, signature)
 }

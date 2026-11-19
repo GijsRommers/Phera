@@ -15,9 +15,11 @@ use crate::key_input::{self, Role};
 
 const DATA: Param = Param::new("data", ParamType::String);
 const ENCRYPTED: Param = Param::new("encrypted_data", ParamType::Mixed).by_ref();
-const DECRYPTED: Param = Param::new("decrypted_data", ParamType::Mixed).by_ref();
+const DECRYPTED: Param = Param::new("decrypted_data", ParamType::Mixed)
+    .by_ref()
+    .sensitive();
 const PUBLIC_KEY: Param = Param::new("public_key", ParamType::Mixed);
-const PRIVATE_KEY: Param = Param::new("private_key", ParamType::Mixed);
+const PRIVATE_KEY: Param = Param::new("private_key", ParamType::Mixed).sensitive();
 const PADDING: Param = Param::new("padding", ParamType::Int).with_default(ConstantValue::Int(1));
 const DIGEST: Param = Param::new("digest_algo", ParamType::String)
     .nullable()
@@ -29,7 +31,7 @@ const PRIVATE_ENCRYPT: &str = "openssl_private_encrypt";
 pub(crate) const FUNCTIONS: &[FunctionEntry] = &[
     FunctionEntry::asynchronous(
         PUBLIC_ENCRYPT,
-        &[DATA, ENCRYPTED, PUBLIC_KEY, PADDING, DIGEST],
+        &[DATA.sensitive(), ENCRYPTED, PUBLIC_KEY, PADDING, DIGEST],
         public_encrypt,
     ),
     FunctionEntry::asynchronous(
@@ -39,7 +41,7 @@ pub(crate) const FUNCTIONS: &[FunctionEntry] = &[
     ),
     FunctionEntry::asynchronous(
         PRIVATE_ENCRYPT,
-        &[DATA, ENCRYPTED, PRIVATE_KEY, PADDING],
+        &[DATA.sensitive(), ENCRYPTED, PRIVATE_KEY, PADDING],
         private_encrypt,
     ),
 ];

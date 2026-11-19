@@ -97,6 +97,8 @@ ed25519-dalek = { version = "3", features = ["pem"] }
 x25519-dalek = { version = "3", features = ["static_secrets"] }
 pkcs8 = { version = "0.11", features = ["pem", "encryption", "sha1-insecure", "3des"] }
 sec1 = "0.8"
+x509-cert = "0.3"
+
 
 sha1-rsa = { package = "sha1", version = "0.11", features = ["oid"] }
 md5-rsa = { package = "md-5", version = "0.11", features = ["oid"] }

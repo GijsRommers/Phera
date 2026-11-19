@@ -21,6 +21,7 @@ const X25519_ALGORITHM: AlgorithmIdentifierRef<'static> = AlgorithmIdentifierRef
 };
 
 pub(crate) fn private(bytes: &[u8], password: &[u8]) -> Option<Private> {
+    let bytes = bytes.trim_ascii_start();
     if bytes.starts_with(b"-----") {
         let (label, document) = SecretDocument::from_pem(std::str::from_utf8(bytes).ok()?).ok()?;
         return match label {
@@ -107,6 +108,7 @@ fn x25519_private(bytes: &[u8]) -> Option<x25519_dalek::StaticSecret> {
 }
 
 pub(crate) fn public(bytes: &[u8]) -> Option<Public> {
+    let bytes = bytes.trim_ascii_start();
     if bytes.starts_with(b"-----") {
         let (label, document) = Document::from_pem(std::str::from_utf8(bytes).ok()?).ok()?;
         return match label {
@@ -120,7 +122,7 @@ pub(crate) fn public(bytes: &[u8]) -> Option<Public> {
     public_spki(bytes).or_else(|| rsa::PublicKey::from_pkcs1_der(bytes).ok().map(Public::Rsa))
 }
 
-fn public_spki(bytes: &[u8]) -> Option<Public> {
+pub(crate) fn public_spki(bytes: &[u8]) -> Option<Public> {
     rsa::PublicKey::from_public_key_der(bytes)
         .ok()
         .map(Public::Rsa)

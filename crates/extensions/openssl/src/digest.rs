@@ -22,7 +22,7 @@ pub(crate) const FUNCTIONS: &[FunctionEntry] = &[
     FunctionEntry::sync(
         "openssl_pbkdf2",
         &[
-            Param::new("password", ParamType::String),
+            Param::new("password", ParamType::String).sensitive(),
             Param::new("salt", ParamType::String),
             Param::new("key_length", ParamType::Int),
             Param::new("iterations", ParamType::Int),
@@ -166,6 +166,16 @@ impl Algorithm {
 
     pub(crate) fn lookup(bytes: &[u8]) -> Option<Self> {
         let name = c_name(bytes)?;
+        let name = match name.as_str() {
+            "sha-1" => "sha1",
+            "sha-224" => "sha224",
+            "sha-256" => "sha256",
+            "sha-384" => "sha384",
+            "sha-512" => "sha512",
+            "sha-512/224" | "sha512/224" => "sha512-224",
+            "sha-512/256" | "sha512/256" => "sha512-256",
+            _ => &name,
+        };
         ALGORITHMS
             .iter()
             .find_map(|(canonical, algorithm, aliases)| {

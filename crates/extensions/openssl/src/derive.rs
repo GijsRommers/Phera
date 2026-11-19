@@ -13,7 +13,7 @@ pub(crate) const ENTRY: FunctionEntry = FunctionEntry::asynchronous(
     NAME,
     &[
         Param::new("public_key", ParamType::Mixed),
-        Param::new("private_key", ParamType::Mixed),
+        Param::new("private_key", ParamType::Mixed).sensitive(),
         Param::new("key_length", ParamType::Int).with_default(ConstantValue::Int(0)),
     ],
     derive,

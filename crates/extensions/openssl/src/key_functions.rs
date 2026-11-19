@@ -17,11 +17,12 @@ const OPTIONS: Param = Param::new("options", ParamType::Array)
     .nullable()
     .with_default(ConstantValue::Null);
 const PASSPHRASE: Param = Param::new("passphrase", ParamType::String)
+    .sensitive()
     .nullable()
     .with_default(ConstantValue::Null);
 const PATH: Param = Param::new("output_filename", ParamType::String);
-const KEY: Param = Param::new("key", ParamType::Mixed);
-const PRIVATE: Param = Param::new("private_key", ParamType::Mixed);
+const KEY: Param = Param::new("key", ParamType::Mixed).sensitive();
+const PRIVATE: Param = Param::new("private_key", ParamType::Mixed).sensitive();
 const PUBLIC: Param = Param::new("public_key", ParamType::Mixed);
 
 pub(crate) const FUNCTIONS: &[FunctionEntry] = &[
@@ -66,11 +67,23 @@ pub(crate) const FUNCTIONS: &[FunctionEntry] = &[
     FunctionEntry::sync(
         "openssl_free_key",
         &[Param::new("key", ParamType::Class(CLASS))],
-        free,
+        free_alias,
     ),
 ];
 
-fn free(_: &mut dyn Context, _: &[Value]) -> NativeResult {
+fn free(context: &mut dyn Context, _: &[Value]) -> NativeResult {
+    deprecate_free(context, "openssl_pkey_free")
+}
+
+fn free_alias(context: &mut dyn Context, _: &[Value]) -> NativeResult {
+    deprecate_free(context, "openssl_free_key")
+}
+
+fn deprecate_free(context: &mut dyn Context, function: &str) -> NativeResult {
+    context.deprecated(format!(
+        "Function {function}() is deprecated since 8.0, \
+         as OpenSSLAsymmetricKey objects are freed automatically"
+    ));
     Ok(Value::Null)
 }
 
@@ -90,6 +103,12 @@ impl GenerateKey {
                 .get(&ArrayKey::str(name))
                 .map(|value| value.deref().clone())
         };
+        if ["rsa", "dsa", "dh", "ec", "ed25519", "x25519"]
+            .iter()
+            .any(|name| matches!(value(*name), Some(Value::Array(_))))
+        {
+            return None;
+        }
         let bits = match value("private_key_bits") {
             Some(Value::Int(bits)) => bits,
             _ => 2048,
@@ -255,6 +274,20 @@ fn export_to_file(
                 "{function}(): Argument #2 ($output_filename) must not contain any null bytes"
             )));
         };
+        let Ok(path) = key_input::working_path(context, path) else {
+            return Ok(Value::Bool(false));
+        };
+        let maximum = if cfg!(target_os = "macos") {
+            1024
+        } else {
+            4096
+        };
+        if bytes.is_empty() || bytes.len() >= maximum || path.as_os_str().len() >= maximum {
+            context.warning(format!(
+                "{function}(output_filename): must be a valid file path"
+            ));
+            return Ok(Value::Bool(false));
+        }
         let Some(pem) = export_pem(context, &arguments, function).await? else {
             return Ok(Value::Bool(false));
         };

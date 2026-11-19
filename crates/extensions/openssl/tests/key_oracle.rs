@@ -13,7 +13,7 @@ use support::Matrix;
 
 type KeyPair = (Value, Value);
 
-fn fixtures() -> Vec<KeyPair> {
+fn fixtures(name: &str) -> Vec<KeyPair> {
     let php = r#"<?php
     $options = [['private_key_bits' => 2048]];
     foreach (['prime256v1', 'secp384r1', 'secp521r1'] as $curve) {
@@ -28,7 +28,7 @@ fn fixtures() -> Vec<KeyPair> {
         echo bin2hex($private), ' ', bin2hex($details['key']), "\n";
     }
     "#;
-    let rows = oracle::run_php("openssl_key_fixtures", php).expect("PHP oracle required");
+    let rows = oracle::run_php(name, php).expect("PHP oracle required");
     assert_eq!(rows.len(), 6);
     rows.iter()
         .map(|row| {
@@ -55,7 +55,7 @@ fn native() -> (Registry, TestContext) {
 
 #[test]
 fn match_key_and_signature_behaviour() {
-    let keys = fixtures();
+    let keys = fixtures("openssl_key_matrix_fixtures");
     let mut matrix = Matrix::new();
     for (private, public) in &keys {
         for value in [private.clone(), public.clone(), Value::Null, Value::Int(1)] {
@@ -106,6 +106,21 @@ fn match_key_and_signature_behaviour() {
             }
         }
     }
+    for (index, (_, public)) in keys.iter().enumerate() {
+        let algorithm = if index == 4 { 0 } else { 7 };
+        for signature in [Value::from(""), Value::from("x"), Value::from(vec![0; 256])] {
+            matrix.case(
+                "openssl_verify",
+                vec![
+                    Value::from("message"),
+                    signature,
+                    public.clone(),
+                    Value::Int(algorithm),
+                ],
+                None,
+            );
+        }
+    }
     for (index, (private, public)) in keys.iter().enumerate() {
         let (registry, mut context) = native();
         let algorithms = [
@@ -125,30 +140,28 @@ fn match_key_and_signature_behaviour() {
             let data = Value::from((0..length).map(|index| index as u8).collect::<Vec<_>>());
             for algorithm in &algorithms {
                 for padding in [0, 1, 6, 99] {
-                    let reference = Rc::new(RefCell::new(Value::from("sentinel")));
-                    let arguments = vec![
+                    let mut arguments = vec![
                         data.clone(),
-                        Value::Reference(reference.clone()),
+                        Value::from("sentinel"),
                         private.clone(),
                         algorithm.clone(),
                         Value::Int(padding),
                     ];
-                    let signed = call(&registry, &mut context, "openssl_sign", arguments).unwrap();
-                    if index == 0 && padding != 6 || index >= 4 || padding != 0 && index != 0 {
-                        matrix.case(
-                            "openssl_sign",
-                            vec![
-                                data.clone(),
-                                Value::from("sentinel"),
-                                private.clone(),
-                                algorithm.clone(),
-                                Value::Int(padding),
-                            ],
-                            Some(1),
-                        );
-                    }
+                    let deterministic_or_failed = match index {
+                        0 => padding != 6,
+                        1..=3 => padding != 0,
+                        _ => true,
+                    };
+                    let (signed, signature) = if deterministic_or_failed {
+                        matrix.case("openssl_sign", arguments, Some(1)).unwrap()
+                    } else {
+                        let reference = Rc::new(RefCell::new(arguments[1].clone()));
+                        arguments[1] = Value::Reference(reference.clone());
+                        let signed =
+                            call(&registry, &mut context, "openssl_sign", arguments).unwrap();
+                        (signed, reference.take())
+                    };
                     if signed == Value::Bool(true) {
-                        let signature = reference.borrow().clone();
                         for message in [data.clone(), Value::from("altered message")] {
                             matrix.case(
                                 "openssl_verify",
@@ -173,7 +186,7 @@ fn match_key_and_signature_behaviour() {
 #[test]
 fn php_signatures_and_key_details_are_read_by_phera() {
     use std::fmt::Write;
-    let keys = fixtures();
+    let keys = fixtures("openssl_signature_fixtures");
     let (registry, mut context) = native();
     let mut script = String::from("<?php\n");
     let data = Value::from(b"fixed \0\xff message".to_vec());

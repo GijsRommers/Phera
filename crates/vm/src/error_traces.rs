@@ -68,6 +68,41 @@ fn frame_arguments(vm: &Vm, frame: FrameView<'_>) -> String {
 }
 
 impl Vm {
+    /// Capture a function frame, replacing sensitive arguments with the PHP wrapper.
+    pub(crate) fn native_function_trace(&mut self, name: &str, arguments: &[Value]) -> NativeTrace {
+        let parameters = self
+            .registry
+            .get_function(name)
+            .map_or(&[][..], |entry| entry.params);
+        self.native_parameter_trace(name, parameters, arguments)
+    }
+
+    pub(crate) fn native_parameter_trace(
+        &mut self,
+        name: &str,
+        parameters: &[phera_extension_api::Param],
+        arguments: &[Value],
+    ) -> NativeTrace {
+        if !parameters.iter().any(|parameter| parameter.sensitive) {
+            return NativeTrace::new(name, arguments);
+        }
+        let mut values = phera_value::PhpArray::new();
+        for (index, argument) in arguments.iter().enumerate() {
+            let parameter = parameters
+                .get(index)
+                .or_else(|| parameters.last().filter(|last| last.variadic));
+            let mut value = argument.deref().clone();
+            if parameter.is_some_and(|parameter| parameter.sensitive) {
+                value = crate::sensitive_parameters::wrap_value(&mut self.classes, value);
+            }
+            let _ = values.push(value);
+        }
+        NativeTrace {
+            name: name.into(),
+            arguments: Value::from(values),
+        }
+    }
+
     /// Binding failures point at the declaration and keep the caller as trace frame zero.
     pub(crate) fn error_trace(
         &mut self,

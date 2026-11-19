@@ -4,8 +4,8 @@
 use std::rc::Rc;
 
 use phera_extension_api::{
-    ClassEntry, ClassHooks, ClassKind, Context, MethodEntry, NativeClone, NativeError,
-    NativeResult, Object, PhpArray, Registry, Value,
+    ClassEntry, ClassHooks, ClassKind, Context, Diagnostics, MethodEntry, NativeClone,
+    NativeComparison, NativeError, NativeResult, Object, PhpArray, Registry, Value,
 };
 use rsa::rand_core::{TryCryptoRng, TryRng};
 
@@ -87,6 +87,7 @@ pub(crate) fn stored(object: &Object) -> Option<Rc<Key>> {
 pub(crate) fn register(registry: &mut Registry) {
     const HOOKS: ClassHooks = ClassHooks {
         clone: Some(NativeClone::Forbidden),
+        compare: Some(compare),
         ..ClassHooks::EMPTY
     };
 
@@ -128,4 +129,12 @@ fn denied_constructor(class: &str, alternative: &str) -> NativeResult {
     Err(NativeError::error(format!(
         "Cannot directly construct {class}, use {alternative}() instead"
     )))
+}
+
+fn compare(
+    _: &Object,
+    _: &Object,
+    _: &mut dyn Diagnostics,
+) -> Result<NativeComparison, phera_extension_api::value::OpError> {
+    Ok(NativeComparison::Uncomparable)
 }

@@ -3,11 +3,11 @@
 
 use aes::cipher::{BlockCipherEncrypt, BlockSizeUser, KeyInit, consts::U16};
 use aes::{Aes128, Aes192, Aes256};
-use aes_gcm::AesGcm;
 use aes_gcm::aead::{AeadInOut, Nonce, Tag, array::ArraySize, consts::*};
 use ccm::{Ccm, NonceSize as CcmNonce, TagSize as CcmTag};
 use chacha20poly1305::ChaCha20Poly1305;
 
+use crate::gcm;
 use crate::methods::{KeySize, Method, Mode};
 
 #[derive(Clone, Copy)]
@@ -42,15 +42,16 @@ pub(crate) struct Output {
 #[derive(Debug)]
 pub(crate) enum Failure {
     Crypto,
-    UnsupportedNonce,
     UnsupportedTag,
 }
 
 type Result = std::result::Result<Output, Failure>;
 
 pub(crate) fn apply(method: Method, input: Input<'_>) -> Result {
-    if method.mode == Mode::ChaCha {
-        return run::<ChaCha20Poly1305>(input);
+    match method.mode {
+        Mode::ChaCha => return run::<ChaCha20Poly1305>(input),
+        Mode::Gcm => return gcm::apply(method.key, input),
+        _ => {}
     }
     match method.key {
         KeySize::Bits128 => aes::<Aes128>(method.mode, input),
@@ -64,20 +65,6 @@ where
     Cipher: BlockCipherEncrypt + BlockSizeUser<BlockSize = U16> + KeyInit,
 {
     match mode {
-        Mode::Gcm => match input.nonce.len() {
-            1 => gcm::<Cipher, U1>(input),
-            7 => gcm::<Cipher, U7>(input),
-            8 => gcm::<Cipher, U8>(input),
-            11 => gcm::<Cipher, U11>(input),
-            12 => gcm::<Cipher, U12>(input),
-            13 => gcm::<Cipher, U13>(input),
-            16 => gcm::<Cipher, U16>(input),
-            24 => gcm::<Cipher, U24>(input),
-            32 => gcm::<Cipher, U32>(input),
-            64 => gcm::<Cipher, U64>(input),
-            128 => gcm::<Cipher, U128>(input),
-            _ => Err(Failure::UnsupportedNonce),
-        },
         Mode::Ccm => match input.nonce.len() {
             7 => ccm::<Cipher, U7>(input),
             8 => ccm::<Cipher, U8>(input),
@@ -89,26 +76,6 @@ where
             _ => Err(Failure::Crypto),
         },
         _ => Err(Failure::Crypto),
-    }
-}
-
-fn gcm<Cipher, Size>(input: Input<'_>) -> Result
-where
-    Cipher: BlockCipherEncrypt + BlockSizeUser<BlockSize = U16> + KeyInit,
-    Size: ArraySize,
-{
-    let Operation::Decrypt(tag) = input.operation else {
-        return run::<AesGcm<Cipher, Size>>(input);
-    };
-    match tag.len() {
-        4 => run::<AesGcm<Cipher, Size, U4>>(input),
-        8 => run::<AesGcm<Cipher, Size, U8>>(input),
-        12 => run::<AesGcm<Cipher, Size, U12>>(input),
-        13 => run::<AesGcm<Cipher, Size, U13>>(input),
-        14 => run::<AesGcm<Cipher, Size, U14>>(input),
-        15 => run::<AesGcm<Cipher, Size, U15>>(input),
-        16 => run::<AesGcm<Cipher, Size>>(input),
-        _ => Err(Failure::UnsupportedTag),
     }
 }
 
@@ -140,6 +107,10 @@ where
 
 fn run<Cipher: AeadInOut + KeyInit>(input: Input<'_>) -> Result {
     let cipher = Cipher::new_from_slice(input.key).map_err(|_| Failure::Crypto)?;
+    with_cipher(&cipher, input)
+}
+
+pub(crate) fn with_cipher<Cipher: AeadInOut>(cipher: &Cipher, input: Input<'_>) -> Result {
     let nonce = <&Nonce<Cipher>>::try_from(input.nonce).map_err(|_| Failure::Crypto)?;
     let mut data = vec![0; input.data.len()];
     let buffer =
