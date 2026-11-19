@@ -16,10 +16,11 @@
 //! them). Each answers [`Step::Slow`], having changed nothing, when its
 //! case is not the plain one, and the VM runs the instruction.
 
-use phera_bytecode::{FetchMode, Instruction};
+use phera_bytecode::{FetchMode, Instruction, PathBase, PathId, Reg};
+use phera_value::Value;
 
 use crate::calls::execution_loop::{Machine, Position, Step};
-use crate::fast::ScalarStep;
+use crate::fast::{ScalarStep, store};
 use crate::fast_values::value_step;
 
 impl Machine<'_> {
@@ -42,6 +43,14 @@ impl Machine<'_> {
                 path,
                 mode: FetchMode::Read,
             } => self.fetch_property::<GUARDED>(position, dst, path),
+            Instruction::Fetch {
+                dst,
+                path,
+                mode: FetchMode::Quiet | FetchMode::Isset | FetchMode::Empty,
+            } => match self.quiet_variable(path, position) {
+                Some(found) => self.store_quiet::<GUARDED>(position, dst, found),
+                None => self.fetch_property_quietly::<GUARDED>(position, dst, path),
+            },
             Instruction::AssignPath { path, src } => {
                 self.assign_property::<GUARDED>(position, path, src)
             }
@@ -50,6 +59,45 @@ impl Machine<'_> {
             }
             Instruction::InitCall { function } => self.prepare_named_call(position, function),
             _ => Step::Slow,
+        }
+    }
+
+    /// A quiet read of a plain variable (`$value ?? $default`): its value,
+    /// or null without a warning when it is unset. `None` for any other
+    /// path, a variable that is a PHP reference, or code whose variables
+    /// can also be reached by name (top-level code, `extract`, `$$name`),
+    /// where an empty register does not prove the variable unset.
+    fn quiet_variable(&self, path: PathId, position: Position) -> Option<Value> {
+        let function = self.code.function(position.frame.function);
+        if function.dynamic_scope {
+            return None;
+        }
+        let path = function.paths.get(path.index())?;
+        let (PathBase::Register(register), []) = (path.base, path.steps.as_slice()) else {
+            return None;
+        };
+        match self
+            .registers
+            .window(position.frame.base() + register.index(), 1)
+        {
+            [Some(Value::Reference(_))] | [] => None,
+            [Some(value)] => Some(value.clone()),
+            [None] => Some(Value::Null),
+            _ => None,
+        }
+    }
+
+    /// Stores what a quiet read found.
+    fn store_quiet<const GUARDED: bool>(
+        &mut self,
+        position: Position,
+        destination: Reg,
+        value: Value,
+    ) -> Step {
+        let slots = self.registers.tail_mut(position.frame.base());
+        match store::<GUARDED>(slots, destination, value) {
+            ScalarStep::Complete => Step::Done(position.ip),
+            ScalarStep::Fallback => Step::Slow,
         }
     }
 

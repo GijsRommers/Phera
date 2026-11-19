@@ -58,6 +58,30 @@ impl Machine<'_> {
         }
     }
 
+    /// `Fetch` of one declared property in a quiet mode (`??`, `isset`,
+    /// `empty`). Unlike a plain read, PHP calls a `get` hook first here,
+    /// so a property with hooks is left to the VM.
+    pub(super) fn fetch_property_quietly<const GUARDED: bool>(
+        &mut self,
+        position: Position,
+        destination: Reg,
+        path: PathId,
+    ) -> Step {
+        let Some(value) = self.with_site(position, path, |entry, object, scope| {
+            if entry.hooks.is_some() {
+                return None;
+            }
+            entry.read_matching(object, scope)
+        }) else {
+            return Step::Slow;
+        };
+        let slots = self.registers.tail_mut(position.frame.base());
+        match store::<GUARDED>(slots, destination, value) {
+            ScalarStep::Complete => Step::Done(position.ip),
+            ScalarStep::Fallback => Step::Slow,
+        }
+    }
+
     /// `AssignPath` of a value to one declared property, outside the
     /// guarded loop.
     #[inline(never)]

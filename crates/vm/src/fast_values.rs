@@ -77,10 +77,10 @@ pub(crate) fn value_step<const GUARDED: bool>(
             dst,
             base,
             index,
-            mode: FetchMode::Read | FetchMode::Quiet,
+            mode,
             ..
         } => {
-            let element = existing_element(slots, base, index);
+            let element = array_element(slots, base, index, mode);
             match element {
                 Some(value) => store::<GUARDED>(slots, dst, value),
                 None => ScalarStep::Fallback,
@@ -111,20 +111,33 @@ fn jump_on_null(
     ScalarStep::Complete
 }
 
-/// The element of an array at an integer or string key that is present.
-/// A missing key (a warning), a string offset or an object with
-/// `ArrayAccess` is the general handler's.
+/// `$array[$key]` with an integer or string key. A read gives an element
+/// that is present (a missing one warns). A quiet read (`??`, `isset`,
+/// `empty`) gives null for a missing element, or for an unset or null
+/// variable, without a diagnostic, as the general handler does; what is
+/// then tested of the value is the next instruction's business. A string
+/// offset, an object with `ArrayAccess`, any other key type: `None`.
 #[inline(always)]
-fn existing_element(slots: &[Option<Value>], base: Reg, index: Reg) -> Option<Value> {
-    let Some(Some(Value::Array(array))) = slots.get(base.index()) else {
-        return None;
+fn array_element(slots: &[Option<Value>], base: Reg, index: Reg, mode: FetchMode) -> Option<Value> {
+    let quiet = match mode {
+        FetchMode::Read => false,
+        FetchMode::Quiet | FetchMode::Isset | FetchMode::Empty => true,
+        FetchMode::Destructure => return None,
     };
     let key = match slots.get(index.index())? {
         Some(Value::Int(integer)) => ArrayKey::Int(*integer),
         Some(Value::String(string)) => ArrayKey::from_string(string.clone()),
         _ => return None,
     };
-    array.get(&key).map(|value| value.deref().clone())
+    match slots.get(base.index())? {
+        Some(Value::Array(array)) => match array.get(&key) {
+            Some(value) => Some(value.deref().clone()),
+            None if quiet => Some(Value::Null),
+            None => None,
+        },
+        None | Some(Value::Null) if quiet => Some(Value::Null),
+        _ => None,
+    }
 }
 
 /// Whether a value is one the value layer's operators handle alone.
