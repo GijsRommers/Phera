@@ -52,6 +52,27 @@ pub trait Context {
     /// Appends to the request's output, as `echo` does.
     fn write(&mut self, bytes: &[u8]);
 
+    /// Snapshot PHP callers without retaining references to live parameter slots.
+    fn backtrace(&mut self, _objects: bool, _arguments: bool, _limit: i32) -> Value {
+        Value::from(PhpArray::new())
+    }
+
+    /// Print a trace using the request's exception string parameter limit.
+    fn print_backtrace(&mut self, _trace: &Value) {}
+
+    /// The most recent diagnostic that reached PHP's default error handler.
+    fn last_error(&self) -> Value {
+        Value::Null
+    }
+
+    /// Reset the request's last diagnostic.
+    fn clear_last_error(&mut self) {}
+
+    /// Look up a global constant by its exact name, as the INI scanner does.
+    fn named_constant(&mut self, _name: &str) -> Option<Value> {
+        None
+    }
+
     /// Where warnings, notices and deprecations go.
     fn diagnostics(&mut self) -> &mut dyn Diagnostics;
 
@@ -63,9 +84,30 @@ pub trait Context {
     /// Per-request storage for extensions; see [`RequestState`].
     fn state(&mut self) -> &mut RequestState;
 
+    /// The PHP source location of the current operation.
+    fn source_location(&self) -> Option<(String, usize)> {
+        None
+    }
+
+    /// Looks up a request global such as `$_COOKIE`.
+    fn request_global(&self, _name: &str) -> Option<Value> {
+        None
+    }
+
+    /// Replaces the symbol, retaining aliases to the old variable.
+    fn replace_request_global(&mut self, _name: &str, _value: Value) {}
+
+    /// Flushes an extension after user shutdown callbacks and output finalization.
+    fn register_request_finalizer(&mut self, _callback: crate::AsyncFn) {}
+
     /// The PHP file making this call, for include-path lookups.
     fn script_path(&self) -> Option<std::path::PathBuf> {
         None
+    }
+
+    /// The script selected by the SAPI, independent of the current included file.
+    fn entry_script_path(&self) -> Option<std::path::PathBuf> {
+        self.script_path()
     }
 
     /// The request's include path, used by the VM and by the file wrappers.
@@ -112,6 +154,20 @@ pub trait Context {
         _arguments: Vec<Value>,
     ) -> LocalFuture<'_, NativeResult> {
         Box::pin(async { Err(NativeError::error("This context has no request lifecycle")) })
+    }
+
+    /// Registers or removes a named slot without changing its order among shutdown callbacks.
+    fn named_shutdown(
+        &mut self,
+        _key: &'static str,
+        _callback: Option<&'static str>,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(async { Err(NativeError::error("This context has no request lifecycle")) })
+    }
+
+    /// Whether an object declares this method, including inherited methods.
+    fn has_method(&self, _object: &Object, _name: &str) -> bool {
+        false
     }
 
     /// Convert a value to a PHP string. A VM context may run __toString.
@@ -182,6 +238,18 @@ pub trait Context {
         );
         Box::pin(std::future::ready(Err(NativeError::error(message))))
     }
+
+    /// Expose a native operation in the trace for the duration of its PHP callback.
+    fn push_callback_frame(
+        &mut self,
+        _name: &'static str,
+        _object: Option<Rc<Object>>,
+        _args: Vec<Value>,
+    ) {
+    }
+
+    /// Restore the previous trace boundary after an opted-in native operation.
+    fn pop_callback_frame(&mut self) {}
 
     /// Invokes an overridable method in a native class's own inheritance scope.
     fn call_protected_method(

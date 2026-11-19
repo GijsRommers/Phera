@@ -73,6 +73,8 @@ def main():
     for path in git(options.checkout, "ls-tree", "-r", "--name-only", options.ref).splitlines():
         if path.endswith(".stub.php") and not path.startswith(("ext/zend_test/", "ext/dl_test/")):
             items.extend(stub_items(git(options.checkout, "show", f"{options.ref}:{path}")))
+    # ext/session/session.c registers SID at request time rather than in a stub.
+    items.append(("constant", "SID", "8.4", "as GET/POST sessions were deprecated"))
     names = {(kind, name) for kind, name, _, _ in items}
     if len(names) != len(items) or kept - names:
         raise ValueError(f"Duplicate stub entries or obsolete keep entries: {kept - names}")

@@ -168,6 +168,7 @@ pub(crate) fn type_text(ty: ParamType) -> &'static str {
         ParamType::ObjectOrArray => "array",
         ParamType::ArrayOrInt => "array|int",
         ParamType::Class(name) => name,
+        ParamType::RoundingModeOrInt => "RoundingMode|int",
         ParamType::Callable => "callable",
         ParamType::Iterable => "Traversable|array",
         ParamType::Number => "int|float",
@@ -229,6 +230,12 @@ fn convert(
         ParamType::ObjectOrArray => {
             matches!(value, Value::Array(_) | Value::Object(_)).then_some(None)
         }
+        ParamType::RoundingModeOrInt => match value {
+            Value::Object(object) if object.class.is_instance_of("RoundingMode") => Some(None),
+            Value::Int(_) => Some(None),
+            _ if strict => None,
+            _ => to_int(value, site, context).map(Some),
+        },
         ParamType::ArrayOrInt => match value {
             Value::Array(_) | Value::Int(_) => Some(None),
             _ if strict => None,

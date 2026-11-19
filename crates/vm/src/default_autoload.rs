@@ -29,7 +29,7 @@ impl Vm {
             self.include_state.record(unit.file.clone());
             self.enter_scoped_unit(unit, None)?;
             self.interpret(stop).await?;
-            if self.classes.entries.contains_key(&base) {
+            if self.classes.get_lowercase(&base).is_some() {
                 break;
             }
         }

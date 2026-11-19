@@ -139,6 +139,11 @@ impl Vm {
         let Some(Value::String(name)) = arguments.first() else {
             return Ok(Value::from("1"));
         };
+        if let Some(handler) = self.registry.ini_handler(name.as_bytes()) {
+            let value = matches!(intrinsic, crate::intrinsics::Intrinsic::IniSet)
+                .then(|| arguments.get(1).unwrap_or(&Value::Null));
+            return handler(self, name.as_bytes(), value);
+        }
         if name.as_bytes() == b"arg_separator.output" {
             let separator = self
                 .state

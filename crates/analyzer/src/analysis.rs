@@ -15,14 +15,17 @@ use phera_ast::*;
 use phera_source::Span;
 
 mod arguments;
+mod arrays;
 mod assignments;
 mod atoms;
 mod attributes;
 mod binding_statements;
 mod bindings;
+mod builtin_facts;
 mod callable_signatures;
 mod calls;
 mod closure_binding;
+mod closure_effects;
 mod coalesce_assignment;
 mod composite;
 mod condition;
@@ -42,12 +45,17 @@ mod match_expression;
 mod member_expressions;
 mod members;
 mod not_supported;
+mod operators;
 mod property_hooks;
+mod receiver_types;
 mod refine;
+mod refine_types;
 mod reporting;
 mod short_circuit;
 mod statements;
 mod switch;
+mod type_docs;
+mod value_contracts;
 mod write;
 
 pub const MAX_DEPTH: usize = 256;
@@ -57,11 +65,14 @@ pub struct Context {
     pub names: Names,
     pub known: std::collections::BTreeSet<Symbol>,
     pub class: Option<String>,
+    pub documentation_class: Option<String>,
     pub this_class: Option<String>,
     pub object: bool,
     pub unbound_this: Option<Vec<crate::index::Location>>,
     pub returns: ValueType,
     pub declared_return: bool,
+    pub documented_return: Option<ValueType>,
+    pub inferred_return: Option<ValueType>,
     pub generator: bool,
     pub by_reference: bool,
     pub function: String,
@@ -74,6 +85,7 @@ pub struct Analyzer<'a> {
     pub dependencies: &'a mut Dependencies,
     pub file: &'a ParsedFile,
     pub level: u8,
+    pub strict_types: bool,
     pub diagnostics: Vec<Diagnostic>,
     pub context: Context,
     pub depth: usize,
@@ -81,6 +93,7 @@ pub struct Analyzer<'a> {
     pub exception_scopes: Vec<Vec<Scope>>,
     pub return_scopes: Vec<Vec<Scope>>,
     pub controls: Vec<control::ControlFrame>,
+    pub statement_docs: std::collections::BTreeMap<usize, Span>,
     pub pending_binding: Option<(usize, closure_binding::ClosureBinding)>,
 }
 
@@ -96,6 +109,11 @@ impl<'a> Analyzer<'a> {
             dependencies,
             file,
             level,
+            strict_types: file.program.statements.iter().any(|statement| {
+                matches!(&statement.kind, StatementKind::Declare { directives, .. }
+                    if directives.iter().any(|directive| directive.name.name.eq_ignore_ascii_case("strict_types")
+                        && matches!(directive.value.kind, ExpressionKind::Literal(Literal::Int(1)))))
+            }),
             diagnostics: Vec::new(),
             depth: 0,
             checked_declarations: std::collections::BTreeSet::new(),
@@ -103,15 +121,23 @@ impl<'a> Analyzer<'a> {
             return_scopes: Vec::new(),
             controls: Vec::new(),
             pending_binding: None,
+            statement_docs: if level >= 2 {
+                type_docs::statement_comments(&file.source)
+            } else {
+                Default::default()
+            },
             context: Context {
                 names: Names::for_block(String::new(), &file.program.statements),
                 known: std::collections::BTreeSet::new(),
                 class: None,
+                documentation_class: None,
                 this_class: None,
                 object: false,
                 unbound_this: None,
                 returns: ValueType::Mixed,
                 declared_return: false,
+                documented_return: None,
+                inferred_return: None,
                 generator: false,
                 by_reference: false,
                 function: "top level".into(),
@@ -227,10 +253,17 @@ impl<'a> Analyzer<'a> {
                 self.report(Finding::UnknownClass(class.clone()), name.span);
             }
             class.map_or(ClassTarget::Unknown, ClassTarget::Known)
-        } else if self.expression(expression, scope, false) == ValueType::Never {
-            ClassTarget::Never
         } else {
-            ClassTarget::Unknown
+            match self.expression(expression, scope, false) {
+                ValueType::Never => ClassTarget::Never,
+                ValueType::ClassString(class) => {
+                    class.class_name().map_or(ClassTarget::Unknown, |name| {
+                        self.dependencies.resolve(self.index, name);
+                        ClassTarget::Known(name.into())
+                    })
+                }
+                _ => ClassTarget::Unknown,
+            }
         }
     }
 }
@@ -239,8 +272,9 @@ impl<'a> Analyzer<'a> {
 pub enum Access {
     Checked,
     Inferred,
-    Static,
-    Forwarded,
+    Guarded,
+    GuardedStatic,
+    Static { has_object: bool, late_bound: bool },
     LateStatic { has_object: bool },
 }
 
@@ -253,13 +287,33 @@ impl Access {
         }
     }
     pub fn static_call(self) -> bool {
-        matches!(self, Self::Static | Self::LateStatic { has_object: false })
+        matches!(
+            self,
+            Self::Static {
+                has_object: false,
+                ..
+            } | Self::GuardedStatic
+                | Self::LateStatic { has_object: false }
+        )
+    }
+    pub fn late_bound(self) -> bool {
+        matches!(
+            self,
+            Self::Static {
+                late_bound: true,
+                ..
+            } | Self::LateStatic { .. }
+        )
     }
     pub fn dynamic_receiver(self) -> bool {
         matches!(self, Self::Checked | Self::LateStatic { .. })
     }
-    pub fn reports_missing(self) -> bool {
-        !matches!(self, Self::Inferred)
+    pub fn reports_missing(self, level: u8) -> bool {
+        match self {
+            Self::Inferred => level >= 2,
+            Self::Guarded | Self::GuardedStatic => false,
+            _ => true,
+        }
     }
 }
 

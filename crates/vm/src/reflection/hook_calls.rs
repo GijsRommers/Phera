@@ -14,7 +14,7 @@ use crate::calls::{
 };
 use crate::classes::Method;
 use crate::code_table::FunctionIndex;
-use crate::error_traces::{NativeCallbackSite, NativeTrace};
+use crate::error_traces::{NativeCallbackSite, NativeCaller, NativeTrace};
 use crate::property_hook_continuation::HookContinuation;
 
 pub(super) enum ReflectedHookCall {
@@ -121,7 +121,7 @@ impl Vm {
             // Generic native callbacks have no PHP destination to suspend into.
             self.native_callback_sites.push(NativeCallbackSite {
                 boundary: self.call_stack.frames().len(),
-                native: trace,
+                native: NativeCaller::Saved(trace),
             });
             let result = self.finish_callback(routed, base, depth, origin).await;
             self.native_callback_sites.pop();

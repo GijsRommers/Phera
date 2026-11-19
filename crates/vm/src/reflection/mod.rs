@@ -34,7 +34,7 @@ enum Construction {
 }
 
 #[derive(Default)]
-struct AttributeCallSite(Option<AttributeSite>);
+struct AttributeCallSite(Option<Rc<AttributeSite>>);
 
 pub(super) fn exception(message: impl Into<String>) -> NativeError {
     NativeError::throw("ReflectionException", message)
@@ -327,7 +327,7 @@ impl ReflectionContext for Vm {
 impl Vm {
     pub(crate) fn attribute_call_site(&self) -> Option<&AttributeSite> {
         if self.argument_origin == ArgumentOrigin::Attribute {
-            self.state.get::<AttributeCallSite>()?.0.as_ref()
+            self.state.get::<AttributeCallSite>()?.0.as_deref()
         } else {
             None
         }
@@ -544,6 +544,17 @@ impl Vm {
                 .ok_or_else(|| exception("Constructor scope does not exist"))?;
             let callee = self.reflection_callee(class, scope, method, Some(object.clone()));
             if let Construction::Attribute(Some(site)) = construction {
+                let site = Rc::new(site);
+                if let Some(callback) = self.native_callback_sites.last_mut()
+                    && callback.boundary == self.call_stack.depth()
+                    && let crate::error_traces::NativeCaller::Method {
+                        name: "ReflectionAttribute->newInstance",
+                        declaration,
+                        ..
+                    } = &mut callback.native
+                {
+                    *declaration = Some(site.clone());
+                }
                 let previous = self
                     .state
                     .get_or_default::<AttributeCallSite>()

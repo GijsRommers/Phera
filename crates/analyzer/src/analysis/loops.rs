@@ -63,17 +63,23 @@ impl Analyzer<'_> {
         body: &[Statement],
         scope: &mut Scope,
     ) -> Flow {
-        if self.expression(subject, scope, false) == ValueType::Never {
+        let subject_type = self.expression(subject, scope, false);
+        if subject_type == ValueType::Never {
             return Flow::Terminal;
         }
         let before = scope.clone();
         let nonempty = matches!(&subject.kind, ExpressionKind::Array(items)
             if items.iter().any(|item| !item.spread));
+        let (key_type, value_type) = if self.level >= 2 && !by_reference {
+            super::arrays::iteration_types(&subject_type)
+        } else {
+            (ValueType::Mixed, ValueType::Mixed)
+        };
         let key_flow = key.map_or(Evaluation::Completes, |key| {
-            self.write(key, ValueType::Mixed, scope)
+            self.write(key, key_type, scope)
         });
         if key_flow == Evaluation::Never
-            || self.write(value, ValueType::Mixed, scope) == Evaluation::Never
+            || self.write(value, value_type, scope) == Evaluation::Never
         {
             *scope = before;
             return if nonempty { Flow::Terminal } else { Flow::Next };

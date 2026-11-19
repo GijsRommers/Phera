@@ -20,6 +20,7 @@ mod phpdoc;
 pub mod project;
 pub mod rules;
 pub mod scope;
+mod signature_types;
 pub mod stubs;
 mod suppress;
 mod trait_users;
@@ -55,6 +56,7 @@ fn check_project(options: &Options) -> Result<Report, String> {
     let paths = project::discover(&options.paths, &options.exclude)?;
     let (files, mut diagnostics) = project::parse_files(&paths)?;
     let mut index = builtins::load_supported();
+    index.read_type_docs = options.level >= 2;
     for file in &files {
         collect::collect(&mut index, &file.path, &file.source, &file.program);
     }

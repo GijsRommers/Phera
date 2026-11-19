@@ -19,7 +19,11 @@ impl Analyzer<'_> {
         {
             return self.invoke_closure(signature, arguments, scope, span);
         }
-        let (ValueType::Class(class), MemberName::Identifier(method)) = (ty, name) else {
+        let receiver = match name {
+            MemberName::Identifier(method) => self.method_receiver(ty, &method.name, span, access),
+            _ => None,
+        };
+        let (Some(class), MemberName::Identifier(method)) = (receiver.as_deref(), name) else {
             if let MemberName::Expression(e) = name
                 && self.expression(e, scope, false) == ValueType::Never
             {
@@ -34,10 +38,30 @@ impl Analyzer<'_> {
             };
         };
         self.dependencies.resolve(self.index, class);
+        let late_class = access
+            .late_bound()
+            .then_some(self.context.class.as_deref())
+            .flatten();
+        let fallback_receiver = ValueType::Class(late_class.unwrap_or(class).into());
+        let receiver = if late_class.is_none()
+            && (ty.class_name().is_some() || matches!(ty, ValueType::Intersection(_)))
+        {
+            ty
+        } else {
+            &fallback_receiver
+        };
         let signature = self
             .index
-            .method(class, &method.name)
-            .cloned()
+            .method_owner(class, &method.name)
+            .map(|(owner, signature)| {
+                let signature = signature.clone().typed(self.index);
+                if self.level >= 2 {
+                    signature.for_receiver(self.index, owner, receiver)
+                } else {
+                    signature
+                }
+            })
+            .or_else(|| self.index.doc_method(class, &method.name).cloned())
             .map(|mut signature| {
                 for parameter in &mut signature.parameters {
                     if let Some(receiver) = parameter.closure_receiver.take() {
@@ -79,7 +103,7 @@ impl Analyzer<'_> {
         };
         let binding = self.pending_binding.take();
         self.prepare_binding(class, &method.name, arguments, scope);
-        let evaluation = self.arguments(
+        let facts = self.argument_facts(
             arguments,
             parameters,
             &format!("{class}::{}()", method.name),
@@ -91,13 +115,42 @@ impl Analyzer<'_> {
             self.apply_global_effects(signature.as_ref(), scope);
         }
         self.pending_binding = binding;
-        if evaluation == Evaluation::Never {
+        if facts.evaluation == Evaluation::Never {
             return ValueType::Never;
         }
         if matches!(arguments, Arguments::FirstClassCallable) {
-            signature.map_or(ValueType::Mixed, |s| ValueType::Callable(Box::new(s)))
+            signature.map_or(ValueType::Mixed, |s| {
+                ValueType::Callable(std::sync::Arc::new(s))
+            })
         } else {
-            signature.map_or(ValueType::Mixed, |s| self.relative_type(s.returns, class))
+            let returns = if let Some(signature) = signature {
+                signature.infer_return(arguments, &facts.types, self.index)
+            } else if self.level >= 2 && !matches!(access, Access::Guarded | Access::GuardedStatic)
+            {
+                let dispatcher = if access.static_call() {
+                    "__callStatic"
+                } else {
+                    "__call"
+                };
+                self.index.method_owner(class, dispatcher).map_or(
+                    ValueType::Mixed,
+                    |(owner, signature)| {
+                        let returns = signature
+                            .clone()
+                            .typed(self.index)
+                            .for_receiver(self.index, owner, receiver)
+                            .returns;
+                        if returns == ValueType::Void {
+                            ValueType::Mixed
+                        } else {
+                            returns
+                        }
+                    },
+                )
+            } else {
+                ValueType::Mixed
+            };
+            self.relative_type(returns, class)
         }
     }
 
@@ -113,8 +166,14 @@ impl Analyzer<'_> {
             if access.static_call() && !signature.modifiers.is_static {
                 self.report(Finding::StaticCall(class.into(), method.into()), span);
             }
-        } else if self.index.complete(class)
-            && access.reports_missing()
+        } else if self.can_report_missing_method(class, method, access) {
+            self.report(Finding::UnknownMethod(class.into(), method.into()), span);
+        }
+    }
+
+    pub fn can_report_missing_method(&self, class: &str, method: &str, access: Access) -> bool {
+        access.reports_missing(self.level)
+            && self.index.complete(class)
             && !self
                 .index
                 .documented_method(class, method, access.static_call())
@@ -133,9 +192,6 @@ impl Analyzer<'_> {
                     },
                 )
                 .is_none()
-        {
-            self.report(Finding::UnknownMethod(class.into(), method.into()), span);
-        }
     }
 
     pub fn new_object(
@@ -176,6 +232,7 @@ impl Analyzer<'_> {
         let late_static = matches!(&expression.kind, ExpressionKind::Name(n)
             if n.text.eq_ignore_ascii_case("static"));
         if !late_static
+            && matches!(expression.kind, ExpressionKind::Name(_))
             && let Some(info) = class.as_ref().and_then(|c| self.index.class(c))
             && (info.modifiers.is_abstract || info.kind == ClassKind::Interface)
         {

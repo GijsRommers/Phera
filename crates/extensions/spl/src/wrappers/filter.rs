@@ -52,10 +52,11 @@ pub(super) fn accept(
             return Ok(Value::Bool(false));
         };
         let callback = callback.ok_or_else(super::uninitialized)?;
-        let result = context
-            .call(&callback, vec![value, key, Value::Object(inner(object)?)])
-            .await?;
-        Ok(Value::Bool(to_bool(&result)))
+        let args = vec![value, key, Value::Object(inner(object)?)];
+        context.push_callback_frame("CallbackFilterIterator->accept", this, Vec::new());
+        let result = context.call(&callback, args).await;
+        context.pop_callback_frame();
+        Ok(Value::Bool(to_bool(&result?)))
     })
 }
 
@@ -87,8 +88,14 @@ pub(super) fn on_rewind(
 ) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
         let object = receiver(this.as_ref())?;
-        rewind(context, object).await?;
-        advance_to_match(context, object).await
+        context.push_callback_frame("FilterIterator->rewind", this.clone(), Vec::new());
+        let result = async {
+            rewind(context, object).await?;
+            advance_to_match(context, object).await
+        }
+        .await;
+        context.pop_callback_frame();
+        result
     })
 }
 
@@ -99,8 +106,14 @@ pub(super) fn on_next(
 ) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
         let object = receiver(this.as_ref())?;
-        next(context, object).await?;
-        advance_to_match(context, object).await
+        context.push_callback_frame("FilterIterator->next", this.clone(), Vec::new());
+        let result = async {
+            next(context, object).await?;
+            advance_to_match(context, object).await
+        }
+        .await;
+        context.pop_callback_frame();
+        result
     })
 }
 

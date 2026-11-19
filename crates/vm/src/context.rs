@@ -33,6 +33,18 @@ impl Context for Vm {
         self.out(bytes)
     }
 
+    fn backtrace(&mut self, objects: bool, arguments: bool, limit: i32) -> Value {
+        Value::from(self.capture_trace(phera_value::PhpArray::new(), objects, arguments, limit))
+    }
+
+    fn print_backtrace(&mut self, trace: &Value) {
+        let text = crate::exception_rendering::render_backtrace(
+            trace,
+            self.error_handlers.trace_string_limit,
+        );
+        self.out(text.as_bytes());
+    }
+
     fn output_origin(&self) -> Option<(&str, usize)> {
         let origin = self.output_writer.origin.as_ref()?;
         Some((&origin.file, origin.line))
@@ -50,12 +62,64 @@ impl Context for Vm {
         Vm::include_path(self)
     }
 
+    fn source_location(&self) -> Option<(String, usize)> {
+        let location = self.location();
+        Some((location.file, location.line))
+    }
+
+    fn request_global(&self, name: &str) -> Option<Value> {
+        self.globals.get(name).cloned()
+    }
+
+    fn replace_request_global(&mut self, name: &str, value: Value) {
+        self.publish_global(name.into(), value);
+    }
+
+    fn register_request_finalizer(&mut self, callback: phera_extension_api::AsyncFn) {
+        self.request_callbacks.output.set_finalizer(callback);
+    }
+
     fn script_path(&self) -> Option<std::path::PathBuf> {
         Some(self.location().file.into())
     }
 
+    fn last_error(&self) -> Value {
+        self.error_handlers
+            .last_error
+            .as_ref()
+            .map_or(Value::Null, crate::last_error::LastError::to_value)
+    }
+
+    fn clear_last_error(&mut self) {
+        self.error_handlers.last_error = None;
+    }
+
+    fn named_constant(&mut self, name: &str) -> Option<Value> {
+        let constant = self.constants.get(name)?.clone();
+        Some(self.report_global_constant(constant))
+    }
+
+    fn entry_script_path(&self) -> Option<std::path::PathBuf> {
+        let main = self.code.known_unit(crate::code_table::FunctionIndex(0))?;
+        Some(main.file.as_str().into())
+    }
+
     fn diagnostics(&mut self) -> &mut dyn Diagnostics {
         self
+    }
+
+    fn named_shutdown(
+        &mut self,
+        key: &'static str,
+        callback: Option<&'static str>,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(self.register_named_shutdown(key, callback))
+    }
+
+    fn has_method(&self, object: &phera_value::Object, name: &str) -> bool {
+        self.classes
+            .for_object(object)
+            .is_some_and(|class| class.methods.contains_key(&name.to_ascii_lowercase()))
     }
 
     fn warning_bytes(&mut self, message: &[u8]) {
@@ -213,7 +277,7 @@ impl Context for Vm {
         {
             self.enqueue_diagnostic(event);
         } else {
-            self.report_event(&event);
+            self.report_event(event);
         }
     }
 
@@ -293,6 +357,29 @@ impl Context for Vm {
         }
     }
 
+    fn push_callback_frame(
+        &mut self,
+        name: &'static str,
+        object: Option<std::rc::Rc<phera_value::Object>>,
+        arguments: Vec<Value>,
+    ) {
+        use crate::error_traces::{NativeCaller, NativeTrace};
+        let native = match object {
+            Some(object) => NativeCaller::Method {
+                name,
+                object,
+                arguments,
+                declaration: None,
+            },
+            None => NativeCaller::Saved(NativeTrace::new(name, &arguments)),
+        };
+        self.push_native_callback(native);
+    }
+
+    fn pop_callback_frame(&mut self) {
+        self.native_callback_sites.pop();
+    }
+
     fn call_protected_method(
         &mut self,
         object: std::rc::Rc<phera_value::Object>,
@@ -353,6 +440,7 @@ impl Context for Vm {
                 .push(crate::generators::trace::Site::new(
                     self.call_stack.depth(),
                     &operation,
+                    &object,
                 ));
             let result = self.operate_generator(object, operation).await;
             if let Some(site) = self.generator_traces.pop() {

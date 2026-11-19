@@ -1,0 +1,18 @@
+[package]
+name = "phera-ext-session"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+chrono.workspace = true
+getrandom.workspace = true
+phera-extension-api.workspace = true
+phera-ext-http.workspace = true
+phera-ext-serialize.workspace = true
+phera-ext-streams.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

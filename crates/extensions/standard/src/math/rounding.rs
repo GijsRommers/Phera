@@ -6,7 +6,8 @@
 //! below 0.285 times 100.
 
 use phera_extension_api::{
-    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Value, args,
+    ArrayKey, ClassEntry, ClassKind, ConstantValue, Context, FunctionEntry, NativeError,
+    NativeResult, Param, ParamType, Registry, Value, args,
 };
 
 use crate::constants::{
@@ -15,8 +16,7 @@ use crate::constants::{
 
 pub(super) const FUNCTIONS: &[FunctionEntry] = &[ROUND];
 
-/// The cases of PHP 8.4's `RoundingMode` enum. The first four also have a
-/// `PHP_ROUND_*` constant; an enum case arrives as its integer 5 to 8.
+/// PHP exposes these modes through enum cases and accepts the historical integers.
 #[derive(Clone, Copy)]
 pub(crate) enum RoundingMode {
     HalfUp,
@@ -29,7 +29,45 @@ pub(crate) enum RoundingMode {
     AwayFromZero,
 }
 
+const CASES: &[&str] = &[
+    "HalfAwayFromZero",
+    "HalfTowardsZero",
+    "HalfEven",
+    "HalfOdd",
+    "TowardsZero",
+    "AwayFromZero",
+    "NegativeInfinity",
+    "PositiveInfinity",
+];
+
+pub(super) fn register_enum(registry: &mut Registry) {
+    registry.class(ClassEntry {
+        kind: ClassKind::UnitEnum(CASES),
+        ..ClassEntry::class("RoundingMode")
+    });
+}
+
 impl RoundingMode {
+    fn from_case(value: &Value) -> Option<Self> {
+        let Value::Object(object) = value else {
+            return Self::from_integer(args::int(std::slice::from_ref(value), 0)?);
+        };
+        let Value::String(name) = object.get(&ArrayKey::str("name"))? else {
+            return None;
+        };
+        Some(match name.as_bytes() {
+            b"HalfAwayFromZero" => Self::HalfUp,
+            b"HalfTowardsZero" => Self::HalfDown,
+            b"HalfEven" => Self::HalfEven,
+            b"HalfOdd" => Self::HalfOdd,
+            b"TowardsZero" => Self::TowardZero,
+            b"AwayFromZero" => Self::AwayFromZero,
+            b"NegativeInfinity" => Self::Floor,
+            b"PositiveInfinity" => Self::Ceiling,
+            _ => return None,
+        })
+    }
+
     fn from_integer(mode: i64) -> Option<Self> {
         Some(match mode {
             PHP_ROUND_HALF_UP => Self::HalfUp,
@@ -46,7 +84,7 @@ impl RoundingMode {
 }
 
 /// `round(int|float $num, int $precision = 0, int|RoundingMode $mode =
-/// PHP_ROUND_HALF_UP): float`, rounded to `$precision` decimal places
+/// RoundingMode::HalfAwayFromZero): float`, rounded to `$precision` decimal places
 /// (tens, hundreds… when negative).
 ///
 /// ```php
@@ -58,21 +96,27 @@ const ROUND: FunctionEntry = FunctionEntry::sync(
     "round",
     &[
         Param::new("num", ParamType::Number),
-        Param::new("precision", ParamType::Int).optional(),
-        Param::new("mode", ParamType::Int).optional(),
+        Param::new("precision", ParamType::Int).with_default(ConstantValue::Int(0)),
+        Param::new("mode", ParamType::RoundingModeOrInt).optional(),
     ],
     round,
 );
 
 fn round(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let mode = args::int(arguments, 2).unwrap_or(PHP_ROUND_HALF_UP);
-    let Some(mode) = RoundingMode::from_integer(mode) else {
+    let mode = match arguments.get(2) {
+        Some(value) => RoundingMode::from_case(value),
+        None => Some(RoundingMode::HalfUp),
+    };
+    let Some(mode) = mode else {
         return Err(NativeError::value_error(
             "round(): Argument #3 ($mode) must be a valid rounding mode (RoundingMode::*)",
         ));
     };
     let number = args::float(arguments, 0).unwrap_or_default();
     let places = args::int(arguments, 1).unwrap_or_default();
+    if places >= 0 && matches!(arguments.first(), Some(Value::Int(_))) {
+        return Ok(Value::Float(number));
+    }
     Ok(Value::Float(round_to_places(number, places, mode)))
 }
 
@@ -82,7 +126,7 @@ pub(crate) fn round_to_places(value: f64, places: i64, mode: RoundingMode) -> f6
         return value;
     }
     let places = places.clamp(i64::from(i32::MIN) + 1, i64::from(i32::MAX)) as i32;
-    let exponent = 10f64.powf(f64::from(places.abs()));
+    let exponent = decimal_power(places.unsigned_abs());
     let scaled = if places > 0 {
         value * exponent
     } else {
@@ -130,4 +174,16 @@ pub(crate) fn round_to_places(value: f64, places: i64, mode: RoundingMode) -> f6
             .unwrap_or(value);
         if result.is_finite() { result } else { value }
     }
+}
+
+/// PHP uses exact float literals for the first 23 decimal powers.
+fn decimal_power(power: u32) -> f64 {
+    const POWERS: [f64; 23] = [
+        1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16,
+        1e17, 1e18, 1e19, 1e20, 1e21, 1e22,
+    ];
+    POWERS
+        .get(power as usize)
+        .copied()
+        .unwrap_or_else(|| 10f64.powf(f64::from(power)))
 }

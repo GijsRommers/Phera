@@ -138,35 +138,24 @@ impl FileStream {
     pub async fn read_csv(
         &self,
         limit: Option<u64>,
-        separator: u8,
-        enclosure: u8,
-        escape: Option<u8>,
+        dialect: phera_ext_standard::csv::Dialect,
     ) -> Result<Option<CsvRecord>, phera_extension_api::NativeError> {
-        let dialect = crate::csv::Dialect {
-            separator,
-            enclosure,
-            escape,
-        };
         let policy = crate::resource::with_stream(&self.0, |stream| stream.read_policy(None))?;
         let parsed = crate::resource::operate(&self.0, policy, move |stream| {
             if stream.eof {
                 return Ok(None);
             }
             let line = stream.line(limit)?;
-            let fields = dialect.decode_line(stream, line.clone())?;
+            let fields = dialect.decode(line.clone(), || stream.line(None))?;
             Ok::<_, std::io::Error>(Some((line, fields)))
         })
         .await?;
         let Ok(Some((line, fields))) = parsed else {
             return Ok(None);
         };
-        let mut values = phera_extension_api::PhpArray::new();
-        for field in fields {
-            values.push(field.map_or(Value::Null, Value::from))?;
-        }
         Ok(Some(CsvRecord {
             line,
-            fields: values,
+            fields: phera_ext_standard::csv::fields_array(fields)?,
         }))
     }
 }

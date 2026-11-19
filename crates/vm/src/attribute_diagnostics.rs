@@ -82,7 +82,7 @@ impl Vm {
         if self.handles_diagnostic(event.level) {
             self.enqueue_diagnostic(event);
         } else {
-            self.report_event(&event);
+            self.report_event(event);
         }
     }
 }

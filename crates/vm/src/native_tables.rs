@@ -1,0 +1,63 @@
+//! Built-in definitions shared by VMs on one thread. `new SessionHandler()` and
+//! `PHP_SESSION_ACTIVE` resolve against metadata linked when the worker starts.
+
+use std::{rc::Rc, sync::Arc};
+
+use phera_extension_api::Registry;
+
+use crate::{
+    classes::ClassDefinitions,
+    constant_table::{NativeConstants, native_constants},
+};
+
+/// A worker shares these PHP values through `Rc`. The registry itself is process-wide.
+/// The linked native definitions contain no request objects or PHP static slots.
+pub struct NativeTables {
+    pub(crate) registry: Arc<Registry>,
+    pub(crate) classes: Rc<ClassDefinitions>,
+    pub(crate) constants: Rc<NativeConstants>,
+}
+
+impl NativeTables {
+    pub fn new(registry: Arc<Registry>) -> Self {
+        Self {
+            classes: Rc::new(ClassDefinitions::native(&registry)),
+            constants: Rc::new(native_constants(&registry)),
+            registry,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{rc::Rc, sync::Arc};
+
+    use phera_extension_api::Registry;
+    use phera_value::Value;
+
+    use super::NativeTables;
+    use crate::Vm;
+
+    #[test]
+    fn requests_share_builtins_and_own_their_additions() {
+        let mut registry = Registry::new();
+        registry.constant("BUILTIN", 1);
+        let tables = NativeTables::new(Arc::new(registry));
+        let mut first = Vm::with_native_tables(&tables);
+        let mut second = Vm::with_native_tables(&tables);
+        let class = first.classes.get("stdClass").unwrap();
+        let same_class = second.classes.get("stdClass").unwrap();
+        assert!(Rc::ptr_eq(&class, &same_class));
+        assert!(std::ptr::eq(
+            first.constants.get("BUILTIN").unwrap(),
+            second.constants.get("BUILTIN").unwrap(),
+        ));
+
+        assert!(first.classes.alias("requestalias".into(), class));
+        assert!(second.classes.get("RequestAlias").is_none());
+        first.set_constant("REQUEST_ONLY", Value::Int(2));
+        assert!(second.constants.get("REQUEST_ONLY").is_none());
+        let entry = first.classes.allocate(same_class.clone());
+        assert_eq!(entry.id, second.classes.allocate(same_class).id);
+    }
+}

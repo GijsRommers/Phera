@@ -73,8 +73,12 @@ impl Activation {
             .as_ref()
             .map(|extras| extras.arguments)
             .unwrap_or_default();
-        let supplied = arguments
-            .supplied
+        let passed = if function.argument_layout == phera_bytecode::ArgumentLayout::Variadic {
+            arguments.count
+        } else {
+            arguments.supplied
+        };
+        let supplied = passed
             .or(self.frame.passed())
             .unwrap_or(function.parameters.len());
         let count = self
@@ -92,6 +96,10 @@ impl Activation {
             supplied,
             slots,
             extra,
+            self.storage
+                .extras
+                .as_ref()
+                .and_then(|extras| extras.variadic.as_deref()),
         )
     }
 

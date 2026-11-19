@@ -53,7 +53,10 @@ impl Dependencies {
             self.vendor_files += 1;
         }
         if let Ok(file) = parsed {
-            let mut declarations = Index::default();
+            let mut declarations = Index {
+                read_type_docs: index.read_type_docs,
+                ..Index::default()
+            };
             collect::collect(&mut declarations, &file.path, &file.source, &file.program);
             // A dependency may contain a polyfill or declarations already found
             // in the requested paths. Keep those callers' original signatures.

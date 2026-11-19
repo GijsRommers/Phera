@@ -18,6 +18,15 @@ impl Analyzer<'_> {
         self.depth += 1;
         let ty = self.expression_kind(expression, scope, quiet);
         self.depth -= 1;
+        if self.level >= 2
+            && !scope.facts.is_empty()
+            && ty != ValueType::Never
+            && !matches!(&expression.kind, ExpressionKind::Variable(Variable::Named(name)) if name != "this")
+            && let Some(place) = crate::scope::Place::of(expression)
+            && let Some(fact) = scope.facts.get(&place)
+        {
+            return fact.ty.clone();
+        }
         ty
     }
 
@@ -78,6 +87,9 @@ impl Analyzer<'_> {
             BinaryOperator::Divide | BinaryOperator::Modulo | BinaryOperator::Power
         ) {
             self.record_exception(scope);
+        }
+        if self.level >= 3 {
+            return super::operators::binary_type(operator, &left_ty, &right_ty);
         }
         match operator {
             BinaryOperator::Concat => ValueType::String,

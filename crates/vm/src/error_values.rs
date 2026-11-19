@@ -14,6 +14,7 @@ pub(crate) fn trace_argument(value: &Value, limit: usize) -> String {
             format!("{}::{}", object.class.name(), name.to_string_lossy())
         }
         Value::Object(object) => format!("Object({})", object.class.name()),
+        Value::Resource(resource) => format!("Resource id #{}", resource.id),
         _ => describe_with_limit(value, limit),
     }
 }

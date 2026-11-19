@@ -33,6 +33,8 @@ pub enum ParamType {
     /// `object|array`
     ObjectOrArray,
     Class(&'static str),
+    /// `RoundingMode|int`
+    RoundingModeOrInt,
     Callable,
     Iterable,
     /// `int|float`

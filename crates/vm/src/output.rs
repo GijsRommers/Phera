@@ -100,7 +100,7 @@ impl Vm {
 
     #[cold]
     fn begin_output(&mut self, bytes: &[u8]) {
-        if self.request_callbacks.headers.is_some() {
+        if self.request_callbacks.output.has_headers() {
             if self.output_writer.queued_origin.is_none() {
                 self.output_writer.queued_origin = Some(self.location());
                 self.pending_callbacks = true;
@@ -138,23 +138,61 @@ impl Vm {
     }
 
     pub(crate) async fn finish_headers(&mut self) -> Result<(), NativeError> {
+        self.finish_headers_at::<false>().await
+    }
+
+    pub(crate) async fn finish_request_headers(&mut self) {
+        if let Err(error) = self.finish_headers_at::<true>().await {
+            self.unwind(error);
+        }
+    }
+
+    async fn finish_headers_at<const REQUEST_END: bool>(&mut self) -> Result<(), NativeError> {
         self.prepare_response_headers();
         let origin = self.output_writer.queued_origin.take();
         self.refresh_pending_callbacks();
         let bytes = std::mem::take(&mut self.output_writer.queued);
-        let result = match self.request_callbacks.headers.take() {
+        if matches!(
+            self.request_callbacks.output,
+            crate::request_callbacks::OutputCallbacks::None
+        ) {
+            self.publish_output(origin, &bytes);
+            return Ok(());
+        }
+        let callbacks = std::mem::take(&mut self.request_callbacks.output);
+        let (headers, finalizer) = callbacks.into_callbacks();
+        if let Some(finalizer) = finalizer {
+            self.request_callbacks.output.set_finalizer(finalizer);
+        }
+        let result = match headers {
             Some(callback) => self
                 .invoke_resolved_callable(callback, [])
                 .await
                 .map(|_| ()),
             None => Ok(()),
         };
+        self.publish_output(origin, &bytes);
+        if !REQUEST_END {
+            return result;
+        }
+        if let Err(error) = result {
+            self.unwind(error);
+        }
+        let (_, finalizer) = std::mem::take(&mut self.request_callbacks.output).into_callbacks();
+        if let Some(finalizer) = finalizer
+            && let Err(error) = finalizer(self, Vec::new()).await
+        {
+            self.report_uncaught(error).await;
+        }
+        Ok(())
+    }
+
+    fn publish_output(&mut self, origin: Option<SourceLocation>, bytes: &[u8]) {
         if self.output_writer.origin.is_none() || origin.is_some() {
             self.output_writer.origin = origin.or_else(|| Some(self.location()));
         }
         if !bytes.is_empty() {
-            self.output_writer.write(&mut self.output, &bytes);
+            self.output_writer.write(&mut self.output, bytes);
         }
-        result
     }
 }

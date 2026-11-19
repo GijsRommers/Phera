@@ -32,7 +32,8 @@ fn sort<'a>(
     name: &'static str,
 ) -> LocalFuture<'a, NativeResult> {
     Box::pin(async move {
-        let object = receiver(object.as_ref())?;
+        let this = object;
+        let object = receiver(this.as_ref())?;
         if matches!(name, "uasort" | "uksort") {
             let callable = super::dimensions::arg(&args, 0);
             context.validate_callback(name, 2, "callback", &callable)?;
@@ -50,7 +51,22 @@ fn sort<'a>(
             state.sorting = true;
             Ok(())
         })?;
+        let method = match (state::base(object), name) {
+            (super::ITERATOR, "uasort") => Some("ArrayIterator->uasort"),
+            (super::ITERATOR, "uksort") => Some("ArrayIterator->uksort"),
+            (_, "uasort") => Some("ArrayObject->uasort"),
+            (_, "uksort") => Some("ArrayObject->uksort"),
+            _ => None,
+        };
+        if let Some(method) = method {
+            context.push_callback_frame(method, this.clone(), args[1..].to_vec());
+            context.push_callback_frame(name, None, args.clone());
+        }
         let result = handler(context, args).await;
+        if method.is_some() {
+            context.pop_callback_frame();
+            context.pop_callback_frame();
+        }
         state::update(object, |state| {
             state.sorting = false;
             Ok(())

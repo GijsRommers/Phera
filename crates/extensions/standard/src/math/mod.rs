@@ -12,6 +12,8 @@ pub(crate) mod rounding;
 mod trig;
 
 pub(crate) fn register(registry: &mut Registry) {
+    rounding::register_enum(registry);
+    registry.describe_function("round", "float", None);
     let modules = [
         aggregate::FUNCTIONS,
         base::FUNCTIONS,

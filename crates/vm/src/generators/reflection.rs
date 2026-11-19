@@ -191,7 +191,7 @@ impl Vm {
     }
 }
 
-fn closure_scope(closure: &Rc<Object>) -> Option<String> {
+pub(super) fn closure_scope(closure: &Rc<Object>) -> Option<String> {
     let native = closure.native.try_borrow().ok()?;
     let closure = native
         .as_ref()?

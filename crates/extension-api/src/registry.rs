@@ -6,6 +6,9 @@ use phera_value::Value;
 
 use crate::{ClassEntry, FunctionEntry};
 
+/// Handles a family of PHP INI settings, with a value only for a write.
+pub type IniHandler = fn(&mut dyn crate::Context, &[u8], Option<&Value>) -> crate::NativeResult;
+
 /// The value of a constant an extension defines. Kept apart from [`Value`] so
 /// a registry holds no `Rc` and can be shared between worker threads.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -65,6 +68,7 @@ pub struct Registry {
     /// Only calls already holding a first-argument object need to check this table.
     object_handlers: HashMap<&'static str, crate::AsyncFn>,
     extra_named_handlers: HashMap<&'static str, crate::SyncFn>,
+    ini_handlers: HashMap<&'static [u8], IniHandler>,
     callback_frames: HashSet<&'static str>,
     function_modules: HashMap<&'static str, &'static str>,
     function_return_types: HashMap<&'static str, &'static str>,
@@ -89,6 +93,16 @@ struct NativeConstant {
 }
 
 impl Registry {
+    /// Dispatches a family such as `session.*` without a dependency on its extension.
+    pub fn ini_family(&mut self, prefix: &'static [u8], handler: IniHandler) {
+        self.ini_handlers.insert(prefix, handler);
+    }
+
+    pub fn ini_handler(&self, setting: &[u8]) -> Option<IniHandler> {
+        let prefix = setting.split(|byte| *byte == b'.').next()?;
+        self.ini_handlers.get(prefix).copied()
+    }
+
     pub fn new() -> Self {
         Self::default()
     }

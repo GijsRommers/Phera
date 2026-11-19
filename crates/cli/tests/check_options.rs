@@ -9,7 +9,7 @@ fn usage_errors_exit_two() {
     let project = Project::new();
     for args in [
         &[][..],
-        &["--level", "2"],
+        &["--level", "6"],
         &["--format", "xml"],
         &["missing.php"],
         &["--generate-baseline"],

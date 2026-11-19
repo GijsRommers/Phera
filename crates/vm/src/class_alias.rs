@@ -1,7 +1,5 @@
 //! `class_alias(Original::class, 'Other')` adds a second name for the same class identity.
 
-use std::collections::hash_map::Entry;
-
 use phera_extension_api::NativeResult;
 use phera_value::Value;
 
@@ -65,26 +63,20 @@ impl Vm {
                 "8.4",
             ));
         }
-        match self.classes.entries.entry(key.clone()) {
-            Entry::Vacant(entry) => {
-                entry.insert(class);
-                self.classes.order.push(key);
-                Ok(Value::Bool(true))
-            }
-            Entry::Occupied(_) => {
-                let kind = class.kind.description().to_ascii_lowercase();
-                let mut message = format!("Cannot redeclare {kind} {alias}");
-                if let Some((function, index)) = class.declaration {
-                    let unit = self.code.unit(function);
-                    if let Some(declaration) = unit.classes.get(index.index()) {
-                        let (file, line) = (&unit.file, declaration.line);
-                        message.push_str(&format!(" (previously declared in {file}:{line})"));
-                    }
-                }
-                self.warn(message);
-                Ok(Value::Bool(false))
+        if self.classes.alias(key, class.clone()) {
+            return Ok(Value::Bool(true));
+        }
+        let kind = class.kind.description().to_ascii_lowercase();
+        let mut message = format!("Cannot redeclare {kind} {alias}");
+        if let Some((function, index)) = class.declaration {
+            let unit = self.code.unit(function);
+            if let Some(declaration) = unit.classes.get(index.index()) {
+                let (file, line) = (&unit.file, declaration.line);
+                message.push_str(&format!(" (previously declared in {file}:{line})"));
             }
         }
+        self.warn(message);
+        Ok(Value::Bool(false))
     }
 
     /// Membership uses canonical names on a miss so aliases work for ancestors as well.

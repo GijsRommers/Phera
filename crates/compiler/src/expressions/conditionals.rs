@@ -86,14 +86,21 @@ impl Compiler<'_> {
     }
 
     /// An evaluated string can observe and modify any caller variable.
-    pub(crate) fn compile_eval(
-        &mut self,
-        code: &ast::Expression,
-        line: usize,
-    ) -> Result<Reg, CompileError> {
+    pub(crate) fn compile_eval(&mut self, code: &ast::Expression) -> Result<Reg, CompileError> {
         self.function.dynamic_scope = true;
         let source = self.compile_expression(code)?;
         let destination = self.allocate_register()?;
+        // Zend emits eval after visiting its operand. Heredoc's first string
+        // token starts after the opener, unlike an ordinary quoted literal.
+        let text = self
+            .source
+            .get(code.span.start..code.span.end)
+            .unwrap_or_default();
+        let content = text
+            .strip_prefix(b"b")
+            .or_else(|| text.strip_prefix(b"B"))
+            .unwrap_or(text);
+        let line = self.lines.line(code.span.start) + usize::from(content.starts_with(b"<<<"));
         self.emit(
             Instruction::Eval {
                 destination,

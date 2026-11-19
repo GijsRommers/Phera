@@ -15,14 +15,16 @@ impl NativeTrace {
     pub(crate) fn new(name: &str, arguments: &[Value]) -> Self {
         Self {
             name: name.into(),
-            arguments: {
-                let mut array = phera_value::PhpArray::new();
-                for value in arguments {
-                    let _ = array.push(value.deref().clone());
-                }
-                Value::Array(std::rc::Rc::new(array))
-            },
+            arguments: Self::snapshot_arguments(arguments),
         }
+    }
+
+    fn snapshot_arguments(arguments: &[Value]) -> Value {
+        let mut array = phera_value::PhpArray::new();
+        for value in arguments {
+            let _ = array.push(value.deref().clone());
+        }
+        Value::from(array)
     }
 }
 
@@ -131,5 +133,66 @@ pub(crate) struct DeclarationFailure {
 /// Native operations that enter PHP record the caller without allocating a PHP frame.
 pub(crate) struct NativeCallbackSite {
     pub(crate) boundary: usize,
-    pub(crate) native: NativeTrace,
+    pub(crate) native: NativeCaller,
+}
+
+/// `array_map($callback, $values)` already owns its arguments for the duration of the call.
+pub(crate) enum NativeCaller {
+    Saved(NativeTrace),
+    ArrayMap(Vec<Value>),
+    Method {
+        name: &'static str,
+        object: std::rc::Rc<phera_value::Object>,
+        arguments: Vec<Value>,
+        declaration: Option<std::rc::Rc<phera_extension_api::reflection::AttributeSite>>,
+    },
+    Internal(Option<crate::diagnostics::SourceLocation>),
+}
+
+impl NativeCaller {
+    pub(crate) fn name(&self) -> Option<&str> {
+        match self {
+            Self::Saved(trace) => Some(&trace.name),
+            Self::Method { name, .. } => Some(name),
+            Self::ArrayMap(_) => Some("array_map"),
+            Self::Internal(_) => None,
+        }
+    }
+
+    pub(crate) fn arguments(&self) -> Value {
+        match self {
+            Self::Saved(trace) => trace.arguments.clone(),
+            Self::ArrayMap(arguments) | Self::Method { arguments, .. } => {
+                NativeTrace::snapshot_arguments(arguments)
+            }
+            Self::Internal(_) => Value::Null,
+        }
+    }
+
+    pub(crate) fn object(&self) -> Option<&std::rc::Rc<phera_value::Object>> {
+        match self {
+            Self::Method { object, .. } => Some(object),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn child_location(&self) -> Option<(&str, usize)> {
+        match self {
+            Self::Method {
+                declaration: Some(site),
+                ..
+            } => Some((&site.file, site.line)),
+            Self::Internal(Some(location)) => Some((&location.file, location.line)),
+            _ => None,
+        }
+    }
+}
+
+impl Vm {
+    pub(crate) fn push_native_callback(&mut self, native: NativeCaller) {
+        self.native_callback_sites.push(NativeCallbackSite {
+            boundary: self.call_stack.depth(),
+            native,
+        });
+    }
 }

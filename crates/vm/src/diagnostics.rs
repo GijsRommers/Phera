@@ -1,7 +1,7 @@
 //! Publish PHP diagnostics and fatal traces at the current bytecode location.
 
 use phera_extension_api::NativeError;
-use phera_value::CollectDiagnostics;
+use phera_value::{CollectDiagnostics, PhpString};
 
 use crate::Vm;
 
@@ -57,11 +57,15 @@ impl Vm {
     }
 
     pub(crate) fn diagnostic(&mut self, kind: &str, message: String) {
-        self.diagnostic_bytes(kind, message.as_bytes());
+        self.publish_diagnostic(kind, message.into());
     }
 
     pub(crate) fn diagnostic_bytes(&mut self, kind: &str, message: &[u8]) {
-        if self.queue_diagnostic(kind, message) {
+        self.publish_diagnostic(kind, message.into());
+    }
+
+    fn publish_diagnostic(&mut self, kind: &str, message: PhpString) {
+        if self.queue_diagnostic(kind, &message) {
             return;
         }
         let level = match kind {
@@ -70,12 +74,7 @@ impl Vm {
             "Deprecated" => 8192,
             _ => 0,
         };
-        if self.diagnostic_reporter.is_visible() && self.error_handlers.reporting & level != 0 {
-            let SourceLocation { file, line } = self.location();
-            if let Some(bytes) = self.diagnostic_reporter.report(kind, message, &file, line) {
-                self.out(&bytes);
-            }
-        }
+        self.report_diagnostic(level, kind, message, self.location());
     }
 
     /// Fatal traces describe heap frames; unwinding never relies on a Rust panic.
@@ -84,9 +83,13 @@ impl Vm {
         let error = self.materialize_error(error);
         match error {
             NativeError::Throw { class, message, .. } => {
-                let SourceLocation { file, line } = self.location();
-                let text = self.error_trace(class, &message, &file, line);
+                let location = self.location();
+                let text = self.error_trace(class, &message, &location.file, location.line);
                 self.out(text.as_bytes());
+                let suffix = format!(" in {} on line {}\n", location.file, location.line);
+                let heading = text.strip_prefix("\nFatal error: ").unwrap_or(&text);
+                let message = heading.strip_suffix(&suffix).unwrap_or(heading);
+                self.record_last_error(1, message.to_owned(), location);
                 self.status = 255;
             }
             NativeError::Unwind(state) => {
@@ -104,6 +107,14 @@ impl Vm {
                             failure.message, failure.file, failure.line
                         )
                         .as_bytes(),
+                    );
+                    self.record_last_error(
+                        64,
+                        failure.message,
+                        SourceLocation {
+                            file: failure.file,
+                            line: failure.line,
+                        },
                     );
                     self.status = 255;
                 }
