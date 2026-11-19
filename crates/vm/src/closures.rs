@@ -33,7 +33,7 @@ pub(crate) struct ClosureState {
     pub(crate) captures: Vec<Option<Value>>,
     pub(crate) context: Option<MethodContext>,
     pub(crate) binding: ClosureBinding,
-    pub(crate) statics: Rc<RefCell<HashMap<u16, Value>>>,
+    pub(crate) statics: Option<Rc<RefCell<HashMap<u16, Value>>>>,
 }
 
 impl Vm {
@@ -80,9 +80,11 @@ impl Vm {
             .code
             .declared_facts(main, function.index())
             .ok_or_else(|| internal_error!("closure body"))?;
-        let capture_count = self.code.function(index).captures as usize;
+        let body = self.code.function(index);
+        let capture_count = body.captures as usize;
+        let statics = (!body.statics.is_empty()).then(|| Rc::new(RefCell::new(HashMap::new())));
         let context = self.closure_context(binding);
-        let callee = closure_callee(&self.code, index);
+        let callee = self.cached_closure_callee(frame.cache(), function, index);
         let first_capture = self
             .closure_captures
             .len()
@@ -100,11 +102,28 @@ impl Vm {
             context,
             binding,
             captures,
-            statics: Rc::new(RefCell::new(HashMap::new())),
+            statics,
         };
         let object = self.allocate_closure(state)?;
         self.set(destination, Value::Object(object));
         Ok(())
+    }
+
+    /// Every evaluation of one closure expression shares immutable argument metadata.
+    fn cached_closure_callee(
+        &self,
+        cache: &crate::unit_caches::UnitCache,
+        local: FunctionId,
+        function: FunctionIndex,
+    ) -> Callee {
+        let mut signatures = cache.closure_signatures.borrow_mut();
+        let index = local.index();
+        if signatures.len() <= index {
+            signatures.resize_with(index + 1, || None);
+        }
+        signatures[index]
+            .get_or_insert_with(|| closure_callee(&self.code, function))
+            .clone()
     }
 
     /// A static closure keeps private class access while deliberately omitting the receiver.
@@ -124,7 +143,7 @@ impl Vm {
     ) -> Result<Rc<Object>, NativeError> {
         let class = self
             .classes
-            .get("Closure")
+            .closure_class()
             .ok_or_else(|| internal_error!("Closure class"))?;
         let object = self.classes.allocate(class);
         *object.native.borrow_mut() = Some(Box::new(state));
@@ -135,25 +154,29 @@ impl Vm {
 impl ClosureState {
     /// PHP clone and bind copy the current static values into independent reference cells.
     pub(crate) fn duplicate(&self) -> Self {
-        let statics = self
-            .statics
-            .borrow()
-            .iter()
-            .map(|(key, value)| {
-                let cloned = match value {
-                    Value::Reference(reference) if Rc::strong_count(reference) > 1 => value.clone(),
-                    _ => Value::Reference(Rc::new(RefCell::new(value.deref().clone()))),
-                };
-                (*key, cloned)
-            })
-            .collect();
+        let statics = self.statics.as_ref().map(|statics| {
+            let copied = statics
+                .borrow()
+                .iter()
+                .map(|(key, value)| {
+                    let cloned = match value {
+                        Value::Reference(reference) if Rc::strong_count(reference) > 1 => {
+                            value.clone()
+                        }
+                        _ => Value::Reference(Rc::new(RefCell::new(value.deref().clone()))),
+                    };
+                    (*key, cloned)
+                })
+                .collect();
+            Rc::new(RefCell::new(copied))
+        });
         Self {
             origin: self.origin,
             callee: self.callee.clone(),
             captures: self.captures.clone(),
             context: self.context.clone(),
             binding: self.binding,
-            statics: Rc::new(RefCell::new(statics)),
+            statics,
         }
     }
 }

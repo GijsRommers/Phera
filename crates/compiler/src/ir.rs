@@ -16,6 +16,7 @@ use phera_bytecode::Reg;
 /// Compiler IR with owned names and paths before table interning.
 #[derive(Debug, Clone)]
 pub enum Instruction {
+    AttributeDiagnostics,
     /// Omitted during bytecode lowering; preserves positions while resolving forward gotos.
     Nop,
     /// Quiet receiver read for isset($this).
@@ -176,6 +177,7 @@ pub enum Instruction {
     /// Invoke the prepared callee and save its result; emits Call.
     FinishCall {
         destination: Reg,
+        result: phera_bytecode::CallResult,
     },
     /// Capture the prepared first-class callable; emits MakeCallable.
     FinishCallable {
@@ -281,6 +283,7 @@ pub enum Instruction {
     },
     /// Prepare and invoke an evaluated callee; emits InitDynamicCall, argument sends, and Call.
     Call {
+        result: phera_bytecode::CallResult,
         destination: Reg,
         name: Reg,
         fallback: Option<String>,

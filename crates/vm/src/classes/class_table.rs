@@ -14,6 +14,12 @@ use super::Class;
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub(crate) struct ClassIndex(u32);
 
+impl ClassIndex {
+    pub(crate) fn number(self) -> u32 {
+        self.0
+    }
+}
+
 /// One request owns the id pool; weak records exist solely for cycle cleanup.
 #[derive(Default)]
 pub(crate) struct ClassTable {
@@ -22,6 +28,7 @@ pub(crate) struct ClassTable {
     pub(crate) entries: HashMap<String, Rc<Class>>,
     /// Every class, by number.
     numbered: Vec<Rc<Class>>,
+    closure: Option<ClassIndex>,
     pub(crate) has_dimensions: bool,
     pub(crate) has_property_views: bool,
     pub(crate) objects: Vec<Weak<Object>>,
@@ -52,6 +59,9 @@ impl ClassTable {
             .hooks
             .as_ref()
             .is_some_and(|hooks| hooks.properties.is_some());
+        if class.origin == super::class::ClassOrigin::Closure {
+            self.closure = Some(class.index);
+        }
         self.numbered.push(class.clone());
         self.entries.insert(lowercase_name, class);
     }
@@ -60,6 +70,16 @@ impl ClassTable {
     #[inline]
     pub(crate) fn class(&self, index: ClassIndex) -> &Rc<Class> {
         &self.numbered[index.0 as usize]
+    }
+
+    pub(crate) fn numbered(&self, index: u32) -> Option<Rc<Class>> {
+        self.numbered.get(index as usize).cloned()
+    }
+
+    /// The built-in Closure class is fixed for a request.
+    pub(crate) fn closure_class(&self) -> Option<Rc<Class>> {
+        let index = self.closure?;
+        self.numbered.get(index.0 as usize).cloned()
     }
 
     /// Class identifiers ignore case, including names produced by dynamic expressions.
