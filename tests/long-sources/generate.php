@@ -125,6 +125,11 @@ $shapes = [
     'property-default-chain' => fn ($n) => 'class C { public $p = ' . chain('1', ' + ', '1', $n) . '; } echo (new C)->p;',
     'parameter-default-chain' => fn ($n) => 'function f($p = ' . chain('1', ' + ', '1', $n) . ') { return $p; } echo f();',
 
+    // Generators.
+    'yield-in-chain' => fn ($n) => 'function g() { $x = (yield 1)' . str_repeat(' + 1', $n) . '; return $x; } $g = g(); $g->current(); $g->send(1); echo $g->getReturn();',
+    'yield-statements' => fn ($n) => 'function g() { ' . numbered('yield #;', $n, ' ') . ' } echo iterator_count(g());',
+    'yield-from-ladder' => fn ($n) => 'function g($v) { if ($v === -1) { yield from []; } ' . numbered('elseif ($v === #) { yield from [#]; }', $n, ' ') . ' } echo implode(",", iterator_to_array(g(' . ($n - 1) . '), false));',
+
     // Classes.
     'class-methods' => fn ($n) => 'class C { ' . numbered('function m#() { return #; }', $n, ' ') . ' } echo (new C)->m' . ($n - 1) . '();',
     'class-constants' => fn ($n) => 'class C { ' . numbered('const K# = #;', $n, ' ') . ' } echo C::K' . ($n - 1) . ';',

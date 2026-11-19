@@ -96,6 +96,10 @@ const CASES: &[(&str, usize, Expect)] = &[
     ("property-default-chain", 100_000, SameAsPhp),
     ("parameter-default-chain", 100_000, SameAsPhp),
     ("attribute-argument-nested", 1_000, SameAsPhp),
+    // Generators.
+    ("yield-in-chain", 100_000, SameAsPhp),
+    ("yield-statements", 100_000, SameAsPhp),
+    ("yield-from-ladder", 50_000, SameAsPhp),
     // Nesting that PHP accepts at a thousand levels was a nesting error.
     ("coalesce", 1_000, SameAsPhp),
     ("power", 1_000, SameAsPhp),
