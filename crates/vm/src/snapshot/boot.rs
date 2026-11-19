@@ -35,6 +35,9 @@ pub enum BootOutcome {
     /// The script ended without calling it, with this exit status; what it
     /// printed is in [`Vm::output`].
     Finished(i32),
+    /// The script called it, but the state could not be kept: the message
+    /// of the `Phera\SnapshotException` it threw.
+    Refused(String),
 }
 
 impl Vm {
@@ -73,9 +76,10 @@ impl Vm {
     pub async fn boot(&mut self, unit: Arc<CompiledUnit>) -> BootOutcome {
         self.snapshot.mode = SnapshotMode::Boot;
         let status = self.run(unit).await;
-        match self.snapshot.taken.take() {
-            Some(snapshot) => BootOutcome::Snapshot(*snapshot),
-            None => BootOutcome::Finished(status),
+        match (self.snapshot.taken.take(), self.snapshot.refused.take()) {
+            (Some(snapshot), _) => BootOutcome::Snapshot(*snapshot),
+            (None, Some(message)) => BootOutcome::Refused(message),
+            (None, None) => BootOutcome::Finished(status),
         }
     }
 

@@ -83,7 +83,14 @@ pub struct Registry {
     class_modules: HashMap<&'static str, &'static str>,
     /// How a fork of a snapshot gets each extension's request state.
     state_forks: HashMap<std::any::TypeId, crate::state::StateFork>,
+    /// How a fork copies an open resource, by the resource's kind.
+    resource_forks: HashMap<&'static str, ResourceFork>,
 }
+
+/// Copies the data of an open resource of one kind for a fork of a
+/// snapshot, or says why it cannot be copied (an open file, a socket).
+pub type ResourceFork =
+    fn(&dyn std::any::Any, &mut phera_value::Fork<'_>) -> Result<Box<dyn std::any::Any>, String>;
 
 #[derive(Clone)]
 struct NativeConstant {
@@ -102,6 +109,16 @@ impl Registry {
     /// stores must be registered, or a snapshot that holds it is refused.
     pub fn fork_state<T: 'static>(&mut self, fork: crate::state::StateFork) {
         self.state_forks.insert(std::any::TypeId::of::<T>(), fork);
+    }
+
+    /// Says how a fork copies an open resource of this kind (`"stream"`).
+    pub fn fork_resource(&mut self, kind: &'static str, fork: ResourceFork) {
+        self.resource_forks.insert(kind, fork);
+    }
+
+    /// How a fork copies a resource of this kind, if it can.
+    pub fn resource_fork(&self, kind: &str) -> Option<ResourceFork> {
+        self.resource_forks.get(kind).copied()
     }
 
     /// The registered forks of request state, by type.

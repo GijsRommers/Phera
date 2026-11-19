@@ -43,9 +43,13 @@ impl Vm {
             }
             SnapshotMode::Boot => {
                 self.snapshot.resume = destination;
-                let mut frozen = self
-                    .fork_vm()
-                    .map_err(|refusal| self.snapshot_exception(&refusal))?;
+                let mut frozen = self.fork_vm().map_err(|refusal| {
+                    let error = self.snapshot_exception(&refusal);
+                    if let NativeError::Throw { message, .. } = &error {
+                        self.snapshot.refused = Some(message.clone());
+                    }
+                    error
+                })?;
                 frozen.snapshot.mode = SnapshotMode::Forked;
                 self.snapshot.taken = Some(Box::new(Snapshot { frozen }));
                 Err(NativeError::Unwind(Unwind(Box::new(SnapshotStop))))

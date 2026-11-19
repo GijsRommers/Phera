@@ -23,12 +23,32 @@ use crate::closures::ClosureState;
 
 /// The VM's [`NativeFork`]. It remembers the objects whose properties are
 /// bound to references: the fork binds them again in its own table.
-#[derive(Default)]
-pub(super) struct VmNatives {
+pub(super) struct VmNatives<'r> {
+    pub(super) registry: &'r phera_extension_api::Registry,
     pub(super) rebind: std::cell::RefCell<Vec<(usize, Vec<phera_value::ArrayKey>)>>,
 }
 
-impl NativeFork for VmNatives {
+impl NativeFork for VmNatives<'_> {
+    fn fork_resource(
+        &self,
+        resource: &phera_value::Resource,
+        fork: &mut Fork<'_>,
+    ) -> Result<phera_value::Resource, String> {
+        let hook = self
+            .registry
+            .resource_fork(resource.kind)
+            .ok_or("an open resource of this kind belongs to one request")?;
+        let data = resource
+            .data
+            .try_borrow()
+            .map_err(|_| "the resource is in use".to_owned())?;
+        let copy = match data.as_deref() {
+            Some(data) => Some(hook(data, fork)?),
+            None => None,
+        };
+        Ok(phera_value::Resource::new(resource.id, resource.kind, copy))
+    }
+
     fn fork_native(
         &self,
         object: &Object,

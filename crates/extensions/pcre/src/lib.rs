@@ -41,6 +41,8 @@ impl Extension for Pcre {
     }
 
     fn register(&self, registry: &mut Registry) {
+        // How a fork of a snapshot gets this extension's request state.
+        registry.fork_state::<crate::errors::Error>(phera_extension_api::fresh_state);
         signatures::register(registry);
         for &(name, value) in CONSTANTS {
             registry.constant(name, value);

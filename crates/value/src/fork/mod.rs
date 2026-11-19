@@ -34,7 +34,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::object::{Object, ObjectIds};
+use crate::object::{Object, ObjectIds, Resource};
 use crate::value::Value;
 
 /// Copies the native state of objects of built-in classes; implemented by
@@ -48,6 +48,9 @@ pub trait NativeFork {
         state: &dyn Any,
         fork: &mut Fork<'_>,
     ) -> Result<Box<dyn Any>, String>;
+
+    /// A copy of an open resource (a stream), or why it cannot be copied.
+    fn fork_resource(&self, resource: &Resource, fork: &mut Fork<'_>) -> Result<Resource, String>;
 }
 
 /// Why a value could not be copied, and which one it was.
@@ -73,6 +76,7 @@ pub struct Fork<'n> {
     /// of its original: `WeakMap` entries are tagged with identities.
     pub(crate) identities: HashMap<usize, usize>,
     references: HashMap<usize, Rc<RefCell<Value>>>,
+    resources: HashMap<usize, Rc<Resource>>,
     pub(crate) arrays: HashMap<usize, Rc<crate::PhpArray>>,
     /// Copies made but not filled yet.
     pub(crate) unfilled_objects: Vec<(Rc<Object>, Rc<Object>)>,
@@ -93,6 +97,7 @@ impl<'n> Fork<'n> {
             objects: HashMap::new(),
             identities: HashMap::new(),
             references: HashMap::new(),
+            resources: HashMap::new(),
             arrays: HashMap::new(),
             unfilled_objects: Vec::new(),
             unfilled_references: Vec::new(),
@@ -112,18 +117,31 @@ impl<'n> Fork<'n> {
             Value::Array(array) => Value::Array(self.array(array)),
             Value::Object(object) => Value::Object(self.object(object)),
             Value::Reference(cell) => Value::Reference(self.reference(cell)),
-            Value::Resource(resource) => {
-                if !resource.is_closed() {
-                    self.refuse_address(
-                        Rc::as_ptr(resource) as usize,
-                        resource.kind,
-                        "an open resource belongs to one request",
-                    );
-                }
-                value.clone()
-            }
+            Value::Resource(resource) => Value::Resource(self.resource(resource)),
             other => other.clone(),
         }
+    }
+
+    /// The copy of a resource: a closed one is shared (it can no longer
+    /// change), an open one is copied by its extension, once.
+    pub fn resource(&mut self, resource: &Rc<Resource>) -> Rc<Resource> {
+        if resource.is_closed() {
+            return resource.clone();
+        }
+        let address = Rc::as_ptr(resource) as usize;
+        if let Some(copy) = self.resources.get(&address) {
+            return copy.clone();
+        }
+        let natives = self.natives;
+        let copy = match natives.fork_resource(resource, self) {
+            Ok(copy) => Rc::new(copy),
+            Err(reason) => {
+                self.refuse_address(address, resource.kind, reason);
+                resource.clone()
+            }
+        };
+        self.resources.insert(address, copy.clone());
+        copy
     }
 
     /// The copy of a reference cell, made empty and filled later.

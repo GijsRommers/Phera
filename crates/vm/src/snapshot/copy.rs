@@ -43,7 +43,10 @@ impl Vm {
     /// A copy of this VM that shares nothing a script can change with it.
     pub(crate) fn fork_vm(&self) -> Result<Vm, SnapshotRefusal> {
         self.check_forkable()?;
-        let natives = VmNatives::default();
+        let natives = VmNatives {
+            registry: &self.registry,
+            rebind: Default::default(),
+        };
         let mut fork = Fork::new(self.classes.ids(), &natives);
         let globals = self.globals.fork_copy(&mut fork);
         let registers = self.registers.fork_copy(&mut fork);

@@ -59,6 +59,9 @@ pub(crate) struct SnapshotState {
     pub(crate) taken: Option<Box<Snapshot>>,
     /// The script called `Phera\snapshot()` in a classic request.
     pub(crate) called: bool,
+    /// Why the call could not keep the state, in a boot run. The script
+    /// may catch the exception, or its own handler may hide it.
+    pub(crate) refused: Option<String>,
 }
 
 impl SnapshotState {
@@ -68,6 +71,7 @@ impl SnapshotState {
             resume: self.resume,
             taken: None,
             called: false,
+            refused: None,
         }
     }
 }

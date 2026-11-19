@@ -108,6 +108,7 @@ impl Runtime {
                     },
                 )
             }
+            BootOutcome::Refused(message) => failed(message),
             BootOutcome::Finished(0) => (
                 ScriptState::Classic(FileStamps::of(vm.included_files())),
                 BootReport::Classic,

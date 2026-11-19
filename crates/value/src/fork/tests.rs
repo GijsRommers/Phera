@@ -34,6 +34,14 @@ impl NativeFork for Natives {
             None => Err("an open file".into()),
         }
     }
+
+    fn fork_resource(
+        &self,
+        _resource: &crate::object::Resource,
+        _fork: &mut Fork<'_>,
+    ) -> Result<crate::object::Resource, String> {
+        Err("a file".into())
+    }
 }
 
 fn object(ids: &Rc<ObjectIds>) -> Rc<Object> {
