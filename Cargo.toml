@@ -137,3 +137,16 @@ tzdb_data = "=0.2.5"
 [profile.release]
 lto = "fat"
 codegen-units = 1
+
+# The mbstring tests push megabytes of text through every encoding. Built
+# without optimization they took 7 of the test suite's 18 minutes in CI, so
+# this crate and the two encoding libraries under it are optimized in debug
+# and test builds as well. Debug assertions and overflow checks stay on.
+[profile.dev.package.phera-ext-mbstring]
+opt-level = 2
+
+[profile.dev.package.encoding_rs]
+opt-level = 2
+
+[profile.dev.package.iconv-native]
+opt-level = 2
