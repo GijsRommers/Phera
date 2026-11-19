@@ -204,20 +204,6 @@ fn native_member(ty: &ValueType) -> Option<&str> {
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn native_members_use_the_same_order_as_runtime_diagnostics() {
-        assert_eq!(
-            ValueType::Int.join(&ValueType::String).to_string(),
-            "string|int"
-        );
-        assert_eq!(ValueType::Int.join(&ValueType::Null).to_string(), "?int");
-    }
-}
-
 fn sequence<'a>(
     parts: &mut Vec<Part<'a>>,
     items: &'a [ValueType],
@@ -233,5 +219,19 @@ fn sequence<'a>(
         } else {
             parts.push(Part::Type(item));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_members_use_the_same_order_as_runtime_diagnostics() {
+        assert_eq!(
+            ValueType::Int.join(&ValueType::String).to_string(),
+            "string|int"
+        );
+        assert_eq!(ValueType::Int.join(&ValueType::Null).to_string(), "?int");
     }
 }
