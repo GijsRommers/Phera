@@ -10,6 +10,7 @@ phera-source.workspace = true
 phera-value.workspace = true
 phera-extension-api.workspace = true
 tokio.workspace = true
+rustix.workspace = true
 
 phera-bytecode.workspace = true
 phera-compiler.workspace = true

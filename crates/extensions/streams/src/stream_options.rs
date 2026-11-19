@@ -1,8 +1,8 @@
 //! `stream_get_meta_data($stream)['seekable']` reports support for seeking.
 
 use phera_extension_api::{
-    ArrayKey, ConstantValue, Context, FunctionEntry, LocalFuture, NativeResult, Param, ParamType,
-    PhpArray, Registry, Value, args, value::to_php_string,
+    ArrayKey, ConstantValue, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param,
+    ParamType, PhpArray, Registry, Value, args, value::to_php_string,
 };
 use rustix::fs::{OFlags, fcntl_getfl, fcntl_setfl};
 
@@ -22,6 +22,8 @@ pub fn register(registry: &mut Registry) {
     const BUFFER: &[Param] = &[STREAM, Param::new("size", ParamType::Int)];
     const BLOCK: &[Param] = &[STREAM, Param::new("enable", ParamType::Bool)];
     for entry in [
+        FunctionEntry::sync("stream_set_chunk_size", BUFFER, set_chunk_size),
+        FunctionEntry::sync("stream_supports_lock", &[STREAM], supports_lock),
         FunctionEntry::sync("stream_get_meta_data", &[STREAM], get_meta_data),
         FunctionEntry::sync("stream_get_wrappers", &[], get_wrappers),
         FunctionEntry::sync("stream_is_local", &[STREAM], is_local),
@@ -46,9 +48,14 @@ fn get_wrappers(_: &mut dyn Context, _: &[Value]) -> NativeResult {
 fn is_local(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let value = args::value(arguments, 0);
     if value.is_resource() {
-        return with_stream(stream_arg(arguments, "stream_is_local")?, |stream| {
-            Value::Bool(stream.wrapper != Wrapper::Data)
-        });
+        return with_stream(
+            stream_arg(arguments, "stream_is_local").map_err(|_| {
+                NativeError::type_error(
+                    "stream_is_local(): supplied resource is not a valid stream resource",
+                )
+            })?,
+            |stream| Value::Bool(stream.wrapper != Wrapper::Data),
+        );
     }
     let name = to_php_string(value, context.diagnostics())?;
     let name = name
@@ -179,6 +186,37 @@ fn set_blocking(_: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, N
         })
         .await?;
         Ok(Value::Bool(value.is_ok()))
+    })
+}
+
+fn supports_lock(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let resource = argument_resource(
+        args::value(arguments, 0),
+        "stream_supports_lock",
+        "#1 ($stream)",
+    )?;
+    if crate::directory::is_open(resource) {
+        return Ok(Value::Bool(false));
+    }
+    with_stream(stream_arg(arguments, "stream_supports_lock")?, |stream| {
+        Value::Bool(stream.descriptor().is_some())
+    })
+}
+
+fn set_chunk_size(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let resource = stream_arg(arguments, "stream_set_chunk_size")?;
+    let size = args::int(arguments, 1).unwrap_or_default();
+    if size <= 0 {
+        return Err(NativeError::value_error(
+            "stream_set_chunk_size(): Argument #2 ($size) must be greater than 0",
+        ));
+    }
+    let size = i32::try_from(size).map_err(|_| {
+        NativeError::value_error("stream_set_chunk_size(): Argument #2 ($size) is too large")
+    })?;
+    with_stream(resource, |stream| {
+        let previous = std::mem::replace(&mut stream.chunk_size, size as usize);
+        Value::Int(previous as i64)
     })
 }
 

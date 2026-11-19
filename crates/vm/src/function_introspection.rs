@@ -12,6 +12,7 @@ pub(crate) enum RuntimeFunction {
     DefinedFunctions,
     DefinedConstants,
     ExtensionLoaded,
+    ExtensionFunctions,
     LoadedExtensions,
     PhpVersion,
 }
@@ -21,6 +22,7 @@ impl RuntimeFunction {
         Self::DefinedFunctions,
         Self::DefinedConstants,
         Self::ExtensionLoaded,
+        Self::ExtensionFunctions,
         Self::LoadedExtensions,
         Self::PhpVersion,
     ];
@@ -30,6 +32,7 @@ impl RuntimeFunction {
             Self::DefinedFunctions => "get_defined_functions",
             Self::DefinedConstants => "get_defined_constants",
             Self::ExtensionLoaded => "extension_loaded",
+            Self::ExtensionFunctions => "get_extension_funcs",
             Self::LoadedExtensions => "get_loaded_extensions",
             Self::PhpVersion => "phpversion",
         }
@@ -50,7 +53,9 @@ impl RuntimeFunction {
             Self::DefinedConstants => {
                 const { &[Param::new("categorize", ParamType::Bool).optional()] }
             }
-            Self::ExtensionLoaded => const { &[Param::new("extension", ParamType::String)] },
+            Self::ExtensionLoaded | Self::ExtensionFunctions => {
+                const { &[Param::new("extension", ParamType::String)] }
+            }
             Self::LoadedExtensions => {
                 const { &[Param::new("zend_extensions", ParamType::Bool).optional()] }
             }
@@ -98,6 +103,18 @@ impl Vm {
         });
         Ok(match function {
             RuntimeFunction::ExtensionLoaded => Value::Bool(loaded),
+            RuntimeFunction::ExtensionFunctions => {
+                let Some(name) = extension.as_deref() else {
+                    return Ok(Value::Bool(false));
+                };
+                if name.eq_ignore_ascii_case("zend") {
+                    return self.extension_functions("core");
+                }
+                if !loaded {
+                    return Ok(Value::Bool(false));
+                }
+                return self.extension_functions(name);
+            }
             RuntimeFunction::LoadedExtensions => {
                 let mut result = PhpArray::new();
                 if !arguments.first().is_some_and(phera_value::to_bool) {
@@ -129,6 +146,24 @@ impl Vm {
             RuntimeFunction::DefinedConstants => {
                 self.defined_constants(arguments.first().is_some_and(phera_value::to_bool))
             }
+        })
+    }
+
+    fn extension_functions(&self, module: &str) -> NativeResult {
+        let functions = include_str!("../../extension-api/data/extension-functions.tsv");
+        let mut result = PhpArray::new();
+        for (owner, name) in functions.lines().filter_map(|row| row.split_once('\t')) {
+            if owner.eq_ignore_ascii_case(module)
+                && (self.registry.get_function(name).is_some()
+                    || crate::intrinsics::Intrinsic::resolve(name).is_some())
+            {
+                result.push(Value::from(name))?;
+            }
+        }
+        Ok(if result.is_empty() {
+            Value::Bool(false)
+        } else {
+            Value::from(result)
         })
     }
 

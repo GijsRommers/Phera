@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use phera_extension_api::serialization::SerializationSettings;
+use phera_extension_api::ini::parse_quantity;
 use phera_extension_api::{ArrayKey, Context, NativeError, PhpArray, Value};
 
 #[derive(Default)]
@@ -25,9 +25,10 @@ impl Options {
         let mut result = Self {
             allowed: AllowedClasses::All,
             max_depth: context
-                .state()
-                .get::<SerializationSettings>()
-                .map_or(4096, |settings| settings.max_depth),
+                .ini_get(b"unserialize_max_depth")
+                .map_or(4096, |setting| {
+                    usize::try_from(parse_quantity(setting.as_bytes()).0).unwrap_or(0)
+                }),
         };
         let Some(options) = options else {
             return Ok(result);

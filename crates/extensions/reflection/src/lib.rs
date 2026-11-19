@@ -18,6 +18,7 @@ mod enum_reflection;
 mod extension;
 mod function;
 mod generator;
+mod lazy;
 mod member;
 mod method;
 mod modifiers;

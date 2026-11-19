@@ -11,6 +11,7 @@ mod expression;
 mod parser;
 mod patterns;
 mod scanner;
+mod settings;
 mod strings;
 mod token;
 
@@ -40,6 +41,7 @@ impl Mode {
 }
 
 pub(crate) fn register(registry: &mut Registry) {
+    settings::register(registry);
     registry.constant("INI_SCANNER_NORMAL", 0);
     registry.constant("INI_SCANNER_RAW", 1);
     registry.constant("INI_SCANNER_TYPED", 2);

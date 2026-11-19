@@ -20,7 +20,9 @@ use crate::value::Value;
 
 mod casting;
 mod structure;
-pub use casting::{StringComparison, StringComparisonStep, compare_with_string_objects};
+pub use casting::{
+    LazyComparison, StringComparison, StringComparisonStep, compare_with_string_objects,
+};
 use structure::{Comparison, Table, compare_tables};
 
 /// `<=>` as an operator: -1, 0 or 1 in a `Value::Int`.
@@ -80,6 +82,7 @@ pub fn compare_after_error(a: &Value, b: &Value, d: &mut dyn Diagnostics) -> Res
 
 /// A native class can supply an ordering or the two property tables to compare.
 pub enum ObjectComparison {
+    InitializeLazy,
     Default,
     Compared(i8),
     Projected(PhpArray, PhpArray),
@@ -130,6 +133,9 @@ fn compare_resolved(
         }
         (Value::Object(a), Value::Object(b)) => match comparison.objects(a, b, d)? {
             structure::Pair::Compared(result) => Ok(result),
+            structure::Pair::Initialize => Err(OpError::error(
+                "Object comparison requires PHP initialization",
+            )),
             structure::Pair::Tables(left, right) => compare_tables(left, right, comparison, d),
         },
         _ => comparison.leaf(a, b, d),

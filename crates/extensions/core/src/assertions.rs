@@ -28,10 +28,34 @@ pub(crate) fn register(registry: &mut Registry) {
 }
 
 fn assert(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    if to_bool(args::value(arguments, 0)) {
+    if context
+        .ini_get(b"zend.assertions")
+        .is_some_and(|value| phera_extension_api::ini::parse_quantity(value.as_bytes()).0 <= 0)
+        || context
+            .ini_get(b"assert.active")
+            .is_some_and(|value| !phera_extension_api::ini::boolean(value.as_bytes()))
+        || to_bool(args::value(arguments, 0))
+    {
         return Ok(Value::Bool(true));
     }
     let description = arguments.get(1).map(|value| value.deref().clone());
+    if !matches!(description, Some(Value::Object(_)))
+        && context
+            .ini_get(b"assert.exception")
+            .is_some_and(|value| !phera_extension_api::ini::boolean(value.as_bytes()))
+    {
+        if context
+            .ini_get(b"assert.warning")
+            .is_none_or(|value| phera_extension_api::ini::boolean(value.as_bytes()))
+        {
+            let text = match description {
+                Some(Value::String(text)) => text.to_string_lossy(),
+                _ => "Assertion".to_owned(),
+            };
+            context.warning(format!("assert(): {text} failed"));
+        }
+        return Ok(Value::Bool(false));
+    }
     Err(match description {
         // A ready-made exception is thrown as it is.
         Some(Value::Object(exception)) => context.throw_object(exception),

@@ -29,10 +29,13 @@ impl Vm {
         let NativeError::Unwind(payload) = error else {
             return Err(error);
         };
-        let thrown = payload
-            .0
-            .downcast::<Thrown>()
-            .map_err(|payload| NativeError::Unwind(phera_extension_api::Unwind(payload)))?;
+        let thrown = match payload.0.downcast::<Thrown>() {
+            Ok(thrown) => thrown,
+            Err(payload) if payload.is::<crate::fibers::GracefulClose>() => {
+                return self.unwind_fiber_close(stop);
+            }
+            Err(payload) => return Err(NativeError::Unwind(phera_extension_api::Unwind(payload))),
+        };
         let object = thrown.object;
         let mut skip_handlers = thrown.skip_handlers;
         while self.call_stack.depth() > stop {
@@ -55,8 +58,8 @@ impl Vm {
                 .as_ref()
                 .and_then(|handler| handler.catch.or(handler.finally));
             self.replace_finally_exceptions(&object, target.map(|target| target.index()));
-            if let Some(handler) = handler {
-                self.prepare_handler(&handler);
+            if let (Some(handler), Some(target)) = (handler, target) {
+                self.prepare_handler(&handler, target.index());
                 if let Some(target) = handler.catch {
                     self.set(handler.exception, Value::Object(object));
                     return self.jump(target);
@@ -81,12 +84,35 @@ impl Vm {
         .into_error())
     }
 
+    /// A fiber's graceful close runs finally blocks and skips PHP catches.
+    #[cold]
+    fn unwind_fiber_close(&mut self, stop: usize) -> Result<(), NativeError> {
+        while self.call_stack.depth() > stop {
+            let handler = self.current().and_then(|frame| {
+                let position = frame.ip().saturating_sub(1);
+                frame
+                    .function()
+                    .handlers
+                    .iter()
+                    .find(|handler| {
+                        handler.finally.is_some()
+                            && handler.start.index() <= position
+                            && position < handler.end.index()
+                    })
+                    .cloned()
+            });
+            let target = handler.as_ref().and_then(|handler| handler.finally);
+            if let (Some(handler), Some(target)) = (handler, target) {
+                self.prepare_handler(&handler, target.index());
+                return self.enter_finally(handler.exception, target, Continuation::FiberClose);
+            }
+            self.discard_exception_frame()?;
+        }
+        Err(crate::fibers::GracefulClose::error())
+    }
+
     /// Abandoned calls and try-local expression owners cannot survive into a catch.
-    fn prepare_handler(&mut self, handler: &Handler) {
-        let target = handler
-            .catch
-            .or(handler.finally)
-            .map_or(0, |target| target.index());
+    fn prepare_handler(&mut self, handler: &Handler, target: usize) {
         let Some(frame) = self.current() else {
             return;
         };
