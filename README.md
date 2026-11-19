@@ -48,14 +48,37 @@ Measured in November 2026 against PHP 8.5, the same script or request on both.
 `phera <command> --help` lists the options. There is no formatter and no test
 runner yet.
 
+### Serving a site
+
+Run `phera serve public` to serve a document root. PHP diagnostics, including
+fatal backtraces, go to the server log by default. Use `phera serve --dev public`
+to display diagnostics in responses during local development.
+
+`--request-read-timeout SECONDS` sets the initial time budget for receiving
+headers and the body. It defaults to 60 seconds and gains one second for every
+16 KiB of body data received. If the budget runs out, the server returns HTTP 408
+and closes the connection.
+
 ## 🧩 Extensions
 
 Built in, each checked call by call against real PHP: core, standard, ctype,
 [curl](crates/extensions/curl/README.md) (HTTP and HTTPS, including HTTP/2,
-connection reuse, and the easy and multi interfaces), date, dom (first stage),
-filter, hash, json, mbstring, openssl, pcre, PDO (SQLite, MySQL, PostgreSQL,
-with TLS), random, redis, reflection, serialize, session, SPL, sqlite3, streams,
-tokenizer, Unix process functions, and POSIX queries.
+connection reuse, and the easy and multi interfaces), date, dom (`DOMDocument`, `DOMNode`, `DOMElement`, `DOMXPath`), filter,
+hash, json, mbstring, openssl, pcre, PDO
+(SQLite, MySQL, PostgreSQL, with TLS), random, redis, reflection, serialize,
+session, SPL, sqlite3, streams, tokenizer, Unix process functions, and POSIX queries.
+
+Modern DOM supports CSS selectors, live class tokens, and `innerHTML`.
+
+- Documents and elements include `Dom\Document`, `Dom\HTMLDocument`,
+  `Dom\XMLDocument`, `Dom\Element`, `Dom\HTMLElement`, `Dom\Attr`.
+- Other nodes include `Dom\Node`, `Dom\CharacterData`, `Dom\Text`,
+  `Dom\CDATASection`, `Dom\Comment`, `Dom\ProcessingInstruction`,
+  `Dom\DocumentType`, `Dom\DocumentFragment`, `Dom\Entity`,
+  `Dom\EntityReference`, `Dom\Notation`.
+- Collections and queries include `Dom\NodeList`, `Dom\NamedNodeMap`,
+  `Dom\DtdNamedNodeMap`, `Dom\HTMLCollection`, `Dom\TokenList`, `Dom\XPath`.
+- `Dom\ParentNode` and `Dom\ChildNode` expose their shared operations.
 
 Unix scripts can launch programs with `shell_exec()`, backticks, and the process
 functions. Backticks emit PHP 8.5's compile-time deprecation. To disable program

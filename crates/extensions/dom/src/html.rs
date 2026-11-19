@@ -4,7 +4,11 @@
 //! $document->loadHTML('<p>hi</p>', LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
 //! ```
 
+mod modern;
 mod sink;
+
+pub use modern::{fragment, parse_modern};
+pub(crate) use sink::XHTML;
 
 use std::borrow::Cow;
 
@@ -36,9 +40,28 @@ pub fn parse(bytes: &[u8], options: Options) -> Document {
     } else {
         Cow::Owned(bytes.iter().copied().map(char::from).collect())
     };
-    let mut arena = parse_document(sink::Sink::default(), ParseOpts::default()).one(input.as_ref());
+    let (mut arena, _) =
+        parse_document(sink::Sink::default(), ParseOpts::default()).one(input.as_ref());
     let lower = input.to_ascii_lowercase();
     adjust_tree(&mut arena, &lower, options);
+    if let Some((offset, _)) = lower.match_indices("<!doctype").next() {
+        let raw = input
+            .get(offset + "<!doctype".len()..)
+            .unwrap_or_default()
+            .trim_start();
+        let name = raw
+            .split([' ', '\t', '\r', '\n', '>'])
+            .next()
+            .unwrap_or_default();
+        let doctype = arena
+            .children(Arena::DOCUMENT)
+            .find(|&id| arena[id].kind == Kind::Doctype);
+        if let Some(doctype) = doctype
+            && name.eq_ignore_ascii_case(&arena[doctype].name.local)
+        {
+            arena[doctype].name.local = name.to_owned();
+        }
+    }
     Document {
         arena,
         settings: Settings {
@@ -135,11 +158,11 @@ fn adjust_tree(arena: &mut Arena, source: &str, options: Options) {
         .find(|&id| arena[id].kind == Kind::Doctype);
     let doctype = if doctype.is_none() && !options.omit_default_doctype {
         let mut node = Node::new(Kind::Doctype, Name::new("html"), "");
-        node.doctype = Some(Doctype {
+        node.doctype = Some(Box::new(Doctype {
             public_id: "-//W3C//DTD HTML 4.0 Transitional//EN".into(),
             system_id: "http://www.w3.org/TR/REC-html40/loose.dtd".into(),
-            internal_subset: None,
-        });
+            ..Doctype::default()
+        }));
         Some(arena.allocate(node))
     } else {
         doctype

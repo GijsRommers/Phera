@@ -77,6 +77,9 @@ phera-ext-http = { path = "crates/extensions/http" }
 phera-ext-mbstring = { path = "crates/extensions/mbstring" }
 iconv-native = "0.1"
 encoding_rs = "0.8.35"
+cssparser = "0.38"
+precomputed-hash = "0.1"
+selectors = "0.41"
 base64 = "0.22"
 phera-ext-json = { path = "crates/extensions/json" }
 phera-ext-openssl = { path = "crates/extensions/openssl" }
@@ -146,6 +149,7 @@ cookie_store = { version = "0.22", default-features = false, features = ["preser
 psl = "2"
 tokio-util = { version = "0.7", features = ["io"] }
 tower-service = "0.3"
+memchr = "2"
 http-body-util = "0.1"
 hyper = { version = "1", default-features = false, features = ["http1", "server"] }
 hyper-util = { version = "0.1", default-features = false, features = ["tokio", "http1", "server-graceful"] }

@@ -2,77 +2,49 @@
 
 use std::collections::HashSet;
 
-use phera_extension_api::ini::parse_quantity;
+use phera_extension_api::serialization::{ActiveUnserializePolicy, UnserializePolicy};
 use phera_extension_api::{ArrayKey, Context, NativeError, PhpArray, Value};
 
-#[derive(Default)]
-enum AllowedClasses {
-    #[default]
-    All,
-    List(HashSet<Vec<u8>>),
-}
-
-pub(super) struct Options {
-    allowed: AllowedClasses,
-    pub(super) max_depth: usize,
-}
-
-impl Options {
-    pub(super) async fn read(
-        context: &mut dyn Context,
-        options: Option<&PhpArray>,
-    ) -> Result<Self, NativeError> {
-        let mut result = Self {
-            allowed: AllowedClasses::All,
-            max_depth: context
-                .ini_get(b"unserialize_max_depth")
-                .map_or(4096, |setting| {
-                    usize::try_from(parse_quantity(setting.as_bytes()).0).unwrap_or(0)
-                }),
-        };
-        let Some(options) = options else {
-            return Ok(result);
-        };
-        if let Some(option) = options.get(&ArrayKey::str("allowed_classes")) {
-            let option = option.try_deref()?.clone();
-            result.allowed = match option {
-                Value::Bool(true) => AllowedClasses::All,
-                Value::Bool(false) => AllowedClasses::List(HashSet::new()),
-                Value::Array(names) => {
-                    AllowedClasses::List(read_class_list(context, &names).await?)
-                }
-                other => {
-                    return Err(NativeError::type_error(format!(
-                        "unserialize(): Option \"allowed_classes\" must be of type \
-                         array|bool, {} given",
-                        option_type(&other)
-                    )));
-                }
-            };
-        }
-        if let Some(depth) = options.get(&ArrayKey::str("max_depth")) {
-            let depth = depth.try_deref()?;
-            let Value::Int(depth) = &*depth else {
+pub(super) async fn read(
+    context: &mut dyn Context,
+    options: Option<&PhpArray>,
+) -> Result<UnserializePolicy, NativeError> {
+    let mut result = ActiveUnserializePolicy::current(context);
+    let Some(options) = options else {
+        return Ok(result);
+    };
+    result.allow_every_class();
+    if let Some(option) = options.get(&ArrayKey::str("allowed_classes")) {
+        let option = option.try_deref()?.clone();
+        match option {
+            Value::Bool(true) => {}
+            Value::Bool(false) => result.restrict_to(HashSet::new()),
+            Value::Array(names) => result.restrict_to(read_class_list(context, &names).await?),
+            other => {
                 return Err(NativeError::type_error(format!(
-                    "unserialize(): Option \"max_depth\" must be of type int, {} given",
-                    option_type(&depth)
+                    "unserialize(): Option \"allowed_classes\" must be of type \
+                         array|bool, {} given",
+                    option_type(&other)
                 )));
-            };
-            result.max_depth = usize::try_from(*depth).map_err(|_| {
-                NativeError::value_error(
-                    "unserialize(): Option \"max_depth\" must be greater than or equal to 0",
-                )
-            })?;
-        }
-        Ok(result)
-    }
-
-    pub(super) fn allows(&self, name: &[u8]) -> bool {
-        match &self.allowed {
-            AllowedClasses::All => true,
-            AllowedClasses::List(list) => list.contains(&name.to_ascii_lowercase()),
+            }
         }
     }
+    if let Some(depth) = options.get(&ArrayKey::str("max_depth")) {
+        let depth = depth.try_deref()?;
+        let Value::Int(depth) = &*depth else {
+            return Err(NativeError::type_error(format!(
+                "unserialize(): Option \"max_depth\" must be of type int, {} given",
+                option_type(&depth)
+            )));
+        };
+        result.depth = 0;
+        result.max_depth = usize::try_from(*depth).map_err(|_| {
+            NativeError::value_error(
+                "unserialize(): Option \"max_depth\" must be greater than or equal to 0",
+            )
+        })?;
+    }
+    Ok(result)
 }
 
 async fn read_class_list(

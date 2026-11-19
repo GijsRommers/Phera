@@ -9,8 +9,9 @@ use phera_extension_api::value::{to_bool, to_php_string};
 use phera_extension_api::{Context, NativeError, NativePropertyMutation, Object, Value};
 
 use crate::tree::{Kind, Name, Node};
+use crate::xml::names::{XML, XMLNS};
 
-use super::super::{attributes, dom_error};
+use super::super::{attributes, dom_error, namespace};
 
 pub(super) fn mutate(
     context: &mut dyn Context,
@@ -18,10 +19,19 @@ pub(super) fn mutate(
     name: &str,
     mutation: NativePropertyMutation<'_>,
 ) -> Result<bool, NativeError> {
-    let location = super::location(object)?;
-    let kind = location.shared.borrow().document.arena[location.id].kind;
+    let location = super::location(object);
+    let kind = location.as_ref().map_or_else(
+        |_| super::uninitialized_kind(object),
+        |node| node.shared.borrow().document.arena[node.id].kind,
+    );
     if !super::known(kind, name) {
         return Ok(false);
+    }
+    if matches!(mutation, NativePropertyMutation::Unset) {
+        return Err(NativeError::error(format!(
+            "Cannot unset {}::${name}",
+            object.class.name(),
+        )));
     }
     let NativePropertyMutation::Assign(value) = mutation else {
         return Err(NativeError::error(format!(
@@ -29,6 +39,13 @@ pub(super) fn mutate(
             object.class.name()
         )));
     };
+    if kind == Kind::Entity && matches!(name, "actualEncoding" | "encoding" | "version") {
+        return Err(NativeError::error(format!(
+            "Cannot modify readonly property {}::${name}",
+            object.class.name(),
+        )));
+    }
+    let location = location?;
     match name {
         "strictErrorChecking"
         | "formatOutput"
@@ -59,6 +76,9 @@ pub(super) fn mutate(
             } else {
                 Some(stringify(context, value)?)
             };
+            if name == "encoding" && !value.as_deref().is_some_and(crate::xml::supported_encoding) {
+                return Err(NativeError::value_error("Invalid document encoding"));
+            }
             let mut state = location.shared.borrow_mut();
             let settings = &mut state.document.settings;
             match name {
@@ -68,6 +88,29 @@ pub(super) fn mutate(
             }
         }
         "data" | "value" | "textContent" | "nodeValue" => {
+            let dereferenced = value.deref();
+            let invalid = match &*dereferenced {
+                Value::Array(_) | Value::Resource(_) => true,
+                Value::Object(object) => !object.class.is_instance_of("Stringable"),
+                _ => false,
+            };
+            if invalid {
+                let declaring = match name {
+                    "data" if kind == Kind::ProcessingInstruction => "DOMProcessingInstruction",
+                    "data" => "DOMCharacterData",
+                    "value" => "DOMAttr",
+                    _ => "DOMNode",
+                };
+                let expected = if matches!(name, "data" | "value") {
+                    "string"
+                } else {
+                    "?string"
+                };
+                return Err(NativeError::type_error(format!(
+                    "Cannot assign {} to property {declaring}::${name} of type {expected}",
+                    value.type_name(),
+                )));
+            }
             let value = if matches!(value, Value::Null) {
                 String::new()
             } else {
@@ -96,22 +139,50 @@ pub(super) fn mutate(
             }
         }
         "className" | "id" => {
-            let value = stringify(context, value)?;
+            let mut value = stringify(context, value)?;
+            if let Some(end) = value.find('\0') {
+                value.truncate(end);
+            }
             let name = Name::new(if name == "id" { "id" } else { "class" });
             let mut state = location.shared.borrow_mut();
-            attributes::set(&mut state.document.arena, location.id, name, value)?;
+            let html = state.document.settings.html;
+            let arena = &mut state.document.arena;
+            let attribute = attributes::set(arena, location.id, name, value, html)?;
+            if arena[attribute].name.local == "id" {
+                arena[attribute].is_id = true;
+            }
         }
         "prefix" => {
             let prefix = stringify(context, value)?;
+            let prefix = prefix.split('\0').next().unwrap_or_default();
             let mut state = location.shared.borrow_mut();
-            let node = &mut state.document.arena[location.id];
-            if node.name.namespace.is_some() {
-                if !prefix.is_empty()
-                    && (!crate::xml::names::valid(&prefix) || prefix.contains(':'))
-                {
+            let arena = &mut state.document.arena;
+            let node = &arena[location.id];
+            if let Some(uri) = node.name.namespace.clone() {
+                if (prefix == "xml" && uri != XML) || (prefix == "xmlns" && uri != XMLNS) {
                     return Err(dom_error(14, "Namespace Error"));
                 }
-                node.name.prefix = (!prefix.is_empty()).then_some(prefix);
+                let owner = if node.kind == Kind::Element {
+                    Some(location.id)
+                } else {
+                    node.parent()
+                };
+                if let Some(owner) = owner
+                    && uri != XML
+                    && uri != XMLNS
+                {
+                    let local = if prefix.is_empty() { "xmlns" } else { prefix };
+                    if let Some(declaration) =
+                        attributes::find(arena, owner, Some(Some(XMLNS)), local)
+                    {
+                        if arena[declaration].value != uri {
+                            return Err(dom_error(14, "Namespace Error"));
+                        }
+                    } else {
+                        namespace::declare(arena, owner, prefix, &uri);
+                    }
+                }
+                arena[location.id].name.prefix = (!prefix.is_empty()).then(|| prefix.to_owned());
             }
         }
         _ => {

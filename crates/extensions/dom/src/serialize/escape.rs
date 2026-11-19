@@ -11,6 +11,7 @@ use std::fmt::Write;
 pub(super) enum Escaping {
     Xml { attribute: bool, ascii: bool },
     Html { attribute: bool, ascii: bool },
+    Html5 { attribute: bool },
     Canonical { attribute: bool },
 }
 
@@ -18,15 +19,28 @@ pub(super) fn escape(output: &mut String, input: &str, mode: Escaping) {
     let attribute = match mode {
         Escaping::Xml { attribute, .. }
         | Escaping::Html { attribute, .. }
+        | Escaping::Html5 { attribute }
         | Escaping::Canonical { attribute } => attribute,
     };
-    for character in input.chars() {
+    let prefix = input
+        .bytes()
+        .position(|b| {
+            matches!(
+                b,
+                b'&' | b'<' | b'>' | b'\r' | b'\n' | b'\t' | b'"' | 128..=255
+            )
+        })
+        .unwrap_or(input.len());
+    let (plain, escaped) = input.split_at(prefix);
+    output.push_str(plain);
+    for character in escaped.chars() {
         match character {
             '&' => output.push_str("&amp;"),
             '<' => output.push_str("&lt;"),
             '>' if !attribute || !matches!(mode, Escaping::Canonical { .. }) => {
                 output.push_str("&gt;")
             }
+            '\u{a0}' if matches!(mode, Escaping::Html5 { .. }) => output.push_str("&nbsp;"),
             '"' if attribute => output.push_str("&quot;"),
             '\t' | '\n' | '\r' if attribute && matches!(mode, Escaping::Canonical { .. }) => {
                 let _ = write!(output, "&#x{:X};", character as u32);

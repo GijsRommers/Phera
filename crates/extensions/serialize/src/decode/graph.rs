@@ -8,7 +8,9 @@ use std::{
     rc::{Rc, Weak},
 };
 
-use phera_extension_api::{ArrayKey, Context, NativeError, Object, PhpArray, Value};
+use phera_extension_api::{
+    ArrayKey, Context, NativeError, Object, PhpArray, Value, serialization::LegacyUnserializeState,
+};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(super) struct Place(usize);
@@ -106,6 +108,47 @@ impl Graph {
         });
         self.places[place.0] = Some(Binding::Direct(content));
         content
+    }
+
+    pub(super) fn legacy_object_slots(&self, payload: &[u8]) -> LegacyUnserializeState {
+        let mut slots = LegacyUnserializeState {
+            count: self.slots.len(),
+            ..LegacyUnserializeState::default()
+        };
+        // An r: token can name an earlier object. Scan the payload to collect
+        // only those slots, so sibling C: tokens never copy the graph prefix.
+        for start in memchr::memmem::find_iter(payload, b"r:") {
+            let digits = &payload[start + 2..];
+            let Some(end) = digits.iter().position(|byte| !byte.is_ascii_digit()) else {
+                continue;
+            };
+            if digits[end] != b';' {
+                continue;
+            }
+            let number = std::str::from_utf8(&digits[..end])
+                .ok()
+                .and_then(|digits| digits.parse::<usize>().ok());
+            let Some(slot) = number.and_then(|number| number.checked_sub(1)) else {
+                continue;
+            };
+            if let Some(place) = self.slots.get(slot)
+                && let Some(binding) = self.places[place.0]
+                && let Value::Object(object) = &self.values[binding.content().0].value
+            {
+                slots.objects.insert(slot + 1, object.clone());
+            }
+        }
+        slots
+    }
+
+    pub(super) fn import_legacy_object_slots(&mut self, mut slots: LegacyUnserializeState) {
+        for index in self.slots.len()..slots.count {
+            let place = self.new_place();
+            self.slots.push(place);
+            if let Some(object) = slots.objects.remove(&(index + 1)) {
+                self.value(place, Value::Object(object));
+            }
+        }
     }
 
     pub(super) fn reference(&mut self, place: Place, slot: usize, by_ref: bool) -> Option<()> {

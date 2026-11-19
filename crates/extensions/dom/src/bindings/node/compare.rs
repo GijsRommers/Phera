@@ -4,7 +4,7 @@
 //! var_dump($root->isEqualNode($root->cloneNode(true)));
 //! ```
 
-use phera_extension_api::{Context, NativeResult, Value, args};
+use phera_extension_api::{Context, NativeError, NativeResult, Value, args};
 
 use super::super::{This, location, mutation::argument_node, this_node};
 
@@ -18,10 +18,22 @@ pub(super) fn same(_: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> 
 
 pub(super) fn contains(_: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> NativeResult {
     let node = this_node(this)?;
-    let Some(other) = args::object(arguments, 0) else {
-        return Ok(Value::Bool(false));
+    let other = args::value(arguments, 0);
+    let other = match &*other.deref() {
+        Value::Null => return Ok(Value::Bool(false)),
+        Value::Object(object) if object.class.is_instance_of("DOMNode") => location(object)?,
+        Value::Object(object) if object.class.is_instance_of("DOMNameSpaceNode") => {
+            super::super::namespace::location(object)
+                .ok_or_else(|| super::super::dom_error(11, "Invalid State Error"))?
+        }
+        other => {
+            return Err(NativeError::type_error(format!(
+                "DOMNode::contains(): Argument #1 ($other) must be of type \
+             DOMNode|DOMNameSpaceNode|null, {} given",
+                other.type_name(),
+            )));
+        }
     };
-    let other = location(other)?;
     let contains = node.same_document(&other)
         && (node.id == other.id || {
             let state = node.shared.borrow();
@@ -103,7 +115,12 @@ pub(super) fn position(_: &mut dyn Context, this: This<'_>, arguments: &[Value])
         .collect();
     if left_path.last() != right_path.last() {
         return Ok(Value::Int(
-            1 | 32 | if left.id.0 < right.id.0 { 4 } else { 2 },
+            1 | 32
+                | if left.id.index() < right.id.index() {
+                    4
+                } else {
+                    2
+                },
         ));
     }
     let mut common = None;
@@ -121,7 +138,14 @@ pub(super) fn position(_: &mut dyn Context, this: This<'_>, arguments: &[Value])
                 .copied()
                 .chain(arena.children(parent))
                 .find(|&candidate| candidate == a || candidate == b);
-            if order == Some(a) { 4 } else { 2 }
+            let direction = if order == Some(a) { 4 } else { 2 };
+            if arena[a].kind == crate::tree::Kind::Attribute
+                && arena[b].kind == crate::tree::Kind::Attribute
+            {
+                direction | 32
+            } else {
+                direction
+            }
         }
         _ => 0,
     };
