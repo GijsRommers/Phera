@@ -18,7 +18,8 @@ use std::time::{Duration, Instant};
 
 use phera_phpt::{Phpt, display_path, expectf_matches, filters_from_args, matches_filters};
 
-const TIMEOUT: Duration = Duration::from_secs(10);
+// A PHP CPU second can take several wall-clock seconds on a shared runner.
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Sections that don't affect how a test runs.
 const IGNORED_SECTIONS: &[&str] = &[
@@ -348,7 +349,12 @@ fn run_php(
     let stdout = read_in_background(child.stdout.take());
     let stderr = read_in_background(child.stderr.take());
 
-    let deadline = Instant::now() + TIMEOUT;
+    let timeout = std::env::var("TEST_TIMEOUT")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|seconds| (1..=3600).contains(seconds))
+        .map_or(DEFAULT_TIMEOUT, Duration::from_secs);
+    let deadline = Instant::now() + timeout;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
@@ -356,7 +362,7 @@ fn run_php(
             Ok(None) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(format!("timed out after {}s", TIMEOUT.as_secs()));
+                return Err(format!("timed out after {}s", timeout.as_secs()));
             }
             Err(e) => return Err(format!("cannot wait for process: {e}")),
         }

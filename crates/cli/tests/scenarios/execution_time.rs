@@ -28,7 +28,7 @@ while (true) {}
             ),
         ],
         ".",
-        &["--request-timeout", "15"],
+        &["--request-timeout", "45"],
     );
 
     thread::scope(|scope| {
@@ -40,7 +40,7 @@ while (true) {}
         let started = Instant::now();
         while !served.root.join("spinning").is_file() {
             assert!(
-                started.elapsed() < Duration::from_secs(10),
+                started.elapsed() < Duration::from_secs(30),
                 "PHP did not start"
             );
             thread::sleep(Duration::from_millis(5));
@@ -48,7 +48,7 @@ while (true) {}
         assert_eq!(served.get("/quick.php"), (200, "quick:30".into()));
         assert!(matches!(slow.try_recv(), Err(mpsc::TryRecvError::Empty)));
         let (status, body) = slow
-            .recv_timeout(Duration::from_secs(20))
+            .recv_timeout(Duration::from_secs(60))
             .expect("timed-out response");
         assert_eq!(status, 200);
         assert!(body.starts_with("\nFatal error: Maximum execution time of 1 second exceeded in "));
@@ -69,7 +69,7 @@ fn a_hidden_timeout_sets_an_http_error_status() {
         ".",
         &[
             "--request-timeout",
-            "15",
+            "45",
             "-d",
             "display_errors=0",
             "-d",
