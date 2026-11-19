@@ -33,6 +33,26 @@ impl PropertyEntry {
         self.slot.map(|slot| slot as usize)
     }
 
+    /// The property's value for a read from class scope `scope`, if this
+    /// entry was made for the object's class and that scope (see
+    /// [`Vm::property_entry`]) and the property holds a value that can be
+    /// read without a notice.
+    pub(crate) fn read_matching(
+        &self,
+        object: &Object,
+        scope: Option<&Rc<crate::classes::Class>>,
+    ) -> Option<Value> {
+        let same_scope = match (&self.scope, scope) {
+            (None, None) => true,
+            (Some(left), Some(right)) => Rc::ptr_eq(left, right),
+            _ => false,
+        };
+        if !same_scope || !Rc::ptr_eq(&self.class, &object.class) {
+            return None;
+        }
+        self.read(object)
+    }
+
     fn read(&self, object: &Object) -> Option<Value> {
         if !self.read_without_static_notice {
             return None;

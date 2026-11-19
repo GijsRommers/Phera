@@ -31,6 +31,7 @@ mod fast_dimensions;
 mod fast_methods;
 mod fast_native_methods;
 mod fast_objects;
+mod fast_properties;
 pub(crate) mod frame;
 pub(crate) mod frame_extras;
 pub(crate) mod frame_view;

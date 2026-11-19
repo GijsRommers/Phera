@@ -309,6 +309,11 @@ impl Machine<'_> {
                 mode: phera_bytecode::FetchMode::Read,
                 ..
             } => self.fetch_native_dimension(position, dst, base, index),
+            Instruction::Fetch {
+                dst,
+                path,
+                mode: phera_bytecode::FetchMode::Read,
+            } => self.fetch_property::<GUARDED>(position, dst, path),
             Instruction::AppendLocal { local, src } => {
                 self.write_native_dimension(position, local, None, src)
             }

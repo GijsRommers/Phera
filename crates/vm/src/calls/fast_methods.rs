@@ -185,7 +185,7 @@ impl Machine<'_> {
     }
 
     /// The window of the running frame, if it is a method or closure.
-    fn current_context(&self) -> Option<WindowContext<'_>> {
+    pub(super) fn current_context(&self) -> Option<WindowContext<'_>> {
         let frame = self.stack.current()?;
         if frame.kind() == CallKind::Function {
             return None;
