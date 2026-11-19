@@ -94,6 +94,11 @@ fn is_local(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
 }
 
 fn isatty(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    if let Value::Resource(resource) = args::value(arguments, 0)
+        && crate::directory::is_open(resource)
+    {
+        return Ok(Value::Bool(false));
+    }
     with_stream(stream_arg(arguments, "stream_isatty")?, |stream| {
         Value::Bool(stream.descriptor().is_some_and(rustix::termios::isatty))
     })
@@ -157,20 +162,22 @@ fn metadata(stream: &Stream) -> PhpArray {
         Wrapper::File => ("plainfile", "STDIO"),
         Wrapper::Gzip | Wrapper::GzipDirect => ("ZLIB", "ZLIB"),
         Wrapper::Standard => ("PHP", "STDIO"),
+        Wrapper::Process => ("plainfile", "STDIO"),
+        Wrapper::ProcessSocket => ("", "generic_socket"),
         Wrapper::Memory => ("PHP", "MEMORY"),
         Wrapper::Temp => ("PHP", "TEMP"),
         Wrapper::Data => ("RFC2397", "RFC2397"),
         Wrapper::Input => ("PHP", "Input"),
         Wrapper::Output => ("PHP", "Output"),
     };
-    if stream.wrapper != Wrapper::GzipDirect {
+    if stream.wrapper != Wrapper::GzipDirect && stream.child_pipe.is_none() {
         insert("wrapper_type", Value::from(wrapper));
     }
     insert("stream_type", Value::from(kind));
     insert("mode", Value::from(stream.mode.clone()));
     insert("unread_bytes", Value::Int(stream.unread() as i64));
     insert("seekable", Value::Bool(stream.seekable));
-    if stream.wrapper != Wrapper::GzipDirect {
+    if stream.wrapper != Wrapper::GzipDirect && stream.child_pipe.is_none() {
         insert("uri", Value::from(stream.uri.clone()));
     }
     result
@@ -181,6 +188,10 @@ fn set_blocking(_: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, N
         let resource = stream_arg(&arguments, "stream_set_blocking")?;
         let enable = args::bool(&arguments, 1).unwrap_or(false);
         let value = operate(resource, IoPolicy::Inline, move |stream| {
+            if stream.child_pipe.is_some() {
+                stream.blocked = enable;
+                return Ok(());
+            }
             let Some(file) = stream.descriptor() else {
                 return Ok(());
             };

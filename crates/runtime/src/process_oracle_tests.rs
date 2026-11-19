@@ -1,6 +1,9 @@
 //! Compare packed addresses, scan results, escaping and entity encodings
 //! with PHP, including `sscanf('42', '%d', $number)` by-reference writes.
 
+mod execution;
+mod posix;
+
 use std::{fmt::Write, sync::Arc};
 
 use phera_extension_api::testing::oracle;

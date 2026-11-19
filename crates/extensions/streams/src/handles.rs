@@ -73,10 +73,12 @@ fn fopen(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
     Box::pin(async move {
         let name = args::bytes(&arguments, 0);
         check_path("fopen", "#1 ($filename)", name)?;
-        validate(args::value(&arguments, 3), "fopen", 4)?;
+
         let mode = args::bytes(&arguments, 1);
         let include_path = args::bool(&arguments, 2).unwrap_or(false);
         let stream_context = args::value(&arguments, 3);
+        validate(stream_context, "fopen", 4)?;
+        files(context).use_default_context(stream_context);
         let stream = if let Target::Gzip(filename) = Target::parse(name)
             && let Some(level) = crate::context_options::option(stream_context, "zlib", "level")
         {
@@ -130,8 +132,11 @@ pub(crate) async fn close_arguments(
     } else {
         true
     };
-    resource.data.borrow_mut().take();
+    let attachment = crate::child_pipe::take_attachment(resource)?;
     files(context).stream_contexts.remove(&resource.id);
+    if let Some(attachment) = attachment {
+        attachment.close(context).await?;
+    }
     Ok(Value::Bool(success))
 }
 

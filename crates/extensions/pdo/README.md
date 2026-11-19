@@ -62,7 +62,8 @@ $pdo = new PDO($dsn, $user, $password, [PDO::PHERA_ATTR_POOL => false]);
 
 ## TLS
 
-Both server drivers negotiate TLS on the asynchronous I/O runtime using rustls.
+Both server drivers negotiate TLS 1.2 or 1.3 on the asynchronous I/O runtime
+using rustls and ring's default cipher suites.
 Phera loads the platform's trust roots and uses the bundled WebPKI roots when
 the platform store is unavailable or empty. A supplied CA takes precedence.
 
@@ -82,8 +83,9 @@ For MySQL, use `Pdo\Mysql::ATTR_SSL_CA` or `ATTR_SSL_CAPATH` for trust roots,
 and `ATTR_SSL_CERT` with `ATTR_SSL_KEY` for client authentication. Server
 verification is enabled by default. With TLS options present, setting
 `ATTR_SSL_VERIFY_SERVER_CERT` to `false` explicitly disables verification.
-`ATTR_SSL_CIPHER` requests TLS. Rustls selects the cipher suite from its own
-configuration, regardless of the option's cipher list.
+`ATTR_SSL_CIPHER` accepts PHP's cipher-list string and requests TLS. Rustls
+negotiates from ring's default TLS 1.2 and 1.3 suites. The supplied list has
+no effect on negotiation.
 
 `PDO::ATTR_CLIENT_VERSION` identifies Phera's client as `mysql_async 0.37.1`
 or `tokio-postgres 0.7.18`.

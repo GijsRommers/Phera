@@ -1933,9 +1933,9 @@ fn errors_have_sensible_spans() {
     let error = err(r#""abc"#);
     assert_eq!(error.span.start, "<?php\n".len());
 
-    // Unsupported syntax (backticks) propagates as a ParseError.
-    let error = err("`ls`;");
-    assert!(error.is_unsupported_lex(), "{}", error.message);
+    assert!(parse("<?php `printf $word`;").is_ok());
+    let error = err("`printf");
+    assert_eq!(error.message, "unterminated string");
 
     // Invalid octal.
     assert!(parse("<?php 08;").is_err());

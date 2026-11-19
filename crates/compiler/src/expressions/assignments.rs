@@ -40,8 +40,8 @@ impl Compiler<'_> {
             return Ok(source);
         }
         let references = super::places::contains_reference(target);
-        let src = if references && writable(value) {
-            let place = self.place(value)?;
+        let src = if references && (writable(value) || crate::helpers::is_this(value)) {
+            let place = self.reference_source(value, line)?;
             let dst = self.allocate_register()?;
             self.emit(
                 Instruction::Reference {

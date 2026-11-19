@@ -59,6 +59,28 @@ impl Compiler<'_> {
         self.readable_place(expression)
     }
 
+    /// The place a reference is taken from: `[&$x]`, `$a = &$x`.
+    ///
+    /// `$this` cannot be rebound, so PHP takes the reference from a copy of
+    /// it: `[&$this]` holds a reference to the object, and assigning through
+    /// that reference leaves `$this` alone.
+    pub(crate) fn reference_source(
+        &mut self,
+        expression: &ast::Expression,
+        line: usize,
+    ) -> Result<Place, CompileError> {
+        if !crate::helpers::is_this(expression) {
+            return self.place(expression);
+        }
+        let copy = self.allocate_register()?;
+        self.emit(Instruction::This { destination: copy }, line);
+        Ok(Place {
+            base: copy,
+            scope: PlaceScope::Local,
+            path: Vec::new(),
+        })
+    }
+
     /// Evaluate the root first and each dynamic key once in source order.
     pub(crate) fn readable_place(
         &mut self,

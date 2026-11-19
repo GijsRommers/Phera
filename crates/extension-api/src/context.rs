@@ -86,6 +86,19 @@ pub trait Context {
     /// Where warnings, notices and deprecations go.
     fn diagnostics(&mut self) -> &mut dyn Diagnostics;
 
+    /// Time available to wait on a child process or its pipes.
+    fn process_wait_budget(&self) -> Option<std::time::Duration> {
+        None
+    }
+
+    /// Include elapsed child I/O waits in the request execution budget.
+    fn process_wait_elapsed(&mut self, _elapsed: std::time::Duration) {}
+
+    /// End PHP execution after a child I/O wait uses the remaining budget.
+    fn process_wait_expired(&mut self) -> NativeError {
+        NativeError::error("Process wait exceeded the execution time limit")
+    }
+
     /// Current PHP scope for diagnostics emitted by object handlers.
     fn diagnostic_function(&self) -> Option<&str> {
         None
@@ -109,6 +122,9 @@ pub trait Context {
 
     /// Flushes an extension after user shutdown callbacks and output finalization.
     fn register_request_finalizer(&mut self, _callback: crate::AsyncFn) {}
+
+    /// Releases resources after output and extension finalizers have run.
+    fn register_resource_finalizer(&mut self, _key: &'static str, _callback: crate::AsyncFn) {}
 
     /// The PHP file making this call, for include-path lookups.
     fn script_path(&self) -> Option<std::path::PathBuf> {

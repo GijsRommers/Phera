@@ -10,7 +10,7 @@ pub(crate) fn php_diagnostic(
     lines: &LineTable,
 ) -> (usize, String) {
     let original = lines.line(error.span.start);
-    if error.is_compile_error() || error.is_backtick_operator() {
+    if error.is_compile_error() {
         return (original, error.message.clone());
     }
     let token = source

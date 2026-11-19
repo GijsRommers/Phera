@@ -361,6 +361,16 @@ fn convert(
         Some(None) => {}
         None => return Err(site.type_error(value)),
     }
+    if site.param.rejects_nul
+        && matches!(value, Value::String(text) if text.as_bytes().contains(&0))
+    {
+        return Err(NativeError::value_error(format!(
+            "{}(): Argument #{}{} must not contain any null bytes",
+            site.function,
+            site.number,
+            site.name(),
+        )));
+    }
     Ok(())
 }
 
