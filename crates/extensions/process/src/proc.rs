@@ -96,17 +96,17 @@ fn open(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Nat
         let Some(parents) = super::descriptors::prepare(context, &mut cmd, spec).await? else {
             return Ok(Value::Bool(false));
         };
-        let child = match bounded(context, spawn(cmd, true)).await? {
+        let child = match spawn(context, cmd, web).await? {
             Ok(child) => child,
             Err(error) => {
                 let reason = reason(&error);
-                context.warning(format!("proc_open(): posix_spawn() failed: {reason}").into());
+                context.warning(format!("proc_open(): posix_spawn() failed: {reason}"));
                 return Ok(Value::Bool(false));
             }
         };
-        let pid = child.id().unwrap_or_default() as i32;
+        let pid = child.child.id().unwrap_or_default() as i32;
         let mut handle = ProcessHandle {
-            child: ManagedChild::new(child, web),
+            child,
             command,
             pid,
             pipes: Vec::new(),
@@ -125,7 +125,7 @@ fn open(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Nat
                 }
                 Ok(_) => return Err(NativeError::error("Expected a child stream resource")),
                 Err(error) => {
-                    context.warning(format!("proc_open(): {}", reason(&error)).into());
+                    context.warning(format!("proc_open(): {}", reason(&error)));
                     return Ok(Value::Bool(false));
                 }
             }
@@ -133,6 +133,7 @@ fn open(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Nat
         if let Some(reference) = args::reference(&arguments, 2) {
             *reference.borrow_mut() = Value::from(pipes);
         }
+        handle.child.detach_on_cli_cleanup();
         Ok(new_resource(context.state(), "process", handle))
     })
 }

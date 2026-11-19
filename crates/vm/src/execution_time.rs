@@ -88,6 +88,12 @@ impl Vm {
 
     fn execution_time_error(&mut self, seconds: i64) -> NativeError {
         self.execution_time.restart(seconds);
+        if let Some(cancel) = self
+            .state_mut()
+            .get::<phera_extension_api::ProcessCancellation>()
+        {
+            cancel.cancel();
+        }
         let mut location = self.location();
         // The fairness boundary publishes the target of a taken branch.
         // Zend reports the opcode where execution would resume.

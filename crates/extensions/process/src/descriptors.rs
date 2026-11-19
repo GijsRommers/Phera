@@ -46,9 +46,13 @@ pub(crate) async fn prepare(
                         Some(kind) => {
                             format!("Cannot represent a stream of type {kind} as a File Descriptor")
                         }
-                        None => "supplied resource is not a valid stream resource".into(),
+                        None => {
+                            return Err(NativeError::type_error(
+                                "proc_open(): supplied resource is not a valid stream resource",
+                            ));
+                        }
                     };
-                    context.warning(format!("proc_open(): {reason}").into());
+                    context.warning(format!("proc_open(): {reason}"));
                     None
                 }
             },
@@ -126,8 +130,9 @@ async fn from_array(
             };
             let target = target as i32;
             if !(0..=2).contains(&target) && !descriptors.iter().any(|d| d.number == target) {
-                context
-                    .warning(format!("proc_open(): Redirection target {target} not found").into());
+                context.warning(format!(
+                    "proc_open(): Redirection target {target} not found"
+                ));
                 return Ok(None);
             }
             redirect(descriptors, target).map(|fd| simple(number, fd))
@@ -141,8 +146,9 @@ async fn from_array(
         b"pty" => make_pty(pty, number).await,
         _ => {
             let kind = String::from_utf8_lossy(super::command::c_prefix(&kind));
-            context
-                .warning(format!("proc_open(): {kind} is not a valid descriptor spec/mode").into());
+            context.warning(format!(
+                "proc_open(): {kind} is not a valid descriptor spec/mode"
+            ));
             return Ok(None);
         }
     };
@@ -160,7 +166,7 @@ async fn from_array(
                 b"pty" => format!("Could not open PTY (pseudoterminal): {reason}"),
                 _ => format!("Failed to dup() for descriptor {number}: {reason}"),
             };
-            context.warning(format!("proc_open(): {detail}").into());
+            context.warning(format!("proc_open(): {detail}"));
             Ok(None)
         }
     }

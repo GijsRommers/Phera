@@ -12,10 +12,10 @@ use phera_extension_api::{
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::ChildStdout;
 
-use super::child::{ManagedChild, exit_code};
-use super::command::{bounded, configure, shell, spawn};
+use super::child::exit_code;
+use super::command::{configure, shell, spawn};
 
-const COMMAND: Param = Param::new("command", ParamType::String);
+const COMMAND: Param = Param::new("command", ParamType::String).without_nul();
 const STATUS: Param = Param::new("result_code", ParamType::Mixed)
     .by_ref()
     .with_default(ConstantValue::Null);
@@ -78,29 +78,15 @@ fn passthru(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_,
     Box::pin(run(context, arguments, Mode::Passthru))
 }
 
-pub(crate) fn validate(
-    function: &str,
-    bytes: &[u8],
-    empty_allowed: bool,
-) -> Result<(), NativeError> {
-    if bytes.contains(&0) {
-        return Err(NativeError::value_error(format!(
-            "{function}(): Argument #1 ($command) must not contain any null bytes"
-        )));
-    }
-    if !empty_allowed && bytes.is_empty() {
-        return Err(NativeError::value_error(format!(
-            "{function}(): Argument #1 ($command) must not be empty"
-        )));
-    }
-    Ok(())
-}
-
 async fn run(context: &mut dyn Context, arguments: Vec<Value>, mode: Mode) -> NativeResult {
     let function = mode.name();
     let web = super::permitted(context, function)?;
     let bytes = args::bytes(&arguments, 0);
-    validate(function, bytes, false)?;
+    if bytes.is_empty() {
+        return Err(NativeError::value_error(format!(
+            "{function}(): Argument #1 ($command) must not be empty"
+        )));
+    }
     let output = (mode == Mode::Exec)
         .then(|| args::reference(&arguments, 1))
         .flatten();
@@ -117,8 +103,8 @@ async fn run(context: &mut dyn Context, arguments: Vec<Value>, mode: Mode) -> Na
     let mut command = shell(bytes);
     configure(context, &mut command, None, &Value::Null, web).await?;
     command.stdout(Stdio::piped());
-    let mut child = match bounded(context, spawn(command, true)).await? {
-        Ok(child) => ManagedChild::new(child, web),
+    let mut child = match spawn(context, command, web).await? {
+        Ok(child) => child,
         Err(_) => {
             let bytes = String::from_utf8_lossy(bytes);
             let detail = if mode == Mode::Shell {
@@ -126,7 +112,7 @@ async fn run(context: &mut dyn Context, arguments: Vec<Value>, mode: Mode) -> Na
             } else {
                 format!("Unable to fork [{bytes}]")
             };
-            context.warning(format!("{function}(): {detail}").into());
+            context.warning(format!("{function}(): {detail}"));
             if let Some(reference) = status {
                 *reference.borrow_mut() = Value::Int(-1);
             }

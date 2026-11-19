@@ -6,7 +6,9 @@ use std::io::{self, BufRead};
 use std::os::fd::{AsFd, OwnedFd};
 use std::sync::Arc;
 
-use phera_extension_api::{Context, NativeError, Value, value::Resource};
+use phera_extension_api::{
+    Context, LocalFuture, NativeError, NativeResult, Value, value::Resource,
+};
 use rustix::fs::{OFlags, fcntl_getfl, fcntl_setfl};
 use tokio::io::Interest;
 use tokio::net::UnixStream;
@@ -100,6 +102,9 @@ pub async fn open_descriptor(
     mode: &[u8],
 ) -> Result<Option<OwnedFd>, NativeError> {
     let stream = crate::wrapper::open(context, function, name, mode, false).await?;
+    if stream.is_some() {
+        crate::request::files(context).claim_id();
+    }
     Ok(stream.and_then(|stream| stream.descriptor()?.as_fd().try_clone_to_owned().ok()))
 }
 
@@ -176,7 +181,7 @@ impl ChildPipe {
             match result {
                 Ok(true) => break,
                 Ok(false) if single => break,
-                Ok(false) => continue,
+                Ok(false) => tokio::task::consume_budget().await,
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
                 Err(error)
                     if matches!(&*self.0, Reactor::Terminal(..))
@@ -206,7 +211,10 @@ impl ChildPipe {
                 .await?;
             match result {
                 Ok(0) => break,
-                Ok(count) => written += count,
+                Ok(count) => {
+                    written += count;
+                    tokio::task::consume_budget().await;
+                }
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
                 Err(error) if written == 0 => return Ok(Err(error)),
                 Err(_) => break,
@@ -270,24 +278,39 @@ fn pull(stream: &mut Stream, limit: u64, line: bool, output: &mut Vec<u8>) -> io
     Ok(newline.is_some())
 }
 
+/// A pclose()/fclose() hook attached to a process stream.
+pub trait CloseAttachment: Send {
+    fn close(self: Box<Self>, context: &mut dyn Context) -> LocalFuture<'_, NativeResult>;
+}
+
 pub fn set_attachment(
     resource: &Resource,
-    attachment: Box<dyn std::any::Any + Send>,
+    attachment: Box<dyn CloseAttachment>,
 ) -> Result<(), NativeError> {
     with_stream(resource, |stream| stream.attachment = Some(attachment))
 }
 
 /// Close the stream before waiting, so a child reading stdin sees EOF.
-pub fn close_child_stream(
-    value: &Value,
-    function: &str,
-) -> Result<Option<Box<dyn std::any::Any + Send>>, NativeError> {
-    let resource = crate::resource::argument_resource(value, function, "#1 ($handle)")?;
-    if resource.kind != "stream" || resource.is_closed() {
-        return Err(NativeError::type_error(format!(
-            "{function}(): supplied resource is not a valid stream resource"
-        )));
+pub async fn close_child_stream(context: &mut dyn Context, value: &Value) -> NativeResult {
+    let resource = crate::resource::argument_resource(value, "pclose", "#1 ($handle)")?;
+    if crate::directory::is_open(resource) {
+        resource.data.borrow_mut().take();
+        return Ok(Value::Int(0));
     }
+    let resource = crate::resource::stream_argument(value, "pclose", "#1 ($handle)")?;
+    let attachment = take_attachment(resource)?;
+    crate::request::files(context)
+        .stream_contexts
+        .remove(&resource.id);
+    match attachment {
+        Some(attachment) => attachment.close(context).await,
+        None => Ok(Value::Int(0)),
+    }
+}
+
+pub(crate) fn take_attachment(
+    resource: &Resource,
+) -> Result<Option<Box<dyn CloseAttachment>>, NativeError> {
     let attachment = with_stream(resource, |stream| stream.attachment.take())?;
     resource.data.borrow_mut().take();
     Ok(attachment)

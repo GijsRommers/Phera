@@ -4,7 +4,9 @@ use std::io;
 use std::os::fd::OwnedFd;
 use std::process::Stdio;
 
-use phera_ext_streams::{ChildStreamKind, child_stream, close_child_stream, set_attachment};
+use phera_ext_streams::{
+    ChildStreamKind, CloseAttachment, child_stream, close_child_stream, set_attachment,
+};
 use phera_extension_api::{
     Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, Registry,
     Value, args,
@@ -30,7 +32,6 @@ fn open(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Nat
     Box::pin(async move {
         let web = super::super::permitted(context, "popen")?;
         let bytes = args::bytes(&arguments, 0);
-        super::validate("popen", bytes, true)?;
         let mode = args::bytes(&arguments, 1);
         let mut posix_mode = mode.to_vec();
         if let Some(index) = posix_mode.iter().position(|&byte| byte == b'b') {
@@ -65,14 +66,13 @@ fn open(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Nat
             command.stdin(Stdio::from(reader));
             writer.into()
         };
-        let child = match bounded(context, spawn(command, true)).await? {
+        let mut child = match spawn(context, command, web).await? {
             Ok(child) => child,
             Err(error) => {
                 warning(context, bytes, &posix_mode, &reason(&error));
                 return Ok(Value::Bool(false));
             }
         };
-        let child = ManagedChild::new(child, web);
         let value = match child_stream(context, parent, mode, ChildStreamKind::Pipe) {
             Ok(value) => value,
             Err(error) => {
@@ -80,6 +80,7 @@ fn open(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Nat
                 return Ok(Value::Bool(false));
             }
         };
+        child.detach_on_cli_cleanup();
         if let Value::Resource(resource) = &value {
             set_attachment(resource, Box::new(child))?;
         }
@@ -88,19 +89,20 @@ fn open(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Nat
 }
 
 fn close(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(async move {
-        let attachment = close_child_stream(args::value(&arguments, 0), "pclose")?;
-        let result =
-            match attachment.and_then(|attachment| attachment.downcast::<ManagedChild>().ok()) {
-                Some(mut child) => bounded(context, child.wait()).await?.map_or(-1, exit_code),
-                None => 0,
-            };
-        Ok(Value::Int(result))
-    })
+    Box::pin(async move { close_child_stream(context, args::value(&arguments, 0)).await })
+}
+
+impl CloseAttachment for ManagedChild {
+    fn close(mut self: Box<Self>, context: &mut dyn Context) -> LocalFuture<'_, NativeResult> {
+        Box::pin(async move {
+            let code = bounded(context, self.wait()).await?.map_or(-1, exit_code);
+            Ok(Value::Int(code))
+        })
+    }
 }
 
 fn warning(context: &mut dyn Context, command: &[u8], mode: &[u8], message: &str) {
     let command = String::from_utf8_lossy(command);
     let mode = String::from_utf8_lossy(mode);
-    context.warning(format!("popen({command},{mode}): {message}").into());
+    context.warning(format!("popen({command},{mode}): {message}"));
 }

@@ -6,21 +6,28 @@ use std::process::ExitStatus;
 
 use nix::sys::signal::{Signal, killpg};
 use nix::unistd::Pid;
+use phera_extension_api::ProcessCancellation;
 use tokio::process::Child;
 
 pub(crate) struct ManagedChild {
     pub child: Child,
     group: bool,
     kill_when_dropped: bool,
+    cancelled: ProcessCancellation,
 }
 
 impl ManagedChild {
-    pub fn new(child: Child, web: bool) -> Self {
+    pub fn new(child: Child, group: bool, cancelled: ProcessCancellation) -> Self {
         Self {
             child,
-            group: web,
-            kill_when_dropped: web,
+            group,
+            kill_when_dropped: true,
+            cancelled,
         }
+    }
+
+    pub fn detach_on_cli_cleanup(&mut self) {
+        self.kill_when_dropped = self.group;
     }
 
     pub async fn wait(&mut self) -> io::Result<ExitStatus> {
@@ -34,7 +41,7 @@ impl ManagedChild {
 
 impl Drop for ManagedChild {
     fn drop(&mut self) {
-        if !self.kill_when_dropped {
+        if !self.kill_when_dropped && !self.cancelled.is_cancelled() {
             return;
         }
         if self.group

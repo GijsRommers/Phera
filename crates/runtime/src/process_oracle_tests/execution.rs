@@ -193,3 +193,53 @@ async fn process_descriptors_and_status_match_php() {
     }
     cases.compare("unix-process-descriptors").await;
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn stream_select_and_multiplexing_match_php() {
+    let mut cases = Cases::new();
+    for seconds in ["null", "-1", "0", "1", "PHP_INT_MAX"] {
+        for micros in ["null", "-1", "0", "1", "1000000", "[]"] {
+            cases.check(format!(
+                "$file = fopen('/dev/null', 'r'); $read = ['file' => $file, 'alias' => $file]; \
+                 $write = $except = null; \
+                 $result = stream_select($read, $write, $except, {seconds}, {micros}); \
+                 $GLOBALS['ERRBUF'] = preg_replace('/max_fd=[0-9]+/', 'max_fd=fd', \
+                                                    $GLOBALS['ERRBUF']); \
+                 return [$result, array_keys($read), $write, $except];"
+            ));
+        }
+    }
+    for direction in ["read", "write", "except"] {
+        for item in [
+            "1",
+            "null",
+            "fopen('php://memory', 'r+')",
+            "fopen('/dev/null','r')",
+        ] {
+            cases.check(format!(
+                "$read = $write = $except = null; ${direction} = ['item' => {item}]; \
+                 return stream_select($read, $write, $except, 0);"
+            ));
+        }
+    }
+    cases.check(
+        "$child = proc_open(['/bin/sh', '-c', \
+          'head -c 3145728 /dev/zero; head -c 3145728 /dev/zero >&2'], \
+          [1 => ['pipe','w'], 2 => ['pipe','w']], $pipes); \
+         foreach ($pipes as $pipe) { stream_set_blocking($pipe, false); } \
+         $counts = [1=>0,2=>0]; $other = null; \
+         while ($pipes) { $read = $pipes; stream_select($read, $other, $other, 2); \
+           foreach ($read as $k => $pipe) { $counts[$k] += strlen(fread($pipe, 8192)); \
+             if (feof($pipe)) { fclose($pipe); unset($pipes[$k]); } } } \
+         return [$counts, proc_close($child)];"
+            .into(),
+    );
+    cases.check(
+        "$child = proc_open(['/bin/echo', 'terminal'], [1 => ['pty']], $pipes); \
+         if (!$child) return false; \
+         return [stream_isatty($pipes[1]), stream_get_meta_data($pipes[1]), \
+                 fgets($pipes[1]), proc_close($child)];"
+            .into(),
+    );
+    cases.compare("unix-select-and-multiplexing").await;
+}

@@ -9,8 +9,11 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use phera_ext_standard::environment::RequestEnvironment;
-use phera_extension_api::{ArrayKey, Context, NativeError, Value, WorkingDirectory};
-use tokio::process::Child;
+use phera_extension_api::{
+    ArrayKey, Context, NativeError, ProcessCancellation, Value, WorkingDirectory,
+};
+
+use super::child::ManagedChild;
 
 pub(crate) fn shell(bytes: &[u8]) -> Command {
     let mut command = Command::new("/bin/sh");
@@ -125,16 +128,26 @@ pub(crate) async fn configure(
 
 /// Tokio's spawn performs the exec handshake synchronously. Move that handshake
 /// off the request thread, then return the Tokio child to the caller's reactor.
-pub(crate) async fn spawn(command: Command, kill_on_drop: bool) -> io::Result<Child> {
+pub(crate) async fn spawn(
+    context: &mut dyn Context,
+    command: Command,
+    web: bool,
+) -> Result<io::Result<ManagedChild>, NativeError> {
     let runtime = tokio::runtime::Handle::current();
-    tokio::task::spawn_blocking(move || {
-        let _reactor = runtime.enter();
-        tokio::process::Command::from(command)
-            .kill_on_drop(kill_on_drop)
-            .spawn()
+    let cancelled = context
+        .state()
+        .get_or_default::<ProcessCancellation>()
+        .clone();
+    bounded(context, async move {
+        tokio::task::spawn_blocking(move || {
+            let _reactor = runtime.enter();
+            let child = tokio::process::Command::from(command).spawn()?;
+            Ok(ManagedChild::new(child, web, cancelled))
+        })
+        .await
+        .map_err(io::Error::other)?
     })
     .await
-    .map_err(io::Error::other)?
 }
 
 pub(crate) async fn bounded<T>(

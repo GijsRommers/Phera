@@ -12,7 +12,7 @@ use phera_extension_api::{
     ParamType, Registry, Value, WorkingDirectory, args,
 };
 
-const FILENAME: Param = Param::new("filename", ParamType::String);
+const FILENAME: Param = Param::new("filename", ParamType::String).without_nul();
 
 pub(super) fn register(registry: &mut Registry) {
     registry.function(FunctionEntry::sync("posix_getcwd", &[], cwd));
@@ -43,7 +43,7 @@ fn cwd(context: &mut dyn Context, _: &[Value]) -> NativeResult {
 
 fn fifo(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
-        let path = path(context, &arguments, "posix_mkfifo")?;
+        let path = path(context, &arguments);
         let mode = Mode::from_bits_truncate(args::int(&arguments, 1).unwrap_or_default() as _);
         filesystem(context, move || mkfifo(&path.ok_or(Errno::ENOENT)?, mode)).await
     })
@@ -51,29 +51,20 @@ fn fifo(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Nat
 
 fn check(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
-        let path = path(context, &arguments, "posix_access")?;
+        let path = path(context, &arguments);
         let flags =
             AccessFlags::from_bits_retain(args::int(&arguments, 1).unwrap_or_default() as i32);
         filesystem(context, move || access(&path.ok_or(Errno::EIO)?, flags)).await
     })
 }
 
-fn path(
-    context: &mut dyn Context,
-    arguments: &[Value],
-    function: &str,
-) -> Result<Option<PathBuf>, NativeError> {
+fn path(context: &mut dyn Context, arguments: &[Value]) -> Option<PathBuf> {
     let name = args::bytes(arguments, 0);
-    if name.contains(&0) {
-        return Err(NativeError::value_error(format!(
-            "{function}(): Argument #1 ($filename) must not contain any null bytes"
-        )));
-    }
     if name.is_empty() {
-        return Ok(None);
+        return None;
     }
     let dir = context.state().get_or_default::<WorkingDirectory>();
-    Ok(dir.resolve(Path::new(OsStr::from_bytes(name))).ok())
+    dir.resolve(Path::new(OsStr::from_bytes(name))).ok()
 }
 
 async fn filesystem(

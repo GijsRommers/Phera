@@ -32,7 +32,7 @@ pub enum Wrapper {
 
 pub struct Stream {
     pub backing: Backing,
-    pub attachment: Option<Box<dyn std::any::Any + Send>>,
+    pub attachment: Option<Box<dyn crate::child_pipe::CloseAttachment>>,
     pub child_pipe: Option<crate::child_pipe::ChildPipe>,
     pub wrapper: Wrapper,
     pub mode: Vec<u8>,

@@ -296,7 +296,8 @@ Program execution is enabled by default. The PHP execution time limit also
 caps a wait on a child or its streams. The HTTP request timeout covers the
 whole handler and cancels any pending wait. PHP's Unix process resource
 destructor closes its pipes and checks child status without waiting or
-sending a signal. Phera gives each web child its own process group and
+sending a signal. Ordinary CLI process cleanup follows this behaviour. Phera gives
+each web child its own process group and
 terminates abandoned children at request cleanup. A program that explicitly
 leaves its group can keep running. Explicit closure waits asynchronously
 and returns the child's exit status.

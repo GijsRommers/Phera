@@ -1,7 +1,11 @@
 //! `stream_select($read, $write, $except, 0)` retains only ready streams.
 
+use nix::sys::{
+    select::{FD_SETSIZE, FdSet, select as select_fds},
+    time::TimeVal,
+};
 use std::collections::HashSet;
-use std::os::fd::OwnedFd;
+use std::os::fd::{AsFd, AsRawFd, OwnedFd};
 use std::time::Duration;
 
 use phera_extension_api::{
@@ -31,6 +35,7 @@ struct Candidate {
     key: ArrayKey,
     value: Value,
     fd: OwnedFd,
+    original_fd: i32,
     buffered: bool,
 }
 
@@ -49,7 +54,9 @@ fn select(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, N
                 let Ok((descriptor, buffered, is_child, wrapper)) =
                     with_stream(&resource, |stream| {
                         (
-                            stream.descriptor().and_then(|file| file.try_clone().ok()),
+                            stream.descriptor().and_then(|file| {
+                                file.try_clone().ok().map(|copy| (file.as_raw_fd(), copy))
+                            }),
                             stream.unread() > 0,
                             stream.child_pipe.is_some(),
                             stream.wrapper,
@@ -58,13 +65,14 @@ fn select(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, N
                 else {
                     continue;
                 };
-                if let Some(fd) = descriptor {
+                if let Some((original_fd, fd)) = descriptor {
                     child |= is_child;
                     candidates.push(Candidate {
                         direction,
                         key,
                         value: Value::Resource(resource),
                         fd: fd.into(),
+                        original_fd,
                         buffered,
                     });
                 } else {
@@ -77,7 +85,7 @@ fn select(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, N
                     };
                     context.warning(format!(
                         "stream_select(): Cannot represent a stream of type {kind} as a select()able descriptor"
-                    ).into());
+                    ));
                 }
             }
         }
@@ -85,6 +93,20 @@ fn select(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, N
             return Err(NativeError::value_error("No stream arrays were passed"));
         }
         let timeout = timeout(&arguments)?;
+        let max_fd = candidates
+            .iter()
+            .map(|candidate| candidate.original_fd)
+            .max()
+            .unwrap_or(0);
+        if max_fd >= FD_SETSIZE as i32 {
+            context.warning(format!(
+                "stream_select(): select() cannot monitor descriptor {max_fd}                  (FD_SETSIZE={FD_SETSIZE})"
+            ));
+            return Ok(Value::Bool(false));
+        }
+        if timeout.is_some_and(|duration| !valid_timeout(duration)) {
+            return Ok(select_error(context, rustix::io::Errno::INVAL, max_fd));
+        }
         let polling = wait(&candidates, timeout);
         let result = if let Some(budget) = child.then(|| context.process_wait_budget()).flatten() {
             tokio::time::timeout(budget, polling)
@@ -93,15 +115,9 @@ fn select(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, N
         } else {
             polling.await
         };
-        let Ok(ready) = result else {
-            context.warning(
-                format!(
-                    "stream_select(): Unable to select [{}]",
-                    result.unwrap_err()
-                )
-                .into(),
-            );
-            return Ok(Value::Bool(false));
+        let ready = match result {
+            Ok(ready) => ready,
+            Err(error) => return Ok(select_error(context, error, max_fd)),
         };
         let mut arrays = [PhpArray::new(), PhpArray::new(), PhpArray::new()];
         let mut descriptors = HashSet::new();
@@ -131,12 +147,12 @@ fn timeout(arguments: &[Value]) -> Result<Option<Duration>, NativeError> {
             "stream_select(): Argument #4 ($seconds) must be greater than or equal to 0",
         ));
     }
-    if micros.is_some_and(|micros| micros < 0) {
+    if seconds.is_some() && micros.is_some_and(|micros| micros < 0) {
         return Err(NativeError::value_error(
             "stream_select(): Argument #5 ($microseconds) must be greater than or equal to 0",
         ));
     }
-    if seconds.is_none() && micros.is_some() {
+    if seconds.is_none() && micros.is_some_and(|micros| micros != 0) {
         return Err(NativeError::value_error(
             "stream_select(): Argument #5 ($microseconds) must be null when argument #4 ($seconds) is null",
         ));
@@ -144,6 +160,24 @@ fn timeout(arguments: &[Value]) -> Result<Option<Duration>, NativeError> {
     Ok(seconds.map(|seconds| {
         Duration::from_secs(seconds as u64) + Duration::from_micros(micros.unwrap_or(0) as u64)
     }))
+}
+
+fn valid_timeout(duration: Duration) -> bool {
+    let max = if cfg!(target_vendor = "apple") {
+        i32::MAX as u64 - 1
+    } else {
+        i64::MAX as u64
+    };
+    duration.as_secs() <= max
+}
+
+fn select_error(context: &mut dyn Context, error: rustix::io::Errno, max_fd: i32) -> Value {
+    let number = error.raw_os_error();
+    let description = nix::errno::Errno::from_raw(number).desc();
+    context.warning(format!(
+        "stream_select(): Unable to select [{number}]: {description} (max_fd={max_fd})"
+    ));
+    Value::Bool(false)
 }
 
 async fn wait(
@@ -161,6 +195,49 @@ async fn wait(
         return Ok(buffered);
     }
     let start = tokio::time::Instant::now();
+    loop {
+        let ready = readiness(candidates)?;
+        if !ready.is_empty() {
+            return Ok(ready);
+        }
+        let interval = Duration::from_millis(1);
+        let pause = timeout.map_or(interval, |duration| {
+            interval.min(duration.saturating_sub(start.elapsed()))
+        });
+        if pause.is_zero() {
+            return Ok(Vec::new());
+        }
+        tokio::time::sleep(pause).await;
+    }
+}
+
+fn readiness(candidates: &[Candidate]) -> Result<Vec<usize>, rustix::io::Errno> {
+    if candidates
+        .iter()
+        .any(|candidate| candidate.fd.as_raw_fd() >= FD_SETSIZE as i32)
+    {
+        return poll_readiness(candidates);
+    }
+    let mut sets = [FdSet::new(), FdSet::new(), FdSet::new()];
+    for candidate in candidates {
+        sets[candidate.direction].insert(candidate.fd.as_fd());
+    }
+    let [read, write, except] = &mut sets;
+    select_fds(None, read, write, except, &mut TimeVal::new(0, 0))
+        .map_err(|error| rustix::io::Errno::from_raw_os_error(error as i32))?;
+    Ok(candidates
+        .iter()
+        .enumerate()
+        .filter_map(|(index, candidate)| {
+            sets[candidate.direction]
+                .contains(candidate.fd.as_fd())
+                .then_some(index)
+        })
+        .collect())
+}
+
+/// Duplicating an otherwise selectable PHP descriptor can exceed FD_SETSIZE.
+fn poll_readiness(candidates: &[Candidate]) -> Result<Vec<usize>, rustix::io::Errno> {
     let mut fds = candidates
         .iter()
         .map(|candidate| {
@@ -174,29 +251,17 @@ async fn wait(
             )
         })
         .collect::<Vec<_>>();
-    loop {
-        if poll(&mut fds, Some(&Timespec::default()))? != 0 {
-            let ready = fds
-                .iter()
-                .enumerate()
-                .filter_map(|(index, fd)| {
-                    let events = match candidates[index].direction {
-                        0 => PollFlags::IN | PollFlags::HUP | PollFlags::ERR,
-                        1 => PollFlags::OUT | PollFlags::ERR,
-                        _ => PollFlags::PRI,
-                    };
-                    fd.revents().intersects(events).then_some(index)
-                })
-                .collect();
-            return Ok(ready);
-        }
-        let interval = Duration::from_millis(1);
-        let pause = timeout.map_or(interval, |duration| {
-            interval.min(duration.saturating_sub(start.elapsed()))
-        });
-        if pause.is_zero() {
-            return Ok(Vec::new());
-        }
-        tokio::time::sleep(pause).await;
-    }
+    poll(&mut fds, Some(&Timespec::default()))?;
+    Ok(fds
+        .iter()
+        .enumerate()
+        .filter_map(|(index, fd)| {
+            let events = match candidates[index].direction {
+                0 => PollFlags::IN | PollFlags::HUP | PollFlags::ERR,
+                1 => PollFlags::OUT | PollFlags::ERR,
+                _ => PollFlags::PRI,
+            };
+            fd.revents().intersects(events).then_some(index)
+        })
+        .collect())
 }

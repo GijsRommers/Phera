@@ -75,7 +75,8 @@ fn kill(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let pid = i32::try_from(args::int(arguments, 0).unwrap_or_default()).map_err(|_| {
         NativeError::value_error(format!(
             "posix_kill(): Argument #1 ($process_id) must be between {} and {}",
-            i32::MIN,
+            // Zend passes an int bound to a zend_long formatter.
+            i32::MIN as u32,
             i32::MAX,
         ))
     })?;

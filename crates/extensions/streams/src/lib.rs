@@ -47,8 +47,8 @@ mod whole_write;
 mod wrapper;
 
 pub use child_pipe::{
-    ChildStreamKind, child_stream, close_child_stream, duplicate_descriptor, open_descriptor,
-    set_attachment,
+    ChildStreamKind, CloseAttachment, child_stream, close_child_stream, duplicate_descriptor,
+    open_descriptor, set_attachment,
 };
 pub use input::RequestInput;
 pub use path_text::parent as dirname_parent;

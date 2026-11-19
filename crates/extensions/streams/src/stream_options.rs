@@ -89,6 +89,11 @@ fn is_local(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
 }
 
 fn isatty(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    if let Value::Resource(resource) = args::value(arguments, 0)
+        && crate::directory::is_open(resource)
+    {
+        return Ok(Value::Bool(false));
+    }
     with_stream(stream_arg(arguments, "stream_isatty")?, |stream| {
         Value::Bool(stream.descriptor().is_some_and(rustix::termios::isatty))
     })

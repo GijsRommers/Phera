@@ -7,7 +7,8 @@ use std::os::unix::ffi::OsStrExt;
 use nix::{errno::Errno, unistd};
 use phera_ext_streams::{stream_kind, with_descriptor};
 use phera_extension_api::{
-    Context, FunctionEntry, NativeResult, Param, ParamType, Registry, Value, args, prepare_call,
+    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Registry, Value, args,
+    prepare_call,
 };
 
 const DESCRIPTOR: Param = Param::new("file_descriptor", ParamType::Mixed);
@@ -49,9 +50,11 @@ fn terminal(
             let reason = if let Some(kind) = stream_kind(resource) {
                 format!("Could not use stream of type '{kind}'")
             } else {
-                "supplied resource is not a valid stream resource".to_owned()
+                return Err(NativeError::type_error(format!(
+                    "{function}(): supplied resource is not a valid stream resource"
+                )));
             };
-            context.warning(format!("{function}(): {reason}").into());
+            context.warning(format!("{function}(): {reason}"));
             return Ok(Value::Bool(false));
         };
         result
@@ -63,7 +66,7 @@ fn terminal(
             let given = crate::descriptors::given(original);
             context.warning(format!(
                 "{function}(): Argument #1 ($file_descriptor) must be of type int|resource, {given} given",
-            ).into());
+            ));
             if !coerce_on_error {
                 return Ok(Value::Bool(false));
             }
@@ -75,13 +78,10 @@ fn terminal(
             2 => operation(stderr().as_fd()),
             3..=2_147_483_647 => Err(Errno::EBADF),
             _ => {
-                context.warning(
-                    format!(
-                        "{function}(): Argument #1 ($file_descriptor) must be between 0 and {}",
-                        i32::MAX,
-                    )
-                    .into(),
-                );
+                context.warning(format!(
+                    "{function}(): Argument #1 ($file_descriptor) must be between 0 and {}",
+                    i32::MAX,
+                ));
                 Err(Errno::EBADF)
             }
         }
