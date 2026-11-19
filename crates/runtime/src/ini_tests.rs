@@ -58,6 +58,44 @@ if (isset($_GET['change'])) {
     define('REQUEST_VALUE', 'present');
 }
 
+echo constant('PHP_SAPI') === php_sapi_name() ? 'sapi' : 'wrong';
+echo '|', (int) function_exists('getallheaders'), '|', ini_get('default_charset'),
+    '|', strlen("é"), '|', (int) defined('REQUEST_VALUE');
+"#,
+    )
+    .unwrap();
+
+    let cli = runtime.run_file(&entry, &[], None).await.unwrap();
+    assert_eq!(cli.status, 0, "{}", String::from_utf8_lossy(&cli.output));
+    assert_eq!(cli.output, b"sapi|0|UTF-8|2|0");
+    let worker = runtime.web_worker();
+    for (query, expected) in [
+        ("change=1", b"sapi|1|ASCII|2|1".as_slice()),
+        ("", b"sapi|1|UTF-8|2|0".as_slice()),
+    ] {
+        let response = worker
+            .handle_request(
+                &entry,
+                directory.path(),
+                HttpRequest {
+                    method: "GET".into(),
+                    target: format!("/index.php?{query}"),
+                    path: "/index.php".into(),
+                    query: query.into(),
+                    protocol: "HTTP/1.1".into(),
+                    headers: Vec::new(),
+                    body: Vec::new(),
+                    remote_addr: ([127, 0, 0, 1], 8081).into(),
+                    local_addr: ([127, 0, 0, 1], 8080).into(),
+                    https: false,
+                },
+            )
+            .await;
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, expected);
+    }
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn unavailable_builtin_names_keep_user_function_binding() {
     let source = "<?php function strlen($value) { return 90; } echo strlen('bytes');";
@@ -98,44 +136,10 @@ async fn shared_native_classes_use_request_local_method_names() {
             .unwrap();
         assert!(expected.status.success());
         let source = format!("<?php {snippet}");
-        assert_eq!(run(&runtime, &tables, &source).await.as_bytes(), expected.stdout);
-    }
-}
-echo constant('PHP_SAPI') === php_sapi_name() ? 'sapi' : 'wrong';
-echo '|', (int) function_exists('getallheaders'), '|', ini_get('default_charset'),
-    '|', strlen("é"), '|', (int) defined('REQUEST_VALUE');
-"#,
-    )
-    .unwrap();
-
-    let cli = runtime.run_file(&entry, &[], None).await.unwrap();
-    assert_eq!(cli.status, 0);
-    assert_eq!(cli.output, b"sapi|0|UTF-8|2|0");
-    let worker = runtime.web_worker();
-    for (query, expected) in [
-        ("change=1", b"sapi|1|ASCII|2|1".as_slice()),
-        ("", b"sapi|1|UTF-8|2|0".as_slice()),
-    ] {
-        let response = worker
-            .handle_request(
-                &entry,
-                directory.path(),
-                HttpRequest {
-                    method: "GET".into(),
-                    target: format!("/index.php?{query}"),
-                    path: "/index.php".into(),
-                    query: query.into(),
-                    protocol: "HTTP/1.1".into(),
-                    headers: Vec::new(),
-                    body: Vec::new(),
-                    remote_addr: ([127, 0, 0, 1], 8081).into(),
-                    local_addr: ([127, 0, 0, 1], 8080).into(),
-                    https: false,
-                },
-            )
-            .await;
-        assert_eq!(response.status, 200);
-        assert_eq!(response.body, expected);
+        assert_eq!(
+            run(&runtime, &tables, &source).await.as_bytes(),
+            expected.stdout
+        );
     }
 }
 
