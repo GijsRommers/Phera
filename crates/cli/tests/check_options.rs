@@ -141,11 +141,11 @@ fn language_level_controls_builtin_signatures() {
 #[test]
 fn language_level_is_selected_once_for_a_script_and_its_includes() {
     let project = Project::new();
-    project.write("src/main.php", "<?php require __DIR__ . '/helper.php';");
     project.write(
-        "src/helper.php",
-        "<?php echo PHP_MINOR_VERSION, ':' . $argv[1];",
+        "src/main.php",
+        "<?php require __DIR__ . '/helper.php'; echo ':' . $argv[1];",
     );
+    project.write("src/helper.php", "<?php echo PHP_MINOR_VERSION;");
     let run = |flags: &[&str]| {
         project
             .command()

@@ -93,7 +93,7 @@ jobs:
           php-version: ${{ matrix.php }}
           extensions: >-
             json, pcre, ctype, pdo, pdo_pgsql, mysqlnd, pdo_mysql, pdo_sqlite, sqlite3, mbstring, iconv, tokenizer,
-            ${{ matrix.php == '8.5' && 'timezonedb-2026.5' || 'timezonedb-2026.6' }}, redis-phpredis/phpredis@6.3.0
+            ${{ matrix.php == '8.5' && 'timezonedb-2026.5, redis-phpredis/phpredis@6.3.0' || 'timezonedb-2026.6' }}
           coverage: none
         env:
           REDIS_PATH: .
@@ -103,6 +103,9 @@ jobs:
       - name: Build the slim date oracle when PHP uses system tzdata
         if: matrix.php == '8.5'
         run: bash .github/scripts/build-date-oracle.sh
+      - name: Build the PHP 8.6 Redis oracle
+        if: matrix.php == '8.6'
+        run: bash .github/scripts/build-php86-redis-oracle.sh
       - name: Export PHP oracle
         run: |
           echo "PHERA_PHP_REAL=$(command -v php)" >> "$GITHUB_ENV"

@@ -22,6 +22,8 @@ options=(-d "extension_dir=$extension_dir")
 for module in "${modules[@]}"; do
     if [[ "$module" == timezonedb && -n "${PHERA_PHP_TIMEZONEDB:-}" ]]; then
         module=$PHERA_PHP_TIMEZONEDB
+    elif [[ "$module" == redis && -n "${PHERA_PHP_REDIS:-}" ]]; then
+        module=$PHERA_PHP_REDIS
     fi
     options+=(-d "extension=$module")
 done
