@@ -1,4 +1,4 @@
-//! Every checker corpus fixture is exercised through the public CLI at both levels.
+//! Every checker corpus fixture is exercised through the public CLI at its expected levels.
 //! Expected line sets live beside each PHP file and are independent of output wording.
 
 use std::collections::BTreeSet;

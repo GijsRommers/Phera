@@ -17,6 +17,7 @@ pub struct ParameterInfo {
     pub name: String,
     pub ty: ValueType,
     pub optional: bool,
+    pub default_is_null: bool,
     pub variadic: bool,
     pub by_reference: bool,
     pub closure_receiver: Option<String>,
@@ -49,6 +50,12 @@ impl Signature {
                     name: p.name.clone(),
                     ty: ValueType::parameter(p, names),
                     optional: p.default.is_some(),
+                    default_is_null: p.default.as_ref().is_some_and(|value| {
+                        matches!(
+                            value.kind,
+                            phera_ast::ExpressionKind::Literal(phera_ast::Literal::Null)
+                        )
+                    }),
                     variadic: p.variadic,
                     by_reference: p.by_reference,
                     closure_receiver: None,
@@ -145,6 +152,20 @@ pub struct Index {
 }
 
 impl Index {
+    pub fn doc_global_constant(&self, name: &str) -> Option<&ValueType> {
+        let unqualified = name.rsplit('\\').next()?;
+        if !unqualified
+            .bytes()
+            .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_')
+        {
+            return None;
+        }
+        self.constants
+            .get(name)
+            .or_else(|| self.constants.get(unqualified))
+            .map(|constant| &constant.ty)
+    }
+
     pub fn class(&self, name: &str) -> Option<&ClassInfo> {
         self.classes.get(&name.to_ascii_lowercase())
     }
@@ -168,18 +189,23 @@ impl Index {
     }
 
     pub fn method(&self, class: &str, method: &str) -> Option<&Signature> {
+        self.method_owner(class, method).map(|(_, method)| method)
+    }
+
+    pub fn method_owner(&self, class: &str, method: &str) -> Option<(&ClassInfo, &Signature)> {
+        let key = method.to_ascii_lowercase();
         let mut contract = None;
         for ancestor in self.ancestry(class) {
-            if let Some(signature) = ancestor.methods.get(&method.to_ascii_lowercase()) {
+            if let Some(signature) = ancestor.methods.get(&key) {
                 if matches!(ancestor.kind, ClassKind::Trait | ClassKind::Interface)
                     && (signature.abstract_body || signature.modifiers.is_abstract)
                 {
                     // The nearest declaration is the contract: an interface
                     // may redeclare its parent's method with more optional
                     // parameters (Doctrine's EntityManagerInterface::find()).
-                    contract = contract.or(Some(signature));
+                    contract = contract.or(Some((ancestor, signature)));
                 } else {
-                    return Some(signature);
+                    return Some((ancestor, signature));
                 }
             }
         }

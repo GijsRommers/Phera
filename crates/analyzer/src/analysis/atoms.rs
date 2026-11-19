@@ -7,6 +7,15 @@ use phera_source::deprecations::{ItemKind, omitted};
 impl Analyzer<'_> {
     pub fn atoms(&mut self, expression: &Expression, scope: &mut Scope, quiet: bool) -> ValueType {
         match &expression.kind {
+            ExpressionKind::Literal(Literal::Int(value)) if self.level >= 2 => {
+                ValueType::IntLiteral(*value)
+            }
+            ExpressionKind::Literal(Literal::Bool(value)) if self.level >= 2 => {
+                ValueType::BoolLiteral(*value)
+            }
+            ExpressionKind::Literal(Literal::String(value)) if self.level >= 2 => {
+                ValueType::StringLiteral(value.as_slice().into())
+            }
             ExpressionKind::Literal(literal) => match literal {
                 Literal::Null => ValueType::Null,
                 Literal::Bool(_) => ValueType::Bool,

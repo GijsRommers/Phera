@@ -125,6 +125,7 @@ impl Analyzer<'_> {
             {
                 self.dependencies.resolve(self.index, class);
                 if self.index.class(class).is_none()
+                    && self.index.doc_global_constant(class).is_none()
                     && !self
                         .index
                         .builtin_classes

@@ -18,6 +18,15 @@ impl Analyzer<'_> {
         self.depth += 1;
         let ty = self.expression_kind(expression, scope, quiet);
         self.depth -= 1;
+        if self.level >= 2
+            && !scope.facts.is_empty()
+            && ty != ValueType::Never
+            && !matches!(&expression.kind, ExpressionKind::Variable(Variable::Named(name)) if name != "this")
+            && let Some(place) = crate::scope::Place::of(expression)
+            && let Some(fact) = scope.facts.get(&place)
+        {
+            return fact.ty.clone();
+        }
         ty
     }
 

@@ -19,6 +19,7 @@ pub struct Documentation {
     pub returns: Option<Annotation>,
     pub variables: BTreeMap<Option<String>, Annotation>,
     pub templates: Templates,
+    pub template_names: Vec<String>,
     pub bases: Vec<Annotation>,
     pub properties: BTreeMap<String, Annotation>,
     pub methods: BTreeMap<String, Annotation>,
@@ -69,18 +70,26 @@ pub fn read(
     }
     for tag in &tags {
         let (_, name) = tag_name(tag.name);
-        if template_tag(name) {
-            let mut words = tag.body.splitn(3, char::is_whitespace);
-            if let Some(name) = words.next() {
-                let bound = match (words.next(), words.next()) {
-                    (Some("of" | "as"), Some(bound)) => {
-                        parse(bound, names, &templates).ok().map(|parsed| parsed.ty)
+        if template_tag(name)
+            && let Some(name) = tag.body.split_whitespace().next()
+        {
+            let rest = tag.body[name.len()..].trim_start();
+            let bound = rest
+                .split_once(char::is_whitespace)
+                .and_then(|(operator, bound)| {
+                    if matches!(operator, "of" | "as") {
+                        parse(bound.trim_start(), names, &templates)
+                            .ok()
+                            .map(|parsed| parsed.ty)
+                    } else {
+                        None
                     }
-                    _ => None,
-                }
+                })
                 .unwrap_or(ValueType::Mixed);
-                templates.insert(name.into(), bound);
+            if !documentation.template_names.iter().any(|old| old == name) {
+                documentation.template_names.push(name.into());
             }
+            templates.insert(name.into(), bound);
         }
     }
     for tag in &tags {

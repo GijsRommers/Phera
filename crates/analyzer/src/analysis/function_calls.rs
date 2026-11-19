@@ -44,7 +44,7 @@ impl Analyzer<'_> {
             _ => None,
         };
         let inserted = probe.filter(|symbol| scope.known.insert(symbol.clone()));
-        let evaluation = self.arguments(
+        let facts = self.argument_facts(
             arguments,
             resolved.signature.as_ref(),
             &resolved.label,
@@ -55,7 +55,7 @@ impl Analyzer<'_> {
         if let Some(symbol) = inserted {
             scope.known.remove(&symbol);
         }
-        if evaluation == Evaluation::Never {
+        if facts.evaluation == Evaluation::Never {
             return ValueType::Never;
         }
         if !matches!(arguments, Arguments::FirstClassCallable) {
@@ -72,7 +72,9 @@ impl Analyzer<'_> {
                 ValueType::Callable(std::sync::Arc::new(s))
             })
         } else {
-            resolved.signature.map_or(ValueType::Mixed, |s| s.returns)
+            resolved.signature.map_or(ValueType::Mixed, |s| {
+                s.infer_return(arguments, &facts.types, self.index)
+            })
         }
     }
 

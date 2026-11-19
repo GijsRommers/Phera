@@ -123,6 +123,11 @@ impl Parser<'_, '_> {
                 name,
             })));
         }
+        if self.eat('*') {
+            // Global constant patterns, such as FILTER_FLAG_*, may include
+            // constants supplied by an optional extension.
+            return Ok(ValueType::Mixed);
+        }
         let lower = word.to_ascii_lowercase();
         if matches!(lower.as_str(), "array" | "list" | "object") && self.eat('{') {
             return self.shape(&lower, depth);

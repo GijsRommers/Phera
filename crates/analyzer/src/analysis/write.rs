@@ -77,6 +77,14 @@ impl Analyzer<'_> {
                     if self.expression(target, scope, false) == ValueType::Never {
                         return Evaluation::Never;
                     }
+                    if self.level >= 2 {
+                        scope.forget_member_write(target);
+                        if matches!(target.kind, ExpressionKind::Property { .. })
+                            && let Some(place) = crate::scope::Place::of(target)
+                        {
+                            scope.facts.record(place, ty, target.span);
+                        }
+                    }
                 }
             }
         }
@@ -119,7 +127,13 @@ impl Analyzer<'_> {
             let ty = if old.definition == Definition::Absent {
                 ValueType::Array
             } else if old.ty == scope.get(name).ty {
-                old.ty
+                match old.ty {
+                    ValueType::Shape(_) | ValueType::Collection(_) => ValueType::Array,
+                    ValueType::StringLiteral(_) | ValueType::StringRefinement(_) => {
+                        ValueType::String
+                    }
+                    ty => ty,
+                }
             } else {
                 ValueType::Mixed
             };

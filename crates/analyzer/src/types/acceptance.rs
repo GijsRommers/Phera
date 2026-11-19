@@ -65,6 +65,13 @@ impl ValueType {
                     }
                     match (expected, given) {
                         (_, Self::Mixed) => results.push(Uncertain),
+                        (_, Self::Class(name))
+                            if index.class(name).is_none()
+                                && let Some(constant) = index.doc_global_constant(name)
+                                && !matches!(constant, Self::Class(_)) =>
+                        {
+                            pending.push(Step::Compare(expected, constant));
+                        }
                         (_, Self::Union(types)) => {
                             pending.push(Step::Reduce(types.len(), Requirement::All));
                             pending.extend(types.iter().map(|ty| Step::Compare(expected, ty)));

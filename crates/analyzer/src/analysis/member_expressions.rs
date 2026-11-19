@@ -12,18 +12,29 @@ impl Analyzer<'_> {
         quiet: bool,
     ) -> ValueType {
         match &expression.kind {
-            ExpressionKind::Property { target, name, .. } => {
+            ExpressionKind::Property {
+                target,
+                name,
+                nullsafe,
+            } => {
                 let ty = self.expression(target, scope, quiet);
                 if ty == ValueType::Never {
                     return ty;
                 }
-                let guarded = match (&target.kind, name) {
-                    (
-                        ExpressionKind::Variable(Variable::Named(receiver)),
-                        MemberName::Identifier(name),
-                    ) => scope
-                        .known
-                        .contains(&Symbol::Property(receiver.clone(), name.name.clone())),
+                if self.level >= 2 && *nullsafe && ty == ValueType::Null {
+                    if let MemberName::Identifier(property) = name {
+                        self.property_receiver(&ty, &property.name, expression.span, quiet);
+                    }
+                    return ty;
+                }
+                let guarded = match name {
+                    MemberName::Identifier(name) if !scope.known.is_empty() => {
+                        crate::scope::Place::of(target).is_some_and(|receiver| {
+                            scope
+                                .known
+                                .contains(&Symbol::Property(receiver, name.name.clone()))
+                        })
+                    }
                     _ => false,
                 };
                 self.property(
@@ -100,6 +111,12 @@ impl Analyzer<'_> {
             && self.expression(name, scope, false) == ValueType::Never
         {
             return ValueType::Never;
+        }
+        if self.level >= 2
+            && let (Some(class), MemberName::Identifier(member)) = (&class, name)
+            && member.name.eq_ignore_ascii_case("class")
+        {
+            return ValueType::ClassString(std::sync::Arc::new(ValueType::Class(class.clone())));
         }
         if let (Some(class), MemberName::Identifier(name)) = (class, name)
             && !name.name.eq_ignore_ascii_case("class")

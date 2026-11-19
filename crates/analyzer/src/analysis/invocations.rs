@@ -18,7 +18,7 @@ impl Analyzer<'_> {
                 target,
                 name,
                 arguments,
-                ..
+                nullsafe,
             } => {
                 let binding = self.pending_binding.take();
                 self.prepare_inline_receiver(target, name, arguments, scope);
@@ -27,7 +27,19 @@ impl Analyzer<'_> {
                 if ty == ValueType::Never {
                     return ty;
                 }
-                if matches!(&target.kind, ExpressionKind::Variable(Variable::Named(receiver)) if receiver == "this")
+                if self.level >= 2 && *nullsafe && ty == ValueType::Null {
+                    if let MemberName::Identifier(method) = name {
+                        self.method_receiver(
+                            &ty,
+                            &method.name,
+                            expression.span,
+                            Access::object(target),
+                        );
+                    }
+                    return ty;
+                }
+                if self.level < 2
+                    && matches!(&target.kind, ExpressionKind::Variable(Variable::Named(receiver)) if receiver == "this")
                     && let MemberName::Identifier(method) = name
                     && let ValueType::Class(narrowed) = scope.get("this").ty
                     && self.index.method(&narrowed, &method.name).is_some()
@@ -36,18 +48,16 @@ impl Analyzer<'_> {
                     // original class still supplies its other members.
                     ty = ValueType::Class(narrowed);
                 }
-                let access = match (&target.kind, name) {
-                    (
-                        ExpressionKind::Variable(Variable::Named(receiver)),
-                        MemberName::Identifier(name),
-                    ) if scope.known.contains(&Symbol::Method(
-                        receiver.clone(),
-                        name.name.to_ascii_lowercase(),
-                    )) =>
-                    {
-                        Access::Guarded
-                    }
-                    _ => Access::object(target),
+                let access = if !scope.known.is_empty()
+                    && let MemberName::Identifier(name) = name
+                    && let Some(receiver) = crate::scope::Place::of(target)
+                    && scope
+                        .known
+                        .contains(&Symbol::Method(receiver, name.name.to_ascii_lowercase()))
+                {
+                    Access::Guarded
+                } else {
+                    Access::object(target)
                 };
                 self.method_call(&ty, name, arguments, scope, expression.span, access)
             }
@@ -63,13 +73,25 @@ impl Analyzer<'_> {
                 let class_name = class_name.name();
                 let forwarding = self.forwards_object(class_name.as_deref());
                 let ty = class_name.map_or(ValueType::Mixed, ValueType::Class);
+                let guarded = match name {
+                    MemberName::Identifier(name) if self.level >= 2 && !scope.known.is_empty() => {
+                        crate::scope::Place::of(class).is_some_and(|receiver| {
+                            scope
+                                .known
+                                .contains(&Symbol::Method(receiver, name.name.to_ascii_lowercase()))
+                        })
+                    }
+                    _ => false,
+                };
                 self.method_call(
                     &ty,
                     name,
                     arguments,
                     scope,
                     expression.span,
-                    if matches!(&class.kind, ExpressionKind::Name(name)
+                    if guarded {
+                        Access::GuardedStatic
+                    } else if matches!(&class.kind, ExpressionKind::Name(name)
                         if name.text.eq_ignore_ascii_case("static"))
                     {
                         Access::LateStatic {

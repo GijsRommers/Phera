@@ -33,6 +33,7 @@ pub fn class_info(
     if read_docs && class.doc_comment.is_some() {
         let doc = crate::phpdoc::read(source, class.doc_comment, names, &Default::default());
         info.documented.templates = doc.templates;
+        info.documented.template_names = doc.template_names;
         info.documented.method_types = doc
             .methods
             .into_iter()

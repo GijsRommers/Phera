@@ -4,6 +4,7 @@
 mod decode;
 mod encode;
 mod fields;
+mod virtual_properties;
 
 use crate::index::Index;
 pub use encode::encode;
@@ -11,6 +12,7 @@ use phera_source::deprecations::{ItemKind, Policy, items};
 
 pub fn load() -> Index {
     let mut index = decode::decode(include_str!("../data/php85.tsv"));
+    virtual_properties::add(&mut index);
     index.builtin_functions = index.functions.keys().cloned().collect();
     index.builtin_classes = index.classes.keys().cloned().collect();
     index

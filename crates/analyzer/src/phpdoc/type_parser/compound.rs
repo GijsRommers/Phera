@@ -76,10 +76,19 @@ impl Parser<'_, '_> {
             },
         );
         while !self.eat(')') {
-            let ty = self.ty(depth)?;
+            let untyped_variadic = self.peek() == Some(Token::Dots)
+                && matches!(self.peek_at(1), Some(Token::Variable(_)));
+            if untyped_variadic {
+                self.cursor += 1;
+            }
+            let ty = if matches!(self.peek(), Some(Token::Variable(name)) if name != "this") {
+                ValueType::Mixed
+            } else {
+                self.ty(depth)?
+            };
             let by_reference = self.eat('&');
-            let variadic = self.peek() == Some(Token::Dots);
-            if variadic {
+            let trailing_variadic = self.peek() == Some(Token::Dots);
+            if trailing_variadic {
                 self.cursor += 1;
             }
             let name = if let Some(Token::Variable(name)) = self.peek() {
@@ -90,11 +99,16 @@ impl Parser<'_, '_> {
                 format!("arg{}", signature.parameters.len() + 1)
             };
             let optional = self.eat('=');
+            let default_is_null = optional && self.peek() == Some(Token::Word("null"));
+            if optional {
+                self.skip_default()?;
+            }
             signature.parameters.push(ParameterInfo {
                 name,
                 ty,
                 optional,
-                variadic,
+                default_is_null,
+                variadic: untyped_variadic || trailing_variadic,
                 by_reference,
                 closure_receiver: None,
             });
@@ -107,5 +121,25 @@ impl Parser<'_, '_> {
             signature.returns = self.ty(depth)?;
         }
         Ok(ValueType::Callable(Arc::new(signature)))
+    }
+
+    fn skip_default(&mut self) -> Result<()> {
+        // @method takes PHP-style defaults, such as `$flags = [A::OPTION]`.
+        // They make the parameter optional without changing its declared type.
+        let mut closing = Vec::new();
+        while let Some(token) = self.peek() {
+            match token {
+                Token::Punctuation(',' | ')') if closing.is_empty() => return Ok(()),
+                Token::Punctuation('(') => closing.push(')'),
+                Token::Punctuation('[') => closing.push(']'),
+                Token::Punctuation('{') => closing.push('}'),
+                Token::Punctuation(ch @ (')' | ']' | '}')) if closing.pop() != Some(ch) => {
+                    return Err(self.error("a balanced parameter default"));
+                }
+                _ => {}
+            }
+            self.cursor += 1;
+        }
+        Err(self.error("',' or ')' after a parameter default"))
     }
 }

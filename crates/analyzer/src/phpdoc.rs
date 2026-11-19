@@ -20,6 +20,7 @@ pub struct Members {
     pub properties: std::collections::BTreeSet<String>,
     pub mixins: Vec<String>,
     pub templates: Templates,
+    pub template_names: Vec<String>,
     pub method_types: std::collections::BTreeMap<String, std::sync::Arc<crate::index::Signature>>,
     pub property_types: std::collections::BTreeMap<String, crate::types::ValueType>,
     pub generic_bases: Vec<crate::types::ValueType>,

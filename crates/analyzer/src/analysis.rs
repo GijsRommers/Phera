@@ -15,6 +15,7 @@ use phera_ast::*;
 use phera_source::Span;
 
 mod arguments;
+mod arrays;
 mod assignments;
 mod atoms;
 mod attributes;
@@ -44,6 +45,7 @@ mod members;
 mod not_supported;
 mod receiver_types;
 mod refine;
+mod refine_types;
 mod reporting;
 mod short_circuit;
 mod statements;
@@ -236,10 +238,17 @@ impl<'a> Analyzer<'a> {
                 self.report(Finding::UnknownClass(class.clone()), name.span);
             }
             class.map_or(ClassTarget::Unknown, ClassTarget::Known)
-        } else if self.expression(expression, scope, false) == ValueType::Never {
-            ClassTarget::Never
         } else {
-            ClassTarget::Unknown
+            match self.expression(expression, scope, false) {
+                ValueType::Never => ClassTarget::Never,
+                ValueType::ClassString(class) => {
+                    class.class_name().map_or(ClassTarget::Unknown, |name| {
+                        self.dependencies.resolve(self.index, name);
+                        ClassTarget::Known(name.into())
+                    })
+                }
+                _ => ClassTarget::Unknown,
+            }
         }
     }
 }
@@ -249,6 +258,7 @@ pub enum Access {
     Checked,
     Inferred,
     Guarded,
+    GuardedStatic,
     Static,
     Forwarded,
     LateStatic { has_object: bool },
@@ -263,7 +273,10 @@ impl Access {
         }
     }
     pub fn static_call(self) -> bool {
-        matches!(self, Self::Static | Self::LateStatic { has_object: false })
+        matches!(
+            self,
+            Self::Static | Self::GuardedStatic | Self::LateStatic { has_object: false }
+        )
     }
     pub fn dynamic_receiver(self) -> bool {
         matches!(self, Self::Checked | Self::LateStatic { .. })
@@ -271,7 +284,7 @@ impl Access {
     pub fn reports_missing(self, level: u8) -> bool {
         match self {
             Self::Inferred => level >= 2,
-            Self::Guarded => false,
+            Self::Guarded | Self::GuardedStatic => false,
             _ => true,
         }
     }

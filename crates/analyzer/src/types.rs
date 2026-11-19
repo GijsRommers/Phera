@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 mod acceptance;
 mod display;
+mod substitution;
 
 pub use acceptance::{Compatibility, TypePolicy};
 
