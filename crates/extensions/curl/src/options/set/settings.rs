@@ -106,7 +106,7 @@ pub(super) fn change(
             0 => settings.auth = Auth::None,
             1 => settings.auth = Auth::Basic,
             64 => settings.auth = Auth::Bearer,
-            65 | CURLAUTH_ANY => settings.auth = Auth::BasicOrBearer,
+            65 | -17 | 4_294_967_023 => settings.auth = Auth::BasicOrBearer,
             _ => {
                 return Ok(Change::Refused(
                     "only Basic and Bearer authentication are available",

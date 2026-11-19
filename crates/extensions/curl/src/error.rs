@@ -83,6 +83,7 @@ fn error_text(code: i64) -> &'static str {
         63 => "Maximum file size exceeded",
         64 => "Requested SSL level failed",
         65 => "Send failed since rewinding of the data stream failed",
+        66 if cfg!(target_os = "linux") => "Failed to initialise SSL crypto engine",
         66 => "Failed to initialize SSL crypto engine",
         67 => "Login denied",
         68 => "TFTP: File Not Found",

@@ -1,6 +1,11 @@
 //! Numeric PHP constants used by the implementation, such as `CURLOPT_URL`.
 
-pub(crate) const CURLAUTH_ANY: i64 = 4294967023;
+// System libcurl headers on Linux expose the signed, pre-8.22 auth masks.
+pub(crate) const CURLAUTH_ANY: i64 = if cfg!(target_os = "linux") {
+    -17
+} else {
+    4_294_967_023
+};
 pub(crate) const CURLE_OK: i64 = 0;
 pub(crate) const CURLHEADER_SEPARATE: i64 = 1;
 pub(crate) const CURLINFO_APPCONNECT_TIME: i64 = 3145761;
