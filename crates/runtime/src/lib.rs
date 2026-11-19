@@ -93,6 +93,14 @@ impl Runtime {
     }
 
     pub fn with_environment(environment: Environment) -> Self {
+        // mysql_async builds its own ClientConfig and requires a process-default provider.
+        static MYSQL_TLS: std::sync::Once = std::sync::Once::new();
+        MYSQL_TLS.call_once(|| {
+            let _ = phera_io_pool::tls::provider()
+                .as_ref()
+                .clone()
+                .install_default();
+        });
         let mut registry = Registry::new();
         registry.load(&phera_ext_core::Core);
         registry.class(phera_extension_api::ClassEntry {

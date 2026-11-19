@@ -124,24 +124,18 @@ async fn subscribed_socket_is_cleaned_before_reuse() {
     let pool = isolated(1);
     // A socket that receives pushes, as a subscription would use.
     let subscriber = async {
-        let client = endpoint().client()?;
-        let info = client.get_connection_info().clone();
-        let settings = info
-            .redis_settings()
-            .clone()
-            .set_protocol(redis::ProtocolVersion::RESP3);
+        let settings =
+            redis::RedisConnectionInfo::default().set_protocol(redis::ProtocolVersion::RESP3);
         let (sender, _receiver) = tokio::sync::mpsc::unbounded_channel();
-        let connection = redis::Client::open(info.set_redis_settings(settings))?
-            .get_multiplexed_async_connection_with_config(
-                &redis::AsyncConnectionConfig::new()
+        endpoint()
+            .open(
+                settings,
+                redis::AsyncConnectionConfig::new()
                     .set_push_sender(sender)
                     .set_response_timeout(None),
+                Some(Duration::from_secs(1)),
             )
-            .await?;
-        Ok(Socket {
-            connection,
-            reusable: true,
-        })
+            .await
     };
     let first = Lease(pool.acquire(endpoint(), subscriber).await.unwrap());
     let mut subscribe = redis::cmd("SUBSCRIBE");
@@ -159,4 +153,42 @@ async fn subscribed_socket_is_cleaned_before_reuse() {
         second.query(redis::cmd("PING"), 2.0).await.unwrap(),
         Value::SimpleString(_)
     ));
+}
+#[tokio::test]
+async fn rejects_a_server_restricted_to_tls_1_0() {
+    use phera_extension_api::Value as PhpValue;
+    use phera_extension_api::testing::legacy_tls::LegacyTlsServer;
+
+    let directory = tempfile::tempdir().unwrap();
+    let server = LegacyTlsServer::start("redis", directory.path());
+    let php = server.php_client(
+        r#"
+        set_error_handler(static function ($level, $message) { echo $message, "\n"; });
+        $options = ['stream' => ['crypto_method' => STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT]];
+        $redis = new Redis();
+        var_dump($redis->connect('tls://127.0.0.1', (int)$argv[3], 3, null, 0, 3, $options));
+        "#,
+    );
+    assert!(
+        php.contains("Redis::connect(): Failed to enable crypto"),
+        "{php}"
+    );
+    assert!(php.ends_with("bool(false)\n"), "{php}");
+
+    let error = crate::connection::connect(
+        "connect",
+        &crate::connection::Session::default(),
+        &[
+            PhpValue::from("tls://127.0.0.1"),
+            PhpValue::Int(i64::from(server.port())),
+            PhpValue::Int(3),
+        ],
+    )
+    .await
+    .expect_err("TLS 1.0 must be rejected");
+    // Phera reports connection failures as exceptions with the rustls detail.
+    let (class, message, code, _) = error.into_exception_parts().unwrap();
+    assert_eq!(class, "RedisException");
+    assert!(matches!(code, PhpValue::Int(0)));
+    assert_eq!(message, "received fatal alert: ProtocolVersion");
 }

@@ -14,6 +14,7 @@ phera-dotenv.workspace = true
 phera-bytecode.workspace = true
 phera-compiler.workspace = true
 phera-extension-api.workspace = true
+phera-io-pool.workspace = true
 phera-ext-core.workspace = true
 phera-ext-ctype.workspace = true
 phera-ext-date.workspace = true
