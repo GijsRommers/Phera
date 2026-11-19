@@ -40,6 +40,14 @@ impl Analyzer<'_> {
 
     fn unset(&mut self, expression: &Expression, scope: &mut Scope) {
         self.expression(expression, scope, true);
+        if self.level >= 2 {
+            if let Some(place) = crate::scope::Place::of(expression) {
+                scope.facts.forget_variable(&place.root);
+            }
+            if matches!(&expression.kind, ExpressionKind::Property { .. }) {
+                scope.forget_member_write(expression);
+            }
+        }
         let name = match &expression.kind {
             ExpressionKind::Variable(Variable::Named(name)) => Some(name.as_str()),
             ExpressionKind::Index { target, .. }

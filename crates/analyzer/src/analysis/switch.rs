@@ -54,6 +54,19 @@ impl Analyzer<'_> {
             let Some(mut branch) = remaining.take() else {
                 break;
             };
+            if self.level >= 2
+                && let Some(crate::constants::ConstantValue::Bool(truth)) = subject
+            {
+                // PHP compares switch cases loosely. With a boolean subject
+                // the comparison is the truthiness of the case expression.
+                let branches = self.condition(condition, branch, false);
+                (entries[index], remaining) = if *truth {
+                    (branches.yes, branches.no)
+                } else {
+                    (branches.no, branches.yes)
+                };
+                continue;
+            }
             let value = crate::constants::value(condition, &branch);
             if self.expression(condition, &mut branch, false) == ValueType::Never {
                 break;

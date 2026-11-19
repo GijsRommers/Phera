@@ -25,6 +25,8 @@ impl Analyzer<'_> {
             self.context.this_class.clone_from(&self.context.class);
             self.context.function = format!("${property}::{}", hook.name.name);
             self.context.declared_return = setter || ty.is_some();
+            self.context.documented_return = None;
+            self.context.inferred_return = None;
             self.context.generator = hook.is_generator;
             self.context.by_reference = hook.by_reference;
             self.context.returns = if setter {
@@ -45,7 +47,10 @@ impl Analyzer<'_> {
             match &hook.body {
                 HookBody::None => {}
                 HookBody::Expression(body) => {
-                    self.expression(body, &mut scope, false);
+                    let given = self.expression(body, &mut scope, false);
+                    if !setter {
+                        self.check_return_value(Some(body), &given, &scope, body.span);
+                    }
                 }
                 HookBody::Block(body) => {
                     let flow = self.block(body, &mut scope);

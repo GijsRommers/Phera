@@ -38,13 +38,19 @@ impl Analyzer<'_> {
                 if *operator == BinaryOperator::NullCoalesce {
                     return self.coalesce_assignment(target, value, scope);
                 }
-                if self.expression(target, scope, false) == ValueType::Never {
+                let previous = self.expression(target, scope, false);
+                if previous == ValueType::Never {
                     return ValueType::Never;
                 }
                 let ty = self.expression(value, scope, false);
                 if ty == ValueType::Never {
                     return ty;
                 }
+                let ty = if self.level >= 3 {
+                    super::operators::binary_type(*operator, &previous, &ty)
+                } else {
+                    ty
+                };
                 if self.write(target, ty.clone(), scope) == Evaluation::Never {
                     return ValueType::Never;
                 }

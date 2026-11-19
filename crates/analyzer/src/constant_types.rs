@@ -31,7 +31,7 @@ pub fn infer(
                 location,
             );
             signature.global_effects = crate::global_effects::of(&closure.body);
-            ValueType::Callable(Box::new(signature))
+            ValueType::Callable(std::sync::Arc::new(signature))
         }
         ExpressionKind::ArrowFunction(arrow) => {
             let mut signature = Signature::new(
@@ -41,7 +41,7 @@ pub fn infer(
                 location,
             );
             signature.global_effects = crate::global_effects::expression(&arrow.body);
-            ValueType::Callable(Box::new(signature))
+            ValueType::Callable(std::sync::Arc::new(signature))
         }
         ExpressionKind::Call {
             callee,
@@ -55,7 +55,7 @@ pub fn infer(
                     .iter()
                     .find_map(|name| index.functions.get(&name.to_ascii_lowercase()))
                     .map_or(ValueType::Mixed, |s| {
-                        ValueType::Callable(Box::new(s.clone()))
+                        ValueType::Callable(std::sync::Arc::new(s.clone()))
                     })
             } else {
                 ValueType::Mixed

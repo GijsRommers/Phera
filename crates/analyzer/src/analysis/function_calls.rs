@@ -44,7 +44,7 @@ impl Analyzer<'_> {
             _ => None,
         };
         let inserted = probe.filter(|symbol| scope.known.insert(symbol.clone()));
-        let evaluation = self.arguments(
+        let facts = self.argument_facts(
             arguments,
             resolved.signature.as_ref(),
             &resolved.label,
@@ -55,7 +55,7 @@ impl Analyzer<'_> {
         if let Some(symbol) = inserted {
             scope.known.remove(&symbol);
         }
-        if evaluation == Evaluation::Never {
+        if facts.evaluation == Evaluation::Never {
             return ValueType::Never;
         }
         if !matches!(arguments, Arguments::FirstClassCallable) {
@@ -64,15 +64,23 @@ impl Analyzer<'_> {
             }
             self.apply_global_effects(resolved.signature.as_ref(), scope);
         }
-        if let Some(name) = resolved.intrinsic {
-            self.intrinsic(&name, arguments, scope);
+        if let Some(name) = &resolved.intrinsic {
+            self.intrinsic(name, arguments, scope);
         }
         if matches!(arguments, Arguments::FirstClassCallable) {
-            resolved
-                .signature
-                .map_or(ValueType::Mixed, |s| ValueType::Callable(Box::new(s)))
+            resolved.signature.map_or(ValueType::Mixed, |s| {
+                ValueType::Callable(std::sync::Arc::new(s))
+            })
         } else {
-            resolved.signature.map_or(ValueType::Mixed, |s| s.returns)
+            if self.level >= 2
+                && let Some(name) = &resolved.intrinsic
+                && let Some(ty) = self.builtin_result(name, arguments, &facts.types, scope)
+            {
+                return ty;
+            }
+            resolved.signature.map_or(ValueType::Mixed, |s| {
+                s.infer_return(arguments, &facts.types, self.index)
+            })
         }
     }
 
@@ -82,7 +90,7 @@ impl Analyzer<'_> {
             self.index
                 .functions
                 .get(&name.to_ascii_lowercase())
-                .map(|signature| (name, signature.clone()))
+                .map(|signature| (name, signature.clone().typed(self.index)))
         });
         if found.is_none() {
             let excluded = candidates
