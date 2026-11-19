@@ -7,6 +7,7 @@ mod arrays;
 mod constants;
 pub mod csv;
 pub mod environment;
+pub mod ini;
 mod last_error;
 mod locale;
 mod math;
@@ -38,6 +39,7 @@ impl Extension for Standard {
         packing::register(registry);
         constants::register(registry);
         csv::register(registry);
+        ini::register(registry);
         for entry in natural::FUNCTIONS.iter().chain(time::FUNCTIONS) {
             registry.function(*entry);
         }

@@ -51,6 +51,11 @@ pub trait Context {
     /// Reset the request's last diagnostic.
     fn clear_last_error(&mut self) {}
 
+    /// Look up a global constant by its exact name, as the INI scanner does.
+    fn named_constant(&mut self, _name: &str) -> Option<Value> {
+        None
+    }
+
     /// Where warnings, notices and deprecations go.
     fn diagnostics(&mut self) -> &mut dyn Diagnostics;
 

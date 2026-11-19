@@ -145,19 +145,7 @@ impl Vm {
                     "Cannot redeclare {name}::{method}()"
                 )));
             }
-            methods.insert(
-                key,
-                Rc::new(Method {
-                    signature: std::cell::OnceCell::new(),
-                    name: method.to_owned(),
-                    declaring: name.clone(),
-                    visibility: Visibility::Public,
-                    is_static: true,
-                    is_final: false,
-                    is_abstract: false,
-                    body: MethodBody::Enum(operation),
-                }),
-            );
+            methods.insert(key, enum_method(name, operation));
         }
         Ok(Some(EnumInfo {
             backing,
@@ -225,6 +213,57 @@ impl Vm {
         }
         Ok(())
     }
+}
+
+/// Internal unit enums publish the same cases, readonly name and method as user enums.
+pub(super) fn link_native_unit_enum(
+    class: &str,
+    cases: &[&str],
+    methods: &mut HashMap<String, Rc<Method>>,
+    defaults: &mut Vec<PropertyDefault>,
+    constants: &mut HashMap<String, Rc<LinkedConstant>>,
+) -> EnumInfo {
+    let operation = EnumMethod::Cases;
+    methods.insert(operation.name().into(), enum_method(class, operation));
+    defaults.push(enum_property(class, "name"));
+    let names = cases
+        .iter()
+        .map(|&name| {
+            let name = name.to_owned();
+            constants.insert(
+                name.clone(),
+                Rc::new(LinkedConstant {
+                    deprecated: None,
+                    declaring: class.to_owned(),
+                    visibility: Visibility::Public,
+                    is_final: false,
+                    initializer: ConstantInitializer::EnumCase {
+                        name: name.clone(),
+                        backing: None,
+                    },
+                    ty: None,
+                }),
+            );
+            name
+        })
+        .collect();
+    EnumInfo {
+        backing: None,
+        names,
+    }
+}
+
+fn enum_method(class: &str, operation: EnumMethod) -> Rc<Method> {
+    Rc::new(Method {
+        signature: std::cell::OnceCell::new(),
+        name: operation.name().to_owned(),
+        declaring: class.to_owned(),
+        visibility: Visibility::Public,
+        is_static: true,
+        is_final: false,
+        is_abstract: false,
+        body: MethodBody::Enum(operation),
+    })
 }
 
 fn enum_property(class: &str, name: &str) -> PropertyDefault {

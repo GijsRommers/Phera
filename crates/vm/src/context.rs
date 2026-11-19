@@ -77,6 +77,11 @@ impl Context for Vm {
         self.error_handlers.last_error = None;
     }
 
+    fn named_constant(&mut self, name: &str) -> Option<Value> {
+        let constant = self.constants.get(name)?.clone();
+        Some(self.report_global_constant(constant))
+    }
+
     fn diagnostics(&mut self) -> &mut dyn Diagnostics {
         self
     }

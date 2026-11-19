@@ -18,6 +18,7 @@ mod formatted;
 mod glob;
 mod handles;
 mod include_path;
+mod ini;
 mod io_policy;
 mod locking;
 mod metadata;
@@ -66,6 +67,7 @@ impl Extension for Streams {
         glob::register(registry);
         handles::register(registry);
         include_path::register(registry);
+        ini::register(registry);
         locking::register(registry);
         metadata::register(registry);
         mutations::register(registry);
