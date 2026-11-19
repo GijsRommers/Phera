@@ -210,6 +210,13 @@ jobs:
         run: make ci-prerequisites
       - name: Build end-to-end binary
         run: make ci-build
+      - name: Compare BCMath, GMP and zlib against PHP
+        run: |
+          "$PHERA_PHP" -n -r 'echo "PHP ", PHP_VERSION, "\n";'
+          cargo test -p phera-ext-bcmath -p phera-ext-gmp -p phera-ext-zlib \
+            --test php_oracle --no-fail-fast -- --nocapture
+        env:
+          PHERA_BIN: ${{ github.workspace }}/target/release/phera
       - name: Compare DOM scripts against PHP
         run: cargo test -p phera-ext-dom --test php_oracle
         env:
