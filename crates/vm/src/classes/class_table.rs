@@ -13,8 +13,6 @@ use super::method_table::MethodTable;
 use super::operations::ClassOperations;
 use crate::code_table::CodeTable;
 
-type NativeMethodTables = Box<[OnceCell<MethodTable>]>;
-
 /// A class's position in the request's class table: a method frame's class
 /// scope and called class are kept as these numbers.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
@@ -67,12 +65,11 @@ pub(crate) struct ClassTable {
     pub(crate) has_property_views: bool,
     pub(crate) has_lazy_objects: bool,
     native_count: u32,
-    native_methods: OnceCell<NativeMethodTables>,
-    /// The method tables of the request's own classes, by number after the
-    /// built-in ones. Kept here, not in the class: a table uses this
-    /// request's name numbers, and a class can be shared with other copies
-    /// of the request's state that number names differently.
-    local_methods: Vec<OnceCell<MethodTable>>,
+    /// The method table of every class, by class number, built on first
+    /// use. Kept here, not in the class: a table uses this request's name
+    /// numbers, and a class is shared with other copies of the request's
+    /// state, which may number names differently.
+    method_tables: Vec<OnceCell<MethodTable>>,
     pub(crate) objects: Vec<Weak<Object>>,
     ids: Rc<ObjectIds>,
     /// Allocations left before the cycle collector should run (see
@@ -92,8 +89,9 @@ impl ClassTable {
             has_property_views: native.has_property_views,
             has_lazy_objects: false,
             native_count: native.numbered.len() as u32,
-            native_methods: OnceCell::new(),
-            local_methods: Vec::new(),
+            method_tables: (0..native.numbered.len())
+                .map(|_| OnceCell::new())
+                .collect(),
             native,
             local: ClassDefinitions::default(),
             objects: Vec::new(),
@@ -116,40 +114,32 @@ impl ClassTable {
         class: &'c Class,
         code: &CodeTable,
     ) -> Option<&'c MethodTable> {
-        let index = class.index.0 as usize;
-        let cell = match index.checked_sub(self.native_count as usize) {
-            None => &self
-                .native_methods
-                .get()
-                .unwrap_or_else(|| self.allocate_native_method_tables())[index],
-            Some(local) => self.local_methods.get(local)?,
-        };
-        Some(
-            cell.get_or_init(|| {
-                MethodTable::build(class, code, |method| self.get(&method.declaring))
-            }),
-        )
+        let cell = self.method_tables.get(class.index.0 as usize)?;
+        Some(match cell.get() {
+            Some(table) => table,
+            None => self.build_method_table(cell, class, code),
+        })
     }
 
     #[cold]
-    fn allocate_native_method_tables(&self) -> &NativeMethodTables {
-        self.native_methods
-            .get_or_init(|| (0..self.native_count).map(|_| OnceCell::new()).collect())
+    fn build_method_table<'c>(
+        &'c self,
+        cell: &'c OnceCell<MethodTable>,
+        class: &'c Class,
+        code: &CodeTable,
+    ) -> &'c MethodTable {
+        cell.get_or_init(|| MethodTable::build(class, code, |method| self.get(&method.declaring)))
     }
 
     pub(crate) fn cached_method_table<'c>(&'c self, class: &'c Class) -> Option<&'c MethodTable> {
-        let index = class.index.0 as usize;
-        match index.checked_sub(self.native_count as usize) {
-            None => self.native_methods.get()?[index].get(),
-            Some(local) => self.local_methods.get(local)?.get(),
-        }
+        self.method_tables.get(class.index.0 as usize)?.get()
     }
 
     pub(crate) fn insert(&mut self, lowercase_name: String, class: Rc<Class>) {
         debug_assert_eq!(class.index, self.next_index());
         self.local.order.push(class.name.clone());
         self.local.insert(lowercase_name, class);
-        self.local_methods.push(OnceCell::new());
+        self.method_tables.push(OnceCell::new());
         self.has_property_views |= self.local.has_property_views;
     }
 
@@ -336,8 +326,7 @@ impl ClassTable {
             has_property_views: self.has_property_views,
             has_lazy_objects: self.has_lazy_objects,
             native_count: self.native_count,
-            native_methods: self.native_methods.clone(),
-            local_methods: self.local_methods.clone(),
+            method_tables: self.method_tables.clone(),
             objects,
             ids,
             allocations_before_collection: self.allocations_before_collection.clone(),

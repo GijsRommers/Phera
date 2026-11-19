@@ -11,7 +11,7 @@ use crate::{Vm, calls::call_state::Callee, classes::Class, error_traces::NativeT
 pub(crate) struct Autoloaders {
     pub(crate) callbacks: Vec<Option<RegisteredLoader>>,
     pub(crate) extensions: Option<String>,
-    active: HashSet<String>,
+    pub(crate) active: HashSet<String>,
 }
 
 #[derive(Clone)]
@@ -149,6 +149,9 @@ impl Vm {
             return Ok(Some(class));
         }
         let callback_name = name.strip_prefix('\\').unwrap_or(name);
+        if let Some(class) = self.load_bundled_class(callback_name).await? {
+            return Ok(Some(class));
+        }
         if self.autoload.callbacks.is_empty()
             || callback_name.is_empty()
             || !callback_name.bytes().all(|byte| {

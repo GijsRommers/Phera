@@ -29,8 +29,13 @@ use phera_vm::Snapshot;
 
 /// What a worker knows about one entry script.
 pub(crate) enum ScriptState {
-    /// Booted: requests fork this.
-    Ready(Rc<Snapshot>, FileStamps),
+    /// Booted: requests fork this, and make the boot's changes to their
+    /// superglobals again.
+    Ready(
+        Rc<Snapshot>,
+        FileStamps,
+        Rc<crate::boot_changes::BootChanges>,
+    ),
     /// The boot ended without `Phera\snapshot()`: requests run classically
     /// until one of these files changes.
     Classic(FileStamps),
@@ -118,7 +123,7 @@ const RETRY_AFTER: Duration = Duration::from_secs(2);
 /// What a request should do with its script.
 pub(crate) enum Plan {
     /// Fork this snapshot.
-    Fork(Rc<Snapshot>),
+    Fork(Rc<Snapshot>, Rc<crate::boot_changes::BootChanges>),
     /// Run the script from the top.
     Classic,
 }
@@ -139,9 +144,9 @@ impl WorkerSnapshots {
         let mut scripts = self.scripts.borrow_mut();
         let booting = self.booting.borrow().iter().any(|path| path == script);
         match scripts.get_mut(script) {
-            Some(ScriptState::Ready(snapshot, files)) => {
+            Some(ScriptState::Ready(snapshot, files, changes)) => {
                 let stale = !booting && files.changed(policy);
-                (Plan::Fork(snapshot.clone()), stale)
+                (Plan::Fork(snapshot.clone(), changes.clone()), stale)
             }
             Some(ScriptState::Classic(files)) => {
                 let stale = !booting && files.changed(policy);

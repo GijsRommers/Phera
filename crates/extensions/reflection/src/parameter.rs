@@ -14,9 +14,9 @@ use crate::class::{NAME_PROPERTY, reflect_class, target_class};
 use crate::{UNCLONEABLE, allocate, bind, engine, exception, load, receiver};
 
 #[derive(Clone)]
-struct ReflectedParameter {
-    function: Rc<FunctionInfo>,
-    position: usize,
+pub(crate) struct ReflectedParameter {
+    pub(crate) function: Rc<FunctionInfo>,
+    pub(crate) position: usize,
 }
 
 impl ReflectedParameter {

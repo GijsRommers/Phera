@@ -37,7 +37,7 @@ pub use object_handlers::{
     PropertyProjection, PropertyPurpose,
 };
 pub use property_view_request::{PropertyViewContinuation, PropertyViewRequest};
-pub use registry::{ConstantValue, Registry, ResourceFork};
+pub use registry::{BundledSource, ConstantValue, Registry, ResourceFork};
 pub use state::{RequestState, StateFork, copy_state, fresh_state};
 pub use working_directory::WorkingDirectory;
 

@@ -5,7 +5,9 @@
 //! worker thread holds a clone; all clones use the same extension registry
 //! and the same compiled code.
 
+pub mod adapters;
 mod boot;
+mod boot_changes;
 mod cache;
 mod constant_calls;
 mod environment;
@@ -49,6 +51,9 @@ pub struct Runtime {
     startup_ini: Arc<[(String, String)]>,
     /// When a worker looks for changed files of its snapshots.
     revalidation: snapshots::Revalidation,
+    /// Scripts that run PHP source Phera ships in place of the file (an
+    /// adapter's entry script), by the script's path.
+    entry_scripts: Arc<std::collections::HashMap<std::path::PathBuf, &'static str>>,
 }
 
 /// A web worker links the process's native definitions once on its own
@@ -144,6 +149,7 @@ impl Runtime {
         Vm::register_state_forks(&mut registry);
         registry.load(&phera_ext_spl::Spl);
         registry.load(&phera_ext_session::Session);
+        adapters::register(&mut registry);
         let mut web_registry = registry.clone();
         phera_ext_http::register_web(&mut web_registry);
         registry.constant("PHP_SAPI", Sapi::Cli.name());
@@ -157,6 +163,24 @@ impl Runtime {
             environment: Arc::new(environment),
             startup_ini: Arc::new([]),
             revalidation: snapshots::Revalidation::from_ini(&[]),
+            entry_scripts: Arc::default(),
+        }
+    }
+
+    /// Runs `source` whenever a request goes to `script`, compiled under
+    /// that file's name (see [`adapters`]).
+    pub fn with_entry_script(mut self, script: std::path::PathBuf, source: &'static str) -> Self {
+        Arc::make_mut(&mut self.entry_scripts).insert(script, source);
+        self
+    }
+
+    /// The compiled code a request to `script` runs.
+    async fn entry_unit(&self, script: &Path) -> Result<Arc<CompiledUnit>, RuntimeError> {
+        match self.entry_scripts.get(script) {
+            Some(source) => self
+                .web_cache
+                .compile_shipped(source, &script.to_string_lossy()),
+            None => self.web_cache.compile(script.to_path_buf()).await,
         }
     }
 
@@ -235,7 +259,7 @@ impl Runtime {
         document_root: &Path,
         request: HttpRequest,
     ) -> HttpResponse {
-        let unit = match self.web_cache.compile(script.to_path_buf()).await {
+        let unit = match self.entry_unit(script).await {
             Ok(unit) => unit,
             Err(RuntimeError::Read { .. }) => {
                 return HttpResponse::plain(404, "File not found.\n");
@@ -268,9 +292,13 @@ impl Runtime {
         if reboot {
             worker.boot_in_background(script, document_root);
         }
+        let mut carried = None;
         let mut vm = match plan {
-            snapshots::Plan::Fork(snapshot) => match snapshot.fork() {
-                Ok(vm) => vm,
+            snapshots::Plan::Fork(snapshot, changes) => match snapshot.fork() {
+                Ok(vm) => {
+                    carried = Some(changes.carry(&vm));
+                    vm
+                }
                 Err(error) => {
                     eprintln!(
                         "phera: worker {}: forking the snapshot of {} failed: {error}",
@@ -291,6 +319,9 @@ impl Runtime {
             worker.environment.as_ref().clone(),
             form,
         );
+        if let Some(carried) = carried {
+            carried.apply(&mut vm);
+        }
         let buffered_post = request.method == "POST"
             && request
                 .header("Content-Type")

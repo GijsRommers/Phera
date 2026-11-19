@@ -27,6 +27,7 @@ mod arrays;
 mod attribute_diagnostics;
 mod autoload;
 mod builtin_calls;
+mod bundled_classes;
 mod callable_classes;
 mod callable_introspection;
 mod callables;
@@ -185,6 +186,19 @@ pub trait CodeLoader: Send + Sync {
         &self,
         path: std::path::PathBuf,
     ) -> LocalFuture<'_, Result<Arc<CompiledUnit>, CodeLoadError>>;
+
+    /// Compiles PHP source that Phera ships (see
+    /// `phera_extension_api::BundledSource`), once.
+    fn load_bundled(
+        &self,
+        source: phera_extension_api::BundledSource,
+    ) -> LocalFuture<'_, Result<Arc<CompiledUnit>, CodeLoadError>> {
+        Box::pin(async move {
+            phera_compiler::compile(source.source, source.file)
+                .map(Arc::new)
+                .map_err(CodeLoadError::Compile)
+        })
+    }
 }
 
 /// PHP retries missing include paths, while compilation errors abort that lookup.
@@ -374,6 +388,12 @@ impl Vm {
     /// superglobal the runtime fills from the request.
     pub fn set_global(&mut self, name: &str, value: Value) {
         self.globals.insert(name.to_string(), value);
+    }
+
+    /// The value of a global variable (seen through a reference), such as
+    /// a superglobal the script may have changed.
+    pub fn global(&self, name: &str) -> Option<Value> {
+        self.globals.get(name).map(|value| value.deref().clone())
     }
 
     /// The extensions' per-request state, for the runtime to read once the

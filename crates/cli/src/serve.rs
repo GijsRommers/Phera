@@ -44,7 +44,7 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
             .filter(|p| p.join("composer.json").is_file())
             .unwrap_or(root)
     };
-    let loaded = match options
+    let mut loaded = match options
         .files
         .load(project, phera_dotenv::Environment::process())
     {
@@ -54,6 +54,7 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    let adapter = Adapter::detect(&site, &mut loaded.environment);
     site.exclude_files(loaded.paths);
     let site = Arc::new(site);
     let trusted_proxies = match options
@@ -81,8 +82,16 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
     }
     let workers = config.workers;
 
+    let mut runtime = Runtime::with_environment(loaded.environment).with_startup_ini(options.ini);
+    if let (Adapter::Laravel, Some(front_controller)) = (adapter, site.front_controller()) {
+        runtime = runtime.with_entry_script(
+            front_controller.to_path_buf(),
+            phera_runtime::adapters::LARAVEL_ENTRY,
+        );
+    }
     let factory = SiteHandlerFactory {
-        runtime: Runtime::with_environment(loaded.environment).with_startup_ini(options.ini),
+        runtime,
+        adapter,
         site: site.clone(),
         compress: options.compress,
         trusted_proxies: Arc::new(trusted_proxies),
@@ -109,6 +118,42 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
     }
 }
 
+/// Which framework adapter `phera serve` uses (see `phera_runtime::adapters`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Adapter {
+    None,
+    /// The front controller runs Phera's Laravel entry script.
+    Laravel,
+    /// `APP_RUNTIME` names Phera's runtime for symfony/runtime.
+    SymfonyRuntime,
+}
+
+impl Adapter {
+    /// The adapter for the site, setting `APP_RUNTIME` for a symfony/runtime
+    /// application that has not chosen a runtime itself.
+    fn detect(site: &Site, environment: &mut phera_dotenv::Environment) -> Adapter {
+        let root = site.document_root();
+        let front_controller = site.front_controller();
+        if front_controller.is_some_and(|script| script == root.join("index.php"))
+            && phera_runtime::adapters::is_laravel(root)
+        {
+            Adapter::Laravel
+        } else if phera_runtime::adapters::uses_symfony_runtime(root)
+            && environment.get(b"APP_RUNTIME").is_none()
+        {
+            environment.insert(
+                b"APP_RUNTIME".to_vec(),
+                phera_runtime::adapters::SYMFONY_RUNTIME_CLASS
+                    .as_bytes()
+                    .to_vec(),
+            );
+            Adapter::SymfonyRuntime
+        } else {
+            Adapter::None
+        }
+    }
+}
+
 /// Where to listen when `--listen` is not given. A hosting platform says
 /// which port it will send traffic to through `PORT`, and reaches the
 /// container from outside, so every interface is listened on. Without
@@ -128,6 +173,9 @@ fn default_address() -> SocketAddr {
 /// request, on the worker's own thread.
 struct SiteHandlerFactory {
     runtime: Runtime,
+    /// The framework adapter in use, which makes the front controller boot
+    /// at start.
+    adapter: Adapter,
     site: Arc<Site>,
     compress: bool,
     trusted_proxies: Arc<TrustedProxies>,
@@ -138,6 +186,7 @@ impl HandlerFactory for SiteHandlerFactory {
     fn create(&self, worker_index: usize) -> Rc<dyn Handler> {
         Rc::new(SiteHandler {
             runtime: self.runtime.web_worker(worker_index),
+            adapter: self.adapter,
             site: self.site.clone(),
             compress: self.compress,
             trusted_proxies: self.trusted_proxies.clone(),
@@ -148,6 +197,7 @@ impl HandlerFactory for SiteHandlerFactory {
 
 struct SiteHandler {
     runtime: WebWorker,
+    adapter: Adapter,
     site: Arc<Site>,
     /// `--compress`: compress responses for clients that accept it.
     compress: bool,
@@ -174,7 +224,7 @@ impl SiteHandler {
         let Some(script) = self.site.front_controller() else {
             return;
         };
-        if !phera_runtime::snapshot_remembered(script) {
+        if self.adapter == Adapter::None && !phera_runtime::snapshot_remembered(script) {
             return;
         }
         let worker = self.runtime.index();

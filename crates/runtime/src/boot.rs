@@ -79,7 +79,7 @@ impl Runtime {
         document_root: &Path,
         started: Instant,
     ) -> (ScriptState, BootReport) {
-        let unit = match self.web_cache.compile(script.to_path_buf()).await {
+        let unit = match self.entry_unit(script).await {
             Ok(unit) => unit,
             Err(error) => return failed(error.to_string()),
         };
@@ -90,6 +90,7 @@ impl Runtime {
             document_root,
             worker.environment.as_ref().clone(),
         );
+        let initial = crate::boot_changes::BootChanges::initial(&vm);
         vm.prepare_web_headers_with(ResponseHead::prepare, ResponseHead::set_error_status);
         phera_ext_streams::set_request(
             vm.state_mut(),
@@ -100,8 +101,9 @@ impl Runtime {
             BootOutcome::Snapshot(snapshot) => {
                 let files = snapshot.included_files();
                 let count = files.len();
+                let changes = crate::boot_changes::BootChanges::between(&initial, &snapshot);
                 (
-                    ScriptState::Ready(Rc::new(snapshot), FileStamps::of(files)),
+                    ScriptState::Ready(Rc::new(snapshot), FileStamps::of(files), Rc::new(changes)),
                     BootReport::Snapshot {
                         elapsed: started.elapsed(),
                         files: count,

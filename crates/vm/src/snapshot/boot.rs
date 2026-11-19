@@ -105,6 +105,11 @@ impl Snapshot {
             .map_err(|refusal| format!("{}: {}", refusal.class, refusal.reason))
     }
 
+    /// The value of a global variable at the call.
+    pub fn global(&self, name: &str) -> Option<Value> {
+        self.frozen.global(name)
+    }
+
     /// Every file the boot run included, the entry script first: when one
     /// of them changes, the snapshot is out of date.
     pub fn included_files(&self) -> Vec<String> {

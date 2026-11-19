@@ -58,6 +58,34 @@ impl CodeCache {
         // Compile without holding the lock, so other files load meanwhile.
         // Two threads may compile the same file once; the result is the same.
         let source = std::fs::read(&canonical).map_err(read_error)?;
+        let unit = Arc::new(self.compile_named(&source, &canonical.to_string_lossy())?);
+        self.lock().insert(canonical, unit.clone());
+        Ok(unit)
+    }
+
+    /// Compiles PHP source that is not read from `file`'s path: an entry
+    /// script or class that Phera ships (see `crate::adapters`), cached under
+    /// its name. The name is never a path a script can include.
+    pub(crate) fn compile_shipped(
+        &self,
+        source: &str,
+        file: &str,
+    ) -> Result<Arc<CompiledUnit>, RuntimeError> {
+        let key = PathBuf::from(format!("\0phera-shipped\0{file}"));
+        if let Some(unit) = self.lock().get(&key) {
+            return Ok(unit.clone());
+        }
+        let unit = Arc::new(self.compile_named(source.as_bytes(), file)?);
+        self.lock().insert(key, unit.clone());
+        Ok(unit)
+    }
+
+    /// Compiles source as the file `file`, with this cache's built-ins.
+    fn compile_named(
+        &self,
+        source: &[u8],
+        file: &str,
+    ) -> Result<CompiledUnit, phera_compiler::CompileError> {
         let natives = phera_compiler::NativeFunctions {
             lookup: &|name| {
                 let Some(entry) = self.registry.get_function(name) else {
@@ -83,15 +111,10 @@ impl CodeCache {
                 crate::constant_calls::fold(&self.registry, name, argument)
             },
         };
-        let file = canonical.to_string_lossy();
-        let unit = Arc::new(match self.mode {
-            FileMode::Web => phera_compiler::compile_bytes_with_natives(&source, &file, &natives),
-            FileMode::Cli => {
-                phera_compiler::compile_cli_bytes_with_natives(&source, &file, &natives)
-            }
-        }?);
-        self.lock().insert(canonical, unit.clone());
-        Ok(unit)
+        match self.mode {
+            FileMode::Web => phera_compiler::compile_bytes_with_natives(source, file, &natives),
+            FileMode::Cli => phera_compiler::compile_cli_bytes_with_natives(source, file, &natives),
+        }
     }
 
     /// A panic while the lock was held cannot leave the map half-updated
@@ -113,6 +136,20 @@ impl phera_vm::CodeLoader for CodeCache {
                 RuntimeError::Compile(error) => phera_vm::CodeLoadError::Compile(error),
                 error => phera_vm::CodeLoadError::Unavailable(error.to_string()),
             })
+        })
+    }
+
+    fn load_bundled(
+        &self,
+        source: phera_extension_api::BundledSource,
+    ) -> phera_extension_api::LocalFuture<'_, Result<Arc<CompiledUnit>, phera_vm::CodeLoadError>>
+    {
+        Box::pin(async move {
+            self.compile_shipped(source.source, source.file)
+                .map_err(|error| match error {
+                    RuntimeError::Compile(error) => phera_vm::CodeLoadError::Compile(error),
+                    error => phera_vm::CodeLoadError::Unavailable(error.to_string()),
+                })
         })
     }
 }

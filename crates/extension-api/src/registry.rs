@@ -85,6 +85,17 @@ pub struct Registry {
     state_forks: HashMap<std::any::TypeId, crate::state::StateFork>,
     /// How a fork copies an open resource, by the resource's kind.
     resource_forks: HashMap<&'static str, ResourceFork>,
+    /// Classes Phera ships written in PHP, by lowercase name: the file name
+    /// their code reports and its source.
+    bundled_classes: HashMap<String, BundledSource>,
+}
+
+/// PHP source that Phera ships for a class in its own namespace.
+#[derive(Clone, Copy)]
+pub struct BundledSource {
+    /// The file name the code reports (`__FILE__`, traces).
+    pub file: &'static str,
+    pub source: &'static str,
 }
 
 /// Copies the data of an open resource of one kind for a fork of a
@@ -109,6 +120,18 @@ impl Registry {
     /// stores must be registered, or a snapshot that holds it is refused.
     pub fn fork_state<T: 'static>(&mut self, fork: crate::state::StateFork) {
         self.state_forks.insert(std::any::TypeId::of::<T>(), fork);
+    }
+
+    /// Ships a class written in PHP: when a script uses `name` and no class
+    /// of that name is declared, the VM compiles `source` and runs it.
+    pub fn bundled_class(&mut self, name: &str, source: BundledSource) {
+        self.bundled_classes
+            .insert(name.to_ascii_lowercase(), source);
+    }
+
+    /// The PHP source of a bundled class, by lowercase name.
+    pub fn bundled_source(&self, lowercase_name: &str) -> Option<BundledSource> {
+        self.bundled_classes.get(lowercase_name).copied()
     }
 
     /// Says how a fork copies an open resource of this kind (`"stream"`).
