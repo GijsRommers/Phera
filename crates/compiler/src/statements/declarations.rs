@@ -1,5 +1,7 @@
 //! Compile statement constructs into ordered IR and patch their control-flow exits.
 
+use std::sync::Arc;
+
 use phera_ast as ast;
 
 use crate::ir::{Constant, Instruction, Target};
@@ -20,8 +22,8 @@ impl Compiler<'_> {
                 ast::UseKind::Function => NameKind::Function,
                 ast::UseKind::Constant => NameKind::Constant,
             };
-            self.imports
-                .insert((key, alias.to_ascii_lowercase()), i.name.text.clone());
+            let imports = self.imports.get_or_insert_with(Default::default);
+            Arc::make_mut(imports).insert((key, alias.to_ascii_lowercase()), i.name.text.clone());
         }
 
         Ok(())
@@ -31,6 +33,7 @@ impl Compiler<'_> {
     pub(crate) fn compile_constants(
         &mut self,
         items: &[ast::ConstantDeclaration],
+        metadata: &phera_bytecode::reflection::DeclarationMetadata,
         line: usize,
     ) -> Result<(), CompileError> {
         for i in items {
@@ -43,6 +46,9 @@ impl Compiler<'_> {
             } else {
                 format!("{}\\{}", self.namespace, i.name.name)
             };
+            self.constant_metadata
+                .entry(name.clone())
+                .or_insert_with(|| metadata.clone());
             self.emit(
                 Instruction::Define {
                     name,

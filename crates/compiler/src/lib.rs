@@ -12,12 +12,14 @@ mod parameter_defaults;
 mod passes;
 mod pipeline;
 mod policies;
+mod reflection_initializer;
 mod statements;
 
 #[cfg(test)]
 mod tests;
 
 pub use compile_error::CompileError;
+pub use reflection_initializer::{CompiledInitializer, compile_reflection_initializer};
 
 use context::{Compiler, Loop};
 use helpers::{binary, constant, type_name, writable};
@@ -58,11 +60,18 @@ fn compile_source(
     file: &str,
     kind: pipeline::SourceKind,
 ) -> Result<phera_bytecode::CompiledUnit, CompileError> {
+    on_compile_stack(file, || pipeline::compile_on_stack(source, file, kind))
+}
+
+fn on_compile_stack<T: Send>(
+    file: &str,
+    compile: impl FnOnce() -> Result<T, CompileError> + Send,
+) -> Result<T, CompileError> {
     std::thread::scope(|scope| {
         std::thread::Builder::new()
             .name("phera-compiler".into())
             .stack_size(phera_parser::PARSER_STACK_BYTES)
-            .spawn_scoped(scope, || pipeline::compile_on_stack(source, file, kind))
+            .spawn_scoped(scope, compile)
             .map_err(|error| CompileError {
                 message: error.to_string(),
                 file: file.into(),

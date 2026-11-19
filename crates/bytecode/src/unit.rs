@@ -5,6 +5,9 @@ use crate::{Function, FunctionId, NameId};
 /// One compiled PHP file.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct CompiledUnit {
+    /// Cold metadata for constants declared with `const`.
+    pub constant_metadata:
+        std::collections::HashMap<String, crate::reflection::DeclarationMetadata>,
     /// The path the file was compiled from, as `__FILE__` reports it.
     pub file: String,
     /// Non-fatal declaration diagnostics are emitted when this file is compiled for execution.
@@ -15,6 +18,16 @@ pub struct CompiledUnit {
     pub main: Function,
     /// Every function the file declares, in source order.
     pub functions: Vec<Function>,
+    /// Reflection metadata for functions, indexed by their local function number.
+    pub function_metadata: Vec<crate::reflection::FunctionMetadata>,
+    /// Only these units need the class linker to read attribute metadata.
+    pub has_link_attributes: bool,
+    /// Validated declaration expressions are compiled only when reflection reads them.
+    pub reflection_initializers: Vec<crate::reflection::InitializerSource>,
+    /// Files with a comment span or deferred initializer keep the original source.
+    pub reflection_lines: Option<phera_source::LineTable>,
+    /// Original bytes, retained once for doc comments and deferred initializers.
+    pub reflection_source: Option<Box<[u8]>>,
     /// Source class declarations; runtime linking is request-local.
     pub classes: Vec<crate::ClassDeclaration>,
     /// Unconditional declarations eligible for dependency-aware prelinking.

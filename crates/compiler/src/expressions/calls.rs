@@ -127,7 +127,13 @@ impl Compiler<'_> {
         line: usize,
     ) -> Result<Reg, CompileError> {
         let destination = self.allocate_register()?;
-        self.emit(Instruction::FinishCall { destination }, line);
+        self.emit(
+            Instruction::FinishCall {
+                destination,
+                result: phera_bytecode::CallResult::Used,
+            },
+            line,
+        );
         // The argument window owns a constructed object for the duration of the call.
         // Drop the compiler's copy before a following call can observe a weak reference.
         for register in temporary_objects {

@@ -10,6 +10,7 @@ mod math;
 mod natural;
 mod offsets;
 mod packing;
+mod process;
 mod strings;
 mod time;
 mod version_compare;
@@ -27,6 +28,7 @@ impl Extension for Standard {
     fn register(&self, registry: &mut Registry) {
         registry.function(version_compare::ENTRY);
         strings::register(registry);
+        registry.describe_function("strlen", "int", Some("Core"));
         url::register(registry);
         math::register(registry);
         arrays::register(registry);
@@ -36,6 +38,7 @@ impl Extension for Standard {
             registry.function(*entry);
         }
         environment::register(registry);
+        process::register(registry);
     }
 }
 

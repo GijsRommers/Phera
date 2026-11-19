@@ -23,6 +23,12 @@ impl Diagnostics for Vm {
 }
 
 impl Context for Vm {
+    fn reflection(
+        &mut self,
+    ) -> Option<&mut dyn phera_extension_api::reflection::ReflectionContext> {
+        Some(self)
+    }
+
     fn write(&mut self, bytes: &[u8]) {
         self.out(bytes)
     }
@@ -183,27 +189,7 @@ impl Context for Vm {
     /// Native decoders construct linked objects without running PHP constructors.
     fn create_object(&mut self, name: &str, properties: phera_value::PhpArray) -> NativeResult {
         let class = self.factory_class(name)?;
-        let object = self.classes.allocate(class.clone());
-        for property in &class.defaults {
-            if property.initialized {
-                let value = if let Some(initializer) = &property.initializer {
-                    self.evaluate_property_initializer(initializer, property)?
-                } else {
-                    property.value.clone()
-                };
-                object.set(property.key.clone(), value);
-            }
-        }
-        object.update(|storage| {
-            for (key, value) in properties.iter() {
-                storage.insert(key.clone(), value.clone());
-            }
-        });
-        self.track_object_property_references(&object)?;
-        if class.is_throwable {
-            self.initialize_throwable(&object, crate::exceptions::TraceOrigin::Construction);
-        }
-        Ok(Value::Object(object))
+        self.create_linked_object(class, properties)
     }
 
     fn validate_callback(
@@ -517,8 +503,14 @@ impl Context for Vm {
     }
 
     fn strict_types(&self) -> bool {
-        self.argument_origin == crate::calls::callback_binding::ArgumentOrigin::Php
-            && self.current().is_some_and(|f| f.function().strict_types)
+        use crate::calls::callback_binding::ArgumentOrigin;
+        match self.argument_origin {
+            ArgumentOrigin::Php => self.current().is_some_and(|f| f.function().strict_types),
+            ArgumentOrigin::Attribute => self
+                .attribute_call_site()
+                .is_some_and(|site| site.strict_types),
+            ArgumentOrigin::Callback => false,
+        }
     }
 
     /// Native callbacks await the heap interpreter with a separate bound on Rust nesting.
@@ -543,6 +535,13 @@ impl Vm {
         let class = self.classes.get(name).ok_or_else(|| {
             phera_extension_api::NativeError::error(format!("Class \"{name}\" not found"))
         })?;
+        Self::check_factory_class(&class)?;
+        Ok(class)
+    }
+
+    pub(crate) fn check_factory_class(
+        class: &crate::classes::Class,
+    ) -> Result<(), phera_extension_api::NativeError> {
         if class.origin == crate::classes::class::ClassOrigin::Closure {
             return Err(phera_extension_api::NativeError::error(
                 "Instantiation of class Closure is not allowed",
@@ -570,7 +569,50 @@ impl Vm {
                 class.name
             )));
         }
-        Ok(class)
+        Ok(())
+    }
+
+    /// Allocate a class the caller has already resolved and checked.
+    pub(crate) fn create_linked_object(
+        &mut self,
+        class: std::rc::Rc<crate::classes::Class>,
+        properties: phera_value::PhpArray,
+    ) -> NativeResult {
+        let object = self.classes.allocate(class.clone());
+        if let Some(template) = &class.property_template {
+            if !template.is_empty() {
+                object.update(|storage| *storage = template.clone());
+            }
+        } else {
+            for property in &class.defaults {
+                if property.initialized {
+                    let value = if let Some(initializer) = &property.initializer {
+                        self.evaluate_initializer(initializer, &property.declaring)?
+                    } else {
+                        property.value.clone()
+                    };
+                    object.set(property.key.clone(), value);
+                }
+            }
+        }
+        if !properties.is_empty() {
+            object.update(|storage| {
+                if storage.is_empty() {
+                    *storage = properties;
+                } else {
+                    for (key, value) in properties.iter() {
+                        storage.insert(key, value.clone());
+                    }
+                }
+            });
+        }
+        if object.property_count() != 0 {
+            self.track_object_property_references(&object)?;
+        }
+        if class.is_throwable {
+            self.initialize_throwable(&object, crate::exceptions::TraceOrigin::Construction);
+        }
+        Ok(Value::Object(object))
     }
 
     /// Native values are consumed directly into the same slots as PHP Send instructions.

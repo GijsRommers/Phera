@@ -24,6 +24,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--base', required=True, type=pathlib.Path)
     parser.add_argument('--head', required=True, type=pathlib.Path)
+    parser.add_argument('--base-benchmarks', type=pathlib.Path)
     parser.add_argument('--runs', type=int, default=5)
     parser.add_argument('--base-benchmarks', type=pathlib.Path,
                         help='Only compare scripts already present on the base branch')
@@ -62,6 +63,16 @@ def main():
                 'echo "\\nPHERA_CI_BENCH_NS:", hrtime(true) - $__phera_ci_started, "\\n";\n'
             )
             try:
+                if args.base_benchmarks is not None and not (args.base_benchmarks / script.name).is_file():
+                    expected = measure(binaries['head'], wrapper)[1]
+                    samples = []
+                    for _ in range(args.runs):
+                        elapsed, output = measure(binaries['head'], wrapper)
+                        if output != expected:
+                            raise RuntimeError('head stdout changed')
+                        samples.append(elapsed)
+                    report.append(f'| {script.name} | new script | {statistics.median(samples):.3f} | — |')
+                    continue
                 expected = measure(binaries['base'], wrapper)[1]
                 if measure(binaries['head'], wrapper)[1] != expected:
                     raise RuntimeError('base/head stdout differs during warm-up')

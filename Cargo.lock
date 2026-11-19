@@ -1826,6 +1826,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "phera-ext-reflection"
+version = "0.1.0"
+dependencies = [
+ "phera-extension-api",
+]
+
+[[package]]
 name = "phera-ext-serialize"
 version = "0.1.0"
 dependencies = [
@@ -1948,6 +1955,7 @@ dependencies = [
  "phera-ext-pdo",
  "phera-ext-random",
  "phera-ext-redis",
+ "phera-ext-reflection",
  "phera-ext-serialize",
  "phera-ext-spl",
  "phera-ext-sqlite3",

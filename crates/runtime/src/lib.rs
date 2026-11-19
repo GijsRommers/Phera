@@ -80,6 +80,7 @@ impl Runtime {
         registry.load(&phera_ext_http::Http);
         registry.load(&phera_ext_hash::Hash);
         registry.load(&phera_ext_random::Random);
+        registry.load(&phera_ext_reflection::Reflection);
         registry.load(&phera_ext_serialize::Serialize);
         registry.load(&phera_ext_spl::Spl);
         let mut web_registry = registry.clone();

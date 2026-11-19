@@ -39,6 +39,7 @@ impl Compiler<'_> {
         let dst = self.allocate_register()?;
         self.emit(
             Instruction::Call {
+                result: phera_bytecode::CallResult::Used,
                 destination: dst,
                 name,
                 fallback: None,
