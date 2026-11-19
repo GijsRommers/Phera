@@ -9,7 +9,7 @@ use phera_extension_api::fiber::{FiberOperation, fiber_error};
 use phera_extension_api::{NativeError, NativeResult, Unwind};
 use phera_value::{Object, Value};
 
-use crate::{Vm, exceptions::Thrown};
+use crate::{Vm, calls::call_stack::MAX_CALLBACK_DEPTH, exceptions::Thrown};
 
 use super::{
     Fiber, State,
@@ -31,7 +31,11 @@ pub(super) enum Progress {
     Yielded(Value),
     Inspected(NativeResult),
     Finished(NativeResult),
+    Blocked,
 }
+
+// The switch and the new VM's interpreter poll also occupy the Rust stack.
+const SWITCH_DEPTH: usize = 2;
 
 impl Vm {
     pub(crate) async fn fiber_operation(
@@ -69,17 +73,11 @@ impl Vm {
             }));
             return Ok(Value::Null);
         }
-        if self
-            .active_fiber
-            .as_ref()
-            .is_some_and(|active| active.exchange.depth.get() >= 16)
-        {
-            return Err(fiber_error(
-                "Cannot switch fibers in current execution context",
-            ));
-        }
         let (mut suspended, input, method) = match operation {
             FiberOperation::Start(arguments) => {
+                if self.call_stack.callback_depth() + SWITCH_DEPTH >= MAX_CALLBACK_DEPTH {
+                    return Err(switch_depth_error());
+                }
                 self.check_fiber_stack_size()?;
                 let callee = with_state(&object, |fiber| match fiber.state {
                     State::Ready(_) => match std::mem::replace(&mut fiber.state, State::Running) {
@@ -154,13 +152,13 @@ impl Vm {
         suspended: &mut Suspended,
         input: Input,
     ) -> Result<Progress, NativeError> {
-        self.export_main_globals();
         let exchange = &suspended.exchange;
-        let depth = self
-            .active_fiber
-            .as_ref()
-            .map_or(1, |active| active.exchange.depth.get() + 1);
-        exchange.depth.set(depth);
+        let depth = self.call_stack.callback_depth() + SWITCH_DEPTH;
+        if depth + exchange.parked_depth.get() > MAX_CALLBACK_DEPTH {
+            return Ok(Progress::Blocked);
+        }
+        exchange.caller_depth.set(depth);
+        self.export_main_globals();
         exchange.input.set(Some(input));
         exchange.transfer(self)?;
         if exchange
@@ -199,6 +197,10 @@ impl Vm {
         progress: Progress,
     ) -> NativeResult {
         match progress {
+            Progress::Blocked => {
+                with_state(&object, |fiber| fiber.state = State::Suspended(suspended))?;
+                Err(switch_depth_error())
+            }
             Progress::Yielded(value) => {
                 with_state(&object, |fiber| fiber.state = State::Suspended(suspended))?;
                 self.suspended_fibers.entry(object.id).or_insert(object);
@@ -304,6 +306,10 @@ impl Vm {
     ) -> NativeError {
         phera_extension_api::Context::native_call_error(self, method, arguments, error)
     }
+}
+
+fn switch_depth_error() -> NativeError {
+    fiber_error("Cannot switch fibers in current execution context")
 }
 
 pub(super) fn take_suspended(object: &Object) -> Result<Suspended, NativeError> {

@@ -649,6 +649,8 @@ The caller's stack and generator state remain live while a fiber runs.
 A fiber started in a generator can suspend back to it, and a generator
 resumed in a fiber can suspend the whole fiber through a native or PHP
 call. PHP recursion within either stack still occupies heap frames.
+Native callback depth is bounded across fiber switches because the Rust
+futures from both sides still occupy native stack space during a poll.
 `getCurrent()` returns the fiber associated with the active stack, including
 inside a native callback. On the request's main stack it returns null.
 

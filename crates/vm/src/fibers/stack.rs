@@ -27,7 +27,8 @@ pub(super) struct Exchange {
     pub(super) caller: RefCell<Option<CallerStack>>,
     pub(super) waiting: RefCell<Option<Waiting>>,
     pub(super) inspected: Cell<Option<NativeResult>>,
-    pub(super) depth: Cell<usize>,
+    pub(super) caller_depth: Cell<usize>,
+    pub(super) parked_depth: Cell<usize>,
     reporting: Cell<i64>,
 }
 
@@ -53,7 +54,8 @@ impl Exchange {
             caller: RefCell::new(None),
             waiting: RefCell::new(None),
             inspected: Cell::new(None),
-            depth: Cell::new(0),
+            caller_depth: Cell::new(0),
+            parked_depth: Cell::new(0),
             reporting: Cell::new(request.fiber_initial_reporting()),
         })
     }
@@ -71,11 +73,21 @@ impl Exchange {
     pub(super) fn restore_child(&self, child: &mut Vm) -> Result<(), NativeError> {
         self.transfer(child)?;
         child.error_handlers.reporting = self.reporting.get();
+        child
+            .call_stack
+            .set_callback_depth(self.caller_depth.get() + self.parked_depth.get());
         Ok(())
     }
 
     pub(super) fn park_child(&self, child: &mut Vm) -> Result<(), NativeError> {
         self.reporting.set(child.error_handlers.reporting);
+        let depth = child
+            .call_stack
+            .callback_depth()
+            .checked_sub(self.caller_depth.get())
+            .ok_or_else(|| internal_error!("fiber native callback depth"))?;
+        self.parked_depth.set(depth);
+        child.call_stack.set_callback_depth(depth);
         self.transfer(child)
     }
 }
