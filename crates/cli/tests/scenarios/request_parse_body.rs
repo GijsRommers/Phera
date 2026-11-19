@@ -17,6 +17,10 @@ if (isset($_GET['raw'])) {
     echo 'before:', strlen(fread($raw, (int) $_GET['raw'])), "\n";
 }
 $options = json_decode($_GET['options'] ?? 'null', true);
+if (isset($_GET['globals'])) {
+    $_POST['before'] = 'post';
+    $_FILES['before'] = 'files';
+}
 for ($i = 0; $i < (isset($_GET['twice']) ? 2 : 1); $i++) {
     try {
         [$post, $files] = request_parse_body(options: $options);
@@ -37,6 +41,9 @@ echo 'after:', strlen(file_get_contents('php://input')), "\n";
 if (isset($raw)) {
     echo 'old:', strlen(stream_get_contents($raw)), "\n";
 }
+if (isset($_GET['twice'], $tmp)) {
+    unlink($tmp);
+}
 "#;
 
 const URLENCODED: &str = "application/x-www-form-urlencoded";
@@ -47,6 +54,12 @@ const FORM: &str = "--boundary42\r\nContent-Disposition: form-data; name=\"title
     Content-Type: text/plain\r\n\r\nfile data\r\n--boundary42--\r\n";
 const GARBLED: &str = "--boundary42\r\nContent-Disposition: form-data;\r\n\r\nfield\r\n\
     --boundary42--\r\n";
+const FOLDED: &str = "--boundary42\r\nContent-Disposition: form-data;\r\n name=\"a\"\r\n\r\n\
+    field\r\n--boundary42--\r\n";
+const BARE_NAME: &str = "--boundary42\r\nContent-Disposition: form-data; name=a space\r\n\r\n\
+    field\r\n--boundary42--\r\n";
+const WRONG_HEADER: &str = "--boundary42\r\nContent-Disposition : form-data; name=\"ignored\"\r\n\
+    \r\nfield\r\n--boundary42--\r\n";
 
 #[test]
 fn request_bodies_and_limits_match_the_php_server() {
@@ -54,6 +67,9 @@ fn request_bodies_and_limits_match_the_php_server() {
     let ours = Served::start("request-parse-body", &[("show.php", SHOW)]);
     let theirs = Server::start_php(&php, &ours.root, 1);
     let large = format!("a=1&b={}&c=3", "a".repeat(8192));
+    let long_form = FORM.replace("world", &"a".repeat(6500));
+    let long_garbled = GARBLED.replace("field", &"x".repeat(6500));
+    let with_preamble = format!("not-a-delimiter--boundary42\r\n{WRONG_HEADER}{FOLDED}");
     let cases = [
         ("PUT", Some(URLENCODED), "a=1&b=2", ""),
         (
@@ -71,6 +87,7 @@ fn request_bodies_and_limits_match_the_php_server() {
         ("PUT", Some(MULTIPART), FORM, ""),
         ("PUT", Some(MULTIPART), FORM, "?raw=1"),
         ("PUT", Some(MULTIPART), FORM, "?twice=1"),
+        ("PUT", Some(MULTIPART), FORM, "?globals=1"),
         ("POST", Some(MULTIPART), FORM, ""),
         ("PATCH", Some(MULTIPART), FORM, ""),
         ("DELETE", None, "", ""),
@@ -90,6 +107,23 @@ fn request_bodies_and_limits_match_the_php_server() {
             "",
         ),
         ("PUT", Some(MULTIPART), GARBLED, ""),
+        ("PUT", Some(MULTIPART), long_garbled.as_str(), ""),
+        ("PUT", Some(MULTIPART), FOLDED, ""),
+        ("PUT", Some(MULTIPART), BARE_NAME, ""),
+        ("PUT", Some(MULTIPART), WRONG_HEADER, ""),
+        ("PUT", Some(MULTIPART), with_preamble.as_str(), ""),
+        (
+            "PUT",
+            Some(MULTIPART),
+            long_form.as_str(),
+            "?options=%7B%22max_multipart_body_parts%22%3A1%7D",
+        ),
+        (
+            "PUT",
+            Some(URLENCODED),
+            "a=1&b=2",
+            "?options=%7B%22post_max_size%22%3A1%7D&raw=1",
+        ),
     ];
     for option in [
         "%7B%22post_max_size%22%3A1%7D",

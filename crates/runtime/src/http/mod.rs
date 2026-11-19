@@ -17,6 +17,13 @@ pub(crate) use request_parse_body::{is_urlencoded, register_request_parse_body};
 pub(crate) use superglobals::define_superglobals;
 pub(crate) use uploads::Form;
 
+fn media_type(content_type: &[u8]) -> &[u8] {
+    content_type
+        .split(|byte| matches!(byte, b';' | b',' | b' '))
+        .next()
+        .unwrap_or_default()
+}
+
 pub(crate) fn receive_form(body: &[u8], boundary: &[u8]) -> Form {
     uploads::receive(body, boundary, form_limits::FormLimits::default())
 }

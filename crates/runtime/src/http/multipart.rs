@@ -19,138 +19,137 @@
 //! The rules are those of PHP's own reader, `main/rfc1867.c`, including
 //! what it does with input that is cut off or malformed.
 
-/// One part of the body: a form field, or a file when `filename` is set.
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) struct Part<'a> {
-    pub(crate) has_disposition: bool,
-    /// The form control's name; `None` if the part did not give one.
-    pub(crate) name: Option<Vec<u8>>,
-    /// The file's name as the client sent it, possibly with a path.
-    pub(crate) filename: Option<Vec<u8>>,
-    /// The media type the client claimed, without parameters; empty if none.
-    pub(crate) content_type: Vec<u8>,
-    pub(crate) content: &'a [u8],
-    /// False when the body ended before this part's closing boundary: the
-    /// upload was cut off.
-    pub(crate) complete: bool,
+mod buffer;
+
+use buffer::{Buffer, FILL_UNIT};
+
+/// Names and headers of the part currently being read.
+pub(super) struct PartHeaders {
+    pub(super) disposition: Disposition,
+    pub(super) content_type: Vec<u8>,
 }
 
-/// The boundary named in a `Content-Type: multipart/form-data; boundary=...`
-/// header, or `None` if it is another type or names no boundary.
-pub(crate) fn boundary(content_type: &[u8]) -> Option<Vec<u8>> {
-    let semicolon = content_type.iter().position(|&byte| byte == b';')?;
-    let (media_type, parameters) = content_type.split_at(semicolon);
-    if !media_type
-        .trim_ascii()
+pub(super) enum Disposition {
+    Absent,
+    Form {
+        name: Option<Vec<u8>>,
+        filename: Option<Vec<u8>>,
+    },
+}
+
+#[derive(Clone, Copy)]
+enum MimeHeader {
+    Disposition,
+    ContentType,
+}
+
+/// The boundary of a multipart POST that PHP would parse on startup.
+pub(super) fn boundary(content_type: &[u8]) -> Option<Vec<u8>> {
+    super::media_type(content_type)
         .eq_ignore_ascii_case(b"multipart/form-data")
-    {
-        return None;
-    }
-    parameters_of(parameters)
-        .into_iter()
-        .find(|(name, _)| name == "boundary")
-        .map(|(_, value)| value)
+        .then(|| explicit_boundary(content_type).ok())
+        .flatten()
         .filter(|boundary| !boundary.is_empty())
+        .map(<[u8]>::to_vec)
 }
 
-/// Splits `body` at `--boundary` lines.
-pub(crate) fn parts<'a>(body: &'a [u8], boundary: &[u8]) -> Vec<Part<'a>> {
-    let delimiter = [b"--", boundary].concat();
-    let mut parts = Vec::new();
-    // Whatever precedes the first boundary is not part of the form.
-    let Some(first) = find(body, &delimiter) else {
-        return parts;
-    };
-    let mut rest = &body[first + delimiter.len()..];
-    loop {
-        // `--boundary--` closes the form.
-        if rest.starts_with(b"--") {
-            break;
-        }
-        let Some(after_line) = skip_line(rest) else {
-            break;
-        };
-        let Some((headers, after_headers)) = split_headers(after_line) else {
-            break;
-        };
-        let (content, next) = match content_before(after_headers, &delimiter) {
-            Some((content, next)) => (content, Some(next)),
-            None => (after_headers, None),
-        };
-        let disposition = header(headers, b"content-disposition");
-        let parameters = parameters_of(disposition.unwrap_or_default());
-        let parameter = |wanted: &str| {
-            parameters
-                .iter()
-                .rfind(|(name, _)| name == wanted)
-                .map(|(_, value)| value.clone())
-        };
-        let claimed_type = header(headers, b"content-type").unwrap_or_default();
-        parts.push(Part {
-            has_disposition: disposition.is_some(),
-            name: parameter("name"),
-            filename: parameter("filename"),
-            content_type: claimed_type
-                .split(|&byte| byte == b';')
-                .next()
-                .unwrap_or_default()
-                .trim_ascii()
-                .to_vec(),
-            content,
-            complete: next.is_some(),
-        });
-        match next {
-            Some(next) => rest = next,
-            None => break,
+pub(super) struct Multipart<'a> {
+    buffer: Buffer<'a>,
+    delimiter: Vec<u8>,
+}
+
+impl<'a> Multipart<'a> {
+    pub(super) fn new(body: &'a [u8], boundary: &[u8]) -> Self {
+        Self {
+            buffer: Buffer::new(body, boundary.len()),
+            delimiter: [b"\n--", boundary].concat(),
         }
     }
-    parts
-}
 
-/// The rest after the end of the current line.
-fn skip_line(input: &[u8]) -> Option<&[u8]> {
-    let newline = input.iter().position(|&byte| byte == b'\n')?;
-    Some(&input[newline + 1..])
-}
-
-/// The header lines of a part, and what follows the empty line after them.
-fn split_headers(input: &[u8]) -> Option<(&[u8], &[u8])> {
-    let mut end = 0;
-    loop {
-        let line_end = end + input[end..].iter().position(|&byte| byte == b'\n')?;
-        let line = input[end..line_end].trim_ascii_end();
-        if line.is_empty() {
-            return Some((&input[..end], &input[line_end + 1..]));
+    /// Find the next delimiter line and read this part's MIME headers.
+    pub(super) fn next_headers(&mut self) -> Option<PartHeaders> {
+        loop {
+            let line = c_string(self.buffer.line()?);
+            if line == &self.delimiter[1..] {
+                break;
+            }
         }
-        end = line_end + 1;
+        let mut disposition: Option<Vec<u8>> = None;
+        let mut content_type: Option<Vec<u8>> = None;
+        let mut current = None;
+        while let Some(line) = self.buffer.line() {
+            let line = c_string(line);
+            if line.is_empty() {
+                break;
+            }
+            let colon = (!line[0].is_ascii_whitespace())
+                .then(|| line.iter().position(|&byte| byte == b':'))
+                .flatten();
+            let Some(colon) = colon else {
+                let value = match current {
+                    Some(MimeHeader::Disposition) => disposition.as_mut(),
+                    Some(MimeHeader::ContentType) => content_type.as_mut(),
+                    None => None,
+                };
+                if let Some(value) = value {
+                    value.extend_from_slice(line);
+                }
+                continue;
+            };
+            let name = &line[..colon];
+            let (header, target) = if name.eq_ignore_ascii_case(b"content-disposition") {
+                (MimeHeader::Disposition, &mut disposition)
+            } else if name.eq_ignore_ascii_case(b"content-type") {
+                (MimeHeader::ContentType, &mut content_type)
+            } else {
+                current = None;
+                continue;
+            };
+            current = if target.is_none() {
+                *target = Some(line[colon + 1..].trim_ascii_start().to_vec());
+                Some(header)
+            } else {
+                None
+            };
+        }
+        let disposition = match disposition {
+            Some(value) => {
+                let mut name = None;
+                let mut filename = None;
+                for (key, value) in parameters_of(&value) {
+                    match key.as_str() {
+                        "name" => name = Some(value),
+                        "filename" => filename = Some(value),
+                        _ => {}
+                    }
+                }
+                Disposition::Form { name, filename }
+            }
+            None => Disposition::Absent,
+        };
+        let content_type = content_type.unwrap_or_default();
+        let content_type = content_type
+            .split(|&byte| byte == b';')
+            .next()
+            .unwrap_or_default()
+            .to_vec();
+        Some(PartHeaders {
+            disposition,
+            content_type,
+        })
+    }
+
+    pub(super) fn content(&mut self, limit: Option<usize>) -> (&'a [u8], bool) {
+        self.buffer.content(&self.delimiter, limit)
+    }
+
+    pub(super) fn consumed(&self) -> usize {
+        self.buffer.consumed()
     }
 }
 
-/// The content up to the next boundary line, and what follows the boundary.
-/// The line break before the boundary belongs to the boundary.
-fn content_before<'a>(input: &'a [u8], delimiter: &[u8]) -> Option<(&'a [u8], &'a [u8])> {
-    let mut from = 0;
-    loop {
-        let at = from + find(&input[from..], delimiter)?;
-        // A boundary only counts at the start of a line.
-        if at == 0 || input[at - 1] == b'\n' {
-            let content = input[..at].strip_suffix(b"\n").unwrap_or(&input[..at]);
-            let content = content.strip_suffix(b"\r").unwrap_or(content);
-            return Some((content, &input[at + delimiter.len()..]));
-        }
-        from = at + 1;
-    }
-}
-
-/// The value of the header `name` (given in lower case) among `headers`.
-fn header<'a>(headers: &'a [u8], name: &[u8]) -> Option<&'a [u8]> {
-    headers.split(|&byte| byte == b'\n').find_map(|line| {
-        let colon = line.iter().position(|&byte| byte == b':')?;
-        line[..colon]
-            .trim_ascii()
-            .eq_ignore_ascii_case(name)
-            .then(|| line[colon + 1..].trim_ascii())
-    })
+fn c_string(bytes: &[u8]) -> &[u8] {
+    bytes.split(|&byte| byte == 0).next().unwrap_or_default()
 }
 
 /// The `key=value` parameters of a header value such as
@@ -201,7 +200,7 @@ pub(super) fn explicit_boundary(content_type: &[u8]) -> Result<&[u8], BoundaryEr
             .next()
             .unwrap_or_default()
     };
-    if boundary.len() > 5120 - 4 {
+    if boundary.len() > FILL_UNIT - 4 {
         return Err(BoundaryError::TooLarge);
     }
     Ok(boundary)
@@ -224,7 +223,11 @@ fn parameter_value(input: &[u8]) -> (Vec<u8>, &[u8]) {
             .iter()
             .position(|&byte| byte == b';')
             .unwrap_or(input.len());
-        return (input[..end].trim_ascii_end().to_vec(), &input[end..]);
+        let value = input[..end]
+            .split(|byte| byte.is_ascii_whitespace())
+            .next()
+            .unwrap_or_default();
+        return (value.to_vec(), &input[end..]);
     };
     let mut value = Vec::new();
     let mut index = 0;
@@ -256,6 +259,34 @@ fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Debug)]
+    struct Part<'a> {
+        name: Option<Vec<u8>>,
+        filename: Option<Vec<u8>>,
+        content_type: Vec<u8>,
+        content: &'a [u8],
+        complete: bool,
+    }
+
+    fn parts<'a>(body: &'a [u8], boundary: &[u8]) -> Vec<Part<'a>> {
+        let mut form = Multipart::new(body, boundary);
+        let mut parts = Vec::new();
+        while let Some(headers) = form.next_headers() {
+            let Disposition::Form { name, filename } = headers.disposition else {
+                continue;
+            };
+            let (content, complete) = form.content(None);
+            parts.push(Part {
+                name,
+                filename,
+                content_type: headers.content_type,
+                content,
+                complete,
+            });
+        }
+        parts
+    }
 
     #[test]
     fn the_boundary_is_read_from_the_content_type() {

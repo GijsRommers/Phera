@@ -25,7 +25,7 @@ use phera_value::{PhpArray, Value};
 use tempfile::TempPath;
 
 use super::form_limits::FormLimits;
-use super::multipart::{self, Part};
+use super::multipart::{Disposition, Multipart};
 use super::query::store_named;
 
 /// The values of `$_FILES[...]['error']`.
@@ -62,6 +62,7 @@ struct Upload {
 pub(crate) struct Form {
     items: Vec<Item>,
     pub(super) issue: Option<FormIssue>,
+    pub(super) consumed: usize,
 }
 
 pub(super) enum FormIssue {
@@ -106,28 +107,30 @@ pub(super) fn receive(body: &[u8], boundary: &[u8], limits: FormLimits) -> Form 
     let mut parts = 0;
     let mut fields = 0;
     let mut unnamed = 0;
-    for part in multipart::parts(body, boundary) {
-        if !part.has_disposition {
+    let mut multipart = Multipart::new(body, boundary);
+    while let Some(headers) = multipart.next_headers() {
+        let Disposition::Form { name, filename } = headers.disposition else {
             continue;
-        }
+        };
         parts += 1;
         if parts > part_limit {
             issue = Some(FormIssue::TooManyParts(part_limit));
             break;
         }
-        let Some(filename) = part.filename.clone() else {
-            let Some(name) = part.name else {
+        let Some(filename) = filename else {
+            let Some(name) = name else {
                 issue = Some(FormIssue::GarbledHeaders);
                 break;
             };
+            let (content, _) = multipart.content(None);
             fields += 1;
             if name.eq_ignore_ascii_case(b"MAX_FILE_SIZE") {
-                form_limit = phera_extension_api::ini::integer(part.content);
+                form_limit = phera_extension_api::ini::integer(content);
             }
             if fields <= limits.max_input_vars {
                 items.push(Item::Field {
                     name,
-                    value: part.content.to_vec(),
+                    value: content.to_vec(),
                 });
             } else if fields == limits.max_input_vars.saturating_add(1) {
                 issue = Some(FormIssue::TooManyFields(limits.max_input_vars));
@@ -144,48 +147,97 @@ pub(super) fn receive(body: &[u8], boundary: &[u8], limits: FormLimits) -> Form 
             }
             continue;
         }
-        files_left -= i64::from(!filename.is_empty());
         // PHP numbers the files of parts that give no control name.
-        let field = part.name.clone().unwrap_or_else(|| {
+        let field = name.unwrap_or_else(|| {
             unnamed += 1;
             (unnamed - 1).to_string().into_bytes()
         });
+        if !valid_file_field(&field) {
+            continue;
+        }
+        let size = FileSize {
+            ini: limits.upload_max_filesize,
+            form: form_limit,
+        };
+        let (content, complete) = if filename.is_empty() {
+            (&[][..], false)
+        } else {
+            files_left -= 1;
+            multipart.content(size.read_limit())
+        };
         let upload = store(
             field,
             filename,
-            &part,
-            limits.upload_max_filesize,
-            form_limit,
+            headers.content_type,
+            content,
+            complete,
+            size,
         );
         if upload.error == UploadError::NoTemporaryDirectory {
             issue = Some(FormIssue::TemporaryFile);
         }
         items.push(Item::File(upload));
     }
-    Form { items, issue }
+    Form {
+        items,
+        issue,
+        consumed: multipart.consumed(),
+    }
+}
+
+fn valid_file_field(name: &[u8]) -> bool {
+    let mut open = 0;
+    for (index, byte) in name.iter().enumerate() {
+        match byte {
+            b'[' => open += 1,
+            b']' if open > 0 && name.get(index + 1).is_none_or(|&byte| byte == b'[') => open -= 1,
+            b']' => return false,
+            _ => {}
+        }
+    }
+    open == 0
+}
+
+struct FileSize {
+    ini: i64,
+    form: i64,
+}
+
+impl FileSize {
+    fn read_limit(&self) -> Option<usize> {
+        [
+            (self.ini > 0).then_some(self.ini),
+            (self.form != 0).then_some(self.form.max(0)),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+        .and_then(|limit| usize::try_from(limit).ok())
+    }
 }
 
 /// Decides what becomes of one file part and writes it if it is accepted.
 fn store(
     field: Vec<u8>,
     filename: Vec<u8>,
-    part: &Part<'_>,
-    file_limit: i64,
-    form_limit: i64,
+    content_type: Vec<u8>,
+    content: &[u8],
+    complete: bool,
+    limits: FileSize,
 ) -> Upload {
-    let length = part.content.len() as i64;
+    let length = content.len() as i64;
     let error = if filename.is_empty() {
         UploadError::NoFile
-    } else if file_limit > 0 && length > file_limit {
+    } else if limits.ini > 0 && length > limits.ini {
         UploadError::TooLarge
-    } else if length > 0 && form_limit != 0 && length > form_limit {
+    } else if length > 0 && limits.form != 0 && length > limits.form {
         UploadError::TooLargeForForm
-    } else if !part.complete {
+    } else if !complete {
         UploadError::CutOff
     } else {
         UploadError::Ok
     };
-    let written = (error == UploadError::Ok).then(|| write_temporary(part.content));
+    let written = (error == UploadError::Ok).then(|| write_temporary(content));
     let (temporary, error) = match written {
         Some(Ok(path)) => (Some(path), UploadError::Ok),
         Some(Err(error)) => (None, error),
@@ -196,11 +248,7 @@ fn store(
     Upload {
         field,
         filename,
-        content_type: if kept {
-            part.content_type.clone()
-        } else {
-            Vec::new()
-        },
+        content_type: if kept { content_type } else { Vec::new() },
         size: if kept { length as u64 } else { 0 },
         temporary,
         error,

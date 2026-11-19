@@ -56,12 +56,25 @@ impl RequestInput {
         range
     }
 
+    /// The standard reader leaves an existing buffer in place when a limit
+    /// rejects the new read. With urlencoded input its bytes are contiguous.
+    pub fn buffered_urlencoded(&self) -> Range<usize> {
+        let state = lock(&self.state);
+        lock(&state.raw).ranges.first().cloned().unwrap_or_default()
+    }
+
     /// Read multipart data directly, without caching it in `php://input`.
     pub fn read_multipart(&self) -> Range<usize> {
         let mut state = lock(&self.state);
         let range = state.consumed..self.bytes.len();
         state.consumed = range.end;
         range
+    }
+
+    /// Return what the multipart reader did not buffer before it stopped.
+    pub fn finish_multipart(&self, reserved: Range<usize>, consumed: usize) {
+        let mut state = lock(&self.state);
+        state.consumed = reserved.start + consumed.min(reserved.len());
     }
 
     pub fn bytes(&self) -> &Arc<[u8]> {

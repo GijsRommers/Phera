@@ -59,8 +59,30 @@ impl UploadedFiles {
     }
 
     /// The files nobody moved. The runtime deletes them after the request.
-    pub fn into_unclaimed(self) -> Vec<PathBuf> {
-        self.waiting
+    pub async fn cleanup(mut self) {
+        let files = std::mem::take(&mut self.waiting);
+        if !files.is_empty() {
+            let _ = tokio::task::spawn_blocking(move || remove_files(files)).await;
+        }
+    }
+}
+
+impl Drop for UploadedFiles {
+    fn drop(&mut self) {
+        let files = std::mem::take(&mut self.waiting);
+        if !files.is_empty() {
+            if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+                runtime.spawn_blocking(move || remove_files(files));
+            } else {
+                remove_files(files);
+            }
+        }
+    }
+}
+
+fn remove_files(files: Vec<PathBuf>) {
+    for file in files {
+        let _ = std::fs::remove_file(file);
     }
 }
 

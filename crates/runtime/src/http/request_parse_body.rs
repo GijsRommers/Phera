@@ -10,7 +10,7 @@ use phera_extension_api::{
 
 use super::form_limits::FormLimits;
 use super::multipart::{BoundaryError, explicit_boundary};
-use super::{query, uploads};
+use super::{media_type, query, uploads};
 
 const EXCEPTION: &str = "RequestParseBodyException";
 const FUNCTION: &str = "request_parse_body";
@@ -75,13 +75,6 @@ fn content_type(context: &mut dyn Context) -> Result<Vec<u8>, NativeError> {
     Ok(value)
 }
 
-fn media_type(content_type: &[u8]) -> &[u8] {
-    content_type
-        .split(|byte| matches!(byte, b';' | b',' | b' '))
-        .next()
-        .unwrap_or_default()
-}
-
 pub(crate) fn is_urlencoded(content_type: &[u8]) -> bool {
     media_type(content_type).eq_ignore_ascii_case(b"application/x-www-form-urlencoded")
 }
@@ -92,12 +85,14 @@ fn parse_urlencoded(
     limits: FormLimits,
 ) -> PhpArray {
     let mut post = PhpArray::new();
-    if let Some(message) = size_issue(input, limits) {
-        context.warning(format!("{FUNCTION}(): {message}"));
-        return post;
-    }
+    let range = match size_issue(input, limits) {
+        Some(message) => {
+            context.warning(format!("{FUNCTION}(): {message}"));
+            input.buffered_urlencoded()
+        }
+        None => input.read_urlencoded(),
+    };
 
-    let range = input.read_urlencoded();
     let limit = limits.max_input_vars as u64;
     if query::parse_post(&mut post, &input.bytes()[range], limit) {
         context.warning(format!(
@@ -138,6 +133,7 @@ async fn parse_multipart(
         }
     };
     let range = input.read_multipart();
+    let reserved = range.clone();
     let bytes = input.bytes().clone();
     let mut form =
         tokio::task::spawn_blocking(move || uploads::receive(&bytes[range], &boundary, limits))
@@ -146,6 +142,7 @@ async fn parse_multipart(
                 NativeError::error(format!("Unable to parse request body: {error}"))
             })?;
     let issue = form.issue.take();
+    input.finish_multipart(reserved, form.consumed);
     let (post, files, temporary) = form.into_variables();
     context
         .state()
