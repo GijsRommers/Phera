@@ -14,6 +14,9 @@ impl Compiler<'_> {
         line: usize,
     ) -> Result<(), CompileError> {
         for expression in expressions {
+            if crate::helpers::is_this(expression) {
+                return Err(self.error("Cannot unset $this", line));
+            }
             let parameter = self.place(expression)?;
             if parameter
                 .path
