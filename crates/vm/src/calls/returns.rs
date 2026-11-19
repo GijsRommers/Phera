@@ -29,8 +29,9 @@ impl Vm {
         stop: usize,
     ) -> Result<Option<Value>, NativeError> {
         if self
+            .call_stack
             .current()
-            .is_some_and(|frame| frame.function().return_type.is_some())
+            .is_some_and(|frame| self.code.facts(frame.function).return_mask.is_some())
         {
             value = self.check_return_value(value)?;
         }
@@ -183,25 +184,36 @@ impl Vm {
         mut value: Value,
         stop: usize,
     ) -> Result<Option<Value>, NativeError> {
-        if let Some(frame) = self.current()
-            && frame.frame.kind() == crate::calls::prepared_call::CallKind::Constructor
-        {
-            value = frame.this().cloned().map(Value::Object).unwrap_or_default();
-        }
-        self.finish_include_scope()?;
-        let property_hook = if self
+        let mut frame = self
             .call_stack
             .current()
-            .is_some_and(|frame| frame.destination().is_none() && frame.has_extras())
+            .copied()
+            .ok_or_else(|| internal_error!("return without frame"))?;
+        if frame.kind() == crate::calls::prepared_call::CallKind::Constructor {
+            value = self
+                .current()
+                .and_then(|frame| frame.this().cloned())
+                .map(Value::Object)
+                .unwrap_or_default();
+        }
+        if self.code.facts(frame.function).local.is_none() {
+            // Includes may move their frame while copying locals back to the caller.
+            self.finish_include_scope()?;
+            frame = self
+                .call_stack
+                .current()
+                .copied()
+                .ok_or_else(|| internal_error!("include return without frame"))?;
+        }
+        let property_hook = if frame.has_extras()
+            && frame.destination().is_none()
+            && self.call_stack.depth() > stop + 1
         {
             self.call_stack.current_extras_mut().property_hook.take()
         } else {
             None
         };
-        let frame = self
-            .call_stack
-            .pop()
-            .ok_or_else(|| internal_error!("return without frame"))?;
+        self.call_stack.pop();
         self.call_stack.abandon_calls_from(frame.start());
         self.registers.truncate(frame.start());
         if self.call_stack.depth() == stop {

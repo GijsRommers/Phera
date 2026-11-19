@@ -82,10 +82,14 @@ impl Machine<'_> {
         let Some(frame) = self.stack.current().copied() else {
             return Step::Slow;
         };
-        let facts = self.code.facts(frame.function);
         let Some(destination) = frame.destination() else {
-            return self.leave_discarded(frame, source);
+            return if frame.discards_result() {
+                self.leave_discarded(frame, source)
+            } else {
+                Step::Slow
+            };
         };
+        let facts = self.code.facts(frame.function);
         let depth = self.stack.depth();
         let kind = frame.kind();
         let start = frame.base() - kind.prefix();
@@ -142,8 +146,7 @@ impl Machine<'_> {
     /// A setter with no suspended caller action returns without publishing a result.
     #[inline(never)]
     fn leave_discarded(&mut self, frame: Frame, source: Option<Reg>) -> Step {
-        if !frame.discards_result()
-            || self.stack.depth() <= self.stop + 1
+        if self.stack.depth() <= self.stop + 1
             || frame.has_extras()
             || self.stack.has_calls_from(frame.start())
         {

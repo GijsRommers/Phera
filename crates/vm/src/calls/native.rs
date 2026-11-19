@@ -246,17 +246,18 @@ impl Vm {
                 if self.output_writer.buffers.pending.is_some() && result.is_ok() {
                     self.output_writer.chunk_caller = Some(entry.name);
                 }
-                match destination {
-                    Some(destination) => {
-                        self.complete_native_view_result(destination, result).await
+                match result {
+                    Ok(value) => Ok(Some(value)),
+                    Err(error) if let Some(destination) = destination => {
+                        Box::pin(self.complete_native_view_result(destination, Err(error))).await
                     }
-                    None => result.map(Some),
+                    Err(error) => Err(error),
                 }
             }
             CallTarget::Intrinsic(crate::intrinsics::Intrinsic::Clone)
                 if let Some(destination) = destination =>
             {
-                self.suspend_clone_intrinsic(destination, arguments).await?;
+                Box::pin(self.suspend_clone_intrinsic(destination, arguments)).await?;
                 Ok(None)
             }
             CallTarget::Intrinsic(crate::intrinsics::Intrinsic::Class(
@@ -265,8 +266,7 @@ impl Vm {
                 (destination, arguments.as_slice())
                 && let Some(class) = self.hooked_property_class(object) =>
             {
-                self.suspend_object_vars(object.clone(), class, destination)
-                    .await?;
+                Box::pin(self.suspend_object_vars(object.clone(), class, destination)).await?;
                 self.call_stack.recycle_native_arguments(arguments);
                 Ok(None)
             }
