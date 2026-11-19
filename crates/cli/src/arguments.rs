@@ -16,6 +16,7 @@ Usage:
     --workers N                           default: one per CPU core
     --preload                             compile Composer files before listening
     -d name=value                         set a PHP INI value
+    --no-process                          forbid starting external programs
     --request-timeout SECONDS             stop a request after this long
                                           (default 60; 0: never)
     --compress                            gzip or brotli for clients that
@@ -70,6 +71,7 @@ pub(crate) struct ServeOptions {
     /// `--compress`: gzip or brotli for clients that accept it. Off unless
     /// given, since the proxy in front usually compresses.
     pub compress: bool,
+    pub no_process: bool,
     /// `--request-timeout`: `None` keeps the server's default, and
     /// `Some(None)` (given as 0) lets a request run without a limit.
     pub request_timeout: Option<Option<Duration>>,
@@ -232,6 +234,7 @@ fn parse_serve(
         workers: None,
         preload: false,
         compress: false,
+        no_process: false,
         request_timeout: None,
         trusted_proxies: None,
         health_path: None,
@@ -261,6 +264,7 @@ fn parse_serve(
             }
             "--compress" => options.compress = true,
             "--preload" => options.preload = true,
+            "--no-process" => options.no_process = true,
             "--trusted-proxies" => {
                 let list = arguments
                     .next()

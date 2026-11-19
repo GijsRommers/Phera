@@ -83,7 +83,9 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
     }
     let workers = config.workers;
 
-    let runtime = Runtime::with_environment(loaded.environment).with_startup_ini(options.ini);
+    let runtime = Runtime::with_environment(loaded.environment)
+        .with_startup_ini(options.ini)
+        .without_web_processes(options.no_process);
     let preload = if options.preload || settings.preload {
         match runtime.preload_composer(&project) {
             Ok(summary) => {
