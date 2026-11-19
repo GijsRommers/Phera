@@ -26,10 +26,13 @@ pub(crate) struct ClassMiss {
     failure: MissFailure,
 }
 
+mod method_variance;
+pub(crate) use method_variance::MethodVariance;
+
 enum MissFailure {
     Lookup(&'static str),
     Member(phera_source::deprecations::ItemKind, String),
-    Signature(crate::error_traces::DeclarationFailure),
+    MethodSignatures(Vec<MethodVariance>),
     PropertySignature {
         remaining: Vec<String>,
         failure: crate::error_traces::DeclarationFailure,
@@ -51,13 +54,13 @@ impl ClassMiss {
         matches!(error, NativeError::Unwind(Unwind(payload)) if payload.is::<Self>())
     }
 
-    pub(crate) fn signature(
-        name: &str,
-        failure: crate::error_traces::DeclarationFailure,
-    ) -> NativeError {
+    pub(crate) fn method_signatures(methods: Vec<MethodVariance>) -> NativeError {
+        let Some(name) = methods.first().and_then(|method| method.names.first()) else {
+            return internal_error!("empty method variance obligation");
+        };
         NativeError::Unwind(Unwind(Box::new(Self {
-            name: name.into(),
-            failure: MissFailure::Signature(failure),
+            name: name.clone(),
+            failure: MissFailure::MethodSignatures(methods),
         })))
     }
 
@@ -87,7 +90,11 @@ impl ClassMiss {
                 kind, &self.name, &member,
             )
             .unwrap_or_else(|| NativeError::error(format!("Class \"{}\" not found", self.name))),
-            MissFailure::Signature(failure) | MissFailure::PropertySignature { failure, .. } => {
+            MissFailure::MethodSignatures(methods) => methods.first().map_or_else(
+                || internal_error!("empty method variance obligation"),
+                |method| method.error(&self.name),
+            ),
+            MissFailure::PropertySignature { failure, .. } => {
                 NativeError::Unwind(Unwind(Box::new(failure)))
             }
         }
@@ -209,7 +216,9 @@ impl Vm {
         if !self.error_handlers.pending.is_empty() {
             self.drain_error_handlers().await?;
         }
-        if let MissFailure::PropertySignature { remaining, .. } = &miss.failure {
+        if let MissFailure::MethodSignatures(methods) = &miss.failure {
+            self.load_method_signature_classes(methods).await?;
+        } else if let MissFailure::PropertySignature { remaining, .. } = &miss.failure {
             let mut attempted = HashSet::new();
             let names = std::iter::once(&miss.name).chain(remaining);
             for name in names.clone() {

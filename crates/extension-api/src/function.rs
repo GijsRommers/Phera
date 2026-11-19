@@ -80,6 +80,8 @@ pub struct Param {
     pub optional: bool,
     /// Fills a skipped position when a later named argument is supplied.
     pub default: Option<ConstantValue>,
+    /// The constant spelling PHP uses in a declaration, when the value is symbolic.
+    pub default_name: Option<&'static str>,
     pub by_ref: bool,
     pub variadic: bool,
 }
@@ -92,6 +94,7 @@ impl Param {
             nullable: false,
             optional: false,
             default: None,
+            default_name: None,
             by_ref: false,
             variadic: false,
         }
@@ -112,6 +115,17 @@ impl Param {
     pub const fn with_default(mut self, default: ConstantValue) -> Self {
         self.optional = true;
         self.default = Some(default);
+        self.default_name = None;
+        self
+    }
+
+    pub const fn with_constant_default(
+        mut self,
+        name: &'static str,
+        default: ConstantValue,
+    ) -> Self {
+        self = self.with_default(default);
+        self.default_name = Some(name);
         self
     }
 
