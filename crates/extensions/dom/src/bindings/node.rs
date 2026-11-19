@@ -9,7 +9,7 @@ mod canonical;
 mod compare;
 mod registration;
 
-pub(super) use registration::register;
+pub(super) use registration::{register, register_modern};
 
 use std::fmt::Write;
 
@@ -23,9 +23,11 @@ use super::{This, factory, mutation, this_node};
 fn has_children(_: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
     let node = this_node(this)?;
     let state = node.shared.borrow();
-    Ok(Value::Bool(
-        state.document.arena[node.id].first_child().is_some(),
-    ))
+    let arena = &state.document.arena;
+    if arena[node.id].kind == Kind::EntityReference {
+        return Ok(Value::Bool(arena.reference_declaration(node.id).is_some()));
+    }
+    Ok(Value::Bool(arena[node.id].first_child().is_some()))
 }
 
 fn has_attributes(_: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
@@ -76,10 +78,13 @@ fn clone_node(context: &mut dyn Context, this: This<'_>, arguments: &[Value]) ->
     .wrap(context)
 }
 
-fn clone_object(source: &std::rc::Rc<Object>, destination: &Object) -> Result<(), NativeError> {
+pub(super) fn clone_object(
+    source: &std::rc::Rc<Object>,
+    destination: &std::rc::Rc<Object>,
+) -> Result<(), NativeError> {
     let node = super::location(source)?;
     let clone = mutation::duplicate(&node, true);
-    *destination.native.borrow_mut() = Some(Box::new(clone));
+    clone.bind(destination);
     Ok(())
 }
 
@@ -191,6 +196,14 @@ pub(in crate::bindings) fn namespace_scope(
     arena: &Arena,
     id: NodeId,
 ) -> impl Iterator<Item = (String, String)> + '_ {
+    let id = if arena[id].kind == Kind::Document {
+        arena
+            .children(id)
+            .find(|&child| arena[child].kind == Kind::Element)
+            .unwrap_or(id)
+    } else {
+        id
+    };
     std::iter::once(id)
         .chain(arena.ancestors(id))
         .flat_map(|id| {

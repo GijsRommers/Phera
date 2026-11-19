@@ -43,6 +43,7 @@ pub(in crate::bindings) fn register_libxml_constants(registry: &mut Registry) {
 }
 
 pub(in crate::bindings) fn register_dom_constants(registry: &mut Registry) {
+    registry.deprecated_constant("DOM_PHP_ERR", 0_i64);
     for (name, value) in [
         ("XML_ELEMENT_NODE", 1),
         ("XML_ATTRIBUTE_NODE", 2),
@@ -72,7 +73,6 @@ pub(in crate::bindings) fn register_dom_constants(registry: &mut Registry) {
         ("XML_ATTRIBUTE_NMTOKENS", 8),
         ("XML_ATTRIBUTE_ENUMERATION", 9),
         ("XML_ATTRIBUTE_NOTATION", 10),
-        ("DOM_PHP_ERR", 0),
         ("DOM_INDEX_SIZE_ERR", 1),
         ("DOMSTRING_SIZE_ERR", 2),
         ("DOM_HIERARCHY_REQUEST_ERR", 3),

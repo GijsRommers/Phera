@@ -62,9 +62,22 @@ and closes the connection.
 ## 🧩 Extensions
 
 Built in, each checked call by call against real PHP: core, standard, ctype,
-date, dom (first stage), filter, hash, json, mbstring, openssl, pcre, PDO
+date, dom (`DOMDocument`, `DOMNode`, `DOMElement`, `DOMXPath`), filter,
+hash, json, mbstring, openssl, pcre, PDO
 (SQLite, MySQL, PostgreSQL, with TLS), random, redis, reflection, serialize,
 session, SPL, sqlite3, streams, tokenizer, Unix process functions, and POSIX queries.
+
+Modern DOM supports CSS selectors, live class tokens, and `innerHTML`.
+
+- Documents and elements include `Dom\Document`, `Dom\HTMLDocument`,
+  `Dom\XMLDocument`, `Dom\Element`, `Dom\HTMLElement`, `Dom\Attr`.
+- Other nodes include `Dom\Node`, `Dom\CharacterData`, `Dom\Text`,
+  `Dom\CDATASection`, `Dom\Comment`, `Dom\ProcessingInstruction`,
+  `Dom\DocumentType`, `Dom\DocumentFragment`, `Dom\Entity`,
+  `Dom\EntityReference`, `Dom\Notation`.
+- Collections and queries include `Dom\NodeList`, `Dom\NamedNodeMap`,
+  `Dom\DtdNamedNodeMap`, `Dom\HTMLCollection`, `Dom\TokenList`, `Dom\XPath`.
+- `Dom\ParentNode` and `Dom\ChildNode` expose their shared operations.
 
 Unix scripts can launch programs with `shell_exec()`, backticks, and the process
 functions. Backticks emit PHP 8.5's compile-time deprecation. To disable program

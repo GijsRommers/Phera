@@ -207,9 +207,12 @@ fn write_namespaces<'a>(
     for (&prefix, &(uri, declaration)) in scope {
         if prefix == "xml"
             || (options.exclusive && !used.contains(prefix))
-            || options
-                .selection
-                .is_some_and(|nodes| declaration.is_some_and(|id| !nodes.contains(&id)))
+            || options.selection.is_some_and(|nodes| {
+                declaration.is_some_and(|declaration| !nodes.contains(&declaration))
+                    && !arena.xpath_namespaces(id).iter().any(|&namespace| {
+                        arena[namespace].name.local == prefix && nodes.contains(&namespace)
+                    })
+            })
             || rendered.get(prefix).map_or("", |(uri, _)| uri) == uri
         {
             continue;
