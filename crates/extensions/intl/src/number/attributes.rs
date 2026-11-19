@@ -8,7 +8,6 @@
 use phera_extension_api::{Context, NativeResult, Value, args};
 
 use super::{Call, Formatter, Operation, Style, affixes, render};
-use crate::number_data;
 
 #[derive(Clone)]
 pub struct Attributes {
@@ -198,7 +197,7 @@ pub fn symbol(state: &Formatter, key: i64) -> Option<String> {
     if let Some(value) = state.symbols.get(&key) {
         return Some(value.clone());
     }
-    let data = number_data::for_locale(&state.locale);
+    let data = state.data;
     let text = match key {
         0 => data.symbols[0],
         1 => data.symbols[1],

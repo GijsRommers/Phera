@@ -10,35 +10,37 @@ use icu_experimental::dimension::currency::{
 };
 use std::rc::Rc;
 
-use super::{Formatter, Style, attributes};
+use super::{CurrencyRender, Formatter, Style, attributes};
 use crate::number_data;
 
-pub fn currency_value(state: &mut Formatter, value: &Decimal, code: &str) -> Option<String> {
-    if !state.currency_cache.contains_key(code) {
-        let currency = CurrencyType::try_from_str(&code.to_ascii_lowercase()).ok()?;
-        let preferences = state.locale.clone().into();
-        let usage = if state.style == Style::CurrencyAccounting {
-            CurrencyUsage::Accounting
-        } else {
-            CurrencyUsage::Standard
-        };
-        let formatter = match state.style {
-            Style::CurrencyIso => {
-                CurrencyFormatter::try_new_code(preferences, currency, usage.into())
-            }
-            Style::CurrencyPlural => CurrencyFormatter::try_new_name(preferences, currency),
-            _ => CurrencyFormatter::try_new_symbol(preferences, currency, usage.into()),
-        }
-        .ok()?;
-        if state.currency_cache.len() >= 32 {
-            state.currency_cache.clear();
-        }
-        state
-            .currency_cache
-            .insert(code.to_owned(), Rc::new(formatter));
+pub(super) fn currency_formatter(state: &mut Formatter, code: &str) -> Option<Rc<CurrencyRender>> {
+    if let Some(cached) = state.currency_cache.get(code) {
+        return Some(Rc::clone(cached));
     }
-    let formatter = state.currency_cache.get(code)?;
-    Some(formatter.format_fixed_decimal(value).to_string())
+    let currency = CurrencyType::try_from_str(&code.to_ascii_lowercase()).ok()?;
+    let preferences = state.locale.clone().into();
+    let usage = if state.style == Style::CurrencyAccounting {
+        CurrencyUsage::Accounting
+    } else {
+        CurrencyUsage::Standard
+    };
+    let formatter = match state.style {
+        Style::CurrencyIso => CurrencyFormatter::try_new_code(preferences, currency, usage.into()),
+        Style::CurrencyPlural => CurrencyFormatter::try_new_name(preferences, currency),
+        _ => CurrencyFormatter::try_new_symbol(preferences, currency, usage.into()),
+    }
+    .ok()?;
+    let cached = Rc::new(CurrencyRender {
+        formatter,
+        fraction: number_data::fraction(code, state.style == Style::CurrencyCash),
+    });
+    if state.currency_cache.len() >= 32 {
+        state.currency_cache.clear();
+    }
+    state
+        .currency_cache
+        .insert(code.to_owned(), Rc::clone(&cached));
+    Some(cached)
 }
 
 pub fn currency_symbol(state: &Formatter) -> String {
@@ -123,7 +125,7 @@ pub fn pattern_affixes(state: &Formatter, currency: &str, negative: bool) -> (St
         String::new()
     };
     let translate = |part: &str| {
-        let data = number_data::for_locale(&state.locale);
+        let data = state.data;
         let output = if part.contains('¤') {
             let money = if state.currency == currency {
                 currency_symbol(state)

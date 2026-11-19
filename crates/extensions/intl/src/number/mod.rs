@@ -29,7 +29,10 @@ pub fn register(registry: &mut Registry) {
 }
 
 type Receiver<'a> = Option<&'a Rc<Object>>;
-type CurrencyRender = Rc<CurrencyFormatter<DecimalFormatter>>;
+struct CurrencyRender {
+    formatter: CurrencyFormatter<DecimalFormatter>,
+    fraction: (i16, u8),
+}
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Style {
@@ -98,11 +101,12 @@ impl Style {
 struct Formatter {
     locale: Locale,
     locale_name: String,
+    data: &'static number_data::NumberData,
     style: Style,
     decimal: DecimalFormatter,
     ungrouped: DecimalFormatter,
     currency: String,
-    currency_cache: HashMap<String, CurrencyRender>,
+    currency_cache: HashMap<String, Rc<CurrencyRender>>,
     attributes: attributes::Attributes,
     symbols: HashMap<i64, String>,
     text_attributes: HashMap<i64, String>,
@@ -186,6 +190,7 @@ fn make_formatter(
     let mut state = Formatter {
         locale: modern,
         locale_name,
+        data,
         style,
         decimal,
         ungrouped,
@@ -200,9 +205,11 @@ fn make_formatter(
     };
     if style.is_currency() {
         let default_currency = state.currency.clone();
-        if let Some(text) =
-            affixes::currency_value(&mut state, &Decimal::from(1), &default_currency)
-        {
+        if let Some(render) = affixes::currency_formatter(&mut state, &default_currency) {
+            let text = render
+                .formatter
+                .format_fixed_decimal(&Decimal::from(1))
+                .to_string();
             let (_, number, _) = affixes::split_number(&text);
             if let Some((_, fraction)) = number.split_once(data.symbols[6]) {
                 let digits = fraction

@@ -5,15 +5,16 @@
 //! $percent->format(0.25); // "25 %"
 //! ```
 
+use std::borrow::Cow;
+
 use fixed_decimal::{
     Decimal, FloatPrecision, RoundingIncrement, Sign, SignedRoundingMode, UnsignedRoundingMode,
 };
 use icu_decimal::CompactDecimalFormatter;
 use phera_extension_api::{Context, NativeError, NativeResult, Value, args};
 
-use super::affixes::{affixes, currency_value, digit, pattern_affixes, split_number};
+use super::affixes::{affixes, currency_formatter, digit, pattern_affixes, split_number};
 use super::{Call, Formatter, Style, attributes};
-use crate::number_data;
 
 pub fn format(
     context: &mut dyn Context,
@@ -109,13 +110,12 @@ fn nonfinite(state: &Formatter, value: f64) -> String {
 }
 
 pub fn render(state: &mut Formatter, original: &Decimal, currency: Option<&str>) -> Option<String> {
-    let normalized_code;
-    let currency = if let Some(code) = currency {
-        normalized_code = code.to_ascii_uppercase();
-        normalized_code.as_str()
-    } else {
-        &state.currency.clone()
+    let currency = match currency {
+        Some(code) if !code.bytes().any(|byte| byte.is_ascii_lowercase()) => Cow::Borrowed(code),
+        Some(code) => Cow::Owned(code.to_ascii_uppercase()),
+        None => Cow::Owned(state.currency.clone()),
     };
+    let currency = currency.as_ref();
     let mut value = original.clone();
     match state.attributes.multiplier {
         1 => {}
@@ -128,8 +128,8 @@ pub fn render(state: &mut Formatter, original: &Decimal, currency: Option<&str>)
     }
     if state.style.is_currency() && !state.custom_pattern {
         let mut currency_number = value.clone();
-        let (digits, cash_rounding) =
-            number_data::fraction(currency, state.style == Style::CurrencyCash);
+        let cached = currency_formatter(state, currency)?;
+        let (digits, cash_rounding) = cached.fraction;
         let rounding = rounding_mode(state.attributes.rounding);
         let increment = match cash_rounding {
             2 => RoundingIncrement::MultiplesOf2,
@@ -138,25 +138,30 @@ pub fn render(state: &mut Formatter, original: &Decimal, currency: Option<&str>)
             _ => RoundingIncrement::MultiplesOf1,
         };
         currency_number.round_with_mode_and_increment(-digits, rounding, increment);
-        let output = currency_value(state, &currency_number, currency)?;
-        let data = number_data::for_locale(&state.locale);
+        let output = cached
+            .formatter
+            .format_fixed_decimal(&currency_number)
+            .to_string();
+        let data = state.data;
         let needs_override = state.attributes.custom_fraction
             || !state.attributes.grouping
             || state.attributes.custom_group_size
             || !state.symbols.is_empty()
             || !state.text_attributes.is_empty();
-        let (prefix, number, suffix) = split_number(&output);
         if !needs_override {
             if state.attributes.grouping
                 && data.minimum_grouping > 1
                 && !data.symbols[11].is_empty()
-                && !number.contains(data.symbols[11])
             {
-                let grouped = regroup(number, data.symbols[6], data.symbols[11], state);
-                return Some(format!("{prefix}{grouped}{suffix}"));
+                let (prefix, number, suffix) = split_number(&output);
+                if !number.contains(data.symbols[11]) {
+                    let grouped = regroup(number, data.symbols[6], data.symbols[11], state);
+                    return Some(format!("{prefix}{grouped}{suffix}"));
+                }
             }
             return Some(output);
         }
+        let (prefix, _, suffix) = split_number(&output);
         if state.attributes.custom_fraction {
             round(state, &mut value);
         } else {
@@ -234,7 +239,7 @@ fn rounding_mode(settings: i64) -> SignedRoundingMode {
 
 fn decimal(state: &Formatter, value: &Decimal) -> String {
     let settings = &state.attributes;
-    let data = number_data::for_locale(&state.locale);
+    let data = state.data;
     let manual_grouping = settings.custom_group_size || data.minimum_grouping > 1;
     let ungrouped = !settings.grouping || manual_grouping;
     let formatter = if ungrouped {

@@ -145,7 +145,8 @@ components. The macOS arm64 CLI measured 33,940,832 bytes before intl,
 `1f0b20e3`. The Stage 2 increase was 17,711,648 bytes (52.2%). The later
 `e7ef1f09` release measured 52,264,736 bytes after standalone resource bundles
 and the main-branch process and TLS changes. A 15-locale build would require
-exporting and maintaining a separate data bundle. Its size remains unmeasured.
+exporting and maintaining a separate data bundle. The reviewer chose full
+locale data for the default build. The 15-locale alternative was not measured.
 
 Each loop made 100,000 calls with the formatter reused. These are median
 process counters from three runs on macOS arm64 at `e7ef1f09`.
