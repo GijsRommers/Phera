@@ -55,6 +55,11 @@ pub(crate) enum FunctionShape {
 }
 
 impl FunctionFacts {
+    /// Declared-type bits for a caller checking positional arguments in order.
+    pub(crate) fn typed_parameters(&self) -> u64 {
+        self.typed
+    }
+
     /// Whether parameter `index` has a declared type.
     pub(crate) fn is_typed(&self, index: usize) -> bool {
         index < 64 && self.typed & (1 << index) != 0

@@ -55,6 +55,10 @@ pub enum ParamType {
     ArrayOrFloat,
     /// `array|bool`, used by sorted-set range options.
     ArrayOrBool,
+    /// `array|object`
+    ArrayOrObject,
+    /// `RecursiveIterator|IteratorAggregate`
+    RecursiveOrAggregate,
 }
 
 impl ParamType {

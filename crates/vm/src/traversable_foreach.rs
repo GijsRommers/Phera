@@ -11,7 +11,10 @@ use phera_extension_api::{
 };
 use phera_value::{Value, to_bool};
 
-use crate::{Vm, calls::frame::IteratorState};
+use crate::{
+    Vm,
+    calls::frame::{IteratorState, TraversalMode},
+};
 
 impl Vm {
     /// A resumed generator either yields its next element here or enters the
@@ -27,7 +30,7 @@ impl Vm {
             .current_extras_mut()
             .iterators
             .get_mut(iterator.0)
-            .filter(|state| state.started && !state.traversal_reference)
+            .filter(|state| state.started && state.traversal_mode == TraversalMode::Generator)
             .and_then(|state| state.traversal.as_deref()?.generator())
             .cloned();
         let Some(generator) = generator else {
@@ -54,17 +57,24 @@ impl Vm {
             return Err(internal_error!("traversal subject"));
         };
         let mut cursor = self.make_traversal(object, by_reference).await?;
-        cursor.step(self, IteratorStep::Rewind).await?;
-        let valid = to_bool(&cursor.step(self, IteratorStep::Valid).await?);
+        traversal::step(cursor.as_mut(), self, IteratorStep::Rewind).await?;
+        let valid = to_bool(&traversal::step(cursor.as_mut(), self, IteratorStep::Valid).await?);
+        let traversal_mode = if by_reference {
+            TraversalMode::Reference
+        } else if cursor.generator().is_some() {
+            TraversalMode::Generator
+        } else {
+            TraversalMode::Value
+        };
         self.call_stack.current_extras_mut().iterators.insert(
             iterator.0,
             IteratorState {
                 snapshot: None,
                 source: None,
                 traversal: valid.then_some(cursor),
+                traversal_mode,
                 property_hooks: None,
                 position: None,
-                traversal_reference: by_reference,
                 started: false,
             },
         );
@@ -95,8 +105,8 @@ impl Vm {
             .as_deref_mut()
             .ok_or_else(|| internal_error!("missing Traversable cursor"))?;
         if state.started {
-            cursor.step(self, IteratorStep::Advance).await?;
-            if !to_bool(&cursor.step(self, IteratorStep::Valid).await?) {
+            traversal::step(cursor, self, IteratorStep::Advance).await?;
+            if !to_bool(&traversal::step(cursor, self, IteratorStep::Valid).await?) {
                 return self.jump(end);
             }
         }
@@ -104,12 +114,14 @@ impl Vm {
         if let Some((key, index)) = key.zip(index) {
             self.set(key, index.deref().clone());
         }
-        let value = if state.traversal_reference {
-            value
+        if state.traversal_mode == TraversalMode::Reference {
+            if !value.is_reference() {
+                return Err(crate::traversal::reference_error());
+            }
+            self.set(destination, value);
         } else {
-            value.deref().clone()
-        };
-        self.set(destination, value);
+            self.set(destination, value.deref().clone());
+        }
         state.started = true;
         self.call_stack
             .current_extras_mut()

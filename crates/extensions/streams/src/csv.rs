@@ -34,10 +34,10 @@ pub fn register(registry: &mut Registry) {
 }
 
 #[derive(Clone, Copy)]
-struct Dialect {
-    separator: u8,
-    enclosure: u8,
-    escape: Option<u8>,
+pub(crate) struct Dialect {
+    pub separator: u8,
+    pub enclosure: u8,
+    pub escape: Option<u8>,
 }
 
 fn dialect(
@@ -169,13 +169,21 @@ impl Dialect {
         stream: &mut Stream,
         length: Option<u64>,
     ) -> io::Result<Option<Vec<Option<Vec<u8>>>>> {
-        let mut line = stream.line(length)?;
+        let line = stream.line(length)?;
         if line.is_empty() {
             return Ok(None);
         }
+        self.decode_line(stream, line).map(Some)
+    }
+
+    pub(crate) fn decode_line(
+        self,
+        stream: &mut Stream,
+        mut line: Vec<u8>,
+    ) -> io::Result<Vec<Option<Vec<u8>>>> {
         let mut end = line_end(&line);
         if end == 0 {
-            return Ok(Some(vec![None]));
+            return Ok(vec![None]);
         }
         let mut fields = Vec::new();
         let mut offset = 0;
@@ -222,7 +230,7 @@ impl Dialect {
             field.extend_from_slice(&line[start..offset]);
             fields.push(Some(field));
             if offset == end {
-                return Ok(Some(fields));
+                return Ok(fields);
             }
             offset += 1;
         }

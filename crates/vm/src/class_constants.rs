@@ -264,7 +264,8 @@ impl Vm {
             .map_err(|_| {
                 NativeError::type_error(format!(
                     "Cannot assign {actual} to class constant {}::{name} of type {}",
-                    constant.declaring, declaration_type.display,
+                    constant.declaring,
+                    crate::types::php_type_display(declaration_type),
                 ))
             })
         } else {
