@@ -17,12 +17,22 @@ pub(crate) struct CodeCache {
     units: Arc<Mutex<HashMap<PathBuf, Arc<CompiledUnit>>>>,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum FileMode {
+    Web,
+    Cli,
+}
+
 impl CodeCache {
     /// Returns the compiled unit for `path`, compiling it on first use.
     ///
     /// Reads the file and compiles, both of which block, so async callers
     /// run this on a blocking thread.
-    pub(crate) fn load(&self, path: &Path) -> Result<Arc<CompiledUnit>, RuntimeError> {
+    pub(crate) fn load(
+        &self,
+        path: &Path,
+        mode: FileMode,
+    ) -> Result<Arc<CompiledUnit>, RuntimeError> {
         let read_error = |error| RuntimeError::Read {
             path: path.to_path_buf(),
             error,
@@ -35,10 +45,11 @@ impl CodeCache {
         // Compile without holding the lock, so other files load meanwhile.
         // Two threads may compile the same file once; the result is the same.
         let source = std::fs::read(&canonical).map_err(read_error)?;
-        let unit = Arc::new(phera_compiler::compile_bytes(
-            &source,
-            &canonical.to_string_lossy(),
-        )?);
+        let file = canonical.to_string_lossy();
+        let unit = Arc::new(match mode {
+            FileMode::Web => phera_compiler::compile_bytes(&source, &file),
+            FileMode::Cli => phera_compiler::compile_cli_bytes(&source, &file),
+        }?);
         self.lock().insert(canonical, unit.clone());
         Ok(unit)
     }

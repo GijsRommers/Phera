@@ -38,6 +38,33 @@ pub fn compile_bytes(
     compile_source(source, file, pipeline::SourceKind::File)
 }
 
+/// Compile a script under PHP's CLI scanner rules, including its first-line shebang.
+pub fn compile_cli_bytes(
+    source: &[u8],
+    file: &str,
+) -> Result<phera_bytecode::CompiledUnit, CompileError> {
+    // The CLI scanner counts through the first LF as one line, even if a
+    // carriage return occurs inside the shebang. Keep the byte offsets.
+    let line_end = source
+        .starts_with(b"#!")
+        .then(|| source.iter().position(|&byte| byte == b'\n'))
+        .flatten();
+    if let Some(end) = line_end {
+        let line = &source[..end];
+        let prefix = line.strip_suffix(b"\r").unwrap_or(line);
+        if prefix.contains(&b'\r') {
+            let mut normalized = source.to_vec();
+            for byte in &mut normalized[..prefix.len()] {
+                if *byte == b'\r' {
+                    *byte = b' ';
+                }
+            }
+            return compile_source(&normalized, file, pipeline::SourceKind::CliFile);
+        }
+    }
+    compile_source(source, file, pipeline::SourceKind::CliFile)
+}
+
 /// Compile the code passed to `eval()` without requiring an opening tag.
 pub fn compile_eval(
     source: &[u8],

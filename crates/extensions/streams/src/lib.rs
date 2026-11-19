@@ -20,6 +20,7 @@ mod glob;
 mod handles;
 mod include_path;
 mod ini;
+mod input;
 mod io_policy;
 mod locking;
 mod metadata;
@@ -41,7 +42,8 @@ mod whole_file;
 mod whole_write;
 mod wrapper;
 
-pub use request::{set_request, track_standard};
+pub use input::RequestInput;
+pub use request::{request_input, set_request, track_standard};
 pub use whole_write::append_log;
 pub use wrapper::standard_constants;
 
