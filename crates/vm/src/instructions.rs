@@ -271,7 +271,9 @@ impl Vm {
                 path,
                 ..
             } => {
-                if !self.start_reference_iterator(iter, path, subject)? {
+                if self.path(path)?.has_properties()?
+                    || !self.start_reference_iterator(iter, path, subject)?
+                {
                     return Ok(Some(BatchExit::Instruction(instruction)));
                 }
             }

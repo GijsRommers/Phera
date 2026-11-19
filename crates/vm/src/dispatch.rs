@@ -236,10 +236,26 @@ impl Vm {
                     }
                     self.start_traversable(iter, subject, false).await?;
                 }
-                Instruction::IterStartReference { iter, subject, .. } => {
-                    let value = self.get(subject);
-                    self.set(subject, Value::Null);
-                    self.start_traversable(iter, value, true).await?;
+                Instruction::IterStartReference {
+                    iter,
+                    subject,
+                    path,
+                    ..
+                } => {
+                    let place = self.path(path)?;
+                    if place.has_properties()? {
+                        self.reference_property_path(
+                            place,
+                            crate::property_hook_continuation::ReferenceCompletion::Foreach(
+                                iter, subject,
+                            ),
+                        )
+                        .await?;
+                    } else {
+                        let value = self.get(subject);
+                        self.set(subject, Value::Null);
+                        self.start_traversable(iter, value, true).await?;
+                    }
                 }
                 Instruction::IterNext { iter, value, end } => {
                     self.next_traversable(iter, None, value, end).await?;

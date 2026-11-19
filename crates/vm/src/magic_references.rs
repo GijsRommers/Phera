@@ -22,6 +22,13 @@ pub(crate) struct ReferencePath {
     cursor: Value,
     detached: Option<Value>,
     keys: InlineStack<PathKey>,
+    use_: ReferenceUse,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum ReferenceUse {
+    Alias,
+    Foreach,
 }
 
 pub(crate) enum ReferenceStep {
@@ -69,6 +76,7 @@ impl Vm {
     pub(crate) fn start_magic_reference(
         &mut self,
         place: AccessPath,
+        use_: ReferenceUse,
     ) -> Result<ReferencePath, NativeError> {
         let register = self
             .base_register(&place, Creation::Create, Missing::Silent)?
@@ -80,6 +88,7 @@ impl Vm {
             cursor: self.raw_local(register),
             detached: None,
             keys: InlineStack::new(),
+            use_,
         })
     }
 
@@ -210,6 +219,13 @@ impl Vm {
             };
             path.cursor = next;
             path.keys.push(key);
+        }
+        // Foreach can bind the properties of a returned object without
+        // replacing the slot that holds the object itself.
+        if matches!(path.use_, ReferenceUse::Foreach)
+            && let Value::Object(object) = &*path.cursor.deref()
+        {
+            return Ok(ReferenceStep::Complete(Value::Object(object.clone())));
         }
         let value = if let Some(root) = path.detached.take() {
             self.reference_from_magic(root, &path.keys, std::mem::take(&mut path.cursor))

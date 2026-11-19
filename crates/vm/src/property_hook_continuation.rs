@@ -3,7 +3,7 @@
 
 use std::rc::Rc;
 
-use phera_bytecode::{BinaryOp, FetchMode, IncDec, Reg};
+use phera_bytecode::{BinaryOp, FetchMode, IncDec, IterId, Reg};
 use phera_extension_api::NativeError;
 use phera_value::{Object, Value};
 
@@ -15,7 +15,7 @@ use crate::magic_mutations::{
     AssignmentLocal, MutationHook, MutationPath, MutationStep, PropertyMutation,
 };
 use crate::magic_places::{PathRead, PathReadStep};
-use crate::magic_references::{ReferenceGetter, ReferencePath, ReferenceStep};
+use crate::magic_references::{ReferenceGetter, ReferencePath, ReferenceStep, ReferenceUse};
 use crate::{AccessPath, Vm};
 
 pub(crate) enum ReadCompletion {
@@ -28,16 +28,20 @@ pub(crate) enum ReadCompletion {
 pub(crate) enum ReferenceCompletion {
     Fetch(Reg),
     Argument(usize),
+    Foreach(IterId, Reg),
 }
 
 impl ReferenceCompletion {
-    fn finish(self, vm: &mut Vm, value: Value) -> Result<(), NativeError> {
+    async fn finish(self, vm: &mut Vm, value: Value) -> Result<(), NativeError> {
         match self {
             Self::Fetch(dst) => {
                 vm.set(dst, value);
                 Ok(())
             }
             Self::Argument(index) => vm.store_sent_value(index, value),
+            Self::Foreach(iterator, subject) => {
+                vm.finish_reference_foreach(iterator, subject, value).await
+            }
         }
     }
 }
@@ -180,7 +184,7 @@ impl Vm {
                 getter,
             } => {
                 if let Some(value) = path.resume(getter, returned.value)? {
-                    completion.finish(self, value)
+                    completion.finish(self, value).await
                 } else {
                     self.continue_property_reference(path, completion).await
                 }
@@ -261,7 +265,11 @@ impl Vm {
         place: AccessPath,
         completion: ReferenceCompletion,
     ) -> Result<(), NativeError> {
-        let path = self.start_magic_reference(place)?;
+        let use_ = match completion {
+            ReferenceCompletion::Foreach(..) => ReferenceUse::Foreach,
+            _ => ReferenceUse::Alias,
+        };
+        let path = self.start_magic_reference(place, use_)?;
         self.continue_property_reference(path, completion).await
     }
 
@@ -271,7 +279,7 @@ impl Vm {
         completion: ReferenceCompletion,
     ) -> Result<(), NativeError> {
         match self.advance_magic_reference(&mut path).await? {
-            ReferenceStep::Complete(value) => completion.finish(self, value),
+            ReferenceStep::Complete(value) => completion.finish(self, value).await,
             ReferenceStep::Hook(function, getter) => {
                 self.suspend_for_hook(
                     function,
