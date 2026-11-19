@@ -4,6 +4,7 @@
 mod scenarios {
     mod compression;
     mod environment;
+    mod execution_time;
     mod limits;
     mod new_project;
     mod proxy;
