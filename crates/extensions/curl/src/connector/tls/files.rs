@@ -18,8 +18,15 @@ use crate::{
 
 pub(super) type Identity = (Vec<CertificateDer<'static>>, PrivateKeyDer<'static>);
 
-pub(super) fn load(files: &TlsFiles) -> Result<(RootCertStore, Option<Identity>), TransferError> {
-    let roots = roots(files)?;
+pub(super) fn load(
+    files: &TlsFiles,
+    verify_peer: bool,
+) -> Result<(RootCertStore, Option<Identity>), TransferError> {
+    let roots = if verify_peer {
+        roots(files)?
+    } else {
+        RootCertStore::empty()
+    };
     let identity = identity(files)?;
     Ok((roots, identity))
 }

@@ -92,6 +92,12 @@ impl Network {
             info.scheme = Some(url.scheme().to_owned());
             let actual_method = settings.custom_method.as_deref().unwrap_or(method.name());
             info.method = Some(actual_method.to_owned());
+            if settings.verbose {
+                let message = request::trace(&url, actual_method, settings);
+                if sender.send(Event::Trace(message)).await.is_err() {
+                    return Ok(());
+                }
+            }
             let empty = Payload::default();
             let payload = if matches!(method, Method::Get | Method::Head) {
                 &empty
@@ -124,16 +130,6 @@ impl Network {
             }
             info.auth = auth;
             info.referer = referer.clone();
-            if settings.verbose {
-                let message = format!(
-                    "* {actual_method} {}{}\n",
-                    url.origin().ascii_serialization(),
-                    url.path()
-                );
-                if sender.send(Event::Trace(message)).await.is_err() {
-                    return Ok(());
-                }
-            }
             wire.set(0);
             info.timing.queue = started.elapsed();
             let response = client.request(request);

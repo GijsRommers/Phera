@@ -1,23 +1,26 @@
-//! SHA-256 pins are checked after rustls validates the server certificate.
+//! The TLS signature is always verified, including with explicit trust overrides.
 
 use std::{fmt, sync::Arc};
 
 use base64::{Engine, engine::general_purpose::STANDARD};
 use rustls::{
-    DigitallySignedStruct, Error, OtherError, SignatureScheme,
+    DigitallySignedStruct, Error, OtherError, RootCertStore, SignatureScheme,
     client::{
-        WebPkiServerVerifier,
         danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
+        verify_server_cert_signed_by_trust_anchor, verify_server_name,
     },
+    crypto::{WebPkiSupportedAlgorithms, verify_tls12_signature, verify_tls13_signature},
     pki_types::{CertificateDer, ServerName, UnixTime},
     server::ParsedCertificate,
 };
 use sha2::{Digest, Sha256};
 
 #[derive(Debug)]
-pub(super) struct Pinned {
-    pub(super) verifier: Arc<WebPkiServerVerifier>,
-    pub(super) pins: Arc<str>,
+pub(super) struct Verifier {
+    pub(super) roots: Option<RootCertStore>,
+    pub(super) verify_host: bool,
+    pub(super) pins: Option<Arc<str>>,
+    pub(super) algorithms: WebPkiSupportedAlgorithms,
 }
 
 #[derive(Debug)]
@@ -31,28 +34,39 @@ impl fmt::Display for PinMismatch {
 
 impl std::error::Error for PinMismatch {}
 
-impl ServerCertVerifier for Pinned {
+impl ServerCertVerifier for Verifier {
     fn verify_server_cert(
         &self,
         certificate: &CertificateDer<'_>,
         intermediates: &[CertificateDer<'_>],
         name: &ServerName<'_>,
-        ocsp: &[u8],
+        _ocsp: &[u8],
         now: UnixTime,
     ) -> Result<ServerCertVerified, Error> {
-        let verified =
-            self.verifier
-                .verify_server_cert(certificate, intermediates, name, ocsp, now)?;
-        let public_key = ParsedCertificate::try_from(certificate)?.subject_public_key_info();
-        let hash = STANDARD.encode(Sha256::digest(public_key.as_ref()));
-        if !self
-            .pins
-            .split(';')
-            .any(|pin| pin.strip_prefix("sha256//") == Some(hash.as_str()))
-        {
-            return Err(OtherError(Arc::new(PinMismatch)).into());
+        let certificate = ParsedCertificate::try_from(certificate)?;
+        if let Some(roots) = &self.roots {
+            verify_server_cert_signed_by_trust_anchor(
+                &certificate,
+                roots,
+                intermediates,
+                now,
+                self.algorithms.all,
+            )?;
         }
-        Ok(verified)
+        if self.verify_host {
+            verify_server_name(&certificate, name)?;
+        }
+        if let Some(pins) = &self.pins {
+            let public_key = certificate.subject_public_key_info();
+            let hash = STANDARD.encode(Sha256::digest(public_key.as_ref()));
+            if !pins
+                .split(';')
+                .any(|pin| pin.strip_prefix("sha256//") == Some(hash.as_str()))
+            {
+                return Err(OtherError(Arc::new(PinMismatch)).into());
+            }
+        }
+        Ok(ServerCertVerified::assertion())
     }
 
     fn verify_tls12_signature(
@@ -61,8 +75,7 @@ impl ServerCertVerifier for Pinned {
         certificate: &CertificateDer<'_>,
         signature: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, Error> {
-        self.verifier
-            .verify_tls12_signature(message, certificate, signature)
+        verify_tls12_signature(message, certificate, signature, &self.algorithms)
     }
 
     fn verify_tls13_signature(
@@ -71,11 +84,10 @@ impl ServerCertVerifier for Pinned {
         certificate: &CertificateDer<'_>,
         signature: &DigitallySignedStruct,
     ) -> Result<HandshakeSignatureValid, Error> {
-        self.verifier
-            .verify_tls13_signature(message, certificate, signature)
+        verify_tls13_signature(message, certificate, signature, &self.algorithms)
     }
 
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        self.verifier.supported_verify_schemes()
+        self.algorithms.supported_schemes()
     }
 }

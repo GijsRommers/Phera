@@ -98,11 +98,6 @@ pub(super) fn change(
                 _ => return Ok(Change::Refused("only TLS 1.2 and TLS 1.3 are available")),
             };
         }
-        CURLOPT_SSL_VERIFYPEER | CURLOPT_SSL_VERIFYHOST => {
-            return Ok(Change::Refused(
-                "peer and hostname verification cannot be disabled",
-            ));
-        }
         CURLOPT_INTERFACE => return Ok(Change::Refused("binding to an interface is unavailable")),
         option if tls::is_blob(option) || tls::takes_text(option) => {
             return tls::change(context, &mut transport.tls_files, option, text);

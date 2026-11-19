@@ -31,8 +31,10 @@ if ($body === false) {
 
 [Option support](OPTIONS.md) lists the disposition of every PHP option. Setting
 an unavailable option emits a warning, returns `false`, and leaves the transfer
-configuration unchanged. TLS peer and hostname verification are mandatory.
-An attempt to disable either fails with a warning. Proxy support covers HTTP
+configuration unchanged. TLS verifies the certificate chain and hostname by
+default. An explicit `CURLOPT_SSL_VERIFYPEER => false` or
+`CURLOPT_SSL_VERIFYHOST => 0` disables that check on the handle. The verbose
+trace identifies the disabled checks, and configured pins still apply. Proxy support covers HTTP
 forwarding and CONNECT. Other proxy types and explicit proxies over a Unix
 socket are refused.
 

@@ -235,8 +235,8 @@ one call stops at the first failed option.
 | `CURLOPT_SSL_OPTIONS` | Refused | Unavailable TLS policy control. |
 | `CURLOPT_SSL_SESSIONID_CACHE` | Refused | Unavailable TLS policy control. |
 | `CURLOPT_SSL_SIGNATURE_ALGORITHMS` | Refused | Unavailable TLS policy control. |
-| `CURLOPT_SSL_VERIFYHOST` | Implemented | Select ALPN and require verification. Disabling certificate or hostname checks is refused. |
-| `CURLOPT_SSL_VERIFYPEER` | Implemented | Select ALPN and require verification. Disabling certificate or hostname checks is refused. |
+| `CURLOPT_SSL_VERIFYHOST` | Implemented | Match the peer identity to the URL hostname by default. Zero disables this check. |
+| `CURLOPT_SSL_VERIFYPEER` | Implemented | Validate the certificate chain against trusted roots by default. False disables this check. |
 | `CURLOPT_SSL_VERIFYSTATUS` | Refused | Unavailable TLS policy control. |
 | `CURLOPT_STDERR` | Implemented | Write a Phera trace to stderr or a PHP stream. |
 | `CURLOPT_STREAM_WEIGHT` | Refused | Unavailable in the HTTP client. |

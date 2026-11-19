@@ -133,8 +133,19 @@ pub(super) fn change(
                 settings.redirect_protocols = protocols;
             }
         }
-        CURLOPT_SSL_VERIFYPEER if enabled => {}
-        CURLOPT_SSL_VERIFYHOST if number == 1 || number == 2 => {}
+        CURLOPT_SSL_VERIFYPEER => settings.transport.verify_peer = number != 0,
+        CURLOPT_SSL_VERIFYHOST => {
+            if number == 1 {
+                context.notice(format!(
+                    concat!(
+                        "{function}(): CURLOPT_SSL_VERIFYHOST no longer accepts the value 1, ",
+                        "value 2 will be used instead"
+                    ),
+                    function = function
+                ));
+            }
+            settings.transport.verify_host = number != 0;
+        }
         CURLOPT_NOSIGNAL | CURLOPT_BINARYTRANSFER => {}
         CURLOPT_DNS_USE_GLOBAL_CACHE | CURLOPT_CERTINFO if !enabled => {}
         CURLOPT_HEADEROPT if number == CURLHEADER_SEPARATE => {}

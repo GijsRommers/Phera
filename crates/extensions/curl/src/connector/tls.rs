@@ -8,7 +8,7 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
-use rustls::{ClientConfig, RootCertStore, client::WebPkiServerVerifier};
+use rustls::{ClientConfig, RootCertStore};
 
 use crate::{
     error::TransferError,
@@ -29,13 +29,15 @@ fn system_roots() -> &'static RootCertStore {
 }
 
 pub(super) async fn config(settings: &Transport) -> Result<Arc<ClientConfig>, TransferError> {
-    let (roots, identity) = if settings.tls_files == TlsFiles::default()
+    let (roots, identity) = if settings.verify_peer
+        && settings.tls_files == TlsFiles::default()
         && let Some(roots) = ROOTS.get()
     {
         (roots.clone(), None)
     } else {
         let files = settings.tls_files.clone();
-        tokio::task::spawn_blocking(move || files::load(&files))
+        let verify_peer = settings.verify_peer;
+        tokio::task::spawn_blocking(move || files::load(&files, verify_peer))
             .await
             .map_err(|_| TransferError::new(77, "Cannot load TLS certificate configuration"))??
     };
@@ -49,19 +51,19 @@ pub(super) async fn config(settings: &Transport) -> Result<Arc<ClientConfig>, Tr
     let builder = ClientConfig::builder_with_provider(Arc::clone(&provider))
         .with_protocol_versions(versions)
         .map_err(|error| TransferError::new(35, error.to_string()))?;
-    let builder = if let Some(pins) = &settings.tls_files.pins {
-        let verifier = WebPkiServerVerifier::builder_with_provider(Arc::new(roots), provider)
-            .build()
-            .map_err(|error| TransferError::new(77, error.to_string()))?;
-        builder
-            .dangerous()
-            .with_custom_certificate_verifier(Arc::new(verify::Pinned {
-                verifier,
-                pins: Arc::clone(pins),
-            }))
-    } else {
-        builder.with_root_certificates(roots)
-    };
+    let builder =
+        if settings.verify_peer && settings.verify_host && settings.tls_files.pins.is_none() {
+            builder.with_root_certificates(roots)
+        } else {
+            builder
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(verify::Verifier {
+                    roots: settings.verify_peer.then_some(roots),
+                    verify_host: settings.verify_host,
+                    pins: settings.tls_files.pins.clone(),
+                    algorithms: provider.signature_verification_algorithms,
+                }))
+        };
     let mut config = if let Some((certificates, key)) = identity {
         builder
             .with_client_auth_cert(certificates, key)

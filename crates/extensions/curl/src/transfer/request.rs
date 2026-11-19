@@ -18,6 +18,23 @@ use crate::{
 
 use super::upload::Payload;
 
+pub(super) fn trace(url: &Url, method: &str, settings: &Settings) -> String {
+    let mut message = format!(
+        "* {method} {}{}\n",
+        url.origin().ascii_serialization(),
+        url.path(),
+    );
+    if url.scheme() == "https" {
+        if !settings.transport.verify_peer {
+            message.push_str("* SSL Trust: peer verification disabled\n");
+        }
+        if !settings.transport.verify_host {
+            message.push_str("* SSL Trust: hostname verification disabled\n");
+        }
+    }
+    message
+}
+
 pub(super) fn build(
     url: &Url,
     method: &str,
