@@ -27,6 +27,7 @@ pub const ATTR_ERRMODE: i64 = 3;
 pub const ATTR_SERVER_VERSION: i64 = 4;
 pub const ATTR_CLIENT_VERSION: i64 = 5;
 pub const ATTR_CASE: i64 = 8;
+pub const ATTR_ORACLE_NULLS: i64 = 11;
 pub const ATTR_PERSISTENT: i64 = 12;
 pub const ATTR_DRIVER_NAME: i64 = 16;
 pub const ATTR_STRINGIFY_FETCHES: i64 = 17;
@@ -171,7 +172,7 @@ pub const CONSTANTS: &[(&str, ConstantValue)] = &[
     ("ATTR_CASE", ConstantValue::Int(ATTR_CASE)),
     ("ATTR_CURSOR_NAME", ConstantValue::Int(9)),
     ("ATTR_CURSOR", ConstantValue::Int(10)),
-    ("ATTR_ORACLE_NULLS", ConstantValue::Int(11)),
+    ("ATTR_ORACLE_NULLS", ConstantValue::Int(ATTR_ORACLE_NULLS)),
     ("ATTR_PERSISTENT", ConstantValue::Int(ATTR_PERSISTENT)),
     ("ATTR_STATEMENT_CLASS", ConstantValue::Int(13)),
     ("ATTR_FETCH_TABLE_NAMES", ConstantValue::Int(14)),

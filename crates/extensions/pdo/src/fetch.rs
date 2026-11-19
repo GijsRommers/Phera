@@ -102,6 +102,14 @@ pub(crate) fn stringify(
     value: Value,
     attributes: &Attributes,
 ) -> NativeResult {
+    if attributes.oracle_nulls == 1
+        && matches!(&value, Value::String(text) if text.as_bytes().is_empty())
+    {
+        return Ok(Value::Null);
+    }
+    if value.is_null() && attributes.oracle_nulls == 2 {
+        return Ok(Value::from(""));
+    }
     if !attributes.stringify || value.is_null() {
         return Ok(value);
     }

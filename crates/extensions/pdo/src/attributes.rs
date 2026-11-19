@@ -2,13 +2,13 @@
 
 use std::rc::Rc;
 
-use phera_extension_api::value::{to_bool, to_int};
+use phera_extension_api::value::{NumVal, parse_numeric, to_bool, to_int};
 use phera_extension_api::{Context, LocalFuture, NativeError, NativeResult, Object, Value, args};
 
 use crate::connection::session;
 use crate::constants::{
     ATTR_CASE, ATTR_CLIENT_VERSION, ATTR_DEFAULT_FETCH_MODE, ATTR_DRIVER_NAME,
-    ATTR_EMULATE_PREPARES, ATTR_ERRMODE, ATTR_PERSISTENT, ATTR_SERVER_VERSION,
+    ATTR_EMULATE_PREPARES, ATTR_ERRMODE, ATTR_ORACLE_NULLS, ATTR_PERSISTENT, ATTR_SERVER_VERSION,
     ATTR_STRINGIFY_FETCHES, ATTR_TIMEOUT, CASE_LOWER, CASE_NATURAL, CASE_UPPER, ERRMODE_EXCEPTION,
     ERRMODE_SILENT, ERRMODE_WARNING, SQLITE_ATTR_EXTENDED_RESULT_CODES, SQLITE_ATTR_OPEN_FLAGS,
     SQLITE_ATTR_TRANSACTION_MODE, SQLITE_OPEN_CREATE, SQLITE_OPEN_READWRITE,
@@ -33,10 +33,11 @@ pub enum ColumnCase {
 
 /// The attributes pdo_sqlite accepts in `setAttribute()`; the constructor
 /// also takes `ATTR_OPEN_FLAGS`. Any other is refused with false.
-const SQLITE_SETTABLE: [i64; 8] = [
+const SQLITE_SETTABLE: [i64; 9] = [
     ATTR_TIMEOUT,
     ATTR_ERRMODE,
     ATTR_CASE,
+    ATTR_ORACLE_NULLS,
     ATTR_PERSISTENT,
     ATTR_STRINGIFY_FETCHES,
     ATTR_DEFAULT_FETCH_MODE,
@@ -45,11 +46,12 @@ const SQLITE_SETTABLE: [i64; 8] = [
 ];
 
 /// The attributes pdo_sqlite answers in `getAttribute()`.
-const SQLITE_READABLE: [i64; 9] = [
+const SQLITE_READABLE: [i64; 10] = [
     ATTR_ERRMODE,
     ATTR_SERVER_VERSION,
     ATTR_CLIENT_VERSION,
     ATTR_CASE,
+    ATTR_ORACLE_NULLS,
     ATTR_PERSISTENT,
     ATTR_DRIVER_NAME,
     ATTR_STRINGIFY_FETCHES,
@@ -68,6 +70,7 @@ pub struct Attributes {
     pub emulate: bool,
     pub stringify: bool,
     pub case: ColumnCase,
+    pub oracle_nulls: i64,
     pub persistent: bool,
     /// SQLite only: the lock timeout in seconds, the open flags, whether
     /// errors report SQLite's extended result codes, and the BEGIN mode.
@@ -86,6 +89,7 @@ impl Attributes {
             emulate: driver == DriverName::Mysql,
             stringify: false,
             case: ColumnCase::Natural,
+            oracle_nulls: 0,
             persistent: false,
             timeout: SQLITE_DEFAULT_TIMEOUT,
             sqlite_flags: SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
@@ -131,6 +135,7 @@ impl Attributes {
                 }
             }
             ATTR_STRINGIFY_FETCHES => self.stringify = to_bool(value),
+            ATTR_ORACLE_NULLS => self.oracle_nulls = integer(value)?,
             ATTR_DEFAULT_FETCH_MODE => {
                 self.fetch = FetchMode::parse(to_int(value, context.diagnostics())?, self.fetch)?
             }
@@ -144,6 +149,26 @@ impl Attributes {
         }
         Ok(())
     }
+}
+
+pub(crate) fn integer(value: &Value) -> Result<i64, NativeError> {
+    match &*value.deref() {
+        Value::Int(value) => return Ok(*value),
+        Value::Bool(value) => return Ok(i64::from(*value)),
+        Value::String(value) => {
+            let parsed = parse_numeric(value.as_bytes());
+            if parsed.exact
+                && let Some(NumVal::Int(value)) = parsed.value
+            {
+                return Ok(value);
+            }
+        }
+        _ => {}
+    }
+    Err(NativeError::type_error(format!(
+        "Attribute value must be of type int for selected attribute, {} given",
+        value.type_name()
+    )))
 }
 
 /// Whether the constructor's options may set `attribute`: for SQLite only
@@ -236,6 +261,7 @@ pub fn get(
         ATTR_PERSISTENT => Value::Bool(attributes.persistent),
         ATTR_DRIVER_NAME => Value::from(connection.name.name()),
         ATTR_STRINGIFY_FETCHES => Value::Bool(attributes.stringify),
+        ATTR_ORACLE_NULLS => Value::Int(attributes.oracle_nulls),
         ATTR_DEFAULT_FETCH_MODE => Value::Int(attributes.fetch.number()),
         ATTR_EMULATE_PREPARES => Value::Bool(attributes.emulate),
         _ => return Err(unsupported("This PDO attribute")),
