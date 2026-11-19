@@ -1,7 +1,7 @@
 //! `ob_start('ob_gzhandler')` negotiates gzip or deflate on an HTTP request.
 
 use phera_ext_http::ResponseHead;
-use phera_extension_api::{ArrayKey, Context, NativeResult, Value, args};
+use phera_extension_api::{ArrayKey, Context, NativeError, NativeResult, Value, args};
 
 use crate::deflate::{Encoder, Flush};
 use crate::format::Encoding;
@@ -97,4 +97,19 @@ pub(crate) fn gzhandler(context: &mut dyn Context, values: &[Value]) -> NativeRe
         state.encoder = None;
     }
     Ok(result.map_or(Value::Bool(false), Value::from))
+}
+
+pub(crate) fn update_compression(
+    context: &mut dyn Context,
+    name: &str,
+    _: Option<&[u8]>,
+    function: &str,
+) -> Result<bool, NativeError> {
+    if context.output_origin().is_some() {
+        context.warning(format!(
+            "{function}(): Cannot change {name} - headers already sent"
+        ));
+        return Ok(false);
+    }
+    Ok(true)
 }

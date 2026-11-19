@@ -11,14 +11,19 @@ use crate::wrapper::Target;
 
 use super::Gzip;
 
+pub(crate) struct GzipOptions {
+    pub include_path: bool,
+    pub level: Option<u32>,
+    pub wrapper: Wrapper,
+}
+
 pub(crate) async fn open_gzip(
     context: &mut dyn Context,
     function: &str,
     filename: &[u8],
     uri: &[u8],
     mode: &[u8],
-    include_path: bool,
-    direct: bool,
+    options: GzipOptions,
 ) -> Result<Option<Stream>, NativeError> {
     nonempty_path(filename)?;
     let mode = mode.split(|byte| *byte == 0).next().unwrap_or_default();
@@ -51,17 +56,20 @@ pub(crate) async fn open_gzip(
             return Ok(None);
         }
     };
-    let include = include_path.then(|| (context.include_path(), context.script_path()));
+    let include = options
+        .include_path
+        .then(|| (context.include_path(), context.script_path()));
     let directory = directory(context);
     let found = include
         .and_then(|(include, script)| search(directory, filename, &include, script.as_deref()));
     let resolved = found.map_or_else(|| directory.resolve(path(filename)), Ok);
     let mask = files(context).mask;
-    let level = mode
-        .iter()
-        .rev()
-        .find(|byte| byte.is_ascii_digit())
-        .map_or(6, |byte| u32::from(byte - b'0'));
+    let level = options.level.unwrap_or_else(|| {
+        mode.iter()
+            .rev()
+            .find(|byte| byte.is_ascii_digit())
+            .map_or(6, |byte| u32::from(byte - b'0'))
+    });
     let opened = IoPolicy::Blocking
         .run(move || {
             let file = parsed.open(&resolved?, mask)?;
@@ -73,19 +81,12 @@ pub(crate) async fn open_gzip(
         })
         .await?;
     match opened {
-        Ok(gzip) => {
-            let wrapper = if direct {
-                Wrapper::GzipDirect
-            } else {
-                Wrapper::Gzip
-            };
-            Ok(Some(Stream::new(
-                Backing::Gzip(Box::new(gzip)),
-                wrapper,
-                mode,
-                uri,
-            )))
-        }
+        Ok(gzip) => Ok(Some(Stream::new(
+            Backing::Gzip(Box::new(gzip)),
+            options.wrapper,
+            mode,
+            uri,
+        ))),
         Err(error) => {
             context.warning_bytes(&open_failure_message(
                 function,

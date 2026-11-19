@@ -64,7 +64,8 @@ pub(crate) fn dictionary(
             Ok((!dictionary.is_empty()).then_some(dictionary))
         }
         given => Err(NativeError::type_error(format!(
-            "{function}(): Argument #2 ($options) must be of type zero-terminated string or array, {} given",
+            "{}(): Argument #2 ($options) must be of type zero-terminated string or array, {} given",
+            function,
             match given {
                 Value::Bool(true) => "true".into(),
                 Value::Bool(false) => "false".into(),

@@ -73,6 +73,9 @@ pub enum ParamType {
     RecursiveOrAggregate,
 }
 
+/// Early validation for a native numeric type's string input.
+pub type NumericStringError = fn(&[u8]) -> Option<&'static str>;
+
 /// Native numeric types can reject malformed strings while preparing a call.
 /// This preserves the order of validation and coercion for later arguments.
 #[derive(Debug)]
@@ -80,7 +83,7 @@ pub struct NativeNumericParameter {
     pub class: &'static str,
     pub declaration: &'static str,
     pub type_error: &'static str,
-    pub string_error: Option<fn(&[u8]) -> Option<&'static str>>,
+    pub string_error: Option<NumericStringError>,
 }
 
 impl PartialEq for NativeNumericParameter {

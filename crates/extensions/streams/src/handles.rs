@@ -13,7 +13,7 @@ use crate::io_policy::{CHUNK, IoPolicy};
 use crate::request::{files, new_resource};
 use crate::resource::{argument_resource, operate, stream_arg, with_stream};
 use crate::stream::Wrapper;
-use crate::wrapper::open;
+use crate::wrapper::{Target, open};
 
 pub const STREAM: Param = Param::new("stream", ParamType::Mixed);
 pub const FILENAME: Param = Param::new("filename", ParamType::String);
@@ -74,14 +74,30 @@ fn fopen(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
         let name = args::bytes(&arguments, 0);
         check_path("fopen", "#1 ($filename)", name)?;
         validate(args::value(&arguments, 3), "fopen", 4)?;
-        let stream = open(
-            context,
-            "fopen",
-            name,
-            args::bytes(&arguments, 1),
-            args::bool(&arguments, 2).unwrap_or(false),
-        )
-        .await?;
+        let mode = args::bytes(&arguments, 1);
+        let include_path = args::bool(&arguments, 2).unwrap_or(false);
+        let stream_context = args::value(&arguments, 3);
+        let stream = if let Target::Gzip(filename) = Target::parse(name)
+            && let Some(level) = crate::context_options::option(stream_context, "zlib", "level")
+        {
+            let level = phera_extension_api::value::to_int(&level, context.diagnostics())?;
+            let level = u32::try_from(level).ok().filter(|level| *level <= 9);
+            crate::gzip::open_gzip(
+                context,
+                "fopen",
+                filename,
+                name,
+                mode,
+                crate::gzip::GzipOptions {
+                    include_path,
+                    level,
+                    wrapper: Wrapper::Gzip,
+                },
+            )
+            .await?
+        } else {
+            open(context, "fopen", name, mode, include_path).await?
+        };
         Ok(match stream {
             Some(stream) => new_resource(context.state(), "stream", stream),
             None => Value::Bool(false),
@@ -161,6 +177,10 @@ pub(crate) async fn seek_arguments(
     }
     let resource = stream_arg(&arguments, function)?;
     let policy = with_stream(resource, |stream| stream.seek_policy())?;
+    if whence == 2 && with_stream(resource, |stream| stream.wrapper.is_gzip())? {
+        context.warning(format!("{function}(): SEEK_END is not supported"));
+        return Ok(Value::Int(-1));
+    }
     let seek = seek_from(offset, whence);
     let success = match seek {
         Some(seek) => operate(resource, policy, move |stream| stream.seek(seek))

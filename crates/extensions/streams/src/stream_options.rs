@@ -209,7 +209,7 @@ fn supports_lock(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         return Ok(Value::Bool(false));
     }
     with_stream(stream_arg(arguments, "stream_supports_lock")?, |stream| {
-        Value::Bool(stream.descriptor().is_some())
+        Value::Bool(stream.lock_descriptor().is_some())
     })
 }
 

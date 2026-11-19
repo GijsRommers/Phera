@@ -2,9 +2,7 @@
 
 use num_integer::Integer;
 use num_traits::Signed;
-use phera_extension_api::{
-    ConstantValue, Context, FunctionEntry, NativeResult, Param, ParamType, Value, args,
-};
+use phera_extension_api::{ConstantValue, FunctionEntry, Param, ParamType, args};
 
 use crate::{
     BASE, GMP_NUMBER,

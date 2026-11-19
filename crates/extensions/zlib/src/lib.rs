@@ -106,6 +106,8 @@ impl Extension for Zlib {
         for class in contexts::CLASSES {
             registry.class(class);
         }
+        registry.ini_update("zlib.output_compression", output::update_compression);
+        registry.ini_update("zlib.output_handler", output::update_compression);
         phera_ext_streams::register_gzip_functions(registry);
     }
 }

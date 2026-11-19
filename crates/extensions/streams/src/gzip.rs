@@ -10,7 +10,7 @@ use crate::io_policy::CHUNK;
 mod functions;
 mod open;
 pub use functions::register;
-pub(crate) use open::open_gzip;
+pub(crate) use open::{GzipOptions, open_gzip};
 
 pub enum Gzip {
     Reader(Box<BufReader<GzipInput>>),
@@ -121,8 +121,22 @@ impl Gzip {
 
     pub fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         match self {
-            Self::Reader(_) => Err(io::ErrorKind::Unsupported.into()),
+            Self::Reader(_) => Ok(0),
             Self::Writer(writer) => writer.encoder()?.write(bytes),
+        }
+    }
+
+    pub fn at_end(&mut self) -> bool {
+        match self {
+            Self::Reader(reader) => reader.fill_buf().is_ok_and(|bytes| bytes.is_empty()),
+            Self::Writer(_) => false,
+        }
+    }
+
+    pub fn file(&self) -> Option<&File> {
+        match self {
+            Self::Reader(reader) => Some(reader.get_ref().file()),
+            Self::Writer(writer) => writer.0.as_ref().map(GzEncoder::get_ref),
         }
     }
 

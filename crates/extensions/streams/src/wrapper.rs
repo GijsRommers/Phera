@@ -11,7 +11,7 @@ use rustix::io::fcntl_dupfd_cloexec;
 use crate::errors::{
     nonempty_path, open_failure_message, reason, wrapper_message, wrapper_warning,
 };
-use crate::gzip::open_gzip;
+use crate::gzip::{GzipOptions, open_gzip};
 use crate::io_policy::IoPolicy;
 use crate::mode::Mode;
 use crate::request::{directory, files, path, resource, search};
@@ -126,7 +126,19 @@ pub(crate) async fn open_with_errors(
     let mode = mode.split(|byte| *byte == 0).next().unwrap_or_default();
     let (result, warning) = match Target::parse(name) {
         Target::Gzip(filename) => {
-            return open_gzip(context, function, filename, name, mode, include_path, false).await;
+            return open_gzip(
+                context,
+                function,
+                filename,
+                name,
+                mode,
+                GzipOptions {
+                    include_path,
+                    level: None,
+                    wrapper: Wrapper::Gzip,
+                },
+            )
+            .await;
         }
         Target::File(filename) => (
             open_file(context, filename, name, mode, include_path).await?,

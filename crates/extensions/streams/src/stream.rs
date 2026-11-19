@@ -97,6 +97,13 @@ impl Stream {
         }
     }
 
+    pub fn lock_descriptor(&self) -> Option<&File> {
+        match &self.backing {
+            Backing::Gzip(gzip) => gzip.file(),
+            _ => self.descriptor(),
+        }
+    }
+
     pub fn metadata(&self) -> io::Result<Metadata> {
         self.descriptor()
             .ok_or(io::ErrorKind::Unsupported)?
@@ -198,7 +205,13 @@ impl Stream {
         let limit = limit.unwrap_or(u64::MAX);
         match &mut self.backing {
             Backing::File(file) => file.take(limit).read_until(b'\n', &mut line)?,
-            Backing::Gzip(gzip) => gzip.line(limit, &mut line)?,
+            Backing::Gzip(gzip) => {
+                let count = gzip.line(limit, &mut line)?;
+                if count != 0 && gzip.at_end() {
+                    self.eof = true;
+                }
+                count
+            }
             Backing::Memory(cursor) => cursor.take(limit).read_until(b'\n', &mut line)?,
             Backing::Input(input) => {
                 line = input.line(

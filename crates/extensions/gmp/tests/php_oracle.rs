@@ -12,7 +12,10 @@ fn gmp_matches_php() {
     let script = comparison.artifacts.join("gmp.php");
     let preamble = PHP_PREAMBLE.replace(
         "    if (is_object($v)) {",
-        "    if (is_object($v) && get_class($v) === 'GMP') return 'G:' . (string) $v;\n    if (is_object($v)) {",
+        concat!(
+            "    if (is_object($v) && get_class($v) === 'GMP') return 'G:' . (string) $v;\n",
+            "    if (is_object($v)) {",
+        ),
     );
     std::fs::write(
         &script,

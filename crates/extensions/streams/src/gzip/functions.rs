@@ -5,13 +5,13 @@ use phera_extension_api::{
     Registry, Value, args,
 };
 
-use super::open_gzip;
+use super::{GzipOptions, open_gzip};
 use crate::errors::check_path;
 use crate::handles::{self, FILENAME, INCLUDE_PATH, LENGTH, STREAM};
 use crate::io_policy::{CHUNK, IoPolicy};
 use crate::request::new_resource;
 use crate::resource::{stream_arg, with_stream};
-use crate::stream::Stream;
+use crate::stream::{Stream, Wrapper};
 use crate::transfer;
 
 const FILE: &[Param] = &[FILENAME, INCLUDE_PATH];
@@ -115,8 +115,11 @@ async fn open_stream(
         path,
         path,
         mode.unwrap_or_else(|| args::bytes(values, 1)),
-        args::bool(values, include).unwrap_or(false),
-        true,
+        GzipOptions {
+            include_path: args::bool(values, include).unwrap_or(false),
+            level: None,
+            wrapper: Wrapper::GzipDirect,
+        },
     )
     .await
 }
