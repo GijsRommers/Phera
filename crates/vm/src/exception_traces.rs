@@ -20,9 +20,9 @@ impl Vm {
     /// Frame entries point at the caller's call instruction and omit the main frame.
     pub(crate) fn throwable_trace(&mut self, origin: crate::exceptions::TraceOrigin) -> Value {
         let trace = if self.generator_traces.is_empty() {
-            self.trace_frames::<false>(origin)
+            self.trace_frames::<false>(origin, true)
         } else {
-            self.trace_frames::<true>(origin)
+            self.trace_frames::<true>(origin, true)
         };
         if !self.error_handlers.trace_ignore_args {
             return trace;
@@ -41,9 +41,19 @@ impl Vm {
         Value::from(result)
     }
 
+    pub(crate) fn trace_without_fiber_caller(&mut self) -> Value {
+        let origin = crate::exceptions::TraceOrigin::Construction;
+        if self.generator_traces.is_empty() {
+            self.trace_frames::<false>(origin, false)
+        } else {
+            self.trace_frames::<true>(origin, false)
+        }
+    }
+
     fn trace_frames<const INCLUDE_GENERATORS: bool>(
         &mut self,
         origin: crate::exceptions::TraceOrigin,
+        include_fiber_caller: bool,
     ) -> Value {
         let mut trace = PhpArray::new();
         if let Some(native) = matches!(origin, crate::exceptions::TraceOrigin::Engine)
@@ -57,7 +67,12 @@ impl Vm {
             if let Some((class, method)) = native.name.split_once("::") {
                 entry.insert(ArrayKey::str("function"), Value::from(method));
                 entry.insert(ArrayKey::str("class"), Value::from(class));
-                entry.insert(ArrayKey::str("type"), Value::from("->"));
+                let access = if native.name == "Fiber::suspend" {
+                    "::"
+                } else {
+                    "->"
+                };
+                entry.insert(ArrayKey::str("type"), Value::from(access));
             } else {
                 entry.insert(ArrayKey::str("function"), Value::from(native.name));
             }
@@ -178,6 +193,9 @@ impl Vm {
             entry.insert(ArrayKey::str("function"), Value::from(name));
             entry.insert(ArrayKey::str("args"), self.trace_arguments(0));
             let _ = trace.push(Value::Array(Rc::new(entry)));
+        }
+        if include_fiber_caller {
+            self.append_fiber_caller(&mut trace);
         }
         Value::Array(Rc::new(trace))
     }

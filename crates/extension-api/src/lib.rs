@@ -63,5 +63,6 @@ pub trait Extension {
     fn register(&self, registry: &mut Registry);
 }
 
+pub mod fiber;
 pub mod ini;
 pub mod reflection;

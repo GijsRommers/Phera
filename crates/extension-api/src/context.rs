@@ -123,6 +123,32 @@ pub trait Context {
         arguments: Vec<Value>,
     ) -> LocalFuture<'a, NativeResult>;
 
+    /// The fiber on this PHP stack, or none on the request's main stack.
+    fn current_fiber(&self) -> Option<Rc<Object>> {
+        None
+    }
+
+    fn fiber_operation(
+        &mut self,
+        object: Rc<Object>,
+        _operation: crate::fiber::FiberOperation,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(std::future::ready(crate::fiber::unavailable(Some(object))))
+    }
+
+    fn suspend_fiber(&mut self, _value: Value) -> LocalFuture<'_, NativeResult> {
+        let error = crate::fiber::fiber_error("Cannot suspend outside of a fiber");
+        Box::pin(std::future::ready(Err(error)))
+    }
+
+    fn inspect_fiber(
+        &mut self,
+        object: Rc<Object>,
+        _inspection: crate::fiber::FiberInspection,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(std::future::ready(crate::fiber::unavailable(Some(object))))
+    }
+
     /// The location of the first write that committed the response headers.
     fn output_origin(&self) -> Option<(&str, usize)> {
         None

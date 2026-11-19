@@ -70,6 +70,7 @@ impl Vm {
                 && matches!(
                     class.name.as_str(),
                     "Directory"
+                        | "Fiber"
                         | "Generator"
                         | "InternalIterator"
                         | "PDO"
@@ -83,6 +84,7 @@ impl Vm {
                         | "ReflectionExtension"
                         | "ReflectionFunctionAbstract"
                         | "ReflectionGenerator"
+                        | "ReflectionFiber"
                         | "ReflectionParameter"
                         | "ReflectionProperty"
                         | "ReflectionReference"

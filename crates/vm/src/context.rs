@@ -46,6 +46,30 @@ impl Context for Vm {
         Box::pin(self.register_callback(phase, arguments))
     }
 
+    fn current_fiber(&self) -> Option<std::rc::Rc<phera_value::Object>> {
+        Vm::current_fiber(self)
+    }
+
+    fn fiber_operation(
+        &mut self,
+        object: std::rc::Rc<phera_value::Object>,
+        operation: phera_extension_api::fiber::FiberOperation,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(Vm::fiber_operation(self, object, operation))
+    }
+
+    fn suspend_fiber(&mut self, value: Value) -> LocalFuture<'_, NativeResult> {
+        Box::pin(self.fiber_suspend(value))
+    }
+
+    fn inspect_fiber(
+        &mut self,
+        object: std::rc::Rc<phera_value::Object>,
+        inspection: phera_extension_api::fiber::FiberInspection,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(self.fiber_inspect(object, inspection))
+    }
+
     fn ini_get(&self, name: &[u8]) -> Option<phera_value::PhpString> {
         Vm::ini_get(self, name)
     }

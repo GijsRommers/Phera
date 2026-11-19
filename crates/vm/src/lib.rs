@@ -73,6 +73,7 @@ mod exception_unwind;
 mod exceptions;
 mod extract;
 mod fast;
+mod fibers;
 mod finally;
 mod function_facts;
 mod function_introspection;
@@ -229,6 +230,8 @@ pub struct Vm {
     property_references: std::rc::Rc<std::cell::RefCell<reference_holders::ReferenceHolders>>,
     autoload: autoload::Autoloaders,
     ini_overrides: ini::IniOverrides,
+    active_fiber: Option<Box<fibers::Active>>,
+    suspended_fibers: fibers::SuspendedFibers,
 }
 
 impl Vm {
@@ -246,11 +249,26 @@ impl Vm {
                 )
             })
             .collect();
+        let mut vm = Self::new_shell(registry);
+        vm.classes = classes::ClassTable::native(&vm.registry);
+        vm.constants = constant_table::ConstantTable::new(constants);
+        vm
+    }
+
+    /// Register VM-owned fiber classes after the runtime has loaded Core and Reflection.
+    pub fn register_fiber_classes(registry: &mut Registry) {
+        fibers::register(registry);
+    }
+
+    /// The empty stack and headers of a VM before receiving request data.
+    fn new_shell(registry: Arc<Registry>) -> Self {
         Self {
             enum_cases: classes::enums::EnumCases::default(),
-            classes: classes::ClassTable::native(&registry),
+            classes: classes::ClassTable::default(),
             autoload: Default::default(),
             ini_overrides: Default::default(),
+            active_fiber: None,
+            suspended_fibers: Default::default(),
             native_callback_sites: Vec::new(),
             debug_objects: Vec::new(),
             property_guards: Vec::new(),
@@ -286,7 +304,7 @@ impl Vm {
             output_writer: output::Output::new(),
             request_callbacks: Default::default(),
             registers: calls::registers::Registers::new(),
-            constants: constant_table::ConstantTable::new(constants),
+            constants: constant_table::ConstantTable::default(),
             frame_limit: DEFAULT_FRAME_LIMIT,
             status: 0,
             error_handlers: error_handlers::ErrorHandlers::default(),
@@ -370,6 +388,7 @@ impl Vm {
             self.unwind(error);
         }
         self.run_shutdown_callbacks().await;
+        self.close_fibers().await;
         self.finish_buffers().await;
         if let Err(error) = self.finish_headers().await {
             self.unwind(error);

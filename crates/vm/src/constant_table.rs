@@ -27,6 +27,7 @@ pub(crate) struct GlobalConstant {
 }
 
 /// Request constants and the resolved values of bytecode symbols.
+#[derive(Default)]
 pub(crate) struct ConstantTable {
     values: HashMap<String, GlobalConstant>,
     user_order: Vec<String>,
