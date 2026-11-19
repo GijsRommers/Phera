@@ -104,6 +104,30 @@ impl Vm {
             let result = compare_objects(left, right, diagnostics)?;
             if matches!(result, ObjectComparison::Default)
                 && left.class.name() == right.class.name()
+            {
+                let effective_left = left
+                    .lazy_instance()
+                    .map(crate::lazy_objects::resolved_lazy_instance);
+                let effective_right = right
+                    .lazy_instance()
+                    .map(crate::lazy_objects::resolved_lazy_instance);
+                let left = effective_left.as_deref().unwrap_or(left);
+                let right = effective_right.as_deref().unwrap_or(right);
+                if std::ptr::eq(left, right) {
+                    return Ok(ObjectComparison::Compared(0));
+                }
+                if left.is_uninitialized_lazy() || right.is_uninitialized_lazy() {
+                    return Ok(ObjectComparison::InitializeLazy);
+                }
+                if effective_left.is_some() || effective_right.is_some() {
+                    return Ok(ObjectComparison::Projected(
+                        left.to_array(),
+                        right.to_array(),
+                    ));
+                }
+            }
+            if matches!(result, ObjectComparison::Default)
+                && left.class.name() == right.class.name()
                 && hooks(left).is_some_and(|hooks| hooks.properties.is_some())
             {
                 let views = (|| {

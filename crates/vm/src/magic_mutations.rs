@@ -121,14 +121,16 @@ impl Vm {
                 }
             };
             if let (PathKey::Property(name), Value::Object(object)) = (&key, &current) {
-                let effective = crate::lazy_objects::resolved_lazy_instance(object.clone());
                 let access = match (steps.peek().is_none(), &operation) {
                     (true, PropertyMutation::Write(_, Binding::ByValue)) => {
-                        crate::lazy_objects::LazyAccess::Write
+                        crate::lazy_property_access::LazyAccess::Write
                     }
-                    (true, PropertyMutation::Unset) => crate::lazy_objects::LazyAccess::Unset,
-                    _ => crate::lazy_objects::LazyAccess::Reference,
+                    (true, PropertyMutation::Unset) => {
+                        crate::lazy_property_access::LazyAccess::Unset
+                    }
+                    _ => crate::lazy_property_access::LazyAccess::Reference,
                 };
+                let effective = self.lazy_property_receiver(object, name, access);
                 if self.property_requires_initialization(&effective, name, access) {
                     path.cursor = cursor;
                     path.retry = Some(key);

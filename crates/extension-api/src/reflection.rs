@@ -282,6 +282,7 @@ pub trait ReflectionContext {
 pub enum PropertyWrite {
     Value,
     Raw,
+    RawWithoutInitialization,
 }
 
 #[derive(Clone, Copy, Debug)]

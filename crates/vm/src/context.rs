@@ -116,8 +116,9 @@ impl Context for Vm {
         match purpose {
             phera_extension_api::PropertyPurpose::Debug => self.has_debug_info(object),
             phera_extension_api::PropertyPurpose::Json => {
-                self.hooked_property_class(object).is_some()
+                object.lazy().is_some() || self.hooked_property_class(object).is_some()
             }
+            phera_extension_api::PropertyPurpose::Serialize => lazy_serialization_view(object),
             _ => false,
         }
     }
@@ -128,12 +129,14 @@ impl Context for Vm {
         purpose: phera_extension_api::PropertyPurpose,
     ) -> bool {
         self.native_view_depth == Some(self.call_stack.depth())
-            && matches!(
-                purpose,
+            && match purpose {
                 phera_extension_api::PropertyPurpose::Json
-                    | phera_extension_api::PropertyPurpose::Export
-            )
-            && self.hooked_property_class(object).is_some()
+                | phera_extension_api::PropertyPurpose::Export => {
+                    object.lazy().is_some() || self.hooked_property_class(object).is_some()
+                }
+                phera_extension_api::PropertyPurpose::Serialize => lazy_serialization_view(object),
+                _ => false,
+            }
     }
 
     fn property_view(
@@ -143,6 +146,37 @@ impl Context for Vm {
         function: &'static str,
         arguments: &[Value],
     ) -> LocalFuture<'_, Result<phera_extension_api::PropertyView, NativeError>> {
+        use phera_extension_api::{PropertyPurpose, PropertyView};
+        if (matches!(purpose, PropertyPurpose::Json | PropertyPurpose::Export)
+            && object.lazy().is_some())
+            || (purpose == PropertyPurpose::Serialize && lazy_serialization_view(&object))
+        {
+            let native = crate::error_traces::NativeTrace::new(function, arguments);
+            return Box::pin(async move {
+                let object = self.initialize_lazy_via_callback(object).await?;
+                let properties = if purpose == PropertyPurpose::Serialize {
+                    self.ordered_serialization_properties(&object)?
+                } else if let Some(class) = self.hooked_property_class(&object) {
+                    self.enumerate_hooked_native(object, class, purpose, native)
+                        .await?
+                } else {
+                    self.object_properties(&object, purpose)?
+                };
+                Ok(PropertyView::Snapshot(std::rc::Rc::new(properties)))
+            });
+        }
+        if purpose == phera_extension_api::PropertyPurpose::Debug
+            && let Some(instance) = object.lazy_instance()
+        {
+            let mut properties = phera_value::PhpArray::new();
+            properties.insert(
+                phera_value::ArrayKey::str("instance"),
+                Value::Object(instance),
+            );
+            return Box::pin(std::future::ready(Ok(
+                phera_extension_api::PropertyView::Snapshot(std::rc::Rc::new(properties)),
+            )));
+        }
         if purpose == phera_extension_api::PropertyPurpose::Debug && self.has_debug_info(&object) {
             return self.debug_properties(object, function, arguments);
         }
@@ -163,7 +197,12 @@ impl Context for Vm {
             });
         }
         if function == "var_dump"
-            && let Some(class) = self.hooked_property_class(&object)
+            && let Some(class) = self.hooked_property_class(&object).or_else(|| {
+                self.classes.for_object(&object).filter(|class| {
+                    class.origin == crate::classes::class::ClassOrigin::User
+                        && class.defaults.iter().any(|property| property.ty.is_some())
+                })
+            })
         {
             let view = self.dump_hooked_slots(&object, &class);
             return Box::pin(std::future::ready(Ok(view)));
@@ -403,6 +442,9 @@ impl Context for Vm {
         &self,
         object: &phera_value::Object,
     ) -> Option<std::rc::Rc<[phera_extension_api::serialization::SerializedProperty]>> {
+        if object.lazy().is_some() {
+            return None;
+        }
         let class = object
             .class
             .as_any()
@@ -458,6 +500,11 @@ impl Context for Vm {
         object: &phera_value::Object,
         purpose: phera_extension_api::PropertyPurpose,
     ) -> Result<phera_value::PhpArray, phera_extension_api::NativeError> {
+        if purpose == phera_extension_api::PropertyPurpose::ArrayCast
+            && object.lazy_instance().is_some()
+        {
+            return Ok(object.lazy_properties());
+        }
         if purpose == phera_extension_api::PropertyPurpose::ArrayCast
             && let Some(class) = self.hooked_property_class(object)
         {
@@ -671,4 +718,16 @@ impl Vm {
             crate::calls::callback_binding::ArgumentOrigin::Callback,
         )
     }
+}
+
+fn lazy_serialization_view(object: &phera_value::Object) -> bool {
+    matches!(
+        object.lazy().as_deref(),
+        Some(
+            phera_value::LazyObject::Pending {
+                skip_serialization: false,
+                ..
+            } | phera_value::LazyObject::Proxy(_)
+        )
+    )
 }

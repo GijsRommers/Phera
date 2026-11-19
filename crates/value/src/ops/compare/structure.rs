@@ -28,6 +28,7 @@ pub(super) enum Comparison<'a, 'callback> {
 pub(super) enum Pair {
     Compared(i8),
     Tables(Table, Table),
+    Initialize,
 }
 
 impl Comparison<'_, '_> {
@@ -53,6 +54,7 @@ impl Comparison<'_, '_> {
                         Table::Projected(right.clone(), b),
                     ));
                 }
+                ObjectComparison::InitializeLazy => return Ok(Pair::Initialize),
                 ObjectComparison::Default => {}
             }
         }
@@ -184,6 +186,7 @@ impl Frame {
 pub(super) enum CompareStep {
     Complete(i8),
     Cast(CastPair),
+    Initialize(Rc<Object>, Rc<Object>),
 }
 
 /// PHP protects only the active left table. Parents and the active set
@@ -211,6 +214,23 @@ impl TableComparison {
             active: None,
             frame: Frame::new(left, right, comparison)?,
         })
+    }
+
+    pub(super) fn enter_child(
+        &mut self,
+        left: Table,
+        right: Table,
+        comparison: &Comparison<'_, '_>,
+    ) -> Result<(), OpError> {
+        push_child(
+            &mut self.frame,
+            &mut self.parents,
+            &mut self.active,
+            &mut self.budget,
+            left,
+            right,
+            comparison,
+        )
     }
 
     pub(super) fn advance<const CAST_STRINGS: bool>(
@@ -271,6 +291,9 @@ impl TableComparison {
                     (Value::Object(a), Value::Object(b)) => {
                         match comparison.objects(a, b, diagnostics)? {
                             Pair::Compared(result) => result,
+                            Pair::Initialize => {
+                                return Ok(CompareStep::Initialize(a.clone(), b.clone()));
+                            }
                             Pair::Tables(left, right) => {
                                 child = Some((left, right));
                                 break;
@@ -294,18 +317,7 @@ impl TableComparison {
             drop(left);
             drop(right);
             if let Some((left, right)) = child {
-                *budget = budget
-                    .checked_sub(left.stack_cost(comparison))
-                    .ok_or_else(|| left.stack_error())?;
-                let active = active.get_or_insert_with(HashSet::new);
-                active.insert(frame.left.id());
-                if active.contains(&left.id()) {
-                    return Err(OpError::error(
-                        "Nesting level too deep - recursive dependency?",
-                    ));
-                }
-                let parent = std::mem::replace(frame, Frame::new(left, right, comparison)?);
-                parents.push(parent);
+                push_child(frame, parents, active, budget, left, right, comparison)?;
             } else if let Some(parent) = parents.pop() {
                 if let Some(active) = active {
                     active.remove(&parent.left.id());
@@ -319,6 +331,30 @@ impl TableComparison {
     }
 }
 
+fn push_child(
+    frame: &mut Frame,
+    parents: &mut Vec<Frame>,
+    active: &mut Option<HashSet<TableId>>,
+    budget: &mut usize,
+    left: Table,
+    right: Table,
+    comparison: &Comparison<'_, '_>,
+) -> Result<(), OpError> {
+    *budget = budget
+        .checked_sub(left.stack_cost(comparison))
+        .ok_or_else(|| left.stack_error())?;
+    let active = active.get_or_insert_with(HashSet::new);
+    active.insert(frame.left.id());
+    if active.contains(&left.id()) {
+        return Err(OpError::error(
+            "Nesting level too deep - recursive dependency?",
+        ));
+    }
+    let parent = std::mem::replace(frame, Frame::new(left, right, comparison)?);
+    parents.push(parent);
+    Ok(())
+}
+
 #[inline(never)]
 pub(super) fn compare_tables(
     left: Table,
@@ -330,8 +366,8 @@ pub(super) fn compare_tables(
         .advance::<false>(comparison, diagnostics)?
     {
         CompareStep::Complete(order) => Ok(order),
-        CompareStep::Cast(_) => Err(OpError::error(
-            "Unexpected PHP string conversion during value comparison",
+        CompareStep::Cast(_) | CompareStep::Initialize(..) => Err(OpError::error(
+            "Unexpected PHP callback during value comparison",
         )),
     }
 }

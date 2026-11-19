@@ -30,9 +30,26 @@ pub(crate) struct UnsetProperties {
 }
 
 pub(crate) struct PropertyGuard {
-    object: u32,
+    object: Weak<Object>,
     name: ArrayKey,
     hook: PropertyHook,
+}
+
+impl PropertyGuard {
+    fn matches(&self, target: &Object) -> bool {
+        let Some(mut receiver) = self.object.upgrade() else {
+            return false;
+        };
+        loop {
+            if std::ptr::eq(&*receiver, target) {
+                return true;
+            }
+            let Some(instance) = receiver.lazy_instance() else {
+                return false;
+            };
+            receiver = instance;
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -142,6 +159,17 @@ impl Vm {
         }
     }
 
+    pub(crate) fn property_guarded(
+        &self,
+        object: &Object,
+        name: &ArrayKey,
+        hook: PropertyHook,
+    ) -> bool {
+        self.property_guards
+            .iter()
+            .any(|guard| guard.hook == hook && guard.name == *name && guard.matches(object))
+    }
+
     pub(crate) fn property_hook(
         &self,
         class: &Class,
@@ -158,11 +186,7 @@ impl Vm {
         };
         method
             .as_ref()
-            .filter(|_| {
-                !self.property_guards.iter().any(|guard| {
-                    guard.object == object.id && guard.hook == hook && guard.name == *key
-                })
-            })
+            .filter(|_| !self.property_guarded(object, key, hook))
             .cloned()
     }
 
@@ -180,7 +204,7 @@ impl Vm {
             ArrayKey::Int(index) => Value::from(index.to_string()),
         };
         self.property_guards.push(PropertyGuard {
-            object: object.id,
+            object: Rc::downgrade(&object),
             name: key,
             hook,
         });

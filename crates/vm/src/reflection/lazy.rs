@@ -9,7 +9,7 @@ use phera_extension_api::reflection::{MemberInfo, PropertyWrite};
 use phera_value::{LazyObject, Object, Value};
 
 use crate::Vm;
-use crate::lazy_continuation::ReflectInitialize;
+use crate::lazy_continuation::{ReflectInitialize, ReflectedOperation};
 use crate::lazy_objects::resolved_lazy_instance;
 
 use super::{exception, properties::property_at};
@@ -27,7 +27,11 @@ impl Vm {
                 _ => Value::Null,
             }),
             LazyClassQuery::Initialize if object.is_uninitialized_lazy() => {
-                Err(ReflectInitialize(object).suspend())
+                Err(ReflectInitialize {
+                    object,
+                    operation: ReflectedOperation::Initialize,
+                }
+                .suspend())
             }
             LazyClassQuery::MarkInitialized if object.is_uninitialized_lazy() => {
                 let pending = object.replace_lazy(None);
@@ -103,7 +107,7 @@ impl Vm {
                     member,
                     Some(object.clone()),
                     value,
-                    PropertyWrite::Raw,
+                    PropertyWrite::RawWithoutInitialization,
                 )?;
             }
         }

@@ -152,13 +152,15 @@ impl Vm {
                 self.magic_path_key(step).await?
             };
             if let (PathKey::Property(name), Value::Object(object)) = (&key, &value) {
-                let effective = crate::lazy_objects::resolved_lazy_instance(object.clone());
-                let access = match mode {
-                    FetchMode::Quiet | FetchMode::Isset | FetchMode::Empty => {
-                        crate::lazy_objects::LazyAccess::Isset
+                use crate::lazy_property_access::LazyAccess;
+                let access = match (mode, steps.peek()) {
+                    (FetchMode::Quiet, _) | (FetchMode::Isset | FetchMode::Empty, Some(_)) => {
+                        LazyAccess::Coalesce
                     }
-                    _ => crate::lazy_objects::LazyAccess::Read,
+                    (FetchMode::Isset | FetchMode::Empty, None) => LazyAccess::Isset,
+                    _ => LazyAccess::Read,
                 };
+                let effective = self.lazy_property_receiver(object, name, access);
                 if self.property_requires_initialization(&effective, name, access) {
                     path.value = value;
                     path.retry = Some(key);

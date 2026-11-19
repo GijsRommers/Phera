@@ -50,7 +50,6 @@ pub struct Object {
     pub(crate) properties: RefCell<PhpArray>,
     /// Native state for built-in classes (closures, PDO handles, ...).
     pub native: RefCell<Option<Box<dyn Any>>>,
-    pub(crate) lazy: crate::lazy_object::LazyStorage,
     /// Gives the id back to its pool when the object is freed. A separate
     /// field rather than a `Drop` on `Object` itself, because a type with
     /// its own `Drop` cannot have its fields moved out, and freeing long
@@ -68,7 +67,6 @@ impl Object {
             class,
             properties: RefCell::new(PhpArray::new()),
             native: RefCell::new(None),
-            lazy: Default::default(),
             _lease: None,
         }
     }
@@ -95,7 +93,6 @@ impl Object {
             class,
             properties: RefCell::new(properties),
             native: RefCell::new(None),
-            lazy: Default::default(),
             _lease: Some(lease),
         }
     }

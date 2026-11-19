@@ -163,7 +163,41 @@ impl Vm {
                     LazyContinuation::Mutation(path, completion) => {
                         self.continue_property_mutation(path, completion).await
                     }
-                    LazyContinuation::Reflection(destination, _) => {
+                    LazyContinuation::Reference(path, completion) => {
+                        self.continue_property_reference(path, completion).await
+                    }
+                    LazyContinuation::Iterate(iterator, subject, object) => {
+                        self.lazy_iterator(iterator, subject, object).await
+                    }
+                    LazyContinuation::Clone(destination, object, properties) => {
+                        self.start_clone(destination, Value::Object(object), properties)
+                            .await
+                    }
+                    LazyContinuation::PropertyExists(destination, object, name, _) => {
+                        self.lazy_property_exists(destination, object, name).await
+                    }
+                    LazyContinuation::Comparison(destination, operator, comparison) => {
+                        let work = self.step_comparison(|diagnostics, objects| {
+                            comparison.resume(objects, diagnostics)
+                        })?;
+                        self.continue_comparison(crate::string_comparison::PendingComparison {
+                            destination,
+                            operator,
+                            work,
+                        })
+                        .await
+                    }
+                    LazyContinuation::NativeView(destination, request, _) => {
+                        if let Some(value) = self.drive_view_request(destination, *request).await? {
+                            self.set(destination, value);
+                        }
+                        Ok(())
+                    }
+                    LazyContinuation::ObjectVars(destination, function, object, _) => {
+                        self.lazy_object_vars(destination, function, object).await
+                    }
+                    LazyContinuation::Reflection(destination, operation, _) => {
+                        let value = self.resume_reflected_lazy(*operation, value)?;
                         self.set(destination, value);
                         Ok(())
                     }
@@ -311,6 +345,17 @@ impl Vm {
         completion: ReferenceCompletion,
     ) -> Result<(), NativeError> {
         match self.advance_magic_reference(&mut path).await? {
+            ReferenceStep::Lazy(object) => {
+                let continuation =
+                    crate::lazy_continuation::LazyContinuation::Reference(path, completion);
+                if let Some(returned) = self
+                    .suspend_lazy_initialization(object, continuation)
+                    .await?
+                {
+                    Box::pin(self.resume_property_hook(returned)).await?;
+                }
+                Ok(())
+            }
             ReferenceStep::Complete(value) => completion.finish(self, value).await,
             ReferenceStep::Hook(function, getter) => {
                 self.suspend_for_hook(
