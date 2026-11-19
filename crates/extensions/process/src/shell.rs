@@ -13,7 +13,7 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::ChildStdout;
 
 use super::child::exit_code;
-use super::command::{configure, shell, spawn};
+use super::command::{configure, popen_command, spawn};
 
 const COMMAND: Param = Param::new("command", ParamType::String).without_nul();
 const STATUS: Param = Param::new("result_code", ParamType::Mixed)
@@ -100,7 +100,7 @@ async fn run(context: &mut dyn Context, arguments: Vec<Value>, mode: Mode) -> Na
     } else {
         PhpArray::new()
     };
-    let mut command = shell(bytes);
+    let mut command = popen_command(bytes);
     configure(context, &mut command, None, &Value::Null, web).await?;
     command.stdout(Stdio::piped());
     let mut child = match spawn(context, command, web).await? {

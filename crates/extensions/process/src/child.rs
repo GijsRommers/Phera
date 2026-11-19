@@ -61,7 +61,19 @@ pub(crate) fn send_signal(pid: i32, signal: i32) -> Result<(), nix::errno::Errno
     let signal = if signal == 0 {
         None
     } else {
-        Some(Signal::try_from(signal)?)
+        match Signal::try_from(signal) {
+            Ok(signal) => Some(signal),
+            Err(error) => {
+                // Linux looks up the target before validating a nonzero signal.
+                if cfg!(target_os = "linux")
+                    && nix::sys::signal::kill(Pid::from_raw(pid), None)
+                        == Err(nix::errno::Errno::ESRCH)
+                {
+                    return Err(nix::errno::Errno::ESRCH);
+                }
+                return Err(error);
+            }
+        }
     };
     nix::sys::signal::kill(Pid::from_raw(pid), signal)
 }

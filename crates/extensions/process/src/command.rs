@@ -17,11 +17,21 @@ use super::child::ManagedChild;
 
 pub(crate) fn shell(bytes: &[u8]) -> Command {
     let mut command = Command::new("/bin/sh");
+    command.arg0("sh").arg("-c");
+    command.arg(OsStr::from_bytes(c_prefix(bytes)));
     command
-        .arg0("sh")
-        .arg("-c")
-        .arg(OsStr::from_bytes(c_prefix(bytes)));
-    command
+}
+
+/// PHP's shell helpers use libc's popen. The GNU implementation ends option parsing.
+pub(crate) fn popen_command(bytes: &[u8]) -> Command {
+    if cfg!(all(target_os = "linux", target_env = "gnu")) {
+        let mut command = Command::new("/bin/sh");
+        command.arg0("sh").args(["-c", "--"]);
+        command.arg(OsStr::from_bytes(c_prefix(bytes)));
+        command
+    } else {
+        shell(bytes)
+    }
 }
 
 pub(crate) async fn string(

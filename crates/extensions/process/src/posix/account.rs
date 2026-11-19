@@ -42,7 +42,7 @@ fn getpwnam(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_,
     Box::pin(async move {
         let name = crate::command::c_prefix(args::bytes(&arguments, 0));
         let Ok(name) = std::str::from_utf8(name) else {
-            return Ok(Value::Bool(false));
+            return Ok(missing(context));
         };
         let name = name.to_owned();
         lookup(context, move || User::from_name(&name), user).await
@@ -66,9 +66,17 @@ async fn lookup<T: Send + 'static>(
         .map_err(|error| NativeError::error(error.to_string()))?
     {
         Ok(Some(account)) => convert(account),
-        Ok(None) => Ok(Value::Bool(false)),
+        Ok(None) => Ok(missing(context)),
         Err(error) => Ok(super::fail(context, error)),
     }
+}
+
+/// glibc's account lookup reports a missing record with errno 0.
+fn missing(context: &mut dyn Context) -> Value {
+    if cfg!(all(target_os = "linux", target_env = "gnu")) {
+        return super::fail(context, Errno::UnknownErrno);
+    }
+    Value::Bool(false)
 }
 
 fn user(user: User) -> NativeResult {
