@@ -4,7 +4,7 @@
 
 use std::rc::Weak;
 
-use phera_value::{Object, Value};
+use phera_value::Object;
 
 use crate::Vm;
 
@@ -62,6 +62,9 @@ impl Vm {
             let Some(object) = current.upgrade() else {
                 continue;
             };
+            if object.is_uninitialized_lazy() {
+                continue;
+            }
             let Some(class) = self.classes.for_object(&object) else {
                 continue;
             };
