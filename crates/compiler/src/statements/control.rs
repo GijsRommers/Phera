@@ -15,7 +15,30 @@ impl Compiler<'_> {
         line: usize,
     ) -> Result<(), CompileError> {
         let first = self.next;
-        self.compile_expression(expression)?;
+        if let ast::ExpressionKind::Cast {
+            kind: ast::CastKind::Void,
+            operand,
+        } = &expression.kind
+        {
+            self.compile_expression(operand)?;
+        } else {
+            let result = self.compile_expression(expression)?;
+            if let Some(
+                Instruction::FinishCall {
+                    destination,
+                    result: use_of_result,
+                }
+                | Instruction::Call {
+                    destination,
+                    result: use_of_result,
+                    ..
+                },
+            ) = self.function.instructions.last_mut()
+                && *destination == result
+            {
+                *use_of_result = phera_bytecode::CallResult::Discarded;
+            }
+        }
         self.clear_expression_temporaries(first, line);
         Ok(())
     }

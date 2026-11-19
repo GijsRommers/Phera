@@ -11,9 +11,7 @@ use crate::wire::{ParseError, Reader, Token};
 /// array entry or require a PHP call. A tag inside a string can only opt out.
 pub(super) fn applies(bytes: &[u8]) -> bool {
     match bytes.first() {
-        Some(b'a') => !bytes
-            .windows(2)
-            .any(|pair| pair[1] == b':' && matches!(pair[0], b'O' | b'C' | b'E' | b'R' | b'r')),
+        Some(b'a') => !super::has_wire_tags(bytes, &[b"O:", b"C:", b"E:", b"R:", b"r:"]),
         Some(b'O' | b'C' | b'E' | b'R' | b'r') => false,
         _ => true,
     }

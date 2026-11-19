@@ -197,8 +197,15 @@ impl Vm {
             self.warn(format!("Constant {name} already defined"));
             return Ok(Value::Bool(false));
         }
-        self.constants
-            .insert(name, arguments.get(1).cloned().unwrap_or_default());
+        let origin = self
+            .current()
+            .map(|frame| crate::constant_table::ConstantOrigin::Define(frame.frame.function));
+        self.constants.insert(
+            name,
+            arguments.get(1).cloned().unwrap_or_default(),
+            origin,
+            None,
+        );
         Ok(Value::Bool(true))
     }
 }

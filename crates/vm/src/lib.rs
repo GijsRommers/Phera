@@ -21,6 +21,7 @@ mod access_mode;
 mod array_map;
 mod array_slots;
 mod arrays;
+mod attribute_diagnostics;
 mod autoload;
 mod callable_classes;
 mod callable_introspection;
@@ -123,15 +124,18 @@ mod place_mutation;
 mod places;
 mod properties;
 mod property_mutation;
+mod property_set_visibility;
 mod property_sites;
 mod property_storage;
 mod property_strings;
 mod property_targets;
 mod reference_holders;
 mod references;
+mod reflection;
 mod request_callbacks;
 mod request_end;
 mod scope_intrinsics;
+mod sensitive_parameters;
 mod serialization;
 mod spl_autoload;
 mod static_variables;
@@ -234,7 +238,7 @@ impl Vm {
                     name.to_owned(),
                     constant_table::GlobalConstant {
                         value: value.to_value(),
-                        deprecated,
+                        deprecated: deprecated.map(std::rc::Rc::from),
                     },
                 )
             })
@@ -297,7 +301,7 @@ impl Vm {
 
     /// Defines a request-local constant, such as a CLI stream.
     pub fn set_constant(&mut self, name: &str, value: Value) {
-        self.constants.insert(name.to_owned(), value);
+        self.constants.insert(name.to_owned(), value, None, None);
     }
 
     /// Defines a global variable before the script starts, such as a
@@ -350,7 +354,7 @@ impl Vm {
             }
         }
         self.publish_declaration_warnings(&unit);
-        let end = if let Err(error) = self.hoist_classes(&unit) {
+        let end = if let Err(error) = self.hoist_classes(&unit, main) {
             self.unwind(error);
             request_end::ScriptEnd::Fatal
         } else {

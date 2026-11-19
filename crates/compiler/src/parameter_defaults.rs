@@ -15,8 +15,8 @@ impl Compiler<'_> {
         if let Some(message) = crate::constant_callables::callable_constant_error(default) {
             return Err(self.error(message, line));
         }
-        if !parameter_expression(default) {
-            return Err(self.error("Constant expression contains invalid operations", line));
+        if let Some(message) = initializer_error(default, true) {
+            return Err(self.error(message, line));
         }
         let Some(declaration) = &parameter.ty else {
             return Ok(());
@@ -61,99 +61,120 @@ impl Compiler<'_> {
     }
 }
 
-/// Defaults permit constant arithmetic and arrays, but never variables or function calls.
+/// Visit every initializer operand without recursing through long PHP expressions.
 pub(crate) fn constant_expression(expression: &Expression) -> bool {
+    initializer_error(expression, false).is_none()
+}
+
+/// Constructors are allowed in defaults for parameters and in attribute arguments.
+pub(crate) fn initializer_error(
+    expression: &Expression,
+    allow_dynamic: bool,
+) -> Option<&'static str> {
+    use ExpressionKind::*;
+    use phera_ast::{Arguments, MemberName, NewTarget};
+
     let mut pending = vec![expression];
     while let Some(expression) = pending.pop() {
         match &expression.kind {
-            ExpressionKind::Literal(_)
-            | ExpressionKind::Name(_)
-            | ExpressionKind::MagicConstant(_) => {}
-            ExpressionKind::ClassConstant { name, .. } => {
-                if let phera_ast::MemberName::Expression(name) = name {
+            Literal(_) | Name(_) | MagicConstant(_) => {}
+            ClassConstant { class, name } => {
+                match &class.kind {
+                    Name(class) if class.text.eq_ignore_ascii_case("static") => {
+                        return Some(
+                            if matches!(name, MemberName::Identifier(member) if member.name.eq_ignore_ascii_case("class"))
+                            {
+                                "static::class cannot be used for compile-time class name resolution"
+                            } else {
+                                "\"static::\" is not allowed in compile-time constants"
+                            },
+                        );
+                    }
+                    Name(_) => {}
+                    _ => return Some("Cannot use dynamic class name in constant expression"),
+                }
+                if let MemberName::Expression(name) = name {
                     pending.push(name);
                 }
             }
-            ExpressionKind::Property {
+            Property {
                 target,
                 name,
                 nullsafe: false,
             } => {
                 pending.push(target);
-                if let phera_ast::MemberName::Expression(name) = name {
+                if let MemberName::Expression(name) = name {
                     pending.push(name);
                 }
             }
-            ExpressionKind::Call {
+            Call {
                 callee,
-                arguments: phera_ast::Arguments::FirstClassCallable,
+                arguments: Arguments::FirstClassCallable,
             } if matches!(
                 callee.kind,
-                ExpressionKind::Name(_) | ExpressionKind::Literal(phera_ast::Literal::String(_))
+                Name(_) | Literal(phera_ast::Literal::String(_))
             ) => {}
-            ExpressionKind::StaticCall {
+            StaticCall {
                 class,
-                name: phera_ast::MemberName::Identifier(_),
-                arguments: phera_ast::Arguments::FirstClassCallable,
-            } if matches!(class.kind, ExpressionKind::Name(_)) => {}
-            ExpressionKind::Closure(closure) if closure.is_static && closure.uses.is_empty() => {}
-            ExpressionKind::Array(items) => {
-                for item in items {
-                    if item.by_reference {
-                        return false;
+                name: MemberName::Identifier(_),
+                arguments: Arguments::FirstClassCallable,
+            } if matches!(class.kind, Name(_)) => {}
+            Closure(closure) if closure.is_static && closure.uses.is_empty() => {}
+            New {
+                class: NewTarget::Class(class),
+                arguments: Arguments::List(arguments),
+            } if allow_dynamic && matches!(class.kind, Name(_)) => {
+                if matches!(&class.kind, Name(name) if name.text.eq_ignore_ascii_case("static")) {
+                    return Some("\"static\" is not allowed in compile-time constants");
+                }
+                for argument in arguments.iter().rev() {
+                    if argument.spread {
+                        return Some("Argument unpacking in constant expressions is not supported");
                     }
-                    pending.extend(item.key.iter());
-                    pending.push(&item.value);
+                    pending.push(&argument.value);
                 }
             }
-            ExpressionKind::Unary { operator, operand }
-                if *operator != phera_ast::UnaryOperator::ErrorSuppress =>
-            {
+            Array(items) => {
+                for item in items.iter().rev() {
+                    if item.by_reference {
+                        return Some("Cannot use references in constant expression");
+                    }
+                    pending.push(&item.value);
+                    pending.extend(item.key.as_ref());
+                }
+            }
+            Unary { operator, operand } if *operator != phera_ast::UnaryOperator::ErrorSuppress => {
                 pending.push(operand)
             }
-            ExpressionKind::Ternary {
+            Cast { kind, operand } => {
+                if !allow_dynamic && *kind == phera_ast::CastKind::Object {
+                    return Some("Object casts are not supported in this context");
+                }
+                pending.push(operand);
+            }
+            Ternary {
                 condition,
                 then,
                 otherwise,
             } => {
-                pending.push(condition);
-                pending.extend(then.as_deref());
                 pending.push(otherwise);
+                pending.extend(then.as_deref());
+                pending.push(condition);
             }
-            ExpressionKind::Index {
+            Index {
                 target,
                 index: Some(index),
+            }
+            | Binary {
+                left: target,
+                right: index,
+                ..
             } => {
-                pending.push(target);
                 pending.push(index);
+                pending.push(target);
             }
-            ExpressionKind::Binary { left, right, .. } => {
-                pending.push(left);
-                pending.push(right);
-            }
-            _ => return false,
+            _ => return Some("Constant expression contains invalid operations"),
         }
     }
-    true
-}
-
-/// PHP permits named-class construction in parameter defaults but not property defaults.
-fn parameter_expression(expression: &Expression) -> bool {
-    match &expression.kind {
-        ExpressionKind::New {
-            class: phera_ast::NewTarget::Class(class),
-            arguments: phera_ast::Arguments::List(arguments),
-        } => {
-            matches!(class.kind, ExpressionKind::Name(_))
-                && arguments
-                    .iter()
-                    .all(|argument| !argument.spread && parameter_expression(&argument.value))
-        }
-        ExpressionKind::Array(items) => items.iter().all(|item| {
-            !item.by_reference
-                && item.key.as_ref().is_none_or(parameter_expression)
-                && parameter_expression(&item.value)
-        }),
-        _ => constant_expression(expression),
-    }
+    None
 }

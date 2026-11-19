@@ -15,14 +15,20 @@ use crate::Vm;
 const VALUE_PARAMETER: Param = Param::new("value", ParamType::IntOrString);
 pub(super) const INTERFACES: &[ClassEntry] = &[
     ClassEntry {
-        methods: &[MethodEntry::required("cases", &[]).static_()],
+        methods: &[MethodEntry::required("cases", &[])
+            .static_()
+            .returning("array")],
         ..ClassEntry::interface("UnitEnum")
     },
     ClassEntry {
         interfaces: &["UnitEnum"],
         methods: &[
-            MethodEntry::required("from", &[VALUE_PARAMETER]).static_(),
-            MethodEntry::required("tryFrom", &[VALUE_PARAMETER]).static_(),
+            MethodEntry::required("from", &[VALUE_PARAMETER])
+                .static_()
+                .returning("static"),
+            MethodEntry::required("tryFrom", &[VALUE_PARAMETER])
+                .static_()
+                .returning("?static"),
         ],
         ..ClassEntry::interface("BackedEnum")
     },
@@ -54,7 +60,7 @@ impl EnumMethod {
 }
 
 pub(crate) struct EnumInfo {
-    pub(super) backing: Option<EnumBacking>,
+    pub(crate) backing: Option<EnumBacking>,
     pub(super) names: Vec<String>,
 }
 
@@ -188,10 +194,22 @@ impl Vm {
                 )));
             }
             info.names.push(name.clone());
+            let deprecated = unit
+                .has_link_attributes
+                .then(|| {
+                    crate::attribute_diagnostics::attribute(&case.metadata.attributes, "Deprecated")
+                        .map(|attribute| {
+                            crate::attribute_diagnostics::deprecation_message(
+                                attribute,
+                                &format!("Enum case {class}::{name}"),
+                            )
+                        })
+                })
+                .flatten();
             constants.insert(
                 name.clone(),
                 Rc::new(LinkedConstant {
-                    deprecated: None,
+                    deprecated,
                     declaring: class.clone(),
                     visibility: Visibility::Public,
                     is_final: false,
@@ -211,6 +229,8 @@ impl Vm {
 
 fn enum_property(class: &str, name: &str) -> PropertyDefault {
     PropertyDefault {
+        set_visibility: None,
+        is_final: false,
         key: ArrayKey::str(name),
         value: Value::Null,
         static_storage: None,

@@ -16,7 +16,7 @@ function {main} (16 registers, dynamic scope)
   0000  line 1    New { class: symbol#0 }
   0001  line 1    LoadConst { dst: r5, constant: const#0 }
   0002  line 1    SendValue { src: r5 }
-  0003  line 1    Call { dst: r6 }
+  0003  line 1    Call { dst: r6, result: Used }
   0004  line 1    Throw { source: r6 }
   0005  line 1    Clear { reg: r5 }
   0006  line 1    Clear { reg: r6 }
@@ -45,7 +45,7 @@ function {main} (16 registers, dynamic scope)
   0029  line 1    Assign { local: r0, src: r2 }
   0030  line 1    Clear { reg: r2 }
   0031  line 1    InitMethodCall { receiver: r0, method: name#1 }
-  0032  line 1    Call { dst: r12 }
+  0032  line 1    Call { dst: r12, result: Used }
   0033  line 1    Echo { src: r12 }
   0034  line 1    Clear { reg: r12 }
   0035  line 1    Jump { target: @37 }

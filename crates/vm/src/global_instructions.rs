@@ -44,7 +44,10 @@ impl Vm {
                 .as_ref()
                 .and_then(|state| state.downcast_ref::<crate::closures::ClosureState>())
                 .ok_or_else(|| internal_error!("closure static"))?;
-            let value = state.statics.borrow().get(&variable.0).cloned();
+            let value = state
+                .statics
+                .as_ref()
+                .and_then(|statics| statics.borrow().get(&variable.0).cloned());
             if let Some(value) = value {
                 self.set(local, value);
                 self.jump(initialized)?;
@@ -73,7 +76,11 @@ impl Vm {
                 .as_ref()
                 .and_then(|state| state.downcast_ref::<crate::closures::ClosureState>())
                 .ok_or_else(|| internal_error!("closure static"))?;
-            state.statics.borrow_mut().insert(variable.0, value.clone());
+            let statics = state
+                .statics
+                .as_ref()
+                .ok_or_else(|| internal_error!("closure statics"))?;
+            statics.borrow_mut().insert(variable.0, value.clone());
             self.set(local, value);
             return Ok(());
         }
