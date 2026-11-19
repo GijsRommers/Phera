@@ -21,7 +21,7 @@ when it is a shared module.
 | `idn_to_ascii`, `idn_to_utf8` | UTS #46 mapping, Punycode, transitional forms and error details. |
 | `intl_*error*`, `intl_is_failure`, `IntlException` | Request-local last error, ICU error names and numeric compatibility constants |
 | `Collator`, `collator_*` | Locale comparisons, array sorting and keys, strength, case, punctuation and numeric options. Sort-key bytes and some ICU-specific attributes differ. |
-| `MessageFormatter`, `msgfmt_*` | MessageFormat 1 with nested select, cardinal and ordinal plural branches, and number, date and time arguments. Parsing and diagnostics are partial. |
+| `MessageFormatter`, `msgfmt_*` | MessageFormat 1 with nested select, cardinal and ordinal plural branches, and number, date and time arguments. Indexed parsing reuses localized number and date parsers. Selection parsing, parse timezone defaults and diagnostics are partial. |
 | `Transliterator`, `transliterator_*` | Compound named transforms, Latin-ASCII, normalization, case mapping, and selected script and BGN romanizations. User rules, inverse IDs and full ICU transform coverage are partial. |
 | `IntlTimeZone`, `intltz_*` | Zone construction, offsets, aliases, Windows mappings and conversion to PHP date zones. ICU-specific enumeration, rule comparisons and localized zone names are partial. |
 | `IntlCalendar`, `IntlGregorianCalendar`, `intlcal_*`, `intlgregcal_*` | Millisecond instants, field access and mutation, conversion to PHP dates, Gregorian cutover and locale week data. Field limits, non-Gregorian mutation and ICU wall time settings are partial. |
@@ -53,6 +53,7 @@ supplies grandfathered tags.
 | Decimal, currency and percent grouping of four-digit numbers in `es_ES` and `it_IT` | 49 | 49 | Fixed. PHP's legacy formatter groups before ICU4X's default minimum. |
 | Half-integer `JPY` values in `ja_JP` | 49 | 49 | Fixed. Round half-even before the ICU4X currency formatter applies its precision. |
 | Long date-time style in `ar_EG`, Brussels GMT offsets at Unix timestamps 0 and 1724727600 | 49 | 49 | Fixed. Match ICU4C's unmarked sign in the rendered Arabic time-zone field. |
+| Generic `Any-Latin/BGN` transform | 49 | 49 | Fixed. ICU4C registers language-specific BGN identifiers and rejects this generic ID. Symfony falls back to `Any-Latin`. |
 
 On macOS, all 8,646 Stage 1 differential cases pass with PHP 8.5.12 and
 ICU4C 79.1. That includes 675 display-name comparisons and 750 number and date

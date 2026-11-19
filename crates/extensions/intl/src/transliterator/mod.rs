@@ -141,6 +141,10 @@ fn dispatch(
             return apply(context, &mut state, values, site, true);
         }
         let detail = format!("unable to open ICU transliterator with id \"{id}\"");
+        context.warning(format!(
+            "{site}(): Could not create transliterator with ID \"{id}\" \
+             ({site}(): {detail}: U_INVALID_ID)"
+        ));
         return error::fail(context, site, 65569, &detail, Value::Bool(false));
     }
     Err(missing())

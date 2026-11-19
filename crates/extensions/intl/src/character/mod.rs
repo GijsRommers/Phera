@@ -119,15 +119,12 @@ fn invoke(context: &mut dyn Context, values: &[Value], site: &str, op: Op) -> Na
         Op::Chr => encode(code),
         Op::Type => Value::Int(i64::from(category as u8)),
         Op::Combining => Value::Int(i64::from(CanonicalCombiningClassMap::new().get32_u8(code))),
-        Op::DigitValue => Value::Int(
-            chr.and_then(number::digit)
-                .map_or(-1, |digit| i64::from(digit as u8 - b'0')),
-        ),
+        Op::DigitValue => Value::Int(chr.and_then(number::digit).map_or(-1, i64::from)),
         Op::Digit => {
             let base = args::int(values, 1).unwrap_or(10);
             let value = chr.and_then(|ch| {
                 number::digit(ch)
-                    .map(|digit| i64::from(digit as u8 - b'0'))
+                    .map(i64::from)
                     .or_else(|| radix_letter(ch))
             });
             if (2..=36).contains(&base)

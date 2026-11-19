@@ -92,10 +92,10 @@ pub fn digit(character: char) -> Option<u32> {
         return None;
     }
     let scalar = u32::from(character);
-    let start = (scalar.saturating_sub(49)..scalar)
-        .rev()
-        .find(|&index| categories.get32(index) != GeneralCategory::DecimalNumber)
-        .map_or(scalar, |last| last + 1);
+    let mut start = scalar;
+    while start > 0 && categories.get32(start - 1) == GeneralCategory::DecimalNumber {
+        start -= 1;
+    }
     Some((scalar - start) % 10)
 }
 

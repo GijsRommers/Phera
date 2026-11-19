@@ -79,19 +79,11 @@ impl Step {
             "nfkc" => Self::Nfkc,
             "nfkd" => Self::Nfkd,
             "null" => Self::Null,
-            "latin" | "latin/bgn" => Self::Scripts(Rc::new(
+            "latin" => Self::Scripts(Rc::new(
                 SCRIPTS
                     .iter()
-                    .filter_map(|&(script, name, tag)| {
-                        let rule = if id.ends_with("/bgn") {
-                            bgn(name)
-                        } else {
-                            None
-                        };
-                        Some((
-                            script,
-                            rule.or_else(|| compiled(&format!("und-Latn-t-und-{tag}")))?,
-                        ))
+                    .filter_map(|&(script, _, tag)| {
+                        Some((script, compiled(&format!("und-Latn-t-und-{tag}"))?))
                     })
                     .collect(),
             )),
@@ -191,7 +183,6 @@ fn script_runs(input: &str, rules: &ScriptTransforms) -> String {
 pub fn ids() -> impl Iterator<Item = String> {
     [
         "Any-Latin",
-        "Any-Latin/BGN",
         "Latin-ASCII",
         "Lower",
         "Upper",

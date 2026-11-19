@@ -94,7 +94,7 @@ pub fn currency(
     Ok(Value::Float(parsed))
 }
 
-fn scan_currency(state: &Formatter, text: &str) -> Option<(String, f64, usize)> {
+pub(super) fn scan_currency(state: &Formatter, text: &str) -> Option<(String, f64, usize)> {
     let symbol = affixes::currency_symbol(state);
     let currencies = [
         (symbol.as_str(), state.currency.as_str()),
@@ -148,7 +148,7 @@ fn currency_token<'a>(text: &'a str, known: &[(&str, &str)]) -> Option<(String, 
     }
 }
 
-fn scan(state: &Formatter, text: &str) -> Option<(String, usize)> {
+pub(super) fn scan(state: &Formatter, text: &str) -> Option<(String, usize)> {
     let decimal = attributes::symbol(state, if state.style.is_currency() { 10 } else { 0 })?;
     let group = attributes::symbol(state, if state.style.is_currency() { 17 } else { 1 })?;
     let minus = attributes::symbol(state, 6)?;

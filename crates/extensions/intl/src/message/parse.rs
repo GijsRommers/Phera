@@ -1,10 +1,16 @@
 //! Recover indexed values from a MessageFormat message with literal delimiters.
 
-use phera_extension_api::{ArrayKey, PhpArray, Value};
+use icu_locale::Locale;
+use phera_extension_api::{ArrayKey, Context, PhpArray, Value};
 
 use super::pattern::{Argument, Node};
 
-pub fn read(pattern: &[Node], input: &[u8]) -> Result<PhpArray, i32> {
+pub fn read(
+    context: &mut dyn Context,
+    locale: &Locale,
+    pattern: &[Node],
+    input: &[u8],
+) -> Result<PhpArray, i32> {
     let mut input = std::str::from_utf8(input).map_err(|_| 10)?;
     let mut values = PhpArray::new();
     for (index, node) in pattern.iter().enumerate() {
@@ -27,17 +33,18 @@ pub fn read(pattern: &[Node], input: &[u8]) -> Result<PhpArray, i32> {
         let value = match kind {
             Argument::Simple => Value::from(value),
             Argument::Number(style) => {
-                let value = value.replace(',', "");
-                if let Ok(integer) = value.parse::<i64>() {
-                    if style == "integer" {
-                        Value::Int(integer)
-                    } else {
-                        Value::Float(integer as f64)
-                    }
-                } else {
-                    Value::Float(value.parse::<f64>().map_err(|_| 6)?)
-                }
+                crate::number::parse_message(locale, value, style).ok_or(6)?
             }
+            Argument::Date(style) | Argument::Time(style) => Value::Float(
+                crate::date::parse_message(
+                    context,
+                    locale,
+                    value,
+                    style,
+                    matches!(kind, Argument::Time(_)),
+                )
+                .ok_or(6)?,
+            ),
             _ => return Err(6),
         };
         values.insert(ArrayKey::Int(key), value);

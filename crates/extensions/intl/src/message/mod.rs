@@ -178,10 +178,12 @@ fn apply(
             }
             failure(context, state, site, 65804, "Formatting failed")
         }
-        Op::Parse => match parse::read(&state.nodes, args::bytes(values, 0)) {
-            Ok(values) => Ok(Value::from(values)),
-            Err(code) => failure(context, state, site, code, "Parsing failed"),
-        },
+        Op::Parse => {
+            match parse::read(context, &state.locale, &state.nodes, args::bytes(values, 0)) {
+                Ok(values) => Ok(Value::from(values)),
+                Err(code) => failure(context, state, site, code, "Parsing failed"),
+            }
+        }
         Op::SetPattern => {
             let input = args::bytes(values, 0);
             if state.set_pattern(input).is_some() {

@@ -2,7 +2,7 @@
 
 use phera_extension_api::{ArrayKey, PhpArray, Value};
 
-use super::Matrix;
+use crate::Matrix;
 
 fn map(entries: &[(&str, Value)]) -> Value {
     let values: PhpArray = entries
@@ -46,6 +46,22 @@ fn collation_and_transforms() {
             &[Value::from(id), Value::from(text)],
         );
     }
+    for text in [
+        "Crème brûlée à Bruxelles",
+        "Ελληνική γλώσσα",
+        "Санкт-Петербург",
+        "اللغة العربية",
+        "नमस्ते दुनिया",
+        "中文测试",
+    ] {
+        for id in ["Any-Latin", "Any-Latin;Latin-ASCII;Lower()"] {
+            matrix.case(
+                "transliterator_transliterate",
+                &[Value::from(id), Value::from(text)],
+            );
+        }
+    }
+    matrix.case("Transliterator::create", &[Value::from("Any-Latin/BGN")]);
     matrix.compare("intl-collation-and-transforms");
 }
 
@@ -103,6 +119,24 @@ fn message_format_arguments() {
             );
         }
     }
+    for (locale, pattern, value) in [
+        ("en_US", "{0,number}", "1,234"),
+        ("en_US", "{0,number,integer}", "-1,234.56"),
+        ("en_US", "{0,number,currency}", "$12.34"),
+        ("en_US", "{0,number,percent}", "23%"),
+        ("en_US", "{0,number}", "123abc"),
+        ("fr_FR", "{0,number}", "1\u{202f}234,5"),
+        ("nl_BE", "{0,number,percent}", "23%"),
+    ] {
+        matrix.case(
+            "msgfmt_parse_message",
+            &[
+                Value::from(locale),
+                Value::from(pattern),
+                Value::from(value),
+            ],
+        );
+    }
     matrix.compare("intl-message-format");
 }
 
@@ -148,6 +182,10 @@ fn zone_metadata_and_character_operations() {
         ] {
             matrix.case(&format!("IntlChar::{method}"), std::slice::from_ref(&chr));
         }
+    }
+    for value in ["1", "٧", "１", "𝟡", "A"] {
+        matrix.case("IntlChar::charDigitValue", &[Value::from(value)]);
+        matrix.case("IntlChar::digit", &[Value::from(value), Value::Int(16)]);
     }
     matrix.compare("intl-zone-and-character");
 }

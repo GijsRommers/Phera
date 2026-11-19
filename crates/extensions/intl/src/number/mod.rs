@@ -219,6 +219,11 @@ fn make_formatter(
 }
 
 pub fn format_message(locale: &Locale, amount: &Decimal, style: &str) -> Option<String> {
+    let mut formatter = message_formatter(locale, style)?;
+    render::render(&mut formatter, amount, None)
+}
+
+fn message_formatter(locale: &Locale, style: &str) -> Option<Formatter> {
     let (style, pattern) = match style {
         "" => (Style::Decimal, ""),
         "integer" => (Style::Pattern, "#,##0"),
@@ -226,8 +231,31 @@ pub fn format_message(locale: &Locale, amount: &Decimal, style: &str) -> Option<
         "percent" => (Style::Percent, ""),
         pattern => (Style::Pattern, pattern),
     };
-    let mut formatter = make_formatter(locale.clone(), locale.id.to_string(), style, pattern)?;
-    render::render(&mut formatter, amount, None)
+    make_formatter(locale.clone(), locale.id.to_string(), style, pattern)
+}
+
+pub fn parse_message(locale: &Locale, input: &str, style: &str) -> Option<Value> {
+    let mut formatter = message_formatter(locale, style)?;
+    if style == "integer" {
+        formatter.attributes.parse_integer = true;
+    }
+    if style == "currency" {
+        let (_, amount, _) = parse::scan_currency(&formatter, input)?;
+        return Some(numeric_message(amount));
+    }
+    let (text, _) = parse::scan(&formatter, input)?;
+    text.parse::<i64>()
+        .ok()
+        .map(Value::Int)
+        .or_else(|| text.parse::<f64>().ok().map(numeric_message))
+}
+
+fn numeric_message(amount: f64) -> Value {
+    if amount.fract() == 0.0 && amount >= i64::MIN as f64 && amount < i64::MAX as f64 {
+        Value::Int(amount as i64)
+    } else {
+        Value::Float(amount)
+    }
 }
 
 pub(crate) fn known_language(language: &str) -> bool {

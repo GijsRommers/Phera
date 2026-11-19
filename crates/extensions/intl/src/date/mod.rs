@@ -45,6 +45,36 @@ pub fn format_message(
     style: &str,
     time: bool,
 ) -> Option<String> {
+    let pattern = message_pattern(locale, style, time);
+    Renderer::new(locale, &pattern, 1)?.format(timestamp, 0, &current_zone(context))
+}
+
+pub fn parse_message(
+    context: &mut dyn Context,
+    locale: &Locale,
+    input: &str,
+    style: &str,
+    time: bool,
+) -> Option<f64> {
+    let pattern = message_pattern(locale, style, time);
+    let state = Formatter {
+        render: Renderer::new(locale, &pattern, 1)?,
+        locale: locale.clone(),
+        locale_name: locale.id.to_string(),
+        date_type: -1,
+        time_type: -1,
+        zone: current_zone(context),
+        calendar: 1,
+        lenient: true,
+        pattern,
+        error: (0, None),
+    };
+    let (parsed, _) = parse::fields(&state, input);
+    let (civil, zone) = parsed?;
+    Some(historical::resolve(&zone, civil) as f64)
+}
+
+fn message_pattern(locale: &Locale, style: &str, time: bool) -> String {
     let style_kind = match style {
         "full" => Some(Style::Full),
         "long" => Some(Style::Long),
@@ -52,12 +82,11 @@ pub fn format_message(
         "short" => Some(Style::Short),
         _ => None,
     };
-    let pattern = match style_kind {
+    match style_kind {
         Some(style) if time => pattern::select(locale, Style::None, style),
         Some(style) => pattern::select(locale, style, Style::None),
         None => style.to_owned(),
-    };
-    Renderer::new(locale, &pattern, 1)?.format(timestamp, 0, &current_zone(context))
+    }
 }
 
 #[derive(Clone)]

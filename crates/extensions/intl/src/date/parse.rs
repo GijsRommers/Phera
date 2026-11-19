@@ -96,7 +96,7 @@ pub fn parse(
     Ok(Value::from(value))
 }
 
-fn fields(state: &Formatter, text: &str) -> (Option<(Civil, ZoneKind)>, usize) {
+pub(super) fn fields(state: &Formatter, text: &str) -> (Option<(Civil, ZoneKind)>, usize) {
     let mut scanner = Scanner {
         rest: text,
         state,
