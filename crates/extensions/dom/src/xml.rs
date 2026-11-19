@@ -13,6 +13,7 @@ mod elements;
 mod encoding;
 mod entities;
 pub(crate) mod names;
+mod replacement;
 pub(crate) use encoding::supported_encoding;
 
 use std::borrow::Cow;
@@ -209,19 +210,6 @@ impl<'a> Parser<'a> {
                 Err(error) => return Err(self.reader_error(error)),
             }
         }
-    }
-
-    fn reference(&mut self, name: &str, line: usize) -> Result<(), ParseError> {
-        match self.entities.resolve(name) {
-            Ok((value, true)) if !self.options.substitute_entities => {
-                self.document.arena.materialize_entity(name, &value);
-                self.add(Kind::EntityReference, name, &value, line)?;
-            }
-            Ok((value, _)) => self.text(&value, Kind::Text)?,
-            Err(error) if error.code == 26 => self.report(error),
-            Err(error) => return Err(error),
-        }
-        Ok(())
     }
 
     fn unexpected_text(&self) -> ParseError {

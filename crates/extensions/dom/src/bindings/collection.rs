@@ -30,6 +30,7 @@ enum Selection {
     Attributes,
     Declarations(Kind),
     Snapshot(Rc<[NodeId]>),
+    Located(Rc<[Location]>),
     Tags {
         namespace: Option<Option<String>>,
         name: String,
@@ -55,6 +56,7 @@ impl Collection {
         let id = self.root.id;
         match &self.selection {
             Selection::Snapshot(nodes) => nodes.to_vec(),
+            Selection::Located(nodes) => (0..nodes.len()).map(NodeId).collect(),
             Selection::Children if arena[id].kind == Kind::EntityReference => {
                 std::iter::successors(arena.reference_declaration(id), |&id| {
                     arena[id]
@@ -78,7 +80,7 @@ impl Collection {
                 .filter(|&id| arena[id].name.namespace.as_deref() != Some(XMLNS))
                 .collect(),
             Selection::Tags { namespace, name } => arena
-                .descendants(id)
+                .content_descendants(id)
                 .filter(|&id| {
                     let node = &arena[id];
                     node.kind == Kind::Element
@@ -97,6 +99,12 @@ impl Collection {
 
     fn wrap_node(&self, context: &mut dyn Context, id: Option<NodeId>) -> NativeResult {
         let root = self.root();
+        if let Selection::Located(nodes) = &self.selection {
+            return match id.and_then(|id| nodes.get(id.0)) {
+                Some(node) => super::namespace::wrap(context, node.clone()),
+                None => Ok(Value::Null),
+            };
+        }
         match id {
             Some(id) if matches!(self.selection, Selection::Snapshot(_)) => {
                 super::namespace::wrap(context, root.at(id))
@@ -119,6 +127,19 @@ pub(super) fn snapshot(
         context,
         root,
         Selection::Snapshot(nodes.into()),
+        "DOMNodeList",
+    )
+}
+
+pub(super) fn located(
+    context: &mut dyn Context,
+    root: Location,
+    nodes: Vec<Location>,
+) -> NativeResult {
+    wrap(
+        context,
+        root,
+        Selection::Located(nodes.into()),
         "DOMNodeList",
     )
 }
@@ -148,17 +169,18 @@ fn wrap(
 ) -> NativeResult {
     let value = context.create_object(class, PhpArray::new())?;
     if let Value::Object(object) = &value {
-        let document_handle =
-            if root.id == Arena::DOCUMENT && !matches!(selection, Selection::Snapshot(_)) {
-                root.shared
-                    .borrow()
-                    .wrappers
-                    .get(&root.id)
-                    .and_then(std::rc::Weak::upgrade)
-                    .and_then(|object| native(&object))
-            } else {
-                None
-            };
+        let document_handle = if root.id == Arena::DOCUMENT
+            && !matches!(selection, Selection::Snapshot(_) | Selection::Located(_))
+        {
+            root.shared
+                .borrow()
+                .wrappers
+                .get(&root.id)
+                .and_then(std::rc::Weak::upgrade)
+                .and_then(|object| native(&object))
+        } else {
+            None
+        };
         let pins = {
             let mut state = root.shared.borrow_mut();
             let mut pins = vec![state.pin(root.id)];

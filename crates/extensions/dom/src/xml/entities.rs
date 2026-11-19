@@ -75,6 +75,14 @@ impl Entities {
     }
 
     pub(super) fn resolve(&mut self, name: &str) -> Result<(String, bool), ParseError> {
+        self.expand(name, false)
+    }
+
+    pub(super) fn replacement(&mut self, name: &str) -> Result<(String, bool), ParseError> {
+        self.expand(name, true)
+    }
+
+    fn expand(&mut self, name: &str, preserve_named: bool) -> Result<(String, bool), ParseError> {
         if let Some(value) = special(name)? {
             return Ok((value, false));
         }
@@ -105,7 +113,13 @@ impl Entities {
                 .ok_or_else(|| ParseError::fatal(23, "EntityRef: expecting ';'"))?;
             *rest = after;
             if let Some(value) = special(reference)? {
-                append(&mut self.bytes, &mut output, &value)?;
+                if preserve_named && !reference.starts_with('#') {
+                    append(&mut self.bytes, &mut output, "&")?;
+                    append(&mut self.bytes, &mut output, reference)?;
+                    append(&mut self.bytes, &mut output, ";")?;
+                } else {
+                    append(&mut self.bytes, &mut output, &value)?;
+                }
             } else {
                 match self.definitions.get(reference) {
                     Some(Some(value)) => {

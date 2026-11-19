@@ -64,7 +64,7 @@ pub(super) fn string_value(arena: &Arena, id: NodeId) -> String {
         Kind::Element | Kind::Document | Kind::Fragment
     ) {
         let mut value = String::new();
-        for child in arena.descendants(id) {
+        for child in arena.content_descendants(id) {
             let node = &arena[child];
             match node.kind {
                 Kind::EntityReference => value.push_str(arena.reference_text(child)),

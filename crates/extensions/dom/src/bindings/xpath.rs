@@ -7,6 +7,7 @@
 //! ```
 
 mod php;
+mod results;
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -138,21 +139,36 @@ fn evaluate<'a>(
                 )
             }
         };
-        let result = if let Some(arena) = arena {
+        let mut located = None;
+        let result = if let Some(mut arena) = arena {
             let mut handler = php::Invoke {
-                arena: &arena,
                 document: &document,
                 namespaces: &namespaces,
                 handlers: state.php,
                 context,
                 method,
+                nodes: results::Nodes::new(&arena),
             };
-            xpath::callback::evaluate(&arena, id, &namespaces, &source, &mut handler).await
+            let result =
+                xpath::callback::evaluate(&mut arena, id, &namespaces, &source, &mut handler).await;
+            if let Ok(xpath::Value::Nodes(ids)) = &result
+                && handler.nodes.copies_used(ids)
+            {
+                located = Some(
+                    ids.iter()
+                        .map(|&id| handler.nodes.location(&document, id))
+                        .collect(),
+                );
+            }
+            result
         } else {
             result.ok_or_else(|| NativeError::error("XPath evaluation could not start"))?
         };
         match result {
-            Ok(xpath::Value::Nodes(nodes)) => collection::snapshot(context, document, nodes),
+            Ok(xpath::Value::Nodes(nodes)) => match located {
+                Some(located) => collection::located(context, document, located),
+                None => collection::snapshot(context, document, nodes),
+            },
             Ok(_) if nodes_only => collection::snapshot(context, document, Vec::new()),
             Ok(xpath::Value::Number(value)) => Ok(Value::Float(value)),
             Ok(xpath::Value::String(value)) => Ok(Value::from(value)),

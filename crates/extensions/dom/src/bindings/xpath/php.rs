@@ -146,12 +146,12 @@ pub(super) fn register_ns(
 }
 
 pub(super) struct Invoke<'a> {
-    pub(super) arena: &'a Arena,
     pub(super) document: &'a Location,
     pub(super) namespaces: &'a HashMap<String, String>,
     pub(super) handlers: Handlers,
     pub(super) context: &'a mut dyn Context,
     pub(super) method: &'static str,
+    pub(super) nodes: super::results::Nodes,
 }
 
 impl Callback for Invoke<'_> {
@@ -159,6 +159,7 @@ impl Callback for Invoke<'_> {
         &'a mut self,
         name: &'a str,
         mut arguments: Vec<XPath>,
+        arena: &'a mut Arena,
     ) -> LocalFuture<'a, Result<XPath, Failure>> {
         Box::pin(async move {
             let (prefix, name) = name.split_once(':').ok_or(Error::Function)?;
@@ -210,16 +211,18 @@ impl Callback for Invoke<'_> {
                     XPath::Nodes(nodes) if !string_nodes => {
                         let mut array = PhpArray::new();
                         for id in nodes {
-                            let object =
-                                super::super::namespace::wrap(self.context, self.document.at(id))
-                                    .map_err(Failure::Php)?;
+                            let object = super::super::namespace::wrap(
+                                self.context,
+                                self.nodes.location(self.document, id),
+                            )
+                            .map_err(Failure::Php)?;
                             let _ = array.push(object);
                         }
                         Value::from(array)
                     }
                     XPath::Boolean(value) => Value::Bool(value),
                     XPath::Number(value) => Value::Float(value),
-                    value => Value::from(value.string(self.arena)),
+                    value => Value::from(value.string(arena)),
                 };
                 values.push(value);
             }
@@ -232,10 +235,7 @@ impl Callback for Invoke<'_> {
                 Value::Bool(value) => XPath::Boolean(value),
                 Value::Object(object) if object.class.is_instance_of("DOMNode") => {
                     let node = location(&object).map_err(Failure::Php)?;
-                    if !node.same_document(self.document) || self.arena.get(node.id).is_none() {
-                        return Err(Failure::Php(NativeError::error("Node from wrong document")));
-                    }
-                    XPath::Nodes(vec![node.id])
+                    XPath::Nodes(vec![self.nodes.add(arena, self.document, node)])
                 }
                 Value::Object(_) => {
                     return Err(Failure::Php(NativeError::type_error(

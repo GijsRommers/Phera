@@ -179,6 +179,10 @@ impl Arena {
         self.nodes.get(id.0)
     }
 
+    pub(crate) fn node_count(&self) -> usize {
+        self.nodes.len()
+    }
+
     pub(crate) fn revision(&self) -> u64 {
         self.revision
     }

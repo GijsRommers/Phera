@@ -4,7 +4,7 @@
 //! $all = $document->getElementsByTagName('*');
 //! ```
 
-use super::{Arena, NodeId};
+use super::{Arena, Kind, NodeId};
 
 impl Arena {
     pub fn children(&self, parent: NodeId) -> Children<'_> {
@@ -19,6 +19,14 @@ impl Arena {
             arena: self,
             root,
             next: self[root].first,
+            skip_declarations: false,
+        }
+    }
+
+    pub(crate) fn content_descendants(&self, root: NodeId) -> Descendants<'_> {
+        Descendants {
+            skip_declarations: true,
+            ..self.descendants(root)
         }
     }
 
@@ -46,6 +54,7 @@ pub struct Descendants<'a> {
     arena: &'a Arena,
     root: NodeId,
     next: Option<NodeId>,
+    skip_declarations: bool,
 }
 
 impl Iterator for Descendants<'_> {
@@ -53,7 +62,15 @@ impl Iterator for Descendants<'_> {
 
     fn next(&mut self) -> Option<NodeId> {
         let id = self.next?;
-        self.next = self.arena[id].first;
+        self.next = if self.skip_declarations
+            && matches!(
+                self.arena[id].kind,
+                Kind::Doctype | Kind::Entity | Kind::EntityReference
+            ) {
+            None
+        } else {
+            self.arena[id].first
+        };
         if self.next.is_none() {
             let mut cursor = id;
             loop {

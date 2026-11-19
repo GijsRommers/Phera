@@ -227,7 +227,7 @@ fn text(arena: &Arena, id: NodeId) -> String {
     match arena[id].kind {
         Kind::Element | Kind::Fragment | Kind::Document => {
             let mut text = String::new();
-            for child in arena.descendants(id) {
+            for child in arena.content_descendants(id) {
                 let node = &arena[child];
                 match node.kind {
                     Kind::EntityReference => text.push_str(arena.reference_text(child)),

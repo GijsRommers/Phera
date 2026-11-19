@@ -54,4 +54,15 @@ impl Arena {
             self.link(declaration, child, None);
         }
     }
+
+    pub(crate) fn materialize_entity_children(&mut self, name: &str, source: &Arena, root: NodeId) {
+        if let Some(declaration) = self.entity(name)
+            && self[declaration].first_child().is_none()
+        {
+            for child in source.children(root) {
+                let copy = self.import(source, child, true);
+                self.link(declaration, copy, None);
+            }
+        }
+    }
 }

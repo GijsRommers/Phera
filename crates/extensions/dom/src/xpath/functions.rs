@@ -149,7 +149,7 @@ fn by_id(arena: &Arena, value: &Value) -> Vec<NodeId> {
         .flat_map(|value| value.split_ascii_whitespace())
         .collect();
     arena
-        .descendants(Arena::DOCUMENT)
+        .content_descendants(Arena::DOCUMENT)
         .filter(|&id| {
             arena[id].kind == Kind::Element
                 && arena[id]

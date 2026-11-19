@@ -33,3 +33,12 @@ foreach ([
     $document->loadXML($xml, LIBXML_NOBLANKS);
     echo json_encode($document->saveXML()), "\n";
 }
+
+foreach (['<p>x</p>', '&lt;p>x&lt;/p>', '&#60;p>x&#60;/p>', 'A &amp; B', '&#xD;'] as $value) {
+    foreach ([0, LIBXML_NOENT] as $flags) {
+        $document = new DOMDocument();
+        $loaded = $document->loadXML('<!DOCTYPE r [<!ENTITY e "' . $value . '">]><r>&e;</r>', $flags);
+        $root = $document->documentElement;
+        echo json_encode([$loaded, $root->textContent, $document->saveXML($root)]), "\n";
+    }
+}

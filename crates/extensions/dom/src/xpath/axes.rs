@@ -15,10 +15,13 @@ impl Eval<'_> {
     pub(super) fn axis(&self, context: NodeId, step: &Step) -> Result<Vec<NodeId>, Error> {
         let arena = self.arena;
         let mut candidates: Vec<_> = match step.axis {
+            Axis::Child if matches!(arena[context].kind, Kind::Doctype | Kind::Entity) => {
+                Vec::new()
+            }
             Axis::Child => arena.children(context).collect(),
-            Axis::Descendant => arena.descendants(context).collect(),
+            Axis::Descendant => arena.content_descendants(context).collect(),
             Axis::DescendantOrSelf => std::iter::once(context)
-                .chain(arena.descendants(context))
+                .chain(arena.content_descendants(context))
                 .collect(),
             Axis::Parent => arena[context].parent().into_iter().collect(),
             Axis::Ancestor => arena.ancestors(context).collect(),
@@ -104,20 +107,20 @@ fn side(arena: &Arena, context: NodeId, reverse: bool) -> Vec<NodeId> {
         && matches!(arena[context].kind, Kind::Attribute | Kind::Namespace)
         && let Some(parent) = arena[context].parent()
     {
-        output.extend(arena.descendants(parent));
+        output.extend(arena.content_descendants(parent));
     }
     for entry in std::iter::once(context).chain(arena.ancestors(context)) {
         if reverse {
             for sibling in preceding_siblings(arena, entry) {
                 let start = output.len();
                 output.push(sibling);
-                output.extend(arena.descendants(sibling));
+                output.extend(arena.content_descendants(sibling));
                 output[start..].reverse();
             }
         } else {
             for sibling in following_siblings(arena, entry) {
                 output.push(sibling);
-                output.extend(arena.descendants(sibling));
+                output.extend(arena.content_descendants(sibling));
             }
         }
     }
