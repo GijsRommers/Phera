@@ -346,7 +346,7 @@ impl Context for Vm {
         if function == "var_dump"
             && let Some(class) = self.hooked_property_class(&object).or_else(|| {
                 self.classes.for_object(&object).filter(|class| {
-                    class.origin == crate::classes::class::ClassOrigin::User
+                    class.has_only_php_ancestors()
                         && class.defaults.iter().any(|property| property.ty.is_some())
                 })
             })

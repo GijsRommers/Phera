@@ -170,6 +170,20 @@ impl ClassHandle for Class {
 }
 
 impl Class {
+    /// Whether the class and every ancestor is written in PHP. A class that
+    /// extends a built-in one keeps that parent's own view of an object: the
+    /// elements of an `SplFixedArray`, the date of a `DateTime`.
+    pub(crate) fn has_only_php_ancestors(&self) -> bool {
+        let mut current = Some(self);
+        while let Some(class) = current {
+            if class.origin != ClassOrigin::User {
+                return false;
+            }
+            current = class.parent.as_deref();
+        }
+        true
+    }
+
     /// Traverse ancestry iteratively so user inheritance never grows the Rust stack.
     pub(crate) fn is_a(&self, name: &str) -> bool {
         if self.name.eq_ignore_ascii_case(name) {

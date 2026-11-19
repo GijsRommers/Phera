@@ -105,6 +105,7 @@ impl Compiler<'_> {
                 ..
             } = &access.kind
             {
+                let line = self.lines.line(name.span.start);
                 self.emit(
                     Instruction::MethodCall {
                         receiver: current,
