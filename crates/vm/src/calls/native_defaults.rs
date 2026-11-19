@@ -7,9 +7,9 @@ use phera_extension_api::{
 };
 use phera_value::Value;
 
+use super::native_frames::NativeFrame;
 use crate::Vm;
 use crate::classes::MethodBody;
-use crate::error_traces::NativeTrace;
 
 use super::call_state::{CallTarget, Callee};
 
@@ -56,11 +56,17 @@ impl Vm {
     }
 
     #[cold]
-    pub(super) fn record_native_gap_error(&mut self, callee: &Callee, arguments: &[Value]) {
-        self.failed_native = match &callee.target {
-            CallTarget::Method { method, .. } => Some(NativeTrace::method(method, arguments)),
-            _ => Some(self.native_function_trace(&callee.name, arguments)),
+    pub(super) fn record_native_gap_error(
+        &mut self,
+        callee: &Callee,
+        error: &NativeError,
+        arguments: &[Value],
+    ) {
+        let frame = match &callee.target {
+            CallTarget::Method { method, .. } => NativeFrame::Method(method),
+            _ => NativeFrame::Function(&callee.name),
         };
+        self.record_native_failure(error, frame, arguments);
     }
 }
 

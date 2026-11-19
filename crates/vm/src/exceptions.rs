@@ -112,8 +112,12 @@ impl Vm {
         if tracking {
             self.error_handlers.native_site = previous;
         }
-        if prepared.is_err() {
-            self.failed_native = Some(crate::error_traces::NativeTrace::method(method, arguments));
+        if let Err(error) = &prepared {
+            self.record_native_failure(
+                error,
+                crate::calls::native_frames::NativeFrame::Method(method),
+                arguments,
+            );
         }
         prepared
     }
