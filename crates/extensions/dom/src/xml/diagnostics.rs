@@ -34,7 +34,7 @@ impl Parser<'_> {
 
     pub(super) fn report(&mut self, mut error: ParseError) {
         error.line = self.position.line;
-        error.column = self.position.column;
+        error.column = self.position.column();
         error.message.push('\n');
         self.diagnostics.push(error);
     }
@@ -56,35 +56,37 @@ impl Parser<'_> {
     }
 }
 
-pub(super) struct Position {
+pub(super) struct Position<'a> {
+    input: &'a str,
     offset: usize,
     pub(super) line: usize,
-    column: usize,
+    line_start: usize,
 }
 
-impl Default for Position {
-    fn default() -> Self {
+impl<'a> Position<'a> {
+    pub(super) fn new(input: &'a str) -> Self {
         Self {
+            input,
             offset: 0,
             line: 1,
-            column: 1,
+            line_start: 0,
         }
     }
-}
 
-impl Position {
-    pub(super) fn advance(&mut self, input: &str, offset: usize) {
+    pub(super) fn advance(&mut self, offset: usize) {
         if self.offset == offset {
             return;
         }
-        if let Some(chunk) = input.get(self.offset..offset) {
+        if let Some(chunk) = self.input.get(self.offset..offset) {
             if let Some((complete, tail)) = chunk.rsplit_once('\n') {
                 self.line += 1 + complete.bytes().filter(|&byte| byte == b'\n').count();
-                self.column = 1 + tail.chars().count();
-            } else {
-                self.column += chunk.chars().count();
+                self.line_start = offset - tail.len();
             }
             self.offset = offset;
         }
+    }
+
+    fn column(&self) -> usize {
+        1 + self.input[self.line_start..self.offset].chars().count()
     }
 }

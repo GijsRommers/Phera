@@ -63,13 +63,13 @@ pub fn parse(input: &[u8], options: Options) -> Parsed {
     let mut parser = Parser::new(&input, options);
     let result = match invalid_character(&input) {
         Some((offset, character)) => {
-            parser.position.advance(&input, offset);
+            parser.position.advance(offset);
             Err(ParseError::fatal(
                 9,
                 format!("PCDATA invalid Char value {}", character as u32),
             ))
         }
-        None => parser.run(&input),
+        None => parser.run(),
     };
     if let Err(error) = result {
         parser.report(error);
@@ -110,7 +110,7 @@ struct Parser<'a> {
     entities: Entities,
     attribute_rules: dtd::AttributeRules,
     diagnostics: Vec<ParseError>,
-    position: Position,
+    position: Position<'a>,
     root: bool,
     doctype: bool,
     options: Options,
@@ -128,17 +128,17 @@ impl<'a> Parser<'a> {
             entities: Entities::default(),
             attribute_rules: dtd::AttributeRules::default(),
             diagnostics: Vec::new(),
-            position: Position::default(),
+            position: Position::new(input),
             root: false,
             doctype: false,
             options,
         }
     }
 
-    fn run(&mut self, input: &str) -> Result<(), ParseError> {
+    fn run(&mut self) -> Result<(), ParseError> {
         loop {
             let start = self.reader.buffer_position() as usize;
-            self.position.advance(input, start);
+            self.position.advance(start);
             let event = self.reader.read_event();
             let end = self.reader.buffer_position() as usize;
             let line = self.position.line;
@@ -153,7 +153,7 @@ impl<'a> Parser<'a> {
                     Ok(Event::Start(_)) => 1,
                     _ => 0,
                 };
-                self.position.advance(input, end.saturating_sub(delimiter));
+                self.position.advance(end.saturating_sub(delimiter));
             }
             match event {
                 Ok(Event::Start(tag)) => self.element(tag, line, true)?,

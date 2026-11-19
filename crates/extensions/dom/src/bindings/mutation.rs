@@ -211,9 +211,12 @@ pub(super) fn fail_at(
         && let NativeError::Throw {
             class: "DOMException",
             message,
-            ..
+            code,
         } = error
     {
+        if code == 11 {
+            return Err(dom_error(code, message));
+        }
         context.warning(format!("{function}(): {message}"));
         return Ok(Value::Bool(false));
     }

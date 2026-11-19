@@ -24,12 +24,24 @@ pub(super) fn mutate(
     if !super::known(kind, name) {
         return Ok(false);
     }
+    if matches!(mutation, NativePropertyMutation::Unset) {
+        return Err(NativeError::error(format!(
+            "Cannot unset {}::${name}",
+            object.class.name(),
+        )));
+    }
     let NativePropertyMutation::Assign(value) = mutation else {
         return Err(NativeError::error(format!(
             "Cannot indirectly modify property {}::${name}",
             object.class.name()
         )));
     };
+    if kind == Kind::Entity && matches!(name, "actualEncoding" | "encoding" | "version") {
+        return Err(NativeError::error(format!(
+            "Cannot modify readonly property {}::${name}",
+            object.class.name(),
+        )));
+    }
     match name {
         "strictErrorChecking"
         | "formatOutput"
@@ -72,7 +84,10 @@ pub(super) fn mutate(
             }
         }
         "data" | "value" | "textContent" | "nodeValue" => {
-            if matches!(&*value.deref(), Value::Array(_) | Value::Resource(_)) {
+            let dereferenced = value.deref();
+            if matches!(&*dereferenced, Value::Array(_) | Value::Resource(_))
+                || matches!(&*dereferenced, Value::Object(object) if !object.class.is_instance_of("Stringable"))
+            {
                 let declaring = match name {
                     "data" if kind == Kind::ProcessingInstruction => "DOMProcessingInstruction",
                     "data" => "DOMCharacterData",

@@ -95,7 +95,12 @@ pub(in crate::bindings) fn reconcile(arena: &mut Arena, parent: NodeId, root: No
         }
         let uri = uri.to_owned();
         let base = if old.is_empty() { "default" } else { old };
-        let mut prefix = old.to_owned();
+        // A descendant's default namespace must not change the root's name.
+        let mut prefix = if old.is_empty() && arena[root].name.namespace.as_deref() != Some(&uri) {
+            base.to_owned()
+        } else {
+            old.to_owned()
+        };
         let mut index = 1;
         while inherited.bound.contains_key(&prefix) || local.contains_key(&prefix) {
             prefix = format!("{base}{index}");
