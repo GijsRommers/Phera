@@ -133,6 +133,9 @@ impl Vm {
         if object.skips_destructor() {
             return Ok(());
         }
+        if Vm::is_suspended_fiber(&object) {
+            return Box::pin(self.close_fiber(object)).await.map(drop);
+        }
         let Some(class) = self.classes.for_object(&object) else {
             return Ok(());
         };

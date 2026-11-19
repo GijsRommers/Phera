@@ -19,6 +19,7 @@
 //!    variable goes. A destructor may create globals; PHP repeats the pass
 //!    until it changes nothing. Globals holding a PHP reference, an array or
 //!    a shared object are left alone.
+//!    A suspended fiber is destroyed the same way: it is unwound.
 //! 3. Calls the destructor of every object still alive, in the order the
 //!    objects were created (their ids). Objects that destructors create in
 //!    this phase are included, and from here on ids are no longer reused.
@@ -156,11 +157,6 @@ impl Vm {
         }
         // 1. Shutdown functions; they run after a fatal error too.
         self.run_shutdown_callbacks().await;
-        // Fibers still suspended are destroyed; what their stacks held is
-        // released, and its destructors run in the phases below.
-        if !self.suspended_fibers.is_empty() {
-            Box::pin(self.close_fibers()).await;
-        }
         // 2. Destructors.
         self.run_request_destructors().await;
         // 3. Output buffers. Objects their callbacks create still get
