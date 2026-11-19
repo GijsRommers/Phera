@@ -14,6 +14,7 @@ mod extension_introspection_tests;
 mod http;
 #[cfg(test)]
 mod ini_tests;
+mod preload;
 #[cfg(test)]
 mod process_oracle_tests;
 mod worker_code_cache;
@@ -36,6 +37,7 @@ use worker_code_cache::{RequestCodeCache, WorkerCodeCache};
 pub use error::RuntimeError;
 pub use http::{HttpRequest, HttpResponse};
 pub use phera_vm::OutputSink;
+pub use preload::PreloadSummary;
 
 #[derive(Clone)]
 pub struct Runtime {

@@ -7,6 +7,7 @@
 mod byte_range;
 mod compress;
 mod conditional;
+mod config;
 mod content_type;
 mod forwarded;
 mod precompressed;
@@ -36,17 +37,17 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let root = site.document_root();
-    let project = if root.join("composer.json").is_file() {
-        root
-    } else {
-        root.parent()
-            .filter(|p| p.join("composer.json").is_file())
-            .unwrap_or(root)
+    let project = config::project_root(site.document_root()).to_path_buf();
+    let settings = match config::read(&project) {
+        Ok(settings) => settings,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::FAILURE;
+        }
     };
-    let loaded = match options
+    let mut loaded = match options
         .files
-        .load(project, phera_dotenv::Environment::process())
+        .load(&project, phera_dotenv::Environment::process())
     {
         Ok(loaded) => loaded,
         Err(error) => {
@@ -54,6 +55,7 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    loaded.paths.extend(settings.path);
     site.exclude_files(loaded.paths);
     let site = Arc::new(site);
     let trusted_proxies = match options
@@ -81,8 +83,27 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
     }
     let workers = config.workers;
 
+    let runtime = Runtime::with_environment(loaded.environment).with_startup_ini(options.ini);
+    let preload = if options.preload || settings.preload {
+        match runtime.preload_composer(&project) {
+            Ok(summary) => {
+                format!(
+                    ", preloaded {} Composer files in {} ms ({} skipped)",
+                    summary.compiled,
+                    summary.elapsed.as_millis(),
+                    summary.skipped
+                )
+            }
+            Err(error) => {
+                eprintln!("Cannot preload Composer files: {error}");
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        String::new()
+    };
     let factory = SiteHandlerFactory {
-        runtime: Runtime::with_environment(loaded.environment).with_startup_ini(options.ini),
+        runtime,
         site: site.clone(),
         compress: options.compress,
         trusted_proxies: Arc::new(trusted_proxies),
@@ -96,7 +117,7 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
         }
     };
     println!(
-        "Phera is serving {} on http://{} with {workers} worker threads",
+        "Phera is serving {} on http://{} with {workers} worker threads{preload}",
         site.describe(),
         server.local_addr()
     );

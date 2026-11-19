@@ -18,6 +18,7 @@ tokio.workspace = true
 httpdate.workspace = true
 flate2.workspace = true
 brotli.workspace = true
+toml = { version = "1", default-features = false, features = ["parse", "serde", "std"] }
 # The system allocator on macOS is slow for the many small allocations an
 # interpreter makes (strings, arrays, objects).
 mimalloc.workspace = true

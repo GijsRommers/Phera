@@ -63,6 +63,12 @@ pub(crate) enum FileMode {
     Cli,
 }
 
+#[derive(Clone, Copy)]
+enum CompileStack {
+    Dedicated,
+    PreloadWorker,
+}
+
 impl CodeCache {
     pub(crate) fn new(registry: Arc<phera_extension_api::Registry>, mode: FileMode) -> Self {
         Self {
@@ -105,16 +111,39 @@ impl CodeCache {
 
     /// Only requests for the same canonical path wait for one another.
     fn load(&self, path: &Path, validation: Validation) -> Result<Arc<CompiledUnit>, RuntimeError> {
+        let canonical = path.canonicalize().map_err(|error| RuntimeError::Read {
+            path: path.to_path_buf(),
+            error,
+        })?;
+        self.load_canonical(&canonical, path, validation, CompileStack::Dedicated)
+    }
+
+    /// The preload pool provides a reusable large stack for each blocking thread.
+    pub(crate) fn preload_file(&self, path: &Path) -> Result<Arc<CompiledUnit>, RuntimeError> {
+        self.load_canonical(
+            path,
+            path,
+            Validation::Timestamps,
+            CompileStack::PreloadWorker,
+        )
+    }
+
+    fn load_canonical(
+        &self,
+        canonical: &Path,
+        path: &Path,
+        validation: Validation,
+        stack: CompileStack,
+    ) -> Result<Arc<CompiledUnit>, RuntimeError> {
         let read_error = |error| RuntimeError::Read {
             path: path.to_path_buf(),
             error,
         };
-        let canonical = path.canonicalize().map_err(read_error)?;
         let slot = self
             .units
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .entry(canonical.clone())
+            .entry(canonical.to_path_buf())
             .or_insert_with(|| Arc::new(Mutex::new(None)))
             .clone();
         let mut revision = slot.lock().unwrap_or_else(PoisonError::into_inner);
@@ -124,14 +153,14 @@ impl CodeCache {
         {
             return cached.compiled.clone().map_err(RuntimeError::Compile);
         }
-        let stamp = FileStamp::read(&canonical).map_err(read_error)?;
+        let stamp = FileStamp::read(canonical).map_err(read_error)?;
         if let Some(cached) = revision.as_ref()
             && cached.stamp == stamp
         {
             return cached.compiled.clone().map_err(RuntimeError::Compile);
         }
-        let source = std::fs::read(&canonical).map_err(read_error)?;
-        let compiled = self.compile_source(&source, &canonical.to_string_lossy());
+        let source = std::fs::read(canonical).map_err(read_error)?;
+        let compiled = self.compile_source(&source, &canonical.to_string_lossy(), stack);
         *revision = Some(CachedRevision {
             stamp,
             compiled: compiled.clone(),
@@ -139,7 +168,12 @@ impl CodeCache {
         compiled.map_err(RuntimeError::Compile)
     }
 
-    fn compile_source(&self, source: &[u8], file: &str) -> Result<Arc<CompiledUnit>, CompileError> {
+    fn compile_source(
+        &self,
+        source: &[u8],
+        file: &str,
+        stack: CompileStack,
+    ) -> Result<Arc<CompiledUnit>, CompileError> {
         let natives = phera_compiler::NativeFunctions {
             lookup: &|name| {
                 let Some(entry) = self.registry.get_function(name) else {
@@ -165,9 +199,16 @@ impl CodeCache {
                 crate::constant_calls::fold(&self.registry, name, argument)
             },
         };
-        match self.mode {
-            FileMode::Web => phera_compiler::compile_bytes_with_natives(source, file, &natives),
-            FileMode::Cli => phera_compiler::compile_cli_bytes_with_natives(source, file, &natives),
+        match (self.mode, stack) {
+            (FileMode::Web, CompileStack::PreloadWorker) => {
+                phera_compiler::compile_bytes_with_natives_on_stack(source, file, &natives)
+            }
+            (FileMode::Web, CompileStack::Dedicated) => {
+                phera_compiler::compile_bytes_with_natives(source, file, &natives)
+            }
+            (FileMode::Cli, _) => {
+                phera_compiler::compile_cli_bytes_with_natives(source, file, &natives)
+            }
         }
         .map(|mut unit| {
             if matches!(self.mode, FileMode::Web) {

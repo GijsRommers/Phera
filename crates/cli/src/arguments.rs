@@ -14,6 +14,7 @@ Usage:
     --listen ADDRESS                      default 127.0.0.1:8080, or
                                           0.0.0.0:$PORT when PORT is set
     --workers N                           default: one per CPU core
+    --preload                             compile Composer files before listening
     -d name=value                         set a PHP INI value
     --request-timeout SECONDS             stop a request after this long
                                           (default 60; 0: never)
@@ -65,6 +66,7 @@ pub(crate) struct ServeOptions {
     pub listen: Option<SocketAddr>,
     /// `None` means one worker per CPU core.
     pub workers: Option<usize>,
+    pub preload: bool,
     /// `--compress`: gzip or brotli for clients that accept it. Off unless
     /// given, since the proxy in front usually compresses.
     pub compress: bool,
@@ -228,6 +230,7 @@ fn parse_serve(
         ini,
         listen: None,
         workers: None,
+        preload: false,
         compress: false,
         request_timeout: None,
         trusted_proxies: None,
@@ -257,6 +260,7 @@ fn parse_serve(
                 options.workers = Some(workers);
             }
             "--compress" => options.compress = true,
+            "--preload" => options.preload = true,
             "--trusted-proxies" => {
                 let list = arguments
                     .next()

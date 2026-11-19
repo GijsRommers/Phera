@@ -57,6 +57,12 @@ include search path on each lookup.
 Request teardown releases circular arrays and objects held by their class's
 static properties or cached constant values.
 
+Use `phera serve --preload public` or set `preload = true` under `[server]`
+in the project's `phera.toml`. At startup Phera compiles the PHP files in
+Composer's generated class map and files autoload list. The start line gives
+the count and elapsed time. PHP still runs each file when the application
+includes it. The Zend-specific `opcache.preload` directive is unsupported.
+
 ## 🧩 Extensions
 
 Built in, each checked call by call against real PHP: core, standard, ctype,
