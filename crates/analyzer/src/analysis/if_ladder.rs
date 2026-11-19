@@ -10,22 +10,21 @@
 //! ```
 //!
 //! Generated code holds ladders of a hundred thousand `elseif`s, so the
-//! nesting is not followed by recursion. The ladder is walked down once,
-//! analysing each condition and branch, and the results are then combined
-//! from the last branch back up to the first, exactly as the nested analysis
-//! would combine them on its way out.
+//! nesting is not followed by recursion. The ladder is walked down once: each
+//! rung's condition splits its entry scope into a "yes" and a "no" scope
+//! ([`Analyzer::condition`]), the branch runs on "yes", and "no" is where the
+//! next rung starts. The rungs' results are then combined from the last one
+//! back up to the first with [`condition::Condition::merge`], exactly as the
+//! nested analysis combines them on its way out of each `if`.
 
 use super::*;
 use crate::analysis::statements::{Flow, contains_label};
 
-/// A rung whose condition was not known: its branch ran on `taken`, and the
-/// rest of the ladder on the scope refined by the condition being false. A
-/// rung whose condition was known to be false leaves nothing to combine.
-struct Split {
-    taken: Scope,
+/// What a rung leaves for the combination on the way up: how its own branch
+/// ended, and the scope it left if it falls through.
+struct Rung {
     flow: Flow,
-    /// The scope before the branch, kept when no path falls through.
-    before: Scope,
+    taken: Option<Scope>,
 }
 
 impl Analyzer<'_> {
@@ -37,84 +36,98 @@ impl Analyzer<'_> {
         otherwise: Option<&[Statement]>,
         scope: &mut Scope,
     ) -> Flow {
-        let outer_known = self.context.known.clone();
-        let branches = std::iter::once((condition, then))
-            .chain(elseifs.iter().map(|e| (&e.condition, &e.body[..])));
+        // Each `elseif` is an `if` statement inside a block in the nested
+        // form: entering the first one saves the known facts and the pending
+        // closure binding, and leaving the ladder restores them.
+        let mut saved = None;
+        let branches: Vec<(&Expression, &[Statement])> = std::iter::once((condition, then))
+            .chain(
+                elseifs
+                    .iter()
+                    .map(|elseif| (&elseif.condition, &elseif.body[..])),
+            )
+            .collect();
+        // Whether the rungs from an index on, or the `else`, hold a label;
+        // only needed when a rung's "no" outcome cannot happen.
+        let mut rest_holds_label: Option<Vec<bool>> = None;
 
         let mut rungs = Vec::new();
-        let mut current = std::mem::take(scope);
-        let mut bottom = None;
-        for (index, (condition, body)) in branches.enumerate() {
-            if index > 0 {
-                // A nested `if` statement sees the facts of the scope it runs in.
-                self.context.known.extend(current.known.iter().cloned());
-            }
-            let truth = self.condition_truth(condition, &current);
-            if self.expression(condition, &mut current, false) == ValueType::Never {
-                bottom = Some(Flow::Terminal);
-                break;
-            }
-            // A branch known not to run is still analysed when it holds a
-            // label: a `goto` can jump into it.
-            let skipped_holds_label = match truth {
-                Some(true) => {
-                    elseifs[index..]
-                        .iter()
-                        .any(|elseif| elseif.body.iter().any(contains_label))
-                        || otherwise.is_some_and(|body| body.iter().any(contains_label))
+        let mut entry = scope.clone();
+        // How the part of the ladder below the last rung walked ended.
+        let bottom = 'walk: {
+            for (index, &(condition, body)) in branches.iter().enumerate() {
+                if index > 0 {
+                    if index == 1 {
+                        saved = Some((self.context.known.clone(), self.pending_binding.clone()));
+                    }
+                    self.context.known.extend(entry.known.iter().cloned());
                 }
-                Some(false) => body.iter().any(contains_label),
-                None => false,
-            };
-            match truth.filter(|_| !skipped_holds_label) {
-                Some(true) => {
-                    bottom = Some(self.block(body, &mut current));
-                    break;
+                let outcome = self.condition(condition, entry.clone(), false);
+                let (flow, taken) = self.statement_branch(body, outcome.yes, &entry);
+                rungs.push(Rung { flow, taken });
+                if index + 1 == branches.len() {
+                    break 'walk self.statement_branch(
+                        otherwise.unwrap_or_default(),
+                        outcome.no,
+                        &entry,
+                    );
                 }
-                Some(false) => {}
-                None => {
-                    let mut taken = current.clone();
-                    self.refine(condition, &mut taken, true);
-                    let before = current.clone();
-                    self.refine(condition, &mut current, false);
-                    let flow = self.block(body, &mut taken);
-                    rungs.push(Split {
-                        taken,
-                        flow,
-                        before,
-                    });
-                }
+                entry = match outcome.no {
+                    Some(no) => no,
+                    None => {
+                        let holds = rest_holds_label
+                            .get_or_insert_with(|| suffix_labels(&branches, otherwise));
+                        if !holds[index + 1] {
+                            break 'walk (Flow::Terminal, None);
+                        }
+                        let mut jumped = entry;
+                        jumped.unknown_writes();
+                        jumped
+                    }
+                };
             }
+            (Flow::Next, None)
+        };
+        if let Some((known, binding)) = saved {
+            self.context.known = known;
+            self.pending_binding = binding;
         }
-        let mut flow = bottom
-            .unwrap_or_else(|| otherwise.map_or(Flow::Next, |body| self.block(body, &mut current)));
-        self.context.known = outer_known;
 
+        let (mut flow, mut after) = bottom;
         for rung in rungs.into_iter().rev() {
-            let Split {
-                taken,
-                flow: taken_flow,
-                before,
-            } = rung;
-            let (rest, rest_flow) = (current, flow);
-            let mut paths = Vec::new();
-            if taken_flow == Flow::Next {
-                paths.push(taken);
-            }
-            if rest_flow == Flow::Next {
-                paths.push(rest);
-            }
-            (current, flow) = if !paths.is_empty() {
-                (Scope::join(&paths), Flow::Next)
-            } else if taken_flow == Flow::Terminal && rest_flow == Flow::Terminal {
-                (before, Flow::Terminal)
-            } else if taken_flow == Flow::Break || rest_flow == Flow::Break {
-                (before, Flow::Break)
-            } else {
-                (before, Flow::Continue)
+            (flow, after) = match condition::Condition::merge(rung.taken, after) {
+                Some(merged) => (Flow::Next, Some(merged)),
+                None => (combined(rung.flow, flow), None),
             };
         }
-        *scope = current;
+        if let Some(after) = after {
+            *scope = after;
+        }
         flow
     }
+}
+
+/// How an `if` ends when neither branch falls through.
+fn combined(taken: Flow, rest: Flow) -> Flow {
+    if taken == Flow::Terminal && rest == Flow::Terminal {
+        Flow::Terminal
+    } else if taken == Flow::Break || rest == Flow::Break {
+        Flow::Break
+    } else {
+        Flow::Continue
+    }
+}
+
+/// For each rung index, whether that rung or any after it, or the `else`,
+/// holds a label; one entry more than there are rungs, for the `else` alone.
+fn suffix_labels(
+    branches: &[(&Expression, &[Statement])],
+    otherwise: Option<&[Statement]>,
+) -> Vec<bool> {
+    let mut holds = vec![false; branches.len() + 1];
+    holds[branches.len()] = otherwise.is_some_and(|body| body.iter().any(contains_label));
+    for index in (0..branches.len()).rev() {
+        holds[index] = holds[index + 1] || branches[index].1.iter().any(contains_label);
+    }
+    holds
 }

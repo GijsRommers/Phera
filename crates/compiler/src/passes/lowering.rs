@@ -22,6 +22,20 @@ impl Tables {
     ) {
         use ir::Instruction as Old;
         let instruction = match source {
+            Old::GeneratorStart => Instruction::GeneratorStart,
+            Old::Yield {
+                destination: dst,
+                key,
+                value,
+            } => Instruction::Yield { dst, key, value },
+            Old::YieldFrom {
+                destination: dst,
+                source: src,
+            } => Instruction::YieldFrom { dst, src },
+            Old::CheckReturn { .. } if function.is_generator => Instruction::Nop,
+            Old::Return(src) | Old::ReturnChecked { source: src } if function.is_generator => {
+                Instruction::GeneratorReturn { src }
+            }
             Old::AttributeDiagnostics => Instruction::AttributeDiagnostics,
             Old::ThisOrNull { destination: dst } => Instruction::ThisOrNull { dst },
             Old::Capture { source: src, kind } => Instruction::Capture { src, kind },

@@ -121,6 +121,7 @@ pub struct Function {
     pub strict_types: bool,
     pub return_type: Option<String>,
     pub returns_reference: bool,
+    pub is_generator: bool,
 }
 /// The top-level function and declarations awaiting final bytecode emission.
 #[derive(Debug, Clone)]

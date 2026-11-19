@@ -72,6 +72,7 @@ impl Vm {
                 && matches!(
                     class.name.as_str(),
                     "Directory"
+                        | "Generator"
                         | "InternalIterator"
                         | "PDO"
                         | "PDOStatement"
@@ -83,6 +84,7 @@ impl Vm {
                         | "ReflectionConstant"
                         | "ReflectionExtension"
                         | "ReflectionFunctionAbstract"
+                        | "ReflectionGenerator"
                         | "ReflectionParameter"
                         | "ReflectionProperty"
                         | "ReflectionReference"

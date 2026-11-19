@@ -8,6 +8,7 @@ use crate::diagnostic::Format;
 pub struct Options {
     pub level: u8,
     pub paths: Vec<String>,
+    pub scan: Vec<String>,
     pub exclude: Vec<String>,
     pub baseline: Option<String>,
     pub generate_baseline: Option<String>,
@@ -21,6 +22,7 @@ impl Default for Options {
             level: 1,
             paths: Vec::new(),
             exclude: Vec::new(),
+            scan: Vec::new(),
             baseline: None,
             generate_baseline: None,
             format: Format::Text,
@@ -134,6 +136,9 @@ impl Options {
             "level" if !array => self.level = level(scalar()?)?,
             "paths" if array => {
                 self.paths = values.iter().map(|s| string(s)).collect::<Result<_, _>>()?
+            }
+            "scan" if array => {
+                self.scan = values.iter().map(|s| string(s)).collect::<Result<_, _>>()?
             }
             "exclude" if array => {
                 self.exclude = values.iter().map(|s| string(s)).collect::<Result<_, _>>()?

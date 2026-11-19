@@ -359,6 +359,7 @@ impl Parser<'_> {
             }
             TokenKind::Yield => self.parse_yield(),
             TokenKind::YieldFrom => {
+                self.saw_yield = true;
                 self.bump()?;
                 let operand = self.parse_expr(prec::YIELD + 2)?;
                 Ok(Expression {
@@ -939,6 +940,7 @@ impl Parser<'_> {
     /// `yield`, `yield $v`, `yield $k => $v`.
     fn parse_yield(&mut self) -> Result<Expression, ParseError> {
         let start = self.expect(TokenKind::Yield, "'yield'")?.span;
+        self.saw_yield = true;
 
         if !self.can_start_expr() {
             return Ok(Expression {
@@ -952,7 +954,7 @@ impl Parser<'_> {
 
         let key = self.parse_expr(prec::YIELD + 1)?;
         let value = if self.eat(TokenKind::FatArrow)? {
-            Some(Box::new(self.parse_expr(0)?))
+            Some(Box::new(self.parse_expr(prec::YIELD + 1)?))
         } else {
             None
         };
@@ -1292,8 +1294,10 @@ impl Parser<'_> {
             let return_type = self.parse_return_type()?;
             self.expect(TokenKind::LeftBrace, "'{'")?;
             // A closure's header is ten symbols on PHP's stack (`static` one more).
-            let body =
-                self.with_php_slots(10 + u32::from(is_static), Self::parse_inner_statements)?;
+            let (body, is_generator) = self
+                .with_php_slots(10 + u32::from(is_static), |parser| {
+                    parser.generator_body(Self::parse_inner_statements)
+                })?;
             self.close_brace()?;
             Ok(Expression {
                 kind: ExpressionKind::Closure(Box::new(Closure {
@@ -1302,6 +1306,7 @@ impl Parser<'_> {
                     attributes,
                     is_static,
                     by_reference,
+                    is_generator,
                     parameters,
                     uses,
                     return_type,
@@ -1316,8 +1321,9 @@ impl Parser<'_> {
             let return_type = self.parse_return_type()?;
             self.expect(TokenKind::FatArrow, "'=>'")?;
             // An arrow function's header is nine symbols on PHP's stack.
-            let body =
-                self.with_php_slots(9 + u32::from(is_static), |parser| parser.parse_expr(0))?;
+            let (body, is_generator) = self.with_php_slots(9 + u32::from(is_static), |parser| {
+                parser.generator_body(|parser| parser.parse_expr(0))
+            })?;
             Ok(Expression {
                 kind: ExpressionKind::ArrowFunction(Box::new(ArrowFunction {
                     declaration_span: self.span_since(declaration_start),
@@ -1325,6 +1331,7 @@ impl Parser<'_> {
                     attributes,
                     is_static,
                     by_reference,
+                    is_generator,
                     parameters,
                     return_type,
                     body,

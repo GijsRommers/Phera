@@ -1,3 +1,3 @@
 <?php
 // Rule: return.void / return.missing; return bad missing.
-function f(): int {} // error1
+function f(): int {} // error0

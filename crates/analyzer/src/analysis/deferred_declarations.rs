@@ -44,7 +44,15 @@ impl Analyzer<'_> {
             }
             StatementKind::Class(class) => {
                 self.class_declaration(class);
-                self.deferred_members(class, pending);
+                let has_users = class.name.as_ref().is_some_and(|name| {
+                    !self
+                        .index
+                        .trait_consumers(&self.context.names.declaration(&name.name))
+                        .is_empty()
+                });
+                if class.kind != ClassKind::Trait || has_users {
+                    self.deferred_members(class, pending);
+                }
             }
             StatementKind::If {
                 condition,

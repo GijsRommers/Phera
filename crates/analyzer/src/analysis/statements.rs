@@ -20,14 +20,19 @@ impl Analyzer<'_> {
         }
         self.depth += 1;
         let mut flow = Flow::Next;
-        for statement in statements {
+        for (position, statement) in statements.iter().enumerate() {
             if flow != Flow::Next {
                 if !contains_label(statement) {
                     continue;
                 }
                 scope.unknown_writes();
             }
+            let binding = self.pending_binding.clone();
+            if let Some(next) = statements.get(position + 1) {
+                self.prepare_local_rebinding(statement, next, scope);
+            }
             flow = self.statement(statement, scope);
+            self.pending_binding = binding;
         }
         self.depth -= 1;
         flow
@@ -50,6 +55,22 @@ impl Analyzer<'_> {
             | StatementKind::DoWhile { .. }
             | StatementKind::For { .. }
             | StatementKind::Foreach { .. } => return self.iteration(statement, scope),
+            StatementKind::Const {
+                attributes, items, ..
+            } => {
+                self.check_attributes(attributes, scope);
+                for constant in items {
+                    self.expression(&constant.value, scope, false);
+                }
+            }
+            StatementKind::Echo(expressions) => {
+                if expressions
+                    .iter()
+                    .any(|expr| self.expression(expr, scope, false) == ValueType::Never)
+                {
+                    return Flow::Terminal;
+                }
+            }
             StatementKind::Global(_) | StatementKind::Static(_) | StatementKind::Unset(_) => {
                 self.binding_statement(statement, scope)
             }
@@ -137,11 +158,36 @@ impl Analyzer<'_> {
             if self.context.returns == ValueType::Void {
                 self.report(Finding::VoidReturn, span);
             }
-        } else if self.context.declared_return && self.context.returns != ValueType::Void {
+        } else if self.level == 1
+            && self.context.declared_return
+            && !self.context.generator
+            && self.context.returns != ValueType::Void
+        {
             self.report(Finding::MissingReturn(self.context.function.clone()), span);
         }
         self.record_return(scope);
         Flow::Terminal
+    }
+
+    /// Runs one branch of a conditional on the scope its outcome leaves, or,
+    /// when that outcome cannot happen, only if a label inside can be jumped to.
+    pub(super) fn statement_branch(
+        &mut self,
+        body: &[Statement],
+        branch: Option<Scope>,
+        entry: &Scope,
+    ) -> (Flow, Option<Scope>) {
+        let mut scope = match branch {
+            Some(scope) => scope,
+            None if body.iter().any(contains_label) => {
+                let mut scope = entry.clone();
+                scope.unknown_writes();
+                scope
+            }
+            None => return (Flow::Terminal, None),
+        };
+        let flow = self.block(body, &mut scope);
+        (flow, (flow == Flow::Next).then_some(scope))
     }
 }
 
