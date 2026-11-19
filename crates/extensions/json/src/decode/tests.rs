@@ -62,7 +62,12 @@ fn object_parser_matches_php() {
                     associative,
                     ..DecodeFlags::default()
                 };
-                let result = parse(document.as_bytes(), depth, flags, &mut factory);
+                let result =
+                    if oracle::test_level().has(phera_extension_api::Change::JsonErrorLocations) {
+                        parse::<true>(document.as_bytes(), depth, flags, &mut factory)
+                    } else {
+                        parse::<false>(document.as_bytes(), depth, flags, &mut factory)
+                    };
                 let code = result.as_ref().err().map_or(0, |error| error.code() as i64);
                 let mut values = PhpArray::new();
                 values.push(result.unwrap_or(Value::Null)).unwrap();
